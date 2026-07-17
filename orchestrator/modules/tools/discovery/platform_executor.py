@@ -72,6 +72,7 @@ from modules.tools.discovery.handlers_workspace import (
     list_connected_apps,
     store_memory,
     checkpoint_thread,  # PRD-206 S2
+    resume_context,  # PRD-206 S3
     update_workspace_settings,  # PRD-143 S11
     list_system_settings,  # PRD-143 S11
     update_system_setting,  # PRD-143 S11
@@ -358,6 +359,7 @@ class PlatformActionExecutor:
             "platform_schedule_playbook": schedule_playbook,
             "platform_store_memory": store_memory,
             "platform_checkpoint_thread": checkpoint_thread,  # PRD-206 S2
+            "platform_resume_context": resume_context,  # PRD-206 S3
             "platform_delete_agent": delete_agent,
             # Infrastructure / observability
             "platform_get_logs": get_logs,
@@ -1042,6 +1044,7 @@ class PlatformActionExecutor:
         _MEMORY_CONTEXT_ACTIONS = (
             "platform_store_memory",
             "platform_checkpoint_thread",
+            "platform_resume_context",
         )
         if action_name in _MEMORY_CONTEXT_ACTIONS:
             params = {

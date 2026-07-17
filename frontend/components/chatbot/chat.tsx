@@ -1122,6 +1122,23 @@ export function Chat({
                 </h1>
               </motion.div>
 
+              {/* PRD-206 S3: one tap to pick up where you left off — answered
+                  in-chat by the platform_resume_context tool */}
+              <motion.div
+                className="mb-6 flex justify-center"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage('Where did we leave off?')}
+                  className="rounded-full border border-border bg-muted/40 px-4 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  Where did we leave off?
+                </button>
+              </motion.div>
+
               {/* Chat input + quick links — no outer box */}
               <div className="w-full max-w-3xl md:max-w-4xl space-y-3">
                 {/* PRD-40: Tool Suggestion Bar */}

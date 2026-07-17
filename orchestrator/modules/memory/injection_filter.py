@@ -44,18 +44,40 @@ def _content_type_of(mem: Dict[str, Any]) -> Optional[str]:
     )
 
 
+def visible_to_viewer(mem: Dict[str, Any], viewer_subject_id: Optional[str] = None) -> bool:
+    """PRD-206 S1 (Q7) read-side rule: private memories belong to their owner.
+
+    - No ``scope`` (legacy rows) or ``scope='workspace'`` → visible to everyone.
+    - ``scope='private'`` → visible ONLY when the viewer's subject tag equals
+      the memory's ``owner``. An unknown viewer (headless/background context)
+      fails closed; an ownerless private row is visible to no one.
+    """
+    if not isinstance(mem, dict):
+        return False
+    meta = mem.get("metadata")
+    meta = meta if isinstance(meta, dict) else {}
+    if meta.get("scope") != "private":
+        return True
+    owner = meta.get("owner")
+    return bool(viewer_subject_id) and owner == viewer_subject_id
+
+
 def filter_injectable_memories(
     memories: Iterable[Dict[str, Any]],
     *,
     floor: float,
     excluded_types: Iterable[str] = EXCLUDED_INJECTION_CONTENT_TYPES,
+    viewer_subject_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Drop sub-floor and noise-typed memories before prompt injection.
+    """Drop sub-floor, noise-typed and not-visible memories before prompt injection.
 
     - Scored-but-below-``floor`` rows are dropped; unscored rows are kept (cannot
       judge — same rule as ``filter_by_relevance_floor``). ``floor <= 0`` disables
       the score check.
     - Rows whose content-type signal is in ``excluded_types`` are dropped.
+    - PRD-206 S7: rows not visible to the viewer (Q7 private scope) are dropped —
+      pass ``viewer_subject_id`` (``user:{users.id}``) where the caller knows the
+      human; None keeps legacy/workspace rows and drops only private ones.
     """
     excluded = frozenset(excluded_types)
     out: List[Dict[str, Any]] = []
@@ -66,6 +88,8 @@ def filter_injectable_memories(
         if floor and floor > 0 and score is not None and (score or 0) < floor:
             continue
         if _content_type_of(mem) in excluded:
+            continue
+        if not visible_to_viewer(mem, viewer_subject_id):
             continue
         out.append(mem)
     return out

@@ -143,6 +143,32 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="platform_resume_context",
+        description=(
+            "Answer 'where did we leave off?' — the user's recent threads "
+            "with their checkpoint summaries, recent decisions, open loops "
+            "and suggested next steps. Use whenever the user asks what they "
+            "were working on, wants to pick something back up, or returns "
+            "after a gap. Read-only."
+        ),
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        promoted=True,
+        tags=["memory", "resume", "continuity", "threads"],
+        examples=[
+            "where did we leave off?",
+            "what were we working on yesterday?",
+            "pick up where we left off",
+            "what's still open?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="platform_checkpoint_thread",
         description=(
             "Checkpoint the current conversation into thread memory: a "

@@ -452,21 +452,29 @@ function WidgetConversation({
             <p className="text-xs text-muted-foreground">
               Ask me anything about {pageLabel || 'this page'}, or tell me what you need help with.
             </p>
-            {quickPrompts.length > 0 && (
-              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-                {quickPrompts.map((qp) => (
-                  <button
-                    key={qp.text}
-                    type="button"
-                    onClick={() => !isLoading && sendMessage(qp.text)}
-                    disabled={isLoading}
-                    className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-                  >
-                    {qp.text}
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+              {/* PRD-206 S3: resume chip — always offered on an empty thread,
+                  answered in-chat by the platform_resume_context tool */}
+              <button
+                type="button"
+                onClick={() => !isLoading && sendMessage('Where did we leave off?')}
+                disabled={isLoading}
+                className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              >
+                Where did we leave off?
+              </button>
+              {quickPrompts.map((qp) => (
+                <button
+                  key={qp.text}
+                  type="button"
+                  onClick={() => !isLoading && sendMessage(qp.text)}
+                  disabled={isLoading}
+                  className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                >
+                  {qp.text}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

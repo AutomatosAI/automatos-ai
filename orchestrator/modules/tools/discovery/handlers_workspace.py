@@ -280,6 +280,30 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         return {"success": False, "error": f"Memory service error: {e}"}
 
 
+async def resume_context(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-206 S3: 'where did we leave off?' from ANY chat.
+
+    The viewer comes from the server-injected ``_user_id`` (strip-then-inject
+    — never spoofable); without one (headless caller) the payload carries
+    workspace decisions/open loops but no personal threads.
+    """
+    from modules.memory.resume_context import build_resume_payload, format_resume_for_llm
+
+    owner = _resolve_owner_subject(db, params.get("_user_id"))
+    viewer_user_id = int(owner.split(":", 1)[1]) if owner else None
+
+    payload = await build_resume_payload(
+        db,
+        workspace_id=str(workspace_id),
+        viewer_user_id=viewer_user_id,
+    )
+    return {
+        "success": True,
+        **payload,
+        "formatted": format_resume_for_llm(payload),
+    }
+
+
 async def checkpoint_thread(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-206 S2: on-demand thread checkpoint ("save where we are").
 
