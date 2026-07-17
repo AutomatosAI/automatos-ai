@@ -303,20 +303,23 @@ const BusinessGraphVisualization = forwardRef<
         (globalScale > 3.5 && godNodeIds.has(n.id)) ||
         (globalScale > 5 && n.degree > maxDegree * 0.3);
       if (showLabel && n.label) {
-        const fontSize = Math.max(10, 13 / globalScale);
+        // ctx is pre-scaled by globalScale, so size/globalScale renders at a
+        // constant screen size. No graph-unit floor here — a floor stops
+        // cancelling the zoom and labels balloon as you zoom in.
+        const fontSize = 13 / globalScale;
         ctx.font = `${fontSize}px Inter, ui-sans-serif`;
         ctx.fillStyle = "#f1f5f9";
         ctx.textBaseline = "middle";
         // Background pill so the label is readable over dense edges.
         const padding = 3 / globalScale;
         const metrics = ctx.measureText(n.label);
-        const pillX = node.x + baseR + 4;
+        const pillX = node.x + baseR + 4 / globalScale;
         const pillY = node.y - fontSize / 2 - padding / 2;
         ctx.fillStyle = "rgba(10,13,20,0.85)";
         ctx.fillRect(
-          pillX - 2,
+          pillX - padding,
           pillY,
-          metrics.width + 4,
+          metrics.width + padding * 2,
           fontSize + padding,
         );
         ctx.fillStyle = "#f1f5f9";
