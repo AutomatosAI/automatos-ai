@@ -33,6 +33,7 @@ import { useUser } from '@clerk/nextjs'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
 import { useChat } from '@/lib/chat/hooks'
 import { getChatHistory, getChatMessages } from '@/lib/chat/api'
+import { useChatChangedListener } from '@/lib/chat/live-events'
 import {
   EMPTY_WIDGET_SESSION,
   isThreadUnread,
@@ -125,6 +126,12 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
       // Thread list is best-effort — the active conversation still works.
     }
   }, [])
+
+  // PRD-205 S7: a background post bumps its thread's updated_at -- refresh
+  // the switcher so the thread (and its unread state) surfaces live.
+  useChatChangedListener(() => {
+    refreshThreads().catch(() => {})
+  })
 
   // S1: restore the session and reconnect to the active thread on mount.
   useEffect(() => {
@@ -314,6 +321,12 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
                       <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
                         {thread.title}
                       </span>
+                      {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
+                      {thread.kind === 'auto' && (
+                        <span className="shrink-0 rounded-full border border-warning/20 bg-warning/10 px-1.5 text-[9px] leading-4 text-warning">
+                          Auto
+                        </span>
+                      )}
                       <span className="shrink-0 text-[10px] text-muted-foreground">
                         {threadTimeAgo(thread.updatedAt)}
                       </span>

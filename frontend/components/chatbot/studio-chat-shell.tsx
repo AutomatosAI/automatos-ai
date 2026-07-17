@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getChatHistory, getChatMessages } from '@/lib/chat/api'
+import { useChatChangedListener } from '@/lib/chat/live-events'
 import { useMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import {
@@ -93,6 +94,10 @@ export function StudioChatShell({
     })
   }
 
+  // PRD-205 S7: bump on a background post so the thread list re-sorts live.
+  const [threadsRefreshTick, setThreadsRefreshTick] = useState(0)
+  useChatChangedListener(() => setThreadsRefreshTick((t) => t + 1))
+
   useEffect(() => {
     let cancelled = false
     setLoadingThreads(true)
@@ -109,7 +114,7 @@ export function StudioChatShell({
     return () => {
       cancelled = true
     }
-  }, [selectedChatId])
+  }, [selectedChatId, threadsRefreshTick])
 
   const handleThreadClick = async (t: ChatType) => {
     if (t.id === selectedChatId || openingThreadId) return
@@ -218,6 +223,10 @@ export function StudioChatShell({
                         aria-hidden
                       />
                       <span className="sh-chat-thread-title">{t.title}</span>
+                      {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
+                      {t.kind === 'auto' && (
+                        <span className="sh-chat-pill brand">Auto</span>
+                      )}
                       <span className="sh-chat-thread-ts">
                         {isOpening ? '…' : rel}
                       </span>

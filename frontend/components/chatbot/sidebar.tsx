@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { SidebarHistoryItem } from './sidebar-history-item'
 import { getChatHistory } from '@/lib/chat/api'
+import { useChatChangedListener } from '@/lib/chat/live-events'
 import type { Chat } from '@/types'
 
 export interface AppSidebarProps {
@@ -31,6 +32,12 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
   useEffect(() => {
     loadChatHistory()
   }, [])
+
+  // PRD-205 S7: a background post bumps its thread's updated_at -- refetch so
+  // the ordering (and any new Auto thread) shows without a reload.
+  useChatChangedListener(() => {
+    loadChatHistory().catch(() => {})
+  })
 
   const loadChatHistory = async () => {
     try {

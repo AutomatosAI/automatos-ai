@@ -137,6 +137,48 @@ def test_rejects_clerk_string_user_id(new_session, seeded):
         s.close()
 
 
+def test_history_and_get_chat_surface_kind(new_session, seeded):
+    """S7 passthrough: /history rows and GET /{chat_id} carry ``chats.kind``
+    so the UI can mark the Auto thread ('user' for ordinary chats)."""
+    import asyncio
+    from types import SimpleNamespace
+
+    try:
+        from api.chat import get_chat, get_chat_history
+    except Exception as e:  # env without the heavy router deps
+        pytest.skip(f"api.chat not importable in this env: {e}")
+    from consumers.chatbot.service import ChatService
+    from services.chat_messenger import find_or_create_auto_chat
+
+    s = new_session()
+    try:
+        svc = ChatService(s)
+        regular = svc.create_chat(
+            user_id=seeded["user_id"],
+            title=f"regular-kind {seeded['tag']}",
+            workspace_id=uuid.UUID(seeded["ws_id"]),
+        )
+        auto = find_or_create_auto_chat(s, seeded["ws_id"], seeded["user_id"])
+
+        # get_user_id's fast path takes an integer ctx.user.id as-is, so a
+        # SimpleNamespace principal exercises the real endpoint bodies.
+        ctx = SimpleNamespace(
+            workspace_id=uuid.UUID(seeded["ws_id"]),
+            user=SimpleNamespace(id=seeded["user_id"]),
+        )
+
+        rows = asyncio.run(get_chat_history(limit=50, ctx=ctx, db=s))
+        by_id = {row["id"]: row for row in rows}
+        assert by_id[str(auto.id)]["kind"] == "auto"
+        assert by_id[str(regular.id)]["kind"] == "user"
+
+        payload = asyncio.run(get_chat(str(auto.id), ctx=ctx, db=s))
+        assert payload["kind"] == "auto"
+        assert payload["userId"] == seeded["user_id"]
+    finally:
+        s.close()
+
+
 def test_auto_thread_is_an_ordinary_chat_in_history_and_deletable(new_session, seeded):
     from consumers.chatbot.service import ChatService
     from services.chat_messenger import find_or_create_auto_chat
