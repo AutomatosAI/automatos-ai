@@ -131,32 +131,30 @@ def resolve_call_binding(
         logger.warning("voice_live_webhook_rejected reason=missing_call_id workspace=%s", workspace_id)
         return None
 
-    try:
-        ws_uuid = uuid.UUID(str(workspace_id))
-    except ValueError:
-        logger.warning("voice_live_webhook_rejected reason=bad_workspace_var call=%s", call_id)
-        return None
-
     row = db.query(VoiceCall).filter(VoiceCall.call_id == str(call_id)).first()
 
-    if row is not None:
-        # The row is OUR truth. A workspace var that contradicts it is a
-        # misroute/tamper — refuse outright (§7.5-2).
-        if str(row.workspace_id) != str(workspace_id):
+    if row is not None and row.workspace_id is not None:
+        # The mint row is SERVER-BORN truth — the vars were only ever our own
+        # values echoed back through Retell. The row alone authorises; vars,
+        # WHEN PRESENT, must not contradict it (a contradiction is tamper and
+        # refuses outright, §7.5-2). Absent vars are fine — first live
+        # contact showed Retell omits them unless the config frame asks.
+        ws_uuid = row.workspace_id
+        if workspace_id and str(workspace_id) != str(row.workspace_id):
             logger.warning(
                 "voice_live_webhook_rejected reason=workspace_mismatch call=%s var=%s row=%s",
                 call_id, workspace_id, row.workspace_id,
             )
             return None
 
-        # Mint-proven thread binding: every var matches the row AND the chat
-        # still exists here, owned by the minted user.
+        # Mint-proven thread binding: the chat still exists here, owned by the
+        # minted user; any PRESENT var must agree with the row.
         if row.chat_id and row.user_id is not None:
-            vars_match = (
-                str(chat_id_var or "") == str(row.chat_id)
-                and str(user_id_var or "") == str(row.user_id)
+            vars_agree = (
+                (chat_id_var is None or str(chat_id_var) == str(row.chat_id))
+                and (user_id_var is None or str(user_id_var) == str(row.user_id))
             )
-            if vars_match:
+            if vars_agree:
                 try:
                     chat = (
                         db.query(Chat)
@@ -190,8 +188,15 @@ def resolve_call_binding(
         # A minted row with no user should not exist (mint requires one) —
         # treat like the unminted lane below.
 
-    # Unminted call (phone lane, or a row missing its user): attribute to the
-    # workspace steward, register/reuse the orphan row LOUD.
+    # Unminted call (phone lane, or a row missing its user): the workspace can
+    # only come from the var here — absent/garbage refuses the turn.
+    try:
+        ws_uuid = uuid.UUID(str(workspace_id))
+    except (TypeError, ValueError):
+        logger.warning("voice_live_webhook_rejected reason=bad_workspace_var call=%s", call_id)
+        return None
+
+    # Attribute to the workspace steward, register/reuse the orphan row LOUD.
     steward = _workspace_steward(db, ws_uuid)
     if steward is None:
         logger.warning(

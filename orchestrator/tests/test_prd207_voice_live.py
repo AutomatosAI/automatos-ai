@@ -663,6 +663,31 @@ def test_webhook_rejects_workspace_mismatch_outright(voice_workspace, new_sessio
     assert b is None  # no proven workspace → refuse the turn entirely
 
 
+def test_webhook_binds_from_mint_row_when_vars_absent(voice_workspace, new_session):
+    """First-live-contact regression: Retell omits dynamic vars unless the
+    config frame asks — the mint row ALONE must authorise binding (it is the
+    server-born source the vars merely echoed)."""
+    from modules.voice.call_binding import resolve_call_binding
+
+    s = new_session()
+    _mint_row(
+        s, call_id="call_novars", ws_id=voice_workspace.ws_id,
+        user_id=voice_workspace.owner, chat_id=voice_workspace.chat_id,
+    )
+    b = resolve_call_binding(
+        s,
+        call_id="call_novars",
+        workspace_id=None,  # no vars arrived at all
+        user_id_var=None,
+        chat_id_var=None,
+        first_text="hello",
+    )
+    assert b is not None and b.bound is True
+    assert b.chat_id == voice_workspace.chat_id
+    assert b.user_id == voice_workspace.owner
+    assert b.workspace_id == voice_workspace.ws_id  # row truth, not var
+
+
 def test_webhook_fallback_chat_is_stable_across_turns(voice_workspace, new_session):
     """The per-turn-chat bug is dead: two turns of one call share ONE thread."""
     from modules.voice.call_binding import resolve_call_binding
@@ -951,8 +976,12 @@ def test_ws_user_speaks_first_then_answers_with_call_details_vars(monkeypatch):
     )
     asyncio.run(vr.retell_llm_websocket(ws, "call_ws1"))
 
-    # server spoke first with the empty floor-yielding response
+    # handshake order: config FIRST (ask for call_details — without it Retell
+    # never sends the vars), then the empty floor-yielding response
     assert ws.sent[0] == {
+        "response_type": "config", "config": {"auto_reconnect": True, "call_details": True},
+    }
+    assert ws.sent[1] == {
         "response_type": "response", "response_id": 0, "content": "", "content_complete": True,
     }
     # ping echoed

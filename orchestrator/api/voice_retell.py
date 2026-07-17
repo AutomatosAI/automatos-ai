@@ -619,6 +619,13 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
                 pass
 
     try:
+        # Protocol handshake: ASK for call_details — Retell only echoes the
+        # call object (and our dynamic variables) when the server requests it.
+        # First live contact: without this config frame the vars never arrived,
+        # every turn failed binding, and Auto sat silent through whole calls.
+        await websocket.send_json(
+            {"response_type": "config", "config": {"auto_reconnect": True, "call_details": True}}
+        )
         # Server speaks first with an EMPTY response — the human opens.
         await websocket.send_json(
             wrap_ws_response({"response_id": 0, "content": "", "content_complete": True})
