@@ -520,15 +520,27 @@ def _fill_path_params(path: str) -> str:
     return re.sub(r"\{[^}]+\}", "1", path)
 
 
+# The deliberate member-tier exceptions inside otherwise-locked modules —
+# named (module, router-attr) pairs, never a pattern. PRD-206/#566 split
+# ``api/memory_stats.py``: the Memory Explorer's GET reads moved to a
+# member-visible hybrid ``router`` (the router-wide su lock over the PRD-77
+# explorer's own reads was a prod outage — members saw a blank Memory tab);
+# the mutations stayed su-locked on ``admin_router``, which this sweep still
+# covers structurally AND behaviourally. Adding to this set is a consent
+# decision, not a convenience.
+_MEMBER_VISIBLE_ROUTERS = {("memory_stats", "router")}
+
+
 def _module_routers(module_name: str) -> List[Tuple[str, APIRouter]]:
     """Every super-admin-locked APIRouter in the module.
 
     PRD-185 S12 added a sibling ``require_workspace_admin`` router in
     ``analytics_real`` for own-workspace health tiles — a deliberately narrower
     tier, gated and swept separately (``test_p2w0_cockpit_reach``). It is excluded
-    here. An accidentally *ungated* router (neither gate) still surfaces and trips
-    the structural ``require_super_admin`` assertion below, so the guard keeps its
-    teeth against a new endpoint added without any lock.
+    here, as are the named ``_MEMBER_VISIBLE_ROUTERS`` exceptions (#566). An
+    accidentally *ungated* router (neither gate, not named) still surfaces and
+    trips the structural ``require_super_admin`` assertion below, so the guard
+    keeps its teeth against a new endpoint added without any lock.
     """
     from core.auth.workspace_admin import require_workspace_admin
 
@@ -537,6 +549,8 @@ def _module_routers(module_name: str) -> List[Tuple[str, APIRouter]]:
     for attr, obj in vars(module).items():
         if not isinstance(obj, APIRouter):
             continue
+        if (module_name, attr) in _MEMBER_VISIBLE_ROUTERS:
+            continue  # #566 member-tier read half — deliberately not su-locked
         dep_fns = [getattr(d, "dependency", None) for d in (obj.dependencies or [])]
         if require_workspace_admin in dep_fns:
             continue  # S12 own-workspace tier — not part of the super-admin sweep
