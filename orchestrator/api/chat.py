@@ -707,7 +707,11 @@ async def get_chat_messages(
             "role": msg.role,
             "parts": msg.parts,
             "attachments": msg.attachments,
-            "createdAt": msg.created_at.isoformat()
+            "createdAt": msg.created_at.isoformat(),
+            # PRD-205 S3: persisted background-author signal ({origin, label,
+            # link_type, link_id}); null for in-turn messages -- the UI badge
+            # survives reload by reading this.
+            "source": msg.source,
         }
         for msg in messages
     ]

@@ -80,6 +80,13 @@ class Watch(Base):
         nullable=True,
     )
 
+    # PRD-205 S4: the conversation this watch was created from (executor-
+    # injected caller_context, never an LLM-supplied arg). SOFT reference by
+    # design -- deliberately NO ForeignKey to chats: deleting a chat must
+    # never break or cascade into the watch registry; a dangling origin just
+    # falls back to the creator's Auto thread at delivery time (S5).
+    origin_chat_id = Column(UUID(as_uuid=True), nullable=True)
+
     # What is being watched
     watch_type = Column(String(32), nullable=False)   # WatchType
     target_type = Column(String(32), nullable=False)  # WatchTargetType (current target)

@@ -6,7 +6,7 @@ Database Models for Automotas AI System
 Comprehensive data models for agents, skills, workflows, documents, and system configuration.
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint, Index, text
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
@@ -1109,6 +1109,13 @@ class Chat(Base):
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     visibility = Column(String(20), default='private', nullable=False)
     last_context = Column(JSONB, default=dict, server_default='{}')
+    # PRD-205 S2/S3: 'user' for every ordinary conversation; 'auto' marks the
+    # per-user "Auto" thread -- the fallback target where background producers
+    # (watcher verdicts, scheduled-task output) speak when no originating chat
+    # is known. At most one auto thread per (workspace_id, user_id), enforced
+    # by the partial unique index below; otherwise an ordinary chat (history,
+    # deep-link, deletion all work -- it is recreated on the next post).
+    kind = Column(String(20), default='user', server_default='user', nullable=False)
 
     # Relationships
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
@@ -1117,7 +1124,15 @@ class Chat(Base):
 
     __table_args__ = (
         CheckConstraint("visibility IN ('private', 'public')", name='check_chat_visibility'),
+        CheckConstraint("kind IN ('user', 'auto')", name='check_chat_kind'),
         Index('ix_chats_workspace_user', 'workspace_id', 'user_id'),
+        # PRD-205 S2: one Auto thread per (workspace, user) -- the race-safe
+        # backstop for find_or_create_auto_chat (IntegrityError -> re-select).
+        Index(
+            'uq_chats_auto_thread', 'workspace_id', 'user_id',
+            unique=True,
+            postgresql_where=text("kind = 'auto'"),
+        ),
         {'extend_existing': True}
     )
 
@@ -1164,6 +1179,13 @@ class Message(Base):
     # by non-chat planes. Kept off `parts` so it never reaches the AI-SDK render
     # contract (same discipline as retrieval_context).
     context_trace = Column(JSONB, nullable=True)
+    # PRD-205 S3: persisted author/source signal for background-authored
+    # messages -- {"origin": "watcher"|"scheduled_task", "label", "link_type",
+    # "link_id"}. NULL for every in-turn message. The UI's "Auto - background"
+    # badge reads this, so it survives reload. A column (not a marker inside
+    # `parts`) for the same reason as retrieval_context/context_trace: `parts`
+    # is the AI-SDK render contract and stays clean (Section 8 Q6).
+    source = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
     # Relationships

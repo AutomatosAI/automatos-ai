@@ -397,6 +397,7 @@ class ChatService:
         workspace_id: Optional[str] = None,
         retrieval_context: Optional[Dict[str, Any]] = None,
         context_trace: Optional[Dict[str, Any]] = None,
+        source: Optional[Dict[str, Any]] = None,
     ) -> Message:
         """Save a message to the database.
 
@@ -407,6 +408,10 @@ class ChatService:
         ``context_trace`` (PRD-201 S1) carries the turn's context-assembly trace
         (mode, per-section token/trim detail, model, budget ceiling) so "what did
         Auto know?" is answerable; NULL for turns built before it shipped.
+
+        ``source`` (PRD-205 S3) marks background-authored messages
+        ({origin, label, link_type, link_id}); NULL for every in-turn write --
+        only ChatMessenger stamps it.
         """
         try:
             chat_uuid = uuid.UUID(chat_id)
@@ -452,6 +457,7 @@ class ChatService:
             attachments=attachments or [],
             retrieval_context=retrieval_context,
             context_trace=context_trace,
+            source=source,
             created_at=datetime.utcnow()
         )
         self.db.add(message)
