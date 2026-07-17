@@ -420,7 +420,6 @@ def _load_service_module():
         "modules.nl2sql",
         "modules.nl2sql.query",
         "modules.nl2sql.training",
-        "modules.nl2sql.intelligence",
         "modules.nl2sql.benchmarks",
         "modules.nl2sql.schema",
         "modules.rag",
@@ -434,9 +433,8 @@ def _load_service_module():
             stub.__path__ = [str(ORCH_ROOT / _pkg.replace(".", "/"))]
             sys.modules[_pkg] = stub
 
-    # sqlparse — stub. service.py only uses sqlparse for the unused
-    # ``_validate_sql`` / ``_extract_tables_from_sql`` helpers; the
-    # ``query_database`` path under test does not touch it at runtime.
+    # sqlparse — stub kept defensively (PRD-199 S5 deleted the legacy limb
+    # that was service.py's only sqlparse consumer; the import is gone).
     if "sqlparse" not in sys.modules:
         sp = types.ModuleType("sqlparse")
         sp.parse = lambda *_a, **_k: [MagicMock()]
@@ -511,8 +509,6 @@ def _load_service_module():
         # Other names imported elsewhere but not exercised here.
         for n in (
             "DatabaseKnowledgeSourceCreate",
-            "SemanticMetricCreate",
-            "SemanticDimensionCreate",
             "DatabaseQueryRequest",
             "QueryTemplateExecute",
             "DatabaseQueryAudit",

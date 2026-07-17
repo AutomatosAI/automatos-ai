@@ -1,0 +1,31 @@
+{
+  "description": "PRD-199 S4 — seeded semantic doc for the A/B eval (semantic-on vs semantic-off). Canonical reader shape. The definitions deliberately AGREE with the goldens' interpretation: the A/B measures whether STATING the business vocabulary helps the LLM match the gold interpretation, so the doc must encode that interpretation, not contradict it.",
+  "instructions": "Business vocabulary for this database: 'customers' are companies; a customer is ACTIVE when customers.status = 'active' and churned when status = 'churned'. 'Revenue' or 'total value' of orders means SUM(orders.total) over the orders in question — include every order regardless of status unless the question names a status (e.g. 'completed'). An order is COMPLETED when orders.status = 'completed', cancelled when 'cancelled', pending when 'pending'. Dates are ISO 'YYYY-MM-DD' strings in orders.order_date; compare them as strings (e.g. order_date >= '2025-05-01'). 'Best-selling' means highest SUM(order_items.quantity). Product revenue means SUM(order_items.quantity * order_items.unit_price).",
+  "metrics": {
+    "total_revenue": {
+      "sql": "SUM(orders.total)",
+      "description": "Total order value; include all statuses unless a status is named"
+    },
+    "product_revenue": {
+      "sql": "SUM(order_items.quantity * order_items.unit_price)",
+      "description": "Revenue attributed to a product via its order items"
+    },
+    "units_sold": {
+      "sql": "SUM(order_items.quantity)",
+      "description": "Quantity sold; 'best-selling' ranks by this"
+    }
+  },
+  "dimensions": {
+    "customer": {
+      "country": "customers.country",
+      "status": "customers.status"
+    },
+    "order": {
+      "status": "orders.status",
+      "month": "substr(orders.order_date, 1, 7)"
+    },
+    "product": {
+      "category": "products.category"
+    }
+  }
+}

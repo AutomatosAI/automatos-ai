@@ -18,7 +18,6 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
-import sqlparse
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
@@ -51,26 +50,11 @@ class DatabaseDialect(Enum):
     REDSHIFT = "redshift"
 
 
-@dataclass
-class SemanticMetric:
-    """Semantic layer metric definition"""
-    name: str
-    display_name: str
-    sql_expression: str
-    aggregation: str  # sum, avg, count, min, max
-    format: str  # number, currency, percentage
-    description: str
-    tables: List[str]
-
-
-@dataclass
-class SemanticDimension:
-    """Semantic layer dimension definition"""
-    name: str
-    display_name: str
-    sql_expression: str
-    type: str  # categorical, temporal, geographical
-    hierarchy: Optional[List[str]] = None
+# PRD-199 S1/S2: the SemanticMetric/SemanticDimension dataclasses are gone.
+# They were the broken writer's intermediate format (list-of-__dict__ with
+# sql_expression keys) — a shape the reader (nl2sql_service.py, dict-of-dicts
+# keyed on 'sql') could never consume. The canonical semantic doc is the
+# READER's shape, built at the API edge; no intermediate classes.
 
 
 class DatabaseKnowledgeService:
@@ -93,7 +77,6 @@ class DatabaseKnowledgeService:
         self.context_engineering = context_engineering
         self.audit_service = audit_service
         self.schema_cache = {}
-        self.query_cache = {}
         self.analytics_engine = get_pandasai_service()
     
     async def _get_source(
@@ -300,6 +283,22 @@ class DatabaseKnowledgeService:
                 return columns, rows
         finally:
             engine.dispose()
+
+    async def run_validated_readonly_sql(self, source, sql: str) -> List[Dict[str, Any]]:
+        """PRD-199 S6: the benchmark executor — validate the statement
+        (read-only roots, table allowlist, LIMIT inject/cap via the S2 AST
+        validator) then execute it against the connected source under the
+        pipeline's existing EXPLAIN dry-run + statement-timeout guards.
+        Returns rows as dicts; raises on validation or execution failure
+        (the benchmark scores a raise as a non-match)."""
+        credentials = self._decrypt_source_credentials(source)
+        validated, _ = SQLValidator().validate_and_rewrite(
+            sql, schema_metadata=source.schema_metadata or {}
+        )
+        _columns, rows = await asyncio.to_thread(
+            self._run_sql_with_guards, source, credentials, validated
+        )
+        return rows
 
     def _augment_schema_with_samples(
         self,
@@ -651,236 +650,81 @@ class DatabaseKnowledgeService:
             logger.warning(f"Confidence scoring failed: {e}")
             return {"score": 0, "level": "unknown", "factors": {}, "recommendation": "review_sql"}
     
+    async def get_semantic_layer(
+        self,
+        source_id: str,
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return the stored canonical semantic doc (PRD-199 S2 — the
+        editor's load path; only POST existed before, so every load 405'd)."""
+        source = await self._get_source(source_id, workspace_id=workspace_id)
+        return source.semantic_layer or {
+            "instructions": "",
+            "metrics": {},
+            "dimensions": {},
+        }
+
     async def update_semantic_layer(
         self,
         source_id: str,
-        metrics: List[SemanticMetric],
-        dimensions: List[SemanticDimension]
-    ) -> None:
+        semantic_doc: Dict[str, Any],
+        workspace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist the canonical semantic doc — PRD-199 S1.
+
+        The doc is the READER's shape (nl2sql_service.py renders it into the
+        generation prompt): ``{instructions: str, metrics: {name: {sql,
+        description}}, dimensions: {category: {name: sql}}}``.
+
+        The pre-199 writer was broken end-to-end: it called two methods that
+        were never defined anywhere (AttributeError on every save), wrote to
+        the detached object ``_get_source`` returns (session closed — no
+        commit), stored ``metrics`` as a LIST with ``sql_expression`` keys the
+        dict-shaped reader could not consume, and had no ``instructions``
+        write path at all. It also never workspace-scoped the lookup — the
+        crash was the only thing stopping a cross-tenant write, so repairing
+        the save without the scope (W3-S9) would have armed that hole.
+
+        The SQL fragments are deliberately NOT validated here: they are
+        prompt guidance the reader interpolates as text, never executed
+        directly — the generated SQL they influence still passes the AST
+        validator downstream. The phantom ``_validate_semantic_definitions``
+        is deleted, not reimplemented as a stub.
         """
-        Update the semantic layer for a database source.
-        """
-        source = await self._get_source(source_id)
-        
-        # Validate metrics and dimensions reference existing tables/columns
-        schema_context = await self._get_schema_context(source)
-        await self._validate_semantic_definitions(metrics, dimensions, schema_context)
-        
-        # Update source
-        source.semantic_layer = {
-            'metrics': [m.__dict__ for m in metrics],
-            'dimensions': [d.__dict__ for d in dimensions],
-            'updated_at': datetime.utcnow().isoformat()
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseKnowledgeSource as DBKSource
+
+        doc = {
+            "instructions": str(semantic_doc.get("instructions") or "").strip(),
+            "metrics": dict(semantic_doc.get("metrics") or {}),
+            "dimensions": dict(semantic_doc.get("dimensions") or {}),
+            "updated_at": datetime.utcnow().isoformat(),
         }
-        
+
+        db_session = SessionLocal()
+        try:
+            query = db_session.query(DBKSource).filter(DBKSource.id == int(source_id))
+            if workspace_id is not None:
+                query = query.filter(DBKSource.workspace_id == str(workspace_id))
+            source = query.first()
+            if not source:
+                raise ValueError(f"Database source {source_id} not found")
+            source.semantic_layer = doc
+            db_session.commit()
+        finally:
+            db_session.close()
+
         # Clear cache to force refresh
         if source_id in self.schema_cache:
             del self.schema_cache[source_id]
+        return doc
     
-    async def _generate_sql(
-        self,
-        query: str,
-        schema_context: Dict,
-        semantic_layer: Optional[Dict]
-    ) -> Dict[str, Any]:
-        """
-        Generate SQL from natural language using LLM.
-        """
-        # Build prompt with schema and semantic context
-        system_prompt = self._build_sql_generation_prompt(
-            schema_context,
-            semantic_layer
-        )
-        
-        response = await self.llm_provider.generate(
-            system_prompt=system_prompt,
-            user_prompt=query,
-            temperature=0.1,
-            response_format="json"
-        )
-        
-        return json.loads(response)
-    
-    async def _validate_sql(
-        self,
-        sql: str,
-        schema_context: Dict,
-        dialect: DatabaseDialect
-    ) -> str:
-        """
-        Three-tier SQL validation system.
-        """
-        # Tier 1: Syntax validation
-        try:
-            parsed = sqlparse.parse(sql)[0]
-            if not parsed:
-                raise ValueError("Invalid SQL syntax")
-        except Exception as e:
-            raise ValueError(f"SQL syntax error: {e}")
-        
-        # Tier 2: Security validation
-        sql_upper = sql.upper()
-        security_checks = [
-            ('SELECT' in sql_upper and not any(
-                word in sql_upper for word in 
-                ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE']
-            ), "Query must be SELECT-only"),
-            ('LIMIT' in sql_upper or 'FETCH' in sql_upper, "Query must have LIMIT clause"),
-            (';' not in sql or sql.strip().endswith(';'), "No multiple statements allowed"),
-            ('INFORMATION_SCHEMA' not in sql_upper and 'PG_' not in sql_upper, 
-             "System tables not allowed")
-        ]
-        
-        for check, message in security_checks:
-            if not check:
-                raise ValueError(f"Security validation failed: {message}")
-        
-        # Tier 3: Semantic validation
-        # Verify tables and columns exist in schema
-        tables_in_query = self._extract_tables_from_sql(sql)
-        valid_tables = set(schema_context.get('tables', {}).keys())
-        
-        for table in tables_in_query:
-            if table.lower() not in valid_tables:
-                raise ValueError(f"Table '{table}' not found in schema")
-        
-        # Add LIMIT if missing
-        if 'LIMIT' not in sql_upper:
-            sql = f"{sql.rstrip(';')} LIMIT 1000"
-        
-        return sql
-    
-    async def _execute_query(
-        self,
-        sql: str,
-        credentials: Dict,
-        dialect: DatabaseDialect
-    ) -> List[Dict]:
-        """
-        Execute SQL query with timeout and row limits.
-        """
-        connection_string = self._build_connection_string(credentials, dialect)
-        engine = create_engine(
-            connection_string,
-            pool_size=5,
-            max_overflow=10,
-            pool_timeout=30,
-            pool_pre_ping=True
-        )
-        
-        try:
-            with engine.connect() as connection:
-                # Set timeout based on dialect
-                if dialect == DatabaseDialect.POSTGRESQL:
-                    connection.execute(text("SET statement_timeout = 30000"))
-                elif dialect == DatabaseDialect.MYSQL:
-                    connection.execute(text("SET max_execution_time = 30000"))
-                
-                # Execute query
-                result = connection.execute(text(sql))
-                rows = result.fetchall()
-                
-                # Convert to list of dicts
-                return [dict(row._mapping) for row in rows]
-                
-        except Exception as e:
-            raise ValueError(f"Query execution failed: {e}")
-        finally:
-            engine.dispose()
-    
-    async def _create_agent_tools(self, source: Dict[str, Any]) -> None:
-        """
-        Auto-create agent tools for database source.
-        """
-        # Create a specific tool for this database
-        tool_definition = {
-            "name": f"query_{source.name.lower().replace(' ', '_')}_database",
-            "display_name": f"Query {source.name} Database",
-            "description": f"Query {source.name} database using natural language",
-            "category": "database",
-            "security_level": "read_only",
-            "parameters": {
-                "query": {
-                    "type": "string",
-                    "description": "Natural language query",
-                    "required": True
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum rows to return",
-                    "default": 100
-                }
-            },
-            "metadata": {
-                "source_id": source.id,
-                "dialect": source.dialect,
-                "requires_credential": source.credential_id
-            }
-        }
-        
-        # Register with tool registry
-        # This would integrate with your Tool Registry (PRD-17)
-        pass
-    
-    def _build_sql_generation_prompt(
-        self,
-        schema_context: Dict,
-        semantic_layer: Optional[Dict]
-    ) -> str:
-        """
-        Build the system prompt for SQL generation.
-        """
-        prompt = """You are an expert SQL query generator. Generate safe, efficient SELECT-only queries.
-
-Database Schema:
-"""
-        # Add tables and columns
-        for table_name, table_info in schema_context.get('tables', {}).items():
-            prompt += f"\nTable: {table_name}\n"
-            for col in table_info.get('columns', []):
-                prompt += f"  - {col['name']} ({col['type']})\n"
-        
-        # Add relationships
-        if schema_context.get('relationships'):
-            prompt += "\nRelationships:\n"
-            for rel in schema_context['relationships']:
-                prompt += f"  - {rel['from']} -> {rel['to']} ({rel['type']})\n"
-        
-        # Add semantic layer
-        if semantic_layer:
-            if semantic_layer.get('metrics'):
-                prompt += "\nAvailable Metrics:\n"
-                for metric in semantic_layer['metrics']:
-                    prompt += f"  - {metric['name']}: {metric['description']} (SQL: {metric['sql_expression']})\n"
-            
-            if semantic_layer.get('dimensions'):
-                prompt += "\nAvailable Dimensions:\n"
-                for dim in semantic_layer['dimensions']:
-                    prompt += f"  - {dim['name']}: {dim['description']} (SQL: {dim['sql_expression']})\n"
-        
-        prompt += """
-Rules:
-1. Generate SELECT-only queries
-2. Always include LIMIT (max 1000)
-3. Use proper JOINs based on relationships
-4. Apply semantic metrics when relevant
-5. Return JSON with: sql, explanation, visualization_hint, confidence_score
-"""
-        return prompt
-    
-    def _get_cache_key(self, sql: str, source_id: str) -> str:
-        """Generate cache key for query results."""
-        return hashlib.md5(f"{source_id}:{sql}".encode()).hexdigest()
-    
-    def _extract_tables_from_sql(self, sql: str) -> List[str]:
-        """Extract table names from SQL query."""
-        # Simple extraction - would use proper SQL parser in production
-        tables = []
-        parsed = sqlparse.parse(sql)[0]
-        for token in parsed.tokens:
-            if token.ttype is None and isinstance(token, sqlparse.sql.Identifier):
-                tables.append(str(token))
-        return tables
+    # PRD-199 S5: the legacy PRD-21 limb is deleted — _generate_sql /
+    # _validate_sql / _execute_query / _create_agent_tools /
+    # _build_sql_generation_prompt / _get_cache_key / _extract_tables_from_sql
+    # were a shadow duplicate of the real pipeline (modules/nl2sql/query/*)
+    # with zero callers, and _execute_query called a _build_connection_string
+    # that was never defined anywhere (AttributeError if ever reached).
 
     async def analyze_database(
         self,

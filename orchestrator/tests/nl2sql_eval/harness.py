@@ -145,3 +145,43 @@ def check_goldens() -> EvalReport:
         x["golden_sql"] for x in _q
         if x["question"] == question
     ))
+
+
+# ---------------------------------------------------------------------------
+# PRD-199 S4 — the semantic lever, measured (semantic-on vs semantic-off)
+# ---------------------------------------------------------------------------
+
+SEMANTIC_FIXTURE = HERE / "semantic_fixture.json"
+
+
+def load_semantic_fixture() -> Dict[str, Any]:
+    """The seeded canonical semantic doc for the A/B eval. Its definitions
+    deliberately AGREE with the goldens' interpretation — the A/B measures
+    whether *stating* the vocabulary helps the LLM match it."""
+    return json.loads(SEMANTIC_FIXTURE.read_text())
+
+
+def evaluate_ab(
+    generate_fn_factory: Callable[
+        [Optional[Dict[str, Any]]], Callable[[str, Dict[str, Any]], str]
+    ],
+) -> Dict[str, Any]:
+    """Run the full set twice — with the seeded semantic doc and without —
+    and report the measured uplift ΔS = acc_with − acc_without.
+
+    ΔS is REPORTED, never asserted against a target: the ~20%-class uplift
+    is Snowflake's number on Snowflake's datasets; the target here is set
+    only after the first honest measurement (§8-Q1, ⏸ PENDING REAL EVAL).
+    ΔS is also what sizes how much semantic-editor UI is worth building.
+    """
+    semantic_doc = load_semantic_fixture()
+    with_report = evaluate(generate_fn_factory(semantic_doc))
+    without_report = evaluate(generate_fn_factory(None))
+    return {
+        "acc_with_semantic": round(with_report.accuracy, 4),
+        "acc_without_semantic": round(without_report.accuracy, 4),
+        "delta_s": round(with_report.accuracy - without_report.accuracy, 4),
+        "total": with_report.total,
+        "with_correct": with_report.correct,
+        "without_correct": without_report.correct,
+    }

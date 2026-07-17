@@ -1414,6 +1414,10 @@
       "path": "/api/knowledge/sources/database/{source_id}/schema/refresh"
     },
     {
+      "method": "GET",
+      "path": "/api/knowledge/sources/database/{source_id}/semantic"
+    },
+    {
       "method": "POST",
       "path": "/api/knowledge/sources/database/{source_id}/semantic"
     },

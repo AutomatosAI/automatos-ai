@@ -65,9 +65,11 @@ class DatabaseKnowledgeSource(Base):
     schema_cache_ttl = Column(Integer, default=3600)  # 1 hour default
     query_cache_ttl = Column(Integer, default=300)   # 5 minutes default
     
-    # Statistics
-    total_queries_executed = Column(Integer, default=0)
-    avg_query_time_ms = Column(Float)
+    # Statistics — PRD-199 S5: total_queries_executed / avg_query_time_ms
+    # deleted. Never written by any code path, permanent fake zeros in every
+    # API payload. If real per-source stats are ever wanted, derive them from
+    # database_query_audit (the dual-entry choke point), don't resurrect
+    # unwritten counters.
     last_successful_query = Column(DateTime)
     
     # Status
@@ -342,33 +344,11 @@ class DatabaseKnowledgeSourceCreate(BaseModel):
     query_cache_ttl: int = 300
 
 
-class SemanticMetricCreate(BaseModel):
-    """Create a business metric"""
-    name: str
-    display_name: str
-    category: str
-    sql_expression: str
-    aggregation: str = "sum"
-    format: str = "number"
-    description: Optional[str] = None
-    business_definition: Optional[str] = None
-    tables_used: List[str]
-    drill_down_dimensions: Optional[List[str]] = []
-    supports_time_grain: bool = True
-    default_time_grain: str = "month"
-    is_featured: bool = False
-
-
-class SemanticDimensionCreate(BaseModel):
-    """Create a dimension for grouping"""
-    name: str
-    display_name: str
-    category: str
-    sql_expression: str
-    type: str  # categorical, temporal, geographical
-    description: Optional[str] = None
-    hierarchy_levels: Optional[List[str]] = None
-    is_featured: bool = False
+# PRD-199 S1/S2: SemanticMetricCreate/SemanticDimensionCreate deleted — they
+# were the request models of the broken pre-199 writer (list-shaped,
+# sql_expression keys the dict-shaped reader never consumed). The canonical
+# semantic body lives at the API edge (api/database_knowledge.py
+# SemanticLayerBody), reader-shaped.
 
 
 class TrainingExampleCreate(BaseModel):

@@ -15,7 +15,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from .comparator import SQLComparator
 
@@ -48,7 +48,8 @@ class NL2SQLBenchmarkRunner:
         test_examples: Optional[List[Dict]] = None,
         dialect: str = "postgresql",
         test_fraction: float = 0.2,
-        seed: int = 42
+        seed: int = 42,
+        execute_sql: Optional[Callable[[str], Awaitable[List[Dict[str, Any]]]]] = None,
     ) -> BenchmarkResult:
         """
         Test current system against verified examples.
@@ -79,23 +80,53 @@ class NL2SQLBenchmarkRunner:
                     dialect=dialect
                 )
 
-                # Compare: exact match (normalized SQL comparison)
+                # Exact match stays a free secondary signal only.
                 exact = self.comparator.exact_match(generated_sql, expected_sql)
-                # Note: execution_match requires a live DB connection to execute both
-                # SQLs and compare results. For now it mirrors exact_match.
-                # TODO: Add optional db_engine param to enable actual execution matching
-                exec_match = exact
+
+                # PRD-199 S6: execution accuracy is THE metric (the Genie-style
+                # benchmark-in-product): run both SQLs against the connected
+                # source — through the caller-supplied executor, which
+                # validates (read-only, LIMIT-capped) and runs under the
+                # pipeline's EXPLAIN/timeout guards — and compare result sets
+                # order-insensitively. Never again mirrored from exact match
+                # (string match is the metric the field abandoned: equivalent
+                # SQL that reads differently scored 0).
+                error_note = None
+                if execute_sql is None:
+                    exec_match = None  # honest: unmeasured without an executor
+                else:
+                    try:
+                        expected_rows = await execute_sql(expected_sql)
+                    except Exception as e:  # a broken golden is a data bug — surface it
+                        expected_rows = None
+                        error_note = f"golden failed: {e}"
+                    if expected_rows is None:
+                        exec_match = False
+                    else:
+                        try:
+                            generated_rows = await execute_sql(generated_sql)
+                            exec_match = self.comparator.results_match(
+                                generated_rows, expected_rows
+                            )
+                        except Exception as e:  # generated SQL failed on the source
+                            exec_match = False
+                            error_note = str(e)
+
                 if exact:
                     exact_matches += 1
+                if exec_match:
                     exec_matches += 1
 
-                results.append({
+                detail = {
                     'question': question,
                     'expected_sql': expected_sql,
                     'generated_sql': generated_sql,
                     'exact_match': exact,
                     'execution_match': exec_match,
-                })
+                }
+                if error_note:
+                    detail['error'] = error_note
+                results.append(detail)
 
             except Exception as e:
                 logger.error(f"Benchmark error for '{question[:50]}...': {e}")
