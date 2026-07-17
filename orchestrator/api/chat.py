@@ -566,7 +566,9 @@ async def get_chat_history(
             "updatedAt": chat.updated_at.isoformat(),
             "visibility": chat.visibility,
             "lastContext": chat.last_context,
-            "lastMessagePreview": previews.get(str(chat.id))
+            "lastMessagePreview": previews.get(str(chat.id)),
+            # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
+            "kind": chat.kind,
         }
         for chat in chats
     ]
@@ -746,7 +748,9 @@ async def get_chat(
         "createdAt": chat.created_at.isoformat(),
         "updatedAt": chat.updated_at.isoformat(),
         "visibility": chat.visibility,
-        "lastContext": chat.last_context
+        "lastContext": chat.last_context,
+        # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
+        "kind": chat.kind,
     }
 
 

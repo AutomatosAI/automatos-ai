@@ -1007,8 +1007,11 @@ class PlatformActionExecutor:
         # PRD-205 S4: capture the originating conversation for watch-creating
         # actions (direct create + the launches whose handlers auto-create a
         # watch) so verdicts post back into that chat. Server-injected from
-        # caller_context; an LLM-supplied param of the same name is OVERWRITTEN
-        # -- the origin is never spoofable via tool args.
+        # caller_context; a caller-supplied param of the same name is ALWAYS
+        # stripped first -- inject-on-truthy alone would let a spoofed tool
+        # arg survive the headless paths (board dispatcher, workflows) where
+        # caller_context carries no conversation_id. The origin is never
+        # spoofable via tool args.
         _WATCH_ORIGIN_ACTIONS = (
             "platform_create_watch",
             "platform_create_mission",
@@ -1017,6 +1020,7 @@ class PlatformActionExecutor:
             "platform_schedule_task",
         )
         if action_name in _WATCH_ORIGIN_ACTIONS:
+            params = {k: v for k, v in params.items() if k != "_origin_chat_id"}
             _origin_chat = (caller_context or {}).get("conversation_id")
             if _origin_chat:
                 params = {**params, "_origin_chat_id": str(_origin_chat)}

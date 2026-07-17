@@ -249,6 +249,64 @@ def test_executor_injects_and_overwrites_origin():
     assert '"_origin_chat_id" not in params' not in block.group("body")
 
 
+def test_executor_strips_spoofed_origin_without_context(monkeypatch):
+    """A caller-supplied _origin_chat_id must never reach a handler: the
+    headless paths (board dispatcher, workflows) carry no conversation_id in
+    caller_context, so inject-on-truthy alone would let the spoofed tool arg
+    survive there. The executor strips the key FIRST, then injects only the
+    context value."""
+    import modules.tools.discovery as discovery_pkg
+    from modules.tools.discovery.platform_executor import PlatformActionExecutor
+
+    registry = MagicMock()
+    registry.get.return_value = None  # no action_def -> permission gates no-op
+    monkeypatch.setattr(discovery_pkg, "get_action_registry", lambda: registry)
+
+    seen = []
+
+    async def _handler(db, workspace_id, params):
+        seen.append(params)
+        return {"success": True}
+
+    executor = PlatformActionExecutor(MagicMock(), uuid.uuid4())
+    executor._handlers["platform_create_watch"] = _handler
+
+    spoofed = str(uuid.uuid4())
+
+    # Headless: no caller_context at all -> the spoofed arg is dropped.
+    result = asyncio.run(
+        executor.execute(
+            "platform_create_watch",
+            {"title": "w", "_origin_chat_id": spoofed},
+            caller_context=None,
+        )
+    )
+    assert result == {"success": True}
+    assert "_origin_chat_id" not in seen[0]
+    assert seen[0]["title"] == "w"
+
+    # Context without a conversation (board dispatcher shape) -> still dropped.
+    asyncio.run(
+        executor.execute(
+            "platform_create_watch",
+            {"title": "w", "_origin_chat_id": spoofed},
+            caller_context={"user_id": "user_abc"},
+        )
+    )
+    assert "_origin_chat_id" not in seen[1]
+
+    # Chat path: the context value wins over the spoofed arg.
+    origin = str(uuid.uuid4())
+    asyncio.run(
+        executor.execute(
+            "platform_create_watch",
+            {"title": "w", "_origin_chat_id": spoofed},
+            caller_context={"conversation_id": origin},
+        )
+    )
+    assert seen[2]["_origin_chat_id"] == origin
+
+
 # ---------------------------------------------------------------------------
 # S5 — the watcher speaks (bell first, chat second, both fail-soft)
 # ---------------------------------------------------------------------------
@@ -420,6 +478,41 @@ def test_notify_chat_event_emits_payload():
         "user_id": 3,
         "event": "chat_changed",
     }
+
+
+def test_history_and_get_chat_surface_kind(workspace_and_user, new_session):
+    """S7 passthrough: /history rows and GET /{chat_id} carry ``chats.kind``
+    so the UI can mark the Auto thread ('user' for ordinary chats)."""
+    from api.chat import get_chat, get_chat_history
+    from consumers.chatbot.service import ChatService
+    from services.chat_messenger import find_or_create_auto_chat
+
+    ws_id, _clerk, user_int_id = workspace_and_user
+    db = new_session()
+    try:
+        regular = ChatService(db).create_chat(
+            user_id=user_int_id,
+            title="regular-kind",
+            workspace_id=uuid.UUID(ws_id),
+        )
+        auto = find_or_create_auto_chat(db, ws_id, user_int_id)
+
+        # get_user_id's fast path takes an integer ctx.user.id as-is, so a
+        # SimpleNamespace principal exercises the real endpoint bodies.
+        ctx = SimpleNamespace(
+            workspace_id=uuid.UUID(ws_id),
+            user=SimpleNamespace(id=user_int_id),
+        )
+
+        rows = asyncio.run(get_chat_history(limit=50, ctx=ctx, db=db))
+        by_id = {row["id"]: row for row in rows}
+        assert by_id[str(auto.id)]["kind"] == "auto"
+        assert by_id[str(regular.id)]["kind"] == "user"
+
+        payload = asyncio.run(get_chat(str(auto.id), ctx=ctx, db=db))
+        assert payload["kind"] == "auto"
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
