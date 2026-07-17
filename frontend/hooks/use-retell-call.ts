@@ -59,9 +59,21 @@ interface UseRetellCallOptions {
    * the chat screen points itself at it so voice and text are ONE
    * conversation, visible while speaking. */
   onChatId?: (chatId: string) => void
+  /** Fires on every Retell transcript update with the CURRENT exchange —
+   * the chat renders these as live-typing bubbles, so Auto's words print
+   * in the thread as he reads them (and yours as you speak). */
+  onLiveTurn?: (turn: { userText: string; agentText: string }) => void
 }
 
-export function useRetellCall({ chatId, agentId, onChatId }: UseRetellCallOptions): UseRetellCallReturn {
+export function useRetellCall({
+  chatId,
+  agentId,
+  onChatId,
+  onLiveTurn,
+}: UseRetellCallOptions): UseRetellCallReturn {
+  // Ref'd so transcript-update wiring never re-creates start() per render.
+  const onLiveTurnRef = useRef(onLiveTurn)
+  onLiveTurnRef.current = onLiveTurn
   const [snap, setSnap] = useState<OrbSnapshot>(initialOrb)
   const [captions, setCaptions] = useState<CaptionLine[]>([])
   const [durationSec, setDurationSec] = useState(0)
@@ -193,7 +205,7 @@ export function useRetellCall({ chatId, agentId, onChatId }: UseRetellCallOption
       client.on('audio', (samples: Float32Array) => {
         levelsRef.current.agent = rmsLevel(samples)
       })
-      // Live captions from Retell's running transcript.
+      // Live captions + live-typing bubbles from Retell's running transcript.
       client.on('update', (update: any) => {
         const transcript = update?.transcript
         if (!Array.isArray(transcript) || transcript.length === 0) return
@@ -202,6 +214,19 @@ export function useRetellCall({ chatId, agentId, onChatId }: UseRetellCallOption
           text: String(t?.content ?? ''),
         }))
         setCaptions(lines)
+        // The current exchange, growing word by word: the LAST utterance of
+        // each speaker — Auto's grows while he talks, so the thread can type
+        // it out in real time.
+        let userText = ''
+        let agentText = ''
+        for (let i = transcript.length - 1; i >= 0; i--) {
+          const t = transcript[i]
+          const isAgent = t?.role === 'agent'
+          if (isAgent && !agentText) agentText = String(t?.content ?? '')
+          if (!isAgent && !userText) userText = String(t?.content ?? '')
+          if (userText && agentText) break
+        }
+        onLiveTurnRef.current?.({ userText, agentText })
       })
 
       await client.startCall({
