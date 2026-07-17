@@ -711,6 +711,179 @@ def test_phone_lane_attributes_to_workspace_steward(voice_workspace, new_session
 
 
 # ---------------------------------------------------------------------------
+# S2 · the custom-LLM WebSocket (Retell's actual transport)
+# ---------------------------------------------------------------------------
+
+class _FakeWebSocket:
+    """Scripted Retell-side socket. receive_json yields a loop tick first so
+    a just-created respond() task gets to start before the next message."""
+
+    def __init__(self, incoming):
+        self.incoming = list(incoming)
+        self.sent = []
+        self.accepted = False
+        self.close_code = None
+
+    async def accept(self):
+        self.accepted = True
+
+    async def close(self, code=1000):
+        self.close_code = code
+
+    async def send_json(self, data):
+        self.sent.append(data)
+
+    async def receive_json(self):
+        from fastapi import WebSocketDisconnect
+
+        await asyncio.sleep(0)
+        if not self.incoming:
+            raise WebSocketDisconnect(1000)
+        return self.incoming.pop(0)
+
+
+def _ws_db(minted: bool):
+    from contextlib import contextmanager
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = (
+        (1,) if minted else None
+    )
+
+    @contextmanager
+    def fake_session():
+        yield db
+
+    return fake_session
+
+
+def test_ws_wrap_shape():
+    from modules.voice.providers.retell import wrap_ws_response
+
+    assert wrap_ws_response({"response_id": 3, "content": "hi", "content_complete": False}) == {
+        "response_type": "response",
+        "response_id": 3,
+        "content": "hi",
+        "content_complete": False,
+    }
+
+
+def test_ws_closes_4403_when_platform_off(monkeypatch):
+    import api.voice_retell as vr
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: False)
+    ws = _FakeWebSocket([])
+    asyncio.run(vr.retell_llm_websocket(ws, "call_x"))
+    assert ws.close_code == 4403
+    assert ws.accepted is False  # the kill-switch refuses before accept
+
+
+def test_ws_closes_4401_for_unminted_call(monkeypatch):
+    import api.voice_retell as vr
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=False))
+    ws = _FakeWebSocket([])
+    asyncio.run(vr.retell_llm_websocket(ws, "call_forged"))
+    assert ws.close_code == 4401  # the minted call_id IS the credential
+    assert ws.accepted is False
+
+
+def test_ws_user_speaks_first_then_answers_with_call_details_vars(monkeypatch):
+    import api.voice_retell as vr
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
+
+    seen_reqs = []
+
+    async def fake_stream(req):
+        seen_reqs.append(req)
+        yield {"response_id": req.response_id, "content": "hello there", "content_complete": False}
+        yield {"response_id": req.response_id, "content": "", "content_complete": True}
+
+    monkeypatch.setattr(vr, "_agent_retell_stream", fake_stream)
+
+    ws = _FakeWebSocket(
+        [
+            {"interaction_type": "ping_pong", "timestamp": 123},
+            {
+                "interaction_type": "call_details",
+                "call": {
+                    "call_id": "call_ws1",
+                    "retell_llm_dynamic_variables": {
+                        "workspace_id": "ws-9", "user_id": "7", "chat_id": "c-1",
+                    },
+                },
+            },
+            {
+                "interaction_type": "response_required",
+                "response_id": 1,
+                "transcript": [{"role": "user", "content": "hey auto"}],
+            },
+        ]
+    )
+    asyncio.run(vr.retell_llm_websocket(ws, "call_ws1"))
+
+    # server spoke first with the empty floor-yielding response
+    assert ws.sent[0] == {
+        "response_type": "response", "response_id": 0, "content": "", "content_complete": True,
+    }
+    # ping echoed
+    assert {"response_type": "ping_pong", "timestamp": 123} in ws.sent
+    # the turn used the call_details vars + path call_id, and frames are wrapped
+    assert len(seen_reqs) == 1
+    req = seen_reqs[0]
+    assert (req.workspace_id, req.user_id, req.chat_id, req.call_id) == ("ws-9", "7", "c-1", "call_ws1")
+    assert req.user_text == "hey auto"
+    assert {"response_type": "response", "response_id": 1, "content": "hello there",
+            "content_complete": False} in ws.sent
+
+
+def test_ws_new_turn_supersedes_streaming_one(monkeypatch):
+    import api.voice_retell as vr
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
+
+    events = []
+
+    async def fake_stream(req):
+        events.append(f"start:{req.response_id}")
+        try:
+            if req.response_id == 1:
+                yield {"response_id": 1, "content": "long answer…", "content_complete": False}
+                await asyncio.Event().wait()  # streams forever until cancelled
+            else:
+                yield {"response_id": 2, "content": "fresh", "content_complete": True}
+        finally:
+            if req.response_id == 1:
+                events.append("cancelled:1")
+
+    monkeypatch.setattr(vr, "_agent_retell_stream", fake_stream)
+
+    turn = lambda rid: {
+        "interaction_type": "response_required",
+        "response_id": rid,
+        "transcript": [{"role": "user", "content": f"turn {rid}"}],
+    }
+    ws = _FakeWebSocket(
+        [
+            {"interaction_type": "call_details",
+             "call": {"retell_llm_dynamic_variables": {"workspace_id": "ws-9"}}},
+            turn(1),
+            turn(2),
+        ]
+    )
+    asyncio.run(vr.retell_llm_websocket(ws, "call_ws2"))
+
+    assert "start:1" in events and "start:2" in events
+    assert "cancelled:1" in events  # barge-in: the superseded stream was stopped
+    assert {"response_type": "response", "response_id": 2, "content": "fresh",
+            "content_complete": True} in ws.sent
+
+
+# ---------------------------------------------------------------------------
 # Guard · the live path never touches the 120s-TTS pod client
 # ---------------------------------------------------------------------------
 

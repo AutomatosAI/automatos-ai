@@ -1,5 +1,5 @@
 {
-  "route_count": 776,
+  "route_count": 775,
   "routes": [
     {
       "method": "GET",
@@ -2476,10 +2476,6 @@
     {
       "method": "POST",
       "path": "/api/voice/retell/events"
-    },
-    {
-      "method": "POST",
-      "path": "/api/voice/retell/llm"
     },
     {
       "method": "POST",
