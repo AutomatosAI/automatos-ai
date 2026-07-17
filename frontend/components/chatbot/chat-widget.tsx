@@ -32,6 +32,7 @@ import {
 import { useUser } from '@clerk/nextjs'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
 import { useChat } from '@/lib/chat/hooks'
+import { usePageContext } from '@/lib/page-context'
 import { getChatHistory, getChatMessages } from '@/lib/chat/api'
 import {
   EMPTY_WIDGET_SESSION,
@@ -380,6 +381,10 @@ function WidgetConversation({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [inputValue, setInputValue] = useState('')
 
+  // PRD-221 S5: send the structured page context (manifest key + route), not
+  // the display label. The label stays UI-only.
+  const pageContext = usePageContext()
+
   const {
     messages,
     isLoading,
@@ -390,7 +395,7 @@ function WidgetConversation({
     id: initialChatId ?? '',
     initialMessages,
     selectedAgentId: undefined, // Routes to Auto (default agent)
-    pageContext: pageLabel,
+    pageContext,
     onChatIdUpdate: onChatIdAssigned,
   })
 
