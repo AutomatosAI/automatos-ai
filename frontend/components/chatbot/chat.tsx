@@ -44,6 +44,12 @@ import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
 import { MissionSuggestionCard } from '@/components/chatbot/mission-suggestion-card'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 
+// PRD-207 S5: Auto Live — the presence orb on the chat screen; the SSE lane
+// also mounts here so voice/background messages land live (chat_changed →
+// the useChat merge listener).
+import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
+import { useBoardEventStream } from '@/hooks/use-board-event-stream'
+
 export interface ChatProps {
   id: string
   initialMessages?: ChatMessage[]
@@ -181,6 +187,13 @@ export function Chat({
   }, [])
 
   const [activeChatId, setActiveChatId] = useState(id)
+
+  // PRD-207 S5: live voice mode — the orb mounts, content drops lower.
+  const [isLiveMode, setIsLiveMode] = useState(false)
+  // PRD-207 S6 (closing a PRD-205 gap): the chat page subscribes to the SSE
+  // lane so chat_changed reaches the useChat merge listener HERE — not only
+  // while Command Center happens to be open.
+  useBoardEventStream(true)
 
   // PRD-221 S5: the main chat page sends its own page context too (page 'chat').
   const pageContext = usePageContext()
@@ -1107,6 +1120,20 @@ export function Chat({
       {/* Normal chat view - NO widgets */}
       {!hasWidgets && !isArtifactViewerVisible && (
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
+          {/* PRD-207 S5: Auto in the room — the orb mounts top-center and the
+              welcome/messages content below animates lower. Bind the call to
+              the on-screen thread once it exists server-side; a welcome-screen
+              call lands in a fresh attributed thread instead. */}
+          <AnimatePresence>
+            {isLiveMode && (
+              <LiveVoiceMode
+                chatId={hasSentMessage ? activeChatId : undefined}
+                agentId={selectedAgentId}
+                onExit={() => setIsLiveMode(false)}
+              />
+            )}
+          </AnimatePresence>
+
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
             <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
@@ -1193,6 +1220,8 @@ export function Chat({
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/assignments?tab=missions')}
+                    isLiveActive={isLiveMode}
+                    onLiveClick={() => setIsLiveMode((v) => !v)}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}
@@ -1354,6 +1383,8 @@ export function Chat({
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/assignments?tab=missions')}
+                    isLiveActive={isLiveMode}
+                    onLiveClick={() => setIsLiveMode((v) => !v)}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}

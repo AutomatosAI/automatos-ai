@@ -119,6 +119,7 @@
     "react-shepherd": "^6.1.9",
     "reactflow": "^11.11.4",
     "recharts": "2.8.0",
+    "retell-client-js-sdk": "^2.0.8",
     "remark-gfm": "^4.0.1",
     "shepherd.js": "^14.5.1",
     "sonner": "^1.7.4",
