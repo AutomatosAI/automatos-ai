@@ -59,7 +59,7 @@ Turn the merged-but-unarmed Retell lane (PRD-203 V·S4) into a product: a **live
 ## 4. Stories (test-first; CI is the only gate — no local runs)
 
 ### S1 · Web-call session mint — S/M
-`POST /api/voice/web-call` (workspace-scoped router; hybrid auth): resolves the caller to INTEGER `users.id` (the #513 idiom), checks — in order, fail-closed — platform kill-switch (`VOICE_LIVE_ENABLED`), Retell key configured, workspace toggle (S4), cap gate (S4 formula), then calls Retell's create-web-call API with dynamic variables `{workspace_id, agent_id?, chat_id?, user_id}`, **inserts the `voice_calls` row at mint** (`status='minted'` — the `call_id → workspace/user/chat` mapping exists BEFORE any event arrives; S2's trust boundary, S3's attribution and S9's BYOK secret-resolution all key off it), sets the vendor-side max call duration where supported (S4), and returns `{access_token, call_id}` (token dies in ~30s unused — the client connects immediately). No Retell key ever reaches the browser. Route-manifest +1 (772→773).
+`POST /api/voice/web-call` (workspace-scoped router; hybrid auth): resolves the caller to INTEGER `users.id` (the #513 idiom), checks — in order, fail-closed — the platform `voice.live_enabled` settings toggle (S4), Retell credentials present (S4 settings), workspace toggle (S4), cap gate (S4 formula), then calls Retell's create-web-call API with dynamic variables `{workspace_id, agent_id?, chat_id?, user_id}`, **inserts the `voice_calls` row at mint** (`status='minted'` — the `call_id → workspace/user/chat` mapping exists BEFORE any event arrives; S2's trust boundary, S3's attribution and S9's BYOK secret-resolution all key off it), sets the vendor-side max call duration where supported (S4), and returns `{access_token, call_id}` (token dies in ~30s unused — the client connects immediately). No Retell key ever reaches the browser. Route-manifest +1 (772→773).
 **Test:** `test_web_call_mint_gates_in_order` (each gate refuses with an honest reason; Retell client mocked); `test_mint_passes_dynamic_vars`; `test_mint_inserts_minted_call_row`.
 
 ### S2 · The webhook learns who is talking and where — S/M
@@ -73,10 +73,11 @@ New table `voice_calls` (justified §2: per-CALL duration/billing grain; `voice_
 **Test:** `test_call_lifecycle_updates_minted_row_idempotently`; `test_monthly_minutes_rollup`; `test_unknown_call_id_is_loud_orphan`; HMAC-refusal test.
 
 ### S4 · Caps, kill-switch, plan gate — S
-Config, ALL fail-closed: `VOICE_LIVE_ENABLED` **default false everywhere** — production arms it explicitly via the §5 runbook, never by merge (no surprise bills, no surprise microphones); `VOICE_LIVE_DEFAULT_MONTHLY_CAP_MINUTES` (default **100**, §8-Qj); `VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES` (default **10**); `VOICE_LIVE_MAX_CALL_MINUTES` (default **30** — passed to the vendor call config at S1 mint where supported).
+**The platform kill-switch is a Settings TOGGLE, not an env var** (PRD-143 replaced `.env` with DB `system_settings`; CLAUDE.md bans `os.getenv` outside config.py — a runbook env flag would fight the platform). `voice.live_enabled` is a `system_settings` row (category `voice`), **default OFF**, flipped by the super-admin from the Settings page via the existing `platform_update_system_setting` surface — arm/disarm live, no redeploy, no SSH. Likewise the Retell platform credentials (`RETELL_API_KEY`/`RETELL_WEBHOOK_SECRET`/`RETELL_AGENT_ID`) live in `system_settings` (masked, the PRD-143 S11 "sensitive values always masked" rule) so arming is entirely a UI act. `config.py` reads these through the canonical DB-settings accessor with an OFF/empty default — the only "variable" is the safe default, never the on-switch.
+Tuning constants stay config (not operational switches): `VOICE_LIVE_DEFAULT_MONTHLY_CAP_MINUTES` (**100**, §8-Qj — but the effective cap is a settings value, see below), `VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES` (**10**), `VOICE_LIVE_MAX_CALL_MINUTES` (**30** — passed to the vendor call config at S1 mint where supported).
 **Cap gate formula (explicit — the two-tabs race is bounded, not implicit):** refuse a mint when `ended_minutes_this_month + active_calls × RESERVE ≥ cap`. The second simultaneous mint sees the first call's reservation.
-Workspace: `settings.voice_live = {enabled: bool (default false), monthly_cap_minutes?: int, retell_voice_id?: str}` — written through the PRD-143 S11 fail-closed whitelist pattern (extend `OPERATOR_WORKSPACE_SETTINGS_KEYS` + the settings PUT surface; never a free-form write). Over-cap mint refusals say exactly why ("Voice budget used: 100/100 min this month").
-**Test:** whitelist-refusal test; cap-boundary test; `test_active_call_reservation_blocks_second_mint`.
+Workspace: `settings.voice_live = {enabled: bool (default false), monthly_cap_minutes?: int, retell_voice_id?: str}` — the per-workspace enable + cap, written through the PRD-143 S11 fail-closed whitelist pattern (extend `OPERATOR_WORKSPACE_SETTINGS_KEYS` + the settings PUT surface; never a free-form write). Two gates, both UI-flippable: super-admin's platform `voice.live_enabled` (the master switch) AND the workspace's own `voice_live.enabled`. Over-cap mint refusals say exactly why ("Voice budget used: 100/100 min this month").
+**Test:** `test_platform_toggle_off_refuses_mint` (system_settings OFF → 503, no env var involved); whitelist-refusal test; cap-boundary test; `test_active_call_reservation_blocks_second_mint`.
 
 ### S5 · The orb + "drop lower" live mode on the chat screen — M
 The screen Gerard keeps is kept: entering live mode ANIMATES the existing welcome/messages content downward and mounts the **presence orb** top-center — Auto in the room. Mechanics:
@@ -92,7 +93,7 @@ Messages written during a live call carry `source = {origin:'voice', label:'Auto
 **Test:** `test_voice_messages_stamped_with_source`; vitest badge render.
 
 ### S7 · The Auto Live settings card — S/M
-`VoiceProfilesSettingsTab` gains an **Auto Live** card: enable toggle (writes the S4 whitelisted key), Retell voice picker (`retell_voice_id`, §8-Qc default), this-month meter (`{used}/{cap} min` from S3 — honest-UI, no fake counts), and arming status ("Platform voice key: configured/not configured" — read-only truth). Copy states the pricing model per §8-Qb once decided.
+Two surfaces, matching the two gates. **Super-admin (system settings):** the platform `voice.live_enabled` master toggle + the masked Retell credentials ride the existing system-settings UI (`platform_update_system_setting`) — arm/disarm the whole platform from a switch, no redeploy. **Workspace (`VoiceProfilesSettingsTab`) gains an Auto Live card:** enable toggle (writes the S4 whitelisted `voice_live.enabled`), Retell voice picker (`retell_voice_id`, §8-Qc default), this-month meter (`{used}/{cap} min` from S3 — honest-UI, no fake counts), and arming status ("Platform voice: on/off" + "voice key configured" — read-only truth reflecting the super-admin state). Copy states the pricing model per §8-Qb once decided.
 **Implementation note (verify before building the picker):** confirm Retell supports per-web-call voice override. If it does not, the voice is bound to the Retell AGENT config — then either manage per-workspace agent variants or hide the picker behind platform config until agent/voice management exists. A dropdown wired to nothing does not ship ("vibes are not an API").
 **Test:** vitest — toggle writes the whitelisted key; meter renders empty/used/capped states honestly.
 
@@ -114,7 +115,7 @@ The embedded widget (`api/widgets/` SDK plane — NOT the in-app widget) gets li
 
 - **Phase 1 = S1+S2+S3+S4+S5+S6+S7+S8** — one shippable act: arm → talk → orb → transcript in thread → capped, metered AND measured from minute one. (Metering is NOT deferrable: caps without S3's meter are decorative. S8 is in Phase 1 because §6 declares `voice_turns` the judging metric — you cannot referee a mode you don't measure; Auto's own review caught this contradiction.)
 - **Phase 2 = S9+S10** — BYOK, embed voice.
-- **Human runbook (§6, Gerard):** create the Retell account/agent, set the three env keys, point Retell at `/api/voice/retell/llm` + `/api/voice/retell/events`, pick Auto's voice (§8-Qc), make one test call, watch `voice_calls`/`voice_turns` move.
+- **Human runbook (§6, Gerard) — all in the UI, no redeploy:** create the Retell account/agent → in **Settings** paste the Retell key/secret/agent-id (masked `system_settings`) and flip `voice.live_enabled` ON → point Retell at `/api/voice/retell/llm` + `/api/voice/retell/events` → pick Auto's voice (§8-Qc) → toggle your own workspace ON → make one test call → watch `voice_calls`/`voice_turns` move. Disarm anytime = flip the same toggle OFF (instant platform-wide kill).
 - The **existing push-to-talk mic and the chatterbox pod stay untouched in Phase 1** — their retirement is §8-Qd/Qe (Gerard's call, one is cross-repo), not a silent deletion.
 
 ## 6. Verification (CI is the only gate — no local runs)
@@ -127,7 +128,7 @@ Mic access is browser-consented; no Retell key in the browser (server-minted 30s
 
 1. Live voice launched from `/chat` binds to the CURRENT chat and the authenticated user — never an anonymous side-channel.
 2. `chat_id` / `user_id` / `workspace_id` are cross-validated server-side against the S1 mint row; HMAC alone never authorises binding.
-3. No mint unless ALL pass: platform flag → Retell key present → workspace toggle → cap formula. Fail-closed, honest refusal reasons.
+3. No mint unless ALL pass: platform `voice.live_enabled` settings toggle → Retell credentials present → workspace toggle → cap formula. Fail-closed, honest refusal reasons. The master switch is a super-admin Settings toggle (DB `system_settings`), never an env var.
 4. Metering (`voice_calls` + the meter) ships WITH first arming, never after.
 5. Retell credentials never reach the browser; tokens are server-minted and short-lived.
 6. Spoken content follows the SAME memory exclusion rules as text (PRD-206 Q3 validator).
