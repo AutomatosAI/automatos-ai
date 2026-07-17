@@ -40,7 +40,6 @@ export function LiveVoiceMode({ chatId, agentId, onChatId, onLiveTurn, onExit }:
     orbState,
     stateLabel,
     levelsRef,
-    captions,
     durationSec,
     muted,
     refusal,
@@ -99,22 +98,9 @@ export function LiveVoiceMode({ chatId, agentId, onChatId, onLiveTurn, onExit }:
         )}
       </p>
 
-      {/* Live captions (accessibility + trust) */}
-      {isLive && captions.length > 0 && (
-        <div className="relative max-w-md space-y-0.5 text-center">
-          {captions.map((line, i) => (
-            <p
-              key={`${line.role}-${i}`}
-              className={`truncate text-xs ${
-                line.role === 'agent' ? 'text-warning/90' : 'text-muted-foreground/70'
-              }`}
-            >
-              <span className="font-medium">{line.role === 'agent' ? 'Auto' : 'You'}:</span>{' '}
-              {line.text}
-            </p>
-          ))}
-        </div>
-      )}
+      {/* No caption lines here: the conversation IS the thread below — the
+          words type out as messages (one source, Gerard's call). The wave
+          stays pure presence. */}
 
       {/* Failure states — honest copy, always a way out. */}
       {failure && (

@@ -134,7 +134,7 @@ describe('PRD-207 — LiveVoiceMode', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
-  it('renders live captions for both voices', () => {
+  it('renders NO caption lines — the thread is the one source of words', () => {
     Object.assign(hookState, {
       refusal: null, error: null, isLive: true, orbState: 'speaking',
       stateLabel: 'Auto is speaking',
@@ -144,7 +144,9 @@ describe('PRD-207 — LiveVoiceMode', () => {
       ],
     })
     render(<LiveVoiceMode onExit={() => {}} />)
-    expect(screen.getByText(/where did we leave off/)).toBeTruthy()
-    expect(screen.getByText(/mid-way through the social pack/)).toBeTruthy()
+    // the words belong to the chat's live-typing bubbles, not a second
+    // caption strip under the wave (Gerard: "why am I seeing two sources")
+    expect(screen.queryByText(/where did we leave off/)).toBeNull()
+    expect(screen.queryByText(/mid-way through the social pack/)).toBeNull()
   })
 })

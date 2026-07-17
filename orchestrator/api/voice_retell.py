@@ -482,7 +482,7 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
     from modules.voice.call_binding import (
         resolve_call_binding,
         stamp_assistant_voice_source,
-        voice_source,
+        upsert_voice_user_message,
     )
 
     turn_t0 = monotonic()
@@ -506,12 +506,14 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
         streaming_service = StreamingChatService(db, workspace_id=binding.workspace_id)
         conversation_id = binding.chat_id
 
-        chat_service.save_message(
+        # Grow-aware: a continued sentence UPDATES the message it grew from
+        # (first live use stacked "…single chat" / "…voice chat?" / "…mixed?"
+        # as three messages — one voice, one message).
+        upsert_voice_user_message(
+            db,
             chat_id=conversation_id,
-            role="user",
-            parts=[{"type": "text", "text": req.user_text}],
             workspace_id=binding.workspace_id,
-            source=voice_source("user"),
+            text=req.user_text,
         )
 
         # Agent selection: an explicit dynamic-variable agent wins; otherwise the

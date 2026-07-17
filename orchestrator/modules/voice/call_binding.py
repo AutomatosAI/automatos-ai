@@ -228,6 +228,55 @@ def resolve_call_binding(
     return CallBinding(chat_id=chat_id, user_id=int(row.user_id), workspace_id=str(ws_uuid), bound=False)
 
 
+def upsert_voice_user_message(db: Session, *, chat_id: str, workspace_id: str, text: str) -> None:
+    """One growing message per spoken sentence — never stacked prefixes.
+
+    Retell requests a turn at every pause; if the speaker keeps going, the
+    next request carries the SAME utterance, longer ("Is the chat, like, a
+    single chat" → "… voice chat?" → "… or is it mixed?"). First live use
+    stacked all three as separate messages. When the chat's last message is
+    a voice user message and old/new are prefix-related, UPDATE it to the
+    longer text (JSONB rebuilt, never mutated); otherwise append through the
+    one write path with the voice source stamp.
+    """
+    from consumers.chatbot.service import ChatService
+    from core.models.core import Message
+
+    text = (text or "").strip()
+    if not text:
+        return
+    try:
+        chat_uuid = uuid.UUID(str(chat_id))
+    except ValueError:
+        return
+
+    last = (
+        db.query(Message)
+        .filter(Message.chat_id == chat_uuid)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    if last is not None and last.role == "user" and (last.source or {}).get("origin") == "voice":
+        old = ""
+        for part in last.parts or []:
+            if isinstance(part, dict) and part.get("type") == "text":
+                old = str(part.get("text") or "")
+                break
+        if old and (text.startswith(old) or old.startswith(text)):
+            longer = text if len(text) >= len(old) else old
+            last.parts = [{"type": "text", "text": longer}]  # rebuild, never mutate
+            db.commit()
+            return
+
+    ChatService(db).save_message(
+        chat_id=str(chat_uuid),
+        role="user",
+        parts=[{"type": "text", "text": text}],
+        workspace_id=str(workspace_id),
+        source=voice_source("user"),
+    )
+
+
 def stamp_assistant_voice_source(
     db: Session, *, chat_id: str, turn_started_at: datetime
 ) -> int:
