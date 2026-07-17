@@ -68,6 +68,46 @@ def notify_board_event(
         )
 
 
+def notify_chat_event(
+    db: Session,
+    *,
+    workspace_id,
+    chat_id,
+    user_id,
+) -> None:
+    """PRD-205 S7 (backend half): fire ``chat_changed`` on the SAME channel.
+
+    A sibling of :func:`notify_board_event` -- one new event value, zero new
+    moving parts (Section 8 Q4). ChatMessenger calls this after its commit so
+    an open chat learns a background message landed; the client filters by
+    ``user_id`` (the target chat owner's integer ``users.id``) and refetches
+    ``/messages`` for the matching ``chat_id``. Workspace isolation is the
+    stream's existing ``frame_for_payload`` gate -- it keys ONLY on
+    ``workspace_id``, so this payload (no task_id/status) passes untouched.
+
+    Best-effort by design, exactly like the board emitter: a failed NOTIFY
+    costs latency (the next open/fetch shows the message), never correctness,
+    and never raises into the messenger.
+    """
+    try:
+        payload = json.dumps(
+            {
+                "workspace_id": str(workspace_id),
+                "chat_id": str(chat_id),
+                "user_id": user_id,
+                "event": "chat_changed",
+            }
+        )
+        db.execute(
+            text("SELECT pg_notify(:chan, :payload)"),
+            {"chan": NOTIFY_CHANNEL, "payload": payload},
+        )
+    except Exception:  # noqa: BLE001 — NOTIFY is an optimisation, not a guarantee
+        logger.debug(
+            "[board_events] pg_notify failed for chat %s", chat_id, exc_info=True
+        )
+
+
 class _SSEListener(threading.Thread):
     """Holds one raw LISTEN connection and pushes notifications onto a queue.
 
