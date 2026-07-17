@@ -80,6 +80,12 @@ class Watch(Base):
         nullable=True,
     )
 
+    # PRD-205 S4: the conversation the launch came from (captured from
+    # caller_context at watch creation; injected server-side, never an
+    # LLM-supplied arg). Verdicts/actions/escalations post back here; NULL
+    # (e.g. heartbeat/API launches) falls back to the owner's Auto thread.
+    origin_chat_id = Column(UUID(as_uuid=True), nullable=True)
+
     # What is being watched
     watch_type = Column(String(32), nullable=False)   # WatchType
     target_type = Column(String(32), nullable=False)  # WatchTargetType (current target)

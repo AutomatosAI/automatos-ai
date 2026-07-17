@@ -707,6 +707,10 @@ async def get_chat_messages(
             "role": msg.role,
             "parts": msg.parts,
             "attachments": msg.attachments,
+            # PRD-205 S3: background-author provenance — the frontend maps it
+            # into the message badge slot ("Auto · background"). null for
+            # every in-turn message, incl. all rows predating the column.
+            "source": msg.source,
             "createdAt": msg.created_at.isoformat()
         }
         for msg in messages
