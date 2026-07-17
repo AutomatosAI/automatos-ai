@@ -29,6 +29,8 @@ import hashlib
 import hmac
 import json
 import logging
+import re
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Optional
 
@@ -143,16 +145,44 @@ async def retell_response_frames(
     yield {"response_id": response_id, "content": "", "content_complete": True}
 
 
-def verify_webhook_signature(secret: str, signature: Optional[str], body: bytes) -> bool:
-    """Constant-time HMAC-SHA256 verification of an inbound Retell webhook.
+# Retell's actual header shape: ``v={timestamp_ms},d={hex_digest}`` — verified
+# against their SDK's webhook-auth source (PRD-207 first-contact finding).
+_SIGNATURE_RE = re.compile(r"^v=(\d+),d=([0-9a-fA-F]+)$")
+_SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000
 
-    Fail-closed: no configured secret or no/!matching signature → ``False``. The
-    route rejects with 401 so an unauthenticated caller can never drive the agent.
+
+def verify_webhook_signature(
+    secret: str,
+    signature: Optional[str],
+    body: bytes,
+    *,
+    now_ms: Optional[int] = None,
+) -> bool:
+    """Constant-time verification of Retell's ``x-retell-signature``.
+
+    Their SDK's real scheme: ``digest = HMAC-SHA256(secret, raw_body +
+    str(timestamp)).hexdigest()`` carried as ``v={timestamp},d={digest}``,
+    with a ±5-minute freshness window (replay protection). PRD-203 shipped a
+    plain HMAC-of-body compare that no genuine Retell webhook could ever
+    pass — first live events all 401'd. Fail-closed on missing secret,
+    malformed header, stale timestamp or digest mismatch. ``now_ms`` is
+    injectable for deterministic tests.
     """
     if not secret or not signature:
         return False
-    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    provided = signature.strip()
-    if provided.startswith("v1="):  # tolerate a scheme prefix if the vendor sends one
-        provided = provided[3:]
-    return hmac.compare_digest(expected, provided)
+    match = _SIGNATURE_RE.match(signature.strip())
+    if not match:
+        return False
+    timestamp, digest = match.group(1), match.group(2).lower()
+
+    now = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    try:
+        if abs(now - int(timestamp)) > _SIGNATURE_MAX_AGE_MS:
+            return False
+    except ValueError:
+        return False
+
+    expected = hmac.new(
+        secret.encode("utf-8"), body + timestamp.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, digest)

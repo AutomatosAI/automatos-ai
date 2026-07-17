@@ -1159,9 +1159,12 @@ def test_events_webhook_hmac_fail_closed(monkeypatch):
     assert exc.value.status_code == 401
     assert applied == []
 
-    # correct signature → applied
-    good = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    out = asyncio.run(vr.retell_events_webhook(_FakeRequest(body, good)))
+    # correct signature (Retell's v={ts},d={hmac(body+ts)} scheme) → applied
+    import time as time_mod
+
+    ts = str(int(time_mod.time() * 1000))
+    digest = hmac_mod.new(secret.encode(), body + ts.encode(), hashlib.sha256).hexdigest()
+    out = asyncio.run(vr.retell_events_webhook(_FakeRequest(body, f"v={ts},d={digest}")))
     assert out == {"ok": True}
     assert applied == ["call_started"]
 
