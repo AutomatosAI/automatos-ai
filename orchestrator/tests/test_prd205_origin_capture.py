@@ -28,7 +28,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 
@@ -209,9 +208,8 @@ def engine():
     eng.dispose()
 
 
-@pytest.fixture
-def new_session(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
+# ``new_session`` comes from tests/conftest.py -- the shared tracking
+# factory (leaked-session guard); teardown sweeps run via new_session.sweep().
 
 
 @pytest.fixture
@@ -230,7 +228,7 @@ def workspace(new_session):
 
     yield ws_id
 
-    s = new_session()
+    s = new_session.sweep()
     for stmt in (
         "DELETE FROM watch_events WHERE watch_id IN "
         "(SELECT id FROM watches WHERE workspace_id = CAST(:w AS uuid))",

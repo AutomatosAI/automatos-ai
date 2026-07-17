@@ -25,14 +25,16 @@ Additive only, four surfaces:
   Clerk user id string (same convention as watches.created_by); both are
   soft references for the same deletion-safety reason as above.
 
-Chaining (PRD-205 Section 8 Q7): PR #551 (the prd204_watch_registry x
-w3_post201_merge_heads join) was OPEN at build time, so this chains
-single-parent on prd204_watch_registry. Deliberately NOT a join of the
-same two parents -- #551 owns that join; a duplicate join re-forks the
-head graph (the #545 x #548 lesson).
+Chaining (PRD-205 Section 8 Q7): PR #551's join (prd204_w3_join_heads)
+MERGED mid-build, restoring a single lineage whose head then advanced
+through prd197_substrate_metrics to prd199_drop_fake_stats -- so this
+chains single-parent on that CURRENT head, keeping the graph at exactly
+one head. (The first cut of this revision chained on
+prd204_watch_registry while #551 was still open; landing that after the
+join would have re-forked the graph -- the #545 x #548 lesson.)
 
 Revision ID: prd205_auto_speaks
-Revises: prd204_watch_registry
+Revises: prd199_drop_fake_stats
 Create Date: 2026-07-17
 """
 from __future__ import annotations
@@ -42,7 +44,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 
 revision = "prd205_auto_speaks"
-down_revision = "prd204_watch_registry"
+down_revision = "prd199_drop_fake_stats"
 branch_labels = None
 depends_on = None
 

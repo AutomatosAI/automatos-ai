@@ -20,7 +20,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 
@@ -130,9 +129,8 @@ def engine():
     eng.dispose()
 
 
-@pytest.fixture
-def new_session(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
+# ``new_session`` comes from tests/conftest.py -- the shared tracking
+# factory (leaked-session guard); teardown sweeps run via new_session.sweep().
 
 
 @pytest.fixture
@@ -169,7 +167,7 @@ def seeded(new_session):
         "tag": tag,
     }
 
-    s = new_session()
+    s = new_session.sweep()
     for stmt in (
         "DELETE FROM messages WHERE workspace_id = CAST(:w AS uuid)",
         "DELETE FROM chats WHERE workspace_id = CAST(:w AS uuid)",
@@ -330,7 +328,8 @@ def test_foreign_workspace_chat_falls_back_to_auto_thread(
         ).scalar()
         assert n == 0
     finally:
-        s2 = new_session()
+        s.close()
+        s2 = new_session.sweep()
         for stmt in (
             "DELETE FROM messages WHERE workspace_id = CAST(:w AS uuid)",
             "DELETE FROM chats WHERE workspace_id = CAST(:w AS uuid)",
@@ -339,7 +338,6 @@ def test_foreign_workspace_chat_falls_back_to_auto_thread(
             s2.execute(text(stmt), {"w": other_ws})
         s2.commit()
         s2.close()
-        s.close()
 
 
 def test_no_chat_and_unresolvable_user_drops_message(
@@ -416,11 +414,14 @@ def test_empty_text_posts_nothing(new_session, seeded, capture_chat_notify):
         s.close()
 
 
-def test_deliver_with_injected_factory_end_to_end(engine, seeded, capture_chat_notify):
-    """The wrapper on the injected test factory: full path, own session."""
+def test_deliver_with_injected_factory_end_to_end(new_session, seeded, capture_chat_notify):
+    """The wrapper on the injected test factory: full path, own session.
+
+    ``new_session`` (the shared tracking factory) IS the injected
+    ``session_factory`` -- exactly the seam the wrapper exposes for tests.
+    """
     from services.chat_messenger import deliver_background_message
 
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
     msg = deliver_background_message(
         workspace_id=seeded["ws_id"],
         text="delivered through the wrapper",
@@ -428,13 +429,13 @@ def test_deliver_with_injected_factory_end_to_end(engine, seeded, capture_chat_n
         clerk_user_id=seeded["clerk"],
         link_type="watch",
         link_id=str(uuid.uuid4()),
-        session_factory=factory,
+        session_factory=new_session,
     )
     assert msg is not None
     assert len(capture_chat_notify) == 1
 
     # Verify from a FRESH session that the write is committed and visible.
-    s = factory()
+    s = new_session()
     try:
         n = s.execute(
             text(

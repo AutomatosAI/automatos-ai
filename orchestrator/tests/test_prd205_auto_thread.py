@@ -14,7 +14,6 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 
@@ -31,9 +30,8 @@ def engine():
     eng.dispose()
 
 
-@pytest.fixture
-def new_session(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
+# ``new_session`` comes from tests/conftest.py -- the shared tracking
+# factory (leaked-session guard); teardown sweeps run via new_session.sweep().
 
 
 @pytest.fixture
@@ -64,7 +62,7 @@ def seeded(new_session):
 
     yield {"ws_id": ws_id, "user_id": user_id, "tag": tag}
 
-    s = new_session()
+    s = new_session.sweep()
     for stmt in (
         "DELETE FROM messages WHERE workspace_id = CAST(:w AS uuid)",
         "DELETE FROM chats WHERE workspace_id = CAST(:w AS uuid)",

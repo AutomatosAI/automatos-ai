@@ -23,7 +23,6 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 
@@ -46,12 +45,13 @@ def _load_migration_module():
     return mod
 
 
-def test_migration_chains_single_parent_on_prd204_watch_registry():
+def test_migration_chains_single_parent_on_current_head():
     mod = _load_migration_module()
     assert mod.revision == "prd205_auto_speaks"
-    # Single parent, NOT a join: PR #551 owns the prd204_watch_registry x
-    # w3_post201_merge_heads join; a duplicate join re-forks the head graph.
-    assert mod.down_revision == "prd204_watch_registry"
+    # Single parent, NOT a join: #551's prd204_w3_join_heads restored one
+    # lineage (head advanced to prd199_drop_fake_stats); chaining anywhere
+    # earlier -- or authoring another join -- would re-fork the graph.
+    assert mod.down_revision == "prd199_drop_fake_stats"
     assert isinstance(mod.down_revision, str)
 
 
@@ -77,9 +77,8 @@ def engine():
     eng.dispose()
 
 
-@pytest.fixture
-def new_session(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
+# ``new_session`` comes from tests/conftest.py -- the shared tracking
+# factory (leaked-session guard); teardown sweeps run via new_session.sweep().
 
 
 @pytest.fixture
@@ -111,7 +110,7 @@ def seeded(new_session):
 
     yield {"ws_id": ws_id, "user_id": user_id, "tag": tag}
 
-    s = new_session()
+    s = new_session.sweep()
     for stmt in (
         "DELETE FROM messages WHERE workspace_id = CAST(:w AS uuid)",
         "DELETE FROM chats WHERE workspace_id = CAST(:w AS uuid)",
