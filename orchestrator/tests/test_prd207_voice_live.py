@@ -710,6 +710,192 @@ def test_phone_lane_attributes_to_workspace_steward(voice_workspace, new_session
     assert row is not None and row[1] == b.chat_id  # orphan registered for reuse
 
 
+# ---------------------------------------------------------------------------
+# S3 · lifecycle events — idempotent updates, loud orphans, HMAC fail-closed
+# ---------------------------------------------------------------------------
+
+def test_call_lifecycle_updates_minted_row_idempotently(voice_workspace, new_session):
+    from sqlalchemy import text
+
+    from api.voice_retell import _apply_call_event
+
+    s = new_session()
+    _mint_row(
+        s, call_id="call_life1", ws_id=voice_workspace.ws_id,
+        user_id=voice_workspace.owner, chat_id=voice_workspace.chat_id,
+    )
+    start_ms, end_ms = 1_700_000_000_000, 1_700_000_090_000  # 90s call
+
+    _apply_call_event(s, "call_started", {"call_id": "call_life1", "start_timestamp": start_ms})
+    for _ in range(2):  # Retell retries → replays must be harmless
+        _apply_call_event(
+            s,
+            "call_ended",
+            {
+                "call_id": "call_life1",
+                "start_timestamp": start_ms,
+                "end_timestamp": end_ms,
+                "disconnection_reason": "user_hangup",
+            },
+        )
+
+    row = s.execute(
+        text(
+            "SELECT status, duration_seconds, disconnect_reason FROM voice_calls "
+            "WHERE call_id = 'call_life1'"
+        )
+    ).fetchone()
+    assert row[0] == "ended"
+    assert row[1] == 90
+    assert row[2] == "user_hangup"
+
+
+def test_call_ended_without_start_marks_failed(voice_workspace, new_session):
+    from sqlalchemy import text
+
+    from api.voice_retell import _apply_call_event
+
+    s = new_session()
+    _mint_row(
+        s, call_id="call_life2", ws_id=voice_workspace.ws_id,
+        user_id=voice_workspace.owner,
+    )
+    _apply_call_event(
+        s, "call_ended", {"call_id": "call_life2", "disconnection_reason": "dial_failed"}
+    )
+    row = s.execute(
+        text("SELECT status FROM voice_calls WHERE call_id = 'call_life2'")
+    ).fetchone()
+    assert row[0] == "failed"  # never connected — not billable minutes
+
+
+def test_unknown_call_id_is_loud_orphan(voice_workspace, new_session):
+    from sqlalchemy import text
+
+    from api.voice_retell import _apply_call_event
+
+    s = new_session()
+    disposition = _apply_call_event(
+        s,
+        "call_started",
+        {"call_id": "call_never_minted", "start_timestamp": 1_700_000_000_000},
+    )
+    assert disposition == "orphan_created"
+    row = s.execute(
+        text("SELECT workspace_id, status FROM voice_calls WHERE call_id = 'call_never_minted'")
+    ).fetchone()
+    assert row is not None  # stored, not dropped
+    assert row[0] is None  # unattributed — visibly an orphan
+    s.execute(text("DELETE FROM voice_calls WHERE call_id = 'call_never_minted'"))
+    s.commit()
+
+
+class _FakeRequest:
+    def __init__(self, body: bytes, signature=None):
+        self._body = body
+        self.headers = {"x-retell-signature": signature} if signature else {}
+
+    async def body(self):
+        return self._body
+
+
+def test_events_webhook_hmac_fail_closed(monkeypatch):
+    import hashlib
+    import hmac as hmac_mod
+    import json as json_mod
+    from contextlib import contextmanager
+
+    from fastapi import HTTPException
+
+    import api.voice_retell as vr
+    from modules.voice.live_settings import RetellCredentials
+
+    secret = "whsec_" + "test"  # concat: never a literal secret-shaped token
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials",
+        lambda: RetellCredentials("k", secret, "a"),
+    )
+    applied = []
+    monkeypatch.setattr(vr, "_apply_call_event", lambda db, e, c: applied.append(e) or "updated")
+
+    @contextmanager
+    def fake_session():
+        yield MagicMock()
+
+    monkeypatch.setattr(vr, "get_db_session", fake_session)
+
+    body = json_mod.dumps({"event": "call_started", "call": {"call_id": "c1"}}).encode()
+
+    # wrong signature → 401, nothing applied
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(vr.retell_events_webhook(_FakeRequest(body, "deadbeef")))
+    assert exc.value.status_code == 401
+    assert applied == []
+
+    # correct signature → applied
+    good = hmac_mod.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    out = asyncio.run(vr.retell_events_webhook(_FakeRequest(body, good)))
+    assert out == {"ok": True}
+    assert applied == ["call_started"]
+
+
+def test_monthly_minutes_rollup(voice_workspace, new_session):
+    from datetime import datetime
+
+    from sqlalchemy import text
+
+    from modules.voice.voice_meter import monthly_meter
+
+    s = new_session()
+    now = datetime.utcnow()
+    for i, dur in enumerate((90, 90)):  # 3 ended minutes this month
+        s.execute(
+            text(
+                "INSERT INTO voice_calls (call_id, workspace_id, user_id, status, "
+                " started_at, ended_at, duration_seconds) "
+                "VALUES (:c, CAST(:ws AS uuid), :u, 'ended', :st, :en, :d)"
+            ),
+            {
+                "c": f"call_meter{i}", "ws": voice_workspace.ws_id,
+                "u": voice_workspace.owner, "st": now, "en": now, "d": dur,
+            },
+        )
+    s.execute(  # one live call → reserves
+        text(
+            "INSERT INTO voice_calls (call_id, workspace_id, user_id, status, started_at) "
+            "VALUES ('call_meter_live', CAST(:ws AS uuid), :u, 'started', :st)"
+        ),
+        {"ws": voice_workspace.ws_id, "u": voice_workspace.owner, "st": now},
+    )
+    s.commit()
+
+    reading = monthly_meter(s, uuid.UUID(voice_workspace.ws_id))
+    assert reading.ended_minutes == 3
+    assert reading.active_calls == 1
+    assert reading.reserved_minutes == reading.reserve_minutes_per_call
+
+
+def test_live_status_payload_never_leaks_credentials(monkeypatch):
+    import api.voice_retell as vr
+    from modules.voice.live_settings import RetellCredentials
+    from modules.voice.voice_meter import MeterReading
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials",
+        lambda: RetellCredentials("k_secret", "s_secret", "agent_1"),
+    )
+    monkeypatch.setattr(vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(12, 1, 10))
+
+    ws = SimpleNamespace(settings={"voice_live": {"enabled": True, "monthly_cap_minutes": 100}})
+    out = asyncio.run(vr.voice_live_status(ctx=_mint_ctx(), db=_mint_db(workspace=ws)))
+
+    assert out["platform_enabled"] is True and out["armed"] is True
+    assert out["used_minutes"] == 12 and out["cap_minutes"] == 100
+    blob = str(out)
+    assert "k_secret" not in blob and "s_secret" not in blob  # presence only, never values
+
+
 def test_assistant_stamp_bounded_to_turn_window(voice_workspace, new_session):
     from datetime import datetime, timedelta
 

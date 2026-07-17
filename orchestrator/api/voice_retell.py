@@ -206,6 +206,133 @@ async def mint_web_call(
     return {"call_id": web_call.call_id, "access_token": web_call.access_token}
 
 
+# ---------------------------------------------------------------------------
+# PRD-207 S3 — call lifecycle events + the S7 status read
+# ---------------------------------------------------------------------------
+
+def _apply_call_event(db: Session, event: str, call: dict) -> str:
+    """Idempotently fold one Retell lifecycle event into voice_calls.
+
+    Returns a disposition string for the log line. Timestamps arrive as
+    millisecond epochs (``start_timestamp``/``end_timestamp``); replays
+    re-apply the same values — idempotent by construction. An event for a
+    call we never minted is stored as a LOUD orphan (phone-lane compat),
+    never silently dropped.
+    """
+    from datetime import datetime, timezone
+
+    from core.models.voice_calls import VoiceCall
+
+    call_id = call.get("call_id")
+    if not call_id:
+        return "ignored_no_call_id"
+
+    def _ts(ms) -> Optional[Any]:
+        try:
+            return datetime.fromtimestamp(int(ms) / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+        except (TypeError, ValueError, OSError):
+            return None
+
+    row = db.query(VoiceCall).filter(VoiceCall.call_id == str(call_id)).first()
+    disposition = "updated"
+    if row is None:
+        logger.warning(
+            "voice_live_orphan_event event=%s call=%s — no mint row; storing loud", event, call_id
+        )
+        row = VoiceCall(call_id=str(call_id), provider="retell", status="minted")
+        db.add(row)
+        disposition = "orphan_created"
+
+    started = _ts(call.get("start_timestamp"))
+    ended = _ts(call.get("end_timestamp"))
+
+    if event == "call_started":
+        row.started_at = started or row.started_at
+        if row.status in ("minted",):
+            row.status = "started"
+    elif event == "call_ended":
+        row.started_at = started or row.started_at
+        row.ended_at = ended or row.ended_at
+        if row.started_at is not None and row.ended_at is not None:
+            row.duration_seconds = max(
+                0, int((row.ended_at - row.started_at).total_seconds())
+            )
+        reason = call.get("disconnection_reason")
+        if reason:
+            row.disconnect_reason = str(reason)[:64]
+        # ended without ever starting = the call never connected.
+        row.status = "ended" if row.started_at is not None else "failed"
+    elif event == "call_analyzed":
+        # Post-call analysis carries no lifecycle change we bill on — ack only.
+        disposition = "acknowledged"
+    else:
+        disposition = f"ignored_{event or 'unknown'}"
+
+    db.commit()
+    return disposition
+
+
+@router.post("/api/voice/retell/events")
+async def retell_events_webhook(request: Request) -> dict:
+    """Retell call-lifecycle webhook (S3): the meter's write path.
+
+    HMAC fail-closed like the LLM webhook; idempotent updates keyed by
+    ``call_id``. Always answers 2xx fast on verified payloads (Retell
+    retries 3× in 10s — a slow handler double-applies, which idempotency
+    absorbs, but we stay quick anyway).
+    """
+    body = await request.body()
+    signature = request.headers.get("x-retell-signature")
+    secret = live_settings.retell_credentials().webhook_secret
+    if not verify_webhook_signature(secret, signature, body):
+        raise HTTPException(status_code=401, detail="Invalid Retell webhook signature")
+
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    event = str(payload.get("event") or "")
+    call = payload.get("call") or {}
+    with get_db_session() as db:
+        disposition = _apply_call_event(db, event, call)
+
+    logger.info(
+        "voice_live_call_event event=%s call=%s disposition=%s",
+        event, call.get("call_id"), disposition,
+    )
+    return {"ok": True}
+
+
+@router.get("/api/voice/live-status")
+async def voice_live_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> dict:
+    """The S7 settings card's one read: both gates + the meter, honestly.
+
+    Never returns credential VALUES — only whether they are present.
+    """
+    from core.models.workspaces import Workspace
+
+    workspace = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    ws_voice = live_settings.parse_workspace_voice_live(workspace.settings)
+    reading = voice_meter.monthly_meter(db, ctx.workspace_id)
+    return {
+        "platform_enabled": live_settings.voice_live_enabled(),
+        "armed": live_settings.retell_credentials().armed,
+        "workspace_enabled": ws_voice.enabled,
+        "retell_voice_id": ws_voice.retell_voice_id,
+        "used_minutes": reading.ended_minutes,
+        "cap_minutes": ws_voice.monthly_cap_minutes,
+        "active_calls": reading.active_calls,
+        "max_call_minutes": int(config.VOICE_LIVE_MAX_CALL_MINUTES),
+    }
+
+
 async def _single_complete(response_id: int) -> AsyncIterator[str]:
     """A one-frame stream that closes the turn without words (non-answer events)."""
     yield json.dumps(
