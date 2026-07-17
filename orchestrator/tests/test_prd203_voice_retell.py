@@ -124,23 +124,31 @@ def test_parse_llm_request_tolerates_missing_context():
 
 
 def test_verify_webhook_signature_valid_and_failclosed():
-    """Retell's REAL scheme (their SDK): v={ts_ms},d=HMAC(body+ts).hexdigest()
-    with a ±5-minute window. The PRD-203 plain HMAC-of-body compare could
-    never match a genuine Retell webhook — first live events all 401'd."""
+    """Retell signs in TWO observed formats — the SDK's timestamped
+    v={ts},d=HMAC(body+ts) scheme AND the plain HMAC(body) hexdigest their
+    live webhook sender used in production (2026-07-17). Both verify; all
+    else fails closed."""
     secret = "shhh-secret"
     body = b'{"event":"call_started"}'
+
+    # — timestamped SDK scheme —
     ts = 1_700_000_000_000
     digest = hmac.new(secret.encode(), body + str(ts).encode(), hashlib.sha256).hexdigest()
     good = f"v={ts},d={digest}"
-
     assert verify_webhook_signature(secret, good, body, now_ms=ts) is True
-    # within the freshness window (either direction)
     assert verify_webhook_signature(secret, good, body, now_ms=ts + 4 * 60 * 1000) is True
     assert verify_webhook_signature(secret, good, body, now_ms=ts - 4 * 60 * 1000) is True
-    # Fail-closed conditions:
     assert verify_webhook_signature(secret, good, body, now_ms=ts + 6 * 60 * 1000) is False  # replay
-    assert verify_webhook_signature(secret, digest, body, now_ms=ts) is False  # bare digest, old shape
     assert verify_webhook_signature(secret, f"v={ts},d=deadbeef", body, now_ms=ts) is False
-    assert verify_webhook_signature(secret, None, body, now_ms=ts) is False
-    assert verify_webhook_signature("", good, body, now_ms=ts) is False
     assert verify_webhook_signature(secret, good, b"tampered", now_ms=ts) is False
+
+    # — plain production scheme (no timestamp exists → no window) —
+    plain = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    assert verify_webhook_signature(secret, plain, body) is True
+    assert verify_webhook_signature(secret, f"v1={plain}", body) is True
+    assert verify_webhook_signature(secret, plain, b"tampered") is False
+
+    # — everything else fails closed —
+    assert verify_webhook_signature(secret, "deadbeef", body) is False  # not 64-hex, not v=,d=
+    assert verify_webhook_signature(secret, None, body) is False
+    assert verify_webhook_signature("", plain, body) is False

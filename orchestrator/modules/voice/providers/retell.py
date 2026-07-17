@@ -151,6 +151,9 @@ _SIGNATURE_RE = re.compile(r"^v=(\d+),d=([0-9a-fA-F]+)$")
 _SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000
 
 
+_PLAIN_HEX_RE = re.compile(r"^(v1=)?([0-9a-fA-F]{64})$")
+
+
 def verify_webhook_signature(
     secret: str,
     signature: Optional[str],
@@ -160,29 +163,40 @@ def verify_webhook_signature(
 ) -> bool:
     """Constant-time verification of Retell's ``x-retell-signature``.
 
-    Their SDK's real scheme: ``digest = HMAC-SHA256(secret, raw_body +
-    str(timestamp)).hexdigest()`` carried as ``v={timestamp},d={digest}``,
-    with a ±5-minute freshness window (replay protection). PRD-203 shipped a
-    plain HMAC-of-body compare that no genuine Retell webhook could ever
-    pass — first live events all 401'd. Fail-closed on missing secret,
-    malformed header, stale timestamp or digest mismatch. ``now_ms`` is
-    injectable for deterministic tests.
+    Retell has TWO observed signing formats and we accept exactly those,
+    fail-closed on everything else:
+
+    * **Timestamped** (their SDK's webhook-auth): ``v={ts_ms},d={digest}``
+      where ``digest = HMAC-SHA256(secret, raw_body + str(ts)).hexdigest()``,
+      refused outside a ±5-minute window (replay protection).
+    * **Plain** (observed from their live webhook sender in production —
+      first-contact evidence, 2026-07-17): a bare 64-hex
+      ``HMAC-SHA256(secret, raw_body).hexdigest()``, optionally ``v1=``-
+      prefixed. No timestamp exists in this format, so no window applies.
+
+    ``now_ms`` is injectable for deterministic tests.
     """
     if not secret or not signature:
         return False
-    match = _SIGNATURE_RE.match(signature.strip())
-    if not match:
-        return False
-    timestamp, digest = match.group(1), match.group(2).lower()
+    provided = signature.strip()
 
-    now = int(time.time() * 1000) if now_ms is None else int(now_ms)
-    try:
-        if abs(now - int(timestamp)) > _SIGNATURE_MAX_AGE_MS:
+    match = _SIGNATURE_RE.match(provided)
+    if match:
+        timestamp, digest = match.group(1), match.group(2).lower()
+        now = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        try:
+            if abs(now - int(timestamp)) > _SIGNATURE_MAX_AGE_MS:
+                return False
+        except ValueError:
             return False
-    except ValueError:
-        return False
+        expected = hmac.new(
+            secret.encode("utf-8"), body + timestamp.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(expected, digest)
 
-    expected = hmac.new(
-        secret.encode("utf-8"), body + timestamp.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(expected, digest)
+    plain = _PLAIN_HEX_RE.match(provided)
+    if plain:
+        expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, plain.group(2).lower())
+
+    return False
