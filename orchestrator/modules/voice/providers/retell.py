@@ -172,7 +172,19 @@ def verify_webhook_signature(
     * **Plain** (observed from their live webhook sender in production —
       first-contact evidence, 2026-07-17): a bare 64-hex
       ``HMAC-SHA256(secret, raw_body).hexdigest()``, optionally ``v1=``-
-      prefixed. No timestamp exists in this format, so no window applies.
+      prefixed. No timestamp exists in this format, so no window CAN apply.
+
+    SECURITY NOTE (reviewed): the plain format is timestamp-less and
+    therefore replayable by anyone who can capture a signed payload
+    (requires breaking TLS between Retell and us, or log access). Accepted
+    deliberately because (a) rejecting it 401s Retell's REAL events — the
+    outage this fix exists to end — and (b) the sole consumer
+    (``/api/voice/retell/events``) folds events idempotently by ``call_id``
+    with guarded status transitions: a replayed ``call_ended`` re-writes
+    identical values and cannot inflate the meter or resurrect a call. The
+    speech lane never uses this verifier (minted call_id auth). If Retell's
+    sender ever moves to the timestamped scheme exclusively, delete the
+    plain branch.
 
     ``now_ms`` is injectable for deterministic tests.
     """
