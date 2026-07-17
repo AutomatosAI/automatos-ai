@@ -123,6 +123,15 @@ export function useBoardEventStream(enabled: boolean = true): void {
           buffer = rest
           for (const evt of events) {
             if (evt.event === 'board_changed') invalidateBoard()
+            // PRD-205 S7: a background message landed in a chat. Fan out as a
+            // window event — the open conversation (useChat) merges it in and
+            // history surfaces refresh. Payload carries user_id; consumers
+            // drop events for other users (workspace filtering is server-side).
+            else if (evt.event === 'chat_changed') {
+              window.dispatchEvent(
+                new CustomEvent('automatos:chat-changed', { detail: evt.data }),
+              )
+            }
           }
         }
       } catch (err) {
