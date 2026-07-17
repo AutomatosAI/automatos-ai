@@ -24,6 +24,8 @@ interface LiveVoiceModeProps {
   /** The call's thread id (created server-side when none was bound) — the
    * chat screen points at it so the spoken conversation is the visible one. */
   onChatId?: (chatId: string) => void
+  /** The current exchange as it streams — the chat types it out live. */
+  onLiveTurn?: (turn: { userText: string; agentText: string }) => void
   onExit: () => void
 }
 
@@ -33,7 +35,7 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-export function LiveVoiceMode({ chatId, agentId, onChatId, onExit }: LiveVoiceModeProps) {
+export function LiveVoiceMode({ chatId, agentId, onChatId, onLiveTurn, onExit }: LiveVoiceModeProps) {
   const {
     orbState,
     stateLabel,
@@ -47,7 +49,7 @@ export function LiveVoiceMode({ chatId, agentId, onChatId, onExit }: LiveVoiceMo
     start,
     stop,
     toggleMute,
-  } = useRetellCall({ chatId, agentId, onChatId })
+  } = useRetellCall({ chatId, agentId, onChatId, onLiveTurn })
 
   // Live mode IS the call: mounting connects, one gesture from the Live pill.
   useEffect(() => {

@@ -190,6 +190,20 @@ export function Chat({
 
   // PRD-207 S5: live voice mode — the orb mounts, content drops lower.
   const [isLiveMode, setIsLiveMode] = useState(false)
+  // PRD-207: the current spoken exchange, streamed from Retell — rendered as
+  // live-typing bubbles so Auto's words print in the thread AS he reads them.
+  // Cleared when chat_changed lands the persisted (badged) versions.
+  const [liveVoiceTurn, setLiveVoiceTurn] = useState<{ userText: string; agentText: string }>({
+    userText: '',
+    agentText: '',
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const clearDrafts = () => setLiveVoiceTurn({ userText: '', agentText: '' })
+    window.addEventListener('automatos:chat-changed', clearDrafts)
+    return () => window.removeEventListener('automatos:chat-changed', clearDrafts)
+  }, [])
+  const liveDraftActive = isLiveMode && Boolean(liveVoiceTurn.userText || liveVoiceTurn.agentText)
   // PRD-207 S6 (closing a PRD-205 gap): the chat page subscribes to the SSE
   // lane so chat_changed reaches the useChat merge listener HERE — not only
   // while Command Center happens to be open.
@@ -880,7 +894,9 @@ export function Chat({
   const isTyping = status === 'streaming'
   const hasSentMessage = messages.length > 0
 
-  const showWelcomeCard = !hasSentMessage && !isTyping
+  // A live spoken exchange IS the conversation — leave the welcome screen the
+  // moment words start flowing, don't wait for a persisted message.
+  const showWelcomeCard = !hasSentMessage && !isTyping && !liveDraftActive
 
   return (
     <>
@@ -1130,7 +1146,11 @@ export function Chat({
                 chatId={hasSentMessage ? activeChatId : undefined}
                 agentId={selectedAgentId}
                 onChatId={(cid) => setActiveChatId(cid)}
-                onExit={() => setIsLiveMode(false)}
+                onLiveTurn={setLiveVoiceTurn}
+                onExit={() => {
+                  setIsLiveMode(false)
+                  setLiveVoiceTurn({ userText: '', agentText: '' })
+                }}
               />
             )}
           </AnimatePresence>
@@ -1266,6 +1286,42 @@ export function Chat({
                     />
                   ))}
                 </AnimatePresence>
+
+                {/* PRD-207: the spoken exchange typing out live — replaced by
+                    the persisted (voice-badged) messages when chat_changed
+                    lands them. Read-only bubbles; Auto's grows as he speaks. */}
+                {liveDraftActive && liveVoiceTurn.userText && (
+                  <Message
+                    key="voice-draft-user"
+                    chatId={id}
+                    message={{
+                      id: 'voice-draft-user',
+                      role: 'user',
+                      content: liveVoiceTurn.userText,
+                      parts: [{ type: 'text', text: liveVoiceTurn.userText }],
+                    } as any}
+                    isLoading={false}
+                    setMessages={setMessages}
+                    regenerate={regenerate}
+                    isReadonly
+                  />
+                )}
+                {liveDraftActive && liveVoiceTurn.agentText && (
+                  <Message
+                    key="voice-draft-assistant"
+                    chatId={id}
+                    message={{
+                      id: 'voice-draft-assistant',
+                      role: 'assistant',
+                      content: liveVoiceTurn.agentText,
+                      parts: [{ type: 'text', text: liveVoiceTurn.agentText }],
+                    } as any}
+                    isLoading={false}
+                    setMessages={setMessages}
+                    regenerate={regenerate}
+                    isReadonly
+                  />
+                )}
 
                 {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
 
