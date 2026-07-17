@@ -480,6 +480,41 @@ def test_notify_chat_event_emits_payload():
     }
 
 
+def test_history_and_get_chat_surface_kind(workspace_and_user, new_session):
+    """S7 passthrough: /history rows and GET /{chat_id} carry ``chats.kind``
+    so the UI can mark the Auto thread ('user' for ordinary chats)."""
+    from api.chat import get_chat, get_chat_history
+    from consumers.chatbot.service import ChatService
+    from services.chat_messenger import find_or_create_auto_chat
+
+    ws_id, _clerk, user_int_id = workspace_and_user
+    db = new_session()
+    try:
+        regular = ChatService(db).create_chat(
+            user_id=user_int_id,
+            title="regular-kind",
+            workspace_id=uuid.UUID(ws_id),
+        )
+        auto = find_or_create_auto_chat(db, ws_id, user_int_id)
+
+        # get_user_id's fast path takes an integer ctx.user.id as-is, so a
+        # SimpleNamespace principal exercises the real endpoint bodies.
+        ctx = SimpleNamespace(
+            workspace_id=uuid.UUID(ws_id),
+            user=SimpleNamespace(id=user_int_id),
+        )
+
+        rows = asyncio.run(get_chat_history(limit=50, ctx=ctx, db=db))
+        by_id = {row["id"]: row for row in rows}
+        assert by_id[str(auto.id)]["kind"] == "auto"
+        assert by_id[str(regular.id)]["kind"] == "user"
+
+        payload = asyncio.run(get_chat(str(auto.id), ctx=ctx, db=db))
+        assert payload["kind"] == "auto"
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # S8 — /vote and /agents resolve (the PRD-220 /search regression class)
 # ---------------------------------------------------------------------------
