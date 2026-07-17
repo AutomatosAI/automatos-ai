@@ -1136,25 +1136,6 @@ export function Chat({
       {/* Normal chat view - NO widgets */}
       {!hasWidgets && !isArtifactViewerVisible && (
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
-          {/* PRD-207 S5: Auto in the room — the orb mounts top-center and the
-              welcome/messages content below animates lower. Bind the call to
-              the on-screen thread once it exists server-side; a welcome-screen
-              call lands in a fresh attributed thread instead. */}
-          <AnimatePresence>
-            {isLiveMode && (
-              <LiveVoiceMode
-                chatId={hasSentMessage ? activeChatId : undefined}
-                agentId={selectedAgentId}
-                onChatId={(cid) => setActiveChatId(cid)}
-                onLiveTurn={setLiveVoiceTurn}
-                onExit={() => {
-                  setIsLiveMode(false)
-                  setLiveVoiceTurn({ userText: '', agentText: '' })
-                }}
-              />
-            )}
-          </AnimatePresence>
-
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
             <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
@@ -1189,6 +1170,22 @@ export function Chat({
 
               {/* Chat input + quick links — no outer box */}
               <div className="w-full max-w-3xl md:max-w-4xl space-y-3">
+                {/* PRD-207: the voice wave docks ON the message box — one
+                    conversation surface, spoken or typed. */}
+                <AnimatePresence>
+                  {isLiveMode && (
+                    <LiveVoiceMode
+                      chatId={hasSentMessage ? activeChatId : undefined}
+                      agentId={selectedAgentId}
+                      onChatId={(cid) => setActiveChatId(cid)}
+                      onLiveTurn={setLiveVoiceTurn}
+                      onExit={() => {
+                        setIsLiveMode(false)
+                        setLiveVoiceTurn({ userText: '', agentText: '' })
+                      }}
+                    />
+                  )}
+                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}
@@ -1386,6 +1383,22 @@ export function Chat({
           {!isReadonly && !showWelcomeCard && (
             <div className="sticky bottom-0 z-10 bg-transparent backdrop-blur-none supports-[backdrop-filter]:bg-transparent border-0">
               <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
+                {/* PRD-207: the voice wave docks ON the message box — one
+                    conversation surface, spoken or typed. */}
+                <AnimatePresence>
+                  {isLiveMode && (
+                    <LiveVoiceMode
+                      chatId={hasSentMessage ? activeChatId : undefined}
+                      agentId={selectedAgentId}
+                      onChatId={(cid) => setActiveChatId(cid)}
+                      onLiveTurn={setLiveVoiceTurn}
+                      onExit={() => {
+                        setIsLiveMode(false)
+                        setLiveVoiceTurn({ userText: '', agentText: '' })
+                      }}
+                    />
+                  )}
+                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}

@@ -1,13 +1,14 @@
 'use client'
 
 /**
- * LiveVoiceMode — the chat screen's live block (PRD-207 S5).
+ * LiveVoiceMode — the composer's voice half (PRD-207 S5).
  *
- * Mounts top-center when Live is on: the existing welcome/messages content
- * animates lower beneath it ("Auto is in the room"). Owns the whole call
- * lifecycle UX: connect → orb + captions + controls; every failure state has
- * designed copy (mint refused with the honest reason, mic denied,
- * unsupported browser, mid-call disconnect) — never a dead button.
+ * Docked directly ON TOP of the message box, same width, same column: the
+ * wave and the text input are ONE conversation surface (Gerard: "the chat
+ * text box and the voice wave need to look the same conversation"). The
+ * thread flows above; words type out in it as they're spoken; typing
+ * mid-call goes to the very same thread. Owns the call lifecycle UX —
+ * every failure state has designed copy, never a dead button.
  */
 
 import { useEffect } from 'react'
@@ -65,106 +66,104 @@ export function LiveVoiceMode({ chatId, agentId, onChatId, onLiveTurn, onExit }:
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: -16 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -16 }}
-      transition={{ duration: 0.35 }}
-      className="relative flex w-full flex-col items-center gap-1 pt-4 pb-2"
+      exit={{ opacity: 0, y: 12 }}
+      transition={{ duration: 0.3 }}
+      className="relative w-full"
       data-testid="live-voice-mode"
     >
-      {/* The room: a soft gold field behind the wave so Auto has a stage,
-          not a black void. Pure CSS, pointer-transparent. */}
+      {/* Soft gold breath behind the composer — the wave and the input share
+          one stage. Pure CSS, pointer-transparent. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-0 h-[260px] w-[720px] max-w-full -translate-x-1/2 opacity-80"
+        className="pointer-events-none absolute -inset-x-6 -top-10 bottom-0 opacity-70"
         style={{
           background:
-            'radial-gradient(ellipse at center, hsl(var(--warning) / 0.14) 0%, hsl(var(--warning) / 0.05) 45%, transparent 72%)',
+            'radial-gradient(ellipse at center, hsl(var(--warning) / 0.12) 0%, hsl(var(--warning) / 0.04) 50%, transparent 75%)',
           filter: 'blur(2px)',
         }}
       />
 
-      <div className="w-full max-w-[720px] px-4">
-        <PresenceOrb state={orbState} levelsRef={levelsRef} size={170} />
-      </div>
+      {/* The wave sits flush on the message box — one surface, two ways in. */}
+      <div className="relative rounded-t-2xl border border-b-0 border-warning/25 bg-background/60 px-3 pt-2 backdrop-blur-sm">
+        <PresenceOrb state={orbState} levelsRef={levelsRef} size={110} />
 
-      {/* State for ears and eyes — the a11y surface for the canvas. */}
-      <p aria-live="polite" className="relative -mt-3 text-sm font-medium text-warning/90 tracking-wide">
-        {stateLabel}
-        {isLive && (
-          <span className="ml-2 font-mono text-xs text-muted-foreground/70">
-            {formatDuration(durationSec)}
-          </span>
-        )}
-      </p>
-
-      {/* No caption lines here: the conversation IS the thread below — the
-          words type out as messages (one source, Gerard's call). The wave
-          stays pure presence. */}
-
-      {/* Failure states — honest copy, always a way out. */}
-      {failure && (
-        <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-center">
-          <p className="text-xs text-destructive">{failure}</p>
-          <div className="mt-2 flex justify-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => void start()}>
-              Try again
-            </Button>
-            <Button size="sm" variant="ghost" onClick={handleExit}>
-              Close
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Controls: mic-live indicator, mute, end — all keyboard-reachable. */}
-      {!failure && (
-        <div className="flex items-center gap-3">
-          {isLive && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {/* One compact strip: state · timer · mic · controls */}
+        <div className="flex items-center justify-center gap-3 pb-2 pt-1">
+          <p aria-live="polite" className="text-xs font-medium tracking-wide text-warning/90">
+            {stateLabel}
+            {isLive && (
+              <span className="ml-2 font-mono text-[11px] text-muted-foreground/70">
+                {formatDuration(durationSec)}
+              </span>
+            )}
+          </p>
+          {!failure && isLive && (
+            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <span
-                className={`h-2 w-2 rounded-full ${
+                className={`h-1.5 w-1.5 rounded-full ${
                   muted ? 'bg-muted-foreground/40' : 'bg-warning animate-pulse'
                 }`}
               />
               {muted ? 'Mic muted' : 'Mic live'}
             </span>
           )}
-          {isLive && (
+          {!failure && isLive && (
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10 rounded-full"
+              className="h-7 w-7 rounded-full"
               onClick={toggleMute}
               aria-label={muted ? 'Unmute microphone' : 'Mute microphone'}
               aria-pressed={muted}
             >
-              {muted ? <MicOff className="h-4 w-4 text-destructive" /> : <Mic className="h-4 w-4" />}
+              {muted ? (
+                <MicOff className="h-3.5 w-3.5 text-destructive" />
+              ) : (
+                <Mic className="h-3.5 w-3.5" />
+              )}
             </Button>
           )}
-          {isLive || orbState === 'connecting' ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 rounded-full text-destructive hover:text-destructive"
-              onClick={handleExit}
-              aria-label="End call"
-            >
-              <PhoneOff className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 rounded-full"
-              onClick={handleExit}
-              aria-label="Close live voice"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
+          {!failure &&
+            (isLive || orbState === 'connecting' ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-full text-destructive hover:text-destructive"
+                onClick={handleExit}
+                aria-label="End call"
+              >
+                <PhoneOff className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-full"
+                onClick={handleExit}
+                aria-label="Close live voice"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            ))}
         </div>
-      )}
+
+        {/* Failure states — honest copy, always a way out. */}
+        {failure && (
+          <div className="mx-auto mb-2 max-w-md rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2 text-center">
+            <p className="text-xs text-destructive">{failure}</p>
+            <div className="mt-2 flex justify-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => void start()}>
+                Try again
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleExit}>
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
     </motion.div>
   )
 }
