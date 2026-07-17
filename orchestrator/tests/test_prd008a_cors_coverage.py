@@ -93,5 +93,114 @@ def test_origin_allowed_with_explicit_allowlist():
         cors_mod.WIDGET_ORIGIN_ALLOWLIST = original
 
 
+# ---------------------------------------------------------------------------
+# PRD-TUTOR-LIVE S0 — key-allowlist preflight fallback
+# ---------------------------------------------------------------------------
+
+import asyncio  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+
+def _isolated_dynamic(monkeypatch):
+    """Fresh cache + saas edition + an env allowlist that misses the origin,
+    so every test exercises the fallback path deliberately."""
+    import api.widgets.cors as cors_mod
+
+    monkeypatch.setattr(cors_mod, "_dynamic_origin_cache", {})
+    monkeypatch.setattr(cors_mod, "WIDGET_ORIGIN_ALLOWLIST", {"https://app.automatos.app"})
+    monkeypatch.setattr(cors_mod.config, "AUTH_EDITION", "saas")
+    return cors_mod
+
+
+def test_preflight_falls_back_to_key_allowlist(monkeypatch):
+    """An origin absent from the env allowlist but named on an active public
+    key's allowed_domains passes the dynamic check (the academy case)."""
+    cors_mod = _isolated_dynamic(monkeypatch)
+    monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", lambda origin: True)
+
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
+
+
+def test_key_fallback_denies_unknown_origin(monkeypatch):
+    cors_mod = _isolated_dynamic(monkeypatch)
+    monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", lambda origin: False)
+
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://malicious.example.com")) is False
+
+
+def test_env_fast_path_skips_the_db(monkeypatch):
+    cors_mod = _isolated_dynamic(monkeypatch)
+
+    def _boom(origin):
+        raise AssertionError("DB lookup must not run for env-allowlisted origins")
+
+    monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", _boom)
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://app.automatos.app")) is True
+
+
+def test_key_fallback_verdict_is_cached(monkeypatch):
+    """Second ask within the TTL answers from cache — no second DB scan."""
+    cors_mod = _isolated_dynamic(monkeypatch)
+    calls = []
+
+    def _count(origin):
+        calls.append(origin)
+        return True
+
+    monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", _count)
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
+    assert len(calls) == 1
+
+
+def test_key_fallback_fails_closed_and_does_not_cache_failures(monkeypatch):
+    """A lookup ERROR denies now but is retried next time (only verdicts
+    cache); a scanning client cannot poison the cache with an outage."""
+    cors_mod = _isolated_dynamic(monkeypatch)
+
+    def _down(origin):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", _down)
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is False
+
+    monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", lambda origin: True)
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
+
+
+def test_origin_allowed_by_any_key_uses_check_domain_matcher():
+    """Service-level: the fallback consults the same matcher widget_auth
+    uses (host-only, fnmatch wildcards); empty-allowlist keys never count."""
+    from core.services.api_key_service import ApiKeyService
+
+    class _StubQuery:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class _StubDb:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def query(self, _model):
+            return _StubQuery(self._rows)
+
+    keyed = SimpleNamespace(allowed_domains=["academy.automatos.app", "*.up.railway.app"])
+    unrestricted = SimpleNamespace(allowed_domains=[])  # "any origin" opt-in — must NOT count
+
+    db = _StubDb([keyed])
+    assert ApiKeyService.origin_allowed_by_any_key(db, "https://academy.automatos.app") is True
+    assert ApiKeyService.origin_allowed_by_any_key(db, "https://automatos-academy-production.up.railway.app") is True
+    assert ApiKeyService.origin_allowed_by_any_key(db, "https://malicious.example.com") is False
+
+    assert ApiKeyService.origin_allowed_by_any_key(_StubDb([unrestricted]), "https://anything.example.com") is False
+    assert ApiKeyService.origin_allowed_by_any_key(_StubDb([]), "https://academy.automatos.app") is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

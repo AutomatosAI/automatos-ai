@@ -227,6 +227,36 @@ class ApiKeyService:
 
         return False
 
+    @staticmethod
+    def origin_allowed_by_any_key(db: Session, origin: str) -> bool:
+        """True when *origin* matches the ``allowed_domains`` of ANY active
+        public key (widget CORS preflight fallback, PRD-TUTOR-LIVE S0).
+
+        A preflight carries no Authorization header, so the CORS middleware
+        cannot resolve which key the actual request will present — it can
+        only ask whether the origin is explicitly allowlisted by *some*
+        active public key, via the same :meth:`check_domain` matcher the
+        request-time check uses. Keys with an EMPTY ``allowed_domains`` (the
+        "any origin" opt-in honoured by :meth:`check_domain`) are
+        deliberately excluded here: counting them would reflect CORS headers
+        for every origin on earth the moment one unrestricted key exists.
+        A green preflight grants nothing by itself — ``widget_auth`` still
+        enforces the presented key's own allowlist on the request proper.
+        """
+        keys = (
+            db.query(SdkApiKey)
+            .filter(
+                SdkApiKey.is_active.is_(True),
+                SdkApiKey.key_type == "public",
+                SdkApiKey.allowed_domains.isnot(None),
+            )
+            .all()
+        )
+        return any(
+            key.allowed_domains and ApiKeyService.check_domain(key, origin)
+            for key in keys
+        )
+
     # ------------------------------------------------------------------
     # Permission check
     # ------------------------------------------------------------------

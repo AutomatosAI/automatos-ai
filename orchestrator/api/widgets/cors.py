@@ -17,9 +17,16 @@ P2-13) aborts boot on an empty allowlist, and this module fails CLOSED if
 that state is ever reached anyway. The actual security boundary on
 /api/sites is the JWT in cookies, not CORS — CORS just lets the dashboard
 browser issue the request in the first place.
+
+Origins named on an active public SDK key's ``allowed_domains`` are honoured
+too (PRD-TUTOR-LIVE S0): preflights carry no Authorization, so a key-scoped
+origin used to die at OPTIONS with 403 before ``widget_auth`` ever saw the
+request it would have approved. See ``_origin_allowed_dynamic``.
 """
 
 import logging
+import time
+from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Receive, Scope, Send
 from config import config
 
@@ -63,6 +70,59 @@ def _origin_allowed(origin: str) -> bool:
     return origin.rstrip("/") in WIDGET_ORIGIN_ALLOWLIST
 
 
+# ── Key-allowlist fallback (PRD-TUTOR-LIVE S0) ──────────────────────────
+# A browser preflight carries no Authorization header, so this middleware
+# cannot know WHICH ak_pub_ key the actual request will present — but it can
+# ask whether the origin is explicitly named on ANY active public key's
+# ``allowed_domains``. Without this, an origin that widget_auth would approve
+# (academy.automatos.app, a provisioned storefront) 403s at OPTIONS unless it
+# is duplicated into WIDGET_ORIGIN_ALLOWLIST. The lookup reuses the exact
+# matcher widget_auth uses (``ApiKeyService.check_domain``) so the preflight
+# and the request can never disagree, and it is cached per origin: one DB
+# scan per origin per TTL, cache bounded so origin-scanning clients cannot
+# grow it without limit. Negative verdicts are cached; lookup FAILURES are
+# not (fail closed now, retry on the next preflight).
+
+_DYNAMIC_TTL_SECONDS = 60.0
+_DYNAMIC_CACHE_MAX = 512
+_dynamic_origin_cache: dict[str, tuple[bool, float]] = {}
+
+
+def _origin_allowed_by_key_sync(origin: str) -> bool:
+    # Imported lazily: cors.py loads during app import, before the DB layer
+    # is necessarily ready, and tests monkeypatch this function wholesale.
+    from core.database.database import SessionLocal
+    from core.services.api_key_service import ApiKeyService
+
+    db = SessionLocal()
+    try:
+        return ApiKeyService.origin_allowed_by_any_key(db, origin)
+    finally:
+        db.close()
+
+
+async def _origin_allowed_dynamic(origin: str) -> bool:
+    """Env allowlist fast path, then the cached key-allowlist fallback."""
+    if _origin_allowed(origin):
+        return True
+    now = time.monotonic()
+    cached = _dynamic_origin_cache.get(origin)
+    if cached and cached[1] > now:
+        return cached[0]
+    try:
+        allowed = await run_in_threadpool(_origin_allowed_by_key_sync, origin)
+    except Exception:
+        logger.exception(
+            "widget CORS: key-allowlist lookup failed for origin %s — failing closed",
+            origin,
+        )
+        return False
+    if len(_dynamic_origin_cache) >= _DYNAMIC_CACHE_MAX:
+        _dynamic_origin_cache.pop(next(iter(_dynamic_origin_cache)))
+    _dynamic_origin_cache[origin] = (allowed, now + _DYNAMIC_TTL_SECONDS)
+    return allowed
+
+
 def _path_is_covered(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in COVERED_PATH_PREFIXES)
 
@@ -89,7 +149,7 @@ class WidgetCORSMiddleware:
 
         # Handle OPTIONS preflight
         if scope["method"] == "OPTIONS":
-            if not origin or not _origin_allowed(origin):
+            if not origin or not await _origin_allowed_dynamic(origin):
                 response_headers = [
                     (b"content-type", b"text/plain"),
                     (b"vary", b"Origin"),
@@ -110,15 +170,20 @@ class WidgetCORSMiddleware:
                 (b"access-control-max-age", b"86400"),
                 (b"access-control-allow-credentials", b"true"),
             ]
-            await send({"type": "http.response.start", "status": 200, "headers": response_headers})
+            # 204 per the S0 preflight contract (a body-less answer; browsers
+            # accept 200 or 204, the contract pins the canonical one).
+            await send({"type": "http.response.start", "status": 204, "headers": response_headers})
             await send({"type": "http.response.body", "body": b""})
             return
 
-        # For actual requests, inject CORS headers only for allowed origins.
-        # Strip any CORS headers an upstream middleware (e.g. FastAPI's
-        # CORSMiddleware) already added — duplicate Access-Control-Allow-*
-        # headers cause Chrome to reject the response with "Failed to fetch".
-        allowed = _origin_allowed(origin) if origin else False
+        # For actual requests, inject CORS headers only for allowed origins —
+        # the SAME combined decision as the preflight (S0 contract point 2: a
+        # green preflight alone doesn't let the browser read the SSE stream;
+        # the POST response must carry ACAO too). Strip any CORS headers an
+        # upstream middleware (e.g. FastAPI's CORSMiddleware) already added —
+        # duplicate Access-Control-Allow-* headers cause Chrome to reject the
+        # response with "Failed to fetch".
+        allowed = await _origin_allowed_dynamic(origin) if origin else False
 
         _CORS_HEADERS_TO_OVERRIDE = (
             b"access-control-allow-origin",
