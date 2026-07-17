@@ -224,3 +224,230 @@ def test_whitelist_refuses_malformed_voice_live():
     )
     assert out["success"] is False
     assert ws.settings["voice_live"]["enabled"] is False  # nothing written
+
+
+# ---------------------------------------------------------------------------
+# S1 · the Retell payload (pure)
+# ---------------------------------------------------------------------------
+
+def test_build_web_call_payload_strings_vars_and_nests_override():
+    from modules.voice.retell_api import build_web_call_payload
+
+    payload = build_web_call_payload(
+        agent_id="agent_1",
+        dynamic_variables={"workspace_id": uuid.UUID(int=7), "user_id": 42, "chat_id": None},
+        voice_id="retell-Cimo",
+        max_call_minutes=30,
+    )
+    dv = payload["retell_llm_dynamic_variables"]
+    assert dv["user_id"] == "42"  # Retell demands string values
+    assert "chat_id" not in dv  # Nones dropped, never the string 'None'
+    # the verified nesting: agent_override.agent.{voice_id, max_call_duration_ms}
+    assert payload["agent_override"]["agent"]["voice_id"] == "retell-Cimo"
+    assert payload["agent_override"]["agent"]["max_call_duration_ms"] == 30 * 60_000
+
+
+def test_build_web_call_payload_omits_override_when_empty():
+    from modules.voice.retell_api import build_web_call_payload
+
+    payload = build_web_call_payload(
+        agent_id="agent_1", dynamic_variables={"workspace_id": "w"}, voice_id=None, max_call_minutes=None
+    )
+    assert "agent_override" not in payload
+
+
+# ---------------------------------------------------------------------------
+# S1 · the mint endpoint — gates in order, honest refusals, row born at mint
+# ---------------------------------------------------------------------------
+
+def _mint_ctx(ws_id=None, user_int=7):
+    return SimpleNamespace(
+        workspace_id=ws_id or uuid.uuid4(),
+        user=SimpleNamespace(id=user_int) if user_int is not None else None,
+        auth_type="clerk",
+    )
+
+
+def _mint_db(workspace=None, chat="unqueried"):
+    """A query-dispatching mock db: Workspace / Chat lookups by model arg."""
+    from core.models.core import Chat as ChatModel
+    from core.models.workspaces import Workspace as WorkspaceModel
+
+    db = MagicMock()
+
+    def dispatch(model_arg):
+        q = MagicMock()
+        if model_arg is WorkspaceModel:
+            q.filter.return_value.first.return_value = workspace
+        elif model_arg is ChatModel:
+            q.filter.return_value.first.return_value = None if chat == "unqueried" else chat
+        else:
+            q.filter.return_value.first.return_value = None
+        return q
+
+    db.query.side_effect = dispatch
+    return db
+
+
+def _run_mint(body=None, ctx=None, db=None):
+    from api.voice_retell import MintWebCallRequest, mint_web_call
+
+    return asyncio.run(
+        mint_web_call(body=body or MintWebCallRequest(), ctx=ctx or _mint_ctx(), db=db or _mint_db())
+    )
+
+
+def test_web_call_mint_gates_in_order(monkeypatch):
+    from fastapi import HTTPException
+
+    import api.voice_retell as vr
+    from modules.voice.live_settings import RetellCredentials, WorkspaceVoiceLive
+    from modules.voice.voice_meter import MeterReading
+
+    vendor_calls = []
+
+    async def never_vendor(*a, **k):
+        vendor_calls.append(1)
+        raise AssertionError("vendor must not be reached by a refused mint")
+
+    monkeypatch.setattr(vr.retell_api, "create_web_call", never_vendor)
+
+    # Gate 1 — platform toggle OFF → 503, nothing else consulted.
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: False)
+    with pytest.raises(HTTPException) as e1:
+        _run_mint()
+    assert e1.value.status_code == 503
+    assert "platform-wide" in e1.value.detail
+
+    # Gate 2 — ON but unarmed → 503 with the arming reason.
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("", "", "")
+    )
+    with pytest.raises(HTTPException) as e2:
+        _run_mint()
+    assert e2.value.status_code == 503
+    assert "not armed" in e2.value.detail
+
+    # Gate 3 — armed but the workspace toggle is off → 403.
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("k", "s", "a")
+    )
+    ws = SimpleNamespace(settings={"voice_live": {"enabled": False}})
+    with pytest.raises(HTTPException) as e3:
+        _run_mint(db=_mint_db(workspace=ws))
+    assert e3.value.status_code == 403
+    assert "workspace" in e3.value.detail
+
+    # Gate 4 — enabled but over cap → 429 with the honest budget line.
+    ws_on = SimpleNamespace(settings={"voice_live": {"enabled": True, "monthly_cap_minutes": 100}})
+    monkeypatch.setattr(
+        vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(100, 0, 10)
+    )
+    with pytest.raises(HTTPException) as e4:
+        _run_mint(db=_mint_db(workspace=ws_on))
+    assert e4.value.status_code == 429
+    assert "100/100" in e4.value.detail
+
+    assert vendor_calls == []  # no refused gate ever reached Retell
+
+
+def test_mint_requires_a_strictly_resolved_user(monkeypatch):
+    from fastapi import HTTPException
+
+    import api.voice_retell as vr
+    from modules.voice.live_settings import RetellCredentials
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("k", "s", "a")
+    )
+    with pytest.raises(HTTPException) as exc:
+        _run_mint(ctx=_mint_ctx(user_int=None))
+    assert exc.value.status_code == 403
+    assert "signed-in" in exc.value.detail
+
+
+def test_mint_passes_dynamic_vars_and_inserts_minted_row(monkeypatch):
+    import api.voice_retell as vr
+    from core.models.voice_calls import VoiceCall
+    from modules.voice.live_settings import RetellCredentials
+    from modules.voice.retell_api import RetellWebCall
+    from modules.voice.voice_meter import MeterReading
+
+    ws_id = uuid.uuid4()
+    chat_id = uuid.uuid4()
+    seen = {}
+
+    async def fake_vendor(api_key, payload):
+        seen["api_key"] = api_key
+        seen["payload"] = payload
+        return RetellWebCall(call_id="call_abc", access_token="tok_xyz")
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("k", "s", "agent_9")
+    )
+    monkeypatch.setattr(vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(0, 0, 10))
+    monkeypatch.setattr(vr.retell_api, "create_web_call", fake_vendor)
+
+    ws = SimpleNamespace(settings={"voice_live": {"enabled": True, "retell_voice_id": "v-1"}})
+    my_chat = SimpleNamespace(id=chat_id, user_id=7, workspace_id=ws_id)
+    db = _mint_db(workspace=ws, chat=my_chat)
+
+    from api.voice_retell import MintWebCallRequest
+
+    out = _run_mint(
+        body=MintWebCallRequest(chat_id=str(chat_id), agent_id=3),
+        ctx=_mint_ctx(ws_id=ws_id, user_int=7),
+        db=db,
+    )
+
+    assert out == {"call_id": "call_abc", "access_token": "tok_xyz"}
+    dv = seen["payload"]["retell_llm_dynamic_variables"]
+    assert dv == {
+        "workspace_id": str(ws_id),
+        "user_id": "7",
+        "chat_id": str(chat_id),
+        "agent_id": "3",
+    }
+    assert seen["payload"]["agent_override"]["agent"]["voice_id"] == "v-1"
+
+    added = [a.args[0] for a in db.add.call_args_list if isinstance(a.args[0], VoiceCall)]
+    assert len(added) == 1  # the row is BORN at mint
+    row = added[0]
+    assert row.call_id == "call_abc"
+    assert row.status == "minted"
+    assert row.user_id == 7
+    assert row.chat_id == str(chat_id)
+    assert db.commit.called
+
+
+def test_mint_refuses_binding_to_someone_elses_chat(monkeypatch):
+    from fastapi import HTTPException
+
+    import api.voice_retell as vr
+    from modules.voice.live_settings import RetellCredentials
+    from modules.voice.voice_meter import MeterReading
+
+    ws_id = uuid.uuid4()
+    chat_id = uuid.uuid4()
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("k", "s", "a")
+    )
+    monkeypatch.setattr(vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(0, 0, 10))
+
+    ws = SimpleNamespace(settings={"voice_live": {"enabled": True}})
+    other_users_chat = SimpleNamespace(id=chat_id, user_id=99, workspace_id=ws_id)
+
+    from api.voice_retell import MintWebCallRequest
+
+    with pytest.raises(HTTPException) as exc:
+        _run_mint(
+            body=MintWebCallRequest(chat_id=str(chat_id)),
+            ctx=_mint_ctx(ws_id=ws_id, user_int=7),
+            db=_mint_db(workspace=ws, chat=other_users_chat),
+        )
+    assert exc.value.status_code == 403
+    assert "your own chat" in exc.value.detail
