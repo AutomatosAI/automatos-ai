@@ -1032,6 +1032,26 @@ class PlatformActionExecutor:
             if _origin_chat:
                 params = {**params, "_origin_chat_id": str(_origin_chat)}
 
+        # PRD-206 S1: memory writes carry their owner (drives the Q7 private/
+        # workspace scope default) and their originating chat (the thread
+        # link). Server-injected from caller_context; caller-supplied values
+        # of the same names are ALWAYS stripped first (the #565 strip-then-
+        # inject hardening) so neither is spoofable via tool args.
+        _MEMORY_CONTEXT_ACTIONS = (
+            "platform_store_memory",
+        )
+        if action_name in _MEMORY_CONTEXT_ACTIONS:
+            params = {
+                k: v for k, v in params.items()
+                if k not in ("_user_id", "_origin_chat_id")
+            }
+            _mem_user = (caller_context or {}).get("user_id")
+            if _mem_user:
+                params = {**params, "_user_id": str(_mem_user)}
+            _mem_chat = (caller_context or {}).get("conversation_id")
+            if _mem_chat:
+                params = {**params, "_origin_chat_id": str(_mem_chat)}
+
         try:
             result = await handler(self.db, self.workspace_id, params)
             # PRD-143 S8: an invocation that ran only because the full-autonomy
