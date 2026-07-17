@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket, BrainCircuit } from 'lucide-react'
+import { Loader2, Settings, Save, RotateCcw, AlertCircle, Shield, FileText, Palette, Rocket, BrainCircuit, Mic } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -34,6 +34,7 @@ import { CredentialAuditTab } from './CredentialAuditTab'
 import { SystemPromptsTab } from './SystemPromptsTab'
 import { SystemIconsSettingsTab } from './SystemIconsSettingsTab'
 import { OnboardingAgentsTab } from './OnboardingAgentsTab'
+import VoiceLiveArmingTab from './VoiceLiveArmingTab'
 
 interface SystemSettingsTabProps {
   className?: string
@@ -214,7 +215,20 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
             <Rocket className="w-3.5 h-3.5 mr-1 shrink-0" />
             Mission Team
           </TabsTrigger>
+          <TabsTrigger value="voice">
+            <Mic className="w-3.5 h-3.5 mr-1 shrink-0" />
+            Voice
+          </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="voice">
+          <VoiceLiveArmingTab
+            settings={settingsByCategory.find(cat => cat.category === 'voice')?.settings || []}
+            onSave={(updates) => saveCategorySettings('voice', updates)}
+            saving={saving}
+            onReset={() => resetToDefaults('voice')}
+          />
+        </TabsContent>
 
         <TabsContent value="general">
           <GeneralSettingsTab

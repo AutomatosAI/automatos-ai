@@ -12,7 +12,7 @@
  * its own rAF loop, so 20ms audio frames never cause React re-renders.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { apiClient } from '@/lib/api-client'
 import {
   ORB_STATE_LABELS,
@@ -38,7 +38,7 @@ export interface UseRetellCallReturn {
   orbState: OrbState
   stateLabel: string
   /** Read by the orb canvas each frame — never triggers renders. */
-  levelsRef: React.MutableRefObject<VoiceLevels>
+  levelsRef: MutableRefObject<VoiceLevels>
   captions: CaptionLine[]
   durationSec: number
   muted: boolean

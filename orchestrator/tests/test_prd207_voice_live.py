@@ -875,6 +875,48 @@ def test_monthly_minutes_rollup(voice_workspace, new_session):
     assert reading.reserved_minutes == reading.reserve_minutes_per_call
 
 
+def test_voice_live_put_refuses_malformed_with_honest_reason():
+    from fastapi import HTTPException
+
+    from api.workspaces import save_voice_live_settings
+
+    ws = SimpleNamespace(id=uuid.uuid4(), settings={"voice_live": {"enabled": False}})
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            save_voice_live_settings(
+                payload={"voice_live": {"enabled": "yes"}}, ctx=_mint_ctx(), db=db
+            )
+        )
+    assert exc.value.status_code == 400
+    assert "boolean" in exc.value.detail
+    assert ws.settings["voice_live"]["enabled"] is False  # nothing written
+
+
+def test_voice_live_put_merges_not_replaces():
+    from api.workspaces import save_voice_live_settings
+
+    ws = SimpleNamespace(
+        id=uuid.uuid4(), settings={"voice_live": {"enabled": True, "retell_voice_id": "keep"}}
+    )
+    db = MagicMock()
+    db.query.return_value.get.return_value = ws
+
+    out = asyncio.run(
+        save_voice_live_settings(
+            payload={"voice_live": {"monthly_cap_minutes": 200}}, ctx=_mint_ctx(), db=db
+        )
+    )
+    assert out["voice_live"] == {
+        "enabled": True,
+        "retell_voice_id": "keep",
+        "monthly_cap_minutes": 200,
+    }
+    assert db.commit.called
+
+
 def test_live_status_payload_never_leaks_credentials(monkeypatch):
     import api.voice_retell as vr
     from modules.voice.live_settings import RetellCredentials

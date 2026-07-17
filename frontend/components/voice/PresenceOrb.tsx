@@ -11,13 +11,13 @@
  * parent's aria-live label).
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type MutableRefObject } from 'react'
 import type { VoiceLevels } from '@/hooks/use-retell-call'
 import type { OrbState } from '@/lib/voice/orb-state'
 
 interface PresenceOrbProps {
   state: OrbState
-  levelsRef: React.MutableRefObject<VoiceLevels>
+  levelsRef: MutableRefObject<VoiceLevels>
   size?: number
 }
 
