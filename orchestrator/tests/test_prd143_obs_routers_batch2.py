@@ -1,9 +1,15 @@
 """PRD-143 S7 — obs routers batch 2 locked to the super admin.
 
 Router-wide ``require_super_admin`` (core/auth/super_admin.py, S5) on:
-api/llm_analytics.py (BOTH routers: router + admin_router), api/memory_stats.py,
+api/llm_analytics.py (BOTH routers: router + admin_router),
 api/statistics.py, api/composio_analytics.py, api/database_analytics.py,
 api/execution_history.py, api/kpi_api.py, api/reports.py.
+
+api/memory_stats.py is NO LONGER router-wide locked: PRD-77's Memory Explorer is
+a per-workspace USER feature, so its reads (/browse, /health, /stats/*, /layers)
+ride hybrid auth and are workspace-scoped. Only its mutating verbs
+(DELETE /{id}, POST /consolidate) keep the super-admin lock on ``admin_router`` —
+covered by ``test_p2w2_authz_boundary_sweep::test_obs_tier_mutating_routes_stay_super_admin_locked``.
 
 Every endpoint on these routers must 403 for any principal that is not
 literally ``system_role == 'super_admin'`` — member, workspace admin/owner,
@@ -51,7 +57,6 @@ SUPER_ADMIN = UserContext(id="u-gerard", role="admin", system_role="super_admin"
 ROUTERS = [
     pytest.param("api.llm_analytics", "router", "/api/analytics/llm/usage", id="llm_analytics"),
     pytest.param("api.llm_analytics", "admin_router", "/api/admin/analytics/costs", id="llm_admin_analytics"),
-    pytest.param("api.memory_stats", "router", "/api/v1/memory/stats/real", id="memory_stats"),
     pytest.param("api.statistics", "router", "/api/system/agents/statistics", id="statistics"),
     pytest.param("api.composio_analytics", "router", "/api/analytics/composio/apps", id="composio_analytics"),
     pytest.param("api.database_analytics", "router", "/api/database/analytics/stats", id="database_analytics"),

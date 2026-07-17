@@ -23,10 +23,23 @@ from core.auth.super_admin import require_super_admin
 
 logger = logging.getLogger(__name__)
 
-# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+# PRD-77 Memory Explorer is a per-workspace USER feature. Every read below
+# (/browse, /health, /stats/*, /layers) filters strictly on ctx.workspace_id and
+# rides the shared hybrid dependency, so an authenticated member sees ONLY their
+# own workspace's memory — full tenant isolation without a super-admin gate.
+# (PRD-143 S7 had locked the WHOLE router to the observability super-admin tier,
+# which 403'd the user-facing explorer and left the Memory tab blank.)
 router = APIRouter(
     prefix="/api/v1/memory",
-    tags=["Real Memory Stats"],
+    tags=["Memory Explorer"],
+)
+
+# The destructive / LLM-spending verbs (delete, consolidate) stay on the PRD-143
+# observability super-admin lock — admin-only, never relaxed. Same prefix, so the
+# route paths are unchanged; only their auth tier differs from the reads.
+admin_router = APIRouter(
+    prefix="/api/v1/memory",
+    tags=["Memory Admin"],
     dependencies=[Depends(require_super_admin)],
 )
 
@@ -458,7 +471,7 @@ async def browse_memories(
         return {"success": False, "error": str(e)[:200], "memories": []}
 
 
-@router.delete("/{memory_id}")
+@admin_router.delete("/{memory_id}")
 async def delete_memory(
     memory_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -800,7 +813,7 @@ class ConsolidateRequest(BaseModel):
     strategy: str = "merge"  # "merge" | "summarise"
 
 
-@router.post("/consolidate")
+@admin_router.post("/consolidate")
 async def consolidate_memories(
     body: ConsolidateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
