@@ -392,6 +392,15 @@ class ScheduledTaskService:
                 agent_id=task.target_agent_id,
                 message=f"[Scheduled Task #{task_id}] {task.description}",
                 db=db,
+                # PRD-205 S6: delivery targeting captured at scheduling time
+                # (S4). NULL for pre-existing / agent-autonomous tasks.
+                task_id=task_id,
+                origin_chat_id=(
+                    str(task.origin_chat_id)
+                    if getattr(task, "origin_chat_id", None)
+                    else None
+                ),
+                created_by=getattr(task, "created_by", None),
             )
 
         except Exception as e:
@@ -414,10 +423,21 @@ class ScheduledTaskService:
         agent_id: int,
         message: str,
         db: Session,
+        task_id: Optional[int] = None,
+        origin_chat_id: Optional[str] = None,
+        created_by: Optional[str] = None,
     ) -> None:
         """
         Execute a task on the target agent via AgentFactory.
         Same pattern as HeartbeatService._agent_tick().
+
+        PRD-205 S6 (the PRD-77 fix): the agent's output is DELIVERED, not
+        discarded -- posted into the scheduling conversation
+        (``origin_chat_id``) when known, else the task creator's Auto thread
+        (``created_by`` Clerk id, both captured by S4). Empty output posts
+        nothing; the error path keeps the existing flow (raise -> caller
+        records last_error). Delivery is fail-soft on its OWN session and
+        can never fail the task run.
         """
         try:
             from modules.agents.factory.agent_factory import AgentFactory
@@ -442,6 +462,24 @@ class ScheduledTaskService:
                 "[ScheduledTask] Agent %d completed task: %s",
                 agent_id, str(llm_text)[:200],
             )
+
+            # PRD-205 S6: deliver non-empty output to a user surface.
+            text_out = str(llm_text).strip() if llm_text else ""
+            if text_out:
+                from services import chat_messenger
+
+                chat_messenger.deliver_background_message(
+                    workspace_id=workspace_id,
+                    text=text_out,
+                    source={
+                        "origin": "scheduled_task",
+                        "label": chat_messenger.AUTO_BACKGROUND_LABEL,
+                    },
+                    chat_id=origin_chat_id,
+                    clerk_user_id=created_by,
+                    link_type="scheduled_task",
+                    link_id=(str(task_id) if task_id is not None else None),
+                )
         except Exception as e:
             logger.error("[ScheduledTask] Failed to trigger agent chat: %s", e, exc_info=True)
             raise
