@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "key": "chat",
+      "route": "/chat",
+      "title": "Chat",
+      "purpose": "Talk with Auto: ask questions, kick off missions and tasks, and pick up earlier conversations.",
+      "entities": ["chats", "messages", "agents"],
+      "tabs": [],
+      "actions": [
+        "platform_search_chat_history",
+        "platform_search_memory",
+        "platform_store_memory",
+        "platform_create_mission",
+        "platform_create_task"
+      ],
+      "quick_prompts": [
+        {"text": "What can you do from here?"},
+        {"text": "Summarise my recent conversations"}
+      ]
+    },
+    {
+      "key": "command-center",
+      "route": "/command-center",
+      "title": "Command Centre",
+      "purpose": "Your workspace pulse: what agents, missions, tasks and playbooks have been doing, what is running now, and what needs attention.",
+      "entities": ["missions", "board_tasks", "watches", "routines", "playbook_executions"],
+      "tabs": ["summary", "board", "calendar", "activity", "watchlist", "governance"],
+      "actions": [
+        "platform_get_activity_feed",
+        "platform_workspace_stats",
+        "platform_board_summary",
+        "platform_list_watches",
+        "platform_list_missions",
+        "platform_get_schedule",
+        "platform_create_task"
+      ],
+      "quick_prompts": [
+        {"text": "Summarise today"},
+        {"text": "What needs my attention?"},
+        {"text": "What changed since yesterday?"}
+      ]
+    },
+    {
+      "key": "missions",
+      "route": "/missions",
+      "title": "Missions",
+      "purpose": "Multi-step work Auto coordinates end-to-end: plans, running missions, approvals and outcomes.",
+      "entities": ["missions", "orchestration_runs", "orchestration_tasks"],
+      "tabs": [],
+      "actions": [
+        "platform_list_missions",
+        "platform_get_mission",
+        "platform_create_mission",
+        "platform_create_watch"
+      ],
+      "quick_prompts": [
+        {"text": "What is running right now?"},
+        {"text": "Why is this mission blocked?"}
+      ]
+    },
+    {
+      "key": "agents",
+      "route": "/agents",
+      "title": "Agents",
+      "purpose": "The agents in this workspace: what each one is for, how they are configured, and how they have been performing.",
+      "entities": ["agents", "skills", "tools"],
+      "tabs": [],
+      "actions": [
+        "platform_list_agents",
+        "platform_create_agent",
+        "platform_browse_marketplace_agents"
+      ],
+      "quick_prompts": [
+        {"text": "Which agent should handle research?"},
+        {"text": "What has each agent been doing this week?"}
+      ]
+    },
+    {
+      "key": "documents",
+      "route": "/documents",
+      "title": "Documents",
+      "purpose": "The workspace knowledge base: uploaded files Auto can search, read and ground answers in.",
+      "entities": ["documents", "document_chunks"],
+      "tabs": [],
+      "actions": [
+        "platform_list_documents",
+        "platform_upload_document",
+        "platform_grep_documents"
+      ],
+      "quick_prompts": [
+        {"text": "Find documents about a topic"},
+        {"text": "What was uploaded this week?"}
+      ]
+    },
+    {
+      "key": "playbooks",
+      "route": "/playbooks",
+      "title": "Playbooks",
+      "purpose": "Repeatable multi-step procedures: run them on demand or on a schedule and track their executions.",
+      "entities": ["playbooks", "playbook_executions", "scheduled_tasks"],
+      "tabs": [],
+      "actions": [
+        "platform_list_playbooks",
+        "platform_execute_playbook",
+        "platform_schedule_task"
+      ],
+      "quick_prompts": [
+        {"text": "Which playbooks run on a schedule?"},
+        {"text": "Run a playbook for me"}
+      ]
+    },
+    {
+      "key": "deliverables",
+      "route": "/deliverables",
+      "title": "Deliverables",
+      "purpose": "Finished outputs produced by agents and missions: documents, reports and files ready to use.",
+      "entities": ["deliverables", "missions"],
+      "tabs": [],
+      "actions": [
+        "platform_list_deliverables",
+        "platform_list_missions"
+      ],
+      "quick_prompts": [
+        {"text": "What was produced this week?"},
+        {"text": "Which mission made this deliverable?"}
+      ]
+    },
+    {
+      "key": "analytics",
+      "route": "/analytics",
+      "title": "Analytics",
+      "purpose": "How the workspace is performing: usage, cost, system health and success rates over time.",
+      "entities": ["metrics", "costs", "alerts"],
+      "tabs": [],
+      "actions": [
+        "platform_workspace_stats",
+        "platform_get_cost_breakdown",
+        "platform_get_system_health",
+        "platform_query_data"
+      ],
+      "quick_prompts": [
+        {"text": "Where is cost concentrated?"},
+        {"text": "Any system health issues?"}
+      ]
+    },
+    {
+      "key": "settings",
+      "route": "/settings",
+      "title": "Settings",
+      "purpose": "Workspace configuration: profile, notifications and workspace-level options.",
+      "entities": ["workspace", "members", "settings"],
+      "tabs": [],
+      "actions": [
+        "platform_list_members",
+        "platform_workspace_stats"
+      ],
+      "quick_prompts": [
+        {"text": "What is configured in this workspace?"},
+        {"text": "Invite a teammate", "admin_only": true}
+      ]
+    },
+    {
+      "key": "team",
+      "route": "/team",
+      "title": "Team",
+      "purpose": "Who is in this workspace and what they can do: members, roles and invitations.",
+      "entities": ["members", "roles", "invitations"],
+      "tabs": [],
+      "actions": [
+        "platform_list_members",
+        "platform_invite_member"
+      ],
+      "quick_prompts": [
+        {"text": "Who is in this workspace?"},
+        {"text": "Invite a teammate", "admin_only": true}
+      ]
+    },
+    {
+      "key": "tools",
+      "route": "/tools",
+      "title": "Tools",
+      "purpose": "External connections and channels Auto can act through: what is connected and what is available.",
+      "entities": ["tools", "channels", "integrations"],
+      "tabs": [],
+      "actions": [
+        "platform_list_channels",
+        "platform_connect_channel"
+      ],
+      "quick_prompts": [
+        {"text": "What integrations are connected?"},
+        {"text": "Connect a new channel", "admin_only": true}
+      ]
+    },
+    {
+      "key": "marketplace",
+      "route": "/marketplace",
+      "title": "Marketplace",
+      "purpose": "Ready-made agents, skills and plugins to install into this workspace.",
+      "entities": ["marketplace_agents", "skills", "plugins", "widgets"],
+      "tabs": [],
+      "actions": [
+        "platform_browse_marketplace_agents"
+      ],
+      "quick_prompts": [
+        {"text": "Find an agent for research"},
+        {"text": "What is popular this week?"}
+      ]
+    }
+  ]
+}

@@ -54,6 +54,10 @@ from modules.tools.tool_router import (
     _semantic_routing_top_k,
     get_tools_for_agent_async,
 )
+from services.page_context import (
+    merge_into_trace,
+    page_actions_from_context as _page_actions_from_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -789,6 +793,7 @@ class StreamingChatService:
         skill_tools: Optional[List[Dict[str, Any]]] = None,
         query: Optional[str] = None,
         is_super_admin: bool = False,
+        page_actions: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all tools for an agent from the SINGLE source: modules.tools.tool_router.
@@ -810,6 +815,7 @@ class StreamingChatService:
             workspace_id=self.workspace_id,
             query=query,
             is_super_admin=is_super_admin,
+            page_actions=page_actions,
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -1990,10 +1996,16 @@ class StreamingChatService:
         suggest_mission: bool = False,
         force_text_only: bool = False,
         is_super_admin: bool = False,
+        page_context: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
         Yields AISDK-formatted chunks for frontend consumption.
+
+        ``page_context`` (PRD-221) is the SANITIZED reference set from
+        services.page_context — never the raw client dict. It rides into the
+        turn's ``context_trace`` (S3) so "what did Auto know" includes page
+        state, and drives the page-prior action exposure (S4).
 
         PRD-137 Fix #2: parameter renamed from ``use_system_llm`` —
         when True, the orchestrator-tier defaults are used; when
@@ -2101,6 +2113,10 @@ class StreamingChatService:
                     agent_ctx.get("skill_tools"),
                     query=latest_text,
                     is_super_admin=is_super_admin,
+                    # PRD-221 S4: the current page's manifest actions get folded
+                    # into the dispatcher enum (gate-filtered) so page-relevant
+                    # tools survive semantic narrowing.
+                    page_actions=_page_actions_from_context(page_context),
                 )
             else:
                 # ATOM path skips full tool loading, but always include
@@ -2292,8 +2308,11 @@ class StreamingChatService:
                 parts=assistant_parts, workspace_id=self.workspace_id,
                 # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
                 retrieval_context=self._turn_retrieval_context(latest_text),
-                # PRD-201 S1: persist the assembly trace for this turn.
-                context_trace=getattr(orchestrated, "context_trace", None),
+                # PRD-201 S1: persist the assembly trace for this turn;
+                # PRD-221 S3: including the sanitized page context the turn saw.
+                context_trace=merge_into_trace(
+                    getattr(orchestrated, "context_trace", None), page_context
+                ),
             )
 
             # Post-response: memory, metrics, eval

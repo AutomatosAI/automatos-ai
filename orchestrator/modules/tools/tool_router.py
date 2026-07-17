@@ -239,6 +239,68 @@ async def _narrow_dispatcher_actions_async(
     return allowed, None
 
 
+def _page_action_passes_gate(
+    name: str, is_admin: bool, is_super_admin: bool
+) -> bool:
+    """True iff a page-manifest action clears the SAME role gate as ranking.
+
+    Uses the ActionDefinition metadata directly (admin_only / super_admin_only),
+    so page-prior exposure can never surface a gated tool to an unauthorized
+    principal (PRD-143 fail-closed). Unknown/unregistered names are dropped.
+    """
+    try:
+        from modules.tools.discovery import get_action_registry
+        action = get_action_registry().get(name)
+    except Exception:
+        return False
+    if action is None:
+        return False
+    if getattr(action, "super_admin_only", False) and not is_super_admin:
+        return False
+    if getattr(action, "admin_only", False) and not is_admin:
+        return False
+    return True
+
+
+def _apply_page_prior(
+    narrowing: Tuple[Optional[List[str]], Optional[str]],
+    page_actions: Optional[List[str]],
+    is_admin: bool,
+    is_super_admin: bool,
+) -> Tuple[Optional[List[str]], Optional[str]]:
+    """Union gate-cleared page actions into the narrowed enum (PRD-221 S4).
+
+    - No page actions, or a full-enum narrowing (allowed is None → every action
+      already exposed): returned unchanged.
+    - Otherwise the gate-passing page actions are appended to the ranked
+      allow-list (dedup, order-stable) and the result is capped at
+      ``TOOL_ROUTING_ENUM_CAP`` to bound prompt cost.
+    """
+    allowed, reason = narrowing
+    if not page_actions or allowed is None:
+        return narrowing
+    cleared = [
+        n for n in page_actions
+        if _page_action_passes_gate(n, is_admin, is_super_admin)
+    ]
+    if not cleared:
+        return narrowing
+    merged = list(allowed)
+    seen = set(merged)
+    for name in cleared:
+        if name not in seen:
+            merged.append(name)
+            seen.add(name)
+    try:
+        from config import config
+        cap = int(getattr(config, "TOOL_ROUTING_ENUM_CAP", 40))
+    except (ImportError, TypeError, ValueError):
+        cap = 40
+    if cap > 0 and len(merged) > cap:
+        merged = merged[:cap]
+    return merged, (reason or "page_prior")
+
+
 def _narrow_dispatcher_actions_sync(
     query: Optional[str],
     is_admin: bool,
@@ -638,6 +700,7 @@ async def get_tools_for_agent_async(
     is_admin: bool = False,
     query: Optional[str] = None,
     is_super_admin: bool = False,
+    page_actions: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     session_used = db_session or SessionLocal()
     trace_id = _new_trace_id()
@@ -646,6 +709,11 @@ async def get_tools_for_agent_async(
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
         narrowing = await _narrow_dispatcher_actions_async(query, is_admin, is_super_admin)
+        # PRD-221 S4: fold the current page's manifest actions into the narrowed
+        # enum so page-relevant tools survive even when the query ranks them out.
+        # Gate-filtered by the SAME predicate as ranking — a manifest can never
+        # expose an admin/su tool to an unauthorized principal.
+        narrowing = _apply_page_prior(narrowing, page_actions, is_admin, is_super_admin)
         return _get_tools_for_agent_core(
             agent_id=agent_id,
             session_used=session_used,

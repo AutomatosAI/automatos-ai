@@ -255,11 +255,16 @@ export interface ChatRequest {
   }
   selectedChatModel?: string
   selectedVisibilityType?: VisibilityType
+  // PRD-221 S5: structured page context — references, not payloads. Mirrors
+  // the backend allow-list (services/page_context.py). NEVER carries role or
+  // permission fields; the server derives authz itself.
   context?: {
-    currentPage?: string
-    selectedItems?: any[]
-    userRole?: string
-    recentActions?: any[]
+    page?: string
+    route?: string
+    tab?: string
+    selected?: { type: string; id: string }
+    filters?: Record<string, string>
+    visible_ids?: string[]
   }
 }
 

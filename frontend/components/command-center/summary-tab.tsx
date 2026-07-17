@@ -16,6 +16,7 @@
 
 import dynamic from 'next/dynamic'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
+import { AutosRead } from '@/components/activity/autos-read'
 
 const CommandCentreDashboard = dynamic(
   () =>
@@ -49,10 +50,13 @@ export function SummaryTab() {
   }
 
   return (
-    <CommandCentreDashboard
-      period="1d"
-      onViewAllActivity={() => goTab('activity')}
-      onViewCalendar={() => goTab('calendar')}
-    />
+    <div className="space-y-4">
+      <AutosRead period="1d" />
+      <CommandCentreDashboard
+        period="1d"
+        onViewAllActivity={() => goTab('activity')}
+        onViewCalendar={() => goTab('calendar')}
+      />
+    </div>
   )
 }

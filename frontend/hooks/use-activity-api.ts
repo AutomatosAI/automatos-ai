@@ -48,6 +48,13 @@ export interface ActivityFeedItem {
   tokens_used?: number | null
   total_tokens?: number | null
   total_duration_ms?: number | null
+  // PRD-221 S12: latest orchestration event as a plain-English progress line.
+  last_progress?: {
+    summary: string
+    at: string | null
+    requires_attention: boolean
+  } | null
+  orchestration_run_id?: string | null
 }
 
 export interface ActivityFeedResponse {

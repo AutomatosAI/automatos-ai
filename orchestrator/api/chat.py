@@ -24,6 +24,7 @@ from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
 from core.session_queue import get_session_queue
+from services.page_context import inject_page_preamble, sanitize_page_context
 
 logger = logging.getLogger(__name__)
 
@@ -206,36 +207,6 @@ def _last_message_previews(db: Session, chat_ids: List[str]) -> dict:
     return previews
 
 
-_PAGE_CONTEXT_MAX_LEN = 80
-
-
-def _inject_page_context(message_history: List[dict], page: Optional[str]) -> List[dict]:
-    """Return ``message_history`` with an ephemeral page-context part on the last
-    user message (PRD-220).
-
-    The widget used to prepend "[Context: …]" into the message text itself, so
-    the hint leaked into the saved message AND the auto-generated chat title.
-    Now the client sends ``request.context = {"page": <label>}`` and the hint is
-    added prompt-side only, AFTER the clean save. Entries are rebuilt, never
-    mutated — ``parts`` here is the ORM row's JSONB list, and an in-place append
-    could flush the hint into the ``messages`` table.
-    """
-    if not page or not isinstance(page, str):
-        return message_history
-    label = page.strip()[:_PAGE_CONTEXT_MAX_LEN]
-    if not label:
-        return message_history
-    for i in range(len(message_history) - 1, -1, -1):
-        entry = message_history[i]
-        if entry.get("role") != "user":
-            continue
-        parts = entry.get("parts") if isinstance(entry.get("parts"), list) else []
-        hint = {"type": "text", "text": f"[Context: the user is currently on the {label} page]"}
-        rebuilt = {**entry, "parts": [*parts, hint]}
-        return [*message_history[:i], rebuilt, *message_history[i + 1:]]
-    return message_history
-
-
 # Endpoints
 @router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def stream_chat(
@@ -374,11 +345,14 @@ async def stream_chat(
                 )
                 break
 
-    # PRD-220: page context rides in request.context = {"page": <label>} and is
-    # injected prompt-side only — the user message was already saved clean above,
-    # so chat titles and reloaded history never show the hint.
-    _page_ctx = request.context.get("page") if isinstance(request.context, dict) else None
-    message_history = _inject_page_context(message_history, _page_ctx)
+    # PRD-221 S2 (extends PRD-220): request.context is the structured reference
+    # set {page, route, tab, selected, filters, visible_ids} — or the legacy
+    # {"page": <label>} form; one renderer serves both. Sanitized against the
+    # allow-list (authz-looking fields never survive; the server derives roles
+    # itself) and injected prompt-side only — the user message was already saved
+    # clean above, so chat titles and reloaded history never show the hint.
+    _page_ctx = sanitize_page_context(request.context)
+    message_history = inject_page_preamble(message_history, _page_ctx)
 
     # DEBUG: Log incoming request
     logger.info(f"Chat request - agentId: {request.agentId}")
@@ -557,6 +531,9 @@ async def stream_chat(
                 plan_mode=bool(request.planMode),
                 suggest_mission=_suggest_mission,
                 is_super_admin=_is_super_admin,
+                # PRD-221 S3/S4: the sanitized reference set rides into the
+                # turn's context_trace and the page-prior action exposure.
+                page_context=_page_ctx,
             ):
                 yield chunk
 

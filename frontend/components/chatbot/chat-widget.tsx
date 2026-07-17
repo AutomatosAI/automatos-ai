@@ -32,6 +32,9 @@ import {
 import { useUser } from '@clerk/nextjs'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
 import { useChat } from '@/lib/chat/hooks'
+import { usePageContext } from '@/lib/page-context'
+import { getPageEntry } from '@/lib/generated/page-manifest'
+import { useSystemRole } from '@/contexts/role-context'
 import { getChatHistory, getChatMessages } from '@/lib/chat/api'
 import {
   EMPTY_WIDGET_SESSION,
@@ -380,6 +383,18 @@ function WidgetConversation({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [inputValue, setInputValue] = useState('')
 
+  // PRD-221 S5: send the structured page context (manifest key + route), not
+  // the display label. The label stays UI-only.
+  const pageContext = usePageContext()
+
+  // PRD-221 S7: the current page's quick-prompt chips (from the manifest
+  // mirror), with admin-only prompts hidden for non-admins. The tool layer
+  // remains the real enforcer — this is a UX filter only.
+  const { isAdmin } = useSystemRole()
+  const quickPrompts = (getPageEntry(pageContext.page)?.quick_prompts ?? []).filter(
+    (qp) => !qp.admin_only || isAdmin,
+  )
+
   const {
     messages,
     isLoading,
@@ -390,7 +405,7 @@ function WidgetConversation({
     id: initialChatId ?? '',
     initialMessages,
     selectedAgentId: undefined, // Routes to Auto (default agent)
-    pageContext: pageLabel,
+    pageContext,
     onChatIdUpdate: onChatIdAssigned,
   })
 
@@ -431,6 +446,21 @@ function WidgetConversation({
             <p className="text-xs text-muted-foreground">
               Ask me anything about {pageLabel || 'this page'}, or tell me what you need help with.
             </p>
+            {quickPrompts.length > 0 && (
+              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                {quickPrompts.map((qp) => (
+                  <button
+                    key={qp.text}
+                    type="button"
+                    onClick={() => !isLoading && sendMessage(qp.text)}
+                    disabled={isLoading}
+                    className="rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                  >
+                    {qp.text}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

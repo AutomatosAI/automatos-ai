@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
+import type { PageContext } from '@/lib/page-context'
 import { toast } from 'sonner'
 
 export function useChat({
@@ -21,9 +22,10 @@ export function useChat({
   selectedAgentId?: number | null
   missionMode?: boolean
   planMode?: boolean
-  // PRD-220: where the user is (widget). Sent as request context, injected
-  // prompt-side by the backend — never stored in the message or the title.
-  pageContext?: string
+  // PRD-221 S5 (extends PRD-220): structured page context — where the user is
+  // plus what they're looking at (references only). Sent as request context,
+  // injected prompt-side by the backend — never stored in the message or title.
+  pageContext?: PageContext
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
   onRoutingDecision?: (info: RoutingInfo) => void
@@ -153,7 +155,7 @@ export function useChat({
             // Plan mode — research and strategy, no execution
             ...(planMode ? { planMode: true } : {}),
             // PRD-220: page context for the widget (prompt-only server-side)
-            ...(pageContext ? { context: { page: pageContext } } : {}),
+            ...(pageContext ? { context: pageContext } : {}),
           }),
           signal: abortControllerRef.current.signal,
         })

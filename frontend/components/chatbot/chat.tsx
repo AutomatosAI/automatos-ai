@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
+import { usePageContext } from '@/lib/page-context'
 import { Message } from './message'
 import { MultimodalInput } from './multimodal-input'
 import { ArtifactViewer } from './artifact-viewer'
@@ -181,9 +182,13 @@ export function Chat({
 
   const [activeChatId, setActiveChatId] = useState(id)
 
+  // PRD-221 S5: the main chat page sends its own page context too (page 'chat').
+  const pageContext = usePageContext()
+
   const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
     id: activeChatId,
     initialMessages,
+    pageContext,
     // PRD-180 S3 (F035): no client model override. The model is no longer a
     // user-facing control (the backend ignored the selection), so routing is by
     // agent; with no agent the model resolves via the Auto tier server-side.

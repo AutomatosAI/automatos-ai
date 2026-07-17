@@ -119,7 +119,60 @@ class ActivityService:
         total = len(items)
         page = items[offset : offset + limit]
 
+        # PRD-221 S12: one bounded query enriches the page with the latest
+        # orchestration event as a plain-English progress line.
+        self._attach_last_progress(page)
+
         return {"items": page, "total": total, "limit": limit, "offset": offset}
+
+    def _attach_last_progress(self, items: List[Dict[str, Any]]) -> None:
+        """Attach ``last_progress`` to run-linked items from the latest
+        orchestration event — ONE query for the whole page (never per-item).
+
+        last_progress = {summary, at, requires_attention}. Items with no run
+        link, or runs with no events, are left untouched.
+        """
+        from services.activity_progress import (
+            progress_label,
+            progress_requires_attention,
+        )
+
+        run_ids = list({
+            i["orchestration_run_id"]
+            for i in items
+            if i.get("orchestration_run_id")
+        })
+        if not run_ids:
+            return
+
+        try:
+            rows = self.db.execute(
+                text(
+                    """
+                    SELECT DISTINCT ON (run_id) run_id, event_type, created_at
+                    FROM orchestration_events
+                    WHERE run_id::text = ANY(:run_ids)
+                    ORDER BY run_id, created_at DESC
+                    """
+                ),
+                {"run_ids": run_ids},
+            ).fetchall()
+        except Exception as e:
+            logger.warning("last_progress enrichment skipped: %s", e)
+            return
+
+        latest = {str(r.run_id): r for r in rows}
+        for item in items:
+            rid = item.get("orchestration_run_id")
+            event = latest.get(rid) if rid else None
+            if not event:
+                continue
+            at = _as_utc(event.created_at)
+            item["last_progress"] = {
+                "summary": progress_label(event.event_type),
+                "at": at.isoformat() if at else None,
+                "requires_attention": progress_requires_attention(event.event_type),
+            }
 
     def get_stats(self, *, period: str = "1d") -> Dict[str, Any]:
         """Return hero-card stats for the Activity Command Centre.
@@ -412,8 +465,7 @@ class ActivityService:
                 elif t.description:
                     summary = str(t.description)
 
-                items.append(
-                    self._build_feed_item(
+                board_item = self._build_feed_item(
                         id=f"task-{t.id}",
                         item_type="task",
                         name=t.title or f"Task #{t.id}",
@@ -427,7 +479,12 @@ class ActivityService:
                         trigger=t.source_type,
                         error_message=t.error_message,
                     )
+                # PRD-221 S12: carry the run link so get_feed can attach a
+                # plain-English last_progress line from orchestration_events.
+                board_item["orchestration_run_id"] = (
+                    str(t.orchestration_run_id) if t.orchestration_run_id else None
                 )
+                items.append(board_item)
             return items
         except Exception as e:
             logger.error("Failed to fetch board tasks for activity feed: %s", e, exc_info=True)

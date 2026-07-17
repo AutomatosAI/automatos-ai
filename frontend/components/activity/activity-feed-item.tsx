@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
@@ -16,12 +17,17 @@ import {
   Pause,
   Timer,
   User,
+  Activity as ActivityIcon,
+  AlertTriangle,
+  ListPlus,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/shared/status-badge'
 import type { StatusVariant } from '@/components/shared/status-badge'
 import { PremiumIcon } from '@/components/shared'
+import { apiClient } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 import type { ActivityFeedItem } from '@/hooks/use-activity-api'
 import { useAgents } from '@/hooks/use-agent-api'
@@ -217,6 +223,37 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
   const configureUrl = getConfigureUrl(item)
   const isRunning = item.status === 'running'
 
+  // PRD-221 S14: failed / needs-attention items can spawn a follow-up board
+  // task that links back via source_type/source_id.
+  const needsAttention =
+    item.status === 'failed' || item.last_progress?.requires_attention === true
+  const [creatingFollowUp, setCreatingFollowUp] = useState(false)
+  const [followUpCreated, setFollowUpCreated] = useState(false)
+
+  const handleCreateFollowUp = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (creatingFollowUp || followUpCreated) return
+    setCreatingFollowUp(true)
+    try {
+      const reason = item.error_message || item.last_progress?.summary || item.summary || ''
+      await apiClient.post('/api/v1/tasks', {
+        title: `Follow up: ${item.name}`,
+        description:
+          `Created from a Command Centre activity item (${item.type}). ` +
+          (reason ? `Context: ${reason}` : ''),
+        priority: 'high',
+        source_type: 'activity',
+        source_id: `${item.type}:${item.source_id ?? item.id}`,
+      })
+      setFollowUpCreated(true)
+      toast.success('Follow-up task created')
+    } catch (err) {
+      toast.error('Could not create the follow-up task')
+    } finally {
+      setCreatingFollowUp(false)
+    }
+  }
+
   // Cross-reference with standard agents to get premium_icon mapping
   const { data: agents = [] } = useAgents()
   const agentDetails = item.agent?.id ? agents.find((a: any) => a.id === item.agent?.id) : null
@@ -320,6 +357,25 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
         {/* Context Line */}
         <ContextLine item={item} />
 
+        {/* PRD-221 S12/S13: plain-English progress line from the latest event */}
+        {item.last_progress && (
+          <div
+            className={cn(
+              'flex items-center gap-1.5 text-xs',
+              item.last_progress.requires_attention
+                ? 'font-medium text-warning'
+                : 'text-muted-foreground',
+            )}
+          >
+            {item.last_progress.requires_attention ? (
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+            ) : (
+              <ActivityIcon className="h-3 w-3 shrink-0" />
+            )}
+            <span className="truncate">{item.last_progress.summary}</span>
+          </div>
+        )}
+
         {/* Error message */}
         {item.status === 'failed' && item.error_message && (
           <p className="text-xs text-destructive/80 truncate">
@@ -347,6 +403,18 @@ export function ActivityFeedItemCard({ item, animationDelay = 0, isNew = false, 
             >
               <Settings className="w-3.5 h-3.5 mr-1" />
               Configure
+            </Button>
+          )}
+          {needsAttention && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCreateFollowUp}
+              disabled={creatingFollowUp || followUpCreated}
+              className="text-xs min-h-[44px] sm:min-h-0 sm:h-7 justify-center"
+            >
+              <ListPlus className="w-3.5 h-3.5 mr-1" />
+              {followUpCreated ? 'Task created' : 'Create follow-up task'}
             </Button>
           )}
         </div>

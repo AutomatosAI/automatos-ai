@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader } from '@/components/shared/page-header'
+import { AutosRead } from './autos-read'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityFeed } from './activity-feed'
@@ -240,7 +241,8 @@ export function ActivityPage() {
       <div>
         <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab} dataTour="activity-tabs">
           <TabsContent value="summary">
-            <div data-tour="activity-summary">
+            <div data-tour="activity-summary" className="space-y-4">
+              <AutosRead period={period} />
               <CommandCentreDashboard
                 period={period}
                 onViewAllActivity={handleViewAllActivity}

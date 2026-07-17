@@ -17,9 +17,13 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from core.models.core import Agent, BoardTask
+from pydantic import BaseModel
+
+from core.models.core import Agent, BoardTask, DigestFeedback
 from services.activity_service import ActivityService
+from services.digest_service import generate_digest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/activity", tags=["Activity"])
@@ -60,6 +64,59 @@ async def get_activity_feed(
     except Exception as e:
         logger.error("Activity feed error: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch activity feed")
+
+
+@router.get("/digest")
+async def get_workspace_digest(
+    period: str = Query("1d", description="Time window: 1d, 7d, 30d, 90d"),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Auto's Read — a cached plain-English summary of the workspace (PRD-221 S9).
+
+    Cached per (workspace, state_hash): the digest LLM fires at most once per
+    real state change. Never 500s — a degraded model returns a deterministic
+    fallback. Response: {text, generated_at, state_hash, needs_attention_count}.
+    """
+    try:
+        return await generate_digest(db, ctx.workspace_id, period=period)
+    except Exception as e:
+        # Defence in depth — generate_digest already falls back internally.
+        logger.error("Digest error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to build digest")
+
+
+class DigestFeedbackRequest(BaseModel):
+    state_hash: str
+    rating: int  # -1 (down) or 1 (up)
+
+
+@router.post(
+    "/digest/feedback",
+    dependencies=[Depends(require_workspace_permission("agents:execute"))],
+)
+async def submit_digest_feedback(
+    body: DigestFeedbackRequest,
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Record a thumbs up/down on an Auto's Read digest (PRD-221 S10).
+
+    Keyed by the digest's state_hash — feedback attaches to the workspace state
+    the read described. rating must be -1 or 1; anything else is a 422. Gated
+    with agents:execute — the same member-level "can use Auto" scope as chat.
+    """
+    if body.rating not in (-1, 1):
+        raise HTTPException(status_code=422, detail="rating must be -1 or 1")
+    row = DigestFeedback(
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.clerk_user_id,
+        state_hash=body.state_hash,
+        rating=body.rating,
+    )
+    db.add(row)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/schedule")
