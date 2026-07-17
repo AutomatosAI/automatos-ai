@@ -1000,8 +1000,15 @@ class PlatformActionExecutor:
             "platform_update_mission_plan",
         )
         if action_name in _MISSION_ATTRIBUTED:
+            # Hardened 2026-07-17 (Gerard's call, flagged in #563): STRIP any
+            # caller-supplied _created_by first, then inject from context --
+            # the original PRD-163 caller-preserving guard let a spoofed tool
+            # arg claim attribution on headless paths (board dispatcher,
+            # workflows) where caller_context carries no user_id. Grep-verified
+            # no legitimate params-side producer exists.
+            params = {k: v for k, v in params.items() if k != "_created_by"}
             _driver = (caller_context or {}).get("user_id")
-            if _driver and "_created_by" not in params:
+            if _driver:
                 params = {**params, "_created_by": str(_driver)}
 
         # PRD-205 S4: capture the originating conversation for watch-creating

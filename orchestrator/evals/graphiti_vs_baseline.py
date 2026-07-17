@@ -22,10 +22,11 @@ Verdict shape reuses the ``operating_graph_uplift`` honest gate:
 aliases, published, **exit 0 always** — a sub-margin uplift is a valid,
 honest outcome (the flag stays OFF and the trial is a documented no-op).
 
-Margin: ≥ +5.0 points recall@5 (§8-Q1 proposal — Gerard confirms; the
-capability-slice gates — dup-rate, contradiction, multi-hop — land with
-S3/S4 and are listed here as pending slices so the verdict never
-overstates what has been measured).
+Bar (§8-Q1 CONFIRMED by Gerard 2026-07-17): ≥ +5.0 points recall@5 mean
+across tenants **AND** the contradicted-fact slice resolves to one live
+fact. Margin alone never adopts — temporal invalidation is the capability
+with no in-house substitute. The other slices (dup-rate, multi-hop) are
+reported, not gating.
 """
 
 from __future__ import annotations
@@ -45,13 +46,16 @@ DEFAULT_RETRIEVAL_BASELINE = _HERE / "baseline" / "kg_retrieval_2026-07.json"
 DEFAULT_MEMORY_BASELINE = _HERE / "baseline" / "memory_recall_2026-07.json"
 DEFAULT_TREATMENT = _HERE / "results" / "graphiti_recall.json"
 
-# Slices the verdict must eventually include (S3/S4); listed as pending so
-# a bare recall win can never silently read as "all criteria met".
-PENDING_SLICES = (
+# Capability slices (measured by S3/S4 once the trial runs). The
+# contradiction slice GATES adoption (Gerard 2026-07-17); the others are
+# reported. Treatment artifacts carry them as
+# {"slices": {"contradicted_fact_resolution": {"passed": bool}, ...}}.
+GATING_SLICE = "contradicted_fact_resolution"
+REPORTED_SLICES = (
     "duplicate_node_rate",
-    "contradicted_fact_resolution",
     "multi_hop_answer_quality",
 )
+PENDING_SLICES = (GATING_SLICE,) + REPORTED_SLICES
 
 
 def load_artifact(path: Path) -> Optional[Dict[str, Any]]:
@@ -144,19 +148,44 @@ def compute_gate(
         )
 
     mean_uplift = round(sum(t["uplift_points"] for t in tenants) / len(tenants), 2)
-    beats = mean_uplift >= margin_points
+    beats_margin = mean_uplift >= margin_points
+
+    # §8-Q1 (CONFIRMED 2026-07-17): adoption requires the margin AND the
+    # contradiction slice. Margin met with the slice unmeasured is PENDING
+    # (the trial hasn't produced its gating evidence), never an adopt.
+    slices = (treatment or {}).get("slices") or {}
+    gating = slices.get(GATING_SLICE)
+
+    if beats_margin and gating is None:
+        verdict = "PENDING"
+        note = (
+            "recall margin met but the gating contradiction slice is "
+            "unmeasured (S3) — adoption cannot fire on the aggregate alone"
+        )
+    elif beats_margin and bool(gating.get("passed")):
+        verdict = "ADOPT_UNBLOCKED"
+        note = (
+            "margin AND contradiction slice met — the adopt follow-through "
+            "(retire the in-house merge path) is unblocked as a §8 decision"
+        )
+    elif beats_margin:
+        verdict = "DO_NOT_ADOPT"
+        note = (
+            "recall margin met but the contradiction slice FAILED — temporal "
+            "invalidation is the point; flag stays OFF"
+        )
+    else:
+        verdict = "DO_NOT_ADOPT"
+        note = "below margin — flag stays OFF; a documented no-op is a valid outcome"
+
     return {
-        "verdict": "ADOPT_UNBLOCKED" if beats else "DO_NOT_ADOPT",
+        "verdict": verdict,
         "mean_uplift_points": mean_uplift,
         "margin_points": margin_points,
+        "gating_slice": {GATING_SLICE: gating},
         "tenants": tenants,
-        "pending_slices": list(PENDING_SLICES),
-        "note": (
-            "recall margin met — the S3/S4 capability slices must also move "
-            "before the adopt follow-through (§8-Q1 slice-gate)"
-            if beats
-            else "below margin — flag stays OFF; a documented no-op is a valid outcome"
-        ),
+        "pending_slices": [name for name in PENDING_SLICES if name not in slices],
+        "note": note,
     }
 
 

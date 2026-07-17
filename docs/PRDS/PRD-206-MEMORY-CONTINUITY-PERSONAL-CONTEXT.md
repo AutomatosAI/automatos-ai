@@ -119,7 +119,7 @@ Workspace + user scoping on every read/write (the existing `knowledge:*` permiss
 
 ## 8. Open questions — Gerard's call (decide, don't let me defer — CLAUDE.md §12)
 
-The draft's ten, plus three of mine. Recommendations inline; build proceeds on the recommendation where unanswered, flagged per the house flip-and-recut pattern — EXCEPT Q3/Q7 (privacy-shaped), which block their stories until answered.
+The draft's ten, plus three of mine. **Q3 + Q7 ANSWERED by Gerard 2026-07-17: Q3 = SILENT everything (no confirmation prompts — the S1 exclusion validator carries the consent weight; transparency via the panel + "forget that"). Q7 = split default (user_fact/preference private-to-me; project/decision/open_loop workspace-shared; per-memory override).** Remaining boxes build to the recommendation, flip-and-recut.
 
 1. **Proactive cadence** — daily mentions vs context-triggered only? **Rec: context-triggered only** (the §13 trigger list); a daily digest is a later opt-in.
 2. **Project cards visible day one?** **Rec: yes** — cards are what make memory legible; ship with Phase 2.

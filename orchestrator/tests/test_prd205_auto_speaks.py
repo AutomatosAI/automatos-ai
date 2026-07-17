@@ -224,8 +224,9 @@ def test_origin_chat_id_parser():
 
 def test_executor_injects_and_overwrites_origin():
     """Source-level pin: the origin comes from caller_context and OVERWRITES
-    any LLM-supplied param (no `not in params` guard — unlike _created_by,
-    which is deliberately caller-preserving)."""
+    any LLM-supplied param. Since 2026-07-17 _created_by is hardened the
+    same way (strip-then-inject — Gerard's call on the #563 flag), so BOTH
+    attribution keys are unspoofable via tool args."""
     src = (
         _orchestrator_root
         / "modules" / "tools" / "discovery" / "platform_executor.py"
@@ -247,6 +248,23 @@ def test_executor_injects_and_overwrites_origin():
         assert action in block.group("actions")
     assert 'caller_context or {}).get("conversation_id")' in block.group("body")
     assert '"_origin_chat_id" not in params' not in block.group("body")
+
+
+def test_executor_created_by_is_strip_then_inject():
+    """The 2026-07-17 hardening: _created_by is stripped from params before
+    context injection — the old caller-preserving guard is gone, so a
+    spoofed tool arg can never claim mission attribution on headless
+    paths."""
+    src = (
+        _orchestrator_root
+        / "modules" / "tools" / "discovery" / "platform_executor.py"
+    ).read_text()
+    block = re.search(
+        r"if action_name in _MISSION_ATTRIBUTED:(?P<body>.*?)\n\n", src, re.S
+    )
+    assert block, "mission attribution block missing"
+    assert '"_created_by" not in params' not in block.group("body")
+    assert 'k != "_created_by"' in block.group("body")
 
 
 def test_executor_strips_spoofed_origin_without_context(monkeypatch):
