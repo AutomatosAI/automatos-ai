@@ -35,11 +35,20 @@ def test_digest_feedback_model_shape():
 
 
 def test_migration_chains_on_single_head():
-    import importlib
-    mig = importlib.import_module("alembic.versions.prd221_digest_feedback")
-    assert mig.revision == "prd221_digest_feedback"
+    # alembic/versions is not a package — read the revision file by path.
+    import pathlib
+    import re
+
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "alembic" / "versions" / "prd221_digest_feedback.py"
+    )
+    src = path.read_text(encoding="utf-8")
+    rev = re.search(r"^revision\s*=\s*['\"]([^'\"]+)['\"]", src, re.M)
+    down = re.search(r"^down_revision\s*=\s*['\"]([^'\"]+)['\"]", src, re.M)
+    assert rev and rev.group(1) == "prd221_digest_feedback"
     # chains directly on the current single head (Auto Speaks), no second join
-    assert mig.down_revision == "prd205_auto_speaks"
+    assert down and down.group(1) == "prd205_auto_speaks"
 
 
 def test_feedback_endpoint_rejects_bad_rating():

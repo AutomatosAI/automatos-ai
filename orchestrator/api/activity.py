@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from pydantic import BaseModel
 
@@ -90,7 +91,10 @@ class DigestFeedbackRequest(BaseModel):
     rating: int  # -1 (down) or 1 (up)
 
 
-@router.post("/digest/feedback")
+@router.post(
+    "/digest/feedback",
+    dependencies=[Depends(require_workspace_permission("agents:execute"))],
+)
 async def submit_digest_feedback(
     body: DigestFeedbackRequest,
     db: Session = Depends(get_db),
@@ -99,7 +103,8 @@ async def submit_digest_feedback(
     """Record a thumbs up/down on an Auto's Read digest (PRD-221 S10).
 
     Keyed by the digest's state_hash — feedback attaches to the workspace state
-    the read described. rating must be -1 or 1; anything else is a 422.
+    the read described. rating must be -1 or 1; anything else is a 422. Gated
+    with agents:execute — the same member-level "can use Auto" scope as chat.
     """
     if body.rating not in (-1, 1):
         raise HTTPException(status_code=422, detail="rating must be -1 or 1")
