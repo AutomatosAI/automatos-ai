@@ -22,7 +22,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 RETELL_CREATE_WEB_CALL_URL = "https://api.retellai.com/v2/create-web-call"
+RETELL_CREATE_AGENT_URL = "https://api.retellai.com/create-agent"
 _TIMEOUT_SECONDS = 10.0
+_AGENT_TIMEOUT_SECONDS = 25.0
 
 
 class RetellApiError(Exception):
@@ -66,6 +68,54 @@ def build_web_call_payload(
         payload["agent_override"] = {"agent": override}
 
     return payload
+
+
+async def create_custom_llm_agent(
+    api_key: str,
+    *,
+    agent_name: str,
+    llm_websocket_url: str,
+    webhook_url: str,
+    voice_id: str,
+) -> str:
+    """Create the Retell agent that fronts Auto Live (one-click arming, S7).
+
+    Verified request shape: ``response_engine {type: custom-llm,
+    llm_websocket_url}``, ``voice_id``, ``agent_name``, ``webhook_url``;
+    the response carries ``agent_id``. Raises ``RetellApiError`` with the
+    vendor's own words (never the key) so the settings card can show an
+    honest reason.
+    """
+    payload = {
+        "agent_name": agent_name,
+        "voice_id": voice_id,
+        "response_engine": {"type": "custom-llm", "llm_websocket_url": llm_websocket_url},
+        "webhook_url": webhook_url,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_AGENT_TIMEOUT_SECONDS) as client:
+            resp = await client.post(
+                RETELL_CREATE_AGENT_URL,
+                json=payload,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.HTTPError as exc:
+        raise RetellApiError(f"Retell unreachable: {type(exc).__name__}") from exc
+
+    if resp.status_code not in (200, 201):
+        logger.error(
+            "voice_live_create_agent_failed status=%s body=%s",
+            resp.status_code,
+            resp.text[:300],
+        )
+        raise RetellApiError(
+            f"Retell refused the API key or agent creation (HTTP {resp.status_code}): {resp.text[:200]}"
+        )
+
+    agent_id = resp.json().get("agent_id")
+    if not agent_id:
+        raise RetellApiError("Retell response missing agent_id")
+    return str(agent_id)
 
 
 async def create_web_call(api_key: str, payload: Dict[str, Any]) -> RetellWebCall:

@@ -106,6 +106,7 @@ def test_validate_voice_live_update_matrix():
         {"monthly_cap_minutes": 0},             # zero cap
         {"monthly_cap_minutes": 200_000},       # absurd cap
         {"retell_voice_id": "x" * 65},          # oversized voice id
+        {"retell_voice_id": "key_" + "a1b2"},   # an API key is never a voice id
         {"surprise": 1},                        # unknown key fail-closed
     ):
         with pytest.raises(ValueError):
@@ -708,6 +709,131 @@ def test_phone_lane_attributes_to_workspace_steward(voice_workspace, new_session
         text("SELECT status, fallback_chat_id FROM voice_calls WHERE call_id = 'call_phone1'")
     ).fetchone()
     assert row is not None and row[1] == b.chat_id  # orphan registered for reuse
+
+
+# ---------------------------------------------------------------------------
+# S7 · one-click arming — the card does the whole job
+# ---------------------------------------------------------------------------
+
+def _admin_ctx():
+    return SimpleNamespace(
+        workspace_id=uuid.uuid4(),
+        user=SimpleNamespace(id=7, system_role="admin"),
+        auth_type="clerk",
+    )
+
+
+def _arm_env(monkeypatch, *, creds, workspace=None):
+    """Wire the arm endpoint's collaborators to recorders."""
+    import api.voice_retell as vr
+
+    written = {}
+    monkeypatch.setattr(
+        vr.live_settings, "set_voice_setting", lambda db, k, v: written.__setitem__(k, v)
+    )
+    monkeypatch.setattr(vr.live_settings, "retell_credentials", lambda: creds)
+
+    created = {}
+
+    async def fake_create(api_key, **kwargs):
+        created.update(kwargs, api_key=api_key)
+        return "agent_new_1"
+
+    monkeypatch.setattr(vr.retell_api, "create_custom_llm_agent", fake_create)
+
+    db = _mint_db(workspace=workspace)
+    return vr, written, created, db
+
+
+def test_arm_requires_admin(monkeypatch):
+    from fastapi import HTTPException
+
+    import api.voice_retell as vr
+    from api.voice_retell import ArmVoiceRequest
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            vr.arm_voice_live(ArmVoiceRequest(api_key="key_x"), ctx=_mint_ctx(), db=MagicMock())
+        )
+    assert exc.value.status_code == 403
+
+
+def test_arm_without_key_is_an_honest_400(monkeypatch):
+    from fastapi import HTTPException
+
+    from api.voice_retell import ArmVoiceRequest
+    from modules.voice.live_settings import RetellCredentials
+
+    vr, written, created, db = _arm_env(monkeypatch, creds=RetellCredentials("", "", ""))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(vr.arm_voice_live(ArmVoiceRequest(), ctx=_admin_ctx(), db=db))
+    assert exc.value.status_code == 400
+    assert "API key" in exc.value.detail
+    assert written == {} and created == {}
+
+
+def test_arm_creates_agent_stores_all_and_sweeps_misfiled_key(monkeypatch):
+    from api.voice_retell import ArmVoiceRequest
+    from modules.voice.live_settings import RetellCredentials
+
+    stray_key = "key_" + "misfiled"
+    ws = SimpleNamespace(
+        id=uuid.uuid4(),
+        settings={"voice_live": {"enabled": True, "retell_voice_id": stray_key}},
+    )
+    vr, written, created, db = _arm_env(
+        monkeypatch, creds=RetellCredentials("", "", ""), workspace=ws
+    )
+
+    out = asyncio.run(
+        vr.arm_voice_live(ArmVoiceRequest(api_key="key_real"), ctx=_admin_ctx(), db=db)
+    )
+
+    assert out == {"armed": True, "platform_enabled": True, "agent_id": "agent_new_1"}
+    # the server built the transport URLs — nobody hand-copies wss strings
+    assert created["llm_websocket_url"].startswith("wss://")
+    assert created["llm_websocket_url"].endswith("/api/voice/retell/llm-websocket")
+    assert created["webhook_url"].endswith("/api/voice/retell/events")
+    # all four slots written; signing key defaults to the API key
+    assert written["retell_api_key"] == "key_real"
+    assert written["retell_webhook_secret"] == "key_real"
+    assert written["retell_agent_id"] == "agent_new_1"
+    assert written["live_enabled"] == "true"
+    # the mis-filed key is swept out of the workspace voice field
+    assert "retell_voice_id" not in ws.settings["voice_live"]
+    assert db.commit.called
+
+
+def test_arm_is_idempotent_when_agent_exists(monkeypatch):
+    from api.voice_retell import ArmVoiceRequest
+    from modules.voice.live_settings import RetellCredentials
+
+    vr, written, created, db = _arm_env(
+        monkeypatch, creds=RetellCredentials("key_old", "sec_old", "agent_existing")
+    )
+    out = asyncio.run(
+        vr.arm_voice_live(ArmVoiceRequest(api_key="key_rotated"), ctx=_admin_ctx(), db=db)
+    )
+    assert created == {}  # no second agent — the existing one is kept
+    assert out["agent_id"] == "agent_existing"
+    assert written["retell_api_key"] == "key_rotated"
+    # an explicitly-configured distinct signing secret is never overwritten
+    assert "retell_webhook_secret" not in written
+
+
+def test_disarm_flips_toggle_only(monkeypatch):
+    from api.voice_retell import ArmVoiceRequest
+    from modules.voice.live_settings import RetellCredentials
+
+    vr, written, created, db = _arm_env(
+        monkeypatch, creds=RetellCredentials("key_k", "key_k", "agent_1")
+    )
+    out = asyncio.run(
+        vr.arm_voice_live(ArmVoiceRequest(enabled=False), ctx=_admin_ctx(), db=db)
+    )
+    assert written == {"live_enabled": "false"}  # creds untouched — instant re-arm
+    assert created == {}
+    assert out["platform_enabled"] is False
 
 
 # ---------------------------------------------------------------------------

@@ -134,6 +134,7 @@ interface VoiceLiveStatus {
   cap_minutes: number
   active_calls: number
   max_call_minutes: number
+  viewer_is_admin: boolean
 }
 
 /**
@@ -148,6 +149,8 @@ function AutoLiveCard() {
   const [savingToggle, setSavingToggle] = useState(false)
   const [voiceId, setVoiceId] = useState('')
   const [savingVoice, setSavingVoice] = useState(false)
+  const [armKey, setArmKey] = useState('')
+  const [arming, setArming] = useState(false)
 
   const loadStatus = useCallback(async () => {
     try {
@@ -186,14 +189,59 @@ function AutoLiveCard() {
   }
 
   const handleSaveVoice = async () => {
+    const vid = voiceId.trim()
+    if (vid.toLowerCase().startsWith('key_')) {
+      toast.error("That's your Retell API key — it goes in the Arm box above, not the voice field")
+      return
+    }
     setSavingVoice(true)
     try {
-      await saveVoiceLive({ retell_voice_id: voiceId.trim() })
+      await saveVoiceLive({ retell_voice_id: vid })
       toast.success('Auto Live voice saved')
     } catch (err: any) {
       toast.error(err?.message || 'Failed to save the voice')
     } finally {
       setSavingVoice(false)
+    }
+  }
+
+  // One-click arm: the server creates the Retell agent (right URLs, no
+  // copy-paste) and files the key into the masked platform slots.
+  const handleArm = async () => {
+    const key = armKey.trim()
+    if (!key) {
+      toast.error('Paste your Retell API key first')
+      return
+    }
+    setArming(true)
+    try {
+      const out = await apiClient.request<{ armed: boolean; agent_id?: string }>(
+        '/api/voice/arm',
+        { method: 'POST', body: { enabled: true, api_key: key } as any }
+      )
+      toast.success(`Auto Live armed — agent ${out.agent_id || 'ready'}`)
+      setArmKey('')
+      await loadStatus()
+    } catch (err: any) {
+      toast.error(err?.message || 'Arming failed')
+    } finally {
+      setArming(false)
+    }
+  }
+
+  const handlePlatformToggle = async (enabled: boolean) => {
+    setArming(true)
+    try {
+      await apiClient.request('/api/voice/arm', {
+        method: 'POST',
+        body: { enabled } as any,
+      })
+      toast.success(enabled ? 'Platform voice ON' : 'Platform voice OFF — all calls killed')
+      await loadStatus()
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to switch platform voice')
+    } finally {
+      setArming(false)
     }
   }
 
@@ -232,7 +280,7 @@ function AutoLiveCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {/* Read-only platform truth from the super-admin gate */}
+        {/* Platform truth + the controls that act on it, in one place */}
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>
             Platform voice:{' '}
@@ -247,12 +295,59 @@ function AutoLiveCard() {
               {status.armed ? 'armed' : 'not configured'}
             </span>
           </span>
-          {!platformReady && (
+          {!platformReady && !status.viewer_is_admin && (
             <span className="basis-full text-muted-foreground/80">
-              A super-admin arms voice platform-wide in System Settings → Voice.
+              An admin arms voice platform-wide right here.
             </span>
           )}
         </div>
+
+        {/* One-click arming — paste the key, the server does the rest */}
+        {status.viewer_is_admin && !status.armed && (
+          <div className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 space-y-2">
+            <Label htmlFor="arm-key" className="font-medium">
+              Arm Auto Live — paste your Retell API key
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              We create the &quot;Auto Live&quot; agent in your Retell account and wire
+              every URL for you. No dashboard visit needed.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                id="arm-key"
+                type="password"
+                value={armKey}
+                onChange={(e) => setArmKey(e.target.value)}
+                placeholder="key_…"
+                className="font-mono"
+                autoComplete="off"
+              />
+              <Button onClick={handleArm} disabled={arming}>
+                {arming ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Arm'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Armed: the master switch lives here too */}
+        {status.viewer_is_admin && status.armed && (
+          <div className="flex items-center justify-between rounded-xl border border-border/50 px-4 py-3">
+            <div>
+              <Label htmlFor="platform-voice" className="font-medium">
+                Platform voice (master switch)
+              </Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                OFF refuses new calls and kills in-flight speech, platform-wide.
+              </p>
+            </div>
+            <Switch
+              id="platform-voice"
+              checked={status.platform_enabled}
+              onCheckedChange={handlePlatformToggle}
+              disabled={arming}
+            />
+          </div>
+        )}
 
         {/* The workspace gate */}
         <div className="flex items-center justify-between rounded-xl border border-border/50 px-4 py-3">

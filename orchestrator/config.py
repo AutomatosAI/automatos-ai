@@ -1276,6 +1276,12 @@ class Config:
         os.getenv("VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES", "10")
     )
     VOICE_LIVE_MAX_CALL_MINUTES: int = int(os.getenv("VOICE_LIVE_MAX_CALL_MINUTES", "30"))
+    # The public host Retell must reach for the custom-LLM socket + events
+    # webhook (one-click arming builds the URLs from it). Railway injects
+    # RAILWAY_PUBLIC_DOMAIN; override with PUBLIC_API_HOST where that's absent.
+    PUBLIC_API_HOST: str = os.getenv(
+        "PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app")
+    )
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.
