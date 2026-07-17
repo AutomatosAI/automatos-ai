@@ -314,6 +314,54 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Origin-conversation capture -- PRD-205 S4
+# ---------------------------------------------------------------------------
+# The actions whose handlers create a watch (platform_create_watch directly;
+# platform_create_mission / platform_execute_playbook via auto_create_watch)
+# or persist a scheduled task (platform_schedule_task) capture WHICH chat the
+# instruction came from, so background verdicts/output can be delivered back
+# into that conversation (chat_messenger). The chat path threads the chat id
+# via caller_context['conversation_id'] (consumers/chatbot/service.py).
+_ORIGIN_CHAT_STAMPED = (
+    "platform_create_watch",
+    "platform_create_mission",
+    "platform_execute_playbook",
+    "platform_schedule_task",
+)
+
+
+def stamp_origin_context(
+    action_name: str,
+    params: Dict[str, Any],
+    caller_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Inject ``_origin_chat_id`` (and, for schedule_task, ``_created_by``).
+
+    Anti-spoof by construction: any caller/LLM-supplied ``_origin_chat_id``
+    is ALWAYS stripped first, then re-set only from the trusted
+    ``caller_context`` -- a tool argument can never point delivery at someone
+    else's conversation (mirrors why ``config.get('chat_id')`` in the mission
+    handler is treated as caller-supplied context, never a delivery target).
+    ``platform_schedule_task`` additionally captures the driving user
+    (``_created_by``, Clerk id string) because the PRD-77 table's own creator
+    column is an AGENT id -- without the human there is no Auto thread to
+    deliver S6 output to. Pure + returns new dicts (never mutates ``params``).
+    """
+    if action_name not in _ORIGIN_CHAT_STAMPED:
+        return params
+    stamped = {k: v for k, v in params.items() if k != "_origin_chat_id"}
+    conv = (caller_context or {}).get("conversation_id")
+    if conv:
+        stamped["_origin_chat_id"] = str(conv)
+    if action_name == "platform_schedule_task":
+        stamped.pop("_created_by", None)
+        driver = (caller_context or {}).get("user_id")
+        if driver:
+            stamped["_created_by"] = str(driver)
+    return stamped
+
+
 class PlatformActionExecutor:
     """
     Executes platform actions using direct database queries.
@@ -1003,6 +1051,10 @@ class PlatformActionExecutor:
             _driver = (caller_context or {}).get("user_id")
             if _driver and "_created_by" not in params:
                 params = {**params, "_created_by": str(_driver)}
+
+        # PRD-205 S4: capture the originating conversation for background->chat
+        # delivery on the actions that create watches / schedule tasks.
+        params = stamp_origin_context(action_name, params, caller_context)
 
         try:
             result = await handler(self.db, self.workspace_id, params)

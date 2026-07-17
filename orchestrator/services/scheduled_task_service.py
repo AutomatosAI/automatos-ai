@@ -45,6 +45,8 @@ class ScheduledTaskService:
         description: str,
         schedule: str,
         max_runs: Optional[int] = None,
+        origin_chat_id: Optional[str] = None,
+        created_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new scheduled task.
@@ -56,6 +58,12 @@ class ScheduledTaskService:
             description: What the agent should do when the task fires.
             schedule: ISO datetime for one_shot, cron expression for recurring.
             max_runs: Max executions for recurring tasks (None = unlimited).
+            origin_chat_id: PRD-205 S4 -- the conversation the schedule
+                instruction came from (executor-injected, soft reference);
+                S6 delivers the task's output back into it.
+            created_by: PRD-205 S4 -- the driving user's Clerk id string
+                (executor-injected). The Auto-thread fallback target when the
+                origin chat is gone; NULL for agent-autonomous schedules.
         """
         # Validate task_type
         if task_type not in ("one_shot", "recurring"):
@@ -124,26 +132,43 @@ class ScheduledTaskService:
         else:
             next_run_at = self._next_cron_run(schedule)
 
+        # PRD-205 S4: origin capture is metadata -- a malformed chat id
+        # degrades to NULL (Auto-thread fallback at delivery), never a
+        # failed create.
+        origin_chat = None
+        if origin_chat_id:
+            try:
+                origin_chat = str(UUID(str(origin_chat_id)))
+            except (ValueError, AttributeError, TypeError):
+                logger.debug(
+                    "[ScheduledTask] non-uuid origin_chat_id %r dropped",
+                    origin_chat_id,
+                )
+
         # Insert
         result = self.db.execute(
             text("""
                 INSERT INTO agent_scheduled_tasks
                     (workspace_id, created_by_agent_id, target_agent_id,
-                     task_type, description, schedule, max_runs, next_run_at)
+                     task_type, description, schedule, max_runs, next_run_at,
+                     origin_chat_id, created_by)
                 VALUES
-                    (:ws_id, :created_by, :target,
-                     :task_type, :description, :schedule, :max_runs, :next_run_at)
+                    (:ws_id, :created_by_agent, :target,
+                     :task_type, :description, :schedule, :max_runs, :next_run_at,
+                     CAST(:origin_chat AS uuid), :created_by_user)
                 RETURNING id, created_at
             """),
             {
                 "ws_id": str(self.workspace_id),
-                "created_by": created_by_agent_id,
+                "created_by_agent": created_by_agent_id,
                 "target": target_agent_id,
                 "task_type": task_type,
                 "description": description,
                 "schedule": schedule,
                 "max_runs": max_runs,
                 "next_run_at": next_run_at,
+                "origin_chat": origin_chat,
+                "created_by_user": (str(created_by) if created_by else None),
             },
         )
         row = result.fetchone()

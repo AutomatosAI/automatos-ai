@@ -144,6 +144,10 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
                 if str(params.get("_agent_id") or "").isdigit()
                 else None
             ),
+            # PRD-205 S4: executor-injected origin conversation for
+            # background->chat verdict delivery (never the LLM-supplied
+            # config chat_id).
+            origin_chat_id=params.get("_origin_chat_id"),
         )
 
         # Summarize the plan for the caller (PRD-164 S2: includes the agent

@@ -510,6 +510,9 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
                 if str(params.get("_agent_id") or "").isdigit()
                 else None
             ),
+            # PRD-205 S4: executor-injected origin conversation for
+            # background->chat verdict delivery.
+            origin_chat_id=params.get("_origin_chat_id"),
         )
         if watch is not None:
             db.commit()

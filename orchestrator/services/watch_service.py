@@ -77,6 +77,24 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _coerce_optional_uuid(value: Optional[UUID | str]) -> Optional[UUID]:
+    """UUID or UUID-string -> UUID; anything else -> None (PRD-205 S4).
+
+    The origin chat id is executor-injected metadata -- a malformed value
+    must degrade to "origin unknown" (Auto-thread fallback at delivery),
+    never poison the watch create.
+    """
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        logger.debug("[Watch] non-uuid origin_chat_id %r dropped", value)
+        return None
+
+
 def watch_auto_create_enabled(db: Session, workspace_id: UUID | str) -> bool:
     """PRD-204 S9 (Section 8 Q1): the ``watch_auto_create`` workspace setting.
 
@@ -131,11 +149,17 @@ class WatchService:
         allowed_actions: Optional[List[str]] = None,
         action_budget: int = DEFAULT_ACTION_BUDGET,
         now: Optional[datetime] = None,
+        origin_chat_id: Optional[UUID | str] = None,
     ) -> Watch:
         """Create a watch on a target. One live watch per target.
 
         ``lineage`` invariant: the ordered target chain INCLUDES the original
         target, so ``lineage[-1]`` always mirrors the live target columns.
+
+        ``origin_chat_id`` (PRD-205 S4) is the conversation the watch was
+        created from -- executor-injected, never an LLM tool arg. A soft
+        reference (no FK); anything non-UUID is stored as NULL rather than
+        poisoning the create.
 
         Raises WatchAlreadyExistsError when a non-terminal watch already
         supervises the target (the partial unique index is the race-safe
@@ -143,6 +167,7 @@ class WatchService:
         """
         moment = now or _utcnow()
         target_id = str(target_id)
+        origin_chat_uuid = _coerce_optional_uuid(origin_chat_id)
 
         existing = WatchService.find_live_watch(
             db, workspace_id=workspace_id, target_type=target_type, target_id=target_id
@@ -154,6 +179,7 @@ class WatchService:
             workspace_id=str(workspace_id),
             created_by=created_by,
             owner_agent_id=owner_agent_id,
+            origin_chat_id=origin_chat_uuid,
             watch_type=watch_type,
             target_type=target_type,
             target_id=target_id,

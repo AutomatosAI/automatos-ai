@@ -47,6 +47,11 @@ async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any])
         description=description,
         schedule=schedule,
         max_runs=params.get("max_runs"),
+        # PRD-205 S4: executor-injected origin (anti-spoof -- stripped and
+        # re-set from caller_context by the executor) so S6 can deliver the
+        # task's output back to the scheduling conversation / user.
+        origin_chat_id=params.get("_origin_chat_id"),
+        created_by=params.get("_created_by"),
     )
 
 

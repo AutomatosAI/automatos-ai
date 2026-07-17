@@ -233,6 +233,9 @@ async def create_watch(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             deadline_at=deadline_at,
             policy=policy,
             action_budget=action_budget,
+            # PRD-205 S4: executor-injected origin conversation (anti-spoof --
+            # the executor strips any caller-supplied value first).
+            origin_chat_id=params.get("_origin_chat_id"),
         )
     except WatchAlreadyExistsError:
         existing = WatchService.find_live_watch(
@@ -374,6 +377,7 @@ def auto_create_watch(
     success_criteria: str,
     created_by: Optional[str] = None,
     owner_agent_id: Optional[int] = None,
+    origin_chat_id: Optional[str] = None,
 ):
     """Create the default run_and_report watch on Auto-launched work.
 
@@ -381,6 +385,9 @@ def auto_create_watch(
     Idempotent (one live watch per target) and fail-soft: NEVER raises into
     the launching handler -- a broken watcher must not break a launch.
     Returns the Watch or None.
+
+    ``origin_chat_id`` (PRD-205 S4): the executor-injected conversation the
+    launch came from, so the watch's verdict can be delivered back into it.
     """
     try:
         from services.watch_service import (
@@ -408,6 +415,7 @@ def auto_create_watch(
             created_by=created_by,
             owner_agent_id=owner_agent_id,
             success_criteria=success_criteria,
+            origin_chat_id=origin_chat_id,
         )
         logger.info(
             "[Watches] auto-created watch %s on %s:%s",
