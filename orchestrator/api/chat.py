@@ -653,6 +653,98 @@ async def search_chat_history(
     return {"query": q, "total": len(results), "results": results}
 
 
+# PRD-205 S8: /vote and /agents MUST be declared before the /{chat_id}
+# routes below — declared after, FastAPI matched chat_id="vote"/"agents"
+# and both endpoints were dead (the exact PRD-220 /search failure mode).
+# Locked by route-order regression tests.
+@router.patch("/vote", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+async def vote_message(
+    request: VoteRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Vote on a message (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(request.chatId, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    success = chat_service.vote_message(
+        request.chatId,
+        request.messageId,
+        request.isUpvoted
+    )
+
+    # PRD-185 S7: feed the RAG feedback loop. Write a rag_feedback row from the
+    # voted assistant message's retrieved doc ids so the PRD-179 live ranker can
+    # learn from thumbs. Best-effort — never fail the vote — but log loudly if it
+    # breaks (this wave exists because of silent swallows).
+    if success:
+        try:
+            from modules.rag.feedback_writer import feedback_from_retrieval_context
+            message = chat_service.get_message(request.chatId, request.messageId)
+            if message is not None:
+                feedback_from_retrieval_context(
+                    db,
+                    retrieval_context=message.retrieval_context,
+                    is_upvoted=request.isUpvoted,
+                    workspace_id=ctx.workspace_id,
+                    user_id=user_id,
+                )
+        except Exception:
+            # The vote itself is already committed; roll back only the failed
+            # feedback partial so the per-request session isn't left poisoned.
+            db.rollback()
+            logger.warning(
+                "[PRD-185 S7] rag_feedback write from chat vote failed "
+                "(chat=%s message=%s)",
+                request.chatId, request.messageId, exc_info=True,
+            )
+
+    return {"success": success}
+
+
+# PRD: Unified Agent-Chat System - Agent Endpoints
+@router.get("/agents")
+async def get_available_agents(
+    status: str = "active",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get list of available agents for chat selection."""
+    from core.models import Agent
+    
+    query = db.query(Agent).filter(Agent.status == status, Agent.workspace_id == ctx.workspace_id)
+    agents = query.all()
+    
+    return {
+        "agents": [
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "agent_type": agent.agent_type,
+                "description": agent.description,
+                "status": agent.status,
+                "skills": agent.configuration.get("skills", []) if agent.configuration else [],
+                "model_config": agent.model_config or {},
+                "is_default": agent.id == 1,
+                "tags": agent.tags or []
+            }
+            for agent in agents
+        ]
+    }
+
+
+class SwitchAgentRequest(BaseModel):
+    newAgentId: int
+    reason: Optional[str] = None
+
+
 @router.get("/{chat_id}")
 async def get_chat(
     chat_id: str,
@@ -758,94 +850,6 @@ async def update_chat(
     
     success = chat_service.update_chat_title(chat_id, request.title)
     return {"success": success}
-
-
-@router.patch("/vote", dependencies=[Depends(require_workspace_permission("agents:execute"))])
-async def vote_message(
-    request: VoteRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Vote on a message (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db, ctx)
-
-    chat = chat_service.get_chat(request.chatId, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    success = chat_service.vote_message(
-        request.chatId,
-        request.messageId,
-        request.isUpvoted
-    )
-
-    # PRD-185 S7: feed the RAG feedback loop. Write a rag_feedback row from the
-    # voted assistant message's retrieved doc ids so the PRD-179 live ranker can
-    # learn from thumbs. Best-effort — never fail the vote — but log loudly if it
-    # breaks (this wave exists because of silent swallows).
-    if success:
-        try:
-            from modules.rag.feedback_writer import feedback_from_retrieval_context
-            message = chat_service.get_message(request.chatId, request.messageId)
-            if message is not None:
-                feedback_from_retrieval_context(
-                    db,
-                    retrieval_context=message.retrieval_context,
-                    is_upvoted=request.isUpvoted,
-                    workspace_id=ctx.workspace_id,
-                    user_id=user_id,
-                )
-        except Exception:
-            # The vote itself is already committed; roll back only the failed
-            # feedback partial so the per-request session isn't left poisoned.
-            db.rollback()
-            logger.warning(
-                "[PRD-185 S7] rag_feedback write from chat vote failed "
-                "(chat=%s message=%s)",
-                request.chatId, request.messageId, exc_info=True,
-            )
-
-    return {"success": success}
-
-
-# PRD: Unified Agent-Chat System - Agent Endpoints
-@router.get("/agents")
-async def get_available_agents(
-    status: str = "active",
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Get list of available agents for chat selection."""
-    from core.models import Agent
-    
-    query = db.query(Agent).filter(Agent.status == status, Agent.workspace_id == ctx.workspace_id)
-    agents = query.all()
-    
-    return {
-        "agents": [
-            {
-                "id": agent.id,
-                "name": agent.name,
-                "agent_type": agent.agent_type,
-                "description": agent.description,
-                "status": agent.status,
-                "skills": agent.configuration.get("skills", []) if agent.configuration else [],
-                "model_config": agent.model_config or {},
-                "is_default": agent.id == 1,
-                "tags": agent.tags or []
-            }
-            for agent in agents
-        ]
-    }
-
-
-class SwitchAgentRequest(BaseModel):
-    newAgentId: int
-    reason: Optional[str] = None
 
 
 @router.post("/{chat_id}/switch-agent", dependencies=[Depends(require_workspace_permission("agents:execute"))])
