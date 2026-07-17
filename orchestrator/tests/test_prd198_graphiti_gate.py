@@ -38,7 +38,7 @@ def test_graphiti_variant_registered():
         {"any": "memory-baseline"},
         _artifact("pilot-a", {"graphiti": 0.80}),
     )
-    assert gate["verdict"] in ("ADOPT_UNBLOCKED", "DO_NOT_ADOPT")
+    assert gate["verdict"] in ("ADOPT_UNBLOCKED", "DO_NOT_ADOPT", "PENDING")
     assert gate["tenants"][0]["graphiti_recall_at_5"] == 0.80
 
 
@@ -67,12 +67,26 @@ def test_uplift_points_treatment_minus_baseline():
     retrieval = _artifact("pilot-a", {"baseline": 0.65, "rerank": 0.769, "hybrid_rrf": 0.692})
     memory = {"frozen": True}
 
-    winning = compute_gate(retrieval, memory, _artifact("pilot-a", {"graphiti": 0.83}))
+    # Margin met, contradiction slice PASSED → adopt unblocked (the 2026-07-17
+    # confirmed bar: margin AND slice, never margin alone).
+    winning_artifact = _artifact("pilot-a", {"graphiti": 0.83})
+    winning_artifact["slices"] = {"contradicted_fact_resolution": {"passed": True}}
+    winning = compute_gate(retrieval, memory, winning_artifact)
     # best baseline is rerank (0.769), not the plain baseline — no strawman
     assert winning["tenants"][0]["best_baseline_recall_at_5"] == 0.769
     assert winning["tenants"][0]["uplift_points"] == pytest.approx(6.1)
     assert winning["verdict"] == "ADOPT_UNBLOCKED"
-    assert winning["pending_slices"]  # a recall win alone never claims the slices
+
+    # Margin met, slice unmeasured → PENDING, never an adopt on aggregate alone.
+    unmeasured = compute_gate(retrieval, memory, _artifact("pilot-a", {"graphiti": 0.83}))
+    assert unmeasured["verdict"] == "PENDING"
+    assert "contradicted_fact_resolution" in unmeasured["pending_slices"]
+
+    # Margin met, slice FAILED → do not adopt (temporal invalidation is the point).
+    failed_artifact = _artifact("pilot-a", {"graphiti": 0.83})
+    failed_artifact["slices"] = {"contradicted_fact_resolution": {"passed": False}}
+    failed = compute_gate(retrieval, memory, failed_artifact)
+    assert failed["verdict"] == "DO_NOT_ADOPT"
 
     losing = compute_gate(retrieval, memory, _artifact("pilot-a", {"graphiti": 0.78}))
     assert losing["verdict"] == "DO_NOT_ADOPT"
