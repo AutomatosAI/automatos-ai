@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 from core.database.database import get_database_url
 from core.models.core import BoardTask
@@ -34,12 +33,6 @@ def engine():
         pytest.skip(f"dispatch suite needs a reachable Postgres: {exc}")
     yield eng
     eng.dispose()
-
-
-@pytest.fixture
-def new_session(engine):
-    """A sessionmaker that hands out independent, committing sessions."""
-    return sessionmaker(bind=engine, expire_on_commit=False)
 
 
 @pytest.fixture
@@ -65,7 +58,7 @@ def seeded(engine, new_session):
 
     yield ws_id, agent_id
 
-    s = new_session()
+    s = new_session.sweep()
     s.execute(text("DELETE FROM board_tasks WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})
     s.execute(text("DELETE FROM agents WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})
     s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": ws_id})

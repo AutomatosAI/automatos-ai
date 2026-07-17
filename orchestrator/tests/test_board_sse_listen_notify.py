@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
 
 # ``board_events`` imports its DB connection lazily (inside the listener thread),
 # so importing it does NOT touch Postgres — the pure tests below run with no DB.
@@ -59,12 +58,6 @@ def engine():
         pytest.skip(f"board SSE suite needs a reachable Postgres: {exc}")
     yield eng
     eng.dispose()
-
-
-@pytest.fixture
-def new_session(engine):
-    """A sessionmaker handing out independent, committing sessions."""
-    return sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def test_notify_board_event_reaches_a_raw_listener(new_session, engine):

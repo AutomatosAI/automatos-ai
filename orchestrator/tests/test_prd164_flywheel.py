@@ -407,6 +407,10 @@ def _cleanup_workspace(engine, ws_id):
     from sqlalchemy import text as sa_text
 
     with engine.begin() as conn:
+        # Bounded sweep (see tests/conftest.py teardown-guard note): if a test
+        # died mid-transaction and pinned row locks, fail loudly in seconds
+        # instead of hanging the lane to the job cap.
+        conn.execute(sa_text("SET LOCAL lock_timeout = '5s'"))
         conn.execute(
             sa_text(
                 "DELETE FROM document_chunks WHERE document_id IN "
