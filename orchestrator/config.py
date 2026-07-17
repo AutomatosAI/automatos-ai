@@ -155,6 +155,15 @@ class Config:
     # telemetry tables). Sweep rides the memory-jobs scheduler daily.
     SUBSTRATE_METRICS_RETENTION_DAYS: int = int(os.getenv("SUBSTRATE_METRICS_RETENTION_DAYS", "14"))
     SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS: int = int(os.getenv("SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", "86400"))
+    # PRD-206 S2: thread-checkpoint sweep — recently-idle chats get an LLM
+    # checkpoint (chats.summary + typed decision/open_loop memories). The
+    # batch cap bounds LLM spend per sweep; min-messages skips trivia.
+    THREAD_CHECKPOINT_ENABLED: bool = os.getenv("THREAD_CHECKPOINT_ENABLED", "true").lower() in ("true", "1", "yes")
+    THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS: int = int(os.getenv("THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS", "900"))
+    THREAD_CHECKPOINT_IDLE_MINUTES: int = int(os.getenv("THREAD_CHECKPOINT_IDLE_MINUTES", "30"))
+    THREAD_CHECKPOINT_LOOKBACK_HOURS: int = int(os.getenv("THREAD_CHECKPOINT_LOOKBACK_HOURS", "48"))
+    THREAD_CHECKPOINT_BATCH: int = int(os.getenv("THREAD_CHECKPOINT_BATCH", "10"))
+    THREAD_CHECKPOINT_MIN_MESSAGES: int = int(os.getenv("THREAD_CHECKPOINT_MIN_MESSAGES", "4"))
 
     # =============================================================================
     # BOOT REAPER — orphaned in-flight runs (PRD-142 Wave 1 · WS-C · W1-S6)

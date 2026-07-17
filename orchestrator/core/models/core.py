@@ -1114,6 +1114,11 @@ class Chat(Base):
     # scheduled-task output). One 'auto' thread per (workspace, user) —
     # enforced by the partial unique index below; ordinary in every other way.
     kind = Column(String(20), nullable=False, default='user', server_default='user')
+    # PRD-206 S2: the thread checkpoint — {topic, decisions[], open_questions[],
+    # last_summary, next_step, updated_at, checkpointed_at, trigger}. Written by
+    # the checkpoint distill (idle sweep + platform_checkpoint_thread); read by
+    # the S3 resume payload. NULL until the thread has been checkpointed.
+    summary = Column(JSONB, nullable=True)
 
     # Relationships
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")

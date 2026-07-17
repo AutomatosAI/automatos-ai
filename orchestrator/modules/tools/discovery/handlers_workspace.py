@@ -280,6 +280,47 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         return {"success": False, "error": f"Memory service error: {e}"}
 
 
+async def checkpoint_thread(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-206 S2: on-demand thread checkpoint ("save where we are").
+
+    Defaults to the CURRENT conversation via the server-injected
+    ``_origin_chat_id`` (never spoofable); an explicit ``chat_id`` param may
+    target another thread in the same workspace (the checkpoint runner
+    enforces the workspace match).
+    """
+    chat_id = params.get("chat_id") or params.get("_origin_chat_id")
+    if not chat_id:
+        return {
+            "success": False,
+            "error": "No conversation to checkpoint — this tool needs a chat context or an explicit chat_id.",
+        }
+
+    from modules.memory.thread_checkpoint import run_thread_checkpoint
+
+    result = await run_thread_checkpoint(
+        db,
+        workspace_id=str(workspace_id),
+        chat_id=str(chat_id),
+        trigger="on_demand",
+        # An explicit "save where we are" should work even on a short thread.
+        min_messages=2,
+    )
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "checkpoint failed")}
+    summary = result.get("summary") or {}
+    return {
+        "success": True,
+        "message": (
+            f"Checkpointed '{summary.get('topic') or 'this thread'}' — "
+            f"{len(summary.get('decisions') or [])} decision(s), "
+            f"{len(summary.get('open_questions') or [])} open loop(s) on record."
+        ),
+        "topic": summary.get("topic"),
+        "next_step": summary.get("next_step"),
+        "stored_memories": result.get("stored_memories", 0),
+    }
+
+
 # ---------------------------------------------------------------------------
 # PRD-143 S11 — administration surface: workspace + system settings.
 # Operator tier by design (the Rev 2 inversion); safety is the fail-closed

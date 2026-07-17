@@ -142,6 +142,39 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
         ],
     ))
 
+    registry.register(ActionDefinition(
+        name="platform_checkpoint_thread",
+        description=(
+            "Checkpoint the current conversation into thread memory: a "
+            "summary of where things got to, plus any decisions and open "
+            "loops, so 'where did we leave off?' works later. Use when the "
+            "user asks to save progress / remember where we are. Runs on the "
+            "CURRENT conversation unless a chat_id is given."
+        ),
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional chat to checkpoint; defaults to the current "
+                        "conversation."
+                    ),
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["memory", "thread", "checkpoint", "continuity"],
+        examples=[
+            "save where we are",
+            "checkpoint this conversation",
+            "remember where we left off here",
+        ],
+    ))
+
     # ── Memory Browse/Delete ─────────────────────────────────────────
 
     registry.register(ActionDefinition(
