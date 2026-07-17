@@ -68,19 +68,21 @@ export function LiveVoiceMode({ chatId, agentId, onExit }: LiveVoiceModeProps) {
       className="relative flex w-full flex-col items-center gap-1 pt-4 pb-2"
       data-testid="live-voice-mode"
     >
-      {/* The room: a soft gold field behind the ring so Auto has a stage,
+      {/* The room: a soft gold field behind the wave so Auto has a stage,
           not a black void. Pure CSS, pointer-transparent. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-0 h-[340px] w-[560px] -translate-x-1/2 opacity-70"
+        className="pointer-events-none absolute left-1/2 top-0 h-[260px] w-[720px] max-w-full -translate-x-1/2 opacity-80"
         style={{
           background:
-            'radial-gradient(ellipse at center, hsl(var(--warning) / 0.14) 0%, hsl(var(--warning) / 0.05) 45%, transparent 70%)',
+            'radial-gradient(ellipse at center, hsl(var(--warning) / 0.14) 0%, hsl(var(--warning) / 0.05) 45%, transparent 72%)',
           filter: 'blur(2px)',
         }}
       />
 
-      <PresenceOrb state={orbState} levelsRef={levelsRef} size={260} />
+      <div className="w-full max-w-[720px] px-4">
+        <PresenceOrb state={orbState} levelsRef={levelsRef} size={170} />
+      </div>
 
       {/* State for ears and eyes — the a11y surface for the canvas. */}
       <p aria-live="polite" className="relative -mt-3 text-sm font-medium text-warning/90 tracking-wide">
