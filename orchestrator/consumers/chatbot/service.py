@@ -992,6 +992,8 @@ class StreamingChatService:
                     agent_id=agent_runtime.agent_id,
                     query=_user_msg if len(_user_msg) > 5 else "user context",
                     widget_mode=self.widget_mode,
+                    # PRD-206 S7: Q7 private-scope guard needs the viewer.
+                    viewer_subject_id=getattr(self, "_viewer_subject_id", None),
                 )
                 if _mem_result and _mem_result.formatted_context:
                     _memory_block = f"\n\n## What you remember about this user:\n{_mem_result.formatted_context}\n"
@@ -1082,6 +1084,8 @@ class StreamingChatService:
             complexity_assessment=complexity_assessment,
             attachment_ids=attachment_ids,
             model_id=model_id,
+            # PRD-206 S7: viewer for the Q7 private-scope recall guard.
+            viewer_subject_id=getattr(self, "_viewer_subject_id", None),
         )
         llm_messages = apply_orchestration_to_messages(orchestrated)
         use_tools = orchestrated.tools if orchestrated.requires_tools else None
@@ -2019,6 +2023,11 @@ class StreamingChatService:
 
         # PRD-185 S7: start the turn with clean retrieval provenance.
         self._reset_turn_retrieval()
+
+        # PRD-206 S7: the driving human as viewer for the Q7 private-scope
+        # recall guard (user_id here is the INTERNAL integer id — the same
+        # value the PRD-196 subject tag carries at store time).
+        self._viewer_subject_id = f"user:{user_id}" if user_id else None
 
         try:
             # Ensure workspace_id is available

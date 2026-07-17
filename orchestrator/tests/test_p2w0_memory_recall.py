@@ -120,7 +120,10 @@ def test_gold_set_ids_all_exist_in_corpus_and_same_tenant():
 def test_report_is_per_tenant_and_bounded():
     report = run_memory_recall_eval(load_corpus(), load_gold_set())
     ws_ids = {t.workspace_id for t in report.tenants}
-    assert ws_ids == {"tenant-acme", "tenant-bloom", "tenant-northstar"}
+    # tenant-continuity joined with the PRD-206 S10 continuity slice.
+    assert ws_ids == {
+        "tenant-acme", "tenant-bloom", "tenant-northstar", "tenant-continuity",
+    }
     for t in report.tenants:
         assert t.n_queries > 0
         for metric in (t.recall_at_1, t.recall_at_3, t.recall_at_5, t.mrr):
@@ -142,7 +145,7 @@ def test_passes_tracks_the_honest_number():
     d = report.to_dict()
     assert d["passes"] == (d["mean_recall_at_5"] >= RECALL_AT_5_TARGET)
     assert isinstance(d["mean_recall_at_5"], float)
-    assert len(d["tenants"]) == 3
+    assert len(d["tenants"]) == 4
 
 
 def test_bundled_fixture_produces_a_real_number():
@@ -155,7 +158,7 @@ def test_bundled_fixture_produces_a_real_number():
     assert isinstance(d["mean_mrr"], float)
     assert 0.0 < report.mean_recall_at_5 <= 1.0
     assert 0.0 < report.mean_mrr <= 1.0
-    assert len(d["tenants"]) == 3
+    assert len(d["tenants"]) == 4
 
 
 def test_main_always_exits_zero():

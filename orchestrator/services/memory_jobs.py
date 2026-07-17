@@ -39,6 +39,7 @@ class MemoryJobScheduler:
     JOB_ID_AUDIT_RETENTION = "audit_retention_sweep"  # PRD-196 S5
     JOB_ID_SNAPSHOT = "memory_qdrant_snapshot"  # PRD-197 S3
     JOB_ID_SUBSTRATE_PRUNE = "substrate_metrics_prune"  # PRD-197 S4
+    JOB_ID_THREAD_CHECKPOINT = "thread_checkpoint_sweep"  # PRD-206 S2
 
     def __init__(self):
         self._scheduler: Optional[AsyncIOScheduler] = None
@@ -156,6 +157,24 @@ class MemoryJobScheduler:
             max_instances=1,
         )
 
+        # PRD-206 S2: checkpoint recently-idle chat threads (Q3: silently) —
+        # summary onto chats.summary, new decisions/open loops into L3. The
+        # batch cap bounds LLM spend per sweep; the checkpointed_at watermark
+        # keeps already-checkpointed threads out of the candidate set.
+        checkpoint_enabled = getattr(app_config, "THREAD_CHECKPOINT_ENABLED", True)
+        checkpoint_interval = getattr(
+            app_config, "THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS", 900
+        )
+        if checkpoint_enabled:
+            self._scheduler.add_job(
+                self._run_thread_checkpoints,
+                "interval",
+                seconds=checkpoint_interval,
+                id=self.JOB_ID_THREAD_CHECKPOINT,
+                replace_existing=True,
+                max_instances=1,
+            )
+
         logger.info(
             "[MemoryJobs] Started — consolidation every %ds, "
             "decay every %ds, promotion daily at %02d:00 UTC, "
@@ -184,6 +203,7 @@ class MemoryJobScheduler:
             self.JOB_ID_AUDIT_RETENTION,
             self.JOB_ID_SNAPSHOT,
             self.JOB_ID_SUBSTRATE_PRUNE,
+            self.JOB_ID_THREAD_CHECKPOINT,
         ):
             if self._scheduler.get_job(job_id):
                 self._scheduler.remove_job(job_id)
@@ -360,6 +380,85 @@ class MemoryJobScheduler:
                 exc_info=True,
             )
 
+    async def _run_thread_checkpoints(self):
+        """PRD-206 S2: checkpoint recently-idle threads. Candidates: user-kind
+        chats idle past the threshold (but touched inside the lookback), with
+        enough messages, whose summary watermark is older than their last
+        activity. Per-chat failures never stop the batch; fail-soft overall."""
+        try:
+            from sqlalchemy import text as sql_text
+
+            from config import config as app_config
+            from core.database.database import SessionLocal
+            from modules.memory.thread_checkpoint import run_thread_checkpoint
+
+            idle_minutes = getattr(app_config, "THREAD_CHECKPOINT_IDLE_MINUTES", 30)
+            lookback_hours = getattr(app_config, "THREAD_CHECKPOINT_LOOKBACK_HOURS", 48)
+            batch = getattr(app_config, "THREAD_CHECKPOINT_BATCH", 10)
+            min_messages = getattr(app_config, "THREAD_CHECKPOINT_MIN_MESSAGES", 4)
+
+            db = SessionLocal()
+            try:
+                rows = db.execute(
+                    sql_text(
+                        """
+                        SELECT id, workspace_id FROM chats
+                        WHERE kind = 'user'
+                          AND workspace_id IS NOT NULL
+                          AND updated_at <= NOW() - (:idle_min * INTERVAL '1 minute')
+                          AND updated_at >= NOW() - (:lookback_h * INTERVAL '1 hour')
+                          AND (
+                            summary IS NULL
+                            OR COALESCE((summary->>'checkpointed_at')::double precision, 0)
+                               < EXTRACT(EPOCH FROM updated_at)
+                          )
+                          AND (
+                            SELECT COUNT(*) FROM messages m WHERE m.chat_id = chats.id
+                          ) >= :min_msgs
+                        ORDER BY updated_at DESC
+                        LIMIT :batch
+                        """
+                    ),
+                    {
+                        "idle_min": idle_minutes,
+                        "lookback_h": lookback_hours,
+                        "min_msgs": min_messages,
+                        "batch": batch,
+                    },
+                ).fetchall()
+
+                done = failed = 0
+                for chat_id, workspace_id in rows:
+                    try:
+                        result = await run_thread_checkpoint(
+                            db,
+                            workspace_id=str(workspace_id),
+                            chat_id=str(chat_id),
+                            trigger="idle_sweep",
+                            min_messages=min_messages,
+                        )
+                        if result.get("success"):
+                            done += 1
+                        elif not result.get("skipped"):
+                            failed += 1
+                    except Exception:
+                        failed += 1
+                        logger.error(
+                            "[MemoryJobs] Thread checkpoint failed for chat=%s",
+                            chat_id, exc_info=True,
+                        )
+            finally:
+                db.close()
+            if done or failed:
+                logger.info(
+                    "[MemoryJobs] Thread checkpoint sweep: candidates=%d done=%d failed=%d",
+                    len(rows), done, failed,
+                )
+        except Exception as e:
+            logger.error(
+                "[MemoryJobs] Thread checkpoint sweep failed: %s", e, exc_info=True,
+            )
+
     async def _run_snapshot(self):
         """PRD-197 S3: snapshot durable_memory + field_memory to the object
         store and prune to retention. Fail-soft like the rest — a snapshot
@@ -403,6 +502,7 @@ class MemoryJobScheduler:
             self.JOB_ID_AUDIT_RETENTION,
             self.JOB_ID_SNAPSHOT,
             self.JOB_ID_SUBSTRATE_PRUNE,
+            self.JOB_ID_THREAD_CHECKPOINT,
         ):
             job = self._scheduler.get_job(job_id)
             jobs[job_id] = {

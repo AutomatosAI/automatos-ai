@@ -145,6 +145,20 @@ class MemorySection(BaseSection):
         # Long-term memories
         lt_memories = getattr(bundle, "long_term_memories", [])
         if lt_memories:
+            # PRD-206 S7: the Router path gets the same Q7 private-scope rule
+            # and composite ranking as the SmartMemoryManager path — one
+            # consent model, whichever retrieval lane served the turn.
+            from modules.memory.injection_filter import visible_to_viewer
+            from modules.memory.recall_ranking import rank_memories
+
+            viewer = ctx.kwargs.get("viewer_subject_id")
+            dict_memories = [m for m in lt_memories if isinstance(m, dict)]
+            str_memories = [m for m in lt_memories if not isinstance(m, dict)]
+            dict_memories = rank_memories(
+                [m for m in dict_memories if visible_to_viewer(m, viewer)]
+            )
+            lt_memories = dict_memories + [{"memory": str(m)} for m in str_memories if m]
+
             memory_lines: list[str] = []
             raw_memories: list[dict] = []
             for m in lt_memories:
@@ -264,6 +278,9 @@ class MemorySection(BaseSection):
                 query=query,
                 limit=8,
                 widget_mode=widget_mode,
+                # PRD-206 S7: Q7 private-scope guard + composite ranking
+                # happen inside retrieve_memories; the viewer rides kwargs.
+                viewer_subject_id=ctx.kwargs.get("viewer_subject_id"),
             )
 
             if not result or not result.formatted_context:

@@ -2,13 +2,34 @@
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_owner_subject(db: Session, raw_user_id: Any) -> Optional[str]:
+    """PRD-206 S1: turn a caller_context user id into the ``user:{users.id}``
+    subject tag (the PRD-196 owner identity). The chat path threads the Clerk
+    STRING id (never treat it as ``users.id`` — the #513 lesson); an already-
+    internal integer id passes through. Unresolvable → None (no owner tag)."""
+    if raw_user_id is None:
+        return None
+    s = str(raw_user_id)
+    if s.isdigit():
+        return f"user:{int(s)}"
+    try:
+        row = db.execute(
+            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+            {"cid": s},
+        ).fetchone()
+    except Exception:
+        logger.warning("[PlatformExecutor] owner-subject resolution failed", exc_info=True)
+        return None
+    return f"user:{row[0]}" if row else None
 
 
 async def get_workspace_info(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -143,6 +164,13 @@ async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str,
 
 
 async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    from modules.memory.write_contract import (
+        MEMORY_FACT_TYPES,
+        MEMORY_SCOPES,
+        build_memory_metadata,
+        violates_exclusions,
+    )
+
     content = params.get("content")
     if not content:
         return {"success": False, "error": "Missing required parameter: content"}
@@ -164,6 +192,34 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         except (TypeError, ValueError):
             return {"success": False, "error": "confidence must be a number between 0 and 1"}
 
+    fact_type = params.get("type")
+    if fact_type is not None and fact_type not in MEMORY_FACT_TYPES:
+        return {
+            "success": False,
+            "error": f"type must be one of: {', '.join(sorted(MEMORY_FACT_TYPES))}",
+        }
+
+    scope = params.get("scope")
+    if scope is not None and scope not in MEMORY_SCOPES:
+        return {
+            "success": False,
+            "error": f"scope must be one of: {', '.join(sorted(MEMORY_SCOPES))}",
+        }
+
+    # PRD-206 S1 (Q3 silent-everything): the exclusion validator IS the consent
+    # gate — refuse loudly so the model can tell the user, and never echo the
+    # content back into the refusal.
+    violation = violates_exclusions(str(content))
+    if violation:
+        return {
+            "success": False,
+            "error": (
+                f"Refused by the memory exclusion policy (rule: {violation}). "
+                "Secrets, credentials, payment and similar sensitive data are "
+                "never stored as memory."
+            ),
+        }
+
     try:
         from datetime import datetime, timezone
         from modules.memory.unified_memory_service import get_unified_memory_service
@@ -177,18 +233,29 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         # Cast to int if provided (may come as string from tool params)
         agent_id_int = int(agent_id) if agent_id else None
 
-        # Wave 3 — provenance keys travel with the memory metadata so
-        # future readers can tell verified facts from inference.
-        metadata: Dict[str, Any] = {
+        # PRD-206 S1: both write paths build the SAME canonical metadata via
+        # the write contract — type + scope (Q7 split default) + provenance +
+        # owner + chat link. ``_user_id`` / ``_origin_chat_id`` are server-
+        # injected by the executor (strip-then-inject), never caller-supplied.
+        extra: Dict[str, Any] = {
             "workspace_id": ws_id,
             "source": "platform_tool",
-            "source_type": source_type,
             "verified_at": datetime.now(timezone.utc).isoformat(),
         }
-        if confidence is not None:
-            metadata["confidence"] = confidence
         if params.get("evidence_uri"):
-            metadata["evidence_uri"] = params["evidence_uri"]
+            extra["evidence_uri"] = params["evidence_uri"]
+
+        metadata = build_memory_metadata(
+            fact_type=fact_type or "business_fact",
+            importance=params.get("importance"),
+            confidence=confidence,
+            source_type=source_type,
+            scope=scope,
+            owner=_resolve_owner_subject(db, params.get("_user_id")),
+            chat_id=params.get("_origin_chat_id"),
+            pinned=bool(params["pinned"]) if params.get("pinned") is not None else None,
+            extra=extra,
+        )
 
         result = await service.store_long_term(
             workspace_id=ws_id,
@@ -211,6 +278,71 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     except Exception as e:
         logger.warning(f"[PlatformExecutor] Memory store failed: {e}", exc_info=True)
         return {"success": False, "error": f"Memory service error: {e}"}
+
+
+async def resume_context(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-206 S3: 'where did we leave off?' from ANY chat.
+
+    The viewer comes from the server-injected ``_user_id`` (strip-then-inject
+    — never spoofable); without one (headless caller) the payload carries
+    workspace decisions/open loops but no personal threads.
+    """
+    from modules.memory.resume_context import build_resume_payload, format_resume_for_llm
+
+    owner = _resolve_owner_subject(db, params.get("_user_id"))
+    viewer_user_id = int(owner.split(":", 1)[1]) if owner else None
+
+    payload = await build_resume_payload(
+        db,
+        workspace_id=str(workspace_id),
+        viewer_user_id=viewer_user_id,
+    )
+    return {
+        "success": True,
+        **payload,
+        "formatted": format_resume_for_llm(payload),
+    }
+
+
+async def checkpoint_thread(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-206 S2: on-demand thread checkpoint ("save where we are").
+
+    Defaults to the CURRENT conversation via the server-injected
+    ``_origin_chat_id`` (never spoofable); an explicit ``chat_id`` param may
+    target another thread in the same workspace (the checkpoint runner
+    enforces the workspace match).
+    """
+    chat_id = params.get("chat_id") or params.get("_origin_chat_id")
+    if not chat_id:
+        return {
+            "success": False,
+            "error": "No conversation to checkpoint — this tool needs a chat context or an explicit chat_id.",
+        }
+
+    from modules.memory.thread_checkpoint import run_thread_checkpoint
+
+    result = await run_thread_checkpoint(
+        db,
+        workspace_id=str(workspace_id),
+        chat_id=str(chat_id),
+        trigger="on_demand",
+        # An explicit "save where we are" should work even on a short thread.
+        min_messages=2,
+    )
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "checkpoint failed")}
+    summary = result.get("summary") or {}
+    return {
+        "success": True,
+        "message": (
+            f"Checkpointed '{summary.get('topic') or 'this thread'}' — "
+            f"{len(summary.get('decisions') or [])} decision(s), "
+            f"{len(summary.get('open_questions') or [])} open loop(s) on record."
+        ),
+        "topic": summary.get("topic"),
+        "next_step": summary.get("next_step"),
+        "stored_memories": result.get("stored_memories", 0),
+    }
 
 
 # ---------------------------------------------------------------------------

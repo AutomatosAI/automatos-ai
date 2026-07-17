@@ -1,5 +1,5 @@
 {
-  "route_count": 771,
+  "route_count": 772,
   "routes": [
     {
       "method": "GET",
@@ -1588,6 +1588,10 @@
     {
       "method": "POST",
       "path": "/api/memory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/resume"
     },
     {
       "method": "GET",

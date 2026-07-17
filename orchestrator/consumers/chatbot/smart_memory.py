@@ -23,20 +23,17 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
-# PRD-159 S1 — operational memory taxonomy (Zep ontology incl. `procedure`).
-# The distiller emits a {fact, type, importance} object per durable fact; `type`
-# is validated against this set and stored as the memory `category` so recall
-# and the Explorer can filter operational knowledge by kind.
-MEMORY_FACT_TYPES = frozenset({
-    "tool_outcome",     # a tool/Composio call's notable result (failure, quirk, new id)
-    "task_learning",    # what was learned from a mission/task succeeding or failing
-    "playbook_pattern", # a reusable pattern surfaced while running a playbook
-    "user_fact",        # stable fact about the user
-    "business_fact",    # stable fact about their business/domain
-    "preference",       # a stated preference
-    "procedure",        # a how-to / standard operating procedure
-})
-DEFAULT_FACT_TYPE = "task_learning"
+# PRD-206 S1: the taxonomy moved to the canonical write-contract module
+# (modules/memory/write_contract) alongside scope defaults and the exclusion
+# validator; re-exported here because this module and its tests are the
+# historical import site.
+from modules.memory.write_contract import (  # noqa: F401  (re-export)
+    DEFAULT_FACT_TYPE,
+    MEMORY_FACT_TYPES,
+    SOURCE_TYPE_DISTILLED,
+    build_memory_metadata,
+    violates_exclusions,
+)
 
 
 @dataclass
@@ -139,9 +136,17 @@ class SmartMemoryManager:
         # Everything else → single workspace namespace. No double-write.
         return "global"
 
-    def _get_cache_key(self, workspace_id: str, agent_id: Optional[int], query: str) -> str:
-        """Create cache key for memory lookups (includes agent for agent-specific cache)."""
-        return f"{workspace_id}:{agent_id}:{query[:50]}"
+    def _get_cache_key(
+        self,
+        workspace_id: str,
+        agent_id: Optional[int],
+        query: str,
+        viewer_subject_id: Optional[str] = None,
+    ) -> str:
+        """Cache key for memory lookups. Includes the agent AND the viewer —
+        the Q7 private-scope guard filters per viewer, so two users sharing a
+        cache entry would leak one user's private rows to the other."""
+        return f"{workspace_id}:{agent_id}:{viewer_subject_id}:{query[:50]}"
 
     async def retrieve_memories(
         self,
@@ -149,7 +154,8 @@ class SmartMemoryManager:
         agent_id: Optional[int],
         query: str,
         limit: int = 8,
-        widget_mode: bool = False
+        widget_mode: bool = False,
+        viewer_subject_id: Optional[str] = None,
     ) -> MemoryResult:
         """
         Retrieve relevant memories for a query.
@@ -166,7 +172,7 @@ class SmartMemoryManager:
         start_time = time.time()
 
         # Check cache first
-        cache_key = self._get_cache_key(workspace_id, agent_id, query)
+        cache_key = self._get_cache_key(workspace_id, agent_id, query, viewer_subject_id)
         cached = self._cache.get(cache_key)
         if cached and (time.time() - cached[0]) < self._cache_ttl:
             logger.debug("[SmartMemory] Using cached memory result")
@@ -224,13 +230,31 @@ class SmartMemoryManager:
                     from config import config as _cfg
                     _floor = float(getattr(_cfg, "MEMORY_RELEVANCE_FLOOR", 0.3))
                 except Exception:
+                    _cfg = None
                     _floor = 0.3
                 _before = len(memories)
-                memories = filter_injectable_memories(memories, floor=_floor)
+                # PRD-206 S7: the viewer rides into the guard — Q7 private
+                # memories only inject for their owner (unknown viewer fails
+                # closed; legacy/workspace rows unchanged).
+                memories = filter_injectable_memories(
+                    memories, floor=_floor, viewer_subject_id=viewer_subject_id,
+                )
                 if len(memories) != _before:
                     logger.info(
-                        "[SmartMemory] Injection guard dropped %d/%d memories (floor+type)",
+                        "[SmartMemory] Injection guard dropped %d/%d memories (floor+type+scope)",
                         _before - len(memories), _before,
+                    )
+
+                # PRD-206 S7: composite recall ranking ABOVE the floor and
+                # exclusions (which stay load-bearing, untouched): semantic ×
+                # recency × importance × pin. Reorders only — never adds or
+                # removes candidates. Knobs: MEMORY_RANK_*.
+                if _cfg is None or getattr(_cfg, "MEMORY_RANK_ENABLED", True):
+                    from modules.memory.recall_ranking import rank_memories
+                    memories = rank_memories(
+                        memories,
+                        half_life_days=float(getattr(_cfg, "MEMORY_RANK_HALF_LIFE_DAYS", 30.0)) if _cfg else 30.0,
+                        pin_boost=float(getattr(_cfg, "MEMORY_RANK_PIN_BOOST", 2.0)) if _cfg else 2.0,
                     )
 
                 if memories:
@@ -473,6 +497,7 @@ class SmartMemoryManager:
             # prevent the L2 transcript write below.
             results: List[tuple] = []
             l3_raised = False
+            facts_attempted = 0
             for fact in facts:
                 # Defensive: tolerate a bare string (legacy/edge) and skip a
                 # malformed fact rather than crash the turn — the L2 transcript
@@ -481,11 +506,28 @@ class SmartMemoryManager:
                     fact = {"fact": fact, "type": DEFAULT_FACT_TYPE, "importance": 0.5}
                 if not isinstance(fact, dict) or not fact.get("fact"):
                     continue
-                fact_meta = {
-                    **base_metadata,
-                    "category": fact.get("type", DEFAULT_FACT_TYPE),
-                    "importance": fact.get("importance", 0.5),
-                }
+                # PRD-206 S1 (Q3 silent-everything): the exclusion validator IS
+                # the consent gate — secrets/credentials/sensitive strings are
+                # never stored. Log the rule name only, never the content.
+                violation = violates_exclusions(str(fact["fact"]))
+                if violation:
+                    logger.warning(
+                        "[SmartMemory] Exclusion validator dropped a distilled "
+                        "fact (rule=%s) — not stored", violation,
+                    )
+                    continue
+                facts_attempted += 1
+                # PRD-206 S1: ONE write contract for both paths — type/scope
+                # (Q7 split default)/provenance/owner/chat link all ride the
+                # same canonical metadata shape.
+                fact_meta = build_memory_metadata(
+                    fact_type=str(fact.get("type", DEFAULT_FACT_TYPE)),
+                    importance=fact.get("importance", 0.5),
+                    source_type=SOURCE_TYPE_DISTILLED,
+                    owner=subject_id,
+                    chat_id=chat_id,
+                    extra=base_metadata,
+                )
                 try:
                     fact_results = await self.unified_service.store_two_tier(
                         workspace_id=workspace_id,
@@ -534,8 +576,12 @@ class SmartMemoryManager:
             l3_ok = any(r[1] and not r[1].get("error") for r in results)
             # PRD-159 S5: how many durable facts actually persisted to L3 this
             # turn — drives the honest memory_stored SSE (0 → no event fired).
-            self._last_l3_facts_stored = len(facts) if l3_ok else 0
-            success = (l3_ok or not facts) and not l3_raised
+            # Counts facts ATTEMPTED (malformed and exclusion-dropped facts are
+            # out), so the SSE stays honest under PRD-206 S1's validator.
+            self._last_l3_facts_stored = facts_attempted if l3_ok else 0
+            # facts_attempted == 0 covers both "nothing durable" and "every
+            # fact excluded" — in both cases the L2 transcript is the record.
+            success = (l3_ok or facts_attempted == 0) and not l3_raised
 
             if success:
                 if l3_ok:
@@ -639,12 +685,20 @@ class SmartMemoryManager:
             "- business_fact: a stable fact about their business or domain\n"
             "- preference: a stated preference (tone, format, tools, cadence)\n"
             "- procedure: a how-to or standing instruction for getting something "
-            "done\n\n"
+            "done\n"
+            "- decision: a decision that was made, with its reason when stated "
+            "(\"we decided X because Y\")\n"
+            "- open_loop: something left unresolved or promised that should be "
+            "picked back up later\n"
+            "- thread_summary: a summary of where a whole conversation thread "
+            "got to (rare in a single exchange — prefer the specific types)\n\n"
             "Write each `fact` as a standalone, third-person statement that makes "
             "sense without the surrounding conversation. Preserve specifics "
             "(names, standards, numbers, ids, spellings). Set `importance` in "
             "[0,1] (0.8+ = load-bearing, 0.3 = minor). Skip pure pleasantries and "
-            "chit-chat with no durable content.\n\n"
+            "chit-chat with no durable content. NEVER extract secrets, "
+            "credentials, passwords, API keys or tokens, card or bank numbers, "
+            "or one-time codes — leave such content out entirely.\n\n"
             "Return ONLY a JSON array of objects "
             "{\"fact\": str, \"type\": str, \"importance\": number}. "
             "If nothing durable is worth keeping, return an empty array [].\n\n"

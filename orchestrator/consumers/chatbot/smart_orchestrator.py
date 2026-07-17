@@ -161,6 +161,7 @@ class SmartChatOrchestrator:
         complexity_assessment: Optional[Any] = None,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
+        viewer_subject_id: Optional[str] = None,
     ) -> OrchestratedRequest:
         """
         Prepare a chat request for the LLM.
@@ -242,6 +243,8 @@ class SmartChatOrchestrator:
             query=latest_query,
             agent_name=self.agent_name,
             user_name=self.state.user_name,
+            # PRD-206 S7: the driving human for the Q7 private-scope guard.
+            viewer_subject_id=viewer_subject_id,
         )
 
         # ─── 4. Update conversation state ───
