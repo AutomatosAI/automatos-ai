@@ -471,9 +471,11 @@ def test_mint_without_chat_creates_and_binds_thread(monkeypatch):
     assert rows[0].chat_id == str(created_chat_id)  # mint-proven binding → webhook writes HERE
 
 
-def test_voice_turn_rides_the_fast_path(monkeypatch):
-    """First live calls measured MINUTES per turn: the spoken lane must trim
-    history and skip widget payloads + external tool loops."""
+def test_voice_turn_has_the_full_brain(monkeypatch):
+    """ONE Auto: the spoken turn gets the SAME brain as the typed turn —
+    full tools + memory (no force_text_only lobotomy, no composio skip) and
+    the caller's REAL privilege tier — with only the history trimmed (rhythm,
+    not brain)."""
     import consumers.chatbot as chatbot_pkg
 
     import api.voice_retell as vr
@@ -534,9 +536,14 @@ def test_voice_turn_rides_the_fast_path(monkeypatch):
 
     from contextlib import contextmanager
 
+    fake_db = MagicMock()
+    # the bound user's REAL privilege tier flows into the turn (PRD-143: su
+    # derives from system_role only)
+    fake_db.query.return_value.filter.return_value.first.return_value = ("super_admin",)
+
     @contextmanager
     def fake_session():
-        yield MagicMock()
+        yield fake_db
 
     monkeypatch.setattr(vr, "get_db_session", fake_session)
 
@@ -553,8 +560,11 @@ def test_voice_turn_rides_the_fast_path(monkeypatch):
     frames = asyncio.run(run())
     assert any(f.get("content") for f in frames)  # the turn streamed
 
-    assert captured["force_text_only"] is True   # words only — no widget payloads
-    assert captured["skip_composio"] is True     # no external tool loops mid-call
+    # the lobotomy flags are GONE — same brain as text chat
+    assert captured.get("force_text_only", False) is False  # tools + memory live
+    assert captured.get("skip_composio", False) is False    # full action surface
+    assert captured["is_super_admin"] is True               # the caller's real tier
+    # the one voice-specific trim: recent conversation, not the archive
     assert len(captured["messages"]) <= int(app_config.VOICE_LIVE_TURN_HISTORY_MESSAGES)
 
 
