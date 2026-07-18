@@ -1,13 +1,15 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import BusinessGraphVisualization from './BusinessGraphVisualization'
+import BusinessGraphVisualization, {
+  type BusinessGraphHandle,
+} from './BusinessGraphVisualization'
 import { GraphView, useGraphPrefs } from '../graph'
 import {
   Layers, Search, X, FileText, Loader2,
@@ -56,6 +58,7 @@ export function KnowledgeGraphExplorer() {
   const { workspaceId } = useWorkspace()
   const queryClient = useQueryClient()
   const [prefs] = useGraphPrefs(workspaceId, 'knowledge')
+  const vizRef = useRef<BusinessGraphHandle>(null)
 
   const [activeCommunity, setActiveCommunity] = useState<number | null>(null)
   const [subgraph, setSubgraph] = useState<SubgraphData | null>(null)
@@ -83,6 +86,9 @@ export function KnowledgeGraphExplorer() {
 
   const loadCommunity = useCallback(async (cid: number) => {
     setLoadingSub(true); setError(null); setSelectedNode(null)
+    // Same drill-mode rule as the in-browser panel: picking a cluster clears
+    // any stale neighbourhood focus so it can't AND the new subgraph to nothing.
+    vizRef.current?.resetFocus()
     try {
       const res: any = await apiClient.graphCommunitySubgraph(cid)
       setSubgraph({ nodes: res.nodes ?? [], links: res.links ?? [], truncated: res.truncated })
@@ -333,6 +339,7 @@ export function KnowledgeGraphExplorer() {
         minHeightClassName="min-h-[520px]"
       >
         <BusinessGraphVisualization
+          ref={vizRef}
           graphData={active as any}
           onNodeSelect={handleNodeSelect as any}
           colorMode={prefs.colorMode}

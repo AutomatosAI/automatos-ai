@@ -337,6 +337,17 @@ export function BusinessGraphPanel() {
     return new Set(relationChips.filter((c) => !hiddenRelSet.has(c.relation)).map((c) => c.relation))
   }, [hiddenRelSet, relationChips])
 
+  // Hidden types actually present in this graph — named in the viz empty
+  // state so an empty filter intersection is explainable.
+  const hiddenTypeCount = useMemo(
+    () => typeChips.filter((c) => hiddenTypeSet.has(c.type)).length,
+    [typeChips, hiddenTypeSet],
+  )
+
+  const handleClearTypeFilters = useCallback(() => {
+    updatePrefs({ hiddenTypes: [] })
+  }, [updatePrefs])
+
   // Cap chips per section: a general knowledge graph carries hundreds of
   // free-text edge relations (each count 1) that flood the legend and bury the
   // canvas. Chips are pre-sorted (curated order, then count desc), so the slice
@@ -394,6 +405,14 @@ export function BusinessGraphPanel() {
 
   const handleNodeSelect = useCallback((node: GraphNode | null) => {
     setSelectedNode(node)
+  }, [])
+
+  // Cluster drill and neighbourhood focus are different drill modes — a stale
+  // focus must not silently AND with the new cluster (often an empty
+  // intersection). Clear it through the viz's one focus-clear path.
+  const handleCommunitySelect = useCallback((id: number | null) => {
+    vizRef.current?.resetFocus()
+    setSelectedCommunity(id)
   }, [])
 
   // ── Empty state — drag-and-drop import zone (bespoke, kept off the shell) ──
@@ -614,7 +633,7 @@ export function BusinessGraphPanel() {
       }
       sidebar={
         graphData ? (
-          <ClusterSidebar communities={communities} selectedCommunity={selectedCommunity} onSelect={setSelectedCommunity} />
+          <ClusterSidebar communities={communities} selectedCommunity={selectedCommunity} onSelect={handleCommunitySelect} />
         ) : undefined
       }
       sidePanel={nodeDetailPanel}
@@ -628,6 +647,8 @@ export function BusinessGraphPanel() {
         visibleTypes={visibleTypes}
         visibleRelations={visibleRelations}
         colorMode={prefs.colorMode}
+        hiddenTypeCount={hiddenTypeCount}
+        onClearFilters={handleClearTypeFilters}
       />
     </GraphView>
   )

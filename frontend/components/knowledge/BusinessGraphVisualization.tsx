@@ -70,6 +70,12 @@ export interface BusinessGraphVisualizationProps {
   visibleRelations?: Set<string>;
   /** Coloring strategy. */
   colorMode?: ColorMode;
+  /** How many node types the panel legend currently hides — named in the
+   *  empty state so an empty filter intersection is explainable. */
+  hiddenTypeCount?: number;
+  /** Panel-side filter reset (hidden node types) for the empty state's
+   *  "Clear filters" button. Focus is cleared viz-side by the same button. */
+  onClearFilters?: () => void;
 }
 
 export interface BusinessGraphHandle {
@@ -128,6 +134,8 @@ const BusinessGraphVisualization = forwardRef<
     visibleTypes,
     visibleRelations,
     colorMode = "community",
+    hiddenTypeCount = 0,
+    onClearFilters,
   },
   ref,
 ) {
@@ -149,15 +157,20 @@ const BusinessGraphVisualization = forwardRef<
     return () => ro.disconnect();
   }, []);
 
-  // ── ESC clears focus ───────────────────────────────────────────────────
+  // ── Clearing focus ─────────────────────────────────────────────────────
+  // The one focus-clear implementation — ESC, background click, the
+  // imperative resetFocus() (cluster drill), and the empty-state
+  // "Clear filters" button all funnel through here.
+
+  const clearFocus = useCallback(() => setFocusNodeId(null), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFocusNodeId(null);
+      if (e.key === "Escape") clearFocus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [clearFocus]);
 
   // ── Filter + augment ───────────────────────────────────────────────────
 
@@ -449,9 +462,9 @@ const BusinessGraphVisualization = forwardRef<
   );
 
   const handleBgClick = useCallback(() => {
-    setFocusNodeId(null);
+    clearFocus();
     onNodeSelect?.(null);
-  }, [onNodeSelect]);
+  }, [clearFocus, onNodeSelect]);
 
   // ── Pre-filtered render data ───────────────────────────────────────────
   // At 24k nodes, the per-tick nodeVisibility/linkVisibility callback path
@@ -482,10 +495,30 @@ const BusinessGraphVisualization = forwardRef<
     ref,
     () => ({
       zoomToFit: () => fgRef.current?.zoomToFit?.(500, 40),
-      resetFocus: () => setFocusNodeId(null),
+      resetFocus: clearFocus,
     }),
-    [],
+    [clearFocus],
   );
+
+  // ── Empty-state explanation ────────────────────────────────────────────
+  // Cluster selection, neighbourhood focus, and hidden node types AND
+  // together — the intersection can be empty. Name the active filters and
+  // offer a one-click reset (focus + hidden types; the cluster is kept).
+
+  const activeFilterSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedCommunity != null) parts.push(`Cluster ${selectedCommunity}`);
+    if (focusNodeId) parts.push("neighbourhood focus");
+    if (hiddenTypeCount > 0) {
+      parts.push(`${hiddenTypeCount} node type${hiddenTypeCount === 1 ? "" : "s"} hidden`);
+    }
+    return parts.join(" + ");
+  }, [selectedCommunity, focusNodeId, hiddenTypeCount]);
+
+  const handleClearFilters = useCallback(() => {
+    clearFocus();
+    onClearFilters?.();
+  }, [clearFocus, onClearFilters]);
 
   // ── Auto zoom-to-fit on data change ────────────────────────────────────
 
@@ -506,8 +539,25 @@ const BusinessGraphVisualization = forwardRef<
   return (
     <div ref={containerRef} className="relative w-full h-full min-h-[500px]">
       {renderData.nodes.length === 0 ? (
-        <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-          No nodes match the current filters.
+        <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center text-sm text-muted-foreground">
+          <div>
+            No nodes match the current filters.
+            {activeFilterSummary && (
+              <div className="mt-1 text-xs text-muted-foreground/70">
+                Active: {activeFilterSummary}
+              </div>
+            )}
+          </div>
+          {(focusNodeId != null || hiddenTypeCount > 0) && (
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-foreground hover:bg-white/10 transition-colors"
+              title="Clear neighbourhood focus and hidden node types (keeps the selected cluster)"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <ForceGraph2D
@@ -552,8 +602,8 @@ const BusinessGraphVisualization = forwardRef<
         </div>
       )}
 
-      {/* Focus hint */}
-      {focusNodeId && (
+      {/* Focus hint — only over a live canvas; the empty state explains itself */}
+      {focusNodeId && renderData.nodes.length > 0 && (
         <div className="absolute bottom-3 left-3 rounded-md border border-white/10 bg-black/70 backdrop-blur-sm px-3 py-1.5 text-xs text-muted-foreground">
           Focused on neighbourhood — press <kbd className="px-1 rounded bg-white/10 text-white">Esc</kbd> or click background to clear
         </div>
