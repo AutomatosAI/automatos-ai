@@ -58,13 +58,13 @@ import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 // How present the room feels per call state — the background wave breathes
 // up when Auto (or you) speaks and nearly vanishes at rest.
 const AMBIENT_OPACITY: Record<string, number> = {
-  speaking: 0.34,
-  listening: 0.2,
-  thinking: 0.24,
-  connecting: 0.14,
-  idle: 0.1,
+  speaking: 0.85,
+  listening: 0.6,
+  thinking: 0.68,
+  connecting: 0.4,
+  idle: 0.4,
   ended: 0,
-  error: 0.1,
+  error: 0.25,
 }
 
 export interface ChatProps {
@@ -1194,7 +1194,7 @@ export function Chat({
                   'radial-gradient(ellipse 90% 70% at 50% 52%, black 45%, transparent 82%)',
               }}
             >
-              <PresenceOrb state={voicePresence} levelsRef={voiceLevels} size={440} fullBleed />
+              <PresenceOrb state={voicePresence} levelsRef={voiceLevels} size={560} fullBleed />
             </div>
           )}
 

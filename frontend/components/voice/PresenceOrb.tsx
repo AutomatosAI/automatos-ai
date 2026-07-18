@@ -72,9 +72,12 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
     ctx.scale(dpr, dpr)
 
     const { h, s, l } = warningHsl()
+    // Full-bleed = the reference look: luminous, clearly THERE. The gain
+    // lifts every stroke; the layer's opacity map still does the breathing.
+    const gain = fullBleed ? 1.5 : 1
     const gold = (alpha: number, dl = 0) =>
-      `hsla(${h}, ${s}%, ${Math.max(0, Math.min(100, l + dl))}%, ${alpha})`
-    const hot = (alpha: number) => `hsla(${h + 6}, 100%, 90%, ${alpha})`
+      `hsla(${h}, ${s}%, ${Math.max(0, Math.min(100, l + dl))}%, ${Math.min(1, alpha * gain)})`
+    const hot = (alpha: number) => `hsla(${h + 6}, 100%, 90%, ${Math.min(1, alpha * gain)})`
 
     const reducedMotion =
       typeof window !== 'undefined' &&
@@ -82,7 +85,7 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
 
     const cx = W / 2
     const cy = H / 2
-    const maxBar = H * 0.36
+    const maxBar = H * (fullBleed ? 0.44 : 0.36)
 
     // Voice history: slot 0 = centre (now), travelling outward each frame.
     const hist = new Float32Array(SLOTS)

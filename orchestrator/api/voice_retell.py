@@ -175,13 +175,40 @@ async def mint_web_call(
             raise HTTPException(status_code=403, detail="You can only bind a live call to your own chat")
         bound_chat_id = str(chat_uuid)
     else:
+        # Find-or-create the caller's ONE voice thread (the Auto-thread
+        # pattern): the chats table enforces unique_user_title, so a second
+        # "Voice call" insert 500'd EVERY welcome-screen call after the first
+        # (surfacing as "Failed to fetch"). Reuse is also the better product —
+        # welcome-screen calls CONTINUE the same conversation. Race-safe:
+        # the IntegrityError loser re-selects.
+        from sqlalchemy.exc import IntegrityError
+
         from consumers.chatbot.service import ChatService
 
-        chat = ChatService(db).create_chat(
-            user_id=int(user_int_id),
-            title="Voice call",
-            workspace_id=ctx.workspace_id,
-        )
+        def _find_voice_thread():
+            return (
+                db.query(Chat)
+                .filter(
+                    Chat.workspace_id == ctx.workspace_id,
+                    Chat.user_id == int(user_int_id),
+                    Chat.title == "Voice call",
+                )
+                .first()
+            )
+
+        chat = _find_voice_thread()
+        if chat is None:
+            try:
+                chat = ChatService(db).create_chat(
+                    user_id=int(user_int_id),
+                    title="Voice call",
+                    workspace_id=ctx.workspace_id,
+                )
+            except IntegrityError:
+                db.rollback()
+                chat = _find_voice_thread()
+        if chat is None:
+            raise HTTPException(status_code=500, detail="Could not open the voice thread")
         bound_chat_id = str(chat.id)
 
     dynamic_vars = {
