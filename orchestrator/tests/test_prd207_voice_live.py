@@ -519,10 +519,12 @@ def test_mint_reuses_the_voice_thread(monkeypatch):
 
 
 def test_voice_turn_has_the_full_brain(monkeypatch):
-    """ONE Auto: the spoken turn gets the SAME brain as the typed turn —
-    full tools + memory (no force_text_only lobotomy, no composio skip) and
-    the caller's REAL privilege tier — with only the history trimmed (rhythm,
-    not brain)."""
+    """ONE Auto: the spoken turn keeps the SAME BRAIN as the typed turn —
+    memory retrieval + core tools + the caller's REAL privilege tier, and
+    NEVER force_text_only (the flag that skips memory). Two measured
+    latency trims that do NOT touch the brain: history is trimmed (rhythm),
+    and Composio's third-party EXECUTION surface is skipped (the 20-90s
+    root cause — 58 tools/137 actions/24-36k tokens per call)."""
     import consumers.chatbot as chatbot_pkg
 
     import api.voice_retell as vr
@@ -604,11 +606,14 @@ def test_voice_turn_has_the_full_brain(monkeypatch):
     frames = asyncio.run(run())
     assert any(f.get("content") for f in frames)  # the turn streamed
 
-    # the lobotomy flags are GONE — same brain as text chat
-    assert captured.get("force_text_only", False) is False  # tools + memory live
-    assert captured.get("skip_composio", False) is False    # full action surface
+    # the LOBOTOMY flag stays gone — memory + tools live (force_text_only
+    # skips memory entirely; it must never be set on a conversational turn)
+    assert captured.get("force_text_only", False) is False
     assert captured["is_super_admin"] is True  # mint-captured tier rides the binding
-    # the one voice-specific trim: recent conversation, not the archive
+    # Composio EXECUTION is skipped for latency (memory/knowledge/core tools
+    # stay) — the measured 20-90s fix, a config dial, NOT the memory lobotomy
+    assert captured.get("skip_composio") is True
+    # the other voice-specific trim: recent conversation, not the archive
     assert len(captured["messages"]) <= int(app_config.VOICE_LIVE_TURN_HISTORY_MESSAGES)
 
 
