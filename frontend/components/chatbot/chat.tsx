@@ -55,18 +55,6 @@ import type { OrbState } from '@/lib/voice/orb-state'
 import type { MutableRefObject } from 'react'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 
-// How present the room feels per call state — the background wave breathes
-// up when Auto (or you) speaks and nearly vanishes at rest.
-const AMBIENT_OPACITY: Record<string, number> = {
-  speaking: 0.34,
-  listening: 0.2,
-  thinking: 0.24,
-  connecting: 0.14,
-  idle: 0.1,
-  ended: 0,
-  error: 0.1,
-}
-
 export interface ChatProps {
   id: string
   initialMessages?: ChatMessage[]
@@ -1178,25 +1166,29 @@ export function Chat({
       {/* Normal chat view - NO widgets */}
       {!hasWidgets && !isArtifactViewerVisible && (
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
-          {/* PRD-207: the room itself — the wave lives BEHIND the chat as an
-              ambient background, waking only while someone speaks. Not a
-              widget, not a screen: the same chat window, alive. */}
-          {isLiveMode && voiceLevels && (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 z-0 flex items-center overflow-hidden"
-              style={{
-                opacity: AMBIENT_OPACITY[voicePresence] ?? 0.12,
-                transition: 'opacity 900ms ease',
-                maskImage:
-                  'radial-gradient(ellipse 75% 65% at 50% 55%, black 35%, transparent 78%)',
-                WebkitMaskImage:
-                  'radial-gradient(ellipse 75% 65% at 50% 55%, black 35%, transparent 78%)',
-              }}
-            >
-              <PresenceOrb state={voicePresence} levelsRef={voiceLevels} size={440} />
-            </div>
-          )}
+          {/* PRD-207/208: the room itself — the wave is the chat's living
+              full-bleed background (Gerard's reference set, brand gold).
+              State intensity, envelopes, and the text-protecting vignette
+              live INSIDE PresenceOrb; the wave sinks lower when the thread
+              is on screen so words own the upper field. */}
+          <AnimatePresence>
+            {isLiveMode && voiceLevels && (
+              <motion.div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5 }}
+              >
+                <PresenceOrb
+                  state={voicePresence}
+                  levelsRef={voiceLevels}
+                  horizon={showWelcomeCard ? 0.56 : 0.74}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
@@ -1327,7 +1319,10 @@ export function Chat({
               className="relative z-10 flex-1 overflow-y-scroll overscroll-contain"
               style={{ overflowAnchor: 'none' }}
             >
-              <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 px-4 py-4 md:gap-6 md:px-8">
+              {/* min-h-full + justify-end: a young thread grows upward from
+                  the composer (no lone bubble stranded at the top of an
+                  empty viewport); once content overflows, normal scroll. */}
+              <div className="mx-auto flex min-h-full min-w-0 max-w-4xl flex-col justify-end gap-4 px-4 py-4 md:gap-6 md:px-8">
 
                 {/* Messages */}
                 <AnimatePresence>
