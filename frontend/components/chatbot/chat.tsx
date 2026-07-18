@@ -207,40 +207,6 @@ export function Chat({
 
   // PRD-207 S5: live voice mode — the orb mounts, content drops lower.
   const [isLiveMode, setIsLiveMode] = useState(false)
-  // PRD-207 (Gerard: "same as old, she just talks it"): spoken words are
-  // upserted as REAL entries in the messages array — the identical render
-  // path as typed streaming. When chat_changed lands the persisted copies,
-  // the ephemeral voice-live entries are dropped and the server rows follow.
-  const handleLiveTurn = useCallback(
-    (turn: { userText: string; agentText: string }) => {
-      setMessages((prev) => {
-        const next = [...prev]
-        const upsert = (mid: string, role: 'user' | 'assistant', text: string) => {
-          if (!text) return
-          const idx = next.findIndex((m) => m.id === mid)
-          const entry = {
-            id: mid,
-            role,
-            content: text,
-            parts: [{ type: 'text', text }],
-          } as ChatMessage
-          if (idx >= 0) next[idx] = { ...next[idx], ...entry }
-          else next.push(entry)
-        }
-        upsert('voice-live-user', 'user', turn.userText)
-        upsert('voice-live-assistant', 'assistant', turn.agentText)
-        return next
-      })
-    },
-    [setMessages]
-  )
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const onPersisted = () =>
-      setMessages((prev) => prev.filter((m) => !String(m.id).startsWith('voice-live-')))
-    window.addEventListener('automatos:chat-changed', onPersisted)
-    return () => window.removeEventListener('automatos:chat-changed', onPersisted)
-  }, [setMessages])
   // PRD-207: presence feed from the call → the ambient background wave.
   const [voicePresence, setVoicePresence] = useState<OrbState>('idle')
   const [voiceLevels, setVoiceLevels] = useState<MutableRefObject<VoiceLevels> | null>(null)
@@ -588,6 +554,44 @@ export function Chat({
       }
     },
   })
+
+  // PRD-207 (Gerard: "same as old, she just talks it"): spoken words are
+  // upserted as REAL entries in the messages array — the identical render
+  // path as typed streaming. When chat_changed lands the persisted copies,
+  // the ephemeral voice-live entries are dropped and the server rows follow.
+  // MUST live below the useChat call: the dependency arrays read setMessages
+  // during render, so hoisting this above useChat is a first-render
+  // ReferenceError (TDZ) that takes down the whole chat page.
+  const handleLiveTurn = useCallback(
+    (turn: { userText: string; agentText: string }) => {
+      setMessages((prev) => {
+        const next = [...prev]
+        const upsert = (mid: string, role: 'user' | 'assistant', text: string) => {
+          if (!text) return
+          const idx = next.findIndex((m) => m.id === mid)
+          const entry = {
+            id: mid,
+            role,
+            content: text,
+            parts: [{ type: 'text', text }],
+          } as ChatMessage
+          if (idx >= 0) next[idx] = { ...next[idx], ...entry }
+          else next.push(entry)
+        }
+        upsert('voice-live-user', 'user', turn.userText)
+        upsert('voice-live-assistant', 'assistant', turn.agentText)
+        return next
+      })
+    },
+    [setMessages]
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onPersisted = () =>
+      setMessages((prev) => prev.filter((m) => !String(m.id).startsWith('voice-live-')))
+    window.addEventListener('automatos:chat-changed', onPersisted)
+    return () => window.removeEventListener('automatos:chat-changed', onPersisted)
+  }, [setMessages])
 
   const regenerate = () => reload()
 
