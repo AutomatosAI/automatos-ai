@@ -84,10 +84,43 @@ def _workspace_steward(db: Session, ws_uuid: uuid.UUID) -> Optional[int]:
     return int(row[0]) if row else None
 
 
+def _voice_chat_title(first_text: str, attempt: int) -> str:
+    """chats carries UNIQUE (user_id, title): a fixed 'Voice call' title
+    500s the SECOND call a user ever makes. Stamp the start time so every
+    call is its own thread; a same-minute repeat gets a numbered suffix."""
+    base = (first_text or "").strip()[:50] or f"Voice call — {datetime.utcnow():%b %d, %H:%M}"
+    return base if attempt == 0 else f"{base[:44]} ({attempt + 1})"
+
+
+def create_voice_chat(db: Session, *, user_id: int, workspace_id, first_text: str = ""):
+    """Create the thread a live call lands in, immune to unique_user_title.
+
+    No pre-SELECT (test doubles stub the session); collisions surface as
+    IntegrityError on commit and retry with a suffixed title."""
+    from sqlalchemy.exc import IntegrityError
+
+    from consumers.chatbot.service import ChatService
+
+    last_err: Optional[IntegrityError] = None
+    for attempt in range(3):
+        try:
+            return ChatService(db).create_chat(
+                user_id=int(user_id),
+                title=_voice_chat_title(first_text, attempt),
+                workspace_id=workspace_id,
+            )
+        except IntegrityError as err:
+            db.rollback()
+            last_err = err
+            logger.warning(
+                "voice_chat_title_collision user=%s attempt=%s", user_id, attempt
+            )
+    raise last_err  # three suffixed collisions in one minute — genuinely stuck
+
+
 def _fallback_chat(db: Session, row, ws_uuid: uuid.UUID, user_id: int, first_text: str) -> str:
     """Find-or-create the per-call fallback chat, remembered on the row so
     every later turn of this call lands in the SAME thread."""
-    from consumers.chatbot.service import ChatService
     from core.models.core import Chat
 
     if row.fallback_chat_id:
@@ -102,11 +135,7 @@ def _fallback_chat(db: Session, row, ws_uuid: uuid.UUID, user_id: int, first_tex
         except ValueError:
             pass
 
-    chat = ChatService(db).create_chat(
-        user_id=int(user_id),
-        title=(first_text or "Voice call")[:50],
-        workspace_id=ws_uuid,
-    )
+    chat = create_voice_chat(db, user_id=int(user_id), workspace_id=ws_uuid, first_text=first_text)
     row.fallback_chat_id = str(chat.id)
     db.commit()
     return str(chat.id)

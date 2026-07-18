@@ -31,13 +31,19 @@ interface PresenceOrbProps {
   fullBleed?: boolean
 }
 
-function warningHsl(): { h: number; s: number; l: number } {
+interface Hsl {
+  h: number
+  s: number
+  l: number
+}
+
+function cssHsl(varName: string, fallback: Hsl): Hsl {
   if (typeof window !== 'undefined') {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue('--warning').trim()
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
     const m = raw.match(/^([\d.]+)\s+([\d.]+)%\s+([\d.]+)%$/)
     if (m) return { h: Number(m[1]), s: Number(m[2]), l: Number(m[3]) }
   }
-  return { h: 38, s: 92, l: 50 }
+  return fallback
 }
 
 /** Deterministic 0..1 hash per index — stable "randomness", no Math.random. */
@@ -46,17 +52,50 @@ function hash(i: number): number {
   return x - Math.floor(x)
 }
 
-const SLOTS = 60 // half-width history slots (centre → edge)
-const BAR_SPACING = 5.5
+/** Pre-baked soft radial sprite: colour stops fading to transparent. */
+function bakeRadialSprite(size: number, stops: Array<[number, string]>): HTMLCanvasElement {
+  const c = document.createElement('canvas')
+  c.width = size
+  c.height = size
+  const sctx = c.getContext('2d')
+  if (sctx) {
+    const g = sctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+    for (const [at, col] of stops) g.addColorStop(at, col)
+    sctx.fillStyle = g
+    sctx.fillRect(0, 0, size, size)
+  }
+  return c
+}
 
-export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }: PresenceOrbProps) {
+const BAR_SPACING = 2.6
+const MAX_SLOTS = 420
+const INTRO_MS = 400
+const ENDED_DECAY_MS = 450
+const HORIZON_GLIDE = 0.06 // per-frame lerp (~600ms settle at 60fps)
+
+// State → master intensity. The MODE of motion is decided in drawFrame();
+// this only scales how present the room feels.
+const STATE_INTENSITY: Record<OrbState, number> = {
+  speaking: 1,
+  listening: 0.8,
+  thinking: 0.9,
+  connecting: 0.55,
+  idle: 0.5,
+  error: 0.32,
+  ended: 0,
+}
+
+export function PresenceOrb({ state, levelsRef, horizon = 0.56 }: PresenceOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stateRef = useRef<OrbState>(state)
   stateRef.current = state
+  const horizonTargetRef = useRef(horizon)
+  horizonTargetRef.current = horizon
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    const host = canvas?.parentElement
+    if (!canvas || !host) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
@@ -90,6 +129,8 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
     let smoothUser = 0
     let energyEnv = 0 // slow envelope: the room keeps glowing between words
     let raf = 0
+    let lastT = 0
+    let stopped = false
 
     // ------------------------------------------------------------------
     // THE REFERENCE (fullBleed): woven ribbon bundles + tall bars + floor
@@ -279,16 +320,22 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
-  }, [levelsRef, size, fullBleed])
+
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [levelsRef])
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ width: '100%', maxWidth: fullBleed ? undefined : 720, height: size, display: 'block' }}
       role="img"
       aria-hidden="true"
       data-orb-state={state}
+      className="absolute inset-0 h-full w-full"
     />
   )
 }
+
+export default PresenceOrb
