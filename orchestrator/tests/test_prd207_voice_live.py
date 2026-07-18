@@ -1161,14 +1161,15 @@ def test_ws_user_speaks_first_then_answers_with_call_details_vars(monkeypatch):
     )
     asyncio.run(vr.retell_llm_websocket(ws, "call_ws1"))
 
-    # handshake order: config FIRST (ask for call_details — without it Retell
-    # never sends the vars), then the empty floor-yielding response
+    # handshake per Retell's demo: config FIRST; the empty floor-yielding
+    # begin goes out only AFTER call_details arrives (not at accept)
     assert ws.sent[0] == {
         "response_type": "config", "config": {"auto_reconnect": True, "call_details": True},
     }
-    assert ws.sent[1] == {
-        "response_type": "response", "response_id": 0, "content": "", "content_complete": True,
-    }
+    begin = {"response_type": "response", "response_id": 0, "content": "", "content_complete": True}
+    assert begin in ws.sent
+    ping_reply_idx = next(i for i, m in enumerate(ws.sent) if m.get("response_type") == "ping_pong")
+    assert ws.sent.index(begin) > ping_reply_idx  # begin followed call_details, not accept
     # ping echoed
     assert {"response_type": "ping_pong", "timestamp": 123} in ws.sent
     # the turn used the call_details vars + path call_id, and frames are wrapped
