@@ -52,6 +52,17 @@ def voice_source(role: str) -> Dict[str, Any]:
     }
 
 
+# Trailing characters Retell's interim transcripts churn as a sentence grows —
+# stripped before the grow-aware prefix compare so "…chat?" still matches
+# "…chat, or is it mixed?".
+_UTTERANCE_TRAILING = " \t\r\n.?!,;:…—–-"
+
+
+def _utterance_stem(s: str) -> str:
+    """One utterance's comparable stem: trailing punctuation/whitespace off."""
+    return (s or "").rstrip(_UTTERANCE_TRAILING)
+
+
 @dataclass(frozen=True)
 class CallBinding:
     chat_id: str  # the thread this turn writes into
@@ -299,7 +310,13 @@ def upsert_voice_user_message(db: Session, *, chat_id: str, workspace_id: str, t
             if isinstance(part, dict) and part.get("type") == "text":
                 old = str(part.get("text") or "")
                 break
-        if old and (text.startswith(old) or old.startswith(text)):
+        # Retell's interim transcripts drift in TRAILING punctuation as the
+        # sentence continues ("…voice chat?" → "…voice chat, or is it mixed?"),
+        # so the strict prefix check missed every punctuation-terminated
+        # interim and stacked it as a new message. Compare on the stem (trailing
+        # punctuation/whitespace stripped); keep the longer ORIGINAL text.
+        stem_old, stem_new = _utterance_stem(old), _utterance_stem(text)
+        if stem_old and (stem_new.startswith(stem_old) or stem_old.startswith(stem_new)):
             longer = text if len(text) >= len(old) else old
             last.parts = [{"type": "text", "text": longer}]  # rebuild, never mutate
             db.commit()
