@@ -49,6 +49,7 @@ import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 // presence up. The SSE lane also mounts here so voice/background messages
 // land live (chat_changed → the useChat merge listener).
 import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
+import { VoiceErrorBoundary } from '@/components/voice/VoiceErrorBoundary'
 import { PresenceOrb } from '@/components/voice/PresenceOrb'
 import type { VoiceLevels } from '@/hooks/use-retell-call'
 import type { OrbState } from '@/lib/voice/orb-state'
@@ -1181,11 +1182,13 @@ export function Chat({
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.5 }}
               >
-                <PresenceOrb
-                  state={voicePresence}
-                  levelsRef={voiceLevels}
-                  horizon={showWelcomeCard ? 0.56 : 0.74}
-                />
+                <VoiceErrorBoundary>
+                  <PresenceOrb
+                    state={voicePresence}
+                    levelsRef={voiceLevels}
+                    horizon={showWelcomeCard ? 0.56 : 0.74}
+                  />
+                </VoiceErrorBoundary>
               </motion.div>
             )}
           </AnimatePresence>
@@ -1228,6 +1231,7 @@ export function Chat({
                     conversation surface, spoken or typed. */}
                 <AnimatePresence>
                   {isLiveMode && (
+                    <VoiceErrorBoundary>
                     <LiveVoiceMode
                       chatId={hasSentMessage ? activeChatId : undefined}
                       agentId={selectedAgentId}
@@ -1240,6 +1244,7 @@ export function Chat({
                         setVoicePresence('ended')
                       }}
                     />
+                    </VoiceErrorBoundary>
                   )}
                 </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
@@ -1410,6 +1415,7 @@ export function Chat({
                     conversation surface, spoken or typed. */}
                 <AnimatePresence>
                   {isLiveMode && (
+                    <VoiceErrorBoundary>
                     <LiveVoiceMode
                       chatId={hasSentMessage ? activeChatId : undefined}
                       agentId={selectedAgentId}
@@ -1422,6 +1428,7 @@ export function Chat({
                         setVoicePresence('ended')
                       }}
                     />
+                    </VoiceErrorBoundary>
                   )}
                 </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
