@@ -1282,12 +1282,24 @@ class Config:
     VOICE_LIVE_TURN_HISTORY_MESSAGES: int = int(
         os.getenv("VOICE_LIVE_TURN_HISTORY_MESSAGES", "12")
     )
+    # If the brain has produced NO first frame this many seconds into a turn,
+    # speak a short honest acknowledgment so the caller hears life instead of
+    # dead air (0 disables the watchdog; empty text keeps the log but says
+    # nothing). Retell severs a socket after ~5s without its ping_pong echoed,
+    # so silence here used to read as a hang even when the turn was healthy.
+    VOICE_LIVE_FIRST_FRAME_ACK_SECONDS: float = float(
+        os.getenv("VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", "2.5")
+    )
+    VOICE_LIVE_FIRST_FRAME_ACK_TEXT: str = os.getenv(
+        "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment."
+    )
     # The public host Retell must reach for the custom-LLM socket + events
     # webhook (one-click arming builds the URLs from it). Railway injects
     # RAILWAY_PUBLIC_DOMAIN; override with PUBLIC_API_HOST where that's absent.
-    PUBLIC_API_HOST: str = os.getenv(
-        "PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app")
-    )
+    PUBLIC_API_HOST: str = (
+        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
+        or "api.automatos.app"
+    ).strip().rstrip("/")
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.
