@@ -22,8 +22,10 @@ is a cross-repo automatos-voice coordination (§8-Qd/Qe), NOT done here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import threading
 import uuid
 from typing import Any, AsyncIterator, Optional
 
@@ -463,7 +465,99 @@ async def arm_voice_live(
     return {"armed": True, "platform_enabled": True, "agent_id": agent_id}
 
 
+# The worker loop gets this long after a turn settles to run its finallys
+# (closing the inner generator, its sessions) before the loop is stopped.
+_WORKER_STOP_GRACE_SECONDS = 2.0
+# On socket exit, an in-flight turn gets this long to finish in the
+# foreground; past it the turn keeps running detached (shielded) so the
+# reply still persists to the thread.
+_TURN_EXIT_GRACE_SECONDS = 3.0
+# A cross-thread frame hand-off that cannot land this long means the caller
+# stopped draining (dead socket, cancelled turn) — the pump gives up.
+_BRIDGE_PUT_TIMEOUT_SECONDS = 10.0
+_STREAM_DONE = object()
+_STREAM_ERROR = object()
+
+
 async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str, Any]]:
+    """Frames for one turn, generated on a DEDICATED thread + event loop.
+
+    The agent loop inside ``_agent_retell_stream_inner`` performs synchronous
+    I/O (ORM reads, memory retrieval, embedding and model-gateway calls). Run
+    on the WS event loop those blocks freeze it — and a frozen loop stops
+    echoing Retell's 2s ``ping_pong``, which severs the socket after ~5s of
+    pong silence (their keepalive contract, up to 2 auto-reconnects). First
+    armed morning: every brained turn died code=1006 ~8s after
+    ``response_required`` with frames=0 — the reply was killed mid-generation
+    by our own starved loop. Isolating the brain on a worker loop keeps THIS
+    loop answering pings no matter what the turn is doing.
+
+    Frames hop back through a bounded queue; closing this generator cancels
+    the worker task, whose own ``finally`` closes the inner generator
+    (sessions and all). The worker thread is daemonic and bounded by the put
+    timeout, so an abandoned turn can never pin the process.
+    """
+    caller_loop = asyncio.get_running_loop()
+    frames: asyncio.Queue = asyncio.Queue(maxsize=8)
+    worker_loop = asyncio.new_event_loop()
+
+    def _worker_main() -> None:
+        try:
+            worker_loop.run_forever()
+        finally:
+            with contextlib.suppress(Exception):
+                worker_loop.close()
+
+    worker = threading.Thread(
+        target=_worker_main,
+        name=f"voice-turn-{(req.call_id or 'call')[-8:]}-{req.response_id}",
+        daemon=True,
+    )
+    worker.start()
+
+    async def pump() -> None:
+        inner = _agent_retell_stream_inner(req)
+        try:
+            async for frame in inner:
+                asyncio.run_coroutine_threadsafe(frames.put(frame), caller_loop).result(
+                    timeout=_BRIDGE_PUT_TIMEOUT_SECONDS
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — re-raised on the caller loop
+            with contextlib.suppress(Exception):
+                asyncio.run_coroutine_threadsafe(
+                    frames.put((_STREAM_ERROR, exc)), caller_loop
+                ).result(timeout=_BRIDGE_PUT_TIMEOUT_SECONDS)
+            return
+        finally:
+            with contextlib.suppress(BaseException):
+                await inner.aclose()
+        with contextlib.suppress(Exception):
+            asyncio.run_coroutine_threadsafe(frames.put(_STREAM_DONE), caller_loop).result(
+                timeout=_BRIDGE_PUT_TIMEOUT_SECONDS
+            )
+
+    turn = asyncio.run_coroutine_threadsafe(pump(), worker_loop)
+    try:
+        while True:
+            item = await frames.get()
+            if item is _STREAM_DONE:
+                break
+            if isinstance(item, tuple) and len(item) == 2 and item[0] is _STREAM_ERROR:
+                raise item[1]
+            yield item
+    finally:
+        # Normal end, aclose() or caller cancellation all land here: cancel
+        # the worker task (propagates into the inner generator's finally) and
+        # stop the worker loop once those finallys have had their grace.
+        turn.cancel()
+        worker_loop.call_soon_threadsafe(
+            worker_loop.call_later, _WORKER_STOP_GRACE_SECONDS, worker_loop.stop
+        )
+
+
+async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dict[str, Any]]:
     """Drive Auto's agent loop for one Retell turn and yield Retell frames.
 
     PRD-207 S2 rewired this onto the mint-row trust boundary
@@ -657,11 +751,55 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
             return False
 
     async def respond(req: RetellLLMRequest) -> None:
+        from time import monotonic
+
+        started = monotonic()
+        first_frame_at: Optional[float] = None
+        sendable = True
+
+        # Slow-turn honesty: if the brain has said NOTHING by the deadline,
+        # speak a short acknowledgment — the caller hears life (and the log
+        # gains the smoking gun) instead of dead air while tools run.
+        ack_task: asyncio.Task | None = None
+        ack_seconds = float(config.VOICE_LIVE_FIRST_FRAME_ACK_SECONDS or 0)
+        ack_text = str(config.VOICE_LIVE_FIRST_FRAME_ACK_TEXT or "").strip()
+        if ack_seconds > 0:
+            async def _slow_turn_ack() -> None:
+                await asyncio.sleep(ack_seconds)
+                logger.warning(
+                    "voice_live_ws_turn_slow call=%s rid=%s waited_ms=%d",
+                    call_id, req.response_id, int((monotonic() - started) * 1000),
+                )
+                if ack_text:
+                    await safe_send(
+                        wrap_ws_response(
+                            {
+                                "response_id": req.response_id,
+                                "content": ack_text + " ",
+                                "content_complete": False,
+                            }
+                        )
+                    )
+
+            ack_task = asyncio.create_task(_slow_turn_ack())
+
         try:
             async for frame in _agent_retell_stream(req):
+                if first_frame_at is None:
+                    first_frame_at = monotonic()
+                    if ack_task is not None:
+                        ack_task.cancel()
+                    logger.info(
+                        "voice_live_ws_first_frame call=%s rid=%s ms=%d",
+                        call_id, req.response_id, int((first_frame_at - started) * 1000),
+                    )
                 stats["frames"] += 1
-                if not await safe_send(wrap_ws_response(frame)):
-                    return
+                if sendable and not await safe_send(wrap_ws_response(frame)):
+                    # The socket died mid-reply (Retell reconnects live calls).
+                    # Keep DRAINING: the streaming service persists the reply at
+                    # stream end, so the words still land in the thread and the
+                    # open chat hears them over SSE — only the TTS leg is lost.
+                    sendable = False
         except asyncio.CancelledError:
             # Superseded turn (barge-in): Retell has moved on — stop quietly.
             raise
@@ -672,6 +810,9 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
                     {"response_id": req.response_id, "content": "", "content_complete": True}
                 )
             )
+        finally:
+            if ack_task is not None and not ack_task.done():
+                ack_task.cancel()
 
     try:
         # Handshake per Retell's own demo: config first (asks for
@@ -732,8 +873,14 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
             "voice_live_ws_died call=%s err=%s", call_id, type(exc).__name__, exc_info=True
         )
     finally:
+        # The socket is gone but the brain may be mid-reply. Do NOT cancel it:
+        # give it a bounded grace to finish (the reply persists to the thread
+        # and reaches the open chat over SSE); past the grace the shield lets
+        # it run detached to the same end. Killing it here was how a severed
+        # socket turned a healthy generation into silence.
         if speaking is not None and not speaking.done():
-            speaking.cancel()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(asyncio.shield(speaking), _TURN_EXIT_GRACE_SECONDS)
         logger.info(
             "voice_live_ws_summary call=%s turns=%s frames=%s pings=%s updates=%s begun=%s",
             call_id, stats["turns"], stats["frames"], stats["pings"], stats["updates"], begun,

@@ -1556,3 +1556,228 @@ def test_assistant_stamp_bounded_to_turn_window(voice_workspace, new_session):
     }
     assert rows[old] is None  # the pre-turn text reply keeps no voice badge
     assert rows[fresh] == {"origin": "voice", "label": "Auto · voice"}
+
+
+# ---------------------------------------------------------------------------
+# S2 · WS liveness — the brain must never starve the socket's event loop
+# (first armed morning: sync I/O inside the turn froze the loop, Retell's 2s
+# ping_pong went unanswered ~5s, the socket died 1006 mid-generation with
+# frames=0 — every brained turn was killed by our own starved loop).
+# ---------------------------------------------------------------------------
+
+class _TailWaitWebSocket(_FakeWebSocket):
+    """Keeps the socket open briefly after the script drains so in-flight
+    respond()/watchdog tasks land their sends before the disconnect."""
+
+    def __init__(self, incoming, tail_wait: float):
+        super().__init__(incoming)
+        self.tail_wait = tail_wait
+
+    async def receive_json(self):
+        from fastapi import WebSocketDisconnect
+
+        await asyncio.sleep(0)
+        if not self.incoming:
+            await asyncio.sleep(self.tail_wait)
+            raise WebSocketDisconnect(1000)
+        return self.incoming.pop(0)
+
+
+class _DyingWebSocket(_FakeWebSocket):
+    """send_json severs once the turn has sent `fail_after` response frames."""
+
+    def __init__(self, incoming, fail_after: int):
+        super().__init__(incoming)
+        self.fail_after = fail_after
+        self._turn_sends = 0
+
+    async def send_json(self, data):
+        if data.get("response_type") == "response" and data.get("response_id") == 1:
+            self._turn_sends += 1
+            if self._turn_sends > self.fail_after:
+                raise RuntimeError("socket severed")
+        self.sent.append(data)
+
+
+def _turn_msg(rid: int, text: str = "hey auto") -> dict:
+    return {
+        "interaction_type": "response_required",
+        "response_id": rid,
+        "transcript": [{"role": "user", "content": text}],
+    }
+
+
+_CALL_DETAILS_MSG = {
+    "interaction_type": "call_details",
+    "call": {"retell_llm_dynamic_variables": {"workspace_id": "ws-9"}},
+}
+
+
+def test_stream_bridge_isolates_the_brain_on_a_worker_thread(monkeypatch):
+    """The REAL _agent_retell_stream runs the turn on a dedicated thread —
+    the WS loop stays free to echo Retell's pings while tools grind."""
+    import threading as _threading
+
+    import api.voice_retell as vr
+    from modules.voice.providers.retell import RetellLLMRequest
+
+    seen = {}
+
+    async def fake_inner(req):
+        seen["thread"] = _threading.get_ident()
+        yield {"response_id": req.response_id, "content": "hi", "content_complete": False}
+        yield {"response_id": req.response_id, "content": "", "content_complete": True}
+
+    monkeypatch.setattr(vr, "_agent_retell_stream_inner", fake_inner)
+    req = RetellLLMRequest(
+        response_id=1, user_text="hey", interaction_type="response_required",
+        workspace_id="ws-9", agent_id=None, call_id="call_bridge1",
+    )
+
+    async def run():
+        return [f async for f in vr._agent_retell_stream(req)]
+
+    frames = asyncio.run(run())
+    assert [f["content"] for f in frames] == ["hi", ""]
+    assert seen["thread"] != _threading.get_ident()  # off the caller's thread
+
+
+def test_stream_bridge_propagates_inner_errors(monkeypatch):
+    import api.voice_retell as vr
+    from modules.voice.providers.retell import RetellLLMRequest
+
+    async def fake_inner(req):
+        yield {"response_id": 1, "content": "a", "content_complete": False}
+        raise RuntimeError("brain fault")
+
+    monkeypatch.setattr(vr, "_agent_retell_stream_inner", fake_inner)
+    req = RetellLLMRequest(
+        response_id=1, user_text="hey", interaction_type="response_required",
+        workspace_id="ws-9", agent_id=None, call_id="call_bridge2",
+    )
+
+    async def run():
+        return [f async for f in vr._agent_retell_stream(req)]
+
+    with pytest.raises(RuntimeError, match="brain fault"):
+        asyncio.run(run())
+
+
+def test_stream_bridge_close_cancels_the_inner_turn(monkeypatch):
+    """Closing the bridge (barge-in cancel) reaches the worker: the inner
+    generator's finally runs, so sessions and telemetry never leak."""
+    import threading as _threading
+
+    import api.voice_retell as vr
+    from modules.voice.providers.retell import RetellLLMRequest
+
+    inner_finally = _threading.Event()
+
+    async def fake_inner(req):
+        try:
+            yield {"response_id": 1, "content": "first", "content_complete": False}
+            await asyncio.Event().wait()  # parks until cancelled
+        finally:
+            inner_finally.set()
+
+    monkeypatch.setattr(vr, "_agent_retell_stream_inner", fake_inner)
+    req = RetellLLMRequest(
+        response_id=1, user_text="hey", interaction_type="response_required",
+        workspace_id="ws-9", agent_id=None, call_id="call_bridge3",
+    )
+
+    async def run():
+        agen = vr._agent_retell_stream(req)
+        first = await agen.__anext__()
+        await agen.aclose()
+        return first
+
+    first = asyncio.run(run())
+    assert first["content"] == "first"
+    assert inner_finally.wait(timeout=3.0)
+
+
+def test_ws_slow_first_frame_speaks_an_honest_ack(monkeypatch):
+    """No first frame by the deadline → ONE short spoken acknowledgment
+    (content_complete=False, same rid) — then the real answer streams."""
+    import api.voice_retell as vr
+    from config import config as app_config
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
+    monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", 0.05)
+    monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment.")
+
+    async def slow_stream(req):
+        await asyncio.sleep(0.25)
+        yield {"response_id": req.response_id, "content": "the answer", "content_complete": True}
+
+    monkeypatch.setattr(vr, "_agent_retell_stream", slow_stream)
+
+    ws = _TailWaitWebSocket([_CALL_DETAILS_MSG, _turn_msg(1)], tail_wait=0.6)
+    asyncio.run(vr.retell_llm_websocket(ws, "call_slow"))
+
+    turn_frames = [
+        m for m in ws.sent
+        if m.get("response_type") == "response" and m.get("response_id") == 1
+    ]
+    assert turn_frames, "the turn sent nothing at all"
+    assert turn_frames[0]["content"].startswith("One moment.")
+    assert turn_frames[0]["content_complete"] is False
+    assert any(m.get("content") == "the answer" for m in turn_frames)
+    acks = [m for m in turn_frames if "One moment." in str(m.get("content"))]
+    assert len(acks) == 1  # the watchdog speaks once, never nags
+
+
+def test_ws_fast_turn_sends_no_ack(monkeypatch):
+    import api.voice_retell as vr
+    from config import config as app_config
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
+    monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", 0.3)
+    monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment.")
+
+    async def fast_stream(req):
+        yield {"response_id": req.response_id, "content": "instant", "content_complete": True}
+
+    monkeypatch.setattr(vr, "_agent_retell_stream", fast_stream)
+
+    ws = _TailWaitWebSocket([_CALL_DETAILS_MSG, _turn_msg(1)], tail_wait=0.05)
+    asyncio.run(vr.retell_llm_websocket(ws, "call_fast_noack"))
+
+    assert not any("One moment." in str(m.get("content")) for m in ws.sent)
+    assert any(m.get("content") == "instant" for m in ws.sent)
+
+
+def test_ws_dead_socket_mid_turn_still_drains_the_brain(monkeypatch):
+    """A severed socket mid-reply must NOT kill the generation: the turn
+    drains to its natural end (the streaming service persists the reply into
+    the thread; only the TTS leg is lost) and later frames are simply not
+    sent."""
+    import api.voice_retell as vr
+    from config import config as app_config
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(vr, "get_db_session", _ws_db(minted=True))
+    monkeypatch.setattr(app_config, "VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", 0)
+
+    drained = []
+
+    async def stream(req):
+        yield {"response_id": 1, "content": "a", "content_complete": False}
+        yield {"response_id": 1, "content": "b", "content_complete": False}
+        yield {"response_id": 1, "content": "", "content_complete": True}
+        drained.append(True)  # reached ONLY if the async-for pulled past every frame
+
+    monkeypatch.setattr(vr, "_agent_retell_stream", stream)
+
+    ws = _DyingWebSocket([_CALL_DETAILS_MSG, _turn_msg(1)], fail_after=1)
+    asyncio.run(vr.retell_llm_websocket(ws, "call_severed"))
+
+    assert drained == [True]
+    turn_frames = [
+        m for m in ws.sent
+        if m.get("response_type") == "response" and m.get("response_id") == 1
+    ]
+    assert [m["content"] for m in turn_frames] == ["a"]  # sends stopped, drain did not

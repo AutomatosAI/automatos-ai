@@ -13,6 +13,12 @@ import {
   rmsLevel,
   type OrbSnapshot,
 } from '@/lib/voice/orb-state'
+import {
+  MIC_SILENT_AFTER_MS,
+  MIC_SILENT_PEAK,
+  feedMicLevel,
+  initialMicHealth,
+} from '@/lib/voice/mic-health'
 
 afterEach(() => {
   cleanup()
@@ -81,6 +87,43 @@ describe('PRD-207 — orbReducer', () => {
 })
 
 // ---------------------------------------------------------------------------
+// mic-health — the silent-capture detector (pure, the orb-state discipline)
+// ---------------------------------------------------------------------------
+
+describe('PRD-207 — feedMicLevel', () => {
+  it('a full window of digital silence raises silent', () => {
+    let h = initialMicHealth(1_000)
+    h = feedMicLevel(h, 0, 1_060)
+    expect(h.silent).toBe(false) // not yet — the window must fill
+    h = feedMicLevel(h, 0.0001, 1_000 + MIC_SILENT_AFTER_MS)
+    expect(h.silent).toBe(true)
+  })
+
+  it('any real signal clears silent instantly and restarts the window', () => {
+    let h = initialMicHealth(0)
+    h = feedMicLevel(h, 0, MIC_SILENT_AFTER_MS) // silent
+    expect(h.silent).toBe(true)
+    h = feedMicLevel(h, MIC_SILENT_PEAK * 3, MIC_SILENT_AFTER_MS + 60)
+    expect(h.silent).toBe(false)
+    expect(h.windowStartAt).toBe(MIC_SILENT_AFTER_MS + 60)
+  })
+
+  it('a quiet-but-live mic (noise floor above the threshold) never trips it', () => {
+    let h = initialMicHealth(0)
+    for (let t = 60; t <= MIC_SILENT_AFTER_MS * 2; t += 60) {
+      h = feedMicLevel(h, MIC_SILENT_PEAK * 1.5, t)
+    }
+    expect(h.silent).toBe(false)
+  })
+
+  it('is immutable — feeding never mutates the previous snapshot', () => {
+    const first = initialMicHealth(0)
+    feedMicLevel(first, 0, 2_000)
+    expect(first).toEqual(initialMicHealth(0))
+  })
+})
+
+// ---------------------------------------------------------------------------
 // LiveVoiceMode — every failure state has designed copy; controls are named
 // ---------------------------------------------------------------------------
 
@@ -94,6 +137,8 @@ const hookState = {
   refusal: null as string | null,
   error: null as string | null,
   isLive: true,
+  micSilent: false,
+  inputDevices: [] as Array<{ deviceId: string; label: string }>,
   start: vi.fn(async () => {}),
   stop: vi.fn(),
   toggleMute: vi.fn(),
@@ -147,5 +192,47 @@ describe('PRD-207 — LiveVoiceMode', () => {
     // caption strip under the wave (Gerard: "why am I seeing two sources")
     expect(screen.queryByText(/where did we leave off/)).toBeNull()
     expect(screen.queryByText(/mid-way through the social pack/)).toBeNull()
+  })
+
+  it('a silent capture raises the honest banner with a way to pick another mic', () => {
+    Object.assign(hookState, {
+      refusal: null, error: null, isLive: true, muted: false,
+      orbState: 'listening', stateLabel: 'Auto is listening', captions: [],
+      micSilent: true,
+      inputDevices: [
+        { deviceId: 'default', label: 'MacBook Pro Microphone' },
+        { deviceId: 'iphone-1', label: "Gerard's iPhone" },
+      ],
+    })
+    render(<LiveVoiceMode onExit={() => {}} />)
+    expect(screen.getByTestId('mic-silent-banner')).toBeTruthy()
+    expect(screen.getByText(/microphone is silent/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Pick another mic' })).toBeTruthy()
+  })
+
+  it('a healthy capture shows no banner; the strip offers the device picker', () => {
+    Object.assign(hookState, {
+      refusal: null, error: null, isLive: true, muted: false,
+      orbState: 'listening', stateLabel: 'Auto is listening', captions: [],
+      micSilent: false,
+      inputDevices: [
+        { deviceId: 'default', label: 'MacBook Pro Microphone' },
+        { deviceId: 'usb-1', label: 'USB Interface' },
+      ],
+    })
+    render(<LiveVoiceMode onExit={() => {}} />)
+    expect(screen.queryByTestId('mic-silent-banner')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Choose microphone' })).toBeTruthy()
+  })
+
+  it('one input device = nothing to choose, no picker chrome', () => {
+    Object.assign(hookState, {
+      refusal: null, error: null, isLive: true, muted: false,
+      orbState: 'listening', stateLabel: 'Auto is listening', captions: [],
+      micSilent: false,
+      inputDevices: [{ deviceId: 'default', label: 'MacBook Pro Microphone' }],
+    })
+    render(<LiveVoiceMode onExit={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Choose microphone' })).toBeNull()
   })
 })

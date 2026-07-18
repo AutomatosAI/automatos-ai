@@ -12,13 +12,26 @@
  * state · timer · mic · mute · end — plus honest failure copy.
  */
 
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Mic, MicOff, PhoneOff, X } from 'lucide-react'
 import type { MutableRefObject } from 'react'
 import { Button } from '@/components/ui/button'
+import { MicDevicePicker, MicSilentBanner } from '@/components/voice/MicHealthControl'
 import { useRetellCall, type VoiceLevels } from '@/hooks/use-retell-call'
 import type { OrbState } from '@/lib/voice/orb-state'
+
+/** The capture device survives page loads — a mic that worked stays picked. */
+const CAPTURE_DEVICE_STORAGE_KEY = 'automatos.voice.capture-device'
+
+function readStoredCaptureDevice(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(CAPTURE_DEVICE_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
 
 interface LiveVoiceModeProps {
   /** The on-screen thread to bind — omit when the chat has no server row yet. */
@@ -50,6 +63,8 @@ export function LiveVoiceMode({
   onLevelsRef,
   onExit,
 }: LiveVoiceModeProps) {
+  const [captureDeviceId, setCaptureDeviceId] = useState<string | null>(readStoredCaptureDevice)
+
   const {
     orbState,
     stateLabel,
@@ -59,10 +74,12 @@ export function LiveVoiceMode({
     refusal,
     error,
     isLive,
+    micSilent = false,
+    inputDevices = [],
     start,
     stop,
     toggleMute,
-  } = useRetellCall({ chatId, agentId, onChatId, onLiveTurn })
+  } = useRetellCall({ chatId, agentId, captureDeviceId, onChatId, onLiveTurn })
 
   // Live mode IS the call: mounting connects, one gesture from the Live pill.
   useEffect(() => {
@@ -74,6 +91,41 @@ export function LiveVoiceMode({
   useEffect(() => {
     onPresence?.(orbState)
   }, [orbState, onPresence])
+
+  // A stored device that no longer exists must not pin the call to nothing.
+  useEffect(() => {
+    if (!captureDeviceId || inputDevices.length === 0) return
+    if (inputDevices.some((d) => d.deviceId === captureDeviceId)) return
+    try {
+      window.localStorage.removeItem(CAPTURE_DEVICE_STORAGE_KEY)
+    } catch {
+      // storage is a nicety
+    }
+    setCaptureDeviceId(null)
+  }, [captureDeviceId, inputDevices])
+
+  const pickDevice = (deviceId: string) => {
+    try {
+      window.localStorage.setItem(CAPTURE_DEVICE_STORAGE_KEY, deviceId)
+    } catch {
+      // storage is a nicety
+    }
+    setCaptureDeviceId(deviceId)
+  }
+
+  // Rebinding the SDK's capture needs a fresh call — restart on device change
+  // (skipping mount, where the stored device rides the initial start()).
+  const deviceRunRef = useRef(true)
+  useEffect(() => {
+    if (deviceRunRef.current) {
+      deviceRunRef.current = false
+      return
+    }
+    stop()
+    const timer = setTimeout(() => void start(), 200)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captureDeviceId])
 
   const handleExit = () => {
     stop()
@@ -130,6 +182,13 @@ export function LiveVoiceMode({
               )}
             </Button>
           )}
+          {isLive && (
+            <MicDevicePicker
+              devices={inputDevices}
+              activeDeviceId={captureDeviceId}
+              onPickDevice={pickDevice}
+            />
+          )}
           {isLive || orbState === 'connecting' ? (
             <Button
               variant="ghost"
@@ -152,6 +211,16 @@ export function LiveVoiceMode({
             </Button>
           )}
         </div>
+      )}
+
+      {/* The mic is bound to a device delivering silence — name it, fix it
+          here. The #1 cause of "recording forever, Auto never answers". */}
+      {!failure && isLive && micSilent && !muted && (
+        <MicSilentBanner
+          devices={inputDevices}
+          activeDeviceId={captureDeviceId}
+          onPickDevice={pickDevice}
+        />
       )}
 
       {/* Failure states — honest copy, always a way out. */}

@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { apiClient } from '@/lib/api-client'
+import { feedMicLevel, initialMicHealth } from '@/lib/voice/mic-health'
 import {
   ORB_STATE_LABELS,
   OrbSnapshot,
@@ -34,6 +35,11 @@ export interface CaptionLine {
   text: string
 }
 
+export interface MicInputDevice {
+  deviceId: string
+  label: string
+}
+
 export interface UseRetellCallReturn {
   orbState: OrbState
   stateLabel: string
@@ -46,6 +52,11 @@ export interface UseRetellCallReturn {
   refusal: string | null
   error: string | null
   isLive: boolean
+  /** True once the capture has delivered a full window of digital silence
+   * while unmuted — the mic is bound to a device that hears nothing. */
+  micSilent: boolean
+  /** Audio inputs the browser offers (labelled once permission exists). */
+  inputDevices: MicInputDevice[]
   start: () => Promise<void>
   stop: () => void
   toggleMute: () => void
@@ -55,6 +66,10 @@ interface UseRetellCallOptions {
   /** Bind the call to this on-screen thread (omit when the chat has no server row yet). */
   chatId?: string | null
   agentId?: number | null
+  /** Send the call's uplink from this capture device (default mic when null).
+   * The classic silent-call cause is the default binding to a continuity
+   * iPhone or a virtual/recorder device that delivers flat zeros. */
+  captureDeviceId?: string | null
   /** Fires with the call's thread id (server-created when none was bound) —
    * the chat screen points itself at it so voice and text are ONE
    * conversation, visible while speaking. */
@@ -68,6 +83,7 @@ interface UseRetellCallOptions {
 export function useRetellCall({
   chatId,
   agentId,
+  captureDeviceId,
   onChatId,
   onLiveTurn,
 }: UseRetellCallOptions): UseRetellCallReturn {
@@ -80,6 +96,8 @@ export function useRetellCall({
   const [muted, setMuted] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [micSilent, setMicSilentState] = useState(false)
+  const [inputDevices, setInputDevices] = useState<MicInputDevice[]>([])
 
   const levelsRef = useRef<VoiceLevels>({ agent: 0, user: 0 })
   const clientRef = useRef<any>(null)
@@ -89,6 +107,21 @@ export function useRetellCall({
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startedAtRef = useRef(0)
+  const micHealthRef = useRef(initialMicHealth(0))
+  const micSilentRef = useRef(false)
+  const mutedRef = useRef(false)
+
+  // The 60ms analyser tick may not re-render per sample — flip state only on
+  // actual transitions.
+  const setMicSilent = useCallback((value: boolean) => {
+    if (micSilentRef.current === value) return
+    micSilentRef.current = value
+    setMicSilentState(value)
+  }, [])
+
+  useEffect(() => {
+    mutedRef.current = muted
+  }, [muted])
 
   const dispatch = useCallback((event: Parameters<typeof orbReducer>[1]) => {
     setSnap((prev) => orbReducer(prev, event))
@@ -114,7 +147,33 @@ export function useRetellCall({
     }
     clientRef.current = null
     levelsRef.current = { agent: 0, user: 0 }
+    micHealthRef.current = initialMicHealth(0)
+    setMicSilent(false)
+  }, [setMicSilent])
+
+  /** Audio inputs, labelled once a permission grant exists. Listing is a
+   * nicety — the call works without it, so failures stay quiet. */
+  const refreshDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices()
+      setInputDevices(
+        all
+          .filter((d) => d.kind === 'audioinput' && d.deviceId)
+          .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Microphone ${i + 1}` }))
+      )
+    } catch {
+      // keep whatever list we had
+    }
   }, [])
+
+  useEffect(() => {
+    const media = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined
+    if (!media?.addEventListener) return
+    const onChange = () => void refreshDevices()
+    media.addEventListener('devicechange', onChange)
+    return () => media.removeEventListener('devicechange', onChange)
+  }, [refreshDevices])
 
   const stop = useCallback(() => {
     teardown()
@@ -232,6 +291,9 @@ export function useRetellCall({
       await client.startCall({
         accessToken: minted.access_token,
         emitRawAudioSamples: true,
+        // Explicit capture binding: the default device is exactly what fails
+        // silently (continuity iPhone, virtual/recorder inputs).
+        ...(captureDeviceId ? { captureDeviceId } : {}),
       })
     } catch (err: any) {
       const message = String(err?.message || err || '')
@@ -245,10 +307,21 @@ export function useRetellCall({
       return
     }
 
-    // 3 — the user's side of the orb: a local analyser tap (viz only; the SDK
-    // owns the mic track it sends).
+    // 3 — the user's side of the orb + the mic-health meter: a local analyser
+    // tap on the SAME device the SDK captures (viz + honesty; the SDK owns
+    // the track it actually sends).
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(
+          captureDeviceId
+            ? { audio: { deviceId: { exact: captureDeviceId } } }
+            : { audio: true }
+        )
+      } catch {
+        // The picked device vanished — meter the default rather than nothing.
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      }
       micStreamRef.current = stream
       const ctx = new AudioContext()
       audioCtxRef.current = ctx
@@ -256,6 +329,7 @@ export function useRetellCall({
       analyser.fftSize = 512
       ctx.createMediaStreamSource(stream).connect(analyser)
       const buf = new Float32Array(analyser.fftSize)
+      micHealthRef.current = initialMicHealth(Date.now())
       analyserTimerRef.current = setInterval(() => {
         analyser.getFloatTimeDomainData(buf)
         const level = rmsLevel(buf)
@@ -263,12 +337,25 @@ export function useRetellCall({
         if (level >= USER_SPEECH_THRESHOLD) {
           dispatch({ type: 'user_voice', now: Date.now() })
         }
+        // Mic health: muted silence is intentional — keep the window fresh;
+        // unmuted digital silence for a full window raises the banner.
+        if (mutedRef.current) {
+          micHealthRef.current = initialMicHealth(Date.now())
+          setMicSilent(false)
+        } else {
+          const next = feedMicLevel(micHealthRef.current, level, Date.now())
+          micHealthRef.current = next
+          setMicSilent(next.silent)
+        }
       }, 60)
     } catch {
       // No analyser is cosmetic-only: the call still works, the orb just
-      // won't react to the user's voice.
+      // won't react to the user's voice (and mic health stays unknown).
     }
-  }, [agentId, chatId, onChatId, dispatch, stop, teardown])
+
+    // Permission now exists → device labels are real.
+    void refreshDevices()
+  }, [agentId, chatId, captureDeviceId, onChatId, dispatch, stop, teardown, setMicSilent, refreshDevices])
 
   useEffect(() => () => teardown(), [teardown])
 
@@ -282,6 +369,8 @@ export function useRetellCall({
     refusal,
     error,
     isLive: snap.state === 'listening' || snap.state === 'thinking' || snap.state === 'speaking',
+    micSilent,
+    inputDevices,
     start,
     stop,
     toggleMute,
