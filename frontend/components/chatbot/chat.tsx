@@ -1184,17 +1184,17 @@ export function Chat({
           {isLiveMode && voiceLevels && (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 z-0 flex items-center overflow-hidden"
+              className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden"
               style={{
                 opacity: AMBIENT_OPACITY[voicePresence] ?? 0.12,
                 transition: 'opacity 900ms ease',
                 maskImage:
-                  'radial-gradient(ellipse 75% 65% at 50% 55%, black 35%, transparent 78%)',
+                  'radial-gradient(ellipse 90% 70% at 50% 52%, black 45%, transparent 82%)',
                 WebkitMaskImage:
-                  'radial-gradient(ellipse 75% 65% at 50% 55%, black 35%, transparent 78%)',
+                  'radial-gradient(ellipse 90% 70% at 50% 52%, black 45%, transparent 82%)',
               }}
             >
-              <PresenceOrb state={voicePresence} levelsRef={voiceLevels} size={440} />
+              <PresenceOrb state={voicePresence} levelsRef={voiceLevels} size={440} fullBleed />
             </div>
           )}
 
