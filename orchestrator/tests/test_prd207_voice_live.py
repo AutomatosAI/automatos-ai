@@ -519,10 +519,12 @@ def test_mint_reuses_the_voice_thread(monkeypatch):
 
 
 def test_voice_turn_has_the_full_brain(monkeypatch):
-    """ONE Auto: the spoken turn gets the SAME brain as the typed turn —
-    full tools + memory (no force_text_only lobotomy, no composio skip) and
-    the caller's REAL privilege tier — with only the history trimmed (rhythm,
-    not brain)."""
+    """ONE Auto: the spoken turn keeps the SAME BRAIN as the typed turn —
+    memory retrieval + core tools + the caller's REAL privilege tier, and
+    NEVER force_text_only (the flag that skips memory). Two measured
+    latency trims that do NOT touch the brain: history is trimmed (rhythm),
+    and Composio's third-party EXECUTION surface is skipped (the 20-90s
+    root cause — 58 tools/137 actions/24-36k tokens per call)."""
     import consumers.chatbot as chatbot_pkg
 
     import api.voice_retell as vr
@@ -604,11 +606,14 @@ def test_voice_turn_has_the_full_brain(monkeypatch):
     frames = asyncio.run(run())
     assert any(f.get("content") for f in frames)  # the turn streamed
 
-    # the lobotomy flags are GONE — same brain as text chat
-    assert captured.get("force_text_only", False) is False  # tools + memory live
-    assert captured.get("skip_composio", False) is False    # full action surface
+    # the LOBOTOMY flag stays gone — memory + tools live (force_text_only
+    # skips memory entirely; it must never be set on a conversational turn)
+    assert captured.get("force_text_only", False) is False
     assert captured["is_super_admin"] is True  # mint-captured tier rides the binding
-    # the one voice-specific trim: recent conversation, not the archive
+    # Composio EXECUTION is skipped for latency (memory/knowledge/core tools
+    # stay) — the measured 20-90s fix, a config dial, NOT the memory lobotomy
+    assert captured.get("skip_composio") is True
+    # the other voice-specific trim: recent conversation, not the archive
     assert len(captured["messages"]) <= int(app_config.VOICE_LIVE_TURN_HISTORY_MESSAGES)
 
 
@@ -961,6 +966,13 @@ def _arm_env(monkeypatch, *, creds, workspace=None):
 
     monkeypatch.setattr(vr.retell_api, "create_custom_llm_agent", fake_create)
 
+    # The re-tune (existing-agent arm) hits Retell too — stub it by default so
+    # arm tests never make a real PATCH; a test that cares overrides this.
+    async def fake_update(api_key, agent_id, settings):
+        return None
+
+    monkeypatch.setattr(vr.retell_api, "update_agent", fake_update)
+
     db = _mint_db(workspace=workspace)
     return vr, written, created, db
 
@@ -1039,6 +1051,44 @@ def test_arm_is_idempotent_when_agent_exists(monkeypatch):
     assert written["retell_api_key"] == "key_rotated"
     # an explicitly-configured distinct signing secret is never overwritten
     assert "retell_webhook_secret" not in written
+
+
+def test_agent_tuning_pins_language_and_denoises():
+    """The STT/turn-taking tuning that keeps transcription honest in a noisy
+    room: pinned language, background-speech denoising, accurate STT, low
+    interruption sensitivity, no backchannel."""
+    from modules.voice.retell_api import build_agent_tuning
+
+    t = build_agent_tuning()
+    assert t["language"]  # pinned, never multilingual auto (hallucination source)
+    assert t["denoising_mode"] == "noise-and-background-speech-cancellation"
+    assert t["stt_mode"] == "accurate"
+    assert 0.0 <= t["interruption_sensitivity"] <= 0.5  # not twitchy
+    assert t["enable_backchannel"] is False
+
+
+def test_arm_retunes_the_existing_agent(monkeypatch):
+    """A one-click re-arm re-applies the tuning to the ALREADY-armed agent —
+    the fix path for a live agent producing confident-nonsense transcripts."""
+    from api.voice_retell import ArmVoiceRequest
+    from modules.voice.live_settings import RetellCredentials
+
+    vr, written, created, db = _arm_env(
+        monkeypatch, creds=RetellCredentials("key_k", "sec_k", "agent_existing")
+    )
+    tuned = {}
+
+    async def capture(api_key, agent_id, settings):
+        tuned.update(agent_id=agent_id, **settings)
+
+    monkeypatch.setattr(vr.retell_api, "update_agent", capture)
+
+    asyncio.run(vr.arm_voice_live(ArmVoiceRequest(), ctx=_admin_ctx(), db=db))
+
+    assert created == {}  # existing agent kept, not recreated
+    assert tuned["agent_id"] == "agent_existing"
+    assert tuned["denoising_mode"] == "noise-and-background-speech-cancellation"
+    assert tuned["language"]
 
 
 def test_disarm_flips_toggle_only(monkeypatch):

@@ -1293,6 +1293,34 @@ class Config:
     VOICE_LIVE_FIRST_FRAME_ACK_TEXT: str = os.getenv(
         "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment."
     )
+    # PRD-207: Retell agent STT / turn-taking tuning — set at agent creation
+    # AND re-applied on every one-click re-arm. Pinning the language stops
+    # multilingual STT from hallucinating confident nonsense; background-speech
+    # denoising kills TV / room bleed (the classic corruptor); accurate STT
+    # trades a little latency for far fewer garbage transcripts; low
+    # interruption sensitivity stops ambient noise from grabbing the turn
+    # ("the mic is too sensitive"). All env-overridable — e.g. en-GB for a
+    # British/Irish speaker whose accent transcribes better there.
+    VOICE_LIVE_LANGUAGE: str = os.getenv("VOICE_LIVE_LANGUAGE", "en-US")
+    VOICE_LIVE_DENOISING_MODE: str = os.getenv(
+        "VOICE_LIVE_DENOISING_MODE", "noise-and-background-speech-cancellation"
+    )
+    VOICE_LIVE_STT_MODE: str = os.getenv("VOICE_LIVE_STT_MODE", "accurate")
+    VOICE_LIVE_INTERRUPTION_SENSITIVITY: float = float(
+        os.getenv("VOICE_LIVE_INTERRUPTION_SENSITIVITY", "0.2")
+    )
+    VOICE_LIVE_RESPONSIVENESS: float = float(os.getenv("VOICE_LIVE_RESPONSIVENESS", "0.8"))
+    # Spoken turns skip the Composio EXECUTION surface (third-party app actions:
+    # Gmail/Slack/etc.). Measured root cause of 20-90s voice latency: loading
+    # all 23 Composio apps → 44 promoted action schemas + a 137-action
+    # dispatcher enum inflated every turn's LLM calls to 24-36k input tokens and
+    # drove a ~5-call agentic loop. Dropping Composio takes the agent from ~58
+    # tools to ~14 core tools — memory, knowledge search, and reasoning are ALL
+    # retained (this is NOT the force_text_only memory-lobotomy). Dial: set
+    # false to restore full parity with typed chat at the latency cost.
+    VOICE_LIVE_SKIP_COMPOSIO: bool = os.getenv(
+        "VOICE_LIVE_SKIP_COMPOSIO", "true"
+    ).strip().lower() == "true"
     # The public host Retell must reach for the custom-LLM socket + events
     # webhook (one-click arming builds the URLs from it). Railway injects
     # RAILWAY_PUBLIC_DOMAIN; override with PUBLIC_API_HOST where that's absent.

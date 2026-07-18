@@ -454,6 +454,15 @@ async def arm_voice_live(
             )
         except retell_api.RetellApiError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
+    else:
+        # The agent already exists — re-tune its STT / turn-taking on this arm
+        # (pin language, cancel background speech, accurate STT, low
+        # interruption sensitivity). Non-fatal: a tune failure must not block
+        # arming (the agent still works with its prior settings).
+        try:
+            await retell_api.update_agent(api_key, agent_id, retell_api.build_agent_tuning())
+        except retell_api.RetellApiError as exc:
+            logger.warning("voice_live_arm_tune_failed agent=%s err=%s", agent_id, exc)
 
     live_settings.set_voice_setting(db, live_settings.KEY_RETELL_API_KEY, api_key)
     # Retell signs webhooks with the API key unless a distinct secret is
@@ -650,14 +659,22 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
 
         # ONE AUTO (Gerard, first live night: "voice auto and text auto are
         # not the same… my auto and voice auto need to be the same"). The
-        # spoken turn gets the SAME brain as the typed turn: full tool
-        # router, memory retrieval, composio actions, and the caller's real
-        # privilege tier. An earlier latency pass set force_text_only here —
-        # which forces the tool-less ATOM path AND skips memory entirely —
-        # a lobotomy, reverted. The one voice-specific trim that stays:
-        # history is the recent conversation, not the archive (rhythm, not
-        # brain — memory injection is retrieval, not history replay). Tool
-        # work mid-call reads as the honest THINKING state, never silence.
+        # spoken turn keeps the SAME BRAIN as the typed turn: full memory
+        # retrieval, knowledge search, core tool router, and the caller's real
+        # privilege tier. force_text_only is NEVER set — that forces the
+        # tool-less ATOM path AND skips memory (the lobotomy Gerard killed).
+        #
+        # Two voice-specific latency trims, both measured, neither touches the
+        # brain: (1) history is the recent conversation, not the archive
+        # (rhythm, not memory — memory injection is retrieval, not replay);
+        # (2) skip_composio drops the THIRD-PARTY EXECUTION surface (Gmail/
+        # Slack/etc.). Root cause of 20-90s first-token: loading all 23
+        # Composio apps put ~58 tools / 137 actions / 44 promoted schemas into
+        # every call (24-36k input tokens) and drove a ~5-call agentic loop.
+        # Without Composio the agent runs ~14 core tools — memory + knowledge
+        # + reasoning intact, first token in a conversational range. Config
+        # dial VOICE_LIVE_SKIP_COMPOSIO restores full parity if ever wanted.
+        # Tool work mid-call still reads as the honest THINKING state.
         messages = chat_service.get_messages_by_chat_id(conversation_id)
         recent = messages[-int(config.VOICE_LIVE_TURN_HISTORY_MESSAGES):]
         message_history = [{"role": m.role, "parts": m.parts} for m in recent]
@@ -672,6 +689,9 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
             # steward/orphan lanes — fail-closed. The #581 runtime lookup
             # crashed every turn: User has no system_role attribute.
             is_super_admin=binding.is_super_admin,
+            # The measured voice-latency lever (memory/tools stay; only
+            # third-party Composio EXECUTION is dropped from spoken turns).
+            skip_composio=bool(config.VOICE_LIVE_SKIP_COMPOSIO),
         )
 
         response_chars = 0
