@@ -206,6 +206,11 @@ async def mint_web_call(
         raise HTTPException(status_code=502, detail=f"Could not start the call: {exc}")
 
     # The row is BORN at mint — the webhook validates against it (S2/S3).
+    # PRD-143 discipline: su derives from Clerk-claims system_role ONLY —
+    # captured HERE (the one place the session exists) for the webhook.
+    caller_is_su = (
+        getattr(getattr(ctx, "user", None), "system_role", "user") == "super_admin"
+    )
     db.add(
         VoiceCall(
             call_id=web_call.call_id,
@@ -214,6 +219,7 @@ async def mint_web_call(
             user_id=user_int_id,
             chat_id=bound_chat_id,
             status="minted",
+            is_super_admin=caller_is_su,
         )
     )
     db.commit()
@@ -537,11 +543,6 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
         # history is the recent conversation, not the archive (rhythm, not
         # brain — memory injection is retrieval, not history replay). Tool
         # work mid-call reads as the honest THINKING state, never silence.
-        from core.models.core import User
-
-        role_row = db.query(User.system_role).filter(User.id == binding.user_id).first()
-        is_super_admin = bool(role_row and role_row[0] == "super_admin")
-
         messages = chat_service.get_messages_by_chat_id(conversation_id)
         recent = messages[-int(config.VOICE_LIVE_TURN_HISTORY_MESSAGES):]
         message_history = [{"role": m.role, "parts": m.parts} for m in recent]
@@ -552,7 +553,10 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
             agent_id=agent_id,
             user_id=binding.user_id,
             use_orchestrator_llm=True,
-            is_super_admin=is_super_admin,
+            # captured at mint (Clerk claims live only there); False for the
+            # steward/orphan lanes — fail-closed. The #581 runtime lookup
+            # crashed every turn: User has no system_role attribute.
+            is_super_admin=binding.is_super_admin,
         )
 
         response_chars = 0

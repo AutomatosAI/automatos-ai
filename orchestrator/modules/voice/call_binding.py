@@ -58,6 +58,9 @@ class CallBinding:
     user_id: int  # INTEGER users.id driving attribution (memory owner, Q7)
     workspace_id: str  # str(uuid) — always the PROVEN workspace
     bound: bool  # True = the mint-proven on-screen thread
+    # Captured at mint from Clerk claims (no DB column exists); the spoken
+    # turn's tool tier. False on steward/orphan lanes — fail-closed.
+    is_super_admin: bool = False
 
 
 def _workspace_steward(db: Session, ws_uuid: uuid.UUID) -> Optional[int]:
@@ -198,6 +201,7 @@ def resolve_call_binding(
                         user_id=int(row.user_id),
                         workspace_id=str(ws_uuid),
                         bound=True,
+                        is_super_admin=bool(row.is_super_admin),
                     )
                 logger.warning(
                     "voice_live_webhook_rejected reason=chat_gone_or_reowned call=%s chat=%s",
@@ -212,7 +216,11 @@ def resolve_call_binding(
         if row.user_id is not None:
             chat_id = _fallback_chat(db, row, ws_uuid, int(row.user_id), first_text)
             return CallBinding(
-                chat_id=chat_id, user_id=int(row.user_id), workspace_id=str(ws_uuid), bound=False
+                chat_id=chat_id,
+                user_id=int(row.user_id),
+                workspace_id=str(ws_uuid),
+                bound=False,
+                is_super_admin=bool(row.is_super_admin),
             )
         # A minted row with no user should not exist (mint requires one) —
         # treat like the unminted lane below.

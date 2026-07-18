@@ -562,7 +562,9 @@ def test_voice_turn_has_the_full_brain(monkeypatch):
 
     monkeypatch.setattr(
         cb, "resolve_call_binding",
-        lambda db, **k: CallBinding(chat_id=chat_id, user_id=7, workspace_id=ws_id, bound=True),
+        lambda db, **k: CallBinding(
+            chat_id=chat_id, user_id=7, workspace_id=ws_id, bound=True, is_super_admin=True
+        ),
     )
     monkeypatch.setattr(cb, "stamp_assistant_voice_source", lambda db, **k: 0)
 
@@ -580,14 +582,9 @@ def test_voice_turn_has_the_full_brain(monkeypatch):
 
     from contextlib import contextmanager
 
-    fake_db = MagicMock()
-    # the bound user's REAL privilege tier flows into the turn (PRD-143: su
-    # derives from system_role only)
-    fake_db.query.return_value.filter.return_value.first.return_value = ("super_admin",)
-
     @contextmanager
     def fake_session():
-        yield fake_db
+        yield MagicMock()
 
     monkeypatch.setattr(vr, "get_db_session", fake_session)
 
@@ -607,7 +604,7 @@ def test_voice_turn_has_the_full_brain(monkeypatch):
     # the lobotomy flags are GONE — same brain as text chat
     assert captured.get("force_text_only", False) is False  # tools + memory live
     assert captured.get("skip_composio", False) is False    # full action surface
-    assert captured["is_super_admin"] is True               # the caller's real tier
+    assert captured["is_super_admin"] is True  # mint-captured tier rides the binding
     # the one voice-specific trim: recent conversation, not the archive
     assert len(captured["messages"]) <= int(app_config.VOICE_LIVE_TURN_HISTORY_MESSAGES)
 
