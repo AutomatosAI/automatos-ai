@@ -471,6 +471,48 @@ def test_mint_without_chat_creates_and_binds_thread(monkeypatch):
     assert rows[0].chat_id == str(created_chat_id)  # mint-proven binding → webhook writes HERE
 
 
+def test_mint_reuses_the_voice_thread(monkeypatch):
+    """chats enforces unique_user_title: the SECOND welcome-screen call must
+    REUSE the caller's 'Voice call' thread (the Auto-thread pattern), never
+    insert-and-500 — the 'Failed to fetch' every call after the first."""
+    import consumers.chatbot.service as chat_service_mod
+
+    import api.voice_retell as vr
+    from modules.voice.live_settings import RetellCredentials
+    from modules.voice.retell_api import RetellWebCall
+    from modules.voice.voice_meter import MeterReading
+
+    ws_id = uuid.uuid4()
+    existing_id = uuid.uuid4()
+    existing = SimpleNamespace(id=existing_id, user_id=7, workspace_id=ws_id, title="Voice call")
+
+    class NeverCreate:
+        def __init__(self, db):
+            pass
+
+        def create_chat(self, **kwargs):
+            raise AssertionError("must reuse the existing voice thread, not create")
+
+    monkeypatch.setattr(chat_service_mod, "ChatService", NeverCreate)
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("k", "s", "a")
+    )
+    monkeypatch.setattr(vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(0, 0, 10))
+
+    async def fake_vendor(api_key, payload):
+        return RetellWebCall(call_id="call_again", access_token="tok")
+
+    monkeypatch.setattr(vr.retell_api, "create_web_call", fake_vendor)
+
+    ws = SimpleNamespace(settings={"voice_live": {"enabled": True}})
+    out = _run_mint(
+        ctx=_mint_ctx(ws_id=ws_id, user_int=7),
+        db=_mint_db(workspace=ws, chat=existing),
+    )
+    assert out["chat_id"] == str(existing_id)  # same thread, conversation continues
+
+
 def test_voice_turn_has_the_full_brain(monkeypatch):
     """ONE Auto: the spoken turn gets the SAME brain as the typed turn —
     full tools + memory (no force_text_only lobotomy, no composio skip) and
