@@ -27,6 +27,9 @@ interface PresenceOrbProps {
   levelsRef: MutableRefObject<VoiceLevels>
   /** Band height in px; the band fills its container's width. */
   size?: number
+  /** Ambient-background mode: no width cap, wider internal resolution —
+   * the beam spans the whole container edge-to-edge with no canvas seam. */
+  fullBleed?: boolean
 }
 
 function warningHsl(): { h: number; s: number; l: number } {
@@ -44,11 +47,10 @@ function hash(i: number): number {
   return x - Math.floor(x)
 }
 
-const W = 680 // internal canvas width; CSS stretches to the container
 const SLOTS = 60 // half-width history slots (centre → edge)
 const BAR_SPACING = 5.5
 
-export function PresenceOrb({ state, levelsRef, size = 170 }: PresenceOrbProps) {
+export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }: PresenceOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stateRef = useRef<OrbState>(state)
   stateRef.current = state
@@ -59,6 +61,10 @@ export function PresenceOrb({ state, levelsRef, size = 170 }: PresenceOrbProps) 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    // Internal resolution; CSS stretches to the container. Full-bleed uses a
+    // wider raster so the beam/ribbons stay crisp across the whole window
+    // while the voice bars keep their centred concentration.
+    const W = fullBleed ? 1280 : 680
     const H = size
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
     canvas.width = W * dpr
@@ -213,12 +219,12 @@ export function PresenceOrb({ state, levelsRef, size = 170 }: PresenceOrbProps) 
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [levelsRef, size])
+  }, [levelsRef, size, fullBleed])
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ width: '100%', maxWidth: 720, height: size, display: 'block' }}
+      style={{ width: '100%', maxWidth: fullBleed ? undefined : 720, height: size, display: 'block' }}
       role="img"
       aria-hidden="true"
       data-orb-state={state}
