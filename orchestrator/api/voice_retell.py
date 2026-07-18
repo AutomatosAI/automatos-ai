@@ -175,12 +175,10 @@ async def mint_web_call(
             raise HTTPException(status_code=403, detail="You can only bind a live call to your own chat")
         bound_chat_id = str(chat_uuid)
     else:
-        from consumers.chatbot.service import ChatService
+        from modules.voice.call_binding import create_voice_chat
 
-        chat = ChatService(db).create_chat(
-            user_id=int(user_int_id),
-            title="Voice call",
-            workspace_id=ctx.workspace_id,
+        chat = create_voice_chat(
+            db, user_id=int(user_int_id), workspace_id=ctx.workspace_id
         )
         bound_chat_id = str(chat.id)
 
