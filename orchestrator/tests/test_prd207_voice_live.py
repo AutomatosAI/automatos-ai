@@ -281,7 +281,10 @@ def _mint_db(workspace=None, chat="unqueried"):
         if model_arg is WorkspaceModel:
             q.filter.return_value.first.return_value = workspace
         elif model_arg is ChatModel:
-            q.filter.return_value.first.return_value = None if chat == "unqueried" else chat
+            result = None if chat == "unqueried" else chat
+            q.filter.return_value.first.return_value = result
+            # The welcome-path find-or-create queries .filter(...).order_by(...).first()
+            q.filter.return_value.order_by.return_value.first.return_value = result
         else:
             q.filter.return_value.first.return_value = None
         return q
@@ -749,10 +752,12 @@ def voice_workspace(engine, new_session):
         {"ws": ws_id, "u": uids[0]},
     )
     chat_id = str(uuid.uuid4())
+    # chats.visibility is NOT NULL with a Python-side default only (no
+    # server_default, unlike chats.kind) — a raw INSERT must set it explicitly.
     s.execute(
         text(
-            "INSERT INTO chats (id, user_id, workspace_id, title) "
-            "VALUES (CAST(:id AS uuid), :u, CAST(:ws AS uuid), 'my thread')"
+            "INSERT INTO chats (id, user_id, workspace_id, title, visibility) "
+            "VALUES (CAST(:id AS uuid), :u, CAST(:ws AS uuid), 'my thread', 'private')"
         ),
         {"id": chat_id, "u": uids[0], "ws": ws_id},
     )
@@ -936,6 +941,11 @@ def _admin_ctx():
 def _arm_env(monkeypatch, *, creds, workspace=None):
     """Wire the arm endpoint's collaborators to recorders."""
     import api.voice_retell as vr
+
+    # The endpoint calls SQLAlchemy's flag_modified to track the in-place JSONB
+    # settings mutation; the fake workspace is a SimpleNamespace (no ORM state),
+    # so neutralise that plumbing call — the test asserts the settings dict.
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
 
     written = {}
     monkeypatch.setattr(
@@ -1440,8 +1450,13 @@ def test_voice_live_put_refuses_malformed_with_honest_reason():
     assert ws.settings["voice_live"]["enabled"] is False  # nothing written
 
 
-def test_voice_live_put_merges_not_replaces():
+def test_voice_live_put_merges_not_replaces(monkeypatch):
     from api.workspaces import save_voice_live_settings
+
+    # flag_modified is SQLAlchemy plumbing for the in-place JSONB mutation;
+    # the fake workspace has no ORM state, so neutralise it — the test asserts
+    # the merged settings dict, not the change-tracking call.
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *a, **k: None)
 
     ws = SimpleNamespace(
         id=uuid.uuid4(), settings={"voice_live": {"enabled": True, "retell_voice_id": "keep"}}

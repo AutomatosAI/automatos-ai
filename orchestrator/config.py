@@ -1296,9 +1296,10 @@ class Config:
     # The public host Retell must reach for the custom-LLM socket + events
     # webhook (one-click arming builds the URLs from it). Railway injects
     # RAILWAY_PUBLIC_DOMAIN; override with PUBLIC_API_HOST where that's absent.
-    PUBLIC_API_HOST: str = os.getenv(
-        "PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app")
-    )
+    PUBLIC_API_HOST: str = (
+        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
+        or "api.automatos.app"
+    ).strip().rstrip("/")
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

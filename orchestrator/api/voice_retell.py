@@ -178,12 +178,32 @@ async def mint_web_call(
             raise HTTPException(status_code=403, detail="You can only bind a live call to your own chat")
         bound_chat_id = str(chat_uuid)
     else:
+        # Welcome-screen mint (no thread on screen): CONTINUE the caller's one
+        # voice conversation — reuse their existing voice thread if it exists,
+        # else create it. Without the find, every welcome-screen call spun up a
+        # brand-new "Voice call —" thread, fragmenting the conversation (#585 —
+        # the ONE-voice-thread contract; unique_user_title made a fixed title
+        # 500 on the second call, so the thread is timestamped and found by
+        # prefix rather than by a colliding constant title).
         from modules.voice.call_binding import create_voice_chat
 
-        chat = create_voice_chat(
-            db, user_id=int(user_int_id), workspace_id=ctx.workspace_id
+        existing = (
+            db.query(Chat)
+            .filter(
+                Chat.user_id == int(user_int_id),
+                Chat.workspace_id == ctx.workspace_id,
+                Chat.title.like("Voice call%"),
+            )
+            .order_by(Chat.created_at.desc())
+            .first()
         )
-        bound_chat_id = str(chat.id)
+        if existing is not None:
+            bound_chat_id = str(existing.id)
+        else:
+            chat = create_voice_chat(
+                db, user_id=int(user_int_id), workspace_id=ctx.workspace_id
+            )
+            bound_chat_id = str(chat.id)
 
     dynamic_vars = {
         "workspace_id": str(ctx.workspace_id),

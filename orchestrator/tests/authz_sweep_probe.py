@@ -86,9 +86,13 @@ def main() -> None:
                         # api/gdpr.py's hand-rolled gate — PRD-196 S7 owns its
                         # consolidation; classified, not touched (PRD-195).
                         or "_require_workspace_admin(ctx)" in src
+                        # PRD-207 voice/arm: platform-admin gate in the handler.
+                        or "_is_platform_admin(ctx)" in src
                     ),
                     "own_gate_in_handler": (
                         "Admin access required to resolve credentials" in src
+                        # PRD-207 voice/web-call: the mint's own signed-in-user gate.
+                        or "Live voice requires a signed-in user" in src
                     ),
                 }
             )

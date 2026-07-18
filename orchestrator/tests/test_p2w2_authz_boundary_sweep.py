@@ -140,6 +140,9 @@ ADMIN_GATED_IN_HANDLER = {
     # admin-in-handler) — removed from this set so they classify exactly once.
     ("PUT", "/api/widget-marketplace/widgets/{widget_id}/approve"),
     ("PUT", "/api/widget-marketplace/widgets/{widget_id}/suspend"),
+    # PRD-207 S7: one-click arming — platform-admin gate in the handler body
+    # (`_is_platform_admin(ctx)` → 403), not a shared dependency.
+    ("POST", "/api/voice/arm"),
 }
 
 # (g) Own explicit in-handler gate.
@@ -147,6 +150,10 @@ OWN_GATE_IN_HANDLER = {
     # Returns DECRYPTED secrets: admin / env-API-key only, gated in the
     # handler; the NULL-workspace BOLA on its lookups is S7's fix.
     ("POST", "/api/credentials/resolve"),
+    # PRD-207 S1: the voice mint gates in the handler body — platform toggle,
+    # armed creds, workspace toggle, cap, and a strict signed-in-user resolve
+    # (403 "Live voice requires a signed-in user"); not a shared dependency.
+    ("POST", "/api/voice/web-call"),
 }
 
 # The agent-tool RBAC fossil (api/permissions.py, vocabulary #5) — unmounted
