@@ -49,6 +49,7 @@ from modules.voice.providers.retell import (
     INTERACTION_PING_PONG,
     INTERACTION_REMINDER,
     INTERACTION_RESPONSE_REQUIRED,
+    INTERACTION_UPDATE_ONLY,
     RetellLLMRequest,
     parse_llm_request,
     retell_response_frames,
@@ -635,52 +636,78 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
         return
 
     await websocket.accept()
+    logger.info("voice_live_ws_open call=%s", call_id)
 
     dynamic_vars: dict[str, Any] = {}
     speaking: asyncio.Task | None = None
+    begun = False
+    stats = {"pings": 0, "updates": 0, "turns": 0, "frames": 0}
+
+    async def safe_send(payload: dict) -> bool:
+        """Send or say why not — a severed socket must NEVER traceback the
+        handler (first live calls died at the ping reply with an uncaught
+        ConnectionClosedError, leaving the mic recording into a dead brain)."""
+        try:
+            await websocket.send_json(payload)
+            return True
+        except Exception as exc:  # noqa: BLE001 — closure class varies by stack layer
+            logger.warning(
+                "voice_live_ws_send_failed call=%s err=%s", call_id, type(exc).__name__
+            )
+            return False
 
     async def respond(req: RetellLLMRequest) -> None:
         try:
             async for frame in _agent_retell_stream(req):
-                await websocket.send_json(wrap_ws_response(frame))
+                stats["frames"] += 1
+                if not await safe_send(wrap_ws_response(frame)):
+                    return
         except asyncio.CancelledError:
             # Superseded turn (barge-in): Retell has moved on — stop quietly.
             raise
         except Exception:  # noqa: BLE001 — a mid-turn fault closes the turn cleanly
             logger.exception("retell_ws_stream_failed call=%s", call_id)
-            try:
-                await websocket.send_json(
-                    wrap_ws_response(
-                        {"response_id": req.response_id, "content": "", "content_complete": True}
-                    )
+            await safe_send(
+                wrap_ws_response(
+                    {"response_id": req.response_id, "content": "", "content_complete": True}
                 )
-            except Exception:  # noqa: BLE001 — socket already gone
-                pass
+            )
 
     try:
-        # Protocol handshake: ASK for call_details — Retell only echoes the
-        # call object (and our dynamic variables) when the server requests it.
-        # First live contact: without this config frame the vars never arrived,
-        # every turn failed binding, and Auto sat silent through whole calls.
-        await websocket.send_json(
+        # Handshake per Retell's own demo: config first (asks for
+        # call_details; enables auto_reconnect)…
+        if not await safe_send(
             {"response_type": "config", "config": {"auto_reconnect": True, "call_details": True}}
-        )
-        # Server speaks first with an EMPTY response — the human opens.
-        await websocket.send_json(
-            wrap_ws_response({"response_id": 0, "content": "", "content_complete": True})
-        )
+        ):
+            return
         while True:
             message = await websocket.receive_json()
             itype = message.get("interaction_type")
             if itype == INTERACTION_PING_PONG:
-                await websocket.send_json(
+                stats["pings"] += 1
+                if not await safe_send(
                     {"response_type": "ping_pong", "timestamp": message.get("timestamp")}
-                )
+                ):
+                    break
             elif itype == INTERACTION_CALL_DETAILS:
                 dynamic_vars = (message.get("call") or {}).get(
                     "retell_llm_dynamic_variables"
                 ) or {}
+                logger.info("voice_live_ws_call_details call=%s vars=%s", call_id, bool(dynamic_vars))
+                # …then the begin message — the demo sends it HERE, not at
+                # accept. Empty response 0 = the human opens.
+                if not begun:
+                    begun = True
+                    if not await safe_send(
+                        wrap_ws_response({"response_id": 0, "content": "", "content_complete": True})
+                    ):
+                        break
             elif itype in (INTERACTION_RESPONSE_REQUIRED, INTERACTION_REMINDER):
+                stats["turns"] += 1
+                logger.info(
+                    "voice_live_ws_turn call=%s rid=%s type=%s",
+                    call_id, message.get("response_id"), itype,
+                )
                 if speaking is not None and not speaking.done():
                     speaking.cancel()
                 req = parse_llm_request(
@@ -695,9 +722,19 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
                     }
                 )
                 speaking = asyncio.create_task(respond(req))
-            # update_only / unknown types: no response owed.
-    except WebSocketDisconnect:
-        pass
+            elif itype == INTERACTION_UPDATE_ONLY:
+                stats["updates"] += 1
+            # unknown types: no response owed.
+    except WebSocketDisconnect as exc:
+        logger.info("voice_live_ws_closed call=%s code=%s", call_id, getattr(exc, "code", "?"))
+    except Exception as exc:  # noqa: BLE001 — abnormal severance is a fact of WS life
+        logger.warning(
+            "voice_live_ws_died call=%s err=%s", call_id, type(exc).__name__, exc_info=True
+        )
     finally:
         if speaking is not None and not speaking.done():
             speaking.cancel()
+        logger.info(
+            "voice_live_ws_summary call=%s turns=%s frames=%s pings=%s updates=%s begun=%s",
+            call_id, stats["turns"], stats["frames"], stats["pings"], stats["updates"], begun,
+        )
