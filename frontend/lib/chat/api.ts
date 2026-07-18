@@ -54,13 +54,15 @@ export async function voteMessage(
  * Get chat messages
  */
 export async function getChatMessages(chatId: string): Promise<ChatMessage[]> {
-  const rows = await apiClient.request<Array<ChatMessage & { source?: { label?: string } | null }>>(
-    `/api/chat/${chatId}/messages`,
-  )
+  const rows = await apiClient.request<
+    Array<ChatMessage & { source?: { label?: string; origin?: string } | null }>
+  >(`/api/chat/${chatId}/messages`)
   // PRD-205 S7: persisted background provenance (messages.source) → the
   // existing metadata badge slot, so "Auto · background" survives reload.
+  // PRD-207: VOICE messages render exactly like typed ones (Gerard: "same
+  // as old, she just talks it") — provenance stays stored, no badge shown.
   return rows.map((row) =>
-    row.source?.label
+    row.source?.label && row.source.origin !== 'voice'
       ? { ...row, metadata: { ...(row.metadata ?? {}), source: row.source.label } }
       : row,
   )

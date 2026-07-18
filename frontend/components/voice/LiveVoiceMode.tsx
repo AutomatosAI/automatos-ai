@@ -91,14 +91,15 @@ export function LiveVoiceMode({
       className="relative w-full"
       data-testid="live-voice-mode"
     >
-      {/* Slim call strip — the room glows behind the whole chat; up here it's
-          just the facts and the two buttons that matter. */}
+      {/* Whisper strip — no card, no border: the room glows behind the whole
+          chat, the words stream in the thread like any typed reply; up here
+          only the quiet facts and the two buttons that matter. */}
       {!failure && (
-        <div className="mx-auto flex w-fit items-center gap-3 rounded-full border border-warning/25 bg-background/70 px-4 py-1.5 backdrop-blur-sm">
-          <p aria-live="polite" className="text-xs font-medium tracking-wide text-warning/90">
+        <div className="mx-auto flex w-fit items-center gap-3 px-2 py-0.5">
+          <p aria-live="polite" className="text-[11px] tracking-wide text-muted-foreground/60">
             {stateLabel}
             {isLive && (
-              <span className="ml-2 font-mono text-[11px] text-muted-foreground/70">
+              <span className="ml-2 font-mono text-[10px] text-muted-foreground/50">
                 {formatDuration(durationSec)}
               </span>
             )}
