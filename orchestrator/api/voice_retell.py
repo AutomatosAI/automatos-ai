@@ -529,15 +529,21 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
         if agent_id is None:
             agent_id = get_default_agent_id(db, binding.workspace_id)
 
-        # VOICE FAST PATH (first live calls measured MINUTES per turn — the
-        # full chat pipeline is built for screens, not speech):
-        # * history is the recent conversation, not the archive — Retell holds
-        #   the floor open while we re-read old messages;
-        # * force_text_only: widget/tool-data payload assembly is meaningless
-        #   to a voice — words only;
-        # * skip_composio: external tool loops are tens of seconds of dead
-        #   air mid-call. Auto says what it knows; deep work belongs to text
-        #   turns or background missions.
+        # ONE AUTO (Gerard, first live night: "voice auto and text auto are
+        # not the same… my auto and voice auto need to be the same"). The
+        # spoken turn gets the SAME brain as the typed turn: full tool
+        # router, memory retrieval, composio actions, and the caller's real
+        # privilege tier. An earlier latency pass set force_text_only here —
+        # which forces the tool-less ATOM path AND skips memory entirely —
+        # a lobotomy, reverted. The one voice-specific trim that stays:
+        # history is the recent conversation, not the archive (rhythm, not
+        # brain — memory injection is retrieval, not history replay). Tool
+        # work mid-call reads as the honest THINKING state, never silence.
+        from core.models.core import User
+
+        role_row = db.query(User.system_role).filter(User.id == binding.user_id).first()
+        is_super_admin = bool(role_row and role_row[0] == "super_admin")
+
         messages = chat_service.get_messages_by_chat_id(conversation_id)
         recent = messages[-int(config.VOICE_LIVE_TURN_HISTORY_MESSAGES):]
         message_history = [{"role": m.role, "parts": m.parts} for m in recent]
@@ -548,8 +554,7 @@ async def _agent_retell_stream(req: RetellLLMRequest) -> AsyncIterator[dict[str,
             agent_id=agent_id,
             user_id=binding.user_id,
             use_orchestrator_llm=True,
-            force_text_only=True,
-            skip_composio=True,
+            is_super_admin=is_super_admin,
         )
 
         response_chars = 0
