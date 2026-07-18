@@ -23,8 +23,39 @@ logger = logging.getLogger(__name__)
 
 RETELL_CREATE_WEB_CALL_URL = "https://api.retellai.com/v2/create-web-call"
 RETELL_CREATE_AGENT_URL = "https://api.retellai.com/create-agent"
+RETELL_UPDATE_AGENT_URL = "https://api.retellai.com/update-agent"
 _TIMEOUT_SECONDS = 10.0
 _AGENT_TIMEOUT_SECONDS = 25.0
+
+
+def build_agent_tuning() -> Dict[str, Any]:
+    """The STT / turn-taking settings that keep transcription honest in a real
+    (noisy, non-headset) room — applied at agent creation AND re-applied on
+    every one-click re-arm.
+
+    Pinning ``language`` stops multilingual STT from hallucinating confident
+    nonsense; ``noise-and-background-speech-cancellation`` strips TV / room
+    bleed (the "multiple voices" corruptor); ``accurate`` STT trades a little
+    latency for far fewer garbage transcripts; low ``interruption_sensitivity``
+    stops every tiny sound from grabbing the turn. All config-driven dials.
+    """
+    from config import config
+
+    tuning: Dict[str, Any] = {
+        "interruption_sensitivity": float(config.VOICE_LIVE_INTERRUPTION_SENSITIVITY),
+        "responsiveness": float(config.VOICE_LIVE_RESPONSIVENESS),
+        "enable_backchannel": False,
+    }
+    language = str(config.VOICE_LIVE_LANGUAGE or "").strip()
+    if language:
+        tuning["language"] = language
+    denoising = str(config.VOICE_LIVE_DENOISING_MODE or "").strip()
+    if denoising:
+        tuning["denoising_mode"] = denoising
+    stt_mode = str(config.VOICE_LIVE_STT_MODE or "").strip()
+    if stt_mode:
+        tuning["stt_mode"] = stt_mode
+    return tuning
 
 
 class RetellApiError(Exception):
@@ -91,6 +122,9 @@ async def create_custom_llm_agent(
         "voice_id": voice_id,
         "response_engine": {"type": "custom-llm", "llm_websocket_url": llm_websocket_url},
         "webhook_url": webhook_url,
+        # STT / turn-taking tuning baked in at birth (fresh agents are honest
+        # in a noisy room from the first call, not just after a re-arm).
+        **build_agent_tuning(),
     }
     try:
         async with httpx.AsyncClient(timeout=_AGENT_TIMEOUT_SECONDS) as client:
@@ -116,6 +150,37 @@ async def create_custom_llm_agent(
     if not agent_id:
         raise RetellApiError("Retell response missing agent_id")
     return str(agent_id)
+
+
+async def update_agent(api_key: str, agent_id: str, settings: Dict[str, Any]) -> None:
+    """PATCH agent-level settings onto an EXISTING Retell agent (S7 re-tune).
+
+    The already-armed agent predates the STT/turn-taking tuning, so a
+    one-click re-arm re-applies ``build_agent_tuning()`` to it — the fix for
+    'confident nonsense' transcripts on a live agent nobody wants to recreate.
+    No-op on empty settings. Raises ``RetellApiError`` (never the key) so the
+    arm route can log-and-continue rather than fail the whole arm.
+    """
+    if not settings:
+        return
+    url = f"{RETELL_UPDATE_AGENT_URL}/{agent_id}"
+    try:
+        async with httpx.AsyncClient(timeout=_AGENT_TIMEOUT_SECONDS) as client:
+            resp = await client.patch(
+                url, json=settings, headers={"Authorization": f"Bearer {api_key}"}
+            )
+    except httpx.HTTPError as exc:
+        raise RetellApiError(f"Retell unreachable: {type(exc).__name__}") from exc
+
+    if resp.status_code not in (200, 201):
+        logger.error(
+            "voice_live_update_agent_failed status=%s body=%s",
+            resp.status_code,
+            resp.text[:300],
+        )
+        raise RetellApiError(
+            f"Retell refused the agent update (HTTP {resp.status_code}): {resp.text[:200]}"
+        )
 
 
 async def create_web_call(api_key: str, payload: Dict[str, Any]) -> RetellWebCall:

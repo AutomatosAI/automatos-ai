@@ -454,6 +454,15 @@ async def arm_voice_live(
             )
         except retell_api.RetellApiError as exc:
             raise HTTPException(status_code=502, detail=str(exc))
+    else:
+        # The agent already exists — re-tune its STT / turn-taking on this arm
+        # (pin language, cancel background speech, accurate STT, low
+        # interruption sensitivity). Non-fatal: a tune failure must not block
+        # arming (the agent still works with its prior settings).
+        try:
+            await retell_api.update_agent(api_key, agent_id, retell_api.build_agent_tuning())
+        except retell_api.RetellApiError as exc:
+            logger.warning("voice_live_arm_tune_failed agent=%s err=%s", agent_id, exc)
 
     live_settings.set_voice_setting(db, live_settings.KEY_RETELL_API_KEY, api_key)
     # Retell signs webhooks with the API key unless a distinct secret is
