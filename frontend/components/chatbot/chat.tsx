@@ -44,11 +44,28 @@ import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
 import { MissionSuggestionCard } from '@/components/chatbot/mission-suggestion-card'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 
-// PRD-207 S5: Auto Live — the presence orb on the chat screen; the SSE lane
-// also mounts here so voice/background messages land live (chat_changed →
-// the useChat merge listener).
+// PRD-207 S5: Auto Live — the wave renders as the chat's ambient BACKGROUND
+// (alive only while someone speaks); LiveVoiceMode owns the call and feeds
+// presence up. The SSE lane also mounts here so voice/background messages
+// land live (chat_changed → the useChat merge listener).
 import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
+import { PresenceOrb } from '@/components/voice/PresenceOrb'
+import type { VoiceLevels } from '@/hooks/use-retell-call'
+import type { OrbState } from '@/lib/voice/orb-state'
+import type { MutableRefObject } from 'react'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
+
+// How present the room feels per call state — the background wave breathes
+// up when Auto (or you) speaks and nearly vanishes at rest.
+const AMBIENT_OPACITY: Record<string, number> = {
+  speaking: 0.34,
+  listening: 0.2,
+  thinking: 0.24,
+  connecting: 0.14,
+  idle: 0.1,
+  ended: 0,
+  error: 0.1,
+}
 
 export interface ChatProps {
   id: string
@@ -190,20 +207,43 @@ export function Chat({
 
   // PRD-207 S5: live voice mode — the orb mounts, content drops lower.
   const [isLiveMode, setIsLiveMode] = useState(false)
-  // PRD-207: the current spoken exchange, streamed from Retell — rendered as
-  // live-typing bubbles so Auto's words print in the thread AS he reads them.
-  // Cleared when chat_changed lands the persisted (badged) versions.
-  const [liveVoiceTurn, setLiveVoiceTurn] = useState<{ userText: string; agentText: string }>({
-    userText: '',
-    agentText: '',
-  })
+  // PRD-207 (Gerard: "same as old, she just talks it"): spoken words are
+  // upserted as REAL entries in the messages array — the identical render
+  // path as typed streaming. When chat_changed lands the persisted copies,
+  // the ephemeral voice-live entries are dropped and the server rows follow.
+  const handleLiveTurn = useCallback(
+    (turn: { userText: string; agentText: string }) => {
+      setMessages((prev) => {
+        const next = [...prev]
+        const upsert = (mid: string, role: 'user' | 'assistant', text: string) => {
+          if (!text) return
+          const idx = next.findIndex((m) => m.id === mid)
+          const entry = {
+            id: mid,
+            role,
+            content: text,
+            parts: [{ type: 'text', text }],
+          } as ChatMessage
+          if (idx >= 0) next[idx] = { ...next[idx], ...entry }
+          else next.push(entry)
+        }
+        upsert('voice-live-user', 'user', turn.userText)
+        upsert('voice-live-assistant', 'assistant', turn.agentText)
+        return next
+      })
+    },
+    [setMessages]
+  )
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const clearDrafts = () => setLiveVoiceTurn({ userText: '', agentText: '' })
-    window.addEventListener('automatos:chat-changed', clearDrafts)
-    return () => window.removeEventListener('automatos:chat-changed', clearDrafts)
-  }, [])
-  const liveDraftActive = isLiveMode && Boolean(liveVoiceTurn.userText || liveVoiceTurn.agentText)
+    const onPersisted = () =>
+      setMessages((prev) => prev.filter((m) => !String(m.id).startsWith('voice-live-')))
+    window.addEventListener('automatos:chat-changed', onPersisted)
+    return () => window.removeEventListener('automatos:chat-changed', onPersisted)
+  }, [setMessages])
+  // PRD-207: presence feed from the call → the ambient background wave.
+  const [voicePresence, setVoicePresence] = useState<OrbState>('idle')
+  const [voiceLevels, setVoiceLevels] = useState<MutableRefObject<VoiceLevels> | null>(null)
   // PRD-207 S6 (closing a PRD-205 gap): the chat page subscribes to the SSE
   // lane so chat_changed reaches the useChat merge listener HERE — not only
   // while Command Center happens to be open.
@@ -894,9 +934,7 @@ export function Chat({
   const isTyping = status === 'streaming'
   const hasSentMessage = messages.length > 0
 
-  // A live spoken exchange IS the conversation — leave the welcome screen the
-  // moment words start flowing, don't wait for a persisted message.
-  const showWelcomeCard = !hasSentMessage && !isTyping && !liveDraftActive
+  const showWelcomeCard = !hasSentMessage && !isTyping
 
   return (
     <>
@@ -1136,28 +1174,29 @@ export function Chat({
       {/* Normal chat view - NO widgets */}
       {!hasWidgets && !isArtifactViewerVisible && (
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
-          {/* PRD-207 S5: Auto in the room — the orb mounts top-center and the
-              welcome/messages content below animates lower. Bind the call to
-              the on-screen thread once it exists server-side; a welcome-screen
-              call lands in a fresh attributed thread instead. */}
-          <AnimatePresence>
-            {isLiveMode && (
-              <LiveVoiceMode
-                chatId={hasSentMessage ? activeChatId : undefined}
-                agentId={selectedAgentId}
-                onChatId={(cid) => setActiveChatId(cid)}
-                onLiveTurn={setLiveVoiceTurn}
-                onExit={() => {
-                  setIsLiveMode(false)
-                  setLiveVoiceTurn({ userText: '', agentText: '' })
-                }}
-              />
-            )}
-          </AnimatePresence>
+          {/* PRD-207: the room itself — the wave lives BEHIND the chat as an
+              ambient background, waking only while someone speaks. Not a
+              widget, not a screen: the same chat window, alive. */}
+          {isLiveMode && voiceLevels && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 z-0 flex items-center overflow-hidden"
+              style={{
+                opacity: AMBIENT_OPACITY[voicePresence] ?? 0.12,
+                transition: 'opacity 900ms ease',
+                maskImage:
+                  'radial-gradient(ellipse 75% 65% at 50% 55%, black 35%, transparent 78%)',
+                WebkitMaskImage:
+                  'radial-gradient(ellipse 75% 65% at 50% 55%, black 35%, transparent 78%)',
+              }}
+            >
+              <PresenceOrb state={voicePresence} levelsRef={voiceLevels} size={440} />
+            </div>
+          )}
 
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
-            <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
+            <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
               {/* Personal greeting */}
               <motion.div
                 className="w-full max-w-3xl md:max-w-4xl text-center mb-8"
@@ -1189,6 +1228,24 @@ export function Chat({
 
               {/* Chat input + quick links — no outer box */}
               <div className="w-full max-w-3xl md:max-w-4xl space-y-3">
+                {/* PRD-207: the voice wave docks ON the message box — one
+                    conversation surface, spoken or typed. */}
+                <AnimatePresence>
+                  {isLiveMode && (
+                    <LiveVoiceMode
+                      chatId={hasSentMessage ? activeChatId : undefined}
+                      agentId={selectedAgentId}
+                      onChatId={(cid) => setActiveChatId(cid)}
+                      onLiveTurn={handleLiveTurn}
+                      onPresence={setVoicePresence}
+                      onLevelsRef={setVoiceLevels}
+                      onExit={() => {
+                        setIsLiveMode(false)
+                        setVoicePresence('ended')
+                      }}
+                    />
+                  )}
+                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}
@@ -1263,7 +1320,7 @@ export function Chat({
           {!showWelcomeCard && (
             <div
               ref={messagesContainerRef}
-              className="flex-1 overflow-y-scroll overscroll-contain"
+              className="relative z-10 flex-1 overflow-y-scroll overscroll-contain"
               style={{ overflowAnchor: 'none' }}
             >
               <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 px-4 py-4 md:gap-6 md:px-8">
@@ -1286,42 +1343,6 @@ export function Chat({
                     />
                   ))}
                 </AnimatePresence>
-
-                {/* PRD-207: the spoken exchange typing out live — replaced by
-                    the persisted (voice-badged) messages when chat_changed
-                    lands them. Read-only bubbles; Auto's grows as he speaks. */}
-                {liveDraftActive && liveVoiceTurn.userText && (
-                  <Message
-                    key="voice-draft-user"
-                    chatId={id}
-                    message={{
-                      id: 'voice-draft-user',
-                      role: 'user',
-                      content: liveVoiceTurn.userText,
-                      parts: [{ type: 'text', text: liveVoiceTurn.userText }],
-                    } as any}
-                    isLoading={false}
-                    setMessages={setMessages}
-                    regenerate={regenerate}
-                    isReadonly
-                  />
-                )}
-                {liveDraftActive && liveVoiceTurn.agentText && (
-                  <Message
-                    key="voice-draft-assistant"
-                    chatId={id}
-                    message={{
-                      id: 'voice-draft-assistant',
-                      role: 'assistant',
-                      content: liveVoiceTurn.agentText,
-                      parts: [{ type: 'text', text: liveVoiceTurn.agentText }],
-                    } as any}
-                    isLoading={false}
-                    setMessages={setMessages}
-                    regenerate={regenerate}
-                    isReadonly
-                  />
-                )}
 
                 {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
 
@@ -1386,6 +1407,24 @@ export function Chat({
           {!isReadonly && !showWelcomeCard && (
             <div className="sticky bottom-0 z-10 bg-transparent backdrop-blur-none supports-[backdrop-filter]:bg-transparent border-0">
               <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
+                {/* PRD-207: the voice wave docks ON the message box — one
+                    conversation surface, spoken or typed. */}
+                <AnimatePresence>
+                  {isLiveMode && (
+                    <LiveVoiceMode
+                      chatId={hasSentMessage ? activeChatId : undefined}
+                      agentId={selectedAgentId}
+                      onChatId={(cid) => setActiveChatId(cid)}
+                      onLiveTurn={handleLiveTurn}
+                      onPresence={setVoicePresence}
+                      onLevelsRef={setVoiceLevels}
+                      onExit={() => {
+                        setIsLiveMode(false)
+                        setVoicePresence('ended')
+                      }}
+                    />
+                  )}
+                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}

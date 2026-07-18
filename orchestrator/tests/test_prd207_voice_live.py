@@ -1431,6 +1431,40 @@ def test_live_status_payload_never_leaks_credentials(monkeypatch):
     assert "k_secret" not in blob and "s_secret" not in blob  # presence only, never values
 
 
+def test_spoken_sentence_grows_one_message(voice_workspace, new_session):
+    """First live use: pausing mid-sentence stacked growing prefixes as
+    separate messages. A continued utterance must UPDATE the message it grew
+    from; a genuinely new utterance appends."""
+    from sqlalchemy import text as sql
+
+    from modules.voice.call_binding import upsert_voice_user_message
+
+    s = new_session()
+    grow = [
+        "Is the chat, like, a single chat",
+        "Is the chat, like, a single chat voice chat?",
+        "Is the chat, like, a single chat voice chat, or is it mixed?",
+    ]
+    for t in grow:
+        upsert_voice_user_message(
+            s, chat_id=voice_workspace.chat_id, workspace_id=voice_workspace.ws_id, text=t
+        )
+    upsert_voice_user_message(
+        s, chat_id=voice_workspace.chat_id, workspace_id=voice_workspace.ws_id,
+        text="Different topic entirely.",
+    )
+
+    rows = s.execute(
+        sql(
+            "SELECT parts FROM messages WHERE chat_id = CAST(:c AS uuid) "
+            "AND role = 'user' ORDER BY created_at"
+        ),
+        {"c": voice_workspace.chat_id},
+    ).fetchall()
+    texts = [r[0][0]["text"] for r in rows]
+    assert texts == [grow[-1], "Different topic entirely."]  # one grown + one new
+
+
 def test_assistant_stamp_bounded_to_turn_window(voice_workspace, new_session):
     from datetime import datetime, timedelta
 

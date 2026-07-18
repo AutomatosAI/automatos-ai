@@ -109,13 +109,12 @@ vi.mock('@/components/voice/PresenceOrb', () => ({
 import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
 
 describe('PRD-207 — LiveVoiceMode', () => {
-  it('live: orb + mic-live indicator + named mute and end controls', () => {
+  it('live: mic-live indicator + named mute and end controls (the wave lives in the chat background, not here)', () => {
     Object.assign(hookState, {
       refusal: null, error: null, isLive: true, orbState: 'listening',
       stateLabel: 'Auto is listening',
     })
     render(<LiveVoiceMode onExit={() => {}} />)
-    expect(screen.getByTestId('orb')).toBeTruthy()
     expect(screen.getByText(/Mic live/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Mute microphone' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'End call' })).toBeTruthy()
@@ -134,7 +133,7 @@ describe('PRD-207 — LiveVoiceMode', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
-  it('renders live captions for both voices', () => {
+  it('renders NO caption lines — the thread is the one source of words', () => {
     Object.assign(hookState, {
       refusal: null, error: null, isLive: true, orbState: 'speaking',
       stateLabel: 'Auto is speaking',
@@ -144,7 +143,9 @@ describe('PRD-207 — LiveVoiceMode', () => {
       ],
     })
     render(<LiveVoiceMode onExit={() => {}} />)
-    expect(screen.getByText(/where did we leave off/)).toBeTruthy()
-    expect(screen.getByText(/mid-way through the social pack/)).toBeTruthy()
+    // the words belong to the chat's live-typing bubbles, not a second
+    // caption strip under the wave (Gerard: "why am I seeing two sources")
+    expect(screen.queryByText(/where did we leave off/)).toBeNull()
+    expect(screen.queryByText(/mid-way through the social pack/)).toBeNull()
   })
 })
