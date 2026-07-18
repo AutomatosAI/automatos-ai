@@ -1,21 +1,21 @@
 'use client'
 
 /**
- * PresenceOrb v3 — the voice-wave band (PRD-207 S5, to Gerard's waveform brief).
+ * PresenceOrb v4 — two renderers, one component.
  *
- * The reference set is HORIZONTAL: a bright beam across the screen, dense
- * mirrored vertical bars breathing out of it, smooth ribbon waves flowing
- * through, a hot core flare at centre, drifting particles. Voice history
- * enters at the centre and travels outward to both edges, so speech
- * literally radiates from the middle of the beam.
+ * `fullBleed` (the chat's living background) draws GERARD'S REFERENCE — the
+ * image sent twelve times: thick WOVEN RIBBON BUNDLES (gold / magenta /
+ * blue, seven offset strands each, a bright leading strand), TALL luminous
+ * bars across the FULL width, a soft floor glow, particles — no dominant
+ * beam. Alive with the voices: bar energy radiates outward from centre,
+ * ribbon amplitude swells as either of you speaks, the core flares on
+ * Auto's voice.
  *
- * Canvas-2D, one rAF, zero React re-renders per audio frame (levels arrive
- * through a mutable ref). `prefers-reduced-motion` renders the full
- * composition once, static. All per-element "randomness" is a
- * deterministic index hash — stable frame to frame.
+ * The compact band (VoiceCallPanel) keeps the original beam-and-bars look.
  *
- * `size` is the band HEIGHT; the band spans the container width (canvas
- * has a fixed internal resolution and stretches via CSS).
+ * Canvas-2D, one rAF, zero React re-renders per audio frame (levels via a
+ * mutable ref). `prefers-reduced-motion` renders one static frame. All
+ * per-element randomness is a deterministic index hash.
  */
 
 import { useEffect, useRef, type MutableRefObject } from 'react'
@@ -27,8 +27,7 @@ interface PresenceOrbProps {
   levelsRef: MutableRefObject<VoiceLevels>
   /** Band height in px; the band fills its container's width. */
   size?: number
-  /** Ambient-background mode: no width cap, wider internal resolution —
-   * the beam spans the whole container edge-to-edge with no canvas seam. */
+  /** Ambient-background mode: reference composition, no width cap. */
   fullBleed?: boolean
 }
 
@@ -61,20 +60,23 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Internal resolution; CSS stretches to the container. Full-bleed uses a
-    // wider raster so the beam/ribbons stay crisp across the whole window
-    // while the voice bars keep their centred concentration.
-    const W = fullBleed ? 1280 : 680
+    const W = fullBleed ? 1440 : 680
     const H = size
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
     canvas.width = W * dpr
     canvas.height = H * dpr
     ctx.scale(dpr, dpr)
 
-    const { h, s, l } = warningHsl()
-    const gold = (alpha: number, dl = 0) =>
-      `hsla(${h}, ${s}%, ${Math.max(0, Math.min(100, l + dl))}%, ${alpha})`
-    const hot = (alpha: number) => `hsla(${h + 6}, 100%, 90%, ${alpha})`
+    const { h: brandH, s: brandS, l: brandL } = warningHsl()
+    // The reference palette: brand gold anchored, magenta and blue companions.
+    const HUES = [brandH, 318, 215]
+    const col = (hue: number, alpha: number, dl = 0, ds = 0) =>
+      `hsla(${hue}, ${Math.max(0, Math.min(100, brandS + ds))}%, ${Math.max(
+        0,
+        Math.min(100, brandL + dl)
+      )}%, ${Math.min(1, alpha)})`
+    const gold = (alpha: number, dl = 0) => col(brandH, alpha, dl)
+    const hot = (alpha: number) => `hsla(${brandH + 6}, 100%, 92%, ${Math.min(1, alpha)})`
 
     const reducedMotion =
       typeof window !== 'undefined' &&
@@ -82,15 +84,141 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
 
     const cx = W / 2
     const cy = H / 2
-    const maxBar = H * 0.36
 
-    // Voice history: slot 0 = centre (now), travelling outward each frame.
     const hist = new Float32Array(SLOTS)
     let smoothAgent = 0
     let smoothUser = 0
+    let energyEnv = 0 // slow envelope: the room keeps glowing between words
     let raf = 0
 
-    const drawFrame = (t: number, animate: boolean) => {
+    // ------------------------------------------------------------------
+    // THE REFERENCE (fullBleed): woven ribbon bundles + tall bars + floor
+    // ------------------------------------------------------------------
+    const drawReference = (t: number, animate: boolean) => {
+      const st = stateRef.current
+      const levels = levelsRef.current
+      smoothAgent += (levels.agent - smoothAgent) * 0.35
+      smoothUser += (levels.user - smoothUser) * 0.3
+      const energy = Math.min(1, smoothAgent * 1.7 + smoothUser * 1.0)
+      energyEnv += ((st === 'speaking' ? Math.max(0.35, energy) : energy) - energyEnv) * 0.06
+
+      if (animate) {
+        hist.copyWithin(1, 0)
+        hist[0] = energy
+      }
+
+      const dim = st === 'ended' ? 0 : st === 'error' ? 0.35 : st === 'connecting' ? 0.6 : 1
+      ctx.clearRect(0, 0, W, H)
+      if (dim === 0) return
+
+      // floor glow — grounds the scene like the reference's reflections
+      const floor = ctx.createRadialGradient(cx, cy + H * 0.22, 0, cx, cy + H * 0.22, W * 0.45)
+      floor.addColorStop(0, gold(0.14 * dim, 6))
+      floor.addColorStop(1, gold(0))
+      ctx.fillStyle = floor
+      ctx.fillRect(0, 0, W, H)
+
+      // TALL BARS across the full width — energy radiates from the centre
+      const step = 16
+      for (let x = step / 2; x < W; x += step) {
+        const i = Math.round(x / step)
+        const distSlot = Math.min(
+          SLOTS - 1,
+          Math.floor((Math.abs(x - cx) / (W / 2)) * SLOTS)
+        )
+        const v = distSlot === 0 ? Math.max(energy, hist[0]) : hist[distSlot]
+        const idle = 0.1 + 0.14 * hash(i * 13) + 0.06 * Math.sin((animate ? t : 700) / 1200 + i)
+        const amp = Math.min(1, idle + v * 1.1 + energyEnv * 0.25)
+        const bh = amp * H * 0.42
+        const hue = HUES[i % 7 === 0 ? 1 : i % 11 === 0 ? 2 : 0] // gold field, pink/blue accents
+        const bright = v > 0.45
+        // three passes: halo, body, hot core — the luminous fade of the ref
+        ctx.strokeStyle = col(hue, 0.10 * dim, 10)
+        ctx.lineWidth = 7
+        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
+        ctx.strokeStyle = col(hue, 0.3 * dim, 16)
+        ctx.lineWidth = 2.6
+        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
+        ctx.strokeStyle = bright ? hot(0.85 * dim) : col(hue, 0.5 * dim, 24)
+        ctx.lineWidth = 1.2
+        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
+      }
+
+      // WOVEN RIBBON BUNDLES — the hero of the reference
+      const sway = 0.55 + 0.75 * energyEnv
+      for (let b = 0; b < 3; b++) {
+        const hue = HUES[b]
+        const baseAmp = H * (0.13 + b * 0.055) * sway
+        const k = 0.0075 + b * 0.0022
+        const dir = b % 2 === 0 ? 1 : -1
+        const speed = (animate ? t : 900) / (1150 + b * 420)
+        for (let sIdx = 0; sIdx < 7; sIdx++) {
+          const ampJ = baseAmp * (0.8 + 0.4 * hash(b * 31 + sIdx))
+          const phase = sIdx * 0.33 + hash(b * 7 + sIdx) * 2.2
+          const lead = sIdx === 3
+          ctx.beginPath()
+          for (let x = 0; x <= W; x += 8) {
+            const env = 0.55 + 0.45 * Math.sin((x / W) * Math.PI)
+            const y =
+              cy -
+              H * 0.02 +
+              Math.sin(x * k + dir * speed * 2 + phase) * ampJ * env +
+              (sIdx - 3) * 2.4
+            if (x === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+          }
+          if (lead) {
+            ctx.strokeStyle = col(hue, 0.55 * dim, 30, 8)
+            ctx.lineWidth = 2.1
+          } else {
+            ctx.strokeStyle = col(hue, 0.14 * dim, 14)
+            ctx.lineWidth = 1.1
+          }
+          ctx.stroke()
+        }
+      }
+
+      // centre flare on Auto's voice
+      const flareR = 20 + smoothAgent * 120
+      const flare = ctx.createRadialGradient(cx, cy, 0, cx, cy, flareR)
+      flare.addColorStop(0, hot(0.9 * dim * (0.25 + smoothAgent)))
+      flare.addColorStop(1, gold(0))
+      ctx.fillStyle = flare
+      ctx.beginPath()
+      ctx.arc(cx, cy, flareR, 0, Math.PI * 2)
+      ctx.fill()
+
+      // particles
+      for (let p = 0; p < 34; p++) {
+        const drift = animate ? (t / 1000) * (4 + hash(p) * 10) : 40
+        const px = (hash(p * 3) * W + drift * (p % 2 === 0 ? 1 : -1) + W * 4) % W
+        const py = cy + (hash(p * 5) - 0.5) * H * 0.8
+        const tw = 0.3 + 0.6 * Math.abs(Math.sin((animate ? t : 500) / 900 + p * 1.7))
+        ctx.fillStyle =
+          p % 6 === 0 ? col(HUES[1], tw * 0.7 * dim, 20) : gold(tw * 0.55 * dim, 18)
+        ctx.beginPath()
+        ctx.arc(px, py, p % 4 === 0 ? 1.7 : 1.1, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      // thinking / connecting: a bright pulse crossing the scene
+      if (st === 'thinking' || st === 'connecting') {
+        const cycle = animate ? (t / 1600) % 1 : 0.35
+        const xp = cycle * W
+        const pg = ctx.createRadialGradient(xp, cy, 0, xp, cy, 26)
+        pg.addColorStop(0, hot(0.9 * dim))
+        pg.addColorStop(1, gold(0))
+        ctx.fillStyle = pg
+        ctx.beginPath()
+        ctx.arc(xp, cy, 26, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // The compact band (VoiceCallPanel): original beam + centred bars
+    // ------------------------------------------------------------------
+    const drawBand = (t: number, animate: boolean) => {
       const st = stateRef.current
       const levels = levelsRef.current
       smoothAgent += (levels.agent - smoothAgent) * 0.35
@@ -98,71 +226,28 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
       const energy = Math.min(1, smoothAgent * 1.7 + smoothUser * 1.0)
 
       if (animate) {
-        hist.copyWithin(1, 0) // history radiates outward from the centre
+        hist.copyWithin(1, 0)
         hist[0] = energy
       }
 
       const dim = st === 'ended' || st === 'error' ? 0.35 : st === 'connecting' ? 0.65 : 1
-
       ctx.clearRect(0, 0, W, H)
 
-      // 1 — ambient wash above/below the beam
-      const wash = ctx.createLinearGradient(0, 0, 0, H)
-      wash.addColorStop(0, gold(0))
-      wash.addColorStop(0.5, gold(0.10 * dim, 6))
-      wash.addColorStop(1, gold(0))
-      ctx.fillStyle = wash
-      ctx.fillRect(0, 0, W, H)
-
-      // 2 — mirrored voice bars: history flows centre → edges (both sides)
       for (let sIdx = 0; sIdx < SLOTS; sIdx++) {
         const v = sIdx === 0 ? energy : hist[sIdx]
         const fade = 1 - (sIdx / SLOTS) * 0.8
-        const jitter = hash(sIdx * 7) * 2
-        const bh = 3 + v * maxBar * (0.45 + fade * 0.55) + jitter
-        const hotBar = v > 0.45
+        const bh = 3 + v * H * 0.36 * (0.45 + fade * 0.55) + hash(sIdx * 7) * 2
         for (const dir of [-1, 1]) {
           const x = cx + dir * (sIdx * BAR_SPACING + 2)
-          // soft wide pass + bright thin core = cheap glow
           ctx.strokeStyle = gold(0.14 * fade * dim, 8)
           ctx.lineWidth = 3.6
           ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh); ctx.stroke()
-          ctx.strokeStyle = hotBar ? hot(0.9 * fade * dim) : gold(0.55 * fade * dim, 14)
+          ctx.strokeStyle = v > 0.45 ? hot(0.9 * fade * dim) : gold(0.55 * fade * dim, 14)
           ctx.lineWidth = 1.4
           ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh); ctx.stroke()
         }
       }
 
-      // 3 — ribbon waves flowing through the bars (three phase-shifted layers)
-      const ribbonEnv = (x: number) => {
-        const d = Math.abs(x - cx) / cx
-        return (1 - d * d) * (0.35 + energy * 0.65)
-      }
-      for (let rIdx = 0; rIdx < 3; rIdx++) {
-        const amp = H * (0.10 + rIdx * 0.045)
-        const k = 0.012 + rIdx * 0.004
-        const speed = (animate ? t : 900) / (900 + rIdx * 380)
-        ctx.beginPath()
-        for (let x = 0; x <= W; x += 6) {
-          const y =
-            cy +
-            Math.sin(x * k + speed * (rIdx % 2 === 0 ? 1 : -1) * 2 + rIdx * 2.1) *
-              amp * ribbonEnv(x)
-          if (x === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        }
-        ctx.strokeStyle = rIdx === 0 ? hot(0.35 * dim) : gold(0.22 * dim, 12 - rIdx * 6)
-        ctx.lineWidth = rIdx === 0 ? 1.6 : 1.1
-        ctx.stroke()
-      }
-
-      // 4 — the beam: a bright horizon line with a soft vertical glow
-      const beamGlow = ctx.createLinearGradient(0, cy - 14, 0, cy + 14)
-      beamGlow.addColorStop(0, gold(0))
-      beamGlow.addColorStop(0.5, gold(0.5 * dim, 18))
-      beamGlow.addColorStop(1, gold(0))
-      ctx.fillStyle = beamGlow
-      ctx.fillRect(0, cy - 14, W, 28)
       const beam = ctx.createLinearGradient(0, 0, W, 0)
       beam.addColorStop(0, gold(0.05 * dim))
       beam.addColorStop(0.5, hot(0.95 * dim))
@@ -170,51 +255,27 @@ export function PresenceOrb({ state, levelsRef, size = 170, fullBleed = false }:
       ctx.fillStyle = beam
       ctx.fillRect(0, cy - 0.8, W, 1.6)
 
-      // 5 — core flare at centre: blooms with Auto's voice
-      const flareR = 26 + smoothAgent * 95 + 6 * Math.sin((animate ? t : 600) / 700)
+      const flareR = 26 + smoothAgent * 60
       const flare = ctx.createRadialGradient(cx, cy, 0, cx, cy, flareR)
-      flare.addColorStop(0, hot(0.95 * dim))
-      flare.addColorStop(0.3, gold(0.55 * dim, 20))
+      flare.addColorStop(0, hot(0.9 * dim))
       flare.addColorStop(1, gold(0))
       ctx.fillStyle = flare
       ctx.beginPath()
       ctx.arc(cx, cy, flareR, 0, Math.PI * 2)
       ctx.fill()
-
-      // 6 — drifting particles (the dust in the references)
-      for (let p = 0; p < 26; p++) {
-        const drift = animate ? (t / 1000) * (4 + hash(p) * 10) : 40
-        const px = (hash(p * 3) * W + drift * (p % 2 === 0 ? 1 : -1) + W * 4) % W
-        const py = cy + (hash(p * 5) - 0.5) * H * 0.75
-        const tw = 0.25 + 0.6 * Math.abs(Math.sin((animate ? t : 500) / 900 + p * 1.7))
-        ctx.fillStyle = p % 5 === 0 ? hot(tw * 0.8 * dim) : gold(tw * 0.5 * dim, 15)
-        ctx.beginPath()
-        ctx.arc(px, py, p % 4 === 0 ? 1.6 : 1, 0, Math.PI * 2)
-        ctx.fill()
-      }
-
-      // 7 — thinking/connecting: a bright pulse travelling the beam
-      if (st === 'thinking' || st === 'connecting') {
-        const cycle = animate ? (t / 1600) % 1 : 0.35
-        const xp = cycle * W
-        const pg = ctx.createRadialGradient(xp, cy, 0, xp, cy, 22)
-        pg.addColorStop(0, hot(0.9 * dim))
-        pg.addColorStop(1, gold(0))
-        ctx.fillStyle = pg
-        ctx.beginPath()
-        ctx.arc(xp, cy, 22, 0, Math.PI * 2)
-        ctx.fill()
-      }
     }
+
+    const draw = fullBleed ? drawReference : drawBand
 
     if (reducedMotion) {
       for (let i = 0; i < SLOTS; i++) hist[i] = 0.15 + hash(i) * 0.45
-      drawFrame(900, false)
+      energyEnv = 0.35
+      draw(900, false)
       return () => undefined
     }
 
     const loop = (t: number) => {
-      drawFrame(t, true)
+      draw(t, true)
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)

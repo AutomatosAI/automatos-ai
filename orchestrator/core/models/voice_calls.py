@@ -27,7 +27,7 @@ silently dropped.
 
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -64,6 +64,11 @@ class VoiceCall(Base):
     fallback_chat_id = Column(String(64), nullable=True)
 
     status = Column(String(16), nullable=False, server_default="minted")
+
+    # The caller's privilege tier, captured at mint — system_role lives only
+    # in Clerk claims (no users column), so the webhook reads it from HERE
+    # (row-truth), never a runtime lookup. False for steward/orphan lanes.
+    is_super_admin = Column(Boolean, nullable=False, server_default="false")
 
     minted_at = Column(DateTime, nullable=False, server_default=func.now())
     started_at = Column(DateTime, nullable=True)
