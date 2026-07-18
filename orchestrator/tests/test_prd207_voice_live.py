@@ -466,7 +466,9 @@ def test_mint_without_chat_creates_and_binds_thread(monkeypatch):
     out = _run_mint(ctx=_mint_ctx(ws_id=ws_id, user_int=7), db=db)
 
     assert out["chat_id"] == str(created_chat_id)  # the screen can follow it
-    assert created["user_id"] == 7 and created["title"] == "Voice call"
+    # Title is time-stamped (unique_user_title makes fixed titles a 500
+    # on the second call — 2026-07-18 incident).
+    assert created["user_id"] == 7 and created["title"].startswith("Voice call — ")
     rows = [a.args[0] for a in db.add.call_args_list if isinstance(a.args[0], VoiceCall)]
     assert rows[0].chat_id == str(created_chat_id)  # mint-proven binding → webhook writes HERE
 
