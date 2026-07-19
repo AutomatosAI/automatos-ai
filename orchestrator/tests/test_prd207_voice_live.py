@@ -518,6 +518,62 @@ def test_mint_reuses_the_voice_thread(monkeypatch):
     assert out["chat_id"] == str(existing_id)  # same thread, conversation continues
 
 
+def test_mint_supersedes_prior_active_calls(monkeypatch):
+    """One live call per user: a fresh mint marks the caller's prior active
+    (minted/started) calls 'superseded' so only the newest speaks — the guard
+    against 'Auto talking over herself' from overlapping web calls."""
+    import api.voice_retell as vr
+    from core.models.core import Chat as ChatModel
+    from core.models.voice_calls import VoiceCall
+    from core.models.workspaces import Workspace as WorkspaceModel
+    from modules.voice.live_settings import RetellCredentials
+    from modules.voice.retell_api import RetellWebCall
+    from modules.voice.voice_meter import MeterReading
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+    monkeypatch.setattr(
+        vr.live_settings, "retell_credentials", lambda: RetellCredentials("k", "s", "a")
+    )
+    monkeypatch.setattr(vr.voice_meter, "monthly_meter", lambda db, w: MeterReading(0, 0, 10))
+
+    async def fake_vendor(api_key, payload):
+        return RetellWebCall(call_id="call_new", access_token="tok")
+
+    monkeypatch.setattr(vr.retell_api, "create_web_call", fake_vendor)
+
+    ws_id = uuid.uuid4()
+    ws = SimpleNamespace(settings={"voice_live": {"enabled": True}})
+    existing = SimpleNamespace(id=uuid.uuid4(), user_id=7, workspace_id=ws_id, title="Voice call")
+    updates = []
+
+    db = MagicMock()
+
+    def dispatch(model):
+        q = MagicMock()
+        if model is WorkspaceModel:
+            q.filter.return_value.first.return_value = ws
+        elif model is ChatModel:
+            q.filter.return_value.first.return_value = existing
+            q.filter.return_value.order_by.return_value.first.return_value = existing
+        elif model is VoiceCall:
+            def _upd(vals, **k):
+                updates.append(vals)
+                return 2
+
+            q.filter.return_value.update.side_effect = _upd
+        else:
+            q.filter.return_value.first.return_value = None
+        return q
+
+    db.query.side_effect = dispatch
+
+    out = _run_mint(ctx=_mint_ctx(ws_id=ws_id, user_int=7), db=db)
+
+    assert out["call_id"] == "call_new"
+    assert updates, "mint did not supersede prior calls"
+    assert "superseded" in list(updates[0].values())  # status -> superseded
+
+
 def test_voice_turn_has_the_full_brain(monkeypatch):
     """ONE Auto: the spoken turn keeps the SAME BRAIN as the typed turn —
     memory retrieval + core tools + the caller's REAL privilege tier, and
@@ -1182,6 +1238,76 @@ def test_ws_closes_4401_for_unminted_call(monkeypatch):
     ws = _FakeWebSocket([])
     asyncio.run(vr.retell_llm_websocket(ws, "call_forged"))
     assert ws.close_code == 4401  # the minted call_id IS the credential
+    assert ws.accepted is False
+
+
+def test_ws_superseded_call_closes_without_speaking(monkeypatch):
+    """One live call per user: a call a newer mint marked 'superseded' must
+    NOT speak on its next turn — it closes instead. Several superseded calls
+    on one mic each streaming a reply is the 'Auto talking over herself' bug."""
+    import api.voice_retell as vr
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+
+    from contextlib import contextmanager
+
+    db = MagicMock()
+    # open-time minted check (.first()) passes; the per-turn status check
+    # (.scalar()) reports this call was superseded by a newer mint.
+    db.query.return_value.filter.return_value.first.return_value = (1,)
+    db.query.return_value.filter.return_value.scalar.return_value = "superseded"
+
+    @contextmanager
+    def fake_session():
+        yield db
+
+    monkeypatch.setattr(vr, "get_db_session", fake_session)
+
+    async def must_not_stream(req):
+        raise AssertionError("a superseded call must never reach the brain")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(vr, "_agent_retell_stream", must_not_stream)
+
+    ws = _FakeWebSocket(
+        [
+            {"interaction_type": "call_details",
+             "call": {"retell_llm_dynamic_variables": {"workspace_id": "ws-9"}}},
+            {"interaction_type": "response_required", "response_id": 1,
+             "transcript": [{"role": "user", "content": "hello"}]},
+        ]
+    )
+    asyncio.run(vr.retell_llm_websocket(ws, "call_superseded"))
+
+    assert ws.close_code == 1000  # closed cleanly, did not speak
+    # no turn response frame was ever sent (only the config + begin handshake)
+    assert not any(
+        m.get("response_type") == "response" and m.get("response_id") == 1
+        for m in ws.sent
+    )
+
+
+def test_ws_rejects_superseded_call_at_open(monkeypatch):
+    """A superseded call must be refused BEFORE accept — so an auto_reconnect
+    of a call a newer mint replaced can't loop back and start a second voice."""
+    import api.voice_retell as vr
+
+    monkeypatch.setattr(vr.live_settings, "voice_live_enabled", lambda: True)
+
+    from contextlib import contextmanager
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = ("superseded",)
+
+    @contextmanager
+    def fake_session():
+        yield db
+
+    monkeypatch.setattr(vr, "get_db_session", fake_session)
+
+    ws = _FakeWebSocket([])
+    asyncio.run(vr.retell_llm_websocket(ws, "call_superseded_open"))
+    assert ws.close_code == 4409
     assert ws.accepted is False
 
 

@@ -228,6 +228,33 @@ async def mint_web_call(
         logger.error("voice_live_mint_denied reason=vendor_error workspace=%s err=%s", ctx.workspace_id, exc)
         raise HTTPException(status_code=502, detail=f"Could not start the call: {exc}")
 
+    # ONE LIVE CALL PER USER. A client that mints again (device switch, a
+    # re-press, a re-render, two LiveVoiceMode instances during a view
+    # transition) would otherwise leave several web calls connected to the
+    # SAME mic, each streaming Auto's reply — the caller hears Auto talking
+    # over herself ("five people at once"). Supersede the caller's prior
+    # active calls here; their sockets close on their next turn (below) so no
+    # superseded call ever speaks again. Best-effort, same transaction.
+    superseded = (
+        db.query(VoiceCall)
+        .filter(
+            VoiceCall.user_id == user_int_id,
+            VoiceCall.status.in_(("minted", "started")),
+        )
+        .update(
+            {
+                VoiceCall.status: "superseded",
+                VoiceCall.disconnect_reason: "superseded_by_newer_call",
+            },
+            synchronize_session=False,
+        )
+    )
+    if superseded:
+        logger.info(
+            "voice_live_superseded_prior count=%s user=%s (new call=%s)",
+            superseded, user_int_id, web_call.call_id,
+        )
+
     # The row is BORN at mint — the webhook validates against it (S2/S3).
     # PRD-143 discipline: su derives from Clerk-claims system_role ONLY —
     # captured HERE (the one place the session exists) for the webhook.
@@ -763,10 +790,19 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
     from core.models.voice_calls import VoiceCall
 
     with get_db_session() as db:
-        minted = db.query(VoiceCall.id).filter(VoiceCall.call_id == str(call_id)).first()
+        minted = (
+            db.query(VoiceCall.status).filter(VoiceCall.call_id == str(call_id)).first()
+        )
     if minted is None:
         logger.warning("voice_live_ws_rejected reason=unminted_call call=%s", call_id)
         await websocket.close(code=4401)
+        return
+    if minted[0] == "superseded":
+        # A newer call already owns this user's conversation — refuse before
+        # accept so an auto_reconnect of a superseded call can't loop back in
+        # and start a second voice.
+        logger.info("voice_live_ws_rejected reason=superseded call=%s", call_id)
+        await websocket.close(code=4409)
         return
 
     await websocket.accept()
@@ -889,6 +925,23 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
                     "voice_live_ws_turn call=%s rid=%s type=%s",
                     call_id, message.get("response_id"), itype,
                 )
+                # ONE LIVE CALL PER USER: a newer mint marked this call
+                # 'superseded'. It must NOT speak — several superseded calls on
+                # one mic is the "Auto talking over herself" bug. Close quietly
+                # (the newest call owns the conversation). Checked at the turn
+                # boundary: exactly where a stale call would otherwise talk.
+                with get_db_session() as _db:
+                    _status = (
+                        _db.query(VoiceCall.status)
+                        .filter(VoiceCall.call_id == str(call_id))
+                        .scalar()
+                    )
+                if _status == "superseded":
+                    logger.info("voice_live_ws_superseded_closing call=%s", call_id)
+                    if speaking is not None and not speaking.done():
+                        speaking.cancel()  # silence any in-flight reply at once
+                    await websocket.close(code=1000)
+                    break
                 if speaking is not None and not speaking.done():
                     speaking.cancel()
                 req = parse_llm_request(
