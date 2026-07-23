@@ -44,8 +44,8 @@ def _patch_registry(monkeypatch, mapping):
 
 def test_page_actions_unioned(monkeypatch):
     monkeypatch.setattr(tr, "_page_action_passes_gate", lambda n, ia, isa: True)
-    narrowing = (["ranked_1", "ranked_2"], "semantic")
-    out, reason = tr._apply_page_prior(
+    narrowing = (["ranked_1", "ranked_2"], "semantic", False)
+    out, reason, _pins = tr._apply_page_prior(
         narrowing, ["page_x", "page_y"], is_admin=False, is_super_admin=False
     )
     # ranked survive AND page actions are folded in even though the query
@@ -56,20 +56,20 @@ def test_page_actions_unioned(monkeypatch):
 
 
 def test_no_page_context_unchanged():
-    narrowing = (["a", "b"], "semantic")
+    narrowing = (["a", "b"], "semantic", False)
     # No page actions → identity (same tuple object).
     assert tr._apply_page_prior(narrowing, None, False, False) is narrowing
     assert tr._apply_page_prior(narrowing, [], False, False) is narrowing
     # Full-enum narrowing (allowed is None → every action already exposed):
     # nothing to union, returned unchanged.
-    full = (None, "routing_off")
+    full = (None, "routing_off", False)
     assert tr._apply_page_prior(full, ["x"], False, False) is full
 
 
 def test_page_actions_dedup_and_order(monkeypatch):
     monkeypatch.setattr(tr, "_page_action_passes_gate", lambda n, ia, isa: True)
-    narrowing = (["a", "b"], "s")
-    out, _ = tr._apply_page_prior(narrowing, ["b", "c", "c"], False, False)
+    narrowing = (["a", "b"], "s", False)
+    out, _, _ = tr._apply_page_prior(narrowing, ["b", "c", "c"], False, False)
     # 'b' already present (not duplicated); 'c' appended once, after ranked.
     assert out == ["a", "b", "c"]
 
@@ -78,7 +78,7 @@ def test_page_actions_cap(monkeypatch):
     monkeypatch.setattr(tr, "_page_action_passes_gate", lambda n, ia, isa: True)
     ranked = [f"r{i}" for i in range(38)]
     page = [f"p{i}" for i in range(10)]
-    out, _ = tr._apply_page_prior((ranked, "s"), page, False, False)
+    out, _, _ = tr._apply_page_prior((ranked, "s", False), page, False, False)
     assert len(out) == 40  # TOOL_ROUTING_ENUM_CAP default
     # ranked kept in full; only the first 2 page actions fit under the cap.
     assert out[:38] == ranked
@@ -93,10 +93,10 @@ def test_page_actions_respect_super_admin_gate(monkeypatch):
         "su_only": _FakeAction(super_admin_only=True),
         "admin_x": _FakeAction(admin_only=True),
     })
-    narrowing = (["ranked"], "s")
+    narrowing = (["ranked"], "s", False)
 
     # non-admin, non-super principal: only the ungated action folds in.
-    out, _ = tr._apply_page_prior(
+    out, _, _ = tr._apply_page_prior(
         narrowing, ["normal", "su_only", "admin_x"],
         is_admin=False, is_super_admin=False,
     )
@@ -105,11 +105,11 @@ def test_page_actions_respect_super_admin_gate(monkeypatch):
     assert "admin_x" not in out
 
     # super-admin sees the su-only action; admin sees the admin-only action.
-    out_su, _ = tr._apply_page_prior(
+    out_su, _, _ = tr._apply_page_prior(
         narrowing, ["su_only"], is_admin=True, is_super_admin=True
     )
     assert "su_only" in out_su
-    out_admin, _ = tr._apply_page_prior(
+    out_admin, _, _ = tr._apply_page_prior(
         narrowing, ["admin_x"], is_admin=True, is_super_admin=False
     )
     assert "admin_x" in out_admin
@@ -124,5 +124,5 @@ def test_gate_drops_unknown_action(monkeypatch):
 def test_gate_unregistered_yields_no_union(monkeypatch):
     # Every page action unknown → nothing clears the gate → narrowing unchanged.
     _patch_registry(monkeypatch, {})
-    narrowing = (["ranked"], "s")
+    narrowing = (["ranked"], "s", False)
     assert tr._apply_page_prior(narrowing, ["ghost1", "ghost2"], True, True) is narrowing

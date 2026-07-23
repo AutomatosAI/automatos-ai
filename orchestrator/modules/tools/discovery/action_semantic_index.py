@@ -50,10 +50,17 @@ def _apply_relevance_floor(
     """
     if not scored or (floor <= 0 and ratio <= 0):
         return scored
-    best = scored[0][1]
-    cutoff = floor
-    if ratio > 0 and best > 0:
-        cutoff = max(cutoff, best * ratio)
+    cutoffs = []
+    if floor > 0:
+        cutoffs.append(floor)
+    if ratio > 0 and scored[0][1] > 0:
+        cutoffs.append(scored[0][1] * ratio)
+    if not cutoffs:
+        # Only the ratio dial is set and the best score is non-positive —
+        # there is no meaningful cutoff; dropping everything here would turn
+        # a hostile query into an empty surface by accident.
+        return scored
+    cutoff = max(cutoffs)
     return [(n, s) for n, s in scored if s >= cutoff]
 
 
