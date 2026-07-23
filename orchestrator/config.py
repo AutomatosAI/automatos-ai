@@ -931,6 +931,28 @@ class Config:
     # Max seconds a live query embedding may take before narrowing falls back
     # to the full action enum (the embed keeps running and caches for next turn).
     SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S: float = float(os.getenv("SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S", "2.5"))
+    # Tool-surface deep review PR-B (docs/reviews/TOOL-SURFACE-DEEP-REVIEW-2026-07-23.md).
+    # Relevance floor on rank_actions: drop candidates scoring below
+    # max(FLOOR, best*FLOOR_RATIO) so a greeting stops surfacing 15
+    # least-dissimilar actions. 0 = off (today's blind top-K, default).
+    SEMANTIC_TOOL_ROUTING_FLOOR: float = float(os.getenv("SEMANTIC_TOOL_ROUTING_FLOOR", "0"))
+    SEMANTIC_TOOL_ROUTING_FLOOR_RATIO: float = float(os.getenv("SEMANTIC_TOOL_ROUTING_FLOOR_RATIO", "0"))
+    # What ships when narrowing CAN'T decide (no query / rank error / embed
+    # timeout) while SEMANTIC_TOOL_ROUTING is on:
+    #   open-full   — today's posture: full enum + full catalog (default)
+    #   closed-pins — the pin set below + platform_find_tools discovery
+    # (flag off entirely = operator chose the wide surface; always open-full).
+    TOOL_FALLBACK_MODE: str = os.getenv("TOOL_FALLBACK_MODE", "open-full")
+    TOOL_FALLBACK_PINS: str = os.getenv(
+        "TOOL_FALLBACK_PINS",
+        "platform_find_tools,platform_search_memory,platform_store_memory,platform_resume_context",
+    )
+    # Shadow telemetry: log (never ship) what the PR-C relevance-gated surface
+    # WOULD have been for each turn — the eval data for the flip.
+    TOOL_SURFACE_SHADOW: bool = os.getenv("TOOL_SURFACE_SHADOW", "true").lower() == "true"
+    # PR-C hybrid: max promoted actions that earn per-turn first-class schemas.
+    # Shadow-only until the flip.
+    TOOL_SURFACE_HYBRID_CAP: int = int(os.getenv("TOOL_SURFACE_HYBRID_CAP", "6"))
     PLATFORM_ACTIONS_MAX_TOKENS: int = int(os.getenv("PLATFORM_ACTIONS_MAX_TOKENS", "4000"))
     PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "2000"))
     MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))

@@ -102,6 +102,7 @@ from modules.tools.discovery.handlers_search import (
     browse_memories,
     delete_memory,
 )
+from modules.tools.discovery.handlers_capabilities import find_tools
 from modules.tools.discovery.handlers_tools_llms import (
     list_tools,
     list_llms,
@@ -372,6 +373,7 @@ class PlatformActionExecutor:
             "platform_query_prometheus": query_prometheus,
             "platform_get_alerts": get_alerts,
             # Visibility / discovery
+            "platform_find_tools": find_tools,  # PR-B: search the action catalog itself
             "platform_list_tools": list_tools,
             "platform_list_llms": list_llms,
             "platform_list_datasources": list_datasources,

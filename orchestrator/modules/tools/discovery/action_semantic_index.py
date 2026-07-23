@@ -20,6 +20,43 @@ from .action_registry import ActionDefinition, get_action_registry
 logger = logging.getLogger(__name__)
 
 
+def _relevance_floor_config() -> Tuple[float, float]:
+    """(absolute_floor, ratio_floor) from the canonical config singleton.
+
+    Both default 0 (floor off). Read lazily so pure unit tests need no config.
+    """
+    try:
+        from config import config
+
+        return (
+            float(getattr(config, "SEMANTIC_TOOL_ROUTING_FLOOR", 0) or 0),
+            float(getattr(config, "SEMANTIC_TOOL_ROUTING_FLOOR_RATIO", 0) or 0),
+        )
+    except Exception:
+        return 0.0, 0.0
+
+
+def _apply_relevance_floor(
+    scored: List[Tuple[str, float]],
+    floor: float,
+    ratio: float,
+) -> List[Tuple[str, float]]:
+    """Drop candidates below max(floor, best*ratio). Pure; order-preserving.
+
+    ``scored`` must be sorted best-first. With both dials 0 this is the
+    identity — the legacy blind top-K. A ratio floor only bites when the
+    best score is positive (cosine can be negative on a hostile query;
+    a negative cutoff would keep everything and mean nothing).
+    """
+    if not scored or (floor <= 0 and ratio <= 0):
+        return scored
+    best = scored[0][1]
+    cutoff = floor
+    if ratio > 0 and best > 0:
+        cutoff = max(cutoff, best * ratio)
+    return [(n, s) for n, s in scored if s >= cutoff]
+
+
 class ActionSemanticIndex:
     """Per-process semantic index over platform ActionDefinitions."""
 
@@ -206,6 +243,14 @@ class ActionSemanticIndex:
         include_super_admin: bool = False,
         embed_timeout_s: Optional[float] = None,
     ) -> List[Tuple[str, float]]:
+        """Rank eligible actions by cosine similarity to ``query``.
+
+        PR-B (tool-surface review): results below the configured relevance
+        floor — max(SEMANTIC_TOOL_ROUTING_FLOOR, best*FLOOR_RATIO) — are
+        dropped BEFORE the top_k cut, so a greeting can legitimately rank
+        zero actions instead of the 15 least-dissimilar. Both dials default
+        to 0 (floor off, exact legacy behavior).
+        """
         import time as _perf_t
         _perf_t0 = _perf_t.monotonic()
         await self.ensure_indexed(
@@ -259,6 +304,7 @@ class ActionSemanticIndex:
                 continue
             scored.append((name, float(np.dot(query_vec, vec) / (q_norm * v_norm))))
         scored.sort(key=lambda x: x[1], reverse=True)
+        scored = _apply_relevance_floor(scored, *_relevance_floor_config())
         logger.info(
             "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms cosine=%.0fms n_candidates=%d cache_hit=%d",
             (_perf_t1 - _perf_t0) * 1000,

@@ -138,24 +138,19 @@ class ToolsSection(BaseSection):
         awaited on this loop — never bridged through a helper thread.
         """
         from modules.tools.discovery.action_registry import get_action_registry
-        from modules.tools.tool_router import (
-            _rank_actions_for_dispatcher_async,
-            _semantic_routing_enabled,
-            _semantic_routing_top_k,
-        )
+        from modules.tools.tool_router import _narrow_dispatcher_actions_async
 
         registry = get_action_registry()
-        allowed_names: Optional[list[str]] = None
-        if query and _semantic_routing_enabled():
-            allowed_names = await _rank_actions_for_dispatcher_async(
-                query=query,
-                top_k=_semantic_routing_top_k(),
-                exclude_admin=True,
-                exclude_promoted=True,
-            )
+        # Shared narrowing contract (PR-B): ranking when possible, and the
+        # configured fallback posture (open-full / closed-pins) when not —
+        # this lane (heartbeat et al.) previously always failed open wide.
+        allowed_names, _reason, from_pins = await _narrow_dispatcher_actions_async(
+            query, is_admin=False, is_super_admin=False
+        )
         schema = registry.to_dispatcher_schema(
             exclude_admin=True,
             allowed_names=allowed_names,
+            allow_promoted_in_allowlist=from_pins,
         )
         return [schema], "auto"
 

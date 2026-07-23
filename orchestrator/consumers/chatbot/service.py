@@ -2137,19 +2137,18 @@ class StreamingChatService:
                 # surface as the full path.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
-                    _allowed = None
-                    if _semantic_routing_enabled() and latest_text:
-                        _allowed = await _rank_actions_for_dispatcher_async(
-                            query=latest_text,
-                            top_k=_semantic_routing_top_k(),
-                            exclude_admin=True,
-                            exclude_promoted=True,
-                            include_super_admin=is_super_admin,
-                        )
+                    from modules.tools.tool_router import _narrow_dispatcher_actions_async
+                    # Shared narrowing contract (PR-B): same ranking + fallback
+                    # posture as the full path, so ATOM turns honor closed-pins
+                    # instead of failing open to the full enum.
+                    _allowed, _nreason, _from_pins = await _narrow_dispatcher_actions_async(
+                        latest_text, is_admin=False, is_super_admin=is_super_admin
+                    )
                     _dispatcher = get_action_registry().to_dispatcher_schema(
                         exclude_admin=True,
                         allowed_names=_allowed,
                         include_super_admin=is_super_admin,
+                        allow_promoted_in_allowlist=_from_pins,
                     )
                     # PRD-007 v0.5: proactive openers get zero tools — directive
                     # is self-contained (page context + graph related products).

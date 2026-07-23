@@ -45,6 +45,7 @@ from .actions_power import register_power_actions  # PRD-142 Wave 4 (W4-S5)
 from .actions_autonomy import register_autonomy_actions
 from .actions_deliverables import register_deliverables_actions  # PRD-164 S3
 from .actions_watches import register_watch_actions  # PRD-204 S9
+from .actions_capabilities import register_capabilities_actions  # tool-surface PR-B
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
@@ -83,6 +84,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_autonomy_actions(registry)
     register_deliverables_actions(registry)  # PRD-164 S3: deliverable list/get tools
     register_watch_actions(registry)  # PRD-204 S9: watch create/list/get/cancel
+    register_capabilities_actions(registry)  # PR-B: platform_find_tools discovery seam
 
     # Workspace tools (file I/O, grep, exec, git)
     from .workspace_actions import register_workspace_actions

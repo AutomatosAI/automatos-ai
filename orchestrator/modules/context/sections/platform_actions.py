@@ -80,6 +80,15 @@ class PlatformActionsSection(BaseSection):
                 if filtered:
                     return filtered
 
+            # PR-B (tool-surface review): when narrowing couldn't decide and
+            # the operator chose closed-pins, render the tiny pins card
+            # instead of the ~4k-token full catalog. Flag-off keeps the full
+            # dump (operator explicitly chose the wide surface).
+            if self._semantic_routing_enabled() and self._fallback_mode_closed():
+                pins_text = self._build_pins_text()
+                if pins_text:
+                    return pins_text
+
             return self._build()
         except Exception:
             logger.exception(
@@ -202,6 +211,49 @@ class PlatformActionsSection(BaseSection):
             sequence = " then ".join(f"`{a}`" for a in actions)
             lines.append(f"- call {sequence}")
         return "\n".join(lines)
+
+    def _fallback_mode_closed(self) -> bool:
+        """One source of truth: the router's fallback-mode reader."""
+        try:
+            from modules.tools.tool_router import _fallback_mode_closed
+            return _fallback_mode_closed()
+        except Exception:
+            return False
+
+    def _build_pins_text(self) -> str:
+        """The closed-pins fallback card: pins + the discovery pointer.
+
+        ~10 lines instead of the ~4k-token catalog. The model keeps a way
+        into EVERYTHING via platform_find_tools, so shipping less text here
+        loses no capability.
+        """
+        try:
+            from modules.tools.discovery.action_registry import get_action_registry
+            from modules.tools.tool_router import _fallback_pins
+
+            pins = _fallback_pins()
+            if not pins:
+                return ""
+            catalog = get_action_registry().build_filtered_prompt_summary(
+                pins,
+                exclude_admin=True,
+                exclude_promoted=False,  # pins are largely promoted by design
+                include_super_admin=False,
+            )
+            if not catalog:
+                return ""
+            return (
+                self._PREAMBLE
+                + catalog
+                + "\n\nNeed anything else? Search the full catalog with "
+                "`platform_find_tools(query=...)` — every platform action is "
+                "reachable through it.\n"
+            )
+        except Exception:
+            logger.warning(
+                "PlatformActionsSection._build_pins_text failed", exc_info=True
+            )
+            return ""
 
     def _build(self) -> str:
         from modules.tools.discovery.action_registry import get_action_registry
