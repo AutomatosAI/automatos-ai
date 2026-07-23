@@ -926,6 +926,9 @@ class AgentFactory:
                         agent=db_agent,
                         workspace_id=agent_runtime.workspace_id,
                         task_description=prompt,
+                        # Narrow the dispatcher enum to task-relevant actions —
+                        # without a query this lane shipped all 137 every run.
+                        query=prompt,
                     )
                     # PRD-201 S4: carry the assembler's cache-stable prefix on the
                     # system message so the Anthropic client can place its
