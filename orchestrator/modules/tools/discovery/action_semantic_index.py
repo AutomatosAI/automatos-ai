@@ -159,14 +159,19 @@ class ActionSemanticIndex:
         # One live embed per (loop, model, query) — concurrent callers share
         # it. The finalize callback owns cleanup + the cache write, so the
         # vector lands in Redis whether the winner was awaited or timed out.
+        # Lazy-init like _get_lock(): tests construct the index via __new__,
+        # so instance state must not assume __init__ ran.
+        inflight = getattr(self, "_inflight", None)
+        if inflight is None:
+            inflight = self._inflight = {}
         key = (id(asyncio.get_running_loop()), model_key, query)
-        task = self._inflight.get(key)
+        task = inflight.get(key)
         if task is None:
             task = asyncio.ensure_future(self._embedding_manager.generate_embedding(query))
-            self._inflight[key] = task
+            inflight[key] = task
 
             def _finalize(t: "asyncio.Task", _key: tuple = key) -> None:
-                self._inflight.pop(_key, None)
+                inflight.pop(_key, None)
                 try:
                     self._cache.set_embeddings_batch({query: t.result()}, model=model_key)
                 except Exception:
