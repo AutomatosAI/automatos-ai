@@ -217,16 +217,57 @@ def _narrow_dispatcher_actions_async_inputs(
     return None
 
 
+def _fallback_pins() -> List[str]:
+    """The configured pin set for closed-pins fallback (CSV, whitespace-safe)."""
+    try:
+        from config import config
+        raw = str(getattr(config, "TOOL_FALLBACK_PINS", "") or "")
+    except Exception:
+        raw = ""
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _fallback_mode_closed() -> bool:
+    """True when TOOL_FALLBACK_MODE=closed-pins (PR-B; default open-full)."""
+    try:
+        from config import config
+        return str(getattr(config, "TOOL_FALLBACK_MODE", "open-full")).strip().lower() == "closed-pins"
+    except Exception:
+        return False
+
+
+def _fallback_narrowing(reason: str) -> Tuple[Optional[List[str]], Optional[str], bool]:
+    """What ships when narrowing CAN'T decide (no query / rank fail / timeout).
+
+    open-full (default): (None, reason, False) — today's fail-open full enum.
+    closed-pins: the pin set, marked from_pins=True so the dispatcher build
+    may admit promoted pins (platform_find_tools et al.) into the enum. A
+    slow embed stops meaning maximum context.
+    """
+    if _fallback_mode_closed():
+        pins = _fallback_pins()
+        if pins:
+            return pins, f"closed-pins ({reason})", True
+    return None, reason, False
+
+
 async def _narrow_dispatcher_actions_async(
     query: Optional[str],
     is_admin: bool,
     is_super_admin: bool,
-) -> Tuple[Optional[List[str]], Optional[str]]:
-    """Resolve (allowed_names, narrow_reason) for the dispatcher enum —
-    async-native (awaits ranking on the caller's loop)."""
+) -> Tuple[Optional[List[str]], Optional[str], bool]:
+    """Resolve (allowed_names, narrow_reason, from_pins) for the dispatcher
+    enum — async-native (awaits ranking on the caller's loop).
+
+    from_pins marks a closed-pins fallback surface: the allow-list may then
+    contain promoted names that to_dispatcher_schema should admit. A flag-off
+    operator choice is always honored as open-full.
+    """
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
     if skip_reason is not None:
-        return None, skip_reason
+        if skip_reason.startswith("flag "):
+            return None, skip_reason, False
+        return _fallback_narrowing(skip_reason)
     allowed = await _rank_actions_for_dispatcher_async(
         query=query,
         top_k=_semantic_routing_top_k(),
@@ -235,8 +276,8 @@ async def _narrow_dispatcher_actions_async(
         include_super_admin=is_super_admin,
     )
     if allowed is None:
-        return None, "rank_actions returned empty or raised"
-    return allowed, None
+        return _fallback_narrowing("rank_actions returned empty or raised")
+    return allowed, None, False
 
 
 def _page_action_passes_gate(
@@ -263,20 +304,20 @@ def _page_action_passes_gate(
 
 
 def _apply_page_prior(
-    narrowing: Tuple[Optional[List[str]], Optional[str]],
+    narrowing: Tuple[Optional[List[str]], Optional[str], bool],
     page_actions: Optional[List[str]],
     is_admin: bool,
     is_super_admin: bool,
-) -> Tuple[Optional[List[str]], Optional[str]]:
+) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Union gate-cleared page actions into the narrowed enum (PRD-221 S4).
 
     - No page actions, or a full-enum narrowing (allowed is None → every action
       already exposed): returned unchanged.
     - Otherwise the gate-passing page actions are appended to the ranked
       allow-list (dedup, order-stable) and the result is capped at
-      ``TOOL_ROUTING_ENUM_CAP`` to bound prompt cost.
+      ``TOOL_ROUTING_ENUM_CAP`` to bound prompt cost. from_pins passes through.
     """
-    allowed, reason = narrowing
+    allowed, reason, from_pins = narrowing
     if not page_actions or allowed is None:
         return narrowing
     cleared = [
@@ -298,18 +339,20 @@ def _apply_page_prior(
         cap = 40
     if cap > 0 and len(merged) > cap:
         merged = merged[:cap]
-    return merged, (reason or "page_prior")
+    return merged, (reason or "page_prior"), from_pins
 
 
 def _narrow_dispatcher_actions_sync(
     query: Optional[str],
     is_admin: bool,
     is_super_admin: bool,
-) -> Tuple[Optional[List[str]], Optional[str]]:
+) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Sync twin of _narrow_dispatcher_actions_async (thread bridge)."""
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
     if skip_reason is not None:
-        return None, skip_reason
+        if skip_reason.startswith("flag "):
+            return None, skip_reason, False
+        return _fallback_narrowing(skip_reason)
     allowed = _rank_actions_for_dispatcher(
         query=query,
         top_k=_semantic_routing_top_k(),
@@ -318,8 +361,8 @@ def _narrow_dispatcher_actions_sync(
         include_super_admin=is_super_admin,
     )
     if allowed is None:
-        return None, "rank_actions returned empty or raised"
-    return allowed, None
+        return _fallback_narrowing("rank_actions returned empty or raised")
+    return allowed, None, False
 
 
 def _resolve_relative_date_window_utc(intent: str) -> Optional[tuple[datetime.date, datetime.date]]:
@@ -565,13 +608,16 @@ def _get_tools_for_agent_core(
 
             # Narrowing was resolved by the public entry (sync bridge or
             # native await) BEFORE this loop-free body ran.
-            allowed_names, narrow_reason = narrowing
+            allowed_names, narrow_reason, from_pins = narrowing
 
             dispatcher_schema = action_registry.to_dispatcher_schema(
                 exclude_admin=not is_admin,
                 exclude_promoted=True,  # promoted actions have first-class schemas below
                 allowed_names=allowed_names,
                 include_super_admin=is_super_admin,
+                # closed-pins fallback pins include promoted names
+                # (platform_find_tools et al.) — admit them into the enum.
+                allow_promoted_in_allowlist=from_pins,
             )
             openai_tools.append(dispatcher_schema)
             all_actions = action_registry.get_all()
@@ -693,6 +739,57 @@ def get_tools_for_agent(
             session_used.close()
 
 
+async def _maybe_log_shadow_surface(
+    query: Optional[str],
+    is_admin: bool,
+    is_super_admin: bool,
+    shipped_tools: List[Dict[str, Any]],
+    trace_id: str,
+) -> None:
+    """PR-C eval data (tool-surface review): log — never ship — what the
+    relevance-gated surface WOULD have been for this turn.
+
+    One line per turn: how many first-class promoted schemas would survive
+    the hybrid cap vs the ~44 shipped today, and the floored enum size. The
+    rank call shares the turn's deduped/cached query embed, so this costs a
+    cosine pass, not a network call. Any failure is swallowed — shadow may
+    never affect a live turn.
+    """
+    try:
+        from config import config
+        if not getattr(config, "TOOL_SURFACE_SHADOW", False) or not query:
+            return
+        from modules.tools.discovery import get_action_registry
+        from modules.tools.discovery.action_semantic_index import (
+            get_action_semantic_index,
+        )
+
+        ranked = await get_action_semantic_index().rank_actions(
+            query=query,
+            top_k=_semantic_routing_top_k(),
+            exclude_admin=not is_admin,
+            exclude_promoted=False,  # the would-be surface spans promoted too
+            include_super_admin=is_super_admin,
+        )
+        registry = get_action_registry()
+        cap = int(getattr(config, "TOOL_SURFACE_HYBRID_CAP", 6))
+        would_first_class = [
+            n for n, _ in ranked
+            if getattr(registry.get(n), "promoted", False)
+        ][: max(cap, 0)]
+        logger.info(
+            "[tool-shadow %s] shipped_tools=%d would_first_class=%d "
+            "would_enum=%d names=%s",
+            trace_id,
+            len(shipped_tools),
+            len(would_first_class),
+            len(ranked),
+            would_first_class,
+        )
+    except Exception:
+        logger.debug("[tool-shadow %s] failed", trace_id, exc_info=True)
+
+
 async def get_tools_for_agent_async(
     agent_id: Optional[int] = None,
     db_session=None,
@@ -714,7 +811,7 @@ async def get_tools_for_agent_async(
         # Gate-filtered by the SAME predicate as ranking — a manifest can never
         # expose an admin/su tool to an unauthorized principal.
         narrowing = _apply_page_prior(narrowing, page_actions, is_admin, is_super_admin)
-        return _get_tools_for_agent_core(
+        tools = _get_tools_for_agent_core(
             agent_id=agent_id,
             session_used=session_used,
             workspace_id=workspace_id,
@@ -725,6 +822,8 @@ async def get_tools_for_agent_async(
             trace_id=trace_id,
             start_time=start_time,
         )
+        await _maybe_log_shadow_surface(query, is_admin, is_super_admin, tools, trace_id)
+        return tools
     except Exception as e:
         logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")
         return []

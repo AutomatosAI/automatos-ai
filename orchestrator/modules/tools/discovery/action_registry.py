@@ -166,6 +166,7 @@ class ActionRegistry:
         exclude_promoted: bool = True,
         allowed_names: Optional[List[str]] = None,
         include_super_admin: bool = False,
+        allow_promoted_in_allowlist: bool = False,
     ) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
@@ -187,6 +188,13 @@ class ActionRegistry:
             include_super_admin: Fail-closed — super_admin_only actions are
                 excluded from the enum (and from every fallback path)
                 unless this is explicitly True.
+            allow_promoted_in_allowlist: PR-B (tool-surface review) — when
+                True, names in ``allowed_names`` that are promoted may enter
+                the enum despite ``exclude_promoted`` (role filters still
+                apply first). Used by the closed-pins fallback, whose pin set
+                (platform_find_tools et al.) is largely promoted; without
+                this the pins would intersect to nothing and fall open to
+                the full enum — the exact failure the mode exists to stop.
         """
         self._ensure_initialized()
 
@@ -212,7 +220,16 @@ class ActionRegistry:
             narrowed_actions = valid_actions
         else:
             allow_set = set(allowed_names)
-            narrowed_actions = [n for n in valid_actions if n in allow_set]
+            intersect_pool = valid_actions
+            if allow_promoted_in_allowlist and exclude_promoted:
+                # Same role gates as valid_actions, promoted admitted — the
+                # allow-list (pins) is the narrowing here, not the flag.
+                intersect_pool = sorted(
+                    a.name for a in self._actions.values()
+                    if (not exclude_admin or not a.admin_only)
+                    and (include_super_admin or not a.super_admin_only)
+                )
+            narrowed_actions = [n for n in intersect_pool if n in allow_set]
             # Defensive: if the intersection is empty (e.g. ranker returned
             # only admin actions for a non-admin caller), fall back to the
             # full eligible set rather than ship a schema with zero options.
