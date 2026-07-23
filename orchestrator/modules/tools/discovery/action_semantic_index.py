@@ -33,6 +33,12 @@ class ActionSemanticIndex:
         self._action_embeddings: Dict[str, List[float]] = {}
         self._indexed: bool = False
         self._lock: Optional[asyncio.Lock] = None
+        # In-flight live query embeds, keyed by (loop id, model_key, query):
+        # concurrent same-query callers (enum narrowing + the prompt catalog
+        # rank the same turn text) share ONE upstream embed instead of racing
+        # duplicates. Loop id in the key because a task is only awaitable on
+        # the loop that created it (the sync bridge runs on its own loop).
+        self._inflight: Dict[tuple, asyncio.Task] = {}
 
     def _get_lock(self) -> asyncio.Lock:
         if self._lock is None:
@@ -150,16 +156,26 @@ class ActionSemanticIndex:
         if cached:
             return cached, True, False
 
-        task = asyncio.ensure_future(self._embedding_manager.generate_embedding(query))
-        done, pending = await asyncio.wait({task}, timeout=timeout_s)
-        if pending:
-            def _stash_when_done(t: "asyncio.Task") -> None:
+        # One live embed per (loop, model, query) — concurrent callers share
+        # it. The finalize callback owns cleanup + the cache write, so the
+        # vector lands in Redis whether the winner was awaited or timed out.
+        key = (id(asyncio.get_running_loop()), model_key, query)
+        task = self._inflight.get(key)
+        if task is None:
+            task = asyncio.ensure_future(self._embedding_manager.generate_embedding(query))
+            self._inflight[key] = task
+
+            def _finalize(t: "asyncio.Task", _key: tuple = key) -> None:
+                self._inflight.pop(_key, None)
                 try:
                     self._cache.set_embeddings_batch({query: t.result()}, model=model_key)
                 except Exception:
                     logger.debug("query-embed background cache write failed", exc_info=True)
 
-            task.add_done_callback(_stash_when_done)
+            task.add_done_callback(_finalize)
+
+        done, pending = await asyncio.wait({task}, timeout=timeout_s)
+        if pending:
             logger.warning(
                 "ActionSemanticIndex: query embed exceeded %.1fs — narrowing "
                 "falls back to the full enum; embed continues in background "

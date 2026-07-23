@@ -172,8 +172,10 @@ class SmartChatOrchestrator:
 
         Args:
             messages: Conversation messages
-            available_tools: All tools available to this agent (kept for
-                backward compatibility — ContextService loads tools internally)
+            available_tools: The tool surface the chat entrypoint already
+                assembled (with is_super_admin + PRD-221 page_actions threaded
+                in). Non-empty → ContextService ships it as-is instead of
+                rebuilding blind; empty → ContextService loads tools itself.
             chat_id: Optional chat session ID
             complexity_assessment: Optional PRD-68 AutoBrain assessment
             attachment_ids: PRD-127 ephemeral attachments to resolve
@@ -241,6 +243,11 @@ class SmartChatOrchestrator:
             skip_memory=not _wants_memory,
             chat_id=chat_id,
             query=latest_query,
+            # The surface service.py::_get_tools built for this turn — carries
+            # is_super_admin + page-prior that ToolsSection can't resolve.
+            # None when empty so a failed upstream build falls back to the
+            # section's own loader.
+            prebuilt_tools=available_tools or None,
             agent_name=self.agent_name,
             user_name=self.state.user_name,
             # PRD-206 S7: the driving human for the Q7 private-scope guard.

@@ -712,6 +712,9 @@ class HeartbeatService:
                 agent=orchestrator_agent,
                 workspace_id=workspace_id,
                 task_description=task_description,
+                # Narrow the dispatcher enum to heartbeat-relevant actions —
+                # without a query this lane shipped all 137 on every run.
+                query=task_description,
             )
 
             system_prompt = context.system_prompt

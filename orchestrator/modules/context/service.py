@@ -611,6 +611,10 @@ class ContextService:
             tool_hints=ctx.tool_hints,
             query=ctx.kwargs.get("query"),
             conversation_context=ctx.messages,
+            # Surface already assembled by the entrypoint (su + PRD-221
+            # page-prior threaded in) — ToolsSection uses it instead of
+            # rebuilding blind.
+            prebuilt_tools=ctx.kwargs.get("prebuilt_tools"),
         )
 
     @staticmethod
