@@ -40,13 +40,18 @@ interface PresenceOrbProps {
   horizon?: number
 }
 
-function brandHsl(): { h: number; s: number; l: number } {
+/** Read a `H S% L%` design token off :root. Falls back when unreadable. */
+function cssHsl(varName: string, fb: { h: number; s: number; l: number }): { h: number; s: number; l: number } {
   if (typeof window !== 'undefined') {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue('--warning').trim()
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
     const m = raw.match(/^([\d.]+)\s+([\d.]+)%\s+([\d.]+)%$/)
     if (m) return { h: Number(m[1]), s: Number(m[2]), l: Number(m[3]) }
   }
-  return { h: 38, s: 92, l: 50 }
+  return fb
+}
+
+function brandHsl(): { h: number; s: number; l: number } {
+  return cssHsl('--warning', { h: 38, s: 92, l: 50 })
 }
 
 /** Deterministic 0..1 hash per index — stable "randomness", no Math.random. */
@@ -96,6 +101,42 @@ export function PresenceOrb({
     let W = 680
     let H = size
 
+    // Palette read live from the brand tokens. The Automatos ORANGE
+    // (--primary) anchors the warm end; gold (--warning) the mid; magenta →
+    // violet → indigo are the reference's jewel companions on the cool end.
+    // Rendered as a horizontal canvas gradient so colour sweeps ALONG the
+    // wave (RGB interpolation keeps orange→magenta pink, never green).
+    const { h: brandH, s: brandS, l: brandL } = brandHsl()
+    const orange = cssHsl('--primary', { h: 16, s: 100, l: 58 })
+    const gold = (alpha: number, dl = 0) =>
+      `hsla(${brandH}, ${brandS}%, ${Math.max(0, Math.min(100, brandL + dl))}%, ${Math.min(
+        1,
+        Math.max(0, alpha)
+      )})`
+    const hot = (alpha: number) =>
+      `hsla(${brandH + 6}, 100%, 92%, ${Math.min(1, Math.max(0, alpha))})`
+
+    const SPECTRAL = [
+      { at: 0.0, h: orange.h, s: 100, l: 58 },
+      { at: 0.3, h: brandH, s: brandS, l: 56 },
+      { at: 0.56, h: 330, s: 88, l: 64 },
+      { at: 0.82, h: 286, s: 82, l: 66 },
+      { at: 1.0, h: 250, s: 80, l: 64 },
+    ]
+    let gMid: CanvasGradient | null = null
+    let gBright: CanvasGradient | null = null
+    let gFloor: CanvasGradient | null = null
+    const buildGradients = () => {
+      gMid = ctx.createLinearGradient(0, 0, W, 0)
+      gBright = ctx.createLinearGradient(0, 0, W, 0)
+      gFloor = ctx.createLinearGradient(0, 0, W, 0)
+      for (const s of SPECTRAL) {
+        gMid.addColorStop(s.at, `hsla(${s.h}, ${s.s}%, ${s.l}%, 0.5)`)
+        gBright.addColorStop(s.at, `hsla(${s.h}, 100%, 80%, 0.95)`)
+        gFloor.addColorStop(s.at, `hsla(${s.h}, ${s.s}%, ${s.l}%, 0.16)`)
+      }
+    }
+
     const applySize = () => {
       if (isBackground && host) {
         const rect = host.getBoundingClientRect()
@@ -109,6 +150,7 @@ export function PresenceOrb({
       canvas.height = H * dpr
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.scale(dpr, dpr)
+      if (isBackground) buildGradients() // gradients span W → rebuild on resize
     }
     applySize()
 
@@ -117,17 +159,6 @@ export function PresenceOrb({
       observer = new ResizeObserver(applySize)
       observer.observe(host)
     }
-
-    const { h: brandH, s: brandS, l: brandL } = brandHsl()
-    const HUES = [brandH, 318, 215] // gold anchor, magenta + blue companions
-    const col = (hue: number, alpha: number, dl = 0, ds = 0) =>
-      `hsla(${hue}, ${Math.max(0, Math.min(100, brandS + ds))}%, ${Math.max(
-        0,
-        Math.min(100, brandL + dl)
-      )}%, ${Math.min(1, Math.max(0, alpha))})`
-    const gold = (alpha: number, dl = 0) => col(brandH, alpha, dl)
-    const hot = (alpha: number) =>
-      `hsla(${brandH + 6}, 100%, 92%, ${Math.min(1, Math.max(0, alpha))})`
 
     const reducedMotion =
       typeof window !== 'undefined' &&
@@ -162,98 +193,116 @@ export function PresenceOrb({
       const cx = W / 2
       const cy = H * horizonY
 
-      // floor glow — grounds the scene like the reference's reflections
-      const floor = ctx.createRadialGradient(cx, cy + H * 0.16, 0, cx, cy + H * 0.16, W * 0.45)
-      floor.addColorStop(0, gold(0.14 * dim, 6))
-      floor.addColorStop(1, gold(0))
-      ctx.fillStyle = floor
-      ctx.fillRect(0, 0, W, H)
+      ctx.globalCompositeOperation = 'lighter'
 
-      // TALL BARS across the full width — energy radiates from the centre
-      const step = 16
-      const barField = Math.min(H * 0.3, 260)
+      // floor glow — grounds the scene like the reference's reflection,
+      // tinted across the full spectral ramp.
+      if (gFloor) {
+        ctx.globalAlpha = dim
+        ctx.fillStyle = gFloor
+        ctx.fillRect(0, cy, W, H - cy)
+        ctx.globalAlpha = 1
+      }
+
+      // vertical light columns behind — energy radiates from the centre.
+      const step = 18
+      const barField = Math.min(H * 0.28, 260)
       for (let x = step / 2; x < W; x += step) {
         const i = Math.round(x / step)
         const distSlot = Math.min(SLOTS - 1, Math.floor((Math.abs(x - cx) / (W / 2)) * SLOTS))
         const v = distSlot === 0 ? Math.max(energy, hist[0]) : hist[distSlot]
-        const idle = 0.1 + 0.14 * hash(i * 13) + 0.06 * Math.sin((animate ? t : 700) / 1200 + i)
-        const amp = Math.min(1, idle + v * 1.1 + energyEnv * 0.25)
+        const idle = 0.08 + 0.12 * hash(i * 13) + 0.05 * Math.sin((animate ? t : 700) / 1200 + i)
+        const amp = Math.min(1, idle + v * 1.0 + energyEnv * 0.22)
         const bh = amp * barField
-        const hue = HUES[i % 7 === 0 ? 1 : i % 11 === 0 ? 2 : 0]
-        ctx.strokeStyle = col(hue, 0.1 * dim, 10)
-        ctx.lineWidth = 7
-        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
-        ctx.strokeStyle = col(hue, 0.3 * dim, 16)
-        ctx.lineWidth = 2.6
-        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
-        ctx.strokeStyle = v > 0.45 ? hot(0.85 * dim) : col(hue, 0.5 * dim, 24)
-        ctx.lineWidth = 1.2
-        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
+        ctx.globalAlpha = 0.12 * dim
+        ctx.strokeStyle = gMid ?? gold(0.12, 8)
+        ctx.lineWidth = 6
+        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.85); ctx.stroke()
+        ctx.globalAlpha = (v > 0.4 ? 0.5 : 0.28) * dim
+        ctx.strokeStyle = v > 0.5 ? hot(1) : gBright ?? gold(0.5, 20)
+        ctx.lineWidth = 1.4
+        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.85); ctx.stroke()
       }
+      ctx.globalAlpha = 1
 
-      // WOVEN RIBBON BUNDLES — the hero of the reference
-      const sway = 0.55 + 0.75 * energyEnv
-      for (let b = 0; b < 3; b++) {
-        const hue = HUES[b]
-        const baseAmp = Math.min(H * 0.11, 90) * (1 + b * 0.4) * sway
-        const k = 0.0075 + b * 0.0022
+      // SILK RIBBON BUNDLES — the hero: many fine strands flowing through the
+      // spectral ramp, a bright leading strand per bundle.
+      const sway = 0.5 + 0.85 * energyEnv
+      const bundles = [
+        { amp: H * 0.055, k: 0.0062, sp: 1500, strands: 16, base: -H * 0.02 },
+        { amp: H * 0.085, k: 0.0048, sp: 1950, strands: 18, base: H * 0.005 },
+        { amp: H * 0.12, k: 0.0037, sp: 2500, strands: 20, base: H * 0.03 },
+      ]
+      for (let b = 0; b < bundles.length; b++) {
+        const bd = bundles[b]
         const dir = b % 2 === 0 ? 1 : -1
-        const speed = (animate ? t : 900) / (1150 + b * 420)
-        for (let sIdx = 0; sIdx < 7; sIdx++) {
-          const ampJ = baseAmp * (0.8 + 0.4 * hash(b * 31 + sIdx))
-          const phase = sIdx * 0.33 + hash(b * 7 + sIdx) * 2.2
-          const lead = sIdx === 3
+        const A = Math.min(bd.amp, 150) * sway * (0.7 + 0.5 * dim)
+        const speed = (animate ? t : 900) / bd.sp
+        const lead = Math.floor(bd.strands / 2)
+        for (let sIdx = 0; sIdx < bd.strands; sIdx++) {
+          const off = sIdx - lead
+          const ampJ = A * (0.82 + 0.36 * hash(b * 31 + sIdx))
+          const ph = sIdx * 0.28 + hash(b * 7 + sIdx) * 2.2
           ctx.beginPath()
-          for (let x = 0; x <= W; x += 8) {
-            const env = 0.55 + 0.45 * Math.sin((x / W) * Math.PI)
+          for (let x = 0; x <= W; x += 7) {
+            const env = 0.5 + 0.5 * Math.sin((x / W) * Math.PI)
             const y =
-              cy -
-              H * 0.015 +
-              Math.sin(x * k + dir * speed * 2 + phase) * ampJ * env +
-              (sIdx - 3) * 2.4
+              cy +
+              bd.base +
+              Math.sin(x * bd.k + dir * speed * 2 + ph) * ampJ * env +
+              Math.sin(x * bd.k * 2.3 + dir * speed * 3 + ph) * ampJ * 0.28 * env +
+              off * 2.2
             if (x === 0) ctx.moveTo(x, y)
             else ctx.lineTo(x, y)
           }
-          ctx.strokeStyle = lead ? col(hue, 0.55 * dim, 30, 8) : col(hue, 0.14 * dim, 14)
-          ctx.lineWidth = lead ? 2.1 : 1.1
+          const isLead = sIdx === lead
+          ctx.globalAlpha = (isLead ? 0.9 : 0.16) * dim
+          ctx.strokeStyle = isLead ? gBright ?? hot(0.9) : gMid ?? gold(0.16, 12)
+          ctx.lineWidth = isLead ? 2.0 : 0.9
           ctx.stroke()
         }
       }
+      ctx.globalAlpha = 1
 
       // centre flare on Auto's voice
-      const flareR = 20 + smoothAgent * 120
+      const flareR = 24 + smoothAgent * 140
       const flare = ctx.createRadialGradient(cx, cy, 0, cx, cy, flareR)
       flare.addColorStop(0, hot(0.9 * dim * (0.25 + smoothAgent)))
+      flare.addColorStop(0.4, gold(0.3 * dim, 8))
       flare.addColorStop(1, gold(0))
       ctx.fillStyle = flare
       ctx.beginPath()
       ctx.arc(cx, cy, flareR, 0, Math.PI * 2)
       ctx.fill()
 
-      // particles
-      for (let p = 0; p < 34; p++) {
-        const drift = animate ? (t / 1000) * (4 + hash(p) * 10) : 40
+      // particles — warm gold motes drifting through the field
+      for (let p = 0; p < 32; p++) {
+        const drift = (animate ? t / 1000 : 40) * (4 + hash(p) * 10)
         const px = (hash(p * 3) * W + drift * (p % 2 === 0 ? 1 : -1) + W * 8) % W
-        const py = cy + (hash(p * 5) - 0.5) * Math.min(H * 0.7, 500)
+        const py = cy + (hash(p * 5) - 0.5) * Math.min(H * 0.7, 520)
         const tw = 0.3 + 0.6 * Math.abs(Math.sin((animate ? t : 500) / 900 + p * 1.7))
-        ctx.fillStyle = p % 6 === 0 ? col(HUES[1], tw * 0.7 * dim, 20) : gold(tw * 0.55 * dim, 18)
+        ctx.globalAlpha = tw * 0.5 * dim
+        ctx.fillStyle = gold(1, 18)
         ctx.beginPath()
-        ctx.arc(px, py, p % 4 === 0 ? 1.7 : 1.1, 0, Math.PI * 2)
+        ctx.arc(px, py, p % 4 === 0 ? 1.7 : 1.05, 0, Math.PI * 2)
         ctx.fill()
       }
+      ctx.globalAlpha = 1
 
       // thinking / connecting: a bright pulse crossing the scene
       if (st === 'thinking' || st === 'connecting') {
         const cycle = animate ? (t / 1600) % 1 : 0.35
         const xp = cycle * W
-        const pg = ctx.createRadialGradient(xp, cy, 0, xp, cy, 26)
+        const pg = ctx.createRadialGradient(xp, cy, 0, xp, cy, 28)
         pg.addColorStop(0, hot(0.9 * dim))
         pg.addColorStop(1, gold(0))
         ctx.fillStyle = pg
         ctx.beginPath()
-        ctx.arc(xp, cy, 26, 0, Math.PI * 2)
+        ctx.arc(xp, cy, 28, 0, Math.PI * 2)
         ctx.fill()
       }
+
+      ctx.globalCompositeOperation = 'source-over'
     }
 
     const drawBand = (t: number, animate: boolean) => {
