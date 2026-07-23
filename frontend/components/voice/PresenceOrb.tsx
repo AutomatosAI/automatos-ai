@@ -40,13 +40,18 @@ interface PresenceOrbProps {
   horizon?: number
 }
 
-function brandHsl(): { h: number; s: number; l: number } {
+/** Read a `H S% L%` design token off :root. Falls back when unreadable. */
+function cssHsl(varName: string, fb: { h: number; s: number; l: number }): { h: number; s: number; l: number } {
   if (typeof window !== 'undefined') {
-    const raw = getComputedStyle(document.documentElement).getPropertyValue('--warning').trim()
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
     const m = raw.match(/^([\d.]+)\s+([\d.]+)%\s+([\d.]+)%$/)
     if (m) return { h: Number(m[1]), s: Number(m[2]), l: Number(m[3]) }
   }
-  return { h: 38, s: 92, l: 50 }
+  return fb
+}
+
+function brandHsl(): { h: number; s: number; l: number } {
+  return cssHsl('--warning', { h: 38, s: 92, l: 50 })
 }
 
 /** Deterministic 0..1 hash per index — stable "randomness", no Math.random. */
@@ -70,6 +75,16 @@ const STATE_INTENSITY: Record<OrbState, number> = {
   ended: 0,
 }
 
+// Silk ribbon bundles (background). yf/amp/thick are fractions of height; tw
+// drives the TWIST — the bundle pinches thin then spreads wide along its
+// length, so each sheet folds like fabric in wind (Gerard's reference).
+const RIBBONS = [
+  { yf: -0.03, amp: 0.15, k: 0.0038, k2: 0.0089, tw: 0.0023, sp: 0.0002, strands: 72, thick: 0.15, ph: 0.0 },
+  { yf: 0.05, amp: 0.21, k: 0.003, k2: 0.0067, tw: 0.0017, sp: 0.00016, strands: 82, thick: 0.19, ph: 2.1 },
+  { yf: -0.12, amp: 0.1, k: 0.0051, k2: 0.0111, tw: 0.003, sp: 0.00027, strands: 58, thick: 0.105, ph: 4.0 },
+  { yf: 0.13, amp: 0.075, k: 0.0066, k2: 0.0139, tw: 0.0039, sp: 0.00033, strands: 44, thick: 0.075, ph: 5.4 },
+]
+
 export function PresenceOrb({
   state,
   levelsRef,
@@ -92,9 +107,47 @@ export function PresenceOrb({
     if (!ctx) return
     const host = canvas.parentElement
 
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+    // Cap DPR in background mode — the silk is stroke-heavy and a full-screen
+    // 3× canvas would waste fill rate for no visible gain.
+    const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, isBackground ? 1.5 : 2)
     let W = 680
     let H = size
+
+    // Palette read live from the brand tokens. The Automatos ORANGE
+    // (--primary) anchors the warm end; gold (--warning) the mid; magenta →
+    // violet → indigo are the reference's jewel companions on the cool end.
+    // Rendered as a horizontal canvas gradient so colour sweeps ALONG the
+    // wave (RGB interpolation keeps orange→magenta pink, never green).
+    const { h: brandH, s: brandS, l: brandL } = brandHsl()
+    const orange = cssHsl('--primary', { h: 16, s: 100, l: 58 })
+    const gold = (alpha: number, dl = 0) =>
+      `hsla(${brandH}, ${brandS}%, ${Math.max(0, Math.min(100, brandL + dl))}%, ${Math.min(
+        1,
+        Math.max(0, alpha)
+      )})`
+    const hot = (alpha: number) =>
+      `hsla(${brandH + 6}, 100%, 92%, ${Math.min(1, Math.max(0, alpha))})`
+
+    const SPECTRAL = [
+      { at: 0.0, h: orange.h, s: 100, l: 60 },
+      { at: 0.28, h: brandH, s: brandS, l: 58 },
+      { at: 0.54, h: 330, s: 92, l: 66 },
+      { at: 0.78, h: 288, s: 86, l: 68 },
+      { at: 1.0, h: 248, s: 88, l: 66 },
+    ]
+    let gMid: CanvasGradient | null = null
+    let gBright: CanvasGradient | null = null
+    let gDeep: CanvasGradient | null = null
+    const buildGradients = () => {
+      gMid = ctx.createLinearGradient(0, 0, W, 0)
+      gBright = ctx.createLinearGradient(0, 0, W, 0)
+      gDeep = ctx.createLinearGradient(0, 0, W, 0)
+      for (const s of SPECTRAL) {
+        gMid.addColorStop(s.at, `hsla(${s.h}, ${s.s}%, ${s.l}%, 0.85)`)
+        gBright.addColorStop(s.at, `hsla(${s.h}, 100%, 82%, 1)`)
+        gDeep.addColorStop(s.at, `hsla(${s.h}, ${s.s}%, ${s.l}%, 0.5)`)
+      }
+    }
 
     const applySize = () => {
       if (isBackground && host) {
@@ -109,6 +162,7 @@ export function PresenceOrb({
       canvas.height = H * dpr
       ctx.setTransform(1, 0, 0, 1, 0, 0)
       ctx.scale(dpr, dpr)
+      if (isBackground) buildGradients() // gradients span W → rebuild on resize
     }
     applySize()
 
@@ -117,17 +171,6 @@ export function PresenceOrb({
       observer = new ResizeObserver(applySize)
       observer.observe(host)
     }
-
-    const { h: brandH, s: brandS, l: brandL } = brandHsl()
-    const HUES = [brandH, 318, 215] // gold anchor, magenta + blue companions
-    const col = (hue: number, alpha: number, dl = 0, ds = 0) =>
-      `hsla(${hue}, ${Math.max(0, Math.min(100, brandS + ds))}%, ${Math.max(
-        0,
-        Math.min(100, brandL + dl)
-      )}%, ${Math.min(1, Math.max(0, alpha))})`
-    const gold = (alpha: number, dl = 0) => col(brandH, alpha, dl)
-    const hot = (alpha: number) =>
-      `hsla(${brandH + 6}, 100%, 92%, ${Math.min(1, Math.max(0, alpha))})`
 
     const reducedMotion =
       typeof window !== 'undefined' &&
@@ -140,6 +183,64 @@ export function PresenceOrb({
     let horizonY = horizonTargetRef.current
     let raf = 0
     let dead = false
+    let degraded = false // set after sustained slow frames (halves the silk)
+    let slow = 0
+
+    // The silk: dense fine strands whose spread PINCHES then SPREADS along the
+    // length (the twist), reflected below the horizon for the glossy floor.
+    const drawSilkField = (t: number, floorY: number, dim: number, reflect: boolean) => {
+      const sway = 0.6 + 0.95 * energyEnv
+      const stride = degraded ? 2 : 1
+      for (const r of RIBBONS) {
+        if (degraded && r.strands < 60) continue // shed the faintest ribbons when slow
+        const A = H * r.amp * sway * (0.7 + 0.5 * dim)
+        const cy = floorY + H * r.yf
+        for (let s = 0; s < r.strands; s += stride) {
+          const f = s / (r.strands - 1) - 0.5
+          const edge = 1 - Math.abs(f) * 1.35
+          if (edge <= 0) continue
+          const core = Math.abs(f) < 0.13
+          ctx.globalAlpha = edge * (reflect ? 0.075 : 0.17) * dim * (stride === 2 ? 1.7 : 1)
+          ctx.strokeStyle = core ? gBright ?? hot(0.9) : gMid ?? gold(0.6)
+          ctx.lineWidth = core ? 1.7 : 1.0
+          ctx.beginPath()
+          for (let x = 0; x <= W; x += 6) {
+            const flow =
+              Math.sin(x * r.k + t * r.sp + r.ph) * A +
+              Math.sin(x * r.k2 + t * r.sp * 1.7 + r.ph) * A * 0.34
+            const twist = Math.sin(x * r.tw + t * r.sp * 0.5 + r.ph)
+            const width = H * r.thick * (0.12 + 0.88 * Math.abs(twist))
+            let y = cy + flow + f * width
+            if (reflect) y = 2 * floorY - y
+            if (x === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
+          }
+          ctx.stroke()
+        }
+      }
+      ctx.globalAlpha = 1
+    }
+
+    // Vertical light columns behind the silk, tinted by the same ramp.
+    const drawBarsField = (t: number, floorY: number, dim: number, reflect: boolean) => {
+      const step = 20
+      const field = Math.min(H * 0.22, 220)
+      for (let x = step / 2; x < W; x += step) {
+        const i = Math.round(x / step)
+        const idle = 0.06 + 0.14 * hash(i * 13) + 0.05 * Math.sin(t / 1200 + i)
+        const amp = Math.min(1, idle + energyEnv * 0.5)
+        const y2 = reflect ? floorY + amp * field : floorY - amp * field
+        ctx.globalAlpha = (reflect ? 0.05 : 0.11) * dim
+        ctx.strokeStyle = gDeep ?? gold(0.4, 6)
+        ctx.lineWidth = 5
+        ctx.beginPath(); ctx.moveTo(x, floorY); ctx.lineTo(x, y2); ctx.stroke()
+        ctx.globalAlpha = (reflect ? 0.1 : 0.24) * dim
+        ctx.strokeStyle = gBright ?? gold(0.6, 18)
+        ctx.lineWidth = 1.3
+        ctx.beginPath(); ctx.moveTo(x, floorY); ctx.lineTo(x, y2); ctx.stroke()
+      }
+      ctx.globalAlpha = 1
+    }
 
     const drawReference = (t: number, animate: boolean) => {
       const st = stateRef.current
@@ -159,101 +260,59 @@ export function PresenceOrb({
       ctx.clearRect(0, 0, W, H)
       if (dim <= 0) return
 
-      const cx = W / 2
-      const cy = H * horizonY
+      const floorY = H * horizonY
+      ctx.globalCompositeOperation = 'lighter'
 
-      // floor glow — grounds the scene like the reference's reflections
-      const floor = ctx.createRadialGradient(cx, cy + H * 0.16, 0, cx, cy + H * 0.16, W * 0.45)
-      floor.addColorStop(0, gold(0.14 * dim, 6))
-      floor.addColorStop(1, gold(0))
-      ctx.fillStyle = floor
-      ctx.fillRect(0, 0, W, H)
-
-      // TALL BARS across the full width — energy radiates from the centre
-      const step = 16
-      const barField = Math.min(H * 0.3, 260)
-      for (let x = step / 2; x < W; x += step) {
-        const i = Math.round(x / step)
-        const distSlot = Math.min(SLOTS - 1, Math.floor((Math.abs(x - cx) / (W / 2)) * SLOTS))
-        const v = distSlot === 0 ? Math.max(energy, hist[0]) : hist[distSlot]
-        const idle = 0.1 + 0.14 * hash(i * 13) + 0.06 * Math.sin((animate ? t : 700) / 1200 + i)
-        const amp = Math.min(1, idle + v * 1.1 + energyEnv * 0.25)
-        const bh = amp * barField
-        const hue = HUES[i % 7 === 0 ? 1 : i % 11 === 0 ? 2 : 0]
-        ctx.strokeStyle = col(hue, 0.1 * dim, 10)
-        ctx.lineWidth = 7
-        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
-        ctx.strokeStyle = col(hue, 0.3 * dim, 16)
-        ctx.lineWidth = 2.6
-        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
-        ctx.strokeStyle = v > 0.45 ? hot(0.85 * dim) : col(hue, 0.5 * dim, 24)
-        ctx.lineWidth = 1.2
-        ctx.beginPath(); ctx.moveTo(x, cy - bh); ctx.lineTo(x, cy + bh * 0.9); ctx.stroke()
+      // reflection first (below the horizon), then the real scene on top.
+      // The mirror is dropped under load — it's the cheapest thing to lose.
+      if (!degraded) {
+        drawBarsField(t, floorY, dim, true)
+        drawSilkField(t, floorY, dim, true)
       }
+      drawBarsField(t, floorY, dim, false)
+      drawSilkField(t, floorY, dim, false)
 
-      // WOVEN RIBBON BUNDLES — the hero of the reference
-      const sway = 0.55 + 0.75 * energyEnv
-      for (let b = 0; b < 3; b++) {
-        const hue = HUES[b]
-        const baseAmp = Math.min(H * 0.11, 90) * (1 + b * 0.4) * sway
-        const k = 0.0075 + b * 0.0022
-        const dir = b % 2 === 0 ? 1 : -1
-        const speed = (animate ? t : 900) / (1150 + b * 420)
-        for (let sIdx = 0; sIdx < 7; sIdx++) {
-          const ampJ = baseAmp * (0.8 + 0.4 * hash(b * 31 + sIdx))
-          const phase = sIdx * 0.33 + hash(b * 7 + sIdx) * 2.2
-          const lead = sIdx === 3
-          ctx.beginPath()
-          for (let x = 0; x <= W; x += 8) {
-            const env = 0.55 + 0.45 * Math.sin((x / W) * Math.PI)
-            const y =
-              cy -
-              H * 0.015 +
-              Math.sin(x * k + dir * speed * 2 + phase) * ampJ * env +
-              (sIdx - 3) * 2.4
-            if (x === 0) ctx.moveTo(x, y)
-            else ctx.lineTo(x, y)
-          }
-          ctx.strokeStyle = lead ? col(hue, 0.55 * dim, 30, 8) : col(hue, 0.14 * dim, 14)
-          ctx.lineWidth = lead ? 2.1 : 1.1
-          ctx.stroke()
-        }
-      }
-
-      // centre flare on Auto's voice
-      const flareR = 20 + smoothAgent * 120
-      const flare = ctx.createRadialGradient(cx, cy, 0, cx, cy, flareR)
-      flare.addColorStop(0, hot(0.9 * dim * (0.25 + smoothAgent)))
+      // core flare on Auto's voice
+      const flareR = 30 + smoothAgent * 170
+      const flare = ctx.createRadialGradient(W / 2, floorY, 0, W / 2, floorY, flareR)
+      flare.addColorStop(0, hot(0.95 * dim * (0.3 + smoothAgent)))
+      flare.addColorStop(0.4, gold(0.35 * dim, 8))
       flare.addColorStop(1, gold(0))
+      ctx.globalAlpha = 1
       ctx.fillStyle = flare
       ctx.beginPath()
-      ctx.arc(cx, cy, flareR, 0, Math.PI * 2)
+      ctx.arc(W / 2, floorY, flareR, 0, Math.PI * 2)
       ctx.fill()
 
-      // particles
-      for (let p = 0; p < 34; p++) {
-        const drift = animate ? (t / 1000) * (4 + hash(p) * 10) : 40
-        const px = (hash(p * 3) * W + drift * (p % 2 === 0 ? 1 : -1) + W * 8) % W
-        const py = cy + (hash(p * 5) - 0.5) * Math.min(H * 0.7, 500)
-        const tw = 0.3 + 0.6 * Math.abs(Math.sin((animate ? t : 500) / 900 + p * 1.7))
-        ctx.fillStyle = p % 6 === 0 ? col(HUES[1], tw * 0.7 * dim, 20) : gold(tw * 0.55 * dim, 18)
-        ctx.beginPath()
-        ctx.arc(px, py, p % 4 === 0 ? 1.7 : 1.1, 0, Math.PI * 2)
-        ctx.fill()
-      }
-
-      // thinking / connecting: a bright pulse crossing the scene
+      // thinking / connecting: a bright pulse crossing the horizon
       if (st === 'thinking' || st === 'connecting') {
-        const cycle = animate ? (t / 1600) % 1 : 0.35
-        const xp = cycle * W
-        const pg = ctx.createRadialGradient(xp, cy, 0, xp, cy, 26)
+        const xp = (animate ? (t / 1600) % 1 : 0.35) * W
+        const pg = ctx.createRadialGradient(xp, floorY, 0, xp, floorY, 30)
         pg.addColorStop(0, hot(0.9 * dim))
         pg.addColorStop(1, gold(0))
         ctx.fillStyle = pg
         ctx.beginPath()
-        ctx.arc(xp, cy, 26, 0, Math.PI * 2)
+        ctx.arc(xp, floorY, 30, 0, Math.PI * 2)
         ctx.fill()
       }
+
+      ctx.globalCompositeOperation = 'source-over'
+
+      // glossy floor edge — a soft bright horizon line
+      if (gBright) {
+        ctx.globalAlpha = 0.28 * dim
+        ctx.fillStyle = gBright
+        ctx.fillRect(0, floorY - 0.8, W, 1.6)
+        ctx.globalAlpha = 1
+      }
+
+      // fade the reflection into the floor — a grounded mirror, not a full copy
+      const rf = ctx.createLinearGradient(0, floorY, 0, H)
+      rf.addColorStop(0, 'rgba(8,7,10,0)')
+      rf.addColorStop(0.65, 'rgba(8,7,10,0.5)')
+      rf.addColorStop(1, 'rgba(8,7,10,0.92)')
+      ctx.fillStyle = rf
+      ctx.fillRect(0, floorY, W, H - floorY)
     }
 
     const drawBand = (t: number, animate: boolean) => {
@@ -309,7 +368,8 @@ export function PresenceOrb({
 
     if (reducedMotion) {
       for (let i = 0; i < SLOTS; i++) hist[i] = 0.15 + hash(i) * 0.45
-      energyEnv = 0.35
+      energyEnv = 0.4
+      smoothAgent = 0.3 // a settled, mid-energy silk frame
       try {
         draw(900, false)
       } catch (err) {
@@ -322,6 +382,7 @@ export function PresenceOrb({
 
     const loop = (t: number) => {
       if (dead) return
+      const t0 = typeof performance !== 'undefined' ? performance.now() : 0
       try {
         draw(t, true)
       } catch (err) {
@@ -329,6 +390,14 @@ export function PresenceOrb({
         dead = true
         console.error('[PresenceOrb] draw loop stopped', err)
         return
+      }
+      // Sustained slow frames → shed the reflection + half the strands, once.
+      if (t0 && !degraded) {
+        if (performance.now() - t0 > 18) {
+          if (++slow >= 3) degraded = true
+        } else {
+          slow = 0
+        }
       }
       raf = requestAnimationFrame(loop)
     }
