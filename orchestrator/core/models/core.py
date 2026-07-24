@@ -856,6 +856,9 @@ class DocumentResponse(BaseModel):
     original_filename: Optional[str]
     file_type: Optional[str]
     file_size: Optional[int]
+    # SHA-256 of the uploaded bytes. Exposed so callers (e.g. Academy corpus sync)
+    # can match a document by exact content rather than by filename.
+    content_hash: Optional[str] = None
     status: str
     chunk_count: Optional[int]
     tags: Optional[List[str]]

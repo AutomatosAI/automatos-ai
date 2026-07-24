@@ -191,10 +191,18 @@ async def handle_request(
         elif file_extension in ['.json']:
             file_type = "json"
         
-        # Parse tags
-        tag_list = []
+        # Parse tags: comma-separated form field → stripped, de-duplicated
+        # (order-preserving) list[str]. Persisted to documents.tags (PostgreSQL
+        # text[]). The Academy corpus sync tags each doc 'academy,<vendor>,<track>,
+        # <domain>' so the tutor's knowledge graph can map chunks back to a course.
+        tag_list: list[str] = []
         if tags:
-            tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+            _seen: set[str] = set()
+            for _raw_tag in tags.split(","):
+                _tag = _raw_tag.strip()
+                if _tag and _tag not in _seen:
+                    _seen.add(_tag)
+                    tag_list.append(_tag)
 
         # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
         from core.team_access import normalize_teams
@@ -202,12 +210,14 @@ async def handle_request(
         if team_access:
             team_access_list = normalize_teams(team_access.split(","))
 
-        # Create document record
-        # TEMPORARY FIX: Tags field commented out to unblock critical vector DB testing
-        # Tags are cosmetic metadata - not needed for embeddings, RAG, or semantic search
-        # Will add back with proper fix after core functionality is validated
+        # Create document record. tags persist to documents.tags — a real PostgreSQL
+        # text[] column (see migration 208275450a15: ARRAY(TEXT), default ARRAY[]::text[]).
+        # The prior "SQLAlchemy array bug" was a mis-diagnosis: team_access below uses the
+        # identical PG_ARRAY(String) column and writes a Python list on every upload without
+        # issue. Assigning a fresh list[str] to a new row is tracked correctly (no
+        # flag_modified needed — that only matters for in-place mutation of a loaded array).
         document = Document(
-        workspace_id=ctx.workspace_id,
+            workspace_id=ctx.workspace_id,
             filename=file.filename,
             original_filename=file.filename,
             file_type=file_type,
@@ -215,7 +225,7 @@ async def handle_request(
             file_path=str(file_path),
             content_hash=content_hash,
             status="uploaded",
-            # tags=tag_list if tag_list else None,  # TEMPORARILY DISABLED - SQLAlchemy array bug
+            tags=tag_list,
             description=description,
             team_access=team_access_list,
             created_by=ctx.clerk_user_id or "system",  # PRD-168 S4: real actor
@@ -556,6 +566,11 @@ async def list_documents(
     # callers/tests that omit it get None, not a truthy Query() sentinel that
     # would make `if source_type:` fire and filter on a Query object.
     source_type: Optional[str] = None,
+    # Exact-match lookup by SHA-256 of the file bytes. Lets a caller resolve a
+    # document by content (e.g. Academy's --replace) instead of by filename.
+    # Plain `= None` (like status/file_type/search) so direct-call callers/tests
+    # that omit it get None, not a truthy Query() sentinel.
+    content_hash: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """List documents with filtering and pagination"""
@@ -567,6 +582,8 @@ async def list_documents(
             query = query.filter(Document.status == status)
         if file_type:
             query = query.filter(Document.file_type == file_type)
+        if content_hash:
+            query = query.filter(Document.content_hash == content_hash)
         if source_type:
             # PRD-164 S3 (Q58): agent outputs are a filterable team-like scope
             query = query.filter(Document.source_type == source_type)
@@ -601,6 +618,7 @@ async def list_documents(
                 original_filename=doc.original_filename,
                 file_type=doc.file_type,
                 file_size=doc.file_size,
+                content_hash=doc.content_hash,
                 status=doc.status,
                 chunk_count=doc.chunk_count,
                 tags=doc.tags or [],
@@ -738,6 +756,7 @@ async def get_document(
             original_filename=document.original_filename,
             file_type=document.file_type,
             file_size=document.file_size,
+            content_hash=document.content_hash,
             status=document.status,
             chunk_count=document.chunk_count,
             tags=document.tags or [],
