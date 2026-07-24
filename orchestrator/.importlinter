@@ -35,7 +35,6 @@ modules =
     modules.context
     modules.coordination
     modules.documents
-    modules.evaluation
     modules.intake
     modules.knowledge
     modules.learning
