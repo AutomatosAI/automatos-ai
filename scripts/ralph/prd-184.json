@@ -1,0 +1,88 @@
+{
+  "project": "Automatos AI Platform — PRD-184 Kill-list (Phase-2 reserved deletion slot) — DELETE-NOW tier only",
+  "branchName": "ralph/prd-184-kill-list-dead-surface",
+  "description": "Cut from origin/main @ 9dd4c848a — re-verify EVERY path/anchor by grep, they drift. SCOPE = the DELETE-NOW tier ONLY (grep-proven zero-caller dead/fabricating surface): 6 stories US-001..US-006. EXPLICITLY OUT OF SCOPE for this Ralph run (Gerard's call / needs care, DO NOT build, DO NOT add as acceptance): S7 /execute wire-or-delete (open decision), S8 KG prove-then-cut (needs consumer trace), S9 legacy-workflow-engine RETIRE (needs jira_bug_triage migrated onto Mission/Playbook first — behaviour change), S10 PlaybookMiner+/chat/[id] RETIRE (has live callers to migrate), and the 4 decide-then-cut items. mem0 residue is OWNED BY PRD-211, NOT here. Lockfiles are OWNED BY PRD-209, NOT here. THE DELETION GATE (non-negotiable): each target is DELETED only after grep-proves ZERO live callers on this branch; if a target has a real caller, that story is RALPH_BLOCKED with the caller cited — NEVER force-delete a referenced symbol, NEVER flatten a live caller. Every deletion ships a source-grep GUARD test in the SAME commit so the surface cannot silently regrow (the recurring guard-drift lesson: add/repoint the guard where the symbol dies). BINDING: no os.getenv outside config.py; NO backward-compat shim (delete, don't _legacy); trim the owning barrel __init__ in the same commit; PURE tests only; NEVER 'git add -A'/'git add .' (node_modules is untracked and NOT gitignored — a blind add poisons the branch); stage only the specific paths (git rm <path> / git add <specific>); never 'git stash -u'. Full spec: docs/PRDS/PRD-184-KILL-LIST-DEAD-SURFACE-REMOVAL.md (§5 audit table — DONE items are already cut by waves 0-3; build ONLY the 8 REMAINING minus the 4 held above = these 6).",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Delete the learning/evaluation theatre packages",
+      "description": "Delete the two empty-theatre packages that signpost away from the real loops: `orchestrator/modules/evaluation/` (~30 LOC, zero external callers) and `orchestrator/modules/learning/` (__init__, feedback/, patterns/, plus playbooks/ EXCEPT do NOT touch miner.py — that is the held S10 retire). Grep-prove the only live importers are `orchestrator/modules/__init__.py` (trim the re-export in the same commit) — api_playbooks.py is the held S10 retire, out of scope. If ANY other live importer exists, RALPH_BLOCKED with the caller cited.",
+      "acceptanceCriteria": [
+        "grep-prove ZERO live importers of modules.learning / modules.evaluation outside the deleted tree (excluding miner.py + api_playbooks which are held) BEFORE deletion",
+        "orchestrator/modules/evaluation/ deleted; orchestrator/modules/learning/ deleted except playbooks/miner.py (held S10)",
+        "orchestrator/modules/__init__.py re-export of the deleted packages trimmed in the same commit; no dangling import",
+        "test_no_learning_evaluation_imports guard added (source-grep: no live modules.learning/modules.evaluation import outside the deleted tree)",
+        "PURE test; cd orchestrator && python3 -m pytest -q green (no regression)",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/modules/evaluation/", "orchestrator/modules/learning/", "orchestrator/modules/__init__.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-002",
+      "title": "Delete the llm-core dead scaffolding (incl. anthropic_client.py)",
+      "description": "Delete the ~1,700 LOC of zero-external-caller llm-core scaffolding: `orchestrator/core/llm/function_executor.py`, `function_registry.py`, `response_parser.py`, `semantic_skill_matcher.py`, `orchestrator/core/global_function_registry.py`, and `orchestrator/api/anthropic_client.py` (zero importers — the earlier broad grep hits were the Anthropic SDK variable name, re-verify). These survive ONLY via the `orchestrator/core/llm/__init__.py` barrel (~lines 40-43, grep to confirm) — repoint/trim the barrel in the SAME commit. This story OWNS anthropic_client.py (PRD-212 defers to it). Any real external caller of any symbol → RALPH_BLOCKED, cite it.",
+      "acceptanceCriteria": [
+        "grep-prove ZERO external callers of the 6 files/symbols (only the core/llm/__init__ barrel re-exports them) BEFORE deletion",
+        "all 6 files deleted; core/llm/__init__.py barrel lines re-exporting them removed in the same commit",
+        "api/anthropic_client.py deleted and unmounted if it was mounted (grep main.py — it is NOT an active router)",
+        "test_llm_core_no_dead_scaffolding guard added (grep: none of the 6 symbols importable/re-exported)",
+        "PURE test; cd orchestrator && python3 -m pytest -q green",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/core/llm/function_executor.py", "orchestrator/core/llm/function_registry.py", "orchestrator/core/llm/response_parser.py", "orchestrator/core/llm/semantic_skill_matcher.py", "orchestrator/core/global_function_registry.py", "orchestrator/api/anthropic_client.py", "orchestrator/core/llm/__init__.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-003",
+      "title": "Delete the exec_planning stub vertical and de-route it",
+      "description": "Delete `orchestrator/modules/tools/execution/exec_planning.py` (~339 LOC, 8 hardcoded template-writer 'planning' tools, 0 LLM, exposed to no agent). De-route in the SAME commit: remove the import at `unified_executor.py` (~:36) and the dispatch branches (~:969-975, grep to confirm), and drop the 8 tool names from any registry. Grep-prove NO agent toolset references those 8 tool names BEFORE cutting; if any agent is wired to them, RALPH_BLOCKED.",
+      "acceptanceCriteria": [
+        "grep-prove no agent toolset / registry references the 8 exec_planning tool names BEFORE deletion",
+        "exec_planning.py deleted; the import + dispatch branches removed from unified_executor.py in the same commit",
+        "test_exec_planning_deleted_and_unrouted guard added (grep: symbol gone + unified_executor has no exec_planning dispatch)",
+        "PURE test; cd orchestrator && python3 -m pytest -q green (no dispatch regression)",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/modules/tools/execution/exec_planning.py", "orchestrator/modules/tools/execution/unified_executor.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-004",
+      "title": "Delete the dead tool-runtime concurrency helper (+ conditional ToolService)",
+      "description": "DEFINITIVE: delete `orchestrator/modules/tools/execution/concurrency.py` (~166 LOC, zero callers — clean). CONDITIONAL (only if grep-proves zero live callers, else LEAVE and note in the story — do NOT flatten a live caller): `orchestrator/modules/tools/service.py` ToolService (live code uses ComposioToolService; delete only if the sole ToolService( site is the tools/__init__.py:10 barrel factory with no external caller, trimming the barrel too) and the specific crash-on-db_session delegate method in `composio_tool_router.py` (the FILE stays — it is live via exec_composio/unified_executor; excise only the dead delegate method). concurrency.py is the acceptance gate; ToolService/router-delegate are best-effort.",
+      "acceptanceCriteria": [
+        "concurrency.py grep-proven zero callers, then deleted",
+        "test_no_tools_concurrency_import guard added (grep: symbol gone)",
+        "ToolService/composio_tool_router-delegate: deleted ONLY if grep-proven dead, otherwise left untouched with a one-line note in the story notes (never flatten a live caller)",
+        "composio_tool_router.py FILE remains (it is live) — only a dead delegate method may be excised",
+        "PURE test; cd orchestrator && python3 -m pytest -q green",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/modules/tools/execution/concurrency.py", "orchestrator/modules/tools/service.py", "orchestrator/modules/tools/__init__.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-005",
+      "title": "Delete the 7 driverless legacy channel adapters",
+      "description": "Delete the 7 byte-near-identical driverless adapters at `orchestrator/channels/{teams,google_chat,signal,imessage,irc,matrix,line}_adapter.py` (~1,570 LOC, no driver) and `_ping_platform_legacy` in `orchestrator/api/channels.py` (~:144, 0 callers). Grep-prove NO live channel dispatch imports them (the one active channel path does not) BEFORE deleting. Any live import → RALPH_BLOCKED, cite it.",
+      "acceptanceCriteria": [
+        "grep-prove ZERO live imports of the 7 adapters + _ping_platform_legacy BEFORE deletion",
+        "the 7 *_adapter.py files deleted; _ping_platform_legacy removed from api/channels.py; any registry/list referencing them trimmed in the same commit",
+        "test_no_legacy_channel_adapters guard added (grep: the 7 adapters + _ping_platform_legacy gone)",
+        "PURE test; cd orchestrator && python3 -m pytest -q green (active channel path unaffected)",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/channels/", "orchestrator/api/channels.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-006",
+      "title": "Delete the frontend placebo relics",
+      "description": "Delete `frontend/app/api-control/page.jsx` (~98 LOC, placebo for the PRD-168-removed mock system) and `frontend/app/styleguide/page.tsx` (~442 LOC, routed in prod). Remove the fabricated `workspaceMeta='pilot · 11 op'` pill from `frontend/components/layout/studio-sidebar.tsx`. DO NOT touch lockfiles (PRD-209 owns) or the /chat/[id] route (held S10). Grep-prove no live route/link points at /api-control or /styleguide BEFORE deleting.",
+      "acceptanceCriteria": [
+        "grep-prove no live navigation/link targets /api-control or /styleguide BEFORE deletion",
+        "app/api-control/ and app/styleguide/ deleted; the workspaceMeta 'pilot · 11 op' literal removed from studio-sidebar.tsx",
+        "test_no_placebo_routes guard added (grep: no /api-control or /styleguide route dir; no workspaceMeta literal)",
+        "frontend typecheck passes (cd frontend && the repo's tsc/vitest lane green); no lockfile touched",
+        "Typecheck passes"
+      ],
+      "files": ["frontend/app/api-control/", "frontend/app/styleguide/", "frontend/components/layout/studio-sidebar.tsx"]
+    }
+  ]
+}
