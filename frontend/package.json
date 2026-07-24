@@ -100,7 +100,7 @@
     "lodash": "4.17.21",
     "lucide-react": "0.279.0",
     "mammoth": "^1.12.0",
-    "next": "^15.5.12",
+    "next": "^15.5.21",
     "next-themes": "0.2.1",
     "papaparse": "^5.5.3",
     "prismjs": "^1.30.0",
