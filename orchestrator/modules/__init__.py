@@ -19,7 +19,7 @@ Usage:
     from modules.rag import RAGService, SemanticChunker
     from modules.memory.unified_memory_service import get_unified_memory_service
     from modules.agents import AgentService, AgentFactory
-    from modules.tools import ToolService, ToolRegistry
+    from modules.tools import ToolRegistry, get_tools_for_agent
     from modules.learning import PlaybookMiner
 """
 
