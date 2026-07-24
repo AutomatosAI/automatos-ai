@@ -28,16 +28,23 @@ _TIMEOUT_SECONDS = 10.0
 _AGENT_TIMEOUT_SECONDS = 25.0
 
 
-def build_agent_tuning() -> Dict[str, Any]:
-    """The STT / turn-taking settings that keep transcription honest in a real
-    (noisy, non-headset) room — applied at agent creation AND re-applied on
-    every one-click re-arm.
+def build_agent_tuning(include_voice: bool = True) -> Dict[str, Any]:
+    """Everything about HOW Auto hears and sounds — applied at agent creation
+    AND re-applied on every one-click re-arm.
 
-    Pinning ``language`` stops multilingual STT from hallucinating confident
-    nonsense; ``noise-and-background-speech-cancellation`` strips TV / room
-    bleed (the "multiple voices" corruptor); ``accurate`` STT trades a little
-    latency for far fewer garbage transcripts; low ``interruption_sensitivity``
-    stops every tiny sound from grabbing the turn. All config-driven dials.
+    Hearing: pinning ``language`` stops multilingual STT hallucinating
+    confident nonsense; ``noise-cancellation`` strips steady room noise while
+    leaving the speaker audible (the aggressive
+    ``noise-and-background-speech-cancellation`` mode cancelled him too — a
+    whole measured call logged zero turns until he shouted); ``accurate`` STT
+    trades a little latency for far fewer garbage transcripts.
+
+    Sounding: the voice itself, its pace and expressiveness, and Retell's
+    ``normalize_for_speech`` so prices, dates and hostnames are spoken as
+    words. ``include_voice=False`` re-tunes hearing only, leaving a voice a
+    human picked in the dashboard untouched.
+
+    All config-driven dials — no literals here.
     """
     from config import config
 
@@ -45,6 +52,9 @@ def build_agent_tuning() -> Dict[str, Any]:
         "interruption_sensitivity": float(config.VOICE_LIVE_INTERRUPTION_SENSITIVITY),
         "responsiveness": float(config.VOICE_LIVE_RESPONSIVENESS),
         "enable_backchannel": False,
+        "normalize_for_speech": bool(config.VOICE_LIVE_NORMALIZE_FOR_SPEECH),
+        "reminder_trigger_ms": int(config.VOICE_LIVE_REMINDER_TRIGGER_MS),
+        "reminder_max_count": int(config.VOICE_LIVE_REMINDER_MAX_COUNT),
     }
     language = str(config.VOICE_LIVE_LANGUAGE or "").strip()
     if language:
@@ -55,6 +65,12 @@ def build_agent_tuning() -> Dict[str, Any]:
     stt_mode = str(config.VOICE_LIVE_STT_MODE or "").strip()
     if stt_mode:
         tuning["stt_mode"] = stt_mode
+    if include_voice:
+        voice_id = str(config.VOICE_LIVE_VOICE_ID or "").strip()
+        if voice_id:
+            tuning["voice_id"] = voice_id
+        tuning["voice_speed"] = float(config.VOICE_LIVE_VOICE_SPEED)
+        tuning["voice_temperature"] = float(config.VOICE_LIVE_VOICE_TEMPERATURE)
     return tuning
 
 

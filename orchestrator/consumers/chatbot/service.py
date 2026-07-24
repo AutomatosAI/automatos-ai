@@ -840,9 +840,13 @@ class StreamingChatService:
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
         force_text_only: bool = False,
+        spoken_mode: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], Any]:
         """
         Prepare LLM messages with orchestration, persona, CTO override, and context guard.
+
+        ``spoken_mode`` appends the spoken-output contract (short sentences, no
+        markdown) — the reply is played aloud, not read.
 
         Returns:
             (llm_messages, use_tools, orchestrated)
@@ -895,6 +899,12 @@ class StreamingChatService:
                 llm_messages, smart_chat, cto_check_result,
                 messages, use_tools, agent_runtime.agent_id,
             )
+
+        # Spoken turns: same brain, different medium. Appended LAST so it
+        # survives the CTO override — whatever persona is speaking, it is
+        # still being HEARD, and a markdown answer read aloud is broken.
+        if spoken_mode:
+            self._apply_spoken_style(llm_messages)
 
         # PRD-137 Fix #3: agent description + persona are injected by
         # IdentitySection (modules/context/sections/identity.py) into the
@@ -1091,6 +1101,34 @@ class StreamingChatService:
         use_tools = orchestrated.tools if orchestrated.requires_tools else None
 
         return llm_messages, use_tools, orchestrated
+
+    @staticmethod
+    def _apply_spoken_style(llm_messages: List[Dict[str, Any]]) -> None:
+        """Append the spoken-output contract to the system prompt, in place.
+
+        Auto's brain is unchanged (ONE AUTO — memory, tools and reasoning all
+        stay); this only tells it the answer will be HEARD. Without it she
+        writes her normal chat reply and the TTS reads the bullets and
+        asterisks out loud. Config dial ``VOICE_LIVE_SPOKEN_STYLE``.
+        """
+        try:
+            from config import config
+            if not getattr(config, "VOICE_LIVE_SPOKEN_STYLE", True):
+                return
+            from modules.voice.spoken_style import SPOKEN_OUTPUT_CONTRACT
+
+            for message in llm_messages:
+                if message.get("role") == "system":
+                    message["content"] = (
+                        f"{message.get('content', '')}\n\n{SPOKEN_OUTPUT_CONTRACT}"
+                    )
+                    return
+            # No system message (shouldn't happen) — lead with the contract.
+            llm_messages.insert(
+                0, {"role": "system", "content": SPOKEN_OUTPUT_CONTRACT}
+            )
+        except Exception:  # noqa: BLE001 — style must never break a live call
+            logger.warning("[voice] spoken-style injection failed", exc_info=True)
 
     def _apply_cto_override(
         self,
@@ -2001,10 +2039,16 @@ class StreamingChatService:
         force_text_only: bool = False,
         is_super_admin: bool = False,
         page_context: Optional[Dict[str, Any]] = None,
+        spoken_mode: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
         Yields AISDK-formatted chunks for frontend consumption.
+
+        ``spoken_mode`` (PRD-207 voice): the reply is played aloud, so the
+        spoken-output contract is appended to the system prompt — short
+        sentences, no markdown, nothing that reads badly out loud. The brain
+        itself is untouched.
 
         ``page_context`` (PRD-221) is the SANITIZED reference set from
         services.page_context — never the raw client dict. It rides into the
@@ -2165,6 +2209,7 @@ class StreamingChatService:
                 attachment_ids=_attachment_ids,
                 model_id=_model_id,
                 force_text_only=force_text_only,
+                spoken_mode=spoken_mode,
             )
 
             # PRD-157 S5: keep the chat's pinned documents always in context.

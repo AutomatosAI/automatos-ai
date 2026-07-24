@@ -719,6 +719,9 @@ async def _agent_retell_stream_inner(req: RetellLLMRequest) -> AsyncIterator[dic
             # The measured voice-latency lever (memory/tools stay; only
             # third-party Composio EXECUTION is dropped from spoken turns).
             skip_composio=bool(config.VOICE_LIVE_SKIP_COMPOSIO),
+            # She is being HEARD, not read: short sentences, no markdown.
+            # Same brain — this is a medium instruction, not a lobotomy.
+            spoken_mode=True,
         )
 
         response_chars = 0
@@ -811,6 +814,11 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
     dynamic_vars: dict[str, Any] = {}
     speaking: asyncio.Task | None = None
     begun = False
+    # The slow-turn filler is a ONE-TIME courtesy per call. It used to fire on
+    # every slow turn, so a 3-turn utterance storm played "One moment. One
+    # moment. One moment." over itself — the "five people talking" Gerard
+    # heard. Once tells the caller the line is alive; twice is a stutter.
+    ack_spent = False
     stats = {"pings": 0, "updates": 0, "turns": 0, "frames": 0}
 
     async def safe_send(payload: dict) -> bool:
@@ -827,6 +835,7 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
             return False
 
     async def respond(req: RetellLLMRequest) -> None:
+        nonlocal ack_spent
         from time import monotonic
 
         started = monotonic()
@@ -835,18 +844,24 @@ async def retell_llm_websocket(websocket: WebSocket, call_id: str) -> None:
 
         # Slow-turn honesty: if the brain has said NOTHING by the deadline,
         # speak a short acknowledgment — the caller hears life (and the log
-        # gains the smoking gun) instead of dead air while tools run.
+        # gains the smoking gun) instead of dead air while tools run. Spoken
+        # AT MOST ONCE per call; the slow-turn WARNING still logs every time,
+        # so the telemetry keeps its teeth.
         ack_task: asyncio.Task | None = None
         ack_seconds = float(config.VOICE_LIVE_FIRST_FRAME_ACK_SECONDS or 0)
         ack_text = str(config.VOICE_LIVE_FIRST_FRAME_ACK_TEXT or "").strip()
         if ack_seconds > 0:
             async def _slow_turn_ack() -> None:
+                nonlocal ack_spent
                 await asyncio.sleep(ack_seconds)
                 logger.warning(
-                    "voice_live_ws_turn_slow call=%s rid=%s waited_ms=%d",
-                    call_id, req.response_id, int((monotonic() - started) * 1000),
+                    "voice_live_ws_turn_slow call=%s rid=%s waited_ms=%d spoken=%s",
+                    call_id, req.response_id,
+                    int((monotonic() - started) * 1000),
+                    not ack_spent,
                 )
-                if ack_text:
+                if ack_text and not ack_spent:
+                    ack_spent = True
                     await safe_send(
                         wrap_ws_response(
                             {
