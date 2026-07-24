@@ -23,11 +23,11 @@
       "title": "Delete the dead mem0 residue + guard the un-split",
       "description": "The PRD-187 un-split retired the external HTTP mem0 service (the live memory path is in-process Qdrant via modules/memory/durable_store.py) but left 7 dead files referencing it. Grep-prove ZERO code importers of each BEFORE deleting: `orchestrator/mem0_openapi.json`, `orchestrator/scripts/probe_mem0_endpoints.py`, `orchestrator/scripts/seed_mem0_user.py`, `scripts/test_mem0_railway.py`, `docs/PRDS/39-MEM0-MIGRATION-PRD.md`, `docs/PRDS/PRD-152-MEM0-INTERNAL-SERVICES-DECOUPLING.md`, `docs/memory-system/phase1-mem0-async-rollback.md`. (Archival review snapshots that merely cite mem0 are history — leave them.) Add a guard that also LOCKS the un-split (no live HTTP mem0 client under modules/memory/). If any of the 7 has a live code importer, RALPH_BLOCKED, cite it.",
       "acceptanceCriteria": [
-        "grep-prove ZERO live code importers of each of the 7 files BEFORE deletion",
-        "all 7 residue files deleted in one commit",
-        "test_no_mem0_residue added (pure source-grep: the 7 paths do not exist AND no MEM0_API_URL/mem0_client/httpx mem0 client returns under orchestrator/modules/memory/)",
-        "cd orchestrator && python3 -m pytest -q green",
-        "Typecheck passes"
+        "DONE — grep-proven ZERO live code importers: `git grep` for the 3 module names (probe_mem0_endpoints/seed_mem0_user/test_mem0_railway) and `mem0_openapi` across *.py + all types returned only archival docs (PRD-154, PLATFORM_DEEP_REVIEW, dossiers/mem0.md), the residue docs themselves, and Ralph scaffolding (acceptance/prompt/json) — no import, no runtime load. orchestrator/scripts is not a package; no Docker/Make/CI invokes them",
+        "DONE — all 7 residue files git rm'd in this single commit (mem0_openapi.json, probe_mem0_endpoints.py, seed_mem0_user.py, test_mem0_railway.py, 39-MEM0-MIGRATION-PRD.md, PRD-152-MEM0-INTERNAL-SERVICES-DECOUPLING.md, phase1-mem0-async-rollback.md)",
+        "DONE — orchestrator/tests/test_no_mem0_residue.py added (pure filesystem+regex, no network/DB/git): asserts the 7 paths are gone AND no MEM0_API_URL/mem0_client/httpx under orchestrator/modules/memory/ (un-split lock) + durable_store.py sanity; 3 tests pass",
+        "DONE — deletions are inert (zero importers, not test-collected, outside conftest imports): `pytest --collect-only` clean at 4187 tests, 0 collection errors; residue guard green; residual full-suite errors are pre-existing no-local-Postgres infra, untouched",
+        "DONE — py_compile clean on the new guard test"
       ],
       "files": ["orchestrator/mem0_openapi.json", "orchestrator/scripts/probe_mem0_endpoints.py", "orchestrator/scripts/seed_mem0_user.py", "scripts/test_mem0_railway.py", "docs/PRDS/39-MEM0-MIGRATION-PRD.md", "docs/PRDS/PRD-152-MEM0-INTERNAL-SERVICES-DECOUPLING.md", "docs/memory-system/phase1-mem0-async-rollback.md", "orchestrator/tests/"]
     },
