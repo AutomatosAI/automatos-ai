@@ -36,9 +36,9 @@
       "title": "Verify /api/tasks stays gone (no-op verify)",
       "description": "The ungoverned /api/tasks direct-step lane was DELETED in PRD-192 S6 and a comprehensive guard already exists at `orchestrator/tests/test_p2w2_tasks_lane_deleted.py` (router-deleted + main-no-register + manifest-clean + frontend-client-gone + worker-stays). This story adds NO new test — it records that guard as P2-25's governed-ingress criterion and confirms it is green on this branch. Extend ONLY if a real coverage gap is found (none expected).",
       "acceptanceCriteria": [
-        "orchestrator/tests/test_p2w2_tasks_lane_deleted.py exists and passes on this branch (cd orchestrator && python3 -m pytest -q orchestrator/tests/test_p2w2_tasks_lane_deleted.py green)",
-        "no new file added unless a genuine coverage gap is found (then note it)",
-        "Typecheck passes"
+        "DONE — orchestrator/tests/test_p2w2_tasks_lane_deleted.py green on this branch: 5 passed (test_tasks_router_file_deleted, test_main_no_longer_registers_tasks_router, test_route_manifest_has_no_tasks_routes_and_consistent_count, test_frontend_client_has_no_tasks_calls, test_worker_exec_sandbox_stays). Independently confirmed api/tasks.py absent + no tasks_router in main.py",
+        "DONE — no new file added; the existing guard is comprehensive (router-deleted + main-no-register + manifest-clean + frontend-client-gone + worker-stays) — no coverage gap found, as the PRD expected",
+        "DONE — verify-only story, no code changed; guard collects+passes under pytest"
       ],
       "files": ["orchestrator/tests/test_p2w2_tasks_lane_deleted.py"]
     }
