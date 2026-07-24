@@ -12,8 +12,7 @@ Available Modules (Complete):
 - tools/       - Tool registry and execution ✅
 - nl2sql/     - Natural language to SQL ✅
 - codegraph/   - Code analysis and search ✅
-- learning/    - Self-improvement (patterns, playbooks, feedback) ✅
-- evaluation/  - Evaluation and benchmarking (structure ready)
+- learning/    - Playbook mining (PlaybookMiner) ✅
 
 Usage:
     from modules.search import ContextOptimizer
@@ -34,5 +33,4 @@ __all__ = [
     "nl2sql",
     "codegraph",
     "learning",
-    "evaluation",
 ]
