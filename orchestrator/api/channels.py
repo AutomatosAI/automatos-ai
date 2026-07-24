@@ -141,62 +141,6 @@ def _save_verify_outcome(
         db.rollback()
 
 
-async def _ping_platform_legacy(platform: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Legacy inline pinger — retained ONLY for the route handlers that
-    haven't been ported to the driver interface yet (none should
-    remain). New code: ``get_driver(platform)().verify(...)``.
-    """
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            if platform == "telegram":
-                token = config.get("bot_token", "")
-                resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
-                if resp.status_code == 200:
-                    bot_info = resp.json().get("result", {})
-                    return {"status": "connected", "bot_name": bot_info.get("username")}
-                # 404 is the symptom of a bot_token missing the "<bot_id>:" prefix —
-                # surface the likely cause so the dashboard error is actionable.
-                if resp.status_code == 404:
-                    return {
-                        "status": "error",
-                        "detail": (
-                            "Telegram returned 404 — the bot_token is likely missing the "
-                            "leading '<bot_id>:' prefix. Paste the full token from "
-                            "@BotFather, e.g. '1234567890:AAF…'."
-                        ),
-                    }
-                return {"status": "error", "detail": f"Telegram API returned {resp.status_code}"}
-
-            if platform == "slack":
-                token = config.get("bot_token", "")
-                resp = await client.post(
-                    "https://slack.com/api/auth.test",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                data = resp.json()
-                if data.get("ok"):
-                    return {"status": "connected", "team": data.get("team"), "bot_user": data.get("user")}
-                return {"status": "error", "detail": data.get("error", "Unknown error")}
-
-            if platform == "discord":
-                token = config.get("bot_token", "")
-                resp = await client.get(
-                    "https://discord.com/api/v10/users/@me",
-                    headers={"Authorization": f"Bot {token}"},
-                )
-                if resp.status_code == 200:
-                    user = resp.json()
-                    return {"status": "connected", "bot_name": user.get("username")}
-                return {"status": "error", "detail": f"Discord API returned {resp.status_code}"}
-
-        return {"status": "error", "detail": f"No verifier for platform {platform!r}"}
-    except Exception as exc:
-        logger.error("Platform ping failed for %s: %s", platform, exc)
-        return {"status": "error", "detail": "Connection test failed"}
-
-
 def _mark_active(db: Session, channel_id: str) -> None:
     """Flip the row to ``status='active'``. Best-effort — never raises."""
     try:
