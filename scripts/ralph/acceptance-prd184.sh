@@ -20,12 +20,21 @@ check "orchestrator-full-suite green (@integration skips with no DB)" \
 
 # --- US-001: learning/evaluation gone + guarded ----------------------------------
 check "US-001 modules/evaluation deleted" "[ ! -e orchestrator/modules/evaluation ]"
-check "US-001 modules/learning deleted (miner.py held S10 may remain)" \
-  "[ ! -e orchestrator/modules/learning/__init__.py ]"
+# learning/__init__.py + playbooks/ SURVIVE BY DESIGN — they are the live reachability
+# chain for the held-S10 PlaybookMiner (`from modules.learning import PlaybookMiner` in the
+# held, out-of-scope api/api_playbooks.py). The deletion gate forbids breaking that live
+# caller, so US-001 razes only the DEAD theatre subpackages (feedback/ + patterns/: empty
+# __init__, zero importers). The in-suite guard test_held_playbook_miner_chain_survives pins
+# this boundary. (The earlier `[ ! -e learning/__init__.py ]` check demanded a deletion-gate
+# violation and matched docstring-prose Usage examples — corrected to the true dead theatre.)
+check "US-001 dead-theatre learning subpkgs deleted (feedback/ + patterns/; __init__/playbooks held for PlaybookMiner)" \
+  "[ ! -e orchestrator/modules/learning/feedback ] && [ ! -e orchestrator/modules/learning/patterns ]"
 check "US-001 guard test present" \
   "[ -n \"\$(grep -rlE 'def test_no_learning_evaluation_imports' orchestrator/tests 2>/dev/null)\" ]"
-check "US-001 no live import of the deleted packages (outside held miner/api_playbooks)" \
-  "! git grep -nE 'from modules\\.(learning|evaluation)|import modules\\.(learning|evaluation)' -- orchestrator ':!orchestrator/modules/learning/playbooks/miner.py' ':!orchestrator/api/api_playbooks.py' ':!orchestrator/tests' 2>/dev/null | grep -q ."
+# Precise dotted-subpackage tokens (mirror the guard test's _GONE_TOKENS): a bare
+# `modules.learning` would false-positive on the surviving held barrel + its docstring prose.
+check "US-001 no live import of the DELETED packages (modules.evaluation / learning.feedback / learning.patterns)" \
+  "! git grep -nE 'modules\\.evaluation|modules\\.learning\\.feedback|modules\\.learning\\.patterns' -- orchestrator ':!orchestrator/tests' 2>/dev/null | grep -q ."
 
 # --- US-002: llm-core dead scaffolding gone + guarded ----------------------------
 check "US-002 the 6 llm-core files deleted (incl anthropic_client.py)" \
