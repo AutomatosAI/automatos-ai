@@ -35,12 +35,9 @@ def _parse():
     return cp
 
 
-def test_import_contract_file_exists():
-    assert _CONTRACT.exists(), f"{_CONTRACT} does not exist"
-
-
-def test_import_contract_parses():
-    cp = _parse()
+def test_import_contract_present():
+    """Canonical PRD-211 US-001 guard: the contract file exists AND parses."""
+    cp = _parse()  # asserts existence first, then parses
     assert cp.has_section("importlinter"), "[importlinter] top section missing"
     assert cp["importlinter"]["root_package"].strip() == "modules", (
         "root_package must be `modules` — features are imported as modules.* "

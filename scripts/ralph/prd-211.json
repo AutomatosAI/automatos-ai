@@ -13,7 +13,7 @@
         "DONE — .github/workflows/import-linter.yml added; mirrors check-shopify-isolation.yml; runs `lint-imports --config orchestrator/.importlinter` with PYTHONPATH=orchestrator; non-required lane (push main+ralph/**, PR->main)",
         "DONE — lint-imports exits 0 on this branch tip: re-traced live via grimp build_graph('modules') → 35 direct feature→feature edges carried as explicit ignore_imports (+ tools routing wildcard). Output: 'Analyzed 363 files, 516 dependencies. ... KEPT. Contracts: 1 kept, 0 broken.'",
         "DONE — throwaway modules/rag/_prd211_probe.py importing modules.nl2sql → 'modules.rag is not allowed to import modules.nl2sql' BROKEN, exit 1; probe removed and NOT committed (re-verified exit 0 after removal)",
-        "DONE — orchestrator/tests/test_import_contract_present.py added (pure configparser, no network; 4 tests pass); asserts existence, parse, root_package=modules, independence type, ≥15 feature modules, and routing-layer exclusion invariant",
+        "DONE — orchestrator/tests/test_import_contract_present.py added (pure configparser, no network; 3 tests pass) with the canonical `def test_import_contract_present` (exists+parses, matches the acceptance grep) plus independence-type/≥15-modules and routing-layer-exclusion invariant tests",
         "DONE — py_compile clean on the new test; it collects and passes under pytest"
       ],
       "files": ["orchestrator/.importlinter", "orchestrator/requirements.txt", ".github/workflows/import-linter.yml", "orchestrator/tests/"]

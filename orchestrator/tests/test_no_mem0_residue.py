@@ -40,7 +40,8 @@ _HTTP_CLIENT = re.compile(r"MEM0_API_URL|mem0_client|httpx")
 _MEMORY_DIR = _ORCH / "modules" / "memory"
 
 
-def test_mem0_residue_files_deleted():
+def test_no_mem0_residue():
+    """Canonical PRD-211 US-002 guard: none of the 7 dead mem0 files exist."""
     survivors = [p for p in _RESIDUE if (_REPO / p).exists()]
     assert not survivors, (
         "dead mem0-residue file(s) resurfaced — the PRD-187 un-split retired the "
