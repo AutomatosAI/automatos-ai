@@ -1,0 +1,86 @@
+# PRD-211 — In-repo topology discipline (Phase 2 Wave 4).
+#
+# Thesis T2 measured Automatos as a healthy modular monolith: only ~3.0% of
+# imports are true feature-to-feature coupling; ~80.5% is the shared kernel.
+# The verdict — "stay a monolith, harden the boundaries in-repo" — is only a
+# claim until it is enforced. This `independence` contract makes the NEXT new
+# lateral edge between feature modules fail loud in CI, at zero runtime cost.
+#
+# Rule in words: no feature module (orchestrator/modules/*) may import another
+# feature module EXCEPT through the permitted routing layer (modules.tools or
+# the api package). modules.tools is excluded by the routing wildcard below;
+# `api` lives outside the `modules` root package and is therefore never a node
+# in this graph (routing through it is inherently invisible to the contract).
+#
+# This is a RATCHET, not a refactor: every lateral edge that exists on the
+# branch tip today is carried as an explicit `ignore_imports` so the contract
+# is GREEN now. It forbids the next edge, it does not demand today's edges be
+# removed (that is a held CLAUDE.md §12 option, not this PRD).
+#
+# To re-trace the baseline after intentional coupling changes, rebuild it from
+# grimp: build_graph("modules") -> direct edges where both endpoints are
+# distinct feature modules. Do not hand-edit blindly.
+
+[importlinter]
+root_package = modules
+include_external_packages = False
+
+[importlinter:contract:feature-module-independence]
+name = Feature modules must not import each other (route via modules.tools or api)
+type = independence
+modules =
+    modules.agents
+    modules.attachments
+    modules.codegraph
+    modules.context
+    modules.coordination
+    modules.documents
+    modules.evaluation
+    modules.intake
+    modules.knowledge
+    modules.learning
+    modules.memory
+    modules.nl2sql
+    modules.policy
+    modules.rag
+    modules.search
+    modules.voice
+    modules.widgets
+    modules.workflows
+ignore_imports =
+    modules.tools.** -> modules.**
+    modules.agents.factory.agent_factory -> modules.attachments.resolver
+    modules.agents.factory.agent_factory -> modules.context
+    modules.agents.factory.agent_factory -> modules.memory.memory_tool
+    modules.agents.services.agent_platform_tools -> modules.codegraph
+    modules.agents.services.agent_platform_tools -> modules.codegraph.ranking
+    modules.agents.services.agent_platform_tools -> modules.documents.generation_service
+    modules.agents.services.agent_platform_tools -> modules.rag
+    modules.agents.services.agent_platform_tools -> modules.rag.config
+    modules.context.planning -> modules.rag.budget
+    modules.context.sections.graph_context -> modules.knowledge.graph_service
+    modules.context.sections.memory -> modules.memory.injection_filter
+    modules.context.sections.memory -> modules.memory.recall_ranking
+    modules.context.sections.memory -> modules.memory.unified_memory_service
+    modules.context.sections.planning_history -> modules.memory.unified_memory_service
+    modules.context.sections.planning_knowledge -> modules.rag.service
+    modules.context.sections.skills -> modules.agents.services.skill_loader
+    modules.context.service -> modules.attachments.resolver
+    modules.context.service -> modules.coordination.agent_matcher
+    modules.coordination.dispatcher -> modules.policy.pricing
+    modules.coordination.match_signals -> modules.context.adapters.vector_field
+    modules.coordination.planner -> modules.attachments.extract
+    modules.coordination.planner -> modules.attachments.store
+    modules.coordination.planner -> modules.context.service
+    modules.memory.unified_memory_service -> modules.context.field_scoring
+    modules.nl2sql.service -> modules.context
+    modules.nl2sql.service -> modules.rag
+    modules.nl2sql.service -> modules.search.services.context_engineering_service
+    modules.rag.ingestion.manager -> modules.knowledge.graph_service
+    modules.rag.ingestion.manager -> modules.search.services.entity_extractor
+    modules.rag.ingestion.manager -> modules.search.vector_store
+    modules.rag.service -> modules.search
+    modules.rag.service -> modules.search.vector_store.backends.pgvector_local_backend
+    modules.rag.service -> modules.search.vector_store.backends.s3_vectors_backend
+    modules.rag.services.cloud_sync_service -> modules.search.vector_store.backends.s3_vectors_backend
+    modules.workflows.recipes.jira_bug_triage -> modules.codegraph.codegraph_service
