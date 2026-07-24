@@ -1323,15 +1323,62 @@ class Config:
     # interruption sensitivity stops ambient noise from grabbing the turn
     # ("the mic is too sensitive"). All env-overridable — e.g. en-GB for a
     # British/Irish speaker whose accent transcribes better there.
-    VOICE_LIVE_LANGUAGE: str = os.getenv("VOICE_LIVE_LANGUAGE", "en-US")
+    VOICE_LIVE_LANGUAGE: str = os.getenv("VOICE_LIVE_LANGUAGE", "en-GB")
+    # ``noise-and-background-speech-cancellation`` (the aggressive mode) also
+    # cancelled the SPEAKER at normal volume — measured live: a whole call
+    # logged turns=0 because it treated his own voice as background and he had
+    # to shout. ``noise-cancellation`` filters steady room noise and keeps the
+    # person talking.
     VOICE_LIVE_DENOISING_MODE: str = os.getenv(
-        "VOICE_LIVE_DENOISING_MODE", "noise-and-background-speech-cancellation"
+        "VOICE_LIVE_DENOISING_MODE", "noise-cancellation"
     )
     VOICE_LIVE_STT_MODE: str = os.getenv("VOICE_LIVE_STT_MODE", "accurate")
+    # 0.2 made a normal-volume interruption unable to take the turn; 0.5 lets a
+    # person barge in without ambient noise doing it for them.
     VOICE_LIVE_INTERRUPTION_SENSITIVITY: float = float(
-        os.getenv("VOICE_LIVE_INTERRUPTION_SENSITIVITY", "0.2")
+        os.getenv("VOICE_LIVE_INTERRUPTION_SENSITIVITY", "0.5")
     )
-    VOICE_LIVE_RESPONSIVENESS: float = float(os.getenv("VOICE_LIVE_RESPONSIVENESS", "0.8"))
+    VOICE_LIVE_RESPONSIVENESS: float = float(os.getenv("VOICE_LIVE_RESPONSIVENESS", "0.9"))
+    # Auto's voice. Retell ships no Irish voice; an ElevenLabs voice imported
+    # into the Retell dashboard appears here as a normal voice id, so swapping
+    # her accent is this one dial. Verified present in list-voices.
+    VOICE_LIVE_VOICE_ID: str = os.getenv("VOICE_LIVE_VOICE_ID", "11labs-Willa")
+    # <1 slower, >1 faster. Retell's default reads a touch brisk for a
+    # colleague-across-the-desk register.
+    VOICE_LIVE_VOICE_SPEED: float = float(os.getenv("VOICE_LIVE_VOICE_SPEED", "0.95"))
+    # Prosody variation. Higher = more expressive, less predictable.
+    VOICE_LIVE_VOICE_TEMPERATURE: float = float(
+        os.getenv("VOICE_LIVE_VOICE_TEMPERATURE", "0.9")
+    )
+    # Let Retell speak "$5.20" / "2026-07-24" / "api.automatos.app" as words.
+    # Belt to speechify()'s braces: the model is told not to emit them, this
+    # rescues the ones that slip through.
+    VOICE_LIVE_NORMALIZE_FOR_SPEECH: bool = os.getenv(
+        "VOICE_LIVE_NORMALIZE_FOR_SPEECH", "true"
+    ).strip().lower() == "true"
+    # Retell nags ("are you still there?") when the caller goes quiet. One
+    # reminder after 15s beats a conversation that keeps prodding you.
+    VOICE_LIVE_REMINDER_TRIGGER_MS: int = int(
+        os.getenv("VOICE_LIVE_REMINDER_TRIGGER_MS", "15000")
+    )
+    VOICE_LIVE_REMINDER_MAX_COUNT: int = int(
+        os.getenv("VOICE_LIVE_REMINDER_MAX_COUNT", "1")
+    )
+    # Spoken replies are emitted as whole clauses rather than raw model tokens:
+    # the sanitizer that strips markdown can only work on a complete unit
+    # (``**`` straddles chunk boundaries). false = legacy token passthrough.
+    VOICE_LIVE_SPEECH_UNITS: bool = os.getenv(
+        "VOICE_LIVE_SPEECH_UNITS", "true"
+    ).strip().lower() == "true"
+    VOICE_LIVE_SPEECH_UNIT_MAX_CHARS: int = int(
+        os.getenv("VOICE_LIVE_SPEECH_UNIT_MAX_CHARS", "180")
+    )
+    # Auto is told she is being HEARD on spoken turns (short sentences, no
+    # markdown, no URLs read aloud). Same brain, different medium — false
+    # restores the old behaviour of speaking her chat-formatted answer.
+    VOICE_LIVE_SPOKEN_STYLE: bool = os.getenv(
+        "VOICE_LIVE_SPOKEN_STYLE", "true"
+    ).strip().lower() == "true"
     # Spoken turns skip the Composio EXECUTION surface (third-party app actions:
     # Gmail/Slack/etc.). Measured root cause of 20-90s voice latency: loading
     # all 23 Composio apps → 44 promoted action schemas + a 137-action

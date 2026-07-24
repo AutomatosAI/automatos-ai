@@ -1111,15 +1111,21 @@ def test_arm_is_idempotent_when_agent_exists(monkeypatch):
 
 def test_agent_tuning_pins_language_and_denoises():
     """The STT/turn-taking tuning that keeps transcription honest in a noisy
-    room: pinned language, background-speech denoising, accurate STT, low
-    interruption sensitivity, no backchannel."""
+    room: pinned language, denoising, accurate STT, sane interruption
+    sensitivity, no backchannel.
+
+    ``noise-and-background-speech-cancellation`` was WITHDRAWN after live
+    measurement — the aggressive mode cancelled the speaker himself at normal
+    volume (a whole call logged turns=0 until he shouted). Plain
+    ``noise-cancellation`` filters the room and keeps the person.
+    """
     from modules.voice.retell_api import build_agent_tuning
 
     t = build_agent_tuning()
     assert t["language"]  # pinned, never multilingual auto (hallucination source)
-    assert t["denoising_mode"] == "noise-and-background-speech-cancellation"
+    assert t["denoising_mode"] == "noise-cancellation"
     assert t["stt_mode"] == "accurate"
-    assert 0.0 <= t["interruption_sensitivity"] <= 0.5  # not twitchy
+    assert 0.2 < t["interruption_sensitivity"] <= 0.7  # barge-in works, noise doesn't
     assert t["enable_backchannel"] is False
 
 

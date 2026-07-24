@@ -128,20 +128,65 @@ async def retell_response_frames(
 ) -> AsyncIterator[Dict[str, Any]]:
     """Stream the agent's AI-SDK output as Retell custom-LLM response frames.
 
-    THE streaming contract (V·S4): each text chunk is emitted as a
-    ``content_complete=False`` frame **the moment it arrives** — Retell begins
-    speaking (first audio) before the full agent generation completes, instead of
-    the old collect-everything-then-speak posture. A terminal
+    THE streaming contract (V·S4): frames are emitted **as the reply forms** —
+    Retell begins speaking before the agent finishes generating, instead of the
+    old collect-everything-then-speak posture. A terminal
     ``content_complete=True`` frame closes the turn.
+
+    Frames are whole speech units (a sentence, or a clause once one runs past
+    ``VOICE_LIVE_SPEECH_UNIT_MAX_CHARS``), not raw tokens. Buffering to a
+    boundary is what makes ``speechify()`` correct: markdown markers straddle
+    stream chunks — ``**`` arrives as ``*`` then ``*`` — so sanitizing token
+    fragments cannot work. The cost is the tail of the first sentence; the
+    return is that nothing reads ``**`` or ``- `` aloud. Set
+    ``VOICE_LIVE_SPEECH_UNITS=false`` to fall back to raw token passthrough.
     """
+    from config import config
+    from modules.voice.spoken_style import speechify, split_speech_unit
+
+    unitised = bool(getattr(config, "VOICE_LIVE_SPEECH_UNITS", True))
+    max_chars = int(getattr(config, "VOICE_LIVE_SPEECH_UNIT_MAX_CHARS", 180))
+
+    def _frame(content: str) -> Dict[str, Any]:
+        return {
+            "response_id": response_id,
+            "content": content,
+            "content_complete": False,
+        }
+
+    if not unitised:
+        async for chunk in agent_chunks:
+            text = extract_agent_text(chunk)
+            if text:
+                yield _frame(text)
+        yield {"response_id": response_id, "content": "", "content_complete": True}
+        return
+
+    buffer = ""
+    spoken_any = False
     async for chunk in agent_chunks:
         text = extract_agent_text(chunk)
-        if text:
-            yield {
-                "response_id": response_id,
-                "content": text,
-                "content_complete": False,
-            }
+        if not text:
+            continue
+        buffer += text
+        while True:
+            unit, buffer = split_speech_unit(buffer, max_chars)
+            if not unit:
+                break
+            said = speechify(unit)
+            if said:
+                spoken_any = True
+                # Space-separate units so the engine doesn't run them together.
+                yield _frame(said + " ")
+
+    tail = speechify(buffer)
+    if tail:
+        spoken_any = True
+        yield _frame(tail)
+    if not spoken_any:
+        logger.info(
+            "retell_frames: nothing speakable in this turn (rid=%s)", response_id
+        )
     yield {"response_id": response_id, "content": "", "content_complete": True}
 
 
