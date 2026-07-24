@@ -1,0 +1,46 @@
+{
+  "project": "Automatos AI Platform — PRD-211 In-repo topology discipline (import-linter contract) — P2-25",
+  "branchName": "ralph/prd-211-topology-discipline",
+  "description": "Cut from origin/main @ 9dd4c848a — re-verify every path/anchor by grep, they drift. SCOPE = 3 stories: US-001 the import-linter (grimp) independence contract that LOCKS the healthy 3.0% lateral coupling (thesis T2), US-002 delete the 7 dead mem0-residue files the PRD-187 un-split left behind, US-003 verify the /api/tasks-stays-gone guard (no-op — already deleted in PRD-192 S6). THIS IS MOSTLY ADDITIVE + SUBTRACTION, LOW RISK — the contract is authored to be GREEN on current main (it ratchets from the measured state; it does NOT demand a refactor). WHY: T2 measured the platform is a healthy modular monolith (only 3.0% true feature-to-feature coupling; 80.5% is the shared kernel) and the verdict is 'stay a monolith, harden the boundaries in-repo' — a claim until it is ENFORCED. This contract makes a new lateral edge fail loud in CI. CROSS-PRD: modules.learning + modules.evaluation are in the contract's module list AND are PRD-184 S1 kill targets — they exist on THIS branch's base so list them; when PRD-184 merges first, drop them on rebase (a contract cannot reference a deleted package). Complements (does NOT duplicate) the PRD-195/207 route-manifest sweep — that guards ROUTES, this guards module IMPORT coupling. BINDING: no os.getenv (the contract is a static config file); NO backward-compat shim (delete the 7 residue files, no _legacy); PURE tests; NEVER 'git add -A'/'git add .' (node_modules is untracked and NOT gitignored — stage only specific paths); never 'git stash -u'. Full spec: docs/PRDS/PRD-211-PHASE2-WAVE-4-TOPOLOGY-DISCIPLINE.md.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The import-linter independence contract (lock the 3.0% lateral coupling)",
+      "description": "Add `import-linter` (pulls grimp; light pure-Python) pinned in `orchestrator/requirements.txt`; a contract config at `orchestrator/.importlinter` (an `independence` contract over the ~18 feature modules under orchestrator/modules/*, with modules.tools + api EXCLUDED as the permitted routing layer and the shared kernel implicitly allowed); and a dedicated non-required CI lane `.github/workflows/import-linter.yml` (mirror the existing check-shopify-isolation.yml). RE-TRACE the current known-good lateral edges on THIS branch by running/reading grimp and carry them as explicit `ignore_imports` so the contract is GREEN on the branch tip (ratchet from the measured state — forbid the NEXT new lateral edge, do not demand a refactor). Do NOT take the edge list from the PRD doc as final — enumerate it live. Rule in words: 'no feature module may import another feature module except through modules/tools or api.'",
+      "acceptanceCriteria": [
+        "orchestrator/.importlinter exists, parses, and defines an `independence` contract over the feature modules with modules.tools + api excluded",
+        "import-linter pinned in orchestrator/requirements.txt",
+        ".github/workflows/import-linter.yml added (dedicated non-required lane running `lint-imports --config orchestrator/.importlinter`)",
+        "lint-imports exits 0 on this branch (green baseline via ignore_imports of the re-traced current lateral edges) — evidence: the command output in the commit body",
+        "a deliberate modules.rag->modules.nl2sql edge makes lint-imports exit non-zero (proven in the commit body, the violating edge NOT committed)",
+        "test_import_contract_present added (pure: asserts orchestrator/.importlinter exists and parses)",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/.importlinter", "orchestrator/requirements.txt", ".github/workflows/import-linter.yml", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-002",
+      "title": "Delete the dead mem0 residue + guard the un-split",
+      "description": "The PRD-187 un-split retired the external HTTP mem0 service (the live memory path is in-process Qdrant via modules/memory/durable_store.py) but left 7 dead files referencing it. Grep-prove ZERO code importers of each BEFORE deleting: `orchestrator/mem0_openapi.json`, `orchestrator/scripts/probe_mem0_endpoints.py`, `orchestrator/scripts/seed_mem0_user.py`, `scripts/test_mem0_railway.py`, `docs/PRDS/39-MEM0-MIGRATION-PRD.md`, `docs/PRDS/PRD-152-MEM0-INTERNAL-SERVICES-DECOUPLING.md`, `docs/memory-system/phase1-mem0-async-rollback.md`. (Archival review snapshots that merely cite mem0 are history — leave them.) Add a guard that also LOCKS the un-split (no live HTTP mem0 client under modules/memory/). If any of the 7 has a live code importer, RALPH_BLOCKED, cite it.",
+      "acceptanceCriteria": [
+        "grep-prove ZERO live code importers of each of the 7 files BEFORE deletion",
+        "all 7 residue files deleted in one commit",
+        "test_no_mem0_residue added (pure source-grep: the 7 paths do not exist AND no MEM0_API_URL/mem0_client/httpx mem0 client returns under orchestrator/modules/memory/)",
+        "cd orchestrator && python3 -m pytest -q green",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/mem0_openapi.json", "orchestrator/scripts/probe_mem0_endpoints.py", "orchestrator/scripts/seed_mem0_user.py", "scripts/test_mem0_railway.py", "docs/PRDS/39-MEM0-MIGRATION-PRD.md", "docs/PRDS/PRD-152-MEM0-INTERNAL-SERVICES-DECOUPLING.md", "docs/memory-system/phase1-mem0-async-rollback.md", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-003",
+      "title": "Verify /api/tasks stays gone (no-op verify)",
+      "description": "The ungoverned /api/tasks direct-step lane was DELETED in PRD-192 S6 and a comprehensive guard already exists at `orchestrator/tests/test_p2w2_tasks_lane_deleted.py` (router-deleted + main-no-register + manifest-clean + frontend-client-gone + worker-stays). This story adds NO new test — it records that guard as P2-25's governed-ingress criterion and confirms it is green on this branch. Extend ONLY if a real coverage gap is found (none expected).",
+      "acceptanceCriteria": [
+        "orchestrator/tests/test_p2w2_tasks_lane_deleted.py exists and passes on this branch (cd orchestrator && python3 -m pytest -q orchestrator/tests/test_p2w2_tasks_lane_deleted.py green)",
+        "no new file added unless a genuine coverage gap is found (then note it)",
+        "Typecheck passes"
+      ],
+      "files": ["orchestrator/tests/test_p2w2_tasks_lane_deleted.py"]
+    }
+  ]
+}
