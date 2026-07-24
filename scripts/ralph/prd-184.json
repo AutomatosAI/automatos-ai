@@ -36,11 +36,11 @@
       "title": "Delete the exec_planning stub vertical and de-route it",
       "description": "Delete `orchestrator/modules/tools/execution/exec_planning.py` (~339 LOC, 8 hardcoded template-writer 'planning' tools, 0 LLM, exposed to no agent). De-route in the SAME commit: remove the import at `unified_executor.py` (~:36) and the dispatch branches (~:969-975, grep to confirm), and drop the 8 tool names from any registry. Grep-prove NO agent toolset references those 8 tool names BEFORE cutting; if any agent is wired to them, RALPH_BLOCKED.",
       "acceptanceCriteria": [
-        "grep-prove no agent toolset / registry references the 8 exec_planning tool names BEFORE deletion",
-        "exec_planning.py deleted; the import + dispatch branches removed from unified_executor.py in the same commit",
-        "test_exec_planning_deleted_and_unrouted guard added (grep: symbol gone + unified_executor has no exec_planning dispatch)",
-        "PURE test; cd orchestrator && python3 -m pytest -q green (no dispatch regression)",
-        "Typecheck passes"
+        "DONE — grep-proven (Python-driven, shell-quoting-safe) all 10 routed tool names (create_implementation_plan/write_technical_content/refine_content/write_document/review_code/security_scan/generate_tests/run_tests/research_topic/analyze_data — the JSON's '8' was anchor drift): 7 have ZERO repo hits; security_scan(40)=plugin_security_scanner/security_scan_id subsystem, run_tests(4)=UI placeholder+skill-string+README+playbook step_id, analyze_data(2)=analyze_database substring — NONE is an agent toolset/registry/skill wiring. `exec_planning` + the 3 handler methods are referenced ONLY in unified_executor.py; NO test asserts them.",
+        "DONE — exec_planning.py git-rm'd; in unified_executor.py (same commit) removed: the import (line 36), the 2 PRD-22 Expansion dispatch blocks (10 entries), and the 3 handler methods (_execute_planning_tool/_execute_writing_tool/_execute_analysis_tool). File parses; `from ...unified_executor import UnifiedToolExecutor` imports clean; sibling dispatch entries (document/composio/widget) intact.",
+        "DONE — tests/test_prd184_us003_exec_planning_deleted.py added: 3 pure file-read tests incl. test_exec_planning_deleted_and_unrouted + a live-neighbour boundary proof. RED before (2 fail), GREEN after (3 passed).",
+        "DONE — PURE (file-read only). Post-change full suite: 3 failed / 3979 passed / 46 errors — identical infra signature to US-001/US-002 (same 3 gates, same 46 DB errors); passed +3 = the new guards. No dispatch regression.",
+        "DONE — no mypy/pyright lane; unified_executor.py AST-parses + UnifiedToolExecutor imports + pytest collects clean = import/compile-clean (typecheck-equivalent)."
       ],
       "files": ["orchestrator/modules/tools/execution/exec_planning.py", "orchestrator/modules/tools/execution/unified_executor.py", "orchestrator/tests/"]
     },
