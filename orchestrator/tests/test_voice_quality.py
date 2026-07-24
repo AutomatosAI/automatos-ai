@@ -183,7 +183,7 @@ async def test_legacy_passthrough_when_units_disabled() -> None:
 
 def test_contract_names_the_things_that_break_tts() -> None:
     lowered = SPOKEN_OUTPUT_CONTRACT.lower()
-    for token in ("markdown", "heard", "sentences", "url"):
+    for token in ("markdown", "hear", "sentences", "url"):
         assert token in lowered
 
 

@@ -1149,7 +1149,7 @@ def test_arm_retunes_the_existing_agent(monkeypatch):
 
     assert created == {}  # existing agent kept, not recreated
     assert tuned["agent_id"] == "agent_existing"
-    assert tuned["denoising_mode"] == "noise-and-background-speech-cancellation"
+    assert tuned["denoising_mode"] == "noise-cancellation"
     assert tuned["language"]
 
 

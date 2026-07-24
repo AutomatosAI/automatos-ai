@@ -146,6 +146,7 @@ async def retell_response_frames(
 
     unitised = bool(getattr(config, "VOICE_LIVE_SPEECH_UNITS", True))
     max_chars = int(getattr(config, "VOICE_LIVE_SPEECH_UNIT_MAX_CHARS", 180))
+    first_max = int(getattr(config, "VOICE_LIVE_SPEECH_FIRST_UNIT_MAX_CHARS", 60))
 
     def _frame(content: str) -> Dict[str, Any]:
         return {
@@ -170,7 +171,10 @@ async def retell_response_frames(
             continue
         buffer += text
         while True:
-            unit, buffer = split_speech_unit(buffer, max_chars)
+            # The opening unit flushes early (time-to-first-audio); the rest
+            # wait for a proper boundary.
+            ceiling = first_max if not spoken_any else max_chars
+            unit, buffer = split_speech_unit(buffer, ceiling)
             if not unit:
                 break
             said = speechify(unit)
