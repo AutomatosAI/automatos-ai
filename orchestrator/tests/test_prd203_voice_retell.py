@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import hmac
 
 import pytest
@@ -28,15 +29,22 @@ from modules.voice.providers.retell import (
 
 def test_first_audio_before_full_agent_stream():
     """A Retell content frame is emitted while the agent is still generating —
-    the exact property the collect-everything-then-speak path lacked."""
+    the exact property the collect-everything-then-speak path lacked.
+
+    Granularity note: frames are whole speech units, not raw tokens (the
+    markdown sanitizer can only work on a complete unit — ``**`` straddles
+    chunk boundaries). So the assertion is that audio starts mid-generation,
+    not that every token ships on arrival. The opening unit also flushes at a
+    lower character ceiling than later ones, so time-to-first-audio survives.
+    """
 
     async def scenario():
         events: list[str] = []
 
         async def agent_stream():
-            yield '0:"Hello "'
+            yield '0:"Hello there. "'
             events.append("agent_yield_1")
-            yield '0:"there"'
+            yield '0:"How can I help?"'
             events.append("agent_yield_2")
             yield 'd:{"finishReason":"stop"}'  # non-text terminal line
             events.append("agent_done")
@@ -52,11 +60,44 @@ def test_first_audio_before_full_agent_stream():
         assert events.index("frame_1") < events.index("agent_yield_2")
 
         content_frames = [f for f in frames if not f["content_complete"]]
-        assert [f["content"] for f in content_frames] == ["Hello ", "there"]
+        spoken = "".join(f["content"] for f in content_frames)
+        assert "Hello there." in spoken and "How can I help?" in spoken
         assert frames[0]["response_id"] == 7
         # A terminal complete frame closes the turn; the non-text 'd:' line
         # produced no content frame.
         assert frames[-1] == {"response_id": 7, "content": "", "content_complete": True}
+
+    asyncio.run(scenario())
+
+
+def test_opening_clause_ships_without_waiting_for_the_sentence():
+    """Time-to-first-audio guard: a long opening sentence must not hold the
+    whole turn silent — the first unit flushes at its own lower ceiling, so
+    audio starts before the sentence's full stop ever arrives."""
+
+    async def scenario():
+        events: list[str] = []
+        # Comfortably past the first-unit ceiling, with no terminator in sight.
+        long_open = (
+            "So the short version here is that everything running on the "
+            "platform right now looks "
+        )
+
+        async def agent_stream():
+            yield '0:' + json.dumps(long_open)
+            events.append("agent_yield_1")
+            yield '0:' + json.dumps("completely healthy.")
+            events.append("agent_yield_2")
+
+        frames = []
+        async for frame in retell_response_frames(1, agent_stream()):
+            frames.append(frame)
+            events.append(f"frame_{len(frames)}")
+
+        # Audio began on the opening clause — before the sentence completed.
+        assert events.index("frame_1") < events.index("agent_yield_2")
+        spoken = "".join(f["content"] for f in frames)
+        assert "completely healthy." in spoken  # nothing dropped on the way
 
     asyncio.run(scenario())
 
