@@ -1,0 +1,100 @@
+# =============================================================================
+# Automatos AI — Backend (API) local defaults · env-file syntax · NO SECRETS
+# =============================================================================
+# Prefilled local-topology settings for a clone-and-run docker compose stack.
+# Secrets (passwords, API keys) live ONLY in the root .env (see .env.example).
+#
+# - Committed to git on purpose: every value here is non-secret local wiring.
+# - Named *.defaults (not *.env) so the repo's block-secrets guard
+#   (.claude/hooks/block-secrets.sh) never matches it; docker compose accepts
+#   any filename via `env_file:` (wired by PRD-153 US-002).
+# - Personal overrides: create envs/api.local (gitignored), listed after this
+#   file in compose `env_file:` so it wins.
+# - SaaS/Railway is NOT affected: Railway sets its own env per service; this
+#   file describes the LOCAL topology only.
+#
+# Tags: [ACTIVE]   read by the code today
+#       [PRD-15x]  takes effect when that PRD lands; harmless until then
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core topology [ACTIVE]
+# -----------------------------------------------------------------------------
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=orchestrator_db
+POSTGRES_USER=postgres
+# POSTGRES_PASSWORD -> root .env
+
+REDIS_HOST=redis
+REDIS_PORT=6379
+# REDIS_PASSWORD -> root .env
+
+ENVIRONMENT=development
+LOG_LEVEL=INFO
+
+# Document conversion sidecar (compose profile: tools) [ACTIVE]
+GOTENBERG_URL=http://gotenberg:3000
+
+# -----------------------------------------------------------------------------
+# Edition & auth
+# -----------------------------------------------------------------------------
+# [PRD-150] OSS edition: local auth provider, single workspace, no login.
+EDITION=oss
+AUTH_PROVIDER=local
+
+# [ACTIVE] Interim no-Clerk mode until PRD-150 lands (anonymous auth path).
+# PRD-150 replaces this with AUTH_PROVIDER=local; flip back to true then.
+REQUIRE_AUTH=false
+
+# [ACTIVE] Leave blank — generated and persisted on first boot (PRD-150 Q3).
+DEFAULT_WORKSPACE_ID=
+
+# -----------------------------------------------------------------------------
+# Object storage — MinIO (S3-compatible, ships in the compose stack)
+# -----------------------------------------------------------------------------
+# [PRD-151] One S3 code path; these point it at the local MinIO container.
+S3_ENDPOINT_URL=http://minio:9000
+# Browser-facing presigned URLs must use the host-reachable endpoint:
+S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
+S3_USE_PATH_STYLE=true
+# MinIO ignores region; kept for AWS-API compatibility. [ACTIVE]
+AWS_REGION=us-east-1
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY -> root .env
+# (locally these are the MinIO root credentials)
+
+# [ACTIVE] Vector store: pgvector in the main Postgres is the default.
+# AWS S3 Vectors is a SaaS-only opt-in; never enable it against MinIO.
+S3_VECTORS_ENABLED=false
+
+# Bucket names: code defaults from config.py apply; override here if needed.
+# Buckets are auto-created on first use against MinIO (PRD-151 US-007).
+# S3_DOCUMENTS_BUCKET=
+# MARKETPLACE_S3_BUCKET=automatos-marketplace
+# RECIPE_LOG_S3_BUCKET=automatos-ai
+
+# -----------------------------------------------------------------------------
+# Memory & vectors
+# -----------------------------------------------------------------------------
+# [ACTIVE] mem0 long-term memory (L3) — compose service DNS, port 8765.
+# Overrides the Railway-internal default in config.py (removed by PRD-152).
+MEM0_API_URL=http://mem0-server:8765
+# MEM0_API_KEY -> root .env
+
+# [ACTIVE] Qdrant field memory (PRD-108). Service lands in the consolidated
+# compose (PRD-153); the backend boots gracefully if it is absent.
+QDRANT_URL=http://qdrant:6333
+
+# -----------------------------------------------------------------------------
+# Internal/optional services — OFF locally [ACTIVE as overrides]
+# -----------------------------------------------------------------------------
+# Empty URL = feature disabled with a clean log line (PRD-152 makes these the
+# code defaults; until then these overrides silence Railway-internal retries).
+LOG_RELAY_ENABLED=false
+LOG_RELAY_URL=
+LOKI_URL=
+PROMETHEUS_URL=
+AGENT_OPT_WORKER_URL=
+VOICE_SERVICE_URL=
+# Enable observability locally via:  docker compose --profile observability up
+# plus envs/observability.defaults (see that file).

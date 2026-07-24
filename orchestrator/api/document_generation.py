@@ -17,9 +17,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
 from config import config
+from modules.documents.models import UnresolvedDeliverableError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["document-generation"])
@@ -40,6 +42,7 @@ class TemplateCreateRequest(BaseModel):
     sample_data: dict = Field(default_factory=dict)
     category: str = "general"
     tags: list = Field(default_factory=list)
+    blocks: Optional[dict] = None  # PRD-167 S2: canonical block-tree body
 
 
 class TemplateUpdateRequest(BaseModel):
@@ -50,6 +53,25 @@ class TemplateUpdateRequest(BaseModel):
     sample_data: Optional[dict] = None
     category: Optional[str] = None
     tags: Optional[list] = None
+    blocks: Optional[dict] = None  # PRD-167 S2
+
+
+class BrandKitUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    tagline: Optional[str] = None
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    text_color: Optional[str] = None
+    font_family: Optional[str] = None
+    company: Optional[dict] = None
+
+
+class PreviewBlocksRequest(BaseModel):
+    """Live-preview a block tree without persisting (PRD-167 S5)."""
+    blocks: dict
+    data: dict = Field(default_factory=dict)
 
 
 class GenerateDocumentRequest(BaseModel):
@@ -69,11 +91,29 @@ class GenerateDocumentResponse(BaseModel):
 
 
 # ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+
+def _validate_blocks_or_422(blocks: Optional[dict]) -> Optional[dict]:
+    """Validate a block body, returning the normalized dict or raising 422 with
+    field-level errors (PRD-167 S2 — no silent swallow)."""
+    if blocks is None:
+        return None
+    from modules.documents.blocks import BlockValidationError, validate_blocks
+
+    try:
+        return validate_blocks(blocks).model_dump()
+    except BlockValidationError as e:
+        raise HTTPException(status_code=422, detail={"message": "Invalid blocks", "errors": e.errors})
+
+
+# ------------------------------------------------------------------
 # Template CRUD
 # ------------------------------------------------------------------
 
 
-@router.post("/templates", status_code=201)
+@router.post("/templates", status_code=201, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def create_template(
     body: TemplateCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -81,6 +121,10 @@ async def create_template(
 ):
     """Create a new document template."""
     from modules.documents.template_service import DocumentTemplateService
+
+    # PRD-167 S2: validate the block body up-front; malformed blocks return 422 with
+    # field-level errors (no silent swallow).
+    normalized_blocks = _validate_blocks_or_422(body.blocks)
 
     service = DocumentTemplateService(db)
     template = service.create_template(
@@ -94,6 +138,7 @@ async def create_template(
         category=body.category,
         tags=body.tags,
         created_by=str(ctx.user.id) if ctx.user and ctx.user.id else None,
+        blocks=normalized_blocks,
     )
     return {
         "id": str(template.id),
@@ -145,7 +190,7 @@ async def get_template(
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
-    template = service.get_template(template_id)
+    template = service.get_template(template_id, ctx.workspace_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     return {
@@ -160,12 +205,13 @@ async def get_template(
         "template_file_path": template.template_file_path,
         "data_schema": template.data_schema,
         "sample_data": template.sample_data,
+        "blocks": template.blocks,
         "created_at": template.created_at.isoformat() if template.created_at else None,
         "updated_at": template.updated_at.isoformat() if template.updated_at else None,
     }
 
 
-@router.put("/templates/{template_id}")
+@router.put("/templates/{template_id}", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def update_template(
     template_id: UUID,
     body: TemplateUpdateRequest,
@@ -177,13 +223,16 @@ async def update_template(
 
     service = DocumentTemplateService(db)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    template = service.update_template(template_id, **updates)
+    # PRD-167 S2: validate blocks before persisting (422 with field-level errors).
+    if "blocks" in updates:
+        updates["blocks"] = _validate_blocks_or_422(updates["blocks"])
+    template = service.update_template(template_id, ctx.workspace_id, **updates)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"id": str(template.id), "name": template.name, "updated": True}
 
 
-@router.delete("/templates/{template_id}")
+@router.delete("/templates/{template_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_template(
     template_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -193,13 +242,13 @@ async def delete_template(
     from modules.documents.template_service import DocumentTemplateService
 
     service = DocumentTemplateService(db)
-    deleted = service.delete_template(template_id)
+    deleted = service.delete_template(template_id, ctx.workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"deleted": True}
 
 
-@router.post("/templates/{template_id}/preview")
+@router.post("/templates/{template_id}/preview", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def preview_template(
     template_id: UUID,
     data: Optional[dict] = None,
@@ -211,7 +260,7 @@ async def preview_template(
     from modules.documents.template_service import DocumentTemplateService
 
     tmpl_service = DocumentTemplateService(db)
-    template = tmpl_service.get_template(template_id)
+    template = tmpl_service.get_template(template_id, ctx.workspace_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
@@ -227,6 +276,20 @@ async def preview_template(
             data=preview_data,
             workspace_id=ctx.workspace_id,
             template_id=template.id,
+            user_id=ctx.user.id if ctx.user else None,
+        )
+    except UnresolvedDeliverableError as e:
+        # P2-09 S3: the finalisation gate — tell the caller WHICH variables
+        # blocked the file so they can fill the data / brand kit / template.
+        # (The Studio live preview, /templates/preview-blocks, stays the
+        # visible-marker surface and is not gated.)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Document blocked: template variables did not resolve",
+                "unresolved": e.unresolved,
+                "unknown": e.unknown,
+            },
         )
     except Exception as e:
         logger.error(f"Document preview failed: {e}", exc_info=True)
@@ -235,7 +298,7 @@ async def preview_template(
     return {"preview_url": result.download_url, "filename": result.filename}
 
 
-@router.post("/templates/upload")
+@router.post("/templates/upload", dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def upload_docx_template(
     name: str = Form(...),
     category: str = Form("general"),
@@ -300,7 +363,7 @@ async def upload_docx_template(
 # ------------------------------------------------------------------
 
 
-@router.post("/generate", response_model=GenerateDocumentResponse)
+@router.post("/generate", response_model=GenerateDocumentResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def generate_document(
     body: GenerateDocumentRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -318,6 +381,19 @@ async def generate_document(
             workspace_id=ctx.workspace_id,
             template_name=body.template_name,
             template_id=UUID(body.template_id) if body.template_id else None,
+            user_id=ctx.user.id if ctx.user else None,
+        )
+    except UnresolvedDeliverableError as e:
+        # P2-09 S3: a Deliverable with [[unresolved]]/unknown variables is
+        # blocked at finalisation — surface the offending paths, loudly.
+        logger.warning(f"Document generation blocked by unresolved variables: {e}")
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Document blocked: template variables did not resolve",
+                "unresolved": e.unresolved,
+                "unknown": e.unknown,
+            },
         )
     except (ValueError, FileNotFoundError) as e:
         logger.warning(f"Document generation validation error: {e}")
@@ -336,6 +412,133 @@ async def generate_document(
         download_url=result.download_url,
         size_kb=result.size // 1024,
     )
+
+
+# ------------------------------------------------------------------
+# Variables + Brand Kit (PRD-167 S3 / S4)
+# ------------------------------------------------------------------
+
+
+@router.get("/variables")
+async def list_variables(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return the variable catalog with resolved sample values for this workspace/user.
+
+    Drives the editor's variable-chip picker (PRD-167 S3). Each entry carries the
+    catalog label/sample plus the *actual* resolved value where available, so authors
+    see what a chip will render to.
+    """
+    from modules.documents.variables import CATALOG
+    from modules.documents.variables.resolver import VariableResolver
+
+    resolver = VariableResolver(db)
+    paths = [e["path"] for e in CATALOG]
+    resolved = resolver.resolve(
+        ctx.workspace_id, ctx.user.id if ctx.user else None, paths
+    )
+    entries = [
+        {
+            "path": e["path"],
+            "category": e["category"],
+            "label": e["label"],
+            "sample": e["sample"],
+            "value": resolved.values.get(e["path"]),
+            "resolved": e["path"] in resolved.values,
+        }
+        for e in CATALOG
+    ]
+    # Group by category for the picker UI.
+    grouped: dict = {}
+    for entry in entries:
+        grouped.setdefault(entry["category"], []).append(entry)
+    return {"variables": entries, "by_category": grouped}
+
+
+@router.get("/brand-kit")
+async def get_brand_kit_endpoint(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return the workspace brand kit (defaults merged in)."""
+    from core.models.workspaces import Workspace
+    from modules.documents.brand_kit import get_brand_kit
+
+    ws = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return get_brand_kit(ws.settings)
+
+
+@router.put("/brand-kit", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+async def update_brand_kit_endpoint(
+    body: BrandKitUpdateRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Update the workspace brand kit (validated, persisted on workspace.settings)."""
+    from pydantic import ValidationError
+
+    from core.models.workspaces import Workspace
+    from modules.documents.brand_kit import BRAND_KIT_SETTINGS_KEY, get_brand_kit, validate_brand_kit
+
+    ws = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    existing = (ws.settings or {}).get(BRAND_KIT_SETTINGS_KEY)
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    try:
+        new_kit = validate_brand_kit(patch, existing)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": e.errors()})
+
+    # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
+    ws.settings = {**(ws.settings or {}), BRAND_KIT_SETTINGS_KEY: new_kit}
+    db.commit()
+    return new_kit
+
+
+@router.post("/preview-blocks", dependencies=[Depends(require_workspace_permission("documents:create"))])
+async def preview_blocks(
+    body: PreviewBlocksRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Render a block tree to HTML for live preview, without persisting (PRD-167 S5).
+
+    Returns the rendered HTML plus the list of unresolved/unknown variable paths so the
+    editor can surface inline errors instead of shipping blanks.
+    """
+    from modules.documents.blocks import (
+        BlockValidationError,
+        collect_variable_paths,
+        render_document_html,
+        validate_blocks,
+    )
+    from modules.documents.brand_kit import get_brand_kit
+    from modules.documents.variables.resolver import VariableResolver
+    from core.models.workspaces import Workspace
+
+    try:
+        block_doc = validate_blocks(body.blocks)
+    except BlockValidationError as e:
+        raise HTTPException(status_code=422, detail={"message": "Invalid blocks", "errors": e.errors})
+
+    paths = collect_variable_paths(block_doc)
+    resolver = VariableResolver(db)
+    resolved = resolver.resolve(
+        ctx.workspace_id, ctx.user.id if ctx.user else None, paths, extra_data=body.data
+    )
+    ws = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
+    brand_kit = get_brand_kit(getattr(ws, "settings", None))
+    rendered = render_document_html(block_doc, resolved.values, brand_kit, title="Preview")
+    return {
+        "html": rendered.html,
+        "unresolved": rendered.unresolved,
+        "unknown": resolved.unknown,
+    }
 
 
 # ------------------------------------------------------------------

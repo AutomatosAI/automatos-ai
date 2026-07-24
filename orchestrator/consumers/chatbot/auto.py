@@ -34,6 +34,11 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# Tier-3 classification uses a cheap active-agent roster (not the planners'
+# full ContextService pack) — the chat hot path can't afford ~80-113s of
+# doc-RAG + graph BFS just to classify. Cap the roster so the prompt stays lean.
+_ROSTER_LIMIT = 40
+
 
 # ---------------------------------------------------------------------------
 # Complexity levels (Progressive Complexity Model PRD-68)
@@ -493,6 +498,16 @@ _PLATFORM_KEYWORDS = {
         "improve draft", "edit article", "update post",
         "change blog post", "set cover image",
     ],
+    "platform_create_blog_post": [
+        "create blog post about", "write a blog about", "new blog post",
+        "start blog mission", "blog post topic", "create blog on",
+        "research and write blog", "produce blog post",
+    ],
+    "platform_generate_cover_image": [
+        "generate cover image", "create cover art", "blog cover image",
+        "make a cover for", "design cover image", "add cover to post",
+        "generate cover for blog",
+    ],
     # PRD-82A: Missions
     "platform_create_mission": [
         "launch a mission", "start a mission", "create a mission",
@@ -700,6 +715,52 @@ class AutoBrain:
     # Tier 3: LLM classification
     # ------------------------------------------------------------------
 
+    async def _planning_context_block(self, message: str) -> str:
+        """Cheap routing hint for Tier-3 classification: the active-agent roster.
+
+        The classifier only needs to know which specialisations exist to
+        delegate to. It must NOT share the planners' full
+        ``ContextService.build_planning_context`` pack (doc-RAG + graph BFS +
+        agent-performance history): on the hot path (every non-heuristic
+        message) that ran ~80-113s to inform a decision the message intent
+        already drives. The real planners (MissionPlanner, board plan_task)
+        keep the rich pack; the hot-path classifier does not. Empty string on
+        any failure — the classifier must never break because of this.
+        """
+        try:
+            from core.models.core import Agent
+
+            agents = (
+                self._db.query(Agent)
+                .filter(
+                    Agent.workspace_id == self._workspace_id,
+                    Agent.status == "active",
+                )
+                .limit(_ROSTER_LIMIT)
+                .all()
+            )
+            if not agents:
+                return ""
+            lines = []
+            for a in agents:
+                name = getattr(a, "name", None) or getattr(a, "slug", None) or "agent"
+                role = getattr(a, "role", None)
+                desc = (getattr(a, "description", None) or "").strip()
+                label = f"{name} ({role})" if role else str(name)
+                summary = f": {desc[:80]}" if desc else ""
+                lines.append(f"- {label}{summary}")
+            return (
+                "\n## Available agents (for routing)\n"
+                + "\n".join(lines)
+                + "\n\nThe roster shows which specialisations exist to delegate to.\n"
+            )
+        except Exception:
+            logger.debug(
+                "[AutoBrain] roster unavailable — classifying without it",
+                exc_info=True,
+            )
+            return ""
+
     async def _llm_classify(
         self, message: str, conversation_length: int
     ) -> ComplexityAssessment:
@@ -720,6 +781,9 @@ class AutoBrain:
         """
         logger.info("[AutoBrain] Tier 3 LLM classifying: '%s'", message[:80])
         t0 = time.monotonic()
+
+        # PRD-164 S1 (Q61): the one planning pack informs routing decisions.
+        platform_context = await self._planning_context_block(message)
 
         prompt = f"""You are a message complexity classifier for an AI platform.
 
@@ -760,7 +824,7 @@ Conversation turn: {conversation_length}
 
 **Default bias: atom.** Most messages are simpler than they look.
 **Multi-tool ≠ complex.** Using 2-3 tools in parallel is molecule, not organ. Organ requires different agents with different specializations working in phases.
-
+{platform_context}
 Return ONLY valid JSON:
 {{
   "complexity": "atom|molecule|cell|organ|organism",

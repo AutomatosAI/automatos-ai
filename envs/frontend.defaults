@@ -1,0 +1,33 @@
+# =============================================================================
+# Automatos AI — Frontend local defaults · env-file syntax · NO SECRETS
+# =============================================================================
+# Prefilled local settings for the Next.js frontend under docker compose.
+# Secrets live ONLY in the root .env. Named *.defaults (not *.env) so the
+# repo's block-secrets guard never matches it; wired via compose `env_file:`
+# (PRD-153 US-002). Personal overrides: envs/frontend.local (gitignored).
+#
+# SaaS/Railway is NOT affected — Railway sets its own env per service.
+#
+# NOTE (PRD-153 US-006): NEXT_PUBLIC_* vars are inlined at BUILD time in the
+# production target. The dev target (compose default) reads them at runtime;
+# a production-mode local build must pass these as build args.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core wiring [ACTIVE]
+# -----------------------------------------------------------------------------
+# Browser-reachable backend endpoints (host ports, not service DNS):
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+NODE_ENV=development
+
+# -----------------------------------------------------------------------------
+# Edition [PRD-150]
+# -----------------------------------------------------------------------------
+# oss  -> no ClerkProvider mounted, no sign-in, no team/billing UI
+# saas -> current Clerk behaviour (requires NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
+NEXT_PUBLIC_EDITION=oss
+
+# Clerk keys are SaaS-only and intentionally absent here.
+# OSS local runs never set them; SaaS gets them from Railway env.
+# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY -> (SaaS only, root .env / Railway)

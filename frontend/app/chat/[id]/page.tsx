@@ -20,7 +20,6 @@ export default async function ChatDetailPage({ params }: { params: Promise<{ id:
             <Chat
               id={chat.id}
               initialMessages={messages}
-              initialChatModel="gpt-4"
               initialVisibilityType={chat.visibility}
               isReadonly={false}
               autoResume={false}

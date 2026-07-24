@@ -83,6 +83,81 @@ async def _dispatch_playbook_event(
 
 
 # ---------------------------------------------------------------------------
+# PRD-204 S3: playbook terminal -> watch registry (fail-soft)
+# ---------------------------------------------------------------------------
+
+def _ingest_playbook_terminal_watch(
+    db: Session,
+    execution,
+    terminal_state: str,
+    summary: Optional[str] = None,
+) -> None:
+    """Report a playbook execution's terminal state to its live watch.
+
+    ONE seam for both the success block and ``_fail_execution`` so each
+    terminal path flows through the same tested call. Fail-soft end to end:
+    ``watch_ingest_terminal`` never raises into the executor.
+    """
+    from services.watch_hooks import watch_ingest_terminal
+
+    output_data = getattr(execution, "output_data", None) or {}
+    cost_snapshot = {
+        "total_tokens": output_data.get("total_tokens", 0),
+        "total_duration_ms": output_data.get("total_duration_ms", 0),
+    }
+    output_pointer = None
+    if output_data.get("final_output"):
+        output_pointer = (
+            f"recipe_execution:{execution.execution_id}:output_data.final_output"
+        )
+    watch_ingest_terminal(
+        db,
+        workspace_id=execution.workspace_id,
+        target_type="playbook_execution",
+        target_id=execution.execution_id,
+        terminal_state=terminal_state,
+        summary=summary,
+        cost_snapshot=cost_snapshot,
+        output_pointer=output_pointer,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PRD-204 S7: per-execution step overrides (rerun tweak)
+# ---------------------------------------------------------------------------
+
+def _apply_step_overrides(
+    steps: List[Dict[str, Any]],
+    overrides: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge ``execution_metadata.step_overrides`` into the step list.
+
+    Shape: ``{step_id: {"prompt_template": "..."}}``. Returns NEW dicts --
+    ``workflow_recipes.steps`` (the shared definition) is never mutated; a
+    tweak affects exactly this execution. Only ``prompt_template`` is
+    honoured; anything else in an override entry is ignored.
+    """
+    if not overrides or not isinstance(overrides, dict):
+        return [dict(step) for step in steps]
+
+    merged: List[Dict[str, Any]] = []
+    for step in steps:
+        step_id = str(step.get("step_id") or "")
+        override = overrides.get(step_id)
+        prompt = override.get("prompt_template") if isinstance(override, dict) else None
+        if isinstance(prompt, str) and prompt.strip():
+            merged.append({**step, "prompt_template": prompt})
+            logger.info(
+                "[recipe_direct] step %s prompt overridden for this execution "
+                "(PRD-204 S7 tweak)",
+                step_id,
+            )
+        else:
+            merged.append(dict(step))
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # Auto-report on playbook completion (mirrors heartbeat & task auto-reports)
 # ---------------------------------------------------------------------------
 async def _auto_create_playbook_report(
@@ -585,10 +660,16 @@ async def _execute_step(
                 })
                 continue
 
-            # Direct Composio action execution (SDK search path).
-            # Also catches LLM-inferred actions beyond search results —
-            # if the tool name matches a connected app prefix (e.g. JIRA_*),
-            # route to Composio direct execution instead of tool_router.
+            # Per-action Composio execution (SDK search path). Also catches
+            # LLM-inferred actions beyond search results — if the tool name
+            # matches a connected app prefix (e.g. JIRA_*). PRD-192 S5: these
+            # steps now ride the SPINE (execute_and_format → UnifiedToolExecutor
+            # as the composio_execute meta-tool) instead of calling
+            # ComposioToolService.execute_action raw — the policy gate,
+            # telemetry, and typed outcome capture govern the daily playbook
+            # lane. Dedup, the LinkedIn workaround, and file-upload resolution
+            # are unchanged; the step-level result envelope keeps its shape for
+            # the transcript writer below.
             _is_composio_action = (
                 composio_result and composio_result.entity_id and (
                     tool_name in composio_result.action_set
@@ -652,23 +733,38 @@ async def _execute_step(
                             params=tool_args,
                             workspace_id=workspace_id,
                         )
-                        exec_result = tool_service.execute_action(
-                            action_name=tool_name,
-                            params=tool_args,
-                            entity_id=composio_result.entity_id,
+                        # PRD-192 S5: dispatch through the spine — the per-action
+                        # name rides in `action`, so the gate's effective-name
+                        # resolution, the tracker, and the audit row all see the
+                        # real action; the executor enforces assigned/connected/
+                        # mapped and resolves the workspace entity itself.
+                        spine_result = await tool_router.execute_and_format(
+                            tool_name="composio_execute",
+                            tool_args={"action": tool_name, "params": tool_args},
+                            agent_id=agent.id,
+                            workspace_id=workspace_id,
+                            original_intent=clean_prompt,
+                            caller_context={
+                                "playbook_execution_id": recipe_execution_id,
+                                "playbook_step": step_order,
+                            },
                         )
                         exec_ms = int((time.time() - t0) * 1000)
 
-                        success = exec_result.get("success", False)
-                        data = exec_result.get("data")
-                        error = exec_result.get("error")
+                        raw = spine_result.get("raw_result") or {}
+                        success = bool(spine_result.get("success"))
+                        data = raw.get("data") if isinstance(raw, dict) else None
+                        error = (
+                            (raw.get("error") if isinstance(raw, dict) else None)
+                            or spine_result.get("llm_context")
+                        )
 
                         if success:
-                            result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
-                            logger.info(f"[recipe_step] Composio direct OK: {tool_name} in {exec_ms}ms")
+                            result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or spine_result.get("llm_context") or "")
+                            logger.info(f"[recipe_step] Composio spine OK: {tool_name} in {exec_ms}ms")
                         else:
                             result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
-                            logger.warning(f"[recipe_step] Composio direct failed: {tool_name} — {error}")
+                            logger.warning(f"[recipe_step] Composio spine failed: {tool_name} — {error}")
                     except Exception as exc:
                         exec_ms = int((time.time() - t0) * 1000)
                         result_text = f"Error executing {tool_name}: {exc}"
@@ -996,6 +1092,29 @@ async def _mark_execution_cancelled(execution_id: str, db_url: Optional[str]) ->
         )
 
 
+def _tokens_to_usd(tokens: int, app_config) -> float:
+    """Price tokens with the same convention the mission dollar-ceiling uses
+    (PRD-163 S5) so a playbook's $ budget is denominated identically to a
+    mission's. PRD-192 S3 (F059 finish): routed through
+    ``modules.policy.pricing`` — the ONE pricing source; a playbook run spans
+    per-step agents/models so pricing's documented flat last-resort applies.
+    ``app_config`` kept for signature stability at the call sites."""
+    from modules.policy import pricing as _pricing
+
+    return _pricing.price_total_tokens_usd(None, None, tokens)
+
+
+def _playbook_cost_ceiling_usd(exec_config: dict, app_config) -> float:
+    """The playbook run's DOLLAR ceiling: an explicit ``execution_config`` value,
+    else 0 (unlimited). Mirrors the mission ``config['cost_ceiling']`` convention."""
+    ceiling = (exec_config or {}).get("cost_ceiling")
+    if ceiling is None:
+        ceiling = (exec_config or {}).get("cost_ceiling_usd")
+    if isinstance(ceiling, (int, float)) and ceiling > 0:
+        return float(ceiling)
+    return 0.0
+
+
 async def _execute_recipe_inner(
     recipe_execution_id: str,
     recipe_id: int,
@@ -1073,6 +1192,12 @@ async def _execute_recipe_inner(
             await _fail_execution(db, recipe_execution_id, "Recipe has no steps")
             return
 
+        # PRD-204 S7: merge per-execution prompt overrides (rerun tweak) at
+        # execution start. The recipe row is never written back to.
+        step_overrides = (execution.execution_metadata or {}).get("step_overrides")
+        if step_overrides:
+            steps = _apply_step_overrides(steps, step_overrides)
+
         total_steps = len(steps)
         logger.info(f"[recipe_direct] Recipe '{recipe.name}' has {total_steps} steps")
 
@@ -1098,8 +1223,8 @@ async def _execute_recipe_inner(
         # --- Pre-execution: load Mem0 memories ---
         recipe_memories = None
         try:
-            from core.services.recipe_memory_service import RecipeMemoryService
-            memory_svc = RecipeMemoryService(db=db)
+            from core.services.playbook_memory_service import PlaybookMemoryService
+            memory_svc = PlaybookMemoryService(db=db)
             recipe_memories = await memory_svc.retrieve_relevant_memories(
                 recipe_id=recipe.id,
                 context={"workspace_id": str(workspace_id), "input_data": input_data}
@@ -1162,6 +1287,33 @@ async def _execute_recipe_inner(
                 _persist_step_results(db, execution, step_results)
                 await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
                 return
+
+            # PRD-181 S2 (F060): playbook DOLLAR-CEILING admission gate — the same
+            # $ ceiling missions enforce, generalised via services.budget_ceiling.
+            # A ceiling of 0/absent means unlimited. A next step that would push
+            # cumulative spend over the ceiling stops the run here (fail honestly),
+            # exactly like the mission dispatcher's 'block' rule.
+            ceiling_usd = _playbook_cost_ceiling_usd(exec_config, app_config)
+            if ceiling_usd > 0:
+                used_usd = _tokens_to_usd(
+                    sum(s.get("tokens_used", 0) for s in step_results), app_config
+                )
+                from services.budget_ceiling import playbook_can_afford
+
+                # Estimate this step at the average per-step spend so far (or a
+                # single step's floor when nothing has run yet).
+                per_step_est = (used_usd / max(1, idx)) if idx > 0 else 0.0
+                if not playbook_can_afford(
+                    ceiling_usd=ceiling_usd, used_usd=used_usd, next_step_usd=per_step_est
+                ):
+                    msg = (
+                        f"Playbook budget ceiling ${ceiling_usd:.2f} reached "
+                        f"(${used_usd:.4f} spent) before step {idx + 1}"
+                    )
+                    logger.warning(f"[recipe_direct] {msg}")
+                    _persist_step_results(db, execution, step_results)
+                    await _fail_execution(db, recipe_execution_id, msg, step_results=step_results)
+                    return
 
             step_id = step.get('step_id', f'step-{idx + 1}')
             step_order = step.get('order', idx + 1)
@@ -1623,6 +1775,20 @@ async def _execute_recipe_inner(
             "steps_completed": len(step_results),
         }
 
+        # PRD-142 W3-S12: playbooks primitive heartbeat at the COMPLETED
+        # boundary. tick is a one-shot terminal transition; the wrapper
+        # swallows any emit failure so a broken heartbeat writer cannot
+        # fail playbook completion.
+        from services.playbook_engine_heartbeat import _emit_playbooks_primitive
+        _emit_playbooks_primitive(
+            execution.workspace_id,
+            success=True,
+            detail=(
+                f"exec={recipe_execution_id} steps={len(step_results)} "
+                f"duration_ms={total_duration} tokens={total_tokens}"
+            ),
+        )
+
         # PRD-128: dispatch playbook_complete before final commit so the
         # notification row persists in the same transaction as the status
         # update.
@@ -1636,6 +1802,15 @@ async def _execute_recipe_inner(
                 f"{len(step_results)} steps completed in {total_duration // 1000}s"
             ),
             status="ok",
+        )
+
+        # PRD-204 S3: playbook terminal choke point (success) -- joins the
+        # same transaction as the status update; fail-soft.
+        _ingest_playbook_terminal_watch(
+            db,
+            execution,
+            terminal_state="completed",
+            summary=f"{len(step_results)} steps completed in {total_duration // 1000}s",
         )
 
         db.commit()
@@ -1681,8 +1856,8 @@ async def _execute_recipe_inner(
         learning_result = None
         if post_exec_config.get('auto_learning') or post_exec_config.get('auto_learn', False):
             try:
-                from core.services.recipe_learning_service import RecipeLearningService
-                learning_svc = RecipeLearningService(db=db)
+                from core.services.playbook_learning_service import PlaybookLearningService
+                learning_svc = PlaybookLearningService(db=db)
                 learning_result = learning_svc.analyze_execution(recipe_execution_id)
                 logger.info(f"[recipe_direct] Auto-learning completed for {recipe_execution_id}")
             except Exception as e:
@@ -1885,7 +2060,28 @@ async def _fail_execution(
             execution.completed_at = datetime.now(timezone.utc)
             if step_results is not None:
                 execution.step_results = step_results
+
+            # PRD-204 S3: playbook terminal choke point (failure) -- joins the
+            # failure-status transaction below; fail-soft.
+            _ingest_playbook_terminal_watch(
+                db,
+                execution,
+                terminal_state="failed",
+                summary=(error_message or "Playbook execution failed")[:500],
+            )
+
             db.commit()
+
+            # PRD-142 W3-S12: playbooks primitive heartbeat at the FAILED
+            # boundary. Paired with the user-visible error_message + the
+            # auto-report below so the tile flips down at the same instant
+            # the failure is recorded (§H DoD #2 Failure path visible).
+            from services.playbook_engine_heartbeat import _emit_playbooks_primitive
+            _emit_playbooks_primitive(
+                execution.workspace_id,
+                success=False,
+                detail=f"exec={execution_id} error={error_message}",
+            )
 
             # Fail the board task
             try:
@@ -1893,6 +2089,23 @@ async def _fail_execution(
                 _complete_board(db, execution_id, success=False, error_message=error_message)
             except Exception:
                 db.rollback()
+
+            # PRD-185 S4: dispatch a playbook_failed notification so a human sees
+            # the failure — mirrors playbook_complete on the success path. Its
+            # absence made a ~17-day OpenRouter 402 outage silent (board closed
+            # 'done', no event, nobody notified).
+            try:
+                await _dispatch_playbook_event(
+                    db=db,
+                    workspace_id=execution.workspace_id,
+                    recipe_execution_id=execution_id,
+                    event_type="playbook_failed",
+                    title="Playbook failed",
+                    message=(error_message[:200] if error_message else "Playbook execution failed"),
+                    status="error",
+                )
+            except Exception:
+                logger.warning("[recipe_direct] playbook_failed dispatch failed for %s", execution_id)
 
             logger.info(f"[recipe_direct] Execution {execution_id} marked FAILED: {error_message}")
             # Update agent performance_metrics for failure

@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from datetime import datetime
+from datetime import datetime, timezone
 import psutil
 
 from core.database.database import get_db
@@ -24,12 +24,13 @@ from core.models import (
 import logging
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 # System Configuration endpoints
-@router.post("/config", response_model=SystemConfigResponse)
+@router.post("/config", response_model=SystemConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_system_config(config_data: SystemConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create or update system configuration"""
     try:
@@ -154,7 +155,7 @@ async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_r
         logger.error(f"Error getting system config {config_key}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/config/{config_key}", response_model=SystemConfigResponse)
+@router.put("/config/{config_key}", response_model=SystemConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_system_config(
     config_key: str, 
     config_data: SystemConfigCreate, 
@@ -203,7 +204,7 @@ async def update_system_config(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # RAG Configuration endpoints
-@router.post("/rag", response_model=RAGConfigResponse)
+@router.post("/rag", response_model=RAGConfigResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create RAG configuration"""
     try:
@@ -216,7 +217,7 @@ async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Dep
             top_k=rag_data.top_k,
             similarity_threshold=rag_data.similarity_threshold,
             configuration=rag_data.configuration or {},
-            created_by="system"  # TODO: Get from auth context
+            created_by=ctx.clerk_user_id or "system",  # PRD-168 S4: real actor
         )
         
         db.add(rag_config)
@@ -313,7 +314,7 @@ async def get_rag_config(config_id: int, ctx: RequestContext = Depends(get_reque
         logger.error(f"Error getting RAG config {config_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/rag/{config_id}/test")
+@router.post("/rag/{config_id}/test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_rag_config(
     config_id: int, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -471,7 +472,7 @@ async def get_system_health(ctx: RequestContext = Depends(get_request_context_hy
             # Verify we can access document chunks (if table exists)
             try:
                 chunk_count = db.execute("SELECT COUNT(*) FROM document_chunks").scalar()
-            except:
+            except Exception:
                 chunk_count = 0
             
             latency_ms = (time.time() - start) * 1000
@@ -846,11 +847,7 @@ async def get_item(
             "active_agents": active_agents,
             "inactive_agents": inactive_agents,
             "agents_by_type": agent_types,
-            "average_performance": 85.5,  # Placeholder
-            "total_executions": 0,  # Placeholder
-            "successful_executions": 0,  # Placeholder
-            "failed_executions": 0,  # Placeholder
-            "timestamp": "2025-08-01T12:57:03Z"
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")
@@ -888,7 +885,7 @@ async def get_agent_status(
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/agent/{agent_id}/execute")
+@router.post("/agent/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def execute_agent(
     agent_id: int, 
     execution_data: dict = {}, 
@@ -960,7 +957,7 @@ async def get_performance_baseline(ctx: RequestContext = Depends(get_request_con
         logger.error(f"Error getting performance baseline: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/learning-state/update")
+@router.post("/learning-state/update", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_learning_state(
     request: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -991,7 +988,7 @@ async def update_learning_state(
         logger.error(f"Error updating learning state: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/performance-test")
+@router.post("/performance-test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def run_performance_test(
     request: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1089,6 +1086,19 @@ async def get_system_state_summary(ctx: RequestContext = Depends(get_request_con
     Provides a comprehensive summary of the current system state.
     """
     try:
+        # PRD-166 S2: real field-memory health — ping Qdrant instead of a
+        # hardcoded 'healthy', so an outage is actually reported.
+        field_theory_status = "unknown"
+        try:
+            from modules.context.factory import get_shared_context
+            _field = get_shared_context()
+            _inner = getattr(_field, "_inner", _field) if _field else None
+            if _inner is not None and hasattr(_inner, "health"):
+                _h = await _inner.health()
+                field_theory_status = "healthy" if _h.get("healthy") else "unhealthy"
+        except Exception:
+            field_theory_status = "unhealthy"
+
         state_summary = {
             "summary_id": f"summary_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
             "system_status": "operational",
@@ -1097,7 +1107,7 @@ async def get_system_state_summary(ctx: RequestContext = Depends(get_request_con
                 "api_server": "healthy",
                 "database": "healthy",
                 "multi_agent_system": "healthy",
-                "field_theory": "healthy",
+                "field_theory": field_theory_status,
                 "document_processor": "healthy",
                 "learning_system": "healthy"
             },

@@ -218,6 +218,10 @@ export function StudioChatShell({
                         aria-hidden
                       />
                       <span className="sh-chat-thread-title">{t.title}</span>
+                      {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
+                      {t.kind === 'auto' && (
+                        <span className="sh-chat-pill brand">Auto</span>
+                      )}
                       <span className="sh-chat-thread-ts">
                         {isOpening ? '…' : rel}
                       </span>

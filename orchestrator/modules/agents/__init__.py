@@ -2,7 +2,7 @@
 Agents Module
 =============
 
-Agent lifecycle, execution, registry, and communication.
+Agent lifecycle, factory, registry, and communication.
 
 Usage:
     from modules.agents import AgentService, AgentFactory, AgentRegistry
@@ -31,14 +31,6 @@ from .registry import (
     AgentCapabilities,
 )
 
-# Execution exports
-from .execution import (
-    AgentExecutionManager,
-    ExecutionPlan,
-    SubtaskExecution,
-    SubtaskStatus,
-)
-
 # Communication exports
 from .communication import (
     AgentCommunicationProtocol,
@@ -63,12 +55,6 @@ __all__ = [
     # Registry
     "AgentRegistry",
     "AgentCapabilities",
-
-    # Execution
-    "AgentExecutionManager",
-    "ExecutionPlan",
-    "SubtaskExecution",
-    "SubtaskStatus",
 
     # Communication
     "AgentCommunicationProtocol",

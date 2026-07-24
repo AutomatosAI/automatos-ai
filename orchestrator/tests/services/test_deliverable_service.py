@@ -25,6 +25,7 @@ from services.deliverable_service import (
     _infer_artifact_type,
     _humanize_basename,
     _slugify,
+    _workspace_file_url,
 )
 
 
@@ -358,7 +359,13 @@ class TestGetDeliverable:
 
         assert out["success"] is True
         assert out["deliverable"]["content"] is None
-        assert out["deliverable"]["content_url"] == "https://cdn/q3.png"
+        # content_url is recomputed fresh from the workspace path (not echoed
+        # from the row's stored preview_url) — older rows had stale preview_url
+        # pointing at /files/content (JSON), so the service always rebuilds the
+        # binary /files/raw URL for images.
+        assert out["deliverable"]["content_url"] == _workspace_file_url(
+            WORKSPACE_ID, "charts/q3.png"
+        )
 
     @pytest.mark.asyncio
     async def test_get_read_file_failure_sets_content_error(self):
@@ -396,7 +403,14 @@ class TestGetStats:
         ag = MagicMock(agent_id=42, cnt=5)
         ag.agent_name = "Scout"
         by_agent_result.fetchall.return_value = [ag]
-        db.execute.side_effect = [total_result, by_type_result, by_agent_result]
+        # P2-09 S4: get_stats also aggregates the clean-render rate.
+        render_result = MagicMock()
+        render_result.fetchone.return_value = MagicMock(
+            rendered_total=2, rendered_clean=1, lane_block=1, lane_legacy=1
+        )
+        db.execute.side_effect = [
+            total_result, by_type_result, by_agent_result, render_result,
+        ]
 
         svc = DeliverableService(db, WORKSPACE_ID)
         out = svc.get_stats()
@@ -405,6 +419,10 @@ class TestGetStats:
         assert out["total"] == 7
         assert out["by_type"] == {"report": 4, "image": 3}
         assert out["by_agent"] == [{"agent_id": 42, "agent_name": "Scout", "count": 5}]
+        assert out["clean_render_rate"] == 0.5
+        assert out["render"] == {
+            "total": 2, "clean": 1, "by_lane": {"block": 1, "legacy": 1},
+        }
 
     def test_get_stats_handles_exception(self):
         db = MagicMock()
@@ -414,6 +432,7 @@ class TestGetStats:
         assert out["success"] is False
         assert out["total"] == 0
         assert out["by_type"] == {}
+        assert out["clean_render_rate"] is None
 
 
 # ---------------------------------------------------------------------------

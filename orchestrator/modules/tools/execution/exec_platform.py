@@ -55,13 +55,20 @@ async def execute_platform_action(
             "tool": tool_name,
         }
 
-    # Inject agent context into params so handlers (submit_report, blog,
-    # auto_reporting, board_tasks) can attribute the call. Don't overwrite
-    # if the LLM already supplied them.
-    if agent_id and isinstance(parameters, dict):
-        if "_agent_id" not in parameters:
-            parameters = {**parameters, "_agent_id": agent_id}
-        if "_agent_name" not in parameters:
+    # Actor identity is server-minted from the trusted runtime ``agent_id``,
+    # NEVER from caller/LLM-supplied params. Strip any _agent_id/_agent_name a
+    # tool call tried to smuggle in — otherwise an agent could set
+    # _agent_id=<a system agent's id> and impersonate it, bypassing the
+    # hierarchy permission check (core.security.hierarchy_permissions) entirely.
+    # When agent_id is unknown the keys stay absent → the permission check sees
+    # no actor and fails closed (anonymous_actor → deny).
+    if isinstance(parameters, dict):
+        parameters = {
+            k: v for k, v in parameters.items()
+            if k not in ("_agent_id", "_agent_name")
+        }
+        if agent_id:
+            parameters["_agent_id"] = agent_id
             try:
                 from core.models import Agent
                 agent = executor.db.query(Agent).filter(
@@ -69,7 +76,7 @@ async def execute_platform_action(
                     Agent.workspace_id == workspace_id,
                 ).first()
                 if agent:
-                    parameters = {**parameters, "_agent_name": agent.name}
+                    parameters["_agent_name"] = agent.name
             except Exception as e:
                 logger.debug("[exec_platform] _agent_name lookup failed: %s", e)
 

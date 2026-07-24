@@ -55,7 +55,7 @@ import { useActiveWorkflows, useExecuteWorkflowAdvanced } from '@/hooks/use-work
 import { LiveProgressPanel } from './live-progress-panel'
 import { apiClient } from '@/lib/api-client'
 import { useQueryClient } from '@tanstack/react-query'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 
 interface ActiveWorkflow {
   id: number;
@@ -147,7 +147,6 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
   const queryClient = useQueryClient()
-  const { toast } = useToast()
 
   // Use React Query hook for active workflows
   const { data: workflowsData, isLoading: loading, error, refetch } = useActiveWorkflows()
@@ -201,18 +200,11 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
       }, {
         onSuccess: (data) => {
           console.log('✅ Execution started:', data)
-          toast({
-            title: "Workflow started cooking!",
-            description: `Execution ID: ${data.execution_id}`,
-          })
+          toast("Workflow started cooking!", { description: `Execution ID: ${data.execution_id}` })
         },
         onError: (error: any) => {
           console.error('❌ Execution failed:', error)
-          toast({
-            title: "Failed to start cooking",
-            description: error?.message || "Unknown error",
-            variant: "destructive",
-          })
+          toast.error("Failed to start cooking", { description: error?.message || "Unknown error" })
         }
       })
     } catch (error) {
@@ -241,20 +233,13 @@ export function ActiveWorkflowsPanel({ onWorkflowClick, onPlaybookRunClick: onRe
     try {
       await apiClient.deleteWorkflow(workflowToDelete.id)
       await queryClient.invalidateQueries({ queryKey: ['activeWorkflows'] })
-      toast({
-        title: "Workflow removed",
-        description: `"${workflowToDelete.name}" has been removed from the kitchen.`,
-      })
+      toast("Workflow removed", { description: `"${workflowToDelete.name}" has been removed from the kitchen.` })
       setWorkflowToDelete(null)
       refetch()
     } catch (error: any) {
       console.error('Error deleting workflow:', error)
       console.error('Error details:', error?.response?.data || error?.message)
-      toast({
-        title: "Failed to remove workflow",
-        description: error?.response?.data?.detail || error?.message || "Unknown error occurred",
-        variant: "destructive",
-      })
+      toast.error("Failed to remove workflow", { description: error?.response?.data?.detail || error?.message || "Unknown error occurred" })
     } finally {
       setIsDeleting(false)
     }

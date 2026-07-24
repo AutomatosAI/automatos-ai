@@ -287,7 +287,7 @@ export function AnalyticsComposio({ days }: Props) {
         <Card className="glass-card overflow-hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-orange-400" />
+              <Clock className="w-5 h-5 text-warning" />
               Action Performance
             </CardTitle>
           </CardHeader>

@@ -11,10 +11,12 @@
 #   # Individual groups
 #   docker compose -f docker-compose.data.yml up -d
 #   docker compose -f docker-compose.core.yml up -d
-#   docker compose -f docker-compose.monitoring.yml up -d
 #   docker compose -f docker-compose.voice.yml up -d
 #   docker compose -f docker-compose.memory.yml up -d
 #   docker compose -f docker-compose.landing.yml up -d
+#
+# Monitoring (prometheus/grafana/loki/alertmanager) lives in the standalone
+# ../automatos-monitoring repo — it is NOT part of this stack.
 #
 # Prerequisites:
 #   1. Copy .env.example to .env and fill in required values
@@ -31,7 +33,6 @@
 include:
   - docker-compose.data.yml
   - docker-compose.core.yml
-  - docker-compose.monitoring.yml
   - docker-compose.voice.yml
   - docker-compose.memory.yml
   - docker-compose.landing.yml

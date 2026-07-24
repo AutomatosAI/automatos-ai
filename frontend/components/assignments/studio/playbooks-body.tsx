@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 
 import { useWorkflowPlaybooks, useExecutePlaybook } from '@/hooks/use-playbook-api'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 
 import { StatusHead } from './status-head'
 import { PlaybookCard, type PlaybookLike } from './playbook-card'
@@ -153,7 +153,6 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
   const totalRuns = all.reduce((acc, p) => acc + (p.use_count ?? 0), 0)
 
   const executePlaybook = useExecutePlaybook()
-  const { toast } = useToast()
 
   // Single run handler — execute the playbook, then route to the live
   // execution screen. Used by featured strip, grid cards, and list rows.
@@ -162,21 +161,14 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
     if (!id) return
     try {
       const result: any = await executePlaybook.mutateAsync({ playbookId: id })
-      toast({
-        title: 'Playbook started',
-        description: `"${p.name}" is now running.`,
-      })
+      toast('Playbook started', { description: `"${p.name}" is now running.` })
       if (result?.recipe_execution_id) {
         router.push(
           `/activity/execution?id=${encodeURIComponent(result.recipe_execution_id)}&recipeId=${encodeURIComponent(id)}` as any,
         )
       }
     } catch (err: any) {
-      toast({
-        title: 'Could not start playbook',
-        description: err?.message || 'Execution failed',
-        variant: 'destructive',
-      })
+      toast.error('Could not start playbook', { description: err?.message || 'Execution failed' })
     }
   }
   const handleFeaturedRun = handleRun

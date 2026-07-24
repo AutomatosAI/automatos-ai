@@ -1,272 +1,298 @@
-import re
+"""SQL validator — sqlglot AST based (PRD-160 S2).
+
+Replaces the previous regex heuristics with a real parse. Regex could not
+reliably see into subqueries/CTEs/UNIONs (the old code blocked them wholesale
+as a workaround); the AST validates every SELECT, table and column in the tree.
+
+Security contract (unchanged, now enforced structurally):
+  * SELECT-only — any DML/DDL node (INSERT/UPDATE/DELETE/DROP/CREATE/ALTER/
+    TRUNCATE/MERGE/GRANT/REVOKE/CALL/COPY/… and ``SELECT … INTO``) is rejected.
+  * Single statement only — stacked statements are rejected.
+  * Table allowlist — every base table must be in the connection's schema
+    metadata (PRD-160 S2: "table allowlist from connection scope").
+  * Cross-schema references (``other_schema.table``) are rejected; only the
+    default schema (public/dbo/main) is allowed.
+  * LIMIT is injected when missing and capped when above ``max_limit``.
+"""
 import logging
-from typing import Dict, Any, List, Tuple, Set, Optional
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import sqlglot
+from sqlglot import exp
 
 logger = logging.getLogger(__name__)
+
+# Schema qualifiers that are NOT treated as a cross-schema escape.
+_DEFAULT_SCHEMAS = {"", "public", "dbo", "main"}
+
+# AST node types that must never appear in a read-only query.
+_FORBIDDEN_NODES = (
+    exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter,
+    exp.TruncateTable, exp.Merge, exp.Grant, exp.Command,
+)
+
+# Roots that are read-only result expressions.
+_READ_ONLY_ROOTS = (exp.Select, exp.Union, exp.Intersect, exp.Except)
+
+# PRD-172 F019: side-effecting / dangerous SQL functions that MUST NOT appear
+# inside a nominally read-only SELECT. The DML/DDL node walk above cannot see
+# these — they are function calls, not statement nodes — so a payload like
+# ``SELECT query_to_xml('UPDATE users SET is_admin=true', true, true, '')`` (or
+# ``dblink_exec``, ``lo_export``, ``pg_read_file`` …) previously passed the
+# SELECT-only check and still mutated data / touched the filesystem / opened a
+# network connection. Names are matched case-insensitively against every
+# function node in the parsed tree (see ``_forbidden_function_in``). Postgres is
+# the primary target (it is what the platform runs) but common cross-engine
+# offenders are included for defence-in-depth.
+_FORBIDDEN_FUNCTIONS = frozenset({
+    # Postgres: run arbitrary SQL (incl. writes) from inside a SELECT.
+    "query_to_xml", "query_to_xmlschema", "query_to_xml_and_xmlschema",
+    "table_to_xml", "cursor_to_xml",
+    # Postgres dblink: execute statements on another (or the same) DB.
+    "dblink", "dblink_exec", "dblink_open", "dblink_send_query", "dblink_connect",
+    # Server-side filesystem / large objects.
+    "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
+    "lo_import", "lo_export", "lo_put", "lo_get",
+    # Availability / side-effect timing.
+    "pg_sleep", "pg_sleep_for", "pg_sleep_until",
+    # Config / session mutation and privilege probing.
+    "set_config", "pg_reload_conf", "pg_rotate_logfile",
+    "pg_terminate_backend", "pg_cancel_backend",
+    # Advisory locks hold server-side state.
+    "pg_advisory_lock", "pg_advisory_unlock", "pg_advisory_xact_lock",
+    # Generic cross-engine offenders.
+    "copy", "system", "load_file", "sys_exec", "sys_eval", "xp_cmdshell",
+})
 
 
 class SQLValidationError(Exception):
     pass
 
 
+def _function_names(node: "exp.Expression") -> Set[str]:
+    """Return the lower-cased name(s) a function-call node is known by.
+
+    PRD-172 F019. sqlglot models a call two ways:
+      * ``exp.Anonymous`` — an unknown/user function; its ``.name`` (or the
+        ``this`` token) is the identifier as written (e.g. ``query_to_xml``).
+      * ``exp.Func`` subclasses — recognised builtins; ``sql_names()`` yields the
+        canonical spelling(s) and ``.name`` is often empty. Some Postgres funcs
+        (e.g. ``pg_sleep``) parse as ``exp.Anonymous``, others as typed nodes,
+        so we check both spellings.
+    """
+    names: Set[str] = set()
+    raw_name = getattr(node, "name", None)
+    if raw_name:
+        names.add(str(raw_name).lower())
+    try:
+        if isinstance(node, exp.Func):
+            for n in node.sql_names():  # class-level canonical names
+                if n:
+                    names.add(str(n).lower())
+    except Exception:  # noqa: BLE001 — never let name extraction break validation
+        pass
+    return names
+
+
+def _forbidden_function_in(tree: "exp.Expression") -> Optional[str]:
+    """Return the first denylisted function name found anywhere in *tree*, else None."""
+    for node in tree.walk():
+        if isinstance(node, (exp.Func, exp.Anonymous)):
+            hit = _FORBIDDEN_FUNCTIONS & _function_names(node)
+            if hit:
+                return sorted(hit)[0]
+    return None
+
+
 class SQLValidator:
-    """
-    SQL validator with schema validation:
-    - SELECT-only (reject INSERT/UPDATE/DELETE/ALTER/TRUNCATE/DROP)
-    - Single statement only
-    - LIMIT injection/enforcement (max_limit)
-    - Table allowlist validation from schema metadata
-    - Column validation to prevent hallucinated columns
+    """Validate (and lightly rewrite) a single read-only SQL statement.
+
+    The public surface is unchanged: ``validate_and_rewrite(sql, schema_metadata)``
+    returns ``(safe_sql, warnings)`` or raises :class:`SQLValidationError`.
     """
 
-    DENY_KEYWORDS = [
-        r"\bINSERT\b", r"\bUPDATE\b", r"\bDELETE\b", r"\bALTER\b",
-        r"\bTRUNCATE\b", r"\bDROP\b", r"\bCREATE\b", r"\bMERGE\b",
-        r"\bGRANT\b", r"\bREVOKE\b", r"\bVACUUM\b",
-        # PRD-70 FIX-04: Additional deny keywords
-        r"\bRETURNING\b",  # Prevents mutation disguised as SELECT
-        r"\bCOPY\b",       # Prevents COPY TO/FROM
-        r"\bEXECUTE\b",    # Prevents dynamic SQL execution
-    ]
-
-    # SQL functions/keywords that look like columns but aren't
-    SQL_FUNCTIONS_AND_KEYWORDS = {
-        'count', 'sum', 'avg', 'max', 'min', 'distinct', 'as', 'and', 'or',
-        'not', 'in', 'is', 'null', 'true', 'false', 'like', 'ilike', 'between',
-        'case', 'when', 'then', 'else', 'end', 'coalesce', 'nullif', 'cast',
-        'extract', 'date', 'timestamp', 'interval', 'now', 'current_date',
-        'current_timestamp', 'upper', 'lower', 'trim', 'substring', 'length',
-        'concat', 'replace', 'to_char', 'to_date', 'to_timestamp', 'asc', 'desc',
-        'limit', 'offset', 'group', 'by', 'order', 'having', 'where', 'from',
-        'join', 'left', 'right', 'inner', 'outer', 'on', 'select', 'all'
-    }
-
-    def __init__(self, max_limit: int = 1000, strict_column_validation: bool = True):
+    def __init__(
+        self,
+        max_limit: int = 1000,
+        strict_column_validation: bool = True,
+        dialect: Optional[str] = None,
+    ):
         self.max_limit = max_limit
         self.strict_column_validation = strict_column_validation
+        self.dialect = dialect
+
+    # -- helpers ----------------------------------------------------------------
 
     def _build_column_map(self, schema_metadata: Dict[str, Any]) -> Dict[str, Set[str]]:
-        """Build a map of table_name -> set of column_names from schema metadata."""
+        """table_name -> set(column_names), lower-cased, from schema metadata."""
         column_map: Dict[str, Set[str]] = {}
         for table in (schema_metadata.get("tables") or []):
-            table_name = table.get("name", "").lower()
-            columns = {col.get("name", "").lower() for col in (table.get("columns") or [])}
-            column_map[table_name] = columns
+            name = (table.get("name") or "").lower()
+            cols = {(c.get("name") or "").lower() for c in (table.get("columns") or [])}
+            column_map[name] = {c for c in cols if c}
         return column_map
 
-    def _extract_referenced_tables(self, sql: str) -> List[Tuple[str, Optional[str]]]:
-        """
-        Extract tables referenced in SQL with their aliases.
-        Returns list of (table_name, alias_or_none).
-        """
-        tables = []
-        # Match FROM table [AS alias] or FROM table alias
-        from_pattern = r"\bFROM\s+([\w\.\"]+)(?:\s+(?:AS\s+)?(\w+))?"
-        join_pattern = r"\bJOIN\s+([\w\.\"]+)(?:\s+(?:AS\s+)?(\w+))?"
+    @staticmethod
+    def _cte_names(tree: exp.Expression) -> Set[str]:
+        return {(c.alias_or_name or "").lower() for c in tree.find_all(exp.CTE)}
 
-        for m in re.finditer(from_pattern, sql, flags=re.IGNORECASE):
-            table = (m.group(1) or '').replace('"', '').lower()
-            if '.' in table:
-                table = table.split('.')[-1]
-            alias = (m.group(2) or '').lower() if m.group(2) else None
-            if table:
-                tables.append((table, alias))
-
-        for m in re.finditer(join_pattern, sql, flags=re.IGNORECASE):
-            table = (m.group(1) or '').replace('"', '').lower()
-            if '.' in table:
-                table = table.split('.')[-1]
-            alias = (m.group(2) or '').lower() if m.group(2) else None
-            if table:
-                tables.append((table, alias))
-
-        return tables
-
-    def _extract_column_references(self, sql: str) -> List[Tuple[Optional[str], str]]:
-        """
-        Extract column references from SQL.
-        Returns list of (table_prefix_or_none, column_name).
-        """
-        columns = []
-
-        # Pattern for column references: table.column or just column
-        # This is a simplified pattern that catches most cases
-        col_pattern = r'(?:(\w+)\.)?(\w+)'
-
-        # Remove string literals to avoid false matches
-        sql_clean = re.sub(r"'[^']*'", "''", sql)
-
-        # Extract from SELECT clause (between SELECT and FROM)
-        select_match = re.search(r'\bSELECT\b(.+?)\bFROM\b', sql_clean, flags=re.IGNORECASE | re.DOTALL)
-        if select_match:
-            select_clause = select_match.group(1)
-            for m in re.finditer(col_pattern, select_clause):
-                prefix = m.group(1).lower() if m.group(1) else None
-                col = m.group(2).lower()
-                if col not in self.SQL_FUNCTIONS_AND_KEYWORDS:
-                    columns.append((prefix, col))
-
-        # Extract from WHERE clause
-        where_match = re.search(r'\bWHERE\b(.+?)(?:\bGROUP\b|\bORDER\b|\bLIMIT\b|$)', sql_clean, flags=re.IGNORECASE | re.DOTALL)
-        if where_match:
-            where_clause = where_match.group(1)
-            for m in re.finditer(col_pattern, where_clause):
-                prefix = m.group(1).lower() if m.group(1) else None
-                col = m.group(2).lower()
-                if col not in self.SQL_FUNCTIONS_AND_KEYWORDS:
-                    columns.append((prefix, col))
-
-        # Extract from GROUP BY clause
-        group_match = re.search(r'\bGROUP\s+BY\b(.+?)(?:\bHAVING\b|\bORDER\b|\bLIMIT\b|$)', sql_clean, flags=re.IGNORECASE | re.DOTALL)
-        if group_match:
-            group_clause = group_match.group(1)
-            for m in re.finditer(col_pattern, group_clause):
-                prefix = m.group(1).lower() if m.group(1) else None
-                col = m.group(2).lower()
-                if col not in self.SQL_FUNCTIONS_AND_KEYWORDS:
-                    columns.append((prefix, col))
-
-        # Extract from ORDER BY clause
-        order_match = re.search(r'\bORDER\s+BY\b(.+?)(?:\bLIMIT\b|$)', sql_clean, flags=re.IGNORECASE | re.DOTALL)
-        if order_match:
-            order_clause = order_match.group(1)
-            for m in re.finditer(col_pattern, order_clause):
-                prefix = m.group(1).lower() if m.group(1) else None
-                col = m.group(2).lower()
-                if col not in self.SQL_FUNCTIONS_AND_KEYWORDS:
-                    columns.append((prefix, col))
-
-        return list(set(columns))
-
-    def _validate_columns(
+    def _check_tables(
         self,
-        sql: str,
-        column_map: Dict[str, Set[str]],
-        tables: List[Tuple[str, Optional[str]]]
-    ) -> List[str]:
+        tree: exp.Expression,
+        schema_metadata: Dict[str, Any],
+    ) -> None:
+        """Enforce the table allowlist + reject cross-schema references."""
+        allowed = {
+            (t.get("name") or "").lower() for t in (schema_metadata.get("tables") or [])
+        }
+        cte_names = self._cte_names(tree)
+
+        for tbl in tree.find_all(exp.Table):
+            name = (tbl.name or "").lower()
+            schema_qual = (tbl.db or "").lower()
+            if not name or name in cte_names:
+                continue  # CTE reference, not a base table
+            if name not in allowed:
+                raise SQLValidationError(
+                    f"Reference to unknown table: '{name}'. "
+                    f"Available tables: {', '.join(sorted(list(allowed))[:10])}"
+                )
+            if schema_qual and schema_qual not in _DEFAULT_SCHEMAS:
+                raise SQLValidationError(
+                    f"Cross-schema reference not allowed: '{schema_qual}.{name}'"
+                )
+
+    def _check_columns(
+        self,
+        tree: exp.Expression,
+        schema_metadata: Dict[str, Any],
+    ) -> None:
+        """Conservatively reject hallucinated *qualified* columns.
+
+        Only flags ``alias.col`` where the alias resolves to a base table that
+        declares columns and ``col`` is not among them. Unqualified columns and
+        tables with no declared columns are left alone — we never reject on
+        absence of metadata (that was the old regex validator's false-positive).
         """
-        Validate that all column references exist in the schema.
-        Returns list of invalid column references.
-        """
-        invalid_columns = []
+        column_map = self._build_column_map(schema_metadata)
+        if not any(column_map.values()):
+            return  # no column metadata anywhere → nothing to validate
 
-        # Build alias -> table mapping
-        alias_map: Dict[str, str] = {}
-        for table, alias in tables:
-            if alias:
-                alias_map[alias] = table
-            alias_map[table] = table  # Table name can also be used as reference
+        # alias / table-name -> base table name
+        alias_to_table: Dict[str, str] = {}
+        for tbl in tree.find_all(exp.Table):
+            base = (tbl.name or "").lower()
+            alias_to_table[base] = base
+            if tbl.alias:
+                alias_to_table[tbl.alias.lower()] = base
 
-        # Get all valid columns from referenced tables
-        all_valid_columns: Set[str] = set()
-        for table, _ in tables:
-            if table in column_map:
-                all_valid_columns.update(column_map[table])
-
-        # Extract and validate column references
-        column_refs = self._extract_column_references(sql)
-
-        for prefix, col in column_refs:
-            # Skip if column is "*"
-            if col == '*':
+        invalid: List[str] = []
+        for col in tree.find_all(exp.Column):
+            tref = (col.table or "").lower()
+            cname = (col.name or "").lower()
+            if not tref or cname == "*":
                 continue
+            base = alias_to_table.get(tref)
+            if not base:
+                continue  # subquery/CTE alias — not a base table
+            known = column_map.get(base)
+            if known and cname not in known:
+                invalid.append(f"{tref}.{cname}")
 
-            # If prefixed, validate against specific table
-            if prefix:
-                table_name = alias_map.get(prefix)
-                if table_name and table_name in column_map:
-                    if col not in column_map[table_name]:
-                        invalid_columns.append(f"{prefix}.{col}")
-                # If prefix not found in aliases, might be a subquery alias - skip validation
-            else:
-                # Unprefixed column must exist in at least one referenced table
-                if col not in all_valid_columns:
-                    # Check if it might be an alias defined in SELECT
-                    # Simple heuristic: if it appears right after "AS", it's an alias
-                    if not re.search(rf'\bAS\s+{col}\b', sql, flags=re.IGNORECASE):
-                        invalid_columns.append(col)
+        if invalid:
+            sample: List[str] = []
+            for cols in column_map.values():
+                sample.extend(sorted(cols)[:5])
+                if len(sample) >= 10:
+                    break
+            raise SQLValidationError(
+                f"Reference to unknown column(s): {', '.join(sorted(set(invalid)))}. "
+                f"Valid columns include: {', '.join(sample[:10])}"
+            )
 
-        return invalid_columns
+    def _apply_limit(self, tree: exp.Expression, reasons: List[str]) -> str:
+        """Inject LIMIT when missing, cap it when above ``max_limit``."""
+        limit = tree.args.get("limit")
+        if limit is None:
+            tree = tree.limit(self.max_limit)
+            reasons.append(f"LIMIT {self.max_limit} injected")
+            return tree.sql(dialect=self.dialect)
+
+        current: Optional[int] = None
+        try:
+            current = int(limit.expression.name)
+        except (AttributeError, ValueError, TypeError):
+            current = None
+        if current is not None and current > self.max_limit:
+            reasons.append(f"LIMIT capped from {current} to {self.max_limit}")
+            tree = tree.limit(self.max_limit)
+        return tree.sql(dialect=self.dialect)
+
+    # -- public -----------------------------------------------------------------
 
     def validate_and_rewrite(
         self,
         sql: str,
-        schema_metadata: Dict[str, Any] | None = None
+        schema_metadata: Dict[str, Any] | None = None,
     ) -> Tuple[str, List[str]]:
         reasons: List[str] = []
-        sql_stripped = sql.strip().rstrip(';')
+        raw = (sql or "").strip()
+        if not raw:
+            raise SQLValidationError("Empty query: no SQL provided")
+        stripped = raw.rstrip(";").strip()
+        if not stripped:
+            raise SQLValidationError("Empty query: no SQL provided")
 
-        # Single statement check (very basic)
-        if ';' in sql_stripped:
+        # Stacked-statement guard (string-literal aware): after the single
+        # trailing ';' is removed, any remaining ';' means multiple statements.
+        literal_free = re.sub(r"'[^']*'", "''", stripped)
+        literal_free = re.sub(r'"[^"]*"', '""', literal_free)
+        if ";" in literal_free:
             raise SQLValidationError("Multiple statements not allowed")
 
-        # Must start with SELECT
-        if not re.match(r"^\s*SELECT\b", sql_stripped, flags=re.IGNORECASE):
+        # Parse to an AST. A parse failure on a non-SELECT is reported as the
+        # SELECT-only violation it is, not as an opaque parser error.
+        try:
+            expressions = sqlglot.parse(stripped, read=self.dialect)
+        except Exception as e:  # noqa: BLE001
+            if not re.match(r"^\s*SELECT\b", stripped, re.IGNORECASE):
+                raise SQLValidationError("Only SELECT statements are allowed")
+            raise SQLValidationError(f"Could not parse SQL: {e}")
+
+        expressions = [e for e in expressions if e is not None]
+        if len(expressions) > 1:
+            raise SQLValidationError("Multiple statements not allowed")
+        if not expressions:
             raise SQLValidationError("Only SELECT statements are allowed")
+        tree = expressions[0]
 
-        # PRD-61 Bug Fix (US-009): Check for mutations across entire SQL including
-        # subqueries. Strip string literals first to avoid false positives on
-        # quoted keywords like WHERE name = 'DELETE FROM'.
-        clean_sql = re.sub(r"'[^']*'", "''", sql_stripped)
-        clean_sql = re.sub(r'"[^"]*"', '""', clean_sql)
-        for kw in self.DENY_KEYWORDS:
-            if re.search(kw, clean_sql, flags=re.IGNORECASE):
-                raise SQLValidationError("Statement contains forbidden keyword")
+        # Root must be a read-only result expression …
+        if not isinstance(tree, _READ_ONLY_ROOTS):
+            raise SQLValidationError("Only SELECT statements are allowed")
+        # … 'SELECT … INTO new_table' writes despite the SELECT root …
+        if tree.args.get("into") is not None:
+            raise SQLValidationError("Only SELECT statements are allowed")
+        # … and no write/DDL/command node may hide anywhere in the tree.
+        for node in tree.walk():
+            if isinstance(node, _FORBIDDEN_NODES):
+                raise SQLValidationError("Only SELECT statements are allowed")
 
-        # PRD-70 FIX-04: Block CTEs (WITH clauses) — they can hide mutations
-        # and complicate static analysis. Regex can't reliably parse nested SQL.
-        if re.search(r"\bWITH\b", clean_sql, flags=re.IGNORECASE):
-            raise SQLValidationError("CTEs (WITH clauses) are not allowed")
+        # PRD-172 F019: a SELECT can still mutate via a side-effecting function
+        # (e.g. ``SELECT query_to_xml('UPDATE …', …)`` / ``dblink_exec`` /
+        # ``lo_export``). The DML-node walk above cannot see those — they are
+        # function calls, not statement nodes — so reject any denylisted
+        # function found anywhere in the tree.
+        forbidden_fn = _forbidden_function_in(tree)
+        if forbidden_fn is not None:
+            raise SQLValidationError(
+                f"Side-effecting function not allowed: {forbidden_fn}"
+            )
 
-        # PRD-70 FIX-04: Block UNION-based cross-workspace data exfiltration.
-        # UNION allows combining results from different WHERE clauses, bypassing
-        # workspace isolation if the attacker crafts a second SELECT.
-        if re.search(r"\bUNION\b", clean_sql, flags=re.IGNORECASE):
-            raise SQLValidationError("UNION queries are not allowed")
-
-        # Schema-based validation
         if schema_metadata:
-            allowed_tables = {t.get("name", "").lower() for t in (schema_metadata.get("tables") or [])}
+            self._check_tables(tree, schema_metadata)
+            if self.strict_column_validation:
+                self._check_columns(tree, schema_metadata)
 
-            # Extract and validate table references
-            tables = self._extract_referenced_tables(sql_stripped)
-            for table, _ in tables:
-                if table and table not in allowed_tables:
-                    raise SQLValidationError(
-                        f"Reference to unknown table: '{table}'. "
-                        f"Available tables: {', '.join(sorted(list(allowed_tables)[:10]))}"
-                    )
-
-            # Validate columns if strict validation is enabled
-            if self.strict_column_validation and tables:
-                column_map = self._build_column_map(schema_metadata)
-                invalid_cols = self._validate_columns(sql_stripped, column_map, tables)
-
-                if invalid_cols:
-                    # Provide helpful error with valid columns
-                    table_names = [t for t, _ in tables]
-                    valid_cols_sample = []
-                    for tname in table_names[:2]:  # Show columns from first 2 tables
-                        if tname in column_map:
-                            valid_cols_sample.extend(list(column_map[tname])[:5])
-
-                    raise SQLValidationError(
-                        f"Reference to unknown column(s): {', '.join(invalid_cols)}. "
-                        f"Valid columns include: {', '.join(valid_cols_sample[:10])}"
-                    )
-
-        # LIMIT enforcement
-        if re.search(r"\bLIMIT\s+\d+\b", sql_stripped, flags=re.IGNORECASE):
-            # cap existing LIMIT
-            def _cap_limit(match):
-                current = int(re.findall(r"\d+", match.group(0))[0])
-                if current > self.max_limit:
-                    reasons.append(f"LIMIT capped from {current} to {self.max_limit}")
-                    return f"LIMIT {self.max_limit}"
-                return match.group(0)
-            sql_capped = re.sub(r"\bLIMIT\s+\d+\b", _cap_limit, sql_stripped, flags=re.IGNORECASE)
-            return sql_capped, reasons
-        else:
-            reasons.append(f"LIMIT {self.max_limit} injected")
-            return f"{sql_stripped} LIMIT {self.max_limit}", reasons
-
+        safe_sql = self._apply_limit(tree, reasons)
+        return safe_sql, reasons

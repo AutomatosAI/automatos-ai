@@ -30,7 +30,15 @@ class ChannelManager:
     # ------------------------------------------------------------------
 
     async def start_all(self):
-        """Load all active connections from DB and start their adapters."""
+        """Load active POLLING-mode connections from DB and start their
+        adapters at boot.
+
+        Webhook-mode rows are intentionally skipped — the platform POSTs
+        directly to ``/api/webhooks/ws/{workspace_key}`` and no in-process
+        adapter is needed. Starting a polling adapter for a webhook-mode
+        bot would conflict on Telegram (409 on getUpdates) and waste a
+        connection slot on every other platform.
+        """
         from core.database.database import SessionLocal
 
         db = SessionLocal()
@@ -39,7 +47,10 @@ class ChannelManager:
 
             connections = (
                 db.query(ChannelConnection)
-                .filter(ChannelConnection.status == "active")
+                .filter(
+                    ChannelConnection.status == "active",
+                    ChannelConnection.mode == "polling",
+                )
                 .all()
             )
 
@@ -50,6 +61,11 @@ class ChannelManager:
                     platform=conn.platform,
                     config=conn.config or {},
                 )
+            logger.info(
+                "[ChannelManager] start_all: launched %d polling adapter(s); "
+                "webhook-mode rows skipped",
+                len(connections),
+            )
         except Exception as e:
             logger.error("[ChannelManager] Failed to load connections: %s", e)
         finally:
@@ -124,13 +140,6 @@ class ChannelManager:
             "telegram":    (".telegram_adapter",     "TelegramAdapter"),
             "slack":       (".slack_adapter",        "SlackAdapter"),
             "discord":     (".discord_adapter",      "DiscordAdapter"),
-            "teams":       (".teams_adapter",        "TeamsAdapter"),
-            "google_chat": (".google_chat_adapter",  "GoogleChatAdapter"),
-            "signal":      (".signal_adapter",       "SignalAdapter"),
-            "imessage":    (".imessage_adapter",     "IMessageAdapter"),
-            "irc":         (".irc_adapter",          "IRCAdapter"),
-            "matrix":      (".matrix_adapter",       "MatrixAdapter"),
-            "line":        (".line_adapter",         "LineAdapter"),
             "whatsapp":    (".whatsapp_adapter",     "WhatsAppAdapter"),
         }
 
@@ -163,6 +172,29 @@ class ChannelManager:
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
+
+    def is_running(self, connection_id: str) -> bool:
+        """True iff a polling adapter for ``connection_id`` is loaded.
+
+        Consults both the legacy ``_adapters`` dict (TelegramAdapter,
+        SlackAdapter, …) and the new per-driver state in
+        ``channels.drivers.*`` — either is authoritative. Used by
+        ``GET /api/channels`` to reconcile the DB-stored status column
+        with reality.
+        """
+        legacy = self._adapters.get(connection_id)
+        if legacy is not None and getattr(legacy, "is_running", False):
+            return True
+        # Ask every registered driver — cheap dict lookups, no I/O.
+        try:
+            from channels.drivers import get_driver, list_platforms
+            for platform in list_platforms():
+                driver = get_driver(platform)()
+                if driver.is_polling_running(connection_id=connection_id):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def get_status(self) -> dict:
         """Return a status snapshot of all managed adapters."""

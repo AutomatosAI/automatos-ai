@@ -2,13 +2,34 @@
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_owner_subject(db: Session, raw_user_id: Any) -> Optional[str]:
+    """PRD-206 S1: turn a caller_context user id into the ``user:{users.id}``
+    subject tag (the PRD-196 owner identity). The chat path threads the Clerk
+    STRING id (never treat it as ``users.id`` — the #513 lesson); an already-
+    internal integer id passes through. Unresolvable → None (no owner tag)."""
+    if raw_user_id is None:
+        return None
+    s = str(raw_user_id)
+    if s.isdigit():
+        return f"user:{int(s)}"
+    try:
+        row = db.execute(
+            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+            {"cid": s},
+        ).fetchone()
+    except Exception:
+        logger.warning("[PlatformExecutor] owner-subject resolution failed", exc_info=True)
+        return None
+    return f"user:{row[0]}" if row else None
 
 
 async def get_workspace_info(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -43,8 +64,8 @@ async def get_memory_stats(db: Session, workspace_id: UUID, params: Dict[str, An
 
     try:
         service = get_unified_memory_service()
-        if not service.is_mem0_configured:
-            return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
+        if not service.is_durable_configured:
+            return {"success": False, "error": "Memory service not configured (QDRANT_URL empty)"}
 
         ws_id = str(workspace_id)
 
@@ -143,6 +164,13 @@ async def list_connected_apps(db: Session, workspace_id: UUID, params: Dict[str,
 
 
 async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    from modules.memory.write_contract import (
+        MEMORY_FACT_TYPES,
+        MEMORY_SCOPES,
+        build_memory_metadata,
+        violates_exclusions,
+    )
+
     content = params.get("content")
     if not content:
         return {"success": False, "error": "Missing required parameter: content"}
@@ -164,31 +192,70 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         except (TypeError, ValueError):
             return {"success": False, "error": "confidence must be a number between 0 and 1"}
 
+    fact_type = params.get("type")
+    if fact_type is not None and fact_type not in MEMORY_FACT_TYPES:
+        return {
+            "success": False,
+            "error": f"type must be one of: {', '.join(sorted(MEMORY_FACT_TYPES))}",
+        }
+
+    scope = params.get("scope")
+    if scope is not None and scope not in MEMORY_SCOPES:
+        return {
+            "success": False,
+            "error": f"scope must be one of: {', '.join(sorted(MEMORY_SCOPES))}",
+        }
+
+    # PRD-206 S1 (Q3 silent-everything): the exclusion validator IS the consent
+    # gate — refuse loudly so the model can tell the user, and never echo the
+    # content back into the refusal.
+    violation = violates_exclusions(str(content))
+    if violation:
+        return {
+            "success": False,
+            "error": (
+                f"Refused by the memory exclusion policy (rule: {violation}). "
+                "Secrets, credentials, payment and similar sensitive data are "
+                "never stored as memory."
+            ),
+        }
+
     try:
         from datetime import datetime, timezone
         from modules.memory.unified_memory_service import get_unified_memory_service
 
         service = get_unified_memory_service()
-        if not service.is_mem0_configured:
-            return {"success": False, "error": "Memory service not configured (MEM0_API_URL empty)"}
+        if not service.is_durable_configured:
+            return {"success": False, "error": "Memory service not configured (QDRANT_URL empty)"}
 
         ws_id = str(workspace_id)
         agent_id = params.get("agent_id")
         # Cast to int if provided (may come as string from tool params)
         agent_id_int = int(agent_id) if agent_id else None
 
-        # Wave 3 — provenance keys travel with the memory metadata so
-        # future readers can tell verified facts from inference.
-        metadata: Dict[str, Any] = {
+        # PRD-206 S1: both write paths build the SAME canonical metadata via
+        # the write contract — type + scope (Q7 split default) + provenance +
+        # owner + chat link. ``_user_id`` / ``_origin_chat_id`` are server-
+        # injected by the executor (strip-then-inject), never caller-supplied.
+        extra: Dict[str, Any] = {
             "workspace_id": ws_id,
             "source": "platform_tool",
-            "source_type": source_type,
             "verified_at": datetime.now(timezone.utc).isoformat(),
         }
-        if confidence is not None:
-            metadata["confidence"] = confidence
         if params.get("evidence_uri"):
-            metadata["evidence_uri"] = params["evidence_uri"]
+            extra["evidence_uri"] = params["evidence_uri"]
+
+        metadata = build_memory_metadata(
+            fact_type=fact_type or "business_fact",
+            importance=params.get("importance"),
+            confidence=confidence,
+            source_type=source_type,
+            scope=scope,
+            owner=_resolve_owner_subject(db, params.get("_user_id")),
+            chat_id=params.get("_origin_chat_id"),
+            pinned=bool(params["pinned"]) if params.get("pinned") is not None else None,
+            extra=extra,
+        )
 
         result = await service.store_long_term(
             workspace_id=ws_id,
@@ -211,3 +278,228 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     except Exception as e:
         logger.warning(f"[PlatformExecutor] Memory store failed: {e}", exc_info=True)
         return {"success": False, "error": f"Memory service error: {e}"}
+
+
+async def resume_context(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-206 S3: 'where did we leave off?' from ANY chat.
+
+    The viewer comes from the server-injected ``_user_id`` (strip-then-inject
+    — never spoofable); without one (headless caller) the payload carries
+    workspace decisions/open loops but no personal threads.
+    """
+    from modules.memory.resume_context import build_resume_payload, format_resume_for_llm
+
+    owner = _resolve_owner_subject(db, params.get("_user_id"))
+    viewer_user_id = int(owner.split(":", 1)[1]) if owner else None
+
+    payload = await build_resume_payload(
+        db,
+        workspace_id=str(workspace_id),
+        viewer_user_id=viewer_user_id,
+    )
+    return {
+        "success": True,
+        **payload,
+        "formatted": format_resume_for_llm(payload),
+    }
+
+
+async def checkpoint_thread(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-206 S2: on-demand thread checkpoint ("save where we are").
+
+    Defaults to the CURRENT conversation via the server-injected
+    ``_origin_chat_id`` (never spoofable); an explicit ``chat_id`` param may
+    target another thread in the same workspace (the checkpoint runner
+    enforces the workspace match).
+    """
+    chat_id = params.get("chat_id") or params.get("_origin_chat_id")
+    if not chat_id:
+        return {
+            "success": False,
+            "error": "No conversation to checkpoint — this tool needs a chat context or an explicit chat_id.",
+        }
+
+    from modules.memory.thread_checkpoint import run_thread_checkpoint
+
+    result = await run_thread_checkpoint(
+        db,
+        workspace_id=str(workspace_id),
+        chat_id=str(chat_id),
+        trigger="on_demand",
+        # An explicit "save where we are" should work even on a short thread.
+        min_messages=2,
+    )
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "checkpoint failed")}
+    summary = result.get("summary") or {}
+    return {
+        "success": True,
+        "message": (
+            f"Checkpointed '{summary.get('topic') or 'this thread'}' — "
+            f"{len(summary.get('decisions') or [])} decision(s), "
+            f"{len(summary.get('open_questions') or [])} open loop(s) on record."
+        ),
+        "topic": summary.get("topic"),
+        "next_step": summary.get("next_step"),
+        "stored_memories": result.get("stored_memories", 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# PRD-143 S11 — administration surface: workspace + system settings.
+# Operator tier by design (the Rev 2 inversion); safety is the fail-closed
+# key whitelist, the executor's confirmation gate and the audit trail.
+# ---------------------------------------------------------------------------
+
+# The only workspace.settings keys this tool may write. Other slices have
+# their own dedicated tools (power_mode, widget config, autonomy,
+# auto-reporting) or are deliberately excluded (integrations carries raw
+# tokens; orchestrator has its own seeded-agent PUT flow).
+OPERATOR_WORKSPACE_SETTINGS_KEYS = (
+    "byok_overrides",
+    "default_notification_channel",
+    "voice_live",  # PRD-207 S4: {enabled, monthly_cap_minutes, retell_voice_id}
+)
+
+
+async def update_workspace_settings(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Set one whitelisted workspace-settings key. Fail-closed on any other key."""
+    key = params.get("key")
+    value = params.get("value")
+
+    try:
+        if key not in OPERATOR_WORKSPACE_SETTINGS_KEYS:
+            return {
+                "success": False,
+                "error": f"key must be one of {list(OPERATOR_WORKSPACE_SETTINGS_KEYS)}, got {key!r}",
+            }
+
+        from core.models.workspaces import Workspace
+
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws is None:
+            return {"success": False, "error": "Workspace not found"}
+
+        settings = dict(ws.settings or {})
+
+        if key == "byok_overrides":
+            # Same semantics as PUT /api/workspaces/current/byok-preferences:
+            # merge, provider-whitelisted, booleans only.
+            from api.workspaces import _ALLOWED_PROVIDERS
+
+            if not isinstance(value, dict):
+                return {"success": False, "error": "byok_overrides value must be an object of provider -> bool"}
+            overrides = dict(settings.get("byok_overrides", {}))
+            ignored = [p for p in value if p not in _ALLOWED_PROVIDERS]
+            for provider, enabled in value.items():
+                if provider in _ALLOWED_PROVIDERS:
+                    overrides[provider] = bool(enabled)
+            settings["byok_overrides"] = overrides
+            applied: Any = overrides
+        elif key == "voice_live":
+            # PRD-207 S4: same fail-closed validation as PUT
+            # /api/workspaces/current/voice-live — merge, never replace-blind.
+            from modules.voice.live_settings import validate_voice_live_update
+
+            try:
+                normalized = validate_voice_live_update(value)
+            except ValueError as ve:
+                return {"success": False, "error": str(ve)}
+            merged = dict(settings.get("voice_live", {}))
+            merged.update(normalized)
+            settings["voice_live"] = merged
+            applied = merged
+            ignored = []
+        else:  # default_notification_channel
+            from api.workspaces import _VALID_NOTIFICATION_CHANNELS
+
+            channel = str(value or "").strip().lower()
+            if channel not in _VALID_NOTIFICATION_CHANNELS:
+                return {
+                    "success": False,
+                    "error": f"default_notification_channel must be one of {sorted(_VALID_NOTIFICATION_CHANNELS)}, got {value!r}",
+                }
+            settings["default_notification_channel"] = channel
+            applied = channel
+            ignored = []
+
+        ws.settings = settings
+        db.commit()
+
+        result = {"success": True, "key": key, "value": applied}
+        if ignored:
+            result["ignored"] = ignored
+        return result
+    except Exception as exc:
+        db.rollback()
+        logger.error("[workspace] update_workspace_settings failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+
+
+def _masked_setting(s) -> Dict[str, Any]:
+    return {
+        "id": s.id,
+        "category": s.category,
+        "key": s.key,
+        "value": "****" if s.is_sensitive else s.value,
+        "is_sensitive": bool(s.is_sensitive),
+        "is_required": bool(s.is_required),
+        "description": s.description,
+    }
+
+
+async def list_system_settings(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """List system settings (optionally by category). Sensitive values are
+    ALWAYS masked — secrets never reach the LLM context (the REST router
+    returns them raw to admin sessions; the tool deliberately does not)."""
+    try:
+        from core.models.system_settings import SystemSetting
+
+        query = db.query(SystemSetting)
+        category = params.get("category")
+        if category:
+            query = query.filter(SystemSetting.category == category)
+
+        rows = query.order_by(SystemSetting.category, SystemSetting.key).all()
+        settings = [_masked_setting(s) for s in rows]
+        return {"success": True, "settings": settings, "count": len(settings)}
+    except Exception as exc:
+        logger.error("[workspace] list_system_settings failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+
+
+async def update_system_setting(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Update one system setting by category + key (platform-wide — the
+    action carries requires_confirmation=True for exactly that reason)."""
+    category = params.get("category")
+    key = params.get("key")
+    value = params.get("value")
+    if not category or not key or value is None:
+        return {"success": False, "error": "category, key and value are required"}
+
+    try:
+        from datetime import datetime
+
+        from core.models.system_settings import SystemSetting
+
+        setting = (
+            db.query(SystemSetting)
+            .filter(SystemSetting.category == category, SystemSetting.key == key)
+            .first()
+        )
+        if not setting:
+            return {"success": False, "error": f"Setting not found: {category}.{key}"}
+
+        setting.value = str(value)
+        setting.updated_at = datetime.utcnow()
+        db.commit()
+
+        logger.info(
+            "[workspace] system setting %s.%s updated via platform tool (workspace %s)",
+            category, key, workspace_id,
+        )
+        return {"success": True, "setting": _masked_setting(setting)}
+    except Exception as exc:
+        db.rollback()
+        logger.error("[workspace] update_system_setting failed: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}

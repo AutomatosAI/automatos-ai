@@ -100,10 +100,32 @@ _fake_em = _FakeEmbeddingManager()
 _fake_cache = _FakeCache()
 _fake_em_module.create_embedding_manager = lambda: _fake_em  # type: ignore[attr-defined]
 _fake_cache_module.get_cache_service = lambda: _fake_cache  # type: ignore[attr-defined]
-sys.modules.setdefault("core", type(sys)("core"))
-sys.modules["core.llm"] = _fake_em_module
-sys.modules["core.cache"] = type(sys)("core.cache")
-sys.modules["core.cache.service"] = _fake_cache_module
+
+# ActionSemanticIndex.__init__ imports core.cache.service / core.llm LAZILY, so
+# the fakes must be live while THIS module's tests run. Installing them at import
+# time, however, leaks a *pathless* fake ``core`` into the collection of sibling
+# test modules — breaking every ``core.*`` import they make. Install in
+# setup_module and restore in teardown_module so the fakes stay scoped to this
+# file's test phase and never touch collection. (PRD-142 W2-S2b.)
+_CORE_FAKE_KEYS = ("core", "core.llm", "core.cache", "core.cache.service")
+_saved_core_modules: Dict[str, object] = {}
+
+
+def setup_module(module):
+    for _k in _CORE_FAKE_KEYS:
+        _saved_core_modules[_k] = sys.modules.get(_k)
+    sys.modules.setdefault("core", type(sys)("core"))
+    sys.modules["core.llm"] = _fake_em_module
+    sys.modules["core.cache"] = type(sys)("core.cache")
+    sys.modules["core.cache.service"] = _fake_cache_module
+
+
+def teardown_module(module):
+    for _k, _v in _saved_core_modules.items():
+        if _v is None:
+            sys.modules.pop(_k, None)
+        else:
+            sys.modules[_k] = _v
 
 # Patch the import the index uses for ActionDefinition + get_action_registry
 # so we control the registry per-test. We rebuild a fresh registry per test.
@@ -304,3 +326,86 @@ def test_cache_round_trip_writes_and_reads():
     _fake_em.batch_calls.clear()
     _run(idx2.ensure_indexed())
     assert _fake_em.batch_calls == [], "cache hit should skip generate_embeddings_batch"
+
+
+# ---- Query-embed cache + timeout (never block the turn on a slow upstream) ----
+
+_MODEL_KEY = "fake:fake-model:4"
+
+
+def test_rank_query_embed_cache_hit_skips_live_embed():
+    """A Redis-cached query vector is used verbatim — no live embed call."""
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+    _fake_cache.set_embeddings_batch({"agent stuff": [1.0, 0.0, 0.0, 0.0]}, model=_MODEL_KEY)
+
+    orig = _fake_em.generate_embedding
+
+    async def _must_not_embed(text):
+        raise AssertionError("live embed must not run on a query-cache hit")
+
+    _fake_em.generate_embedding = _must_not_embed
+    try:
+        results = _run(idx.rank_actions(query="agent stuff", top_k=5))
+    finally:
+        _fake_em.generate_embedding = orig
+    assert results, "cached query vector should still produce a ranking"
+    assert results[0][0] == "platform_agent_thing"
+
+
+def test_rank_query_embed_success_writes_cache():
+    """A live query embed lands in the cache so the next identical query is free."""
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+    results = _run(idx.rank_actions(query="agent stuff", top_k=5))
+    assert results
+    assert _fake_cache.store.get(_MODEL_KEY, {}).get("agent stuff") is not None
+
+
+def test_rank_query_embed_timeout_falls_back_and_warms_cache():
+    """When the live embed exceeds the budget, rank_actions returns [] fast
+    (caller falls back to the full enum) and the embed finishes in the
+    background, writing the cache for the next turn."""
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+
+    orig = _fake_em.generate_embedding
+
+    async def _slow_embed(text):
+        await asyncio.sleep(0.2)
+        return [1.0, 0.0, 0.0, 0.0]
+
+    _fake_em.generate_embedding = _slow_embed
+    try:
+        async def _scenario():
+            results = await idx.rank_actions(
+                query="agent stuff", top_k=5, embed_timeout_s=0.05
+            )
+            assert results == [], "timed-out embed must fall back to []"
+            assert _fake_cache.store.get(_MODEL_KEY, {}).get("agent stuff") is None
+            # Let the abandoned embed finish inside the same loop.
+            await asyncio.sleep(0.3)
+            assert _fake_cache.store.get(_MODEL_KEY, {}).get("agent stuff") is not None
+
+        _run(_scenario())
+    finally:
+        _fake_em.generate_embedding = orig
+
+
+def test_rank_query_embed_timeout_disabled_with_nonpositive_budget():
+    """embed_timeout_s <= 0 disables the bound — the call simply waits."""
+    actions = [_make("platform_agent_thing", category="agents")]
+    idx = _make_index(actions)
+
+    orig = _fake_em.generate_embedding
+
+    async def _slowish_embed(text):
+        await asyncio.sleep(0.05)
+        return [1.0, 0.0, 0.0, 0.0]
+
+    _fake_em.generate_embedding = _slowish_embed
+    try:
+        results = _run(idx.rank_actions(query="agent stuff", top_k=5, embed_timeout_s=0))
+    finally:
+        _fake_em.generate_embedding = orig
+    assert results and results[0][0] == "platform_agent_thing"

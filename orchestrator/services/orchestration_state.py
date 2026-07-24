@@ -292,6 +292,41 @@ def transition_run(
             "Failed to sync mission board status for run %s", run.id, exc_info=True,
         )
 
+    # PRD-204 S3: mission terminal choke point -- EVERY run transition to a
+    # terminal state flows through here (coordinator, reconciler, joiner,
+    # human cancel/reject), so one fail-soft hook covers all producers.
+    # watch_ingest_terminal never raises (documented fail-soft seam); the
+    # extra guard mirrors the board-sync seam above so even a broken import
+    # cannot fail the transition.
+    if new_state in TERMINAL_RUN_STATES:
+        try:
+            from services.watch_hooks import watch_ingest_terminal
+
+            cost_snapshot = {
+                "tokens_used": run.tokens_used or 0,
+                "budget_spent": run.budget_spent or {},
+            }
+            watch_ingest_terminal(
+                db,
+                workspace_id=run.workspace_id,
+                target_type="mission",
+                target_id=str(run.id),
+                terminal_state=new_state.value,
+                summary=stop_detail or reason,
+                cost_snapshot=cost_snapshot,
+                output_pointer=(
+                    f"mission:{run.id}:output_summary"
+                    if run.output_summary is not None
+                    else None
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "Watch terminal hook failed for run %s (non-fatal)",
+                run.id,
+                exc_info=True,
+            )
+
     # PRD-123 Pattern #1: Produce frozen transition record
     transition = RunTransition(
         run_id=run.id,

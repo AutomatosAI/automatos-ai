@@ -16,8 +16,8 @@ interface UserProfileButtonProps {
 }
 
 export function UserProfileButton({
-    afterSignInUrl = '/dashboard',
-    afterSignUpUrl = '/dashboard',
+    afterSignInUrl = '/chat',
+    afterSignUpUrl = '/chat',
 }: UserProfileButtonProps) {
     const { isSignedIn, isLoaded } = useUser()
 

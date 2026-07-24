@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.composio.entity_manager import EntityManager
 
@@ -182,7 +183,7 @@ async def list_github_repos(
 # ---------------------------------------------------------------------------
 # POST /api/workspaces/{workspace_id}/github/clone
 # ---------------------------------------------------------------------------
-@router.post("/clone")
+@router.post("/clone", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def clone_github_repo(
     workspace_id: str,
     body: CloneRequest,
@@ -305,8 +306,10 @@ async def clone_github_repo(
         task_id[:8], workspace_id[:8], body.repo_url,
     )
 
+    # PRD-192 S6: the `events_url` field went with the deleted tasks router —
+    # no consumer read it (the widget polls the workspace-files surface with
+    # the task_id; grep-proven).
     return {
         "task_id": task_id,
         "status": "queued",
-        "events_url": f"/api/tasks/{task_id}/events",
     }

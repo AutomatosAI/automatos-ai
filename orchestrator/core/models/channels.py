@@ -25,6 +25,15 @@ class ChannelConnection(Base):
     platform = Column(String(50), nullable=False)  # telegram, slack, discord
     config = Column(JSON, server_default="{}")  # encrypted credentials
     status = Column(String(20), server_default="'inactive'")  # active, inactive, error
+    # PRD-008-A.4: per-channel connectivity mode ('webhook' | 'polling')
+    # and the URL the platform POSTs inbound traffic to (when in
+    # webhook mode). ``last_verified`` is updated whenever the driver's
+    # verify() returns ok; ``last_error`` carries the most recent
+    # failure reason so the dashboard can surface it without log diving.
+    mode = Column(String(20), nullable=False, server_default="'webhook'")
+    webhook_url = Column(String, nullable=True)
+    last_verified = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(String, nullable=True)
     metadata_ = Column("metadata", JSON, server_default="{}")
     default_agent_id = Column(Integer, nullable=True)  # US-027: default routing
     message_count = Column(Integer, server_default="0")

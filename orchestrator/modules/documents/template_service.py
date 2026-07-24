@@ -33,8 +33,13 @@ class DocumentTemplateService:
         category: str = "general",
         tags: list = None,
         created_by: str = None,
+        blocks: dict = None,
     ) -> DocumentTemplate:
-        """Create a new document template."""
+        """Create a new document template.
+
+        ``blocks`` (PRD-167 S2) is the canonical block-tree body; when present it is the
+        render source of truth.
+        """
         template = DocumentTemplate(
             workspace_id=workspace_id,
             name=name,
@@ -47,6 +52,7 @@ class DocumentTemplateService:
             category=category,
             tags=tags or [],
             created_by=created_by,
+            blocks=blocks,
         )
         self.db.add(template)
         self.db.commit()
@@ -54,10 +60,16 @@ class DocumentTemplateService:
         logger.info(f"Created template '{name}' (format={format}) for workspace {workspace_id}")
         return template
 
-    def get_template(self, template_id: UUID) -> Optional[DocumentTemplate]:
-        """Get a template by ID."""
+    def get_template(self, template_id: UUID, workspace_id: UUID) -> Optional[DocumentTemplate]:
+        """Get a template by ID, scoped to its workspace.
+
+        PRD-156 S4: confirmed cross-workspace IDOR — callers MUST pass the
+        caller's workspace_id; another workspace's template returns None (the
+        endpoints then 404), so it can't be read/updated/deleted across tenants.
+        """
         return self.db.query(DocumentTemplate).filter(
             DocumentTemplate.id == template_id,
+            DocumentTemplate.workspace_id == workspace_id,
             DocumentTemplate.is_active == True,
         ).first()
 
@@ -91,9 +103,9 @@ class DocumentTemplateService:
             query = query.filter(DocumentTemplate.category == category)
         return query.order_by(DocumentTemplate.name, DocumentTemplate.version.desc()).all()
 
-    def update_template(self, template_id: UUID, **kwargs) -> Optional[DocumentTemplate]:
-        """Update specified fields on a template."""
-        template = self.get_template(template_id)
+    def update_template(self, template_id: UUID, workspace_id: UUID, **kwargs) -> Optional[DocumentTemplate]:
+        """Update specified fields on a template (PRD-156 S4: workspace-scoped)."""
+        template = self.get_template(template_id, workspace_id)
         if not template:
             return None
         for key, value in kwargs.items():
@@ -104,9 +116,9 @@ class DocumentTemplateService:
         self.db.refresh(template)
         return template
 
-    def delete_template(self, template_id: UUID) -> bool:
-        """Soft-delete a template by setting is_active=False."""
-        template = self.get_template(template_id)
+    def delete_template(self, template_id: UUID, workspace_id: UUID) -> bool:
+        """Soft-delete a template by setting is_active=False (PRD-156 S4: workspace-scoped)."""
+        template = self.get_template(template_id, workspace_id)
         if not template:
             return False
         template.is_active = False

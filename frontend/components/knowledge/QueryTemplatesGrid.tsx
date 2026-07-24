@@ -28,6 +28,7 @@ import {
   Table as TableIcon
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { apiClient } from '@/lib/api-client'
 
 interface QueryTemplate {
   id: number
@@ -87,20 +88,17 @@ export function QueryTemplatesGrid({ templates: initialTemplates, selectedSource
   const loadTemplates = async () => {
     try {
       const dialect = selectedSource?.dialect || 'postgresql'
-      const response = await fetch(`/api/knowledge/sources/database/templates/list?dialect=${dialect}`)
-      if (response.ok) {
-        const data = await response.json()
-        // Mock enriched data for demonstration
-        const enrichedTemplates = data.map((t: any, idx: number) => ({
-          ...t,
-          sql_template: getMockSQLTemplate(t.name),
-          parameters: getMockParameters(t.name),
-          usage_count: Math.floor(Math.random() * 1000),
-          is_featured: idx < 3,
-          tags: getMockTags(t.category)
-        }))
-        setTemplates(enrichedTemplates)
-      }
+      const data = await apiClient.get<any[]>(`/api/knowledge/sources/database/templates/list?dialect=${dialect}`)
+      // Mock enriched data for demonstration
+      const enrichedTemplates = (data || []).map((t: any, idx: number) => ({
+        ...t,
+        sql_template: getMockSQLTemplate(t.name),
+        parameters: getMockParameters(t.name),
+        usage_count: Math.floor(Math.random() * 1000),
+        is_featured: idx < 3,
+        tags: getMockTags(t.category)
+      }))
+      setTemplates(enrichedTemplates)
     } catch (error) {
       console.error('Failed to load templates:', error)
     }
@@ -133,24 +131,14 @@ export function QueryTemplatesGrid({ templates: initialTemplates, selectedSource
 
     setIsExecuting(true)
     try {
-      const response = await fetch(`/api/knowledge/sources/database/templates/${selectedTemplate.id}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_id: selectedSource.id,
-          parameters: executionParams
-        })
+      await apiClient.post(`/api/knowledge/sources/database/templates/${selectedTemplate.id}/execute`, {
+        source_id: selectedSource.id,
+        parameters: executionParams
       })
-
-      if (response.ok) {
-        const data = await response.json()
-        toast.success('Template executed successfully!')
-        // Handle results display
-      } else {
-        toast.error('Failed to execute template')
-      }
-    } catch (error) {
-      toast.error('Error executing template')
+      toast.success('Template executed successfully!')
+      // Handle results display
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to execute template')
     } finally {
       setIsExecuting(false)
     }

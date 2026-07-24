@@ -5,23 +5,23 @@
   @page {
     size: A4;
     margin: 2cm;
-    @top-center { content: "{{ company_name | default('Automatos AI') }}"; font-size: 9pt; color: #999; }
+    @top-center { content: "{{ company_name | default(brand.name) }}"; font-size: 9pt; color: #999; }
     @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #999; }
   }
-  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: #1a1a2e; line-height: 1.6; }
-  .header { border-bottom: 3px solid #ff6b35; padding-bottom: 1rem; margin-bottom: 2rem; }
-  .header h1 { margin: 0 0 0.5rem 0; font-size: 28pt; color: #1a1a2e; }
+  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: {{ brand.primary_color }}; line-height: 1.6; }
+  .header { border-bottom: 3px solid {{ brand.accent_color }}; padding-bottom: 1rem; margin-bottom: 2rem; }
+  .header h1 { margin: 0 0 0.5rem 0; font-size: 28pt; color: {{ brand.primary_color }}; }
   .header .meta { color: #666; font-size: 10pt; }
-  h2 { color: #1a1a2e; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 2rem; }
+  h2 { color: {{ brand.primary_color }}; border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 2rem; }
   .metrics { display: flex; gap: 1rem; margin: 1.5rem 0; }
   .metric-card {
     flex: 1; background: #f8f9fa; border-radius: 8px; padding: 1rem;
-    border-left: 4px solid #ff6b35; text-align: center;
+    border-left: 4px solid {{ brand.accent_color }}; text-align: center;
   }
   .metric-card .label { font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
-  .metric-card .value { font-size: 24pt; font-weight: 700; color: #1a1a2e; }
+  .metric-card .value { font-size: 24pt; font-weight: 700; color: {{ brand.primary_color }}; }
   table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-  th { background: #1a1a2e; color: white; padding: 0.75rem; text-align: left; font-size: 9pt; text-transform: uppercase; }
+  th { background: {{ brand.primary_color }}; color: white; padding: 0.75rem; text-align: left; font-size: 9pt; text-transform: uppercase; }
   td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; }
   tr:nth-child(even) { background: #fafafa; }
   .section-content { margin-bottom: 1.5rem; }
@@ -30,7 +30,7 @@
 <body>
   <div class="header">
     <h1>{{ title }}</h1>
-    <div class="meta">Generated: {{ date | default('') }} | Author: {{ author | default('Automatos AI') }}</div>
+    <div class="meta">Generated: {{ date | default('') }} | Author: {{ author | default(brand.name) }}</div>
   </div>
 
   {% if metrics %}

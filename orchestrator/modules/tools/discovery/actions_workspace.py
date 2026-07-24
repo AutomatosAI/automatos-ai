@@ -62,11 +62,17 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
         description=(
             "Store a curated fact in workspace long-term memory for future conversations. "
             "Use for: user facts, confirmed decisions, workspace patterns, user corrections. "
-            "Do NOT use for: task artifacts, raw tool outputs, volatile data. "
+            "Do NOT use for: task artifacts, raw tool outputs, volatile data — and NEVER "
+            "secrets, credentials, passwords, API keys, card or bank numbers (such content "
+            "is refused by the exclusion policy). "
             "Keep under 200 chars. For searching stored memories, use platform_search_memory.\n\n"
             "Wave 3 — provenance: when you set ``source_type``, future readers can tell "
             "platform_verified facts from claude_reports / current_status / inference. "
-            "Always set ``source_type`` honestly; default is 'inference' when unsure."
+            "Always set ``source_type`` honestly; default is 'inference' when unsure.\n\n"
+            "PRD-206 — set ``type`` from the taxonomy (decision / open_loop / preference / "
+            "user_fact / business_fact / procedure / ...). Sharing defaults split by type: "
+            "user_fact and preference are private to the current user; everything else is "
+            "workspace-shared. Override per memory with ``scope``."
         ),
         category="memory",
         parameters={
@@ -75,6 +81,35 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
                 "content": {
                     "type": "string",
                     "description": "The information to remember.",
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "tool_outcome", "task_learning", "playbook_pattern",
+                        "user_fact", "business_fact", "preference", "procedure",
+                        "decision", "open_loop", "thread_summary",
+                    ],
+                    "description": (
+                        "What kind of fact this is. Use 'decision' for choices made "
+                        "(with the why), 'open_loop' for unresolved follow-ups. "
+                        "Default when omitted: business_fact."
+                    ),
+                },
+                "importance": {
+                    "type": "number",
+                    "description": "0.0-1.0 how load-bearing this fact is (0.8+ = critical). Default 0.5.",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["private", "workspace"],
+                    "description": (
+                        "Sharing override. Default: private for user_fact/preference "
+                        "(visible only to the current user), workspace for everything else."
+                    ),
+                },
+                "pinned": {
+                    "type": "boolean",
+                    "description": "Pin this memory so recall always ranks it highly.",
                 },
                 "source_type": {
                     "type": "string",
@@ -102,8 +137,67 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
         tags=["memory", "store", "write", "provenance"],
         examples=[
             "remember that our deploy day is Thursday",
-            "store this: API key rotates every 90 days",
+            "remember we decided to ship the pilot without SSO (type=decision)",
             "store with source_type=platform_verified after running the check",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_resume_context",
+        description=(
+            "Answer 'where did we leave off?' — the user's recent threads "
+            "with their checkpoint summaries, recent decisions, open loops "
+            "and suggested next steps. Use whenever the user asks what they "
+            "were working on, wants to pick something back up, or returns "
+            "after a gap. Read-only."
+        ),
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        permission_level="read",
+        promoted=True,
+        tags=["memory", "resume", "continuity", "threads"],
+        examples=[
+            "where did we leave off?",
+            "what were we working on yesterday?",
+            "pick up where we left off",
+            "what's still open?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_checkpoint_thread",
+        description=(
+            "Checkpoint the current conversation into thread memory: a "
+            "summary of where things got to, plus any decisions and open "
+            "loops, so 'where did we leave off?' works later. Use when the "
+            "user asks to save progress / remember where we are. Runs on the "
+            "CURRENT conversation unless a chat_id is given."
+        ),
+        category="memory",
+        parameters={
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional chat to checkpoint; defaults to the current "
+                        "conversation."
+                    ),
+                },
+            },
+            "required": [],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["memory", "thread", "checkpoint", "continuity"],
+        examples=[
+            "save where we are",
+            "checkpoint this conversation",
+            "remember where we left off here",
         ],
     ))
 
@@ -201,7 +295,7 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
-        admin_only=True,
+        super_admin_only=True,
         promoted=True,
         tags=["health", "status", "infrastructure", "monitoring"],
         examples=[
@@ -209,5 +303,112 @@ def register_workspace_actions_defs(registry: ActionRegistry) -> None:
             "check system health",
             "is everything working?",
             "platform health check",
+        ],
+    ))
+
+    # ── PRD-143 S11: administration surface — workspace + system settings ──
+    # Operator tier by design (Rev 2). The workspace-settings tool is
+    # fail-closed on a key whitelist (handlers_workspace.
+    # OPERATOR_WORKSPACE_SETTINGS_KEYS); system-setting updates are
+    # platform-wide, hence requires_confirmation=True.
+
+    registry.register(ActionDefinition(
+        name="platform_update_workspace_settings",
+        description=(
+            "Update a workspace setting. Supported keys: 'byok_overrides' "
+            "(per-provider bring-your-own-key toggles, e.g. {\"openai\": true}) "
+            "and 'default_notification_channel' (in_app, webhook, telegram or "
+            "slack). Other settings have dedicated tools (power mode, widget "
+            "config, autonomy) — this tool refuses keys outside its whitelist."
+        ),
+        category="settings",
+        parameters={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "enum": ["byok_overrides", "default_notification_channel"],
+                    "description": "Which workspace setting to update.",
+                },
+                "value": {
+                    "description": (
+                        "For byok_overrides: an object of provider -> boolean. "
+                        "For default_notification_channel: the channel name."
+                    ),
+                },
+            },
+            "required": ["key", "value"],
+        },
+        permission_level="write",
+        requires_confirmation=False,
+        tags=["settings", "workspace", "byok", "notifications", "configuration"],
+        examples=[
+            "use my own OpenAI key for this workspace",
+            "turn off BYOK for anthropic",
+            "set the default notification channel to telegram",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_list_system_settings",
+        description=(
+            "List platform system settings (optionally filtered by category) — "
+            "the database-backed configuration that replaces .env. Sensitive "
+            "values are always masked. Use before updating a setting or when "
+            "the user asks how the platform is configured."
+        ),
+        category="settings",
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Optional category filter (e.g. 'llm', 'email').",
+                },
+            },
+        },
+        permission_level="read",
+        requires_confirmation=False,
+        tags=["settings", "system", "configuration", "platform"],
+        examples=[
+            "list the system settings",
+            "show the llm configuration settings",
+            "what platform settings exist?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_update_system_setting",
+        description=(
+            "Update one platform system setting by category + key. This is "
+            "PLATFORM-WIDE — it changes behaviour for every workspace, which "
+            "is why it always asks for confirmation first. Use "
+            "platform_list_system_settings to find the category and key."
+        ),
+        category="settings",
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "The setting's category (e.g. 'llm').",
+                },
+                "key": {
+                    "type": "string",
+                    "description": "The setting's key within the category.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The new value (stored as a string).",
+                },
+            },
+            "required": ["category", "key", "value"],
+        },
+        permission_level="write",
+        requires_confirmation=True,
+        tags=["settings", "system", "configuration", "platform"],
+        examples=[
+            "change the default LLM model setting",
+            "update the email sender system setting",
         ],
     ))

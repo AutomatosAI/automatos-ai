@@ -1,5 +1,11 @@
 # Core FastAPI dependencies
-fastapi>=0.115.0,<1.0.0
+fastapi>=0.115.0,<0.116.0
+# Pin the FastAPI/Starlette pair. Starlette >=0.42 changed Router internals so
+# FastAPI's include_router silently no-ops, dropping every mounted router on a
+# cold boot (route_manifest / cold-boot API collapse). Unpinned before, a fresh
+# install pulled starlette 1.3.1 (capping <1.0 still gave 0.52.1, also broken).
+# 0.115.x + starlette 0.41.x is the tested, working pair. (F092 — dep pinning.)
+starlette>=0.40.0,<0.42.0
 uvicorn[standard]==0.24.0
 websockets==12.0
 
@@ -10,6 +16,7 @@ psycopg2-binary==2.9.9
 asyncpg==0.29.0
 pgvector==0.2.4
 sqlparse>=0.5.4
+sqlglot>=25.5.1  # PRD-160 S2: AST-based NL2SQL SQL validation (SELECT-only, table allowlist, cross-schema)
 greenlet>=3.0.0
 
 # Data validation
@@ -36,6 +43,7 @@ psutil==5.9.6
 
 # Scheduling (heartbeat service)
 apscheduler>=3.10
+croniter>=2.0  # PRD-162: stateless next_run math for the calendar/schedule truth
 
 # Network & async
 aiofiles==23.2.1
@@ -51,8 +59,15 @@ cachetools>=5.3.0
 # Development/Testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
+pytest-timeout==2.3.1  # per-test timeout net for CI (PRD-142 W2-S3); kills hangs fast
+pytest-cov==4.1.0  # PRD-182 W12-S4 (F092): measured coverage + ratchet (compatible with pytest 7.4.x)
 black==23.11.0
 isort==5.12.0
+# PRD-211: in-repo topology discipline. `import-linter` (pulls grimp, pure
+# Python) runs the feature-module `independence` contract in orchestrator/
+# .importlinter — the CI lane .github/workflows/import-linter.yml fails loud on
+# a new feature->feature import edge. Zero runtime weight (dev/CI only).
+import-linter==2.1
 
 # Redis & SSH
 redis>=4.5.0
@@ -117,3 +132,12 @@ prometheus-client>=0.20.0
 
 # PRD-126: Business Knowledge Graph (Graphify Integration)
 graphifyy[leiden]>=0.3.28
+
+# PRD-185 S9: Observability / tracing seam (vendor-neutral, default-OFF).
+# `langfuse` is an OPTIONAL backend — the OFF path never imports it and the seam
+# (core/observability/tracer.py) degrades to a logged no-op if it is absent.
+# Kept OUT of the default install so the default (disabled) posture adds zero
+# weight and zero resolver risk to the pinned dep graph. To activate: uncomment,
+# reinstall, set TRACING_ENABLED=true + LANGFUSE_PUBLIC_KEY/SECRET_KEY
+# (+ optional LANGFUSE_HOST, defaults to Langfuse Cloud).
+# langfuse>=3.0.0,<4.0.0

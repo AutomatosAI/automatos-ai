@@ -77,7 +77,7 @@ export function HumanInteractionChat({ workflowId, isExecuting }: HumanInteracti
   const getPriorityColor = (priority?: string) => {
     switch (priority) {
       case 'urgent': return 'text-destructive border-destructive/50'
-      case 'high': return 'text-orange-400 border-orange-400/50'
+      case 'high': return 'text-warning border-warning/50'
       case 'medium': return 'text-warning border-warning/50'
       default: return 'text-info border-blue-400/50'
     }

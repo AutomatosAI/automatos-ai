@@ -16,13 +16,20 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.super_admin import require_super_admin
 from core.database.database import get_db
 from core.models import Agent
 from core.models.core import LLMUsage, BoardTask, RecipeExecution, WorkflowTemplate
 from core.models.orchestration import OrchestrationRun
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/kpi", tags=["kpi"])
+
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/kpi",
+    tags=["kpi"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 PERIOD_DAYS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
 

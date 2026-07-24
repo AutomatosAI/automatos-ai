@@ -29,8 +29,13 @@ class SharedContextPort(ABC):
         self,
         team_agent_ids: list[int],
         initial_data: Optional[dict[str, Any]] = None,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> str:
-        """Create a shared context space. Returns context_id."""
+        """Create a shared context space. Returns context_id.
+
+        ``provenance`` (PRD-166 S1) carries ``workspace_id``/``mission_id``/
+        ``task_id`` so seeded patterns keep their lineage into the workspace field.
+        """
         ...
 
     @abstractmethod
@@ -41,8 +46,10 @@ class SharedContextPort(ABC):
         value: str,
         agent_id: int,
         strength: float = 1.0,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> None:
-        """Inject a pattern into the shared context."""
+        """Inject a pattern into the shared context. ``provenance`` (PRD-166 S1)
+        records workspace/mission/task lineage on the pattern."""
         ...
 
     @abstractmethod
@@ -52,8 +59,13 @@ class SharedContextPort(ABC):
         query: str,
         agent_id: int,
         top_k: int = 10,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
-        """Query for relevant patterns. Returns ranked results."""
+        """Query for relevant patterns. Returns ranked results.
+
+        ``record_access=False`` (PRD-178 S2) reads without reinforcing, for the
+        retrieval-trace inspector — observing the field must not mutate it.
+        """
         ...
 
     @abstractmethod

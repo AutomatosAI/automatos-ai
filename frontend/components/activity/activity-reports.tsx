@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import { useReports, useReportStats } from '@/hooks/use-reports-api'
 import { apiClient } from '@/lib/api-client'
 import type { AgentReport, ReportFilters } from '@/hooks/use-reports-api'

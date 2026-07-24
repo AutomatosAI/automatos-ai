@@ -6,7 +6,6 @@ import { useAuth } from '@clerk/nextjs'
 import { AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { ModelSelector } from './model-selector'
 import { AgentSelector, type Agent } from './agent-selector'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { VoiceMicButton } from '@/components/voice/VoiceMicButton'
@@ -25,8 +24,6 @@ export interface MultimodalInputProps {
   stop: () => void
   sendMessage: (message: any) => void
   setMessages?: React.Dispatch<React.SetStateAction<any[]>>
-  selectedModelId: string
-  onModelChange: (modelId: string) => void
   selectedAgentId?: number | null
   onAgentChange?: (agentId: number | null) => void
   selectedVisibilityType: VisibilityType
@@ -41,8 +38,6 @@ export function MultimodalInput({
   stop,
   sendMessage,
   setMessages,
-  selectedModelId,
-  onModelChange,
   selectedAgentId,
   onAgentChange,
   selectedVisibilityType,
@@ -97,11 +92,10 @@ export function MultimodalInput({
             content: response.response_text,
             parts: [
               { type: 'text' as const, text: response.response_text },
-              ...((response.audio_base64 || response.audio_url) ? [{
+              ...(response.audio_url ? [{
                 type: 'voice' as const,
                 transcript: response.response_text,
                 audioUrl: getVoiceAudioUrl(response.message_id),
-                audioBase64: response.audio_base64 || undefined,
               }] : []),
             ],
           }
@@ -364,17 +358,15 @@ export function MultimodalInput({
               </Button>
             )} */}
 
-            {/* PRD: Unified Agent-Chat System - Agent Selector */}
-            {onAgentChange ? (
+            {/* PRD: Unified Agent-Chat System — the Agent Selector is the real
+                routing control. PRD-180 S3 (F035): the placebo ModelSelector
+                fallback was removed (the backend never read the chosen model —
+                a control that does nothing corrodes trust in the real ones). */}
+            {onAgentChange && (
               <AgentSelector
                 selectedAgentId={selectedAgentId}
                 onAgentChange={onAgentChange}
                 onAgentData={setActiveAgent}
-              />
-            ) : (
-              <ModelSelector
-                selectedModelId={selectedModelId}
-                onModelChange={onModelChange}
               />
             )}
           </div>

@@ -1,10 +1,10 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Brain, Zap, TrendingDown, Eye, Users, Activity, Clock, BarChart3, AlertTriangle, ServerCrash } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMissionField } from '@/hooks/use-missions-api'
-import type { FieldPattern } from '@/hooks/use-missions-api'
+import type { FieldPattern, FieldScope } from '@/hooks/use-missions-api'
 import dynamic from 'next/dynamic'
 
 const MissionFieldViz = dynamic(
@@ -25,7 +25,7 @@ const AGENT_COLORS = [
   'bg-warning/20 border-warning/40 text-warning',
   'bg-rose-500/20 border-rose-500/40 text-rose-400',
   'bg-cyan-500/20 border-cyan-500/40 text-cyan-400',
-  'bg-orange-500/20 border-orange-500/40 text-orange-400',
+  'bg-warning/20 border-warning/40 text-warning',
 ]
 
 const AGENT_DOT_COLORS = [
@@ -35,7 +35,7 @@ const AGENT_DOT_COLORS = [
   'bg-warning',
   'bg-rose-500',
   'bg-cyan-500',
-  'bg-orange-500',
+  'bg-warning',
 ]
 
 function getAgentColor(agentId: number, index: number) {
@@ -55,7 +55,7 @@ function StrengthBar({ strength, maxStrength }: { strength: number; maxStrength:
           'h-full rounded-full transition-all duration-300',
           strength > 0.7 ? 'bg-success' :
           strength > 0.3 ? 'bg-warning' :
-          strength > 0.05 ? 'bg-orange-500' :
+          strength > 0.05 ? 'bg-warning' :
           'bg-destructive/50'
         )}
         style={{ width: `${Math.max(pct, 2)}%` }}
@@ -113,7 +113,8 @@ function PatternCard({ pattern, agentIndex, maxStrength }: {
 }
 
 export function MissionFieldPanel({ missionId, className }: MissionFieldPanelProps) {
-  const { data, isLoading } = useMissionField(missionId)
+  const [scope, setScope] = useState<FieldScope>('mission')
+  const { data, isLoading } = useMissionField(missionId, true, scope)
 
   const agentMap = useMemo(() => {
     if (!data?.patterns) return new Map<number, number>()
@@ -196,11 +197,23 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
             <Brain className="w-3.5 h-3.5" />
-            Shared Field
+            {scope === 'workspace' ? 'Workspace Field' : 'Shared Field'}
           </h3>
-          <span className="text-[10px] font-mono text-muted-foreground/60">
-            {data.backend}
-          </span>
+          {/* PRD-166 S1/S4: mission ↔ workspace-persistent field scope */}
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+            {(['mission', 'workspace'] as FieldScope[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setScope(s)}
+                className={cn(
+                  'px-1.5 py-0.5 text-[10px] rounded transition-colors capitalize',
+                  scope === s ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Stability gauge */}
@@ -277,7 +290,7 @@ export function MissionFieldPanel({ missionId, className }: MissionFieldPanelPro
             <span className="text-xs">Field is empty. Waiting for agent activity...</span>
           </div>
         ) : (
-          <MissionFieldViz patterns={patterns} className="absolute inset-0" />
+          <MissionFieldViz missionId={missionId} patterns={patterns} className="absolute inset-0" />
         )}
       </div>
     </div>

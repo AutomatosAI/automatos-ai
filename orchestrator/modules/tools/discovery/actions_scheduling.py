@@ -86,7 +86,12 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
 
     registry.register(ActionDefinition(
         name="platform_cancel_scheduled_task",
-        description="Cancel a scheduled task by ID.",
+        description=(
+            "Cancel a scheduled (recurring or one-off) task by its ID so it stops "
+            "running on its schedule. Use when the user wants to stop, disable, or "
+            "remove an automation/cron they previously set up. List scheduled tasks "
+            "first if you don't know the ID."
+        ),
         category="scheduling",
         parameters={
             "type": "object",
@@ -102,4 +107,34 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
         requires_confirmation=True,
         tags=["scheduling", "write", "destructive"],
         examples=["cancel scheduled task 5", "stop that recurring task"],
+    ))
+
+    registry.register(ActionDefinition(
+        name="platform_get_schedule",
+        description=(
+            "Show everything scheduled in the workspace right now — agent heartbeat "
+            "routines, cron-scheduled playbooks, and scheduled tasks — each with its "
+            "next run time. This is the same source of truth the calendar shows. Use "
+            "when asked 'what's scheduled?', 'what runs next?', or to review what "
+            "automations are set up."
+        ),
+        category="scheduling",
+        parameters={
+            "type": "object",
+            "properties": {
+                "range_days": {
+                    "type": "integer",
+                    "description": "How many days ahead to include (default 30).",
+                },
+            },
+            "required": [],
+        },
+        permission_level="read",
+        tags=["scheduling", "read", "calendar"],
+        examples=[
+            "what's scheduled",
+            "what runs next",
+            "show the schedule for the next week",
+            "what automations do I have set up",
+        ],
     ))

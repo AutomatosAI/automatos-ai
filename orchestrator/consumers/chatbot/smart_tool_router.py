@@ -8,7 +8,9 @@ Intelligent tool routing that decides:
 - HOW to prioritize tool selection
 
 Works with the Intent Classifier to route appropriately.
-Supports embedding-based semantic ranking (PRD-64) with fallback to keyword matching.
+Delegates semantic ranking to GraphRouter (PRD-141 US-014) — the single
+tool-selection pipeline — and falls back to keyword/category matching when the
+graph is unavailable.
 
 NOTE: This module is consumed by ContextService (ToolLoadingStrategy.FILTERED).
 It is the only caller. Future work: absorb filtering logic into
@@ -16,14 +18,37 @@ modules/context/sections/tools.py and delete this file.
 See PRD-81 Task 5.3 and system audit R1 finding.
 """
 
-import asyncio
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass
 
 from .intent_classifier import Intent, IntentResult, get_intent_classifier
 
 logger = logging.getLogger(__name__)
+
+
+# Intent → ActionRegistry *category* names (PRD-141 US-015).
+# Replaces the old hardcoded per-tool category dicts: instead of pinning literal
+# tool names, each tool-requiring intent maps to one or more ActionRegistry
+# categories, and the matching action names are pulled from the registry at call
+# time. An action registered under an already-mapped category is therefore
+# auto-discoverable with no edit to this router.
+# Values are REAL registry category names (verified against modules/tools/).
+# GREETING / CHITCHAT / FACTUAL are intentionally absent — they classify as
+# requires_tools=False and never reach the filter.
+_INTENT_TO_REGISTRY_CATEGORIES: Dict[Intent, List[str]] = {
+    Intent.DATA_QUERY: ["analytics", "database", "graph", "field", "reports"],
+    Intent.SEARCH: ["discovery", "documents", "graph", "memory", "workspace_files"],
+    Intent.EXTERNAL_ACTION: ["integrations", "notifications", "marketplace", "skills"],
+    Intent.CREATION: ["documents", "reports", "blog", "workspace_files", "playbooks"],
+    Intent.MEMORY_RECALL: ["memory", "field"],
+    Intent.MULTI_STEP: [
+        "agents", "missions", "tasks", "playbooks", "workspace", "workspace_files",
+        "analytics", "reports", "documents", "graph", "memory", "field",
+        "marketplace", "skills", "monitoring", "infrastructure", "integrations",
+        "discovery", "scheduling", "governance", "notifications", "blog",
+    ],
+}
 
 
 @dataclass
@@ -46,8 +71,9 @@ class SmartToolRouter:
     - Prefer internal tools for internal data
     - Use Composio for external app actions
 
-    PRD-64: Supports embedding-based semantic ranking when SEMANTIC_TOOL_ROUTING=true.
-    Falls back to keyword-based category matching if embeddings are unavailable.
+    PRD-141 US-014: when SEMANTIC_TOOL_ROUTING=true, ranking is delegated to
+    GraphRouter (the single tool-selection pipeline). Falls back to keyword-based
+    category matching if the graph is unavailable.
     """
 
     # Core tools that are almost always useful
@@ -64,9 +90,27 @@ class SmartToolRouter:
         "generate_document",
     })
 
-    # Promoted platform tools that bypass intent filtering —
-    # always included regardless of detected intent (PRD-122 US-010)
-    ALWAYS_INCLUDE = frozenset({
+    # Native *signal* tools that MUST survive intent filtering but are NOT
+    # registry-promoted (they're gated upstream by validate_tool_access, so they
+    # only appear in available_tools when the affordance is enabled).
+    #
+    # widget_open_callback_form: when present (only when the Site has
+    # callback.enabled), it must survive filtering. Without it the LLM,
+    # instructed by its skill to open the form, improvises a
+    # composio_execute(action="widget_open_callback_form") call that fails with
+    # "'WIDGET' is not assigned to agent N". Pinning it keeps the affordance
+    # available on every widget turn regardless of the classified intent.
+    # Literal (not imported) to keep this hot-path module free of the heavy
+    # modules.tools.* import chain; canonical name lives in
+    # modules/tools/widget_callback.py::WIDGET_OPEN_CALLBACK_FORM_NAME.
+    _SIGNAL_TOOL_PINS = frozenset({
+        "widget_open_callback_form",
+    })
+
+    # Platform tools that are always useful and must survive intent filtering.
+    # Kept static so the hot path knows them without a registry read. These are
+    # unioned with every registry-promoted action in _always_include_names().
+    _CORE_PLATFORM_PINS = frozenset({
         "platform_list_agents",
         "platform_get_agent",
         "platform_search_memory",
@@ -75,158 +119,32 @@ class SmartToolRouter:
         "platform_field_inject",
     })
 
-    # Tool categories
-    TOOL_CATEGORIES = {
-        "data": ["query_database", "smart_query_database", "sql_query"],
-        "search": ["search_knowledge", "semantic_search", "search_codebase", "search_multimodal",
-                    "search_tables", "search_images", "search_formulas"],
-        "web_search": [
-            "TAVILY_TAVILY_SEARCH", "COMPOSIO_SEARCH_FETCH_URL_CONTENT",
-            "COMPOSIO_SEARCH_SEC_FILINGS", "composio_execute",
-        ],
-        "files": ["workspace_read_file", "workspace_write_file", "workspace_list_dir", "workspace_grep"],
-        "external": ["composio_execute", "composio_actions"],
-        "creation": ["workspace_write_file", "generate_document"],
-        "document": ["generate_document", "workspace_write_file"],
-        "code": ["search_codebase", "execute_code", "run_command"],
-        # Promoted platform tool categories (PRD-122 US-010)
-        "platform_management": [
-            "platform_list_agents", "platform_get_agent",
-            "platform_create_agent", "platform_update_agent",
-        ],
-        "marketplace": [
-            "platform_browse_marketplace_agents",
-            "platform_browse_marketplace_skills",
-            "platform_browse_marketplace_plugins",
-            "platform_install_skill", "platform_install_plugin",
-        ],
-        "monitoring": [
-            "platform_get_system_health", "platform_get_activity_feed",
-        ],
-        "memory": [
-            "platform_search_memory", "platform_store_memory",
-        ],
-        "fields": [
-            "platform_field_query", "platform_field_inject",
-        ],
-    }
-
-    # Intent to tool category mapping
-    INTENT_TO_TOOLS = {
-        Intent.DATA_QUERY: ["data", "search", "web_search", "fields"],
-        Intent.SEARCH: ["search", "web_search", "code", "memory"],
-        Intent.EXTERNAL_ACTION: ["external", "web_search", "document", "platform_management"],
-        Intent.CREATION: ["files", "creation", "document", "external", "platform_management"],
-        Intent.MULTI_STEP: [
-            "data", "search", "web_search", "files", "external", "document", "code",
-            "platform_management", "marketplace", "monitoring", "memory", "fields",
-        ],
-        Intent.MEMORY_RECALL: ["memory"],  # Memory tools for recall intents
-        Intent.GREETING: [],  # No tools needed
-        Intent.CHITCHAT: [],  # No tools needed
-        Intent.FACTUAL: [],  # Try without tools first
-    }
-
     def __init__(self):
         self.classifier = get_intent_classifier()
 
-        # Embedding-based semantic ranking state (PRD-64)
-        self._embedding_manager = None
-        self._tool_embeddings: Dict[str, List[float]] = {}  # tool_name -> embedding
-        self._embeddings_initialized = False
-        self._embeddings_init_lock = asyncio.Lock()
+    def _always_include_names(self) -> Set[str]:
+        """Tool names that bypass intent filtering.
 
-    async def _ensure_embeddings(self, available_tools: List[Dict[str, Any]]) -> bool:
+        Signal pins + core platform pins + every registry-``promoted`` action.
+        Reading ``promoted`` here is what makes a tool marked ``promoted=True``
+        surface in chat with no edit to this router (PRD-122 US-010) — e.g. the
+        full-autonomy dial (``platform_set/get_autonomy_level``), whose
+        ``settings`` category is intentionally unmapped.
+
+        Fail-safe: a registry import/lookup error degrades to the static pins,
+        never crashes routing.
         """
-        Lazy-initialize tool embeddings on first route() call.
-        Returns True if semantic ranking is available.
-        """
-        from config import config
-        if not config.SEMANTIC_TOOL_ROUTING:
-            return False
+        names: Set[str] = set(self._SIGNAL_TOOL_PINS) | set(self._CORE_PLATFORM_PINS)
+        try:
+            from modules.tools.discovery.action_registry import get_action_registry
 
-        async with self._embeddings_init_lock:
-            # Collect tool names that need embedding
-            tools_needing_embed = []
-            for tool in available_tools:
-                fn = tool.get("function", {})
-                name = fn.get("name", "")
-                if name and name not in self._tool_embeddings:
-                    desc = fn.get("description", "")
-                    tools_needing_embed.append((name, f"{name}: {desc}"))
-
-            if not tools_needing_embed and self._embeddings_initialized:
-                return True
-
-            try:
-                if self._embedding_manager is None:
-                    from core.llm.embedding_manager import get_embedding_manager
-                    self._embedding_manager = get_embedding_manager()
-
-                if tools_needing_embed:
-                    texts = [t[1] for t in tools_needing_embed]
-                    embeddings = await self._embedding_manager.generate_embeddings_batch(texts)
-                    for (name, _), embedding in zip(tools_needing_embed, embeddings):
-                        self._tool_embeddings[name] = embedding
-
-                    logger.info(
-                        f"[ToolRouter] Embedded {len(tools_needing_embed)} new tools "
-                        f"(total cached: {len(self._tool_embeddings)})"
-                    )
-
-                self._embeddings_initialized = True
-                return True
-
-            except Exception as e:
-                logger.warning(f"[ToolRouter] Embedding init failed, falling back to keyword matching: {e}")
-                return False
-
-    async def _rank_tools_by_similarity(
-        self,
-        query: str,
-        available_tools: List[Dict[str, Any]],
-        intent_result: IntentResult,
-        max_tools: int = 30,
-    ) -> List[Dict[str, Any]]:
-        """
-        Rank tools by cosine similarity between query embedding and tool embeddings.
-        Applies intent boost and core tool boost.
-        """
-        from core.math.vector_operations import VectorOperations
-
-        # Generate query embedding
-        query_embedding = await self._embedding_manager.generate_embedding(query)
-
-        # Score each tool
-        scored: List[Tuple[float, Dict[str, Any]]] = []
-        for tool in available_tools:
-            fn = tool.get("function", {})
-            name = fn.get("name", "")
-
-            tool_emb = self._tool_embeddings.get(name)
-            if not tool_emb:
-                continue
-
-            score = float(VectorOperations.cosine_similarity(query_embedding, tool_emb))
-
-            # Boost for intent-suggested tools
-            if name in (intent_result.suggested_tools or []):
-                score += 0.15
-
-            # Slight boost for core tools
-            if name in self.CORE_TOOLS:
-                score += 0.05
-
-            scored.append((score, tool))
-
-        # Sort by score descending
-        scored.sort(key=lambda x: -x[0])
-
-        # Log top 5 for debugging
-        top_debug = [(t.get("function", {}).get("name", "?"), f"{s:.3f}") for s, t in scored[:5]]
-        logger.info(f"[ToolRouter] Semantic ranking top-5: {top_debug}")
-
-        return [tool for _, tool in scored[:max_tools]]
+            names |= {a.name for a in get_action_registry().get_promoted()}
+        except Exception:
+            logger.warning(
+                "[ToolRouter] promoted-tool lookup failed — using static pins only",
+                exc_info=True,
+            )
+        return names
 
     async def route(
         self,
@@ -234,6 +152,8 @@ class SmartToolRouter:
         available_tools: List[Dict[str, Any]],
         conversation_context: Optional[List[Dict]] = None,
         tool_hints: Optional[List[str]] = None,
+        agent_id: Optional[int] = None,
+        workspace_id: Optional[str] = None,
     ) -> ToolRoutingResult:
         """
         Route a query to appropriate tools.
@@ -243,6 +163,9 @@ class SmartToolRouter:
             available_tools: All tools available to the agent
             conversation_context: Recent conversation history
             tool_hints: PRD-68 hint keywords from AutoBrain (e.g. ["email", "github"])
+            agent_id: Owning agent — scopes GraphRouter's per-agent edges/affinities
+            workspace_id: Owning workspace — scopes GraphRouter's per-tenant
+                edges/affinities (PRD-177 S5). Threaded to ``rank_chains``.
 
         Returns:
             ToolRoutingResult with filtered tools and guidance
@@ -259,8 +182,8 @@ class SmartToolRouter:
                         hint_matched.append(tool)
                         break
             if hint_matched:
-                # Always include core + ALWAYS_INCLUDE tools alongside hint-matched tools
-                must_have = self.CORE_TOOLS | self.ALWAYS_INCLUDE
+                # Always include core + promoted/pinned tools alongside hint-matched tools
+                must_have = self.CORE_TOOLS | self._always_include_names()
                 core = [t for t in available_tools if t.get("function", {}).get("name") in must_have]
                 combined = hint_matched + [c for c in core if c not in hint_matched]
                 logger.info(f"[ToolRouter] PRD-68 hint match: {len(hint_matched)} tools for hints={tool_hints}")
@@ -291,44 +214,47 @@ class SmartToolRouter:
                 reasoning=intent_result.reasoning
             )
 
-        # Try semantic ranking first (PRD-64)
-        semantic_available = await self._ensure_embeddings(available_tools)
-
-        if semantic_available:
+        # PRD-141 US-014: delegate semantic ranking to GraphRouter — the single
+        # tool-selection pipeline. It wraps ActionSemanticIndex + the tool-routing
+        # graph and internally falls back to embedding-only ranking when the graph
+        # is empty. An empty result or any failure drops through to category
+        # filtering below. CORE_TOOLS / always-include pins / classifier-suggested
+        # tools are always kept so the graph path never strips a tool the agent needs.
+        from config import config
+        if config.SEMANTIC_TOOL_ROUTING:
             try:
-                filtered = await self._rank_tools_by_similarity(
-                    query, available_tools, intent_result
-                )
-                # Ensure ALWAYS_INCLUDE tools are present even after semantic ranking
-                filtered_names = {t.get("function", {}).get("name") for t in filtered}
-                for tool in available_tools:
-                    name = tool.get("function", {}).get("name", "")
-                    if name in self.ALWAYS_INCLUDE and name not in filtered_names:
-                        filtered.append(tool)
-                tool_choice = self._determine_tool_choice(intent_result, filtered)
-                priority = intent_result.suggested_tools or []
+                from modules.tools.discovery.graph_router import get_graph_router
 
-                return ToolRoutingResult(
-                    should_include_tools=True,
-                    filtered_tools=filtered,
-                    priority_tools=priority,
-                    tool_choice=tool_choice,
-                    reasoning=f"Semantic ranking: {intent_result.reasoning}"
+                chains = await get_graph_router().rank_chains(
+                    query=query, workspace_id=workspace_id, agent_id=agent_id, top_k=30,
                 )
+                if chains:
+                    keep = {name for _, _, chain in chains for name in chain}
+                    keep |= self.CORE_TOOLS | self._always_include_names()
+                    keep |= set(intent_result.suggested_tools or [])
+                    filtered = [
+                        t for t in available_tools
+                        if t.get("function", {}).get("name", "") in keep
+                    ]
+                    if filtered:
+                        return ToolRoutingResult(
+                            should_include_tools=True,
+                            filtered_tools=filtered,
+                            priority_tools=intent_result.suggested_tools or [],
+                            tool_choice=self._determine_tool_choice(intent_result, filtered),
+                            reasoning=f"Graph routing: {intent_result.reasoning}",
+                        )
             except Exception as e:
-                logger.warning(f"[ToolRouter] Semantic ranking failed, falling back: {e}")
+                from core.utils.exception_telemetry import record_error
+                record_error(
+                    subsystem="routing",
+                    operation="graph_rank_chains",
+                    error=e,
+                    agent_id=agent_id,
+                )
 
-        # Fallback: keyword-based category matching
-        relevant_categories = self.INTENT_TO_TOOLS.get(
-            intent_result.primary_intent,
-            []
-        )
-
-        filtered = self._filter_tools_by_categories(
-            available_tools,
-            relevant_categories,
-            intent_result.suggested_tools
-        )
+        # Fallback: ActionRegistry category matching (PRD-141 US-015)
+        filtered = self._filter_tools_by_intent(available_tools, intent_result)
 
         tool_choice = self._determine_tool_choice(intent_result, filtered)
         priority = intent_result.suggested_tools or []
@@ -341,74 +267,72 @@ class SmartToolRouter:
             reasoning=intent_result.reasoning
         )
 
-    def _filter_tools_by_categories(
+    def _filter_tools_by_intent(
         self,
         all_tools: List[Dict[str, Any]],
-        categories: List[str],
-        suggested: List[str]
+        intent_result: IntentResult,
     ) -> List[Dict[str, Any]]:
-        """Filter tools to only include relevant categories."""
+        """Filter tools to the ActionRegistry categories mapped to the intent.
+
+        PRD-141 US-015: maps the classified intent to ActionRegistry *category
+        names* via ``_INTENT_TO_REGISTRY_CATEGORIES`` and pulls the matching
+        action names from the registry at call time. The kept set is unioned
+        with the classifier's suggested tools plus the always-on CORE_TOOLS and
+        the signal/core/promoted pins from ``_always_include_names()``, so an
+        action registered under an already-mapped category — or marked
+        ``promoted=True`` — is auto-discoverable with no edit to this router.
+        """
+        categories = _INTENT_TO_REGISTRY_CATEGORIES.get(intent_result.primary_intent, [])
+        suggested = set(intent_result.suggested_tools or [])
+
+        # Nothing to narrow on (unmapped intent, no suggestions) — can't filter
+        # meaningfully, so keep the full set.
         if not categories and not suggested:
-            # For multi-step or complex queries, include all tools
             return all_tools
 
-        # Build set of relevant tool names
-        relevant_names = set(suggested) if suggested else set()
-        for category in categories:
-            relevant_names.update(self.TOOL_CATEGORIES.get(category, []))
+        relevant_names = suggested | set(self.CORE_TOOLS) | self._always_include_names()
 
-        # Always include core tools and promoted always-include tools
-        relevant_names.update(self.CORE_TOOLS)
-        relevant_names.update(self.ALWAYS_INCLUDE)
+        if categories:
+            # Lazy import — the registry pulls in heavy modules.tools.* deps.
+            # This is already the fallback-of-last-resort (the graph path failed
+            # or is off), so a registry hiccup must not crash routing: degrade
+            # to suggested ∪ CORE_TOOLS ∪ always-include pins.
+            try:
+                from modules.tools.discovery.action_registry import get_action_registry
+                registry = get_action_registry()
+                for category in categories:
+                    for action in registry.get_by_category(category):
+                        relevant_names.add(action.name)
+            except Exception:
+                logger.warning(
+                    "[ToolRouter] ActionRegistry lookup failed during category "
+                    "fallback — degrading to core/always/suggested tools",
+                    exc_info=True,
+                )
 
-        # Filter
-        filtered = []
-        for tool in all_tools:
-            if not isinstance(tool, dict):
-                continue
-            fn = tool.get("function", {})
-            name = fn.get("name", "")
+        filtered = [
+            t for t in all_tools
+            if isinstance(t, dict)
+            and t.get("function", {}).get("name", "") in relevant_names
+        ]
 
-            if name in relevant_names:
-                filtered.append(tool)
-            elif self._tool_matches_query(name, fn.get("description", ""), categories):
-                filtered.append(tool)
-
-        # Limit to reasonable number
+        # Limit to a reasonable number, keeping suggested + core + always-include
+        # (signal/core/promoted) tools first so the cap never drops a pinned or
+        # promoted affordance (e.g. the full-autonomy dial).
         if len(filtered) > 30:
-            # Keep suggested + core + first N others
+            always = self._always_include_names()
             priority_tools = []
             other_tools = []
             for tool in filtered:
                 name = tool.get("function", {}).get("name", "")
-                if name in suggested or name in self.CORE_TOOLS:
+                if name in suggested or name in self.CORE_TOOLS or name in always:
                     priority_tools.append(tool)
                 else:
                     other_tools.append(tool)
-            filtered = priority_tools + other_tools[:30 - len(priority_tools)]
+            filtered = priority_tools + other_tools[:max(0, 30 - len(priority_tools))]
 
         logger.debug(f"[ToolRouter] Filtered {len(all_tools)} tools to {len(filtered)}")
         return filtered
-
-    def _tool_matches_query(self, name: str, description: str, categories: List[str]) -> bool:
-        """Check if a tool might be relevant based on its name/description."""
-        text = f"{name} {description}".lower()
-
-        category_keywords = {
-            "data": ["database", "query", "sql", "data", "analytics"],
-            "search": ["search", "find", "lookup", "knowledge"],
-            "files": ["file", "directory", "folder", "write", "read"],
-            "external": ["email", "slack", "github", "compose"],
-            "document": ["document", "report", "pdf", "docx", "xlsx", "invoice", "export", "generate"],
-            "code": ["code", "execute", "run", "command"],
-        }
-
-        for category in categories:
-            keywords = category_keywords.get(category, [])
-            if any(kw in text for kw in keywords):
-                return True
-
-        return False
 
     def _determine_tool_choice(
         self,

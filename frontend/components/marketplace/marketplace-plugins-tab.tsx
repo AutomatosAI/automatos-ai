@@ -35,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { PremiumIcon } from '@/components/shared'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ViewToggle } from '@/components/shared/view-toggle'
@@ -92,7 +92,6 @@ interface MarketplacePluginsTabProps {
 // ===================================================================
 
 export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplacePluginsTabProps) {
-  const { toast } = useToast()
   const { user } = useUser()
   const [viewMode, setViewMode] = useViewMode('mp-plugins')
   const { data: iconMappings = {} } = useSystemIcons()
@@ -227,14 +226,10 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
     setApprovingId(pluginId)
     try {
       await apiClient.post(`/api/admin/plugins/${pluginId}/approve`)
-      toast({ title: 'Capability approved and published to marketplace!' })
+      toast('Capability approved and published to marketplace!')
       fetchAllPlugins()
     } catch (error: any) {
-      toast({
-        title: 'Failed to approve capability',
-        description: error?.message || 'An error occurred',
-        variant: 'destructive',
-      })
+      toast.error('Failed to approve capability', { description: error?.message || 'An error occurred' })
     } finally {
       setApprovingId(null)
     }
@@ -244,14 +239,10 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
     setDeactivatingId(pluginId)
     try {
       await apiClient.post(`/api/admin/plugins/${pluginId}/deactivate`)
-      toast({ title: 'Capability deactivated' })
+      toast('Capability deactivated')
       fetchAllPlugins()
     } catch (error: any) {
-      toast({
-        title: 'Failed to deactivate capability',
-        description: error?.message || 'An error occurred',
-        variant: 'destructive',
-      })
+      toast.error('Failed to deactivate capability', { description: error?.message || 'An error occurred' })
     } finally {
       setDeactivatingId(null)
     }
@@ -264,14 +255,10 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
     setDeletingId(pluginId)
     try {
       await apiClient.delete(`/api/admin/plugins/${pluginId}`)
-      toast({ title: 'Capability deleted permanently' })
+      toast('Capability deleted permanently')
       fetchAllPlugins()
     } catch (error: any) {
-      toast({
-        title: 'Failed to delete capability',
-        description: error?.message || 'An error occurred',
-        variant: 'destructive',
-      })
+      toast.error('Failed to delete capability', { description: error?.message || 'An error occurred' })
     } finally {
       setDeletingId(null)
     }
@@ -295,11 +282,7 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
   const handleEnable = async (pluginId: string, pluginName: string) => {
     const wsId = getWorkspaceId()
     if (!wsId) {
-      toast({
-        title: 'No workspace',
-        description: 'No active workspace found. Please select a workspace.',
-        variant: 'destructive',
-      })
+      toast.error('No workspace', { description: 'No active workspace found. Please select a workspace.' })
       return
     }
 
@@ -324,24 +307,14 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
         )
       )
 
-      toast({
-        title: 'Capability Enabled',
-        description: `${pluginName} has been enabled for your workspace.`,
-      })
+      toast('Capability Enabled', { description: `${pluginName} has been enabled for your workspace.` })
     } catch (err: any) {
       const msg = err?.message || 'Failed to enable plugin'
       if (msg.includes('already enabled') || msg.includes('409')) {
-        toast({
-          title: 'Already Enabled',
-          description: `${pluginName} is already enabled for your workspace.`,
-        })
+        toast('Already Enabled', { description: `${pluginName} is already enabled for your workspace.` })
         setEnabledPluginIds((prev) => new Set([...prev, pluginId]))
       } else {
-        toast({
-          title: 'Error',
-          description: msg,
-          variant: 'destructive',
-        })
+        toast.error('Error', { description: msg })
       }
     } finally {
       setEnablingId(null)
@@ -375,16 +348,9 @@ export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplaceP
         )
       )
 
-      toast({
-        title: 'Capability Disabled',
-        description: `${pluginName} has been disabled for your workspace.`,
-      })
+      toast('Capability Disabled', { description: `${pluginName} has been disabled for your workspace.` })
     } catch (err: any) {
-      toast({
-        title: 'Error',
-        description: err?.message || 'Failed to disable capability',
-        variant: 'destructive',
-      })
+      toast.error('Error', { description: err?.message || 'Failed to disable capability' })
     }
   }
 

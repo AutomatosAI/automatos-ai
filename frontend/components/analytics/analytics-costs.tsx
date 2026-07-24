@@ -645,7 +645,7 @@ export function AnalyticsCosts({ days }: Props) {
           <Card className="glass-card overflow-hidden">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Bot className="w-5 h-5 text-orange-400" />
+                <Bot className="w-5 h-5 text-warning" />
                 Cost by Agent
               </CardTitle>
             </CardHeader>

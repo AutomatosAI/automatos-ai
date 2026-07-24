@@ -1,0 +1,64 @@
+name: CodeQL
+
+# PRD-173 (F092, W3 slice) — SAST lane.
+#
+# Static analysis (CodeQL) over the repo's two languages: the Python
+# orchestrator and the TypeScript/JavaScript frontend. Runs on PRs to main
+# (so new alerts surface before merge) and weekly (to catch newly-published
+# query updates against the existing tree).
+#
+# Interpreted languages use build-mode: none — no compile step. CodeQL's
+# default behaviour is to flag alerts without failing the check on the whole
+# backlog; alerts land in the repo's Security tab and PR checks. Tightening
+# to "fail on newly-introduced high-severity" is a branch-protection/Security
+# setting (default-setup style), not encoded here, so the lane does not red
+# the tree on day one against pre-existing findings (see PRD-173 §6).
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Mondays 03:17 UTC — off the hour to avoid the scheduling stampede.
+    - cron: "17 3 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      security-events: write
+      # Needed for workflows in private repos / to fetch actions.
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - python
+          - javascript-typescript
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

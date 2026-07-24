@@ -51,7 +51,7 @@ export function VoiceRecordingIndicator({
         {Array.from({ length: 16 }).map((_, i) => (
           <div
             key={i}
-            className="w-[3px] rounded-full bg-gradient-to-t from-orange-500 to-red-500"
+            className="w-[3px] rounded-full bg-gradient-to-t from-warning to-red-500"
             style={{
               animation: `voice-bar 0.8s ease-in-out ${i * 0.05}s infinite alternate`,
               height: '4px',
@@ -77,7 +77,7 @@ export function VoiceRecordingIndicator({
           type="button"
           size="sm"
           onClick={onStop}
-          className="h-8 px-3 bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-xl shadow-[0_0_12px_rgba(249,115,22,0.3)]"
+          className="h-8 px-3 bg-gradient-to-br from-warning to-red-500 hover:from-warning hover:to-red-600 text-white rounded-xl shadow-[0_0_12px_rgba(249,115,22,0.3)]"
           title="Stop and send"
         >
           <Square className="w-3.5 h-3.5 mr-1.5 fill-current" />

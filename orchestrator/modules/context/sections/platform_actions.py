@@ -80,6 +80,15 @@ class PlatformActionsSection(BaseSection):
                 if filtered:
                     return filtered
 
+            # PR-B (tool-surface review): when narrowing couldn't decide and
+            # the operator chose closed-pins, render the tiny pins card
+            # instead of the ~4k-token full catalog. Flag-off keeps the full
+            # dump (operator explicitly chose the wide surface).
+            if self._semantic_routing_enabled() and self._fallback_mode_closed():
+                pins_text = self._build_pins_text()
+                if pins_text:
+                    return pins_text
+
             return self._build()
         except Exception:
             logger.exception(
@@ -137,7 +146,14 @@ class PlatformActionsSection(BaseSection):
         agent_id = ctx.kwargs.get("agent_id") if ctx.kwargs else None
         router = get_graph_router()
         top_k = self._top_k()
-        chains = await router.rank_chains(query, agent_id=agent_id, top_k=top_k)
+        # PRD-177 S5: per-tenant graph — scope reads to this workspace. The
+        # learned edges are the tenant's own; never read another workspace's.
+        chains = await router.rank_chains(
+            query,
+            workspace_id=ctx.workspace_id,
+            agent_id=agent_id,
+            top_k=top_k,
+        )
 
         if not chains:
             return None
@@ -151,9 +167,14 @@ class PlatformActionsSection(BaseSection):
         hints = self._build_chain_hints(chains)
 
         # Build filtered summary from registry
+        # PRD-143: Auto context paths NEVER include the su tier — pinned
+        # explicitly so a future default change cannot widen this surface.
         registry = get_action_registry()
         catalog = registry.build_filtered_prompt_summary(
-            action_names, exclude_admin=True, exclude_promoted=True
+            action_names,
+            exclude_admin=True,
+            exclude_promoted=True,
+            include_super_admin=False,
         )
 
         if not catalog:
@@ -191,11 +212,59 @@ class PlatformActionsSection(BaseSection):
             lines.append(f"- call {sequence}")
         return "\n".join(lines)
 
+    def _fallback_mode_closed(self) -> bool:
+        """One source of truth: the router's fallback-mode reader."""
+        try:
+            from modules.tools.tool_router import _fallback_mode_closed
+            return _fallback_mode_closed()
+        except Exception:
+            return False
+
+    def _build_pins_text(self) -> str:
+        """The closed-pins fallback card: pins + the discovery pointer.
+
+        ~10 lines instead of the ~4k-token catalog. The model keeps a way
+        into EVERYTHING via platform_find_tools, so shipping less text here
+        loses no capability.
+        """
+        try:
+            from modules.tools.discovery.action_registry import get_action_registry
+            from modules.tools.tool_router import _fallback_pins
+
+            pins = _fallback_pins()
+            if not pins:
+                return ""
+            catalog = get_action_registry().build_filtered_prompt_summary(
+                pins,
+                exclude_admin=True,
+                exclude_promoted=False,  # pins are largely promoted by design
+                include_super_admin=False,
+            )
+            if not catalog:
+                return ""
+            return (
+                self._PREAMBLE
+                + catalog
+                + "\n\nNeed anything else? Search the full catalog with "
+                "`platform_find_tools(query=...)` — every platform action is "
+                "reachable through it.\n"
+            )
+        except Exception:
+            logger.warning(
+                "PlatformActionsSection._build_pins_text failed", exc_info=True
+            )
+            return ""
+
     def _build(self) -> str:
         from modules.tools.discovery.action_registry import get_action_registry
 
         registry = get_action_registry()
-        catalog: str = registry.build_prompt_summary(exclude_promoted=True, exclude_admin=True)
+        # PRD-143: Auto context path — su tier pinned out explicitly.
+        catalog: str = registry.build_prompt_summary(
+            exclude_promoted=True,
+            exclude_admin=True,
+            include_super_admin=False,
+        )
 
         if not catalog:
             logger.warning(
@@ -226,11 +295,13 @@ class PlatformActionsSection(BaseSection):
 
             index = get_action_semantic_index()
             top_k = self._top_k()
+            # PRD-143: Auto context path — su tier pinned out explicitly.
             ranked = await index.rank_actions(
                 query,
                 top_k=top_k,
                 exclude_admin=True,
                 exclude_promoted=True,
+                include_super_admin=False,
             )
             if not ranked:
                 logger.debug(
@@ -245,6 +316,7 @@ class PlatformActionsSection(BaseSection):
                 top_names,
                 exclude_admin=True,
                 exclude_promoted=True,
+                include_super_admin=False,
             )
             if not catalog:
                 return None

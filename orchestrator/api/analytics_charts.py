@@ -18,11 +18,17 @@ from sqlalchemy import func, desc
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.super_admin import require_super_admin
 from core.database.database import get_db
 from core.models.core import LLMUsage
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/analytics/charts", tags=["Analytics Charts"])
+# PRD-143 S6: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/analytics/charts",
+    tags=["Analytics Charts"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────

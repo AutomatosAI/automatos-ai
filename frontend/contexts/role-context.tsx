@@ -5,12 +5,14 @@ import { useSession } from '@clerk/nextjs'
 
 /**
  * System Role Context
- * 
- * Provides system-level role (admin, user, customer_manager) from Clerk's
- * session token metadata. This is separate from workspace roles (owner/member).
+ *
+ * Provides the system-level role from Clerk's session token metadata,
+ * aligned to the backend's system_role set (PRD-195 S8 — the legacy ghost
+ * role that existed in no backend role set is deleted).
+ * This is separate from workspace roles (owner/admin/editor/viewer).
  */
 
-type SystemRole = 'admin' | 'user' | 'customer_manager'
+type SystemRole = 'super_admin' | 'admin' | 'user'
 
 interface RoleContextType {
     systemRole: SystemRole
@@ -47,14 +49,17 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     // role, but a misconfigured tenant user must never be promoted to platform
     // admin. Require an Automatos-staff email domain on top of the metadata.
     const isAutomatosStaff = !!primaryEmail && primaryEmail.endsWith('@automatos.app')
-    const effectiveRole = roleFromToken === 'admin' && !isAutomatosStaff ? 'user' : roleFromToken
+    const isElevated = roleFromToken === 'admin' || roleFromToken === 'super_admin'
+    const effectiveRole = isElevated && !isAutomatosStaff ? 'user' : roleFromToken
 
     const systemRole = (effectiveRole || 'user') as SystemRole
 
     return (
         <RoleContext.Provider value={{
             systemRole,
-            isAdmin: systemRole === 'admin',
+            // super_admin ⊇ admin — mirrors the backend hierarchy
+            // (modules/policy/roles.py role_satisfies).
+            isAdmin: systemRole === 'admin' || systemRole === 'super_admin',
             isLoading: !isLoaded
         }}>
             {children}

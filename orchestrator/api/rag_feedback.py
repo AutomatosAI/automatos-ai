@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field
 
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from modules.rag.feedback_writer import write_rag_feedback
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/rag/feedback", tags=["rag-feedback"])
@@ -47,7 +49,7 @@ class FeedbackStatsResponse(BaseModel):
 
 # --- Endpoints ---
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def submit_feedback(
     feedback: RAGFeedbackRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -55,35 +57,22 @@ async def submit_feedback(
 ):
     """Submit feedback on a RAG-generated response."""
     try:
-        insert_query = text("""
-            INSERT INTO rag_feedback
-                (query, response_text, chunk_ids, document_ids, rating,
-                 feedback_type, correction_text, rag_config_id,
-                 execution_time_ms, workspace_id, user_id, created_at)
-            VALUES
-                (:query, :response_text, :chunk_ids, :document_ids, :rating,
-                 :feedback_type, :correction_text, :rag_config_id,
-                 :execution_time_ms, :workspace_id, :user_id, NOW())
-            RETURNING id
-        """)
-
-        result = db.execute(insert_query, {
-            "query": feedback.query,
-            "response_text": feedback.response_text,
-            "chunk_ids": feedback.chunk_ids,
-            "document_ids": feedback.document_ids,
-            "rating": feedback.rating,
-            "feedback_type": feedback.feedback_type,
-            "correction_text": feedback.correction_text,
-            "rag_config_id": feedback.rag_config_id,
-            "execution_time_ms": feedback.execution_time_ms,
-            "workspace_id": str(ctx.workspace_id),
-            "user_id": getattr(ctx, "user_id", None),
-        })
-        row = result.fetchone()
-        db.commit()
-
-        return {"success": True, "feedback_id": row.id if row else None}
+        # PRD-185 S7: single shared writer — the chat vote path lands rows here too.
+        feedback_id = write_rag_feedback(
+            db,
+            query=feedback.query,
+            workspace_id=ctx.workspace_id,
+            user_id=getattr(ctx, "user_id", None),
+            document_ids=feedback.document_ids,
+            chunk_ids=feedback.chunk_ids,
+            rating=feedback.rating,
+            feedback_type=feedback.feedback_type,
+            correction_text=feedback.correction_text,
+            rag_config_id=feedback.rag_config_id,
+            execution_time_ms=feedback.execution_time_ms,
+            response_text=feedback.response_text,
+        )
+        return {"success": True, "feedback_id": feedback_id}
 
     except Exception as e:
         db.rollback()

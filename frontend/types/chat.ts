@@ -123,7 +123,10 @@ export interface RoutingInfo {
 export interface MessageMetadata {
   intent?: string
   confidence?: number
-  source?: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database'
+  // PRD-205 S7: background-authored messages carry their persisted
+  // source.label ("Auto · background") through this slot — any string
+  // renders as a neutral badge; the literals keep their colour branches.
+  source?: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database' | (string & {})
   processing_time?: number
   tools_used?: string[]
   database_count?: number
@@ -206,6 +209,10 @@ export interface Chat {
   updatedAt: string
   visibility: VisibilityType
   lastContext?: AppUsage
+  /** PRD-220: latest message text (truncated server-side) for thread lists. */
+  lastMessagePreview?: string | null
+  /** PRD-205: 'auto' marks the per-user thread where Auto speaks unprompted. */
+  kind?: 'user' | 'auto'
 }
 
 /**
@@ -250,11 +257,16 @@ export interface ChatRequest {
   }
   selectedChatModel?: string
   selectedVisibilityType?: VisibilityType
+  // PRD-221 S5: structured page context — references, not payloads. Mirrors
+  // the backend allow-list (services/page_context.py). NEVER carries role or
+  // permission fields; the server derives authz itself.
   context?: {
-    currentPage?: string
-    selectedItems?: any[]
-    userRole?: string
-    recentActions?: any[]
+    page?: string
+    route?: string
+    tab?: string
+    selected?: { type: string; id: string }
+    filters?: Record<string, string>
+    visible_ids?: string[]
   }
 }
 

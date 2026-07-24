@@ -65,11 +65,14 @@ class ComposioClient:
     Usage:
         client = ComposioClient()
         
-        # Initiate OAuth connection
-        redirect_url = client.initiate_connection(
+        # Initiate hosted-auth connection (returns dict with redirect_url +
+        # the auth_config_id/scheme actually used — persist these against the
+        # workspace's connection row so reconnects reuse the same scheme).
+        result = client.initiate_connection(
             entity_id="workspace_123",
-            app="GITHUB"
+            app="GITHUB",
         )
+        redirect_url = result["redirect_url"]
         
         # Create Tool Router session
         session = client.create_tool_router_session(
@@ -113,7 +116,11 @@ class ComposioClient:
             # billing, and service monitoring. This is part of their service model.
             self._composio = Composio(
                 api_key=self.api_key,
-                toolkit_versions={"default": "latest"},
+                # "latest" is rejected for manual tools.execute() calls — see
+                # docs/SHOPIFY/COMPOSIO-SHOPIFY-SETUP.md gotcha #1. Pin shopify
+                # to the version we've tested PRD-009 sync against; other
+                # toolkits stay on "latest" via the default key.
+                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
             )
         return self._composio
 
@@ -130,7 +137,9 @@ class ComposioClient:
             self._toolset = Composio(
                 api_key=self.api_key,
                 provider=OpenAIProvider(),
-                toolkit_versions={"default": "latest"},
+                # Mirror the pin on `composio` above so the OpenAI-provider
+                # variant doesn't drift back to "latest" for shopify.
+                toolkit_versions={"default": "latest", "shopify": "20260414_00"},
             )
         return self._toolset
     
@@ -154,34 +163,51 @@ class ComposioClient:
         # Return a simple dict for compatibility
         return {"user_id": entity_id, "composio_entity_id": entity_id}
     
-    def _resolve_auth_config_id(self, app_slug: str) -> Optional[str]:
+    def _resolve_auth_config_id(
+        self,
+        app_slug: str,
+        preferred_auth_config_id: Optional[str] = None,
+        preferred_scheme: Optional[str] = None,
+    ) -> Optional[str]:
         """
-        Find existing active Auth Config ID for an app slug.
-        PERFORMANCE: Cached for 1 hour to avoid repeated API calls.
+        Find an ENABLED Auth Config ID for an app slug.
+
+        Selection order:
+          1. preferred_auth_config_id, if passed (caller knows exactly which one)
+          2. ENABLED config matching app_slug AND preferred_scheme (if passed)
+          3. ENABLED config matching app_slug (first hit — legacy behaviour)
+
+        PERFORMANCE: Cached for 1 hour. Scheme is part of the cache key so
+        OAuth lookups don't poison API_KEY lookups for the same toolkit.
         """
-        # Check cache first
-        cache_key = app_slug.lower()
+        if preferred_auth_config_id:
+            return preferred_auth_config_id
+
+        scheme_norm = (preferred_scheme or "_any").upper()
+        cache_key = f"{app_slug.lower()}::{scheme_norm}"
         if cache_key in self._auth_config_cache:
             return self._auth_config_cache[cache_key]
 
         try:
-            # List all auth configs (expensive call)
-            logger.debug(f"Fetching auth_configs from Composio API for {app_slug}")
+            logger.debug(f"Fetching auth_configs from Composio API for {app_slug} scheme={scheme_norm}")
             response = self.composio.auth_configs.list()
             items = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
 
             for c in items:
-                # Check for matching toolkit slug and enabled status
-                # Safe access to nested attributes
                 c_slug = getattr(c.toolkit, 'slug', '') if hasattr(c, 'toolkit') else ''
                 c_status = getattr(c, 'status', 'ENABLED')
+                c_scheme = (getattr(c, 'auth_scheme', '') or getattr(c, 'authScheme', '') or '').upper()
 
-                if c_slug.lower() == app_slug.lower() and c_status == 'ENABLED':
-                    # Cache the result
-                    self._auth_config_cache[cache_key] = c.id
-                    return c.id
+                if c_slug.lower() != app_slug.lower():
+                    continue
+                if c_status != 'ENABLED':
+                    continue
+                if preferred_scheme and c_scheme != scheme_norm:
+                    continue
 
-            # Cache None result too (to avoid retrying)
+                self._auth_config_cache[cache_key] = c.id
+                return c.id
+
             self._auth_config_cache[cache_key] = None
             return None
         except Exception as e:
@@ -207,13 +233,25 @@ class ComposioClient:
         schemes = self._get_auth_schemes(app_slug)
         return schemes == ["NO_AUTH"] or (len(schemes) == 1 and "NO_AUTH" in schemes)
 
-    def _ensure_auth_config_id(self, app_slug: str) -> str:
+    def _ensure_auth_config_id(
+        self,
+        app_slug: str,
+        preferred_auth_config_id: Optional[str] = None,
+        preferred_scheme: Optional[str] = None,
+    ) -> str:
         """
         Get existing Auth Config ID or create a new one with correct scheme.
 
+        If preferred_auth_config_id or preferred_scheme is passed, those are
+        threaded through resolution. Creation only happens when nothing exists.
+
         Raises ValueError for NO_AUTH apps — they don't need auth configs.
         """
-        existing_id = self._resolve_auth_config_id(app_slug)
+        existing_id = self._resolve_auth_config_id(
+            app_slug,
+            preferred_auth_config_id=preferred_auth_config_id,
+            preferred_scheme=preferred_scheme,
+        )
         if existing_id:
             return existing_id
 
@@ -262,37 +300,66 @@ class ComposioClient:
         self,
         entity_id: str,
         app: str,
-        callback_url: Optional[str] = None
-    ) -> str:
+        callback_url: Optional[str] = None,
+        auth_config_id: Optional[str] = None,
+        auth_scheme: Optional[str] = None,
+    ) -> Dict[str, str]:
         """
-        Initiate OAuth connection using Composio's Hosted Auth Link.
-        
-        This returns a URL that the user should be redirected to.
-        Composio handles the OAuth flow and stores the credentials.
-        
+        Initiate a Composio hosted-auth connection.
+
+        Composio's hosted-auth link handles OAuth, API Key, and Bearer Token
+        flows from the same UI — the form Composio renders depends on the
+        auth_config's scheme. Pass auth_scheme or auth_config_id to pin which
+        scheme this workspace uses (e.g. API_KEY for Shopify merchants where
+        managed-install breaks OAuth).
+
         Args:
-            entity_id: Entity identifier (user_id in SDK)
-            app: App name (auth_config_id in SDK, e.g., "GITHUB")
-            callback_url: Optional callback URL after auth completes
-            
+            entity_id: Workspace's Composio user_id.
+            app: App slug (e.g. "SHOPIFY").
+            callback_url: Optional post-auth redirect.
+            auth_config_id: Optional explicit auth_config to use (wins over scheme).
+            auth_scheme: Optional preferred scheme ("API_KEY" | "OAUTH2" | "BASIC").
+
         Returns:
-            Redirect URL for OAuth flow
+            dict with redirect_url + auth_config_id + auth_scheme actually used
+            (so callers can persist the choice against the workspace's connection).
         """
         if not self.composio:
             raise ValueError("Composio client not initialized. Set COMPOSIO_API_KEY.")
-        
+
         try:
-            # Ensure valid Auth Config ID exists for this app
-            auth_config_id = self._ensure_auth_config_id(app)
-            
-            # Use link() for hosted auth UI (handles OAuth, API Key, Bearer Token, etc.)
-            # This redirects users to Composio's page where they can input credentials
+            chosen_id = self._ensure_auth_config_id(
+                app,
+                preferred_auth_config_id=auth_config_id,
+                preferred_scheme=auth_scheme,
+            )
+
             connection_request = self.composio.connected_accounts.link(
                 user_id=entity_id,
-                auth_config_id=auth_config_id,
-                callback_url=callback_url
+                auth_config_id=chosen_id,
+                callback_url=callback_url,
             )
-            return connection_request.redirect_url
+
+            # Best-effort: look up the chosen config's scheme so callers can
+            # persist it. Falls back to whatever the caller asked for.
+            resolved_scheme = (auth_scheme or "").upper() or None
+            try:
+                cfg = self.composio.auth_configs.get(chosen_id)
+                resolved_scheme = (
+                    getattr(cfg, 'auth_scheme', None)
+                    or getattr(cfg, 'authScheme', None)
+                    or resolved_scheme
+                )
+                if resolved_scheme:
+                    resolved_scheme = str(resolved_scheme).upper()
+            except Exception:
+                pass
+
+            return {
+                "redirect_url": connection_request.redirect_url,
+                "auth_config_id": chosen_id,
+                "auth_scheme": resolved_scheme or "",
+            }
         except Exception as e:
             logger.error(f"Failed to initiate Composio connection for {app}: {e}")
             raise

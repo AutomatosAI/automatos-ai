@@ -82,8 +82,9 @@ export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
  * their own tabs as part of their editorial page frame and are deliberately
  * absent from this map.
  *
- * Tab counts here are seed values for display before the page mounts and
- * fetches the real numbers — pages that care wire their own dynamic counts.
+ * Labels only — no seed counts. The previous placeholder badges (All 18,
+ * Outputs 41, Skills 24…) fabricated numbers pilots read as real (PRD-154 S10).
+ * Pages with honest counts wire their own dynamic numbers.
  */
 /**
  * Tuple shape: [label, count, hrefOverride?]
@@ -106,7 +107,6 @@ export function resolveActiveMenuId(pathname: string): string | null {
   if (pathname.startsWith('/chat')) return 'chat';
   if (pathname.startsWith('/missions/')) return 'assign'; // mission detail nests under Assignments
   if (pathname.startsWith('/activity')) return 'cmd';     // activity panels live under Command Centre
-  if (pathname.startsWith('/dashboard')) return 'cmd';
   if (pathname.startsWith('/marketplace')) return 'market';
   if (pathname.startsWith('/admin')) return 'admin';
   if (pathname.startsWith('/playbooks')) return 'assign';

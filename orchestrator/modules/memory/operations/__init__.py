@@ -1,23 +1,10 @@
-"""Memory Operations"""
-from .augmentation import VectorStoreAugmenter, AugmentationStrategy, AugmentedMemory
-from .consolidation import MemoryConsolidator, ConsolidationStrategy, ConsolidationMetrics
-from .access_patterns import MemoryAccessOptimizer, AccessPattern, AccessMetrics
-from .execution_history import ExecutionHistorySearch, ExecutionResult, get_execution_history_search
-from .prompt_injection import MemoryPromptInjector
+"""Memory Operations — contradiction-based consolidation (PRD-159 S4).
 
-__all__ = [
-    "VectorStoreAugmenter",
-    "AugmentationStrategy",
-    "AugmentedMemory",
-    "MemoryConsolidator",
-    "ConsolidationStrategy",
-    "ConsolidationMetrics",
-    "MemoryAccessOptimizer",
-    "AccessPattern",
-    "AccessMetrics",
-    "ExecutionHistorySearch",
-    "ExecutionResult",
-    "get_execution_history_search",
-    # Prompt Injection
-    "MemoryPromptInjector",
-]
+The retired manager's satellites that used to live here (augmentation,
+access_patterns, consolidation, execution_history, prompt_injection) were
+deleted with that stack in PRD-187 S5 — ``contradiction`` is the one live
+operation, driven by ``UnifiedMemoryService.run_sleep_time_consolidation``.
+"""
+from .contradiction import plan_consolidation
+
+__all__ = ["plan_consolidation"]

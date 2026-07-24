@@ -114,6 +114,15 @@ class StreamingHandler:
             payload["data"] = data
         return f'd:{json.dumps(payload)}\n'
 
+    def format_aisdk_limit_reached(self, limit: str, value: int, message: str) -> str:
+        """Format a limit_reached event so the user is told an agent stopped
+        because it hit a cap (instead of silently bailing). Carries limit/value
+        under the AI SDK data envelope like every other data event."""
+        return self.format_aisdk_data(
+            "limit_reached",
+            {"limit": limit, "value": value, "message": message},
+        )
+
     def format_aisdk_chat_id(self, chat_id: str) -> str:
         """Format chat-id data event."""
         return f'd:{{"type":"chat-id","chatId":"{chat_id}"}}\n'

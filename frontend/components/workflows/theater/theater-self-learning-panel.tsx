@@ -165,7 +165,7 @@ const getGradeColor = (grade: string) => {
     case 'C':
       return 'text-warning bg-warning/20 border-warning/40'
     case 'D':
-      return 'text-orange-400 bg-orange-400/20 border-orange-400/40'
+      return 'text-warning bg-warning/20 border-warning/40'
     case 'F':
       return 'text-destructive bg-destructive/20 border-destructive/40'
     default:
@@ -180,7 +180,7 @@ const getBottleneckIcon = (type: QualityBottleneck['type']) => {
     case 'failed_step':
       return <XCircle className="w-3.5 h-3.5 text-destructive" />
     case 'high_retry_step':
-      return <TrendingUp className="w-3.5 h-3.5 text-orange-400" />
+      return <TrendingUp className="w-3.5 h-3.5 text-warning" />
     default:
       return <AlertTriangle className="w-3.5 h-3.5 text-muted-foreground" />
   }

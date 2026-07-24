@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence } from 'framer-motion'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import { Paperclip, X, FileText, Image } from 'lucide-react'
 import {
   Dialog,
@@ -159,24 +159,13 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
         ? `Task assigned to ${assignedAgent.name}.`
         : 'Task created.'
 
-      toast(
-        (t) => (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">{msg}</span>
-            <button
-              type="button"
-              className="text-xs text-primary hover:underline text-left"
-              onClick={() => {
-                toast.dismiss(t.id)
-                router.push('/command-center?tab=board')
-              }}
-            >
-              View on Command Center &rarr; Board
-            </button>
-          </div>
-        ),
-        { duration: 5000, icon: '\u2705' },
-      )
+      toast.success(msg, {
+        duration: 5000,
+        action: {
+          label: 'View on Board',
+          onClick: () => router.push('/command-center?tab=board'),
+        },
+      })
       handleOpenChange(false)
     } catch {
       toast.error('Failed to create task')

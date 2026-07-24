@@ -59,7 +59,6 @@ export function StudioPageTabs() {
             aria-current={isActive ? 'page' : undefined}
           >
             <span>{label}</span>
-            {count > 0 && <span className="sh-tab-ct">{count}</span>}
           </Link>
         );
       })}

@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from core.database.database import get_db, get_db_session
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.composio.client import get_composio_client, ComposioClient
 from core.composio.entity_manager import EntityManager
@@ -33,6 +34,7 @@ from core.models.routing import UnroutedEvent
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.jira_trigger import JiraTriggerIngestor
+from services import webhook_dedup
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -77,14 +79,21 @@ class ConnectionResponse(BaseModel):
 
 
 class InitiateConnectionRequest(BaseModel):
-    """Request to initiate OAuth."""
+    """Request to initiate a hosted-auth connection."""
     callback_url: Optional[str] = None
+    # Optional per-workspace overrides for hosted-auth scheme selection.
+    # Pass auth_scheme="API_KEY" for Shopify merchants where managed-install
+    # breaks the OAuth bounce; auth_config_id pins a specific Composio config.
+    auth_scheme: Optional[str] = None
+    auth_config_id: Optional[str] = None
 
 
 class InitiateConnectionResponse(BaseModel):
-    """OAuth redirect URL."""
+    """Hosted-auth redirect URL + the chosen auth config (persisted on the workspace)."""
     redirect_url: str
     app_name: str
+    auth_config_id: Optional[str] = None
+    auth_scheme: Optional[str] = None
 
 
 class FeatureToggleRequest(BaseModel):
@@ -290,7 +299,7 @@ async def test_linkedin_upload_init():
 
 
 
-@router.post("/connect/{app_name}", response_model=InitiateConnectionResponse)
+@router.post("/connect/{app_name}", response_model=InitiateConnectionResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def initiate_connection(
     app_name: str,
     request: InitiateConnectionRequest = None,
@@ -329,30 +338,52 @@ async def initiate_connection(
         frontend_url = config.FRONTEND_URL or "http://localhost:3000"
         callback_url = f"{frontend_url}/tools/callback?connected={app_name.upper()}"
 
+    # If the workspace already has a stored auth_config_id/scheme for this
+    # app (from a prior connect), reuse it unless the caller is explicitly
+    # overriding. This makes reconnects sticky to the scheme that worked.
+    explicit_scheme = request.auth_scheme if request else None
+    explicit_id = request.auth_config_id if request else None
+    if not explicit_scheme and not explicit_id:
+        prior_meta = entity_manager.get_connection_metadata(
+            entity_id=entity["id"], app_name=app_name.upper()
+        )
+        if prior_meta:
+            explicit_scheme = prior_meta.get("auth_scheme") or explicit_scheme
+            explicit_id = prior_meta.get("auth_config_id") or explicit_id
+
     try:
-        redirect_url = client.initiate_connection(
+        link = client.initiate_connection(
             entity_id=composio_entity_id,
             app=app_name.upper(),
-            callback_url=callback_url
+            callback_url=callback_url,
+            auth_config_id=explicit_id,
+            auth_scheme=explicit_scheme,
         )
     except Exception as e:
         logger.error(f"Failed to initiate connection for {app_name}: {e}")
         raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
 
-    # Store pending connection
+    # Store pending connection + pin the chosen auth_config_id / scheme so
+    # subsequent reconnects pick the same one without the caller specifying.
     entity_manager.add_connection(
         entity_id=entity["id"],
         app_name=app_name.upper(),
-        status="pending"
+        status="pending",
+        metadata={
+            "auth_config_id": link.get("auth_config_id"),
+            "auth_scheme": link.get("auth_scheme"),
+        },
     )
 
     return InitiateConnectionResponse(
-        redirect_url=redirect_url,
-        app_name=app_name.upper()
+        redirect_url=link["redirect_url"],
+        app_name=app_name.upper(),
+        auth_config_id=link.get("auth_config_id"),
+        auth_scheme=link.get("auth_scheme"),
     )
 
 
-@router.post("/connect/{app_name}/callback")
+@router.post("/connect/{app_name}/callback", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def connection_callback(
     app_name: str,
     connection_id: Optional[str] = Query(None, description="Composio connection ID"),
@@ -420,7 +451,7 @@ async def connection_callback(
     return {"status": "success", "app_name": app_name.upper(), "connected": normalized_status == "active"}
 
 
-@router.delete("/connections/{app_name}")
+@router.delete("/connections/{app_name}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def disconnect_app(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -499,7 +530,7 @@ async def get_agent_app_features(
     ]
 
 
-@router.put("/agents/{agent_id}/apps/{app_name}/features")
+@router.put("/agents/{agent_id}/apps/{app_name}/features", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_agent_app_features(
     agent_id: int,
     app_name: str,
@@ -521,7 +552,7 @@ async def update_agent_app_features(
     return {"updated": count, "app_name": app_name.upper()}
 
 
-@router.post("/agents/{agent_id}/apps/{app_name}/enable-all")
+@router.post("/agents/{agent_id}/apps/{app_name}/enable-all", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def enable_all_features(
     agent_id: int,
     app_name: str,
@@ -541,7 +572,7 @@ async def enable_all_features(
     return {"enabled": count, "app_name": app_name.upper()}
 
 
-@router.post("/agents/{agent_id}/apps/{app_name}/disable-all")
+@router.post("/agents/{agent_id}/apps/{app_name}/disable-all", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def disable_all_features(
     agent_id: int,
     app_name: str,
@@ -583,7 +614,9 @@ async def handle_webhook(
     body = await request.body()
 
     # Verify signature — supports both legacy (x-composio-signature)
-    # and V3 (webhook-signature with "v1,<base64>" format)
+    # and V3 (webhook-signature with "v1,<base64>" format).
+    # When a secret is configured, a valid signature is mandatory:
+    # mismatch, verification error, or missing header ⇒ 401 (P2-13).
     webhook_secret = config.COMPOSIO_WEBHOOK_SECRET
     v3_signature = request.headers.get("webhook-signature")
     if webhook_secret and v3_signature:
@@ -597,10 +630,13 @@ async def handle_webhook(
                 hmac.new(base64.b64decode(webhook_secret), signed_content, hashlib.sha256).digest()
             ).decode()
             sig_value = v3_signature.split(",", 1)[-1] if "," in v3_signature else v3_signature
-            if not hmac.compare_digest(sig_value, expected_sig):
-                logger.warning("V3 webhook signature mismatch — allowing through for debugging")
+            signature_ok = hmac.compare_digest(sig_value, expected_sig)
         except Exception:
-            logger.warning("V3 signature verification error — allowing through for debugging", exc_info=True)
+            logger.warning("V3 signature verification error — rejecting", exc_info=True)
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        if not signature_ok:
+            logger.warning("V3 webhook signature mismatch — rejecting")
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
     elif webhook_secret and x_composio_signature:
         # Legacy format: plain HMAC hex digest
         expected_sig = hmac.new(
@@ -610,6 +646,23 @@ async def handle_webhook(
         ).hexdigest()
         if not hmac.compare_digest(x_composio_signature, expected_sig):
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    elif webhook_secret:
+        logger.warning("Webhook rejected: COMPOSIO_WEBHOOK_SECRET is set but no signature header present")
+        raise HTTPException(status_code=401, detail="Missing webhook signature")
+
+    # Replay guard + event dedup (PRD-194 S2, P2-13). Composio V3 sends
+    # webhook-id + webhook-timestamp on every delivery, and both are part of
+    # the signed content above — so a valid-signature replay of an old
+    # capture still carries its ORIGINAL timestamp (⇒ stale ⇒ 401), and a
+    # redelivery of an already-accepted webhook-id is a fast no-op ack:
+    # nothing parsed, nothing routed, nothing dispatched.
+    if webhook_dedup.timestamp_is_stale(request.headers.get("webhook-timestamp")):
+        logger.warning("Webhook rejected: stale webhook-timestamp (replay guard)")
+        raise HTTPException(status_code=401, detail="Stale webhook timestamp")
+    dedup_event_id = request.headers.get("webhook-id")
+    if await webhook_dedup.seen_before("composio", dedup_event_id):
+        logger.info("Duplicate Composio webhook %s — no-op ack", dedup_event_id)
+        return {"status": "duplicate", "webhook_id": dedup_event_id}
 
     # Parse payload
     try:
@@ -829,7 +882,8 @@ async def _dispatch_workflow(
             ).first()
             if recipe_row:
                 from uuid import uuid4 as _uuid4
-                from api.recipe_executor import execute_recipe_direct
+                # PRD-142 W3-S12: composio trigger dispatch goes via the engine seam.
+                from services.playbook_engine import get_playbook_engine
 
                 execution_id = f"trigger-{_uuid4().hex[:12]}"
                 execution = RecipeExecution(
@@ -854,7 +908,7 @@ async def _dispatch_workflow(
                     "[webhook] Dispatching to UI recipe %d (%s), execution=%s",
                     recipe_row.id, recipe_row.name, execution_id,
                 )
-                await execute_recipe_direct(
+                await get_playbook_engine().execute_direct(
                     recipe_execution_id=execution_id,
                     recipe_id=recipe_row.id,
                     workspace_id=envelope.workspace_id,
@@ -894,7 +948,7 @@ async def _dispatch_workflow(
 # Trigger Subscription Endpoints
 # =============================================================================
 
-@router.post("/triggers/subscribe")
+@router.post("/triggers/subscribe", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def subscribe_to_trigger(
     request: TriggerSubscriptionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -973,7 +1027,7 @@ async def list_trigger_subscriptions(
     ]
 
 
-@router.delete("/triggers/{subscription_id}")
+@router.delete("/triggers/{subscription_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def unsubscribe_trigger(
     subscription_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

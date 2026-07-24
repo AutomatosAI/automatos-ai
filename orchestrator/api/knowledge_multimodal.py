@@ -43,6 +43,7 @@ from modules.rag import (
 )
 from core.credentials.resolver import get_credential_resolver
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,7 @@ async def get_knowledge_types(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/items", response_model=KnowledgeItemResponse)
+@router.post("/items", response_model=KnowledgeItemResponse, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def create_knowledge_item(
     item: KnowledgeItemCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -250,7 +251,7 @@ async def create_knowledge_item(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/upload", response_model=DocumentUploadResponse)
+@router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def upload_document_multimodal(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
@@ -274,8 +275,14 @@ async def upload_document_multimodal(
     Creates knowledge items for each extracted element.
     """
     start_time = datetime.now()
-    
+
     try:
+        # PRD-156 S1 / PRD-124: persist team_access (comma-separated → normalized
+        # list) into each knowledge_item's metadata so retrieval can scope it.
+        # knowledge_items has no team_access column; empty list = visible to all.
+        from core.team_access import normalize_teams
+        team_access_list: List[str] = normalize_teams(team_access.split(",")) if team_access else []
+
         # Validate file type
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file provided")
@@ -362,7 +369,7 @@ async def upload_document_multimodal(
                         "title": doc_title,
                         "content": results['text'],
                         "summary": summary,
-                        "metadata": json.dumps({"filename": file.filename, "description": description}),
+                        "metadata": json.dumps({"filename": file.filename, "description": description, "team_access": team_access_list}),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id
                     }
@@ -397,7 +404,8 @@ async def upload_document_multimodal(
                             "headers": table.headers,
                             "row_count": table.row_count,
                             "column_count": table.column_count,
-                            "page_number": table.page_number
+                            "page_number": table.page_number,
+                            "team_access": team_access_list
                         }),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id
@@ -454,7 +462,8 @@ async def upload_document_multimodal(
                             "width": image.width,
                             "height": image.height,
                             "format": image.format,
-                            "page_number": image.page_number
+                            "page_number": image.page_number,
+                            "team_access": team_access_list
                         }),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id
@@ -511,7 +520,8 @@ async def upload_document_multimodal(
                         "metadata": json.dumps({
                             "formula_type": formula.formula_type,
                             "domain": formula.domain,
-                            "complexity": formula.complexity
+                            "complexity": formula.complexity,
+                            "team_access": team_access_list
                         }),
                         "source_id": file.filename,
                         "workspace_id": ctx.workspace_id
@@ -659,7 +669,7 @@ async def upload_document_multimodal(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/search", response_model=List[KnowledgeSearchResult])
+@router.post("/search", response_model=List[KnowledgeSearchResult], dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def search_knowledge(
     search: KnowledgeSearchRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -675,8 +685,14 @@ async def search_knowledge(
     - Quality filtering
     """
     try:
+        # PRD-157 S1: fail-closed workspace scope via the centralized choke point.
+        # kb_formulas/kb_tables/kb_images are workspace assets (no team granularity);
+        # the builder guarantees we never search without a resolved workspace.
+        from modules.rag.retrieval_filters import build_retrieval_filters
+        build_retrieval_filters(workspace_id=ctx.workspace_id)
+
         all_results = []
-        
+
         # Search formulas
         if not search.kb_types or 'formula' in search.kb_types:
             formula_query = text("""

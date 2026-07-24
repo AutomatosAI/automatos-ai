@@ -222,11 +222,15 @@ class AgentPlatformTools:
                         },
                         "template_name": {
                             "type": "string",
-                            "description": "Template to use (e.g. 'Basic Report', 'Invoice'). Omit for auto-selection."
+                            "description": "Template to use (e.g. 'Basic Report', 'Invoice', 'Branded Letter'). Omit for auto-selection."
+                        },
+                        "template_id": {
+                            "type": "string",
+                            "description": "UUID of a specific template to fill (from platform_list_templates). Takes precedence over template_name."
                         },
                         "data": {
                             "type": "object",
-                            "description": "Data to populate the template — must match the template's expected schema"
+                            "description": "Data to populate the template. For block templates, supply the data.* fields the template references (see platform_get_template_schema)."
                         }
                     },
                     "required": ["title", "format", "data"]
@@ -469,6 +473,13 @@ class AgentPlatformTools:
                 query = parameters.get("query", "")
                 file_type = parameters.get("file_type")
                 project_name = parameters.get("project_name")
+                search_type = (parameters.get("search_type") or "fuzzy").lower()
+                symbol_type = parameters.get("symbol_type")
+                if symbol_type == "all":
+                    symbol_type = None
+                limit = parameters.get("limit", 10)
+                # fetch headroom for PageRank re-ranking, then cap at requested limit
+                fetch_limit = max(limit, 20)
 
                 # Resolve workspace_id from agent (CodeGraph projects are workspace-scoped)
                 workspace_id = None
@@ -526,17 +537,29 @@ class AgentPlatformTools:
                         tool_name
                     )
                 
-                self.logger.info(f"  🔍 Searching codebase: '{query}' in project '{project_name}'")
+                self.logger.info(
+                    f"  🔍 Searching codebase ({search_type}): '{query}' in project '{project_name}'"
+                )
                 try:
-                    result_dict = await self.code_graph.search_symbols(
-                        project_name=project_name,
-                        query=query,
-                        limit=20,  # Fetch more, will filter down to 10
-                        workspace_id=workspace_id,
-                    )
-                    # search_symbols returns a dict with 'results' key
+                    if search_type == "semantic":
+                        # Route to the working pgvector path (was unreachable before).
+                        result_dict = await self.code_graph.semantic_search(
+                            project_name=project_name,
+                            query=query,
+                            limit=fetch_limit,
+                            workspace_id=workspace_id,
+                        )
+                    else:
+                        result_dict = await self.code_graph.search_symbols(
+                            project_name=project_name,
+                            query=query,
+                            symbol_type=symbol_type,
+                            limit=fetch_limit,
+                            workspace_id=workspace_id,
+                        )
+                    # search returns a dict with 'results' key
                     results = result_dict.get("results", []) if isinstance(result_dict, dict) else []
-                    
+
                 except Exception as e:
                     # Project might not exist or name mismatch - return helpful message
                     self.logger.warning(f"  ⚠️ CodeGraph search failed: {str(e)}")
@@ -582,24 +605,23 @@ class AgentPlatformTools:
                 except Exception as e:
                     self.logger.debug(f"  PageRank ranking skipped: {e}")
 
-                # Convert to raw format for formatter
+                # Convert to raw format for formatter. No content-length filter:
+                # the old <50-char gate hid short symbols (one-liners, signatures)
+                # that are valid hits agents need to act on.
                 raw_results = []
                 for r in results:
-                    code_snippet = r.get("code_snippet", "")
-                    if len(code_snippet.strip()) < 50:
-                        continue
                     raw_results.append({
                         "symbol_name": r.get("name", "Unknown"),
                         "file_path": r.get("file_path", "Unknown"),
                         "symbol_type": r.get("symbol_type", "symbol"),
                         "line_number": r.get("line_number", 0),
-                        "code": code_snippet,
+                        "code": r.get("code_snippet", ""),
                         "docstring": r.get("docstring", ""),
                         "signature": r.get("signature", ""),
                         "score": r.get("score", 0.8),
                         "importance_rank": r.get("importance_rank", 0.0),
                     })
-                    if len(raw_results) >= 10:
+                    if len(raw_results) >= limit:
                         break
                 
                 # Use unified formatter
@@ -701,17 +723,23 @@ class AgentPlatformTools:
                 fmt = parameters.get("format", "pdf")
                 data = parameters.get("data", {})
                 template_name = parameters.get("template_name")
+                template_id_raw = parameters.get("template_id")
+                has_template = bool(template_name or template_id_raw)
 
-                # Guard: reject empty data — LLM must provide actual content
-                if not data or (fmt == "pdf" and not data.get("sections") and not data.get("content")):
+                # Guard: reject empty data only on the NO-template fallback path, where
+                # the document is built purely from sections/content. A chosen template
+                # (block or legacy) defines its own structure and fills data.* fields, so
+                # it must not be blocked by the sections/content requirement (PRD-167 S6).
+                if not has_template and (
+                    not data or (fmt == "pdf" and not data.get("sections") and not data.get("content"))
+                ):
                     return ToolResultFormatter.standardize_result(
                         {
                             "success": False,
                             "error": (
-                                "Missing document content. The 'data' parameter must include "
-                                "'sections' (a list of {title, content} objects with substantial text) "
-                                "or 'content' (a string). Generate the actual text content first, "
-                                "then call this tool again with the content in the 'data' parameter."
+                                "Missing document content. Either pass a template_id/template_name, "
+                                "or include 'sections' (a list of {title, content} objects with "
+                                "substantial text) or 'content' (a string) in 'data'."
                             ),
                         },
                         tool_name,
@@ -721,6 +749,7 @@ class AgentPlatformTools:
 
                 # Resolve workspace_id from agent
                 workspace_id = None
+                agent_row = None
                 try:
                     from core.models import Agent as AgentModel
                     agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
@@ -735,6 +764,18 @@ class AgentPlatformTools:
                         tool_name
                     )
 
+                # Resolve template_id (UUID) + the requesting user for {{user.*}} chips.
+                template_id = None
+                if template_id_raw:
+                    try:
+                        template_id = UUID(str(template_id_raw))
+                    except (ValueError, TypeError):
+                        return ToolResultFormatter.standardize_result(
+                            {"success": False, "error": f"Invalid template_id: {template_id_raw!r}"},
+                            tool_name,
+                        )
+                agent_user_id = getattr(agent_row, "user_id", None)
+
                 from modules.documents.generation_service import DocumentGenerationService
                 gen_service = DocumentGenerationService(self.db, workspace_id)
                 result = await gen_service.generate(
@@ -743,7 +784,47 @@ class AgentPlatformTools:
                     data=data,
                     workspace_id=workspace_id,
                     template_name=template_name,
+                    template_id=template_id,
+                    user_id=agent_user_id,
                 )
+
+                # PRD-167 S6: register the rendered document as a deliverable with
+                # source attribution (template_id + the producing agent).
+                registration = gen_service.register_as_deliverable(
+                    result,
+                    title=title,
+                    source_type="agent_output",
+                    agent_id=agent_id,
+                    agent_name=getattr(agent_row, "name", None),
+                    template_id=template_id,
+                )
+
+                # PRD-164 S3 (Q58 flywheel): the generated document's markdown
+                # becomes retrievable knowledge via the existing ingestion
+                # manager. Opt-out enforced inside ingest_agent_output;
+                # failure never fails the generation.
+                try:
+                    from services.knowledge_flywheel import ingest_agent_output
+
+                    _gen_source_id = (registration or {}).get("deliverable_id") or result.filename
+                    await ingest_agent_output(
+                        self.db,
+                        workspace_id,
+                        content=result.content or "",
+                        filename=f"{(result.filename or title).rsplit('.', 1)[0]}.md",
+                        source="generated_document",
+                        source_id=str(_gen_source_id),
+                        title=title,
+                        description=f"Generated document: {title}"[:500],
+                        agent_name=getattr(agent_row, "name", None),
+                        created_by=getattr(agent_row, "name", None) or "agent",
+                        extra_tags=[f"agent:{agent_id}"],
+                    )
+                except Exception:
+                    self.logger.warning(
+                        "Flywheel ingest failed for generated document '%s' (non-fatal)",
+                        title, exc_info=True,
+                    )
 
                 self.logger.info(f"  ✅ Document generated: {result.filename} ({result.size // 1024}KB)")
                 return ToolResultFormatter.standardize_result(

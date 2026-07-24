@@ -7,6 +7,10 @@
   :root {
     /* Light theme (default) */
     --background: 0 0% 98%;
+    /* Graph canvas background — read by the GraphView shell (PRD-165 S1).
+       Dark for now in both themes (graph nodes/labels are tuned for a dark
+       canvas); PRD-169 S3 sets the light value with the full light-theme pass. */
+    --graph-canvas: #0a0d14;
     --foreground: 0 0% 10%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 10%;
@@ -81,6 +85,7 @@
   .dark {
     /* Dark theme */
     --background: 0 0% 6%;
+    --graph-canvas: #0a0d14;
     --foreground: 0 0% 98%;
     --card: 0 0% 8%;
     --card-foreground: 0 0% 98%;
@@ -921,8 +926,7 @@
   }
 
   /* Toast — Studio uses paper with semantic left-border (per kit.jsx) */
-  .studio [data-sonner-toast],
-  .studio .react-hot-toast {
+  .studio [data-sonner-toast] {
     background: hsl(var(--card));
     border: 1px solid hsl(var(--border));
     border-radius: 8px;
@@ -1127,15 +1131,8 @@
   .studio .sh-side .sh-footer {
     margin-top: auto; padding-top: 10px; border-top: 1px solid hsl(var(--border));
   }
-  .studio .sh-side .sh-mini-stats {
-    font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
-    color: hsl(var(--muted-foreground)); padding: 8px 8px 0;
-    display: grid; gap: 3px;
-  }
-  .studio .sh-side .sh-mini-stats .sh-row {
-    display: flex; justify-content: space-between;
-  }
-  .studio .sh-side .sh-mini-stats .sh-row .sh-ok { color: hsl(82 50% 22%); }
+  /* PRD-180 S2 (F038): .sh-mini-stats rules removed with the fabricated
+     sidebar stats block they styled (now dead). */
 
   /* ── Studio brand wordmark ─────────────────────────────────────── */
   .studio .sh-brand {
@@ -1218,40 +1215,6 @@
     margin-left: auto; font-family: var(--font-geist-mono, monospace); font-size: 10px;
     padding: 1px 5px; border: 1px solid hsl(var(--border)); border-radius: 3px;
     background: hsl(var(--secondary)); color: hsl(var(--muted-foreground));
-  }
-
-  /* ── Studio ticker (TICK-A · editorial slim 30px) ──────────────── */
-  .studio .sh-ticker {
-    display: flex; align-items: center;
-    height: 30px; padding: 0 24px; gap: 18px;
-    background: hsl(38 45% 96%); border-bottom: 1px solid hsl(var(--border));
-    font-family: var(--font-geist-mono, monospace);
-    font-size: 10.5px; color: hsl(var(--muted-foreground));
-    letter-spacing: 0.01em; overflow-x: auto; scrollbar-width: none;
-  }
-  .studio .sh-ticker::-webkit-scrollbar { display: none; }
-  .studio .sh-ticker .sh-cell {
-    display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap;
-  }
-  .studio .sh-ticker .sh-cell .sh-l {
-    color: hsl(var(--muted-foreground)); letter-spacing: 0.10em;
-    text-transform: uppercase; font-size: 9.5px;
-  }
-  .studio .sh-ticker .sh-cell .sh-v {
-    color: hsl(var(--foreground)); font-weight: 600;
-    font-feature-settings: "tnum";
-  }
-  .studio .sh-ticker .sh-cell .sh-v.ok  { color: hsl(82 50% 22%); }
-  .studio .sh-ticker .sh-cell .sh-v.err { color: hsl(var(--accent)); }
-  .studio .sh-ticker .sh-cell .sh-v.info { color: hsl(var(--info)); }
-  .studio .sh-ticker .sh-cell .sh-delta {
-    color: hsl(var(--muted-foreground)); font-size: 9.5px;
-  }
-  .studio .sh-ticker .sh-clock {
-    margin-left: auto; color: hsl(var(--muted-foreground));
-  }
-  .studio .sh-ticker .sh-divider {
-    width: 1px; height: 12px; background: hsl(var(--border)); flex-shrink: 0;
   }
 
   /* ── Studio shell layout container ─────────────────────────────── */

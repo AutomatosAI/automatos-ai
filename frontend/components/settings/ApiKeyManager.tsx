@@ -49,8 +49,10 @@ type Permission =
   | "data:execute"
   | "agents:read"
   | "agents:execute"
-  | "workflows:read"
-  | "workflows:execute";
+  | "missions:read"
+  | "missions:execute"
+  | "playbooks:read"
+  | "playbooks:execute";
 
 type ExpiryOption = "none" | "30d" | "90d" | "1y";
 
@@ -98,8 +100,10 @@ const ALL_PERMISSIONS: { value: Permission; label: string; group: string }[] = [
   { value: "data:execute", label: "Data: Execute", group: "Data" },
   { value: "agents:read", label: "Agents: Read", group: "Agents" },
   { value: "agents:execute", label: "Agents: Execute", group: "Agents" },
-  { value: "workflows:read", label: "Workflows: Read", group: "Workflows" },
-  { value: "workflows:execute", label: "Workflows: Execute", group: "Workflows" },
+  { value: "missions:read", label: "Missions: Read", group: "Missions" },
+  { value: "missions:execute", label: "Missions: Execute", group: "Missions" },
+  { value: "playbooks:read", label: "Playbooks: Read", group: "Playbooks" },
+  { value: "playbooks:execute", label: "Playbooks: Execute", group: "Playbooks" },
 ];
 
 const EXPIRY_OPTIONS: { value: ExpiryOption; label: string }[] = [

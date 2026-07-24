@@ -3,7 +3,7 @@ Agent Service
 =============
 
 Main service class for Agents module.
-Coordinates agent factory, registry, execution, and communication.
+Coordinates agent factory, registry, and communication.
 """
 
 import logging
@@ -39,7 +39,6 @@ class AgentService:
         # Lazy-loaded components
         self._factory = None
         self._registry = None
-        self._execution_manager = None
         self._communication = None
         
         logger.info("AgentService initialized")
@@ -59,17 +58,6 @@ class AgentService:
             from .registry import AgentRegistry
             self._registry = AgentRegistry(self.db)
         return self._registry
-    
-    @property
-    def execution_manager(self):
-        """Get AgentExecutionManager (lazy-loaded)"""
-        if self._execution_manager is None:
-            from .execution import AgentExecutionManager
-            self._execution_manager = AgentExecutionManager(
-                db_session=self.db,
-                workspace_dir=self.config.workspace_dir
-            )
-        return self._execution_manager
     
     async def create_agent(
         self,

@@ -25,6 +25,20 @@ def _hash_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode()).hexdigest()
 
 
+def _host_only(value: str) -> str:
+    """Reduce an origin or allow-list pattern to its host[:port] form.
+
+    Request origins arrive as bare hosts (``_extract_origin`` returns
+    ``parsed.hostname``) while allow-list entries are commonly stored with a
+    scheme (``https://*.myshopify.com``) and sometimes a trailing slash. A
+    scheme-prefixed pattern can never ``fnmatch`` a bare host, so we strip the
+    scheme and trailing slash from both sides before comparing.
+    """
+    if "://" in value:
+        value = value.split("://", 1)[1]
+    return value.rstrip("/")
+
+
 class ApiKeyService:
     """Manages SDK API keys with SHA-256 hashing."""
 
@@ -206,11 +220,42 @@ class ApiKeyService:
         if not api_key.allowed_domains:
             return True
 
+        candidate = _host_only(origin)
         for pattern in api_key.allowed_domains:
-            if fnmatch(origin, pattern):
+            if fnmatch(candidate, _host_only(pattern)):
                 return True
 
         return False
+
+    @staticmethod
+    def origin_allowed_by_any_key(db: Session, origin: str) -> bool:
+        """True when *origin* matches the ``allowed_domains`` of ANY active
+        public key (widget CORS preflight fallback, PRD-TUTOR-LIVE S0).
+
+        A preflight carries no Authorization header, so the CORS middleware
+        cannot resolve which key the actual request will present — it can
+        only ask whether the origin is explicitly allowlisted by *some*
+        active public key, via the same :meth:`check_domain` matcher the
+        request-time check uses. Keys with an EMPTY ``allowed_domains`` (the
+        "any origin" opt-in honoured by :meth:`check_domain`) are
+        deliberately excluded here: counting them would reflect CORS headers
+        for every origin on earth the moment one unrestricted key exists.
+        A green preflight grants nothing by itself — ``widget_auth`` still
+        enforces the presented key's own allowlist on the request proper.
+        """
+        keys = (
+            db.query(SdkApiKey)
+            .filter(
+                SdkApiKey.is_active.is_(True),
+                SdkApiKey.key_type == "public",
+                SdkApiKey.allowed_domains.isnot(None),
+            )
+            .all()
+        )
+        return any(
+            key.allowed_domains and ApiKeyService.check_domain(key, origin)
+            for key in keys
+        )
 
     # ------------------------------------------------------------------
     # Permission check
@@ -219,10 +264,13 @@ class ApiKeyService:
     def check_permissions(api_key: SdkApiKey, permission: str) -> bool:
         """Check whether *api_key* grants the requested *permission*.
 
-        An empty or ``None`` ``permissions`` list means **all**
-        permissions are granted (unrestricted key).
+        PRD-195 S1 (P2-14 / F042): delegates to the one authority —
+        ``modules.policy.roles.has_permission``. **Empty or ``None``
+        permissions grant NOTHING** (least privilege); an explicit ``"*"``
+        element is honoured as a deliberate full grant. The legacy
+        "empty = unrestricted" god-key semantic is deleted — all three key
+        checkers (service, widget, board) now share this rule.
         """
-        if not api_key.permissions:
-            return True
+        from modules.policy.roles import has_permission
 
-        return permission in api_key.permissions
+        return has_permission(api_key.permissions, permission)

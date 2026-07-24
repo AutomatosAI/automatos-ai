@@ -37,7 +37,6 @@ Usage:
 import hashlib
 import json
 import logging
-import os
 import queue
 import sys
 import threading
@@ -46,24 +45,21 @@ import traceback
 from contextvars import ContextVar
 from typing import Optional
 
+from config import config
+
 
 # ─────────────────────────────────────────────
-# Configuration
+# Configuration — read once at module load from the central config (PRD-142 W3-S5 / G7)
 # ─────────────────────────────────────────────
 
-LOG_RELAY_URL = os.environ.get(
-    "LOG_RELAY_URL",
-    "http://log-relay.railway.internal:8080/push",
-)
-LOG_RELAY_ENABLED = os.environ.get("LOG_RELAY_ENABLED", "true").lower() == "true"
-SERVICE_NAME = os.environ.get("SERVICE_NAME", "unknown")
-ENVIRONMENT = os.environ.get(
-    "ENVIRONMENT", os.environ.get("RAILWAY_ENVIRONMENT", "development")
-)
+LOG_RELAY_URL = config.LOG_RELAY_URL
+LOG_RELAY_ENABLED = config.LOG_RELAY_ENABLED
+SERVICE_NAME = config.LOG_RELAY_SERVICE_NAME
+ENVIRONMENT = config.LOG_RELAY_ENVIRONMENT
 
 # Batch settings
-BATCH_SIZE = int(os.environ.get("LOG_RELAY_BATCH_SIZE", "50"))
-FLUSH_INTERVAL = float(os.environ.get("LOG_RELAY_FLUSH_INTERVAL", "2.0"))
+BATCH_SIZE = config.LOG_RELAY_BATCH_SIZE
+FLUSH_INTERVAL = config.LOG_RELAY_FLUSH_INTERVAL
 
 
 # ─────────────────────────────────────────────

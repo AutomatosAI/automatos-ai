@@ -294,7 +294,7 @@ async def stream_workflow_execution(
         }
         try:
             yield f"data: {json.dumps(error_event)}\n\n"
-        except:
+        except Exception:
             pass
     finally:
         await manager.remove_stream(execution_id, queue)
@@ -469,7 +469,7 @@ async def stream_workflow_as_aisdk(
             yield f'0:{json.dumps(text)}\n'
             err_json = json.dumps({"message": str(e)})
             yield f'e:{err_json}\n'
-        except:
+        except Exception:
             pass
     finally:
         await manager.remove_stream(execution_id, queue)

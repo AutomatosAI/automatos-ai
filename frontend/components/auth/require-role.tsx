@@ -13,7 +13,7 @@ import { useEffect } from 'react'
 
 interface RequireRoleProps {
     /** List of roles that are allowed to access this content */
-    roles: ('admin' | 'user' | 'customer_manager')[]
+    roles: ('super_admin' | 'admin' | 'user')[]
     /** Content to render if user has access */
     children: React.ReactNode
     /** Optional fallback to show if user doesn't have access */
@@ -62,7 +62,7 @@ export function RequireAdmin({
     redirectTo = '/chat'
 }: Omit<RequireRoleProps, 'roles'>) {
     return (
-        <RequireRole roles={['admin']} fallback={fallback} redirectTo={redirectTo}>
+        <RequireRole roles={['super_admin', 'admin']} fallback={fallback} redirectTo={redirectTo}>
             {children}
         </RequireRole>
     )

@@ -4,13 +4,14 @@ Integration tests for UnifiedMemoryService, ContextRouter, and MemoryNamespace.
 Tests L1 session lifecycle, L2 CRUD + decay, L3 cache hit,
 Context Router signal routing, and MemoryNamespace correctness.
 
-All external dependencies (Redis, Mem0, Postgres) are mocked.
+All external dependencies (Redis, durable store, Postgres) are mocked.
 
 Uses importlib to load modules directly, avoiding the pgvector dependency
 pulled in by modules/memory/__init__.py.
 """
 
 import importlib.util
+import inspect
 import json
 import math
 import pathlib
@@ -43,19 +44,32 @@ _mock_config_obj = MagicMock()
 _mock_config_obj.MEMORY_SESSION_TTL_SECONDS = 86400
 _mock_config_obj.MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS = 3600
 _mock_config_obj.MEMORY_CACHE_TTL_SECONDS = 300
-_mock_config_obj.MEMORY_DECAY_RATE = 0.1
+_mock_config_obj.MEMORY_DECAY_RATE = 0.004  # PRD-154 S3: week-scale (was 0.1/hr)
 _mock_config_obj.MEMORY_DECAY_ARCHIVE_THRESHOLD = 0.3
 _mock_config_obj.MEMORY_DECAY_BATCH_SIZE = 100
 _mock_config_obj.MEMORY_PROMOTION_MIN_IMPORTANCE = 0.7
-_mock_config_obj.MEMORY_PROMOTION_MIN_ACCESS_COUNT = 3
+_mock_config_obj.MEMORY_PROMOTION_HIGH_SIGNAL_TYPES = "user_fact,preference,procedure"
+_mock_config_obj.MEMORY_PROMOTION_HIGH_SIGNAL_MIN_IMPORTANCE = 0.5
 _mock_config_obj.MEMORY_PROMOTION_BATCH_SIZE = 50
 
 _config_mod = types.ModuleType("config")
 _config_mod.config = _mock_config_obj
-sys.modules.setdefault("config", _config_mod)
+
+# Install the mock ``config`` for the importlib loads below, then restore so the
+# collection of sibling test modules never sees this fake (PRD-142 W2-S2b): a
+# pathless ``config`` stub left in sys.modules shadows the real config package
+# for every file collected afterwards. The loaded services import config lazily
+# inside their methods, so the autouse fixture re-installs it for each test.
+_config_snapshot = sys.modules.get("config")
+sys.modules["config"] = _config_mod
 
 _ums_mod = _load("unified_memory_service", "modules/memory/unified_memory_service.py")
 _cr_mod = _load("context_router", "modules/memory/context_router.py")
+
+if _config_snapshot is None:
+    sys.modules.pop("config", None)
+else:
+    sys.modules["config"] = _config_snapshot
 
 MemoryNamespace = _ums_mod.MemoryNamespace
 SessionMemory = _ums_mod.SessionMemory
@@ -79,22 +93,31 @@ CONV_ID = "conv-test-001"
 
 @pytest.fixture(autouse=True)
 def _reset_singleton():
-    """Reset singleton between tests."""
+    """Reset singleton + install the mock ``config`` for the duration of the test."""
+    _prev_config = sys.modules.get("config")
+    sys.modules["config"] = _config_mod
     UnifiedMemoryService._instance = None
-    yield
-    UnifiedMemoryService._instance = None
+    try:
+        yield
+    finally:
+        UnifiedMemoryService._instance = None
+        if _prev_config is None:
+            sys.modules.pop("config", None)
+        else:
+            sys.modules["config"] = _prev_config
 
 
 @pytest.fixture
-def mock_mem0():
+def mock_durable():
+    # DurableMemoryStore (PRD-187 S1) is async: add/search/get_all/delete are
+    # coroutines, so they must be AsyncMock to be awaitable.
     m = MagicMock()
-    m.api_url = "http://mem0.test"
-    m.add.return_value = {"success": True, "id": "mem-001"}
-    m.search.return_value = [
-        {"id": "m1", "memory": "user likes dark mode", "score": 0.9}
-    ]
-    m.get_all.return_value = [{"id": "m1", "memory": "user likes dark mode"}]
-    m.delete.return_value = True
+    m.add = AsyncMock(return_value={"success": True, "id": "mem-001"})
+    m.search = AsyncMock(
+        return_value=[{"id": "m1", "memory": "user likes dark mode", "score": 0.9}]
+    )
+    m.get_all = AsyncMock(return_value=[{"id": "m1", "memory": "user likes dark mode"}])
+    m.delete = AsyncMock(return_value=True)
     return m
 
 
@@ -117,9 +140,9 @@ def mock_redis_client(mock_redis_conn):
 
 
 @pytest.fixture
-def service(mock_mem0, mock_redis_client):
+def service(mock_durable, mock_redis_client):
     svc = UnifiedMemoryService.__new__(UnifiedMemoryService)
-    svc._mem0 = mock_mem0
+    svc._durable = mock_durable
     svc._redis_client_getter = lambda: mock_redis_client
     UnifiedMemoryService._instance = svc
     return svc
@@ -186,23 +209,31 @@ class TestSessionMemory:
     def test_round_trip(self):
         original = SessionMemory(
             summary="pricing talk",
-            decisions=["tier-2"],
-            action_items=["send invoice"],
             exchange_count=3,
             last_updated="2026-03-12T10:00:00+00:00",
             ended=False,
         )
         restored = SessionMemory.from_json(original.to_json())
         assert restored.summary == original.summary
-        assert restored.decisions == original.decisions
-        assert restored.action_items == original.action_items
         assert restored.exchange_count == 3
         assert restored.ended is False
+
+    def test_from_json_ignores_unknown_keys(self):
+        # PRD-159 removed decisions/action_items; pre-existing Redis payloads
+        # that still carry them must load cleanly (tolerant deserialisation).
+        import json as _json
+        raw = _json.dumps({
+            "summary": "x", "exchange_count": 1, "ended": False,
+            "decisions": ["old"], "action_items": ["legacy"],
+        })
+        s = SessionMemory.from_json(raw)
+        assert s.summary == "x"
+        assert s.exchange_count == 1
+        assert not hasattr(s, "decisions")
 
     def test_defaults(self):
         s = SessionMemory()
         assert s.summary == ""
-        assert s.decisions == []
         assert s.exchange_count == 0
         assert s.ended is False
 
@@ -252,18 +283,6 @@ class TestL1Session:
         assert "Q2" in stored.summary
 
     @pytest.mark.asyncio
-    async def test_end_session_sets_flag_and_short_ttl(self, service, mock_redis_conn):
-        session = SessionMemory(summary="s", decisions=["d1"], exchange_count=5)
-        mock_redis_conn.get.return_value = session.to_json()
-        await service.end_session(WS_ID, CONV_ID)
-
-        _, ttl, payload = mock_redis_conn.setex.call_args[0]
-        assert ttl == 3600
-        stored = SessionMemory.from_json(payload)
-        assert stored.ended is True
-        assert stored.exchange_count == 5
-
-    @pytest.mark.asyncio
     async def test_redis_failure_returns_none(self, service, mock_redis_conn):
         mock_redis_conn.get.side_effect = ConnectionError("down")
         assert await service.get_session(WS_ID, CONV_ID) is None
@@ -282,181 +301,155 @@ class TestL1Session:
 class TestL3:
 
     @pytest.mark.asyncio
-    async def test_store_long_term(self, service, mock_mem0):
+    async def test_store_long_term(self, service, mock_durable):
         result = await service.store_long_term(WS_ID, "dark mode", agent_id=AGENT_ID)
         assert result["success"] is True
-        assert mock_mem0.add.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
+        assert mock_durable.add.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
 
     @pytest.mark.asyncio
-    async def test_store_long_term_with_category(self, service, mock_mem0):
+    async def test_store_long_term_with_category(self, service, mock_durable):
         await service.store_long_term(WS_ID, "coffee", category="pref", metadata={"src": "chat"})
-        meta = mock_mem0.add.call_args[1]["metadata"]
+        meta = mock_durable.add.call_args[1]["metadata"]
         assert meta["category"] == "pref"
         assert meta["src"] == "chat"
 
     @pytest.mark.asyncio
-    async def test_search_cache_miss(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_cache_miss(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
         results = await service.search_long_term(WS_ID, "dark mode")
         assert len(results) == 1
-        mock_mem0.search.assert_called_once()
+        mock_durable.search.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_search_cache_hit(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_cache_hit(self, service, mock_durable, mock_redis_conn):
         cached = [{"id": "c1", "memory": "cached", "score": 0.8}]
         mock_redis_conn.get.return_value = json.dumps(cached)
 
         results = await service.search_long_term(WS_ID, "dark mode")
         assert results[0]["id"] == "c1"
-        mock_mem0.search.assert_not_called()
+        mock_durable.search.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_search_agent_namespace(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_agent_namespace(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
         await service.search_long_term(WS_ID, "test", agent_id=AGENT_ID)
-        assert mock_mem0.search.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
+        assert mock_durable.search.call_args[1]["user_id"] == f"mem:{WS_ID}:agent:{AGENT_ID}"
 
     @pytest.mark.asyncio
-    async def test_search_workspace_namespace(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_workspace_namespace(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
         await service.search_long_term(WS_ID, "test")
-        assert mock_mem0.search.call_args[1]["user_id"] == f"mem:{WS_ID}"
+        assert mock_durable.search.call_args[1]["user_id"] == f"mem:{WS_ID}"
 
     @pytest.mark.asyncio
-    async def test_get_all(self, service, mock_mem0):
+    async def test_get_all(self, service, mock_durable):
         results = await service.get_all_memories(WS_ID)
         assert len(results) == 1
 
     @pytest.mark.asyncio
-    async def test_delete(self, service, mock_mem0):
-        assert await service.delete_memory("mem-001") is True
-        mock_mem0.delete.assert_called_once_with(memory_id="mem-001")
+    async def test_delete(self, service, mock_durable):
+        # The service resolves the namespace user_id and passes the durable
+        # store a memory_ids list (ownership check happens in the adapter).
+        assert await service.delete_memory("mem-001", workspace_id=WS_ID) is True
+        mock_durable.delete.assert_called_once_with(
+            memory_ids=["mem-001"], user_id=f"mem:{WS_ID}", workspace_id=WS_ID
+        )
 
     @pytest.mark.asyncio
-    async def test_store_failure(self, service, mock_mem0):
-        mock_mem0.add.side_effect = Exception("boom")
+    async def test_recall_touches_each_short_term_result(self, service):
+        # touch_short_term had ZERO callers; recall must now bump access_count so
+        # the L2->L3 promotion threshold becomes reachable.
+        rows = [{"id": "r1", "content": "a"}, {"id": "r2", "content": "b"}]
+        service._search_short_term_sync = lambda *a, **k: rows
+        touched: list = []
+
+        async def _fake_touch(memory_id):
+            touched.append(memory_id)
+            return True
+
+        service.touch_short_term = _fake_touch
+        out = await service.search_short_term(WS_ID, "anything")
+
+        assert out == rows
+        assert set(touched) == {"r1", "r2"}
+
+    @pytest.mark.asyncio
+    async def test_store_failure(self, service, mock_durable):
+        mock_durable.add.side_effect = Exception("boom")
         result = await service.store_long_term(WS_ID, "x")
         assert result["success"] is False
 
     @pytest.mark.asyncio
-    async def test_search_failure(self, service, mock_mem0, mock_redis_conn):
+    async def test_search_failure(self, service, mock_durable, mock_redis_conn):
         mock_redis_conn.get.return_value = None
-        mock_mem0.search.side_effect = Exception("boom")
+        mock_durable.search.side_effect = Exception("boom")
         assert await service.search_long_term(WS_ID, "x") == []
 
     @pytest.mark.asyncio
-    async def test_is_mem0_configured(self, service, mock_mem0):
-        assert service.is_mem0_configured is True
-        mock_mem0.api_url = None
-        assert service.is_mem0_configured is False
+    async def test_is_durable_configured(self, service):
+        _mock_config_obj.QDRANT_URL = "http://qdrant.test:6333"
+        assert service.is_durable_configured is True
+        _mock_config_obj.QDRANT_URL = ""
+        assert service.is_durable_configured is False
+        _mock_config_obj.QDRANT_URL = "http://qdrant.test:6333"
 
 
 # ===========================================================================
-# 5. L1→L2 Consolidation
+# 5. Sleep-time consolidation (PRD-159 S4) — replaces the dead L1→L2 session
+#    decision scan. Contradiction-based invalidation is the primary lifecycle:
+#    near-duplicates merge into one canonical (rest deleted), contradictions
+#    supersede by recency+confidence. The pure algorithm is covered in
+#    test_memory_consolidation.py; here we test the service applies the plan.
 # ===========================================================================
 
 
-class TestConsolidation:
+class TestSleepTimeConsolidation:
 
     @pytest.mark.asyncio
-    async def test_consolidate_with_decisions(self, service, mock_redis_conn):
-        session = SessionMemory(
-            summary="pricing talk",
-            decisions=["tier-2", "launch Q2"],
-            action_items=["send proposal"],
-            exchange_count=10,
-            ended=True,
-        )
-        mock_redis_conn.get.return_value = session.to_json()
+    async def test_merges_dups_via_delete(self, service):
+        mems = [
+            {"id": "1", "memory": "InBuildUK is a UK smoke ventilation contractor.",
+             "created_at": "2026-06-10", "metadata": {"importance": 0.9}},
+            {"id": "2", "memory": "InBuildUK is a UK smoke ventilation contractor.",
+             "created_at": "2026-06-01", "metadata": {"importance": 0.4}},
+            {"id": "3", "memory": "The user prefers British spelling.",
+             "created_at": "2026-06-05", "metadata": {"importance": 0.7}},
+        ]
+        deleted = []
 
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.consolidate_session(WS_ID, CONV_ID)
+        async def _del(mid, ws, agent_id=None):
+            deleted.append(mid)
+            return True
 
-        # 2 decisions + 1 action item + 1 summary = 4 L2 entries
-        assert result["items_stored"] == 4
-        assert mock_st.call_count == 4
-        mock_redis_conn.delete.assert_called_once()
+        with patch.object(service, "get_all_memories", new_callable=AsyncMock) as mock_get, \
+             patch.object(service, "delete_memory", side_effect=_del):
+            mock_get.return_value = mems
+            result = await service.run_sleep_time_consolidation(workspace_id=WS_ID)
 
-    @pytest.mark.asyncio
-    async def test_consolidate_no_session(self, service, mock_redis_conn):
-        mock_redis_conn.get.return_value = None
-        result = await service.consolidate_session(WS_ID, CONV_ID)
-        assert result["items_stored"] == 0
-
-    @pytest.mark.asyncio
-    async def test_consolidate_empty(self, service, mock_redis_conn):
-        session = SessionMemory(summary="hi", decisions=[], action_items=[], exchange_count=1, ended=True)
-        mock_redis_conn.get.return_value = session.to_json()
-
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.consolidate_session(WS_ID, CONV_ID)
-
-        assert result["items_stored"] == 1  # Just summary
+        # 1 & 2 are duplicates → canonical "1" (higher importance) kept, "2" deleted.
+        assert result["workspaces_processed"] == 1
+        assert result["merged"] == 1
+        assert deleted == ["2"]
 
     @pytest.mark.asyncio
-    async def test_run_consolidation_scans(self, service, mock_redis_conn):
-        ended = SessionMemory(summary="done", decisions=["d1"], exchange_count=3, ended=True)
-        active = SessionMemory(summary="active", exchange_count=1, ended=False)
+    async def test_empty_workspace_is_noop(self, service):
+        with patch.object(service, "get_all_memories", new_callable=AsyncMock) as mock_get, \
+             patch.object(service, "delete_memory", new_callable=AsyncMock) as mock_del:
+            mock_get.return_value = []
+            result = await service.run_sleep_time_consolidation(workspace_id=WS_ID)
 
-        key1 = f"mem:session:{WS_ID}:conv-1"
-        key2 = f"mem:session:{WS_ID}:conv-2"
-
-        # scan_iter returns byte keys matching mem:session:*
-        mock_redis_conn.scan_iter.return_value = iter([key1.encode(), key2.encode()])
-
-        def get_side_effect(key):
-            k = key.decode() if isinstance(key, bytes) else key
-            if k == key1:
-                return ended.to_json()
-            if k == key2:
-                return active.to_json()
-            return None
-
-        mock_redis_conn.get.side_effect = get_side_effect
-
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.run_session_consolidation()
-
-        # Only the ended session should be consolidated
-        assert result["sessions_consolidated"] >= 1
+        assert result["merged"] == 0
+        assert result["superseded"] == 0
+        mock_del.assert_not_called()
 
 
 # ===========================================================================
-# 6. store_exchange
+# 6. store_exchange — RETIRED in PRD-142 W3-S7 (G12 dual L2 write collapsed).
+#    The canonical L2 write per chat turn is now ``store_transcript`` (PRD-131d
+#    Phase 3), called from SmartMemoryManager.store_conversation. No
+#    production caller of UnifiedMemoryService.store_exchange remains; the
+#    method was deleted in the same commit as this test block.
 # ===========================================================================
-
-
-class TestStoreExchange:
-
-    @pytest.mark.asyncio
-    async def test_stores_to_l2(self, service):
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            mock_st.return_value = str(uuid.uuid4())
-            result = await service.store_exchange(
-                workspace_id=WS_ID, agent_id=AGENT_ID,
-                user_msg="What is MRR?", assistant_msg="$45k",
-                conversation_id=CONV_ID,
-            )
-
-        assert result is not None
-        kw = mock_st.call_args[1]
-        assert kw["content_type"] == "exchange"
-        assert "What is MRR?" in kw["content"]
-        assert kw["metadata"]["conversation_id"] == CONV_ID
-
-    @pytest.mark.asyncio
-    async def test_skips_trivial(self, service):
-        with patch.object(service, "store_short_term", new_callable=AsyncMock) as mock_st:
-            result = await service.store_exchange(
-                workspace_id=WS_ID, agent_id=AGENT_ID,
-                user_msg="hi", assistant_msg="Hello!",
-                conversation_id=CONV_ID,
-            )
-        assert result is None
-        mock_st.assert_not_called()
 
 
 # ===========================================================================
@@ -563,7 +556,13 @@ class TestContextBundle:
 
 class TestDecayFormula:
 
-    def _retention(self, hours, importance=0.5, access_count=0, rate=0.1):
+    # Mirror config.MEMORY_DECAY_RATE — PRD-154 S3 retuned it to week-scale
+    # (0.1/hr archived importance-0.8 in ~15h). Threshold unchanged at 0.3.
+    RATE = 0.004
+    THRESHOLD = 0.3
+
+    def _retention(self, hours, importance=0.5, access_count=0, rate=None):
+        rate = self.RATE if rate is None else rate
         return math.exp(-rate * hours) * (
             1.0 + 0.5 * importance + 0.1 * min(access_count, 10)
         )
@@ -571,29 +570,31 @@ class TestDecayFormula:
     def test_fresh_high_retention(self):
         assert self._retention(1) > 0.9
 
-    def test_old_low_retention(self):
-        assert self._retention(72, importance=0.1) < 0.3
-
     def test_importance_boost(self):
-        assert self._retention(48, importance=0.9) > self._retention(48, importance=0.2)
+        # Even after a full week, higher importance retains more.
+        week = 7 * 24
+        assert self._retention(week, importance=0.9) > self._retention(week, importance=0.2)
 
     def test_access_boost(self):
-        assert self._retention(48, access_count=5) > self._retention(48, access_count=0)
+        week = 7 * 24
+        assert self._retention(week, access_count=5) > self._retention(week, access_count=0)
 
     def test_access_capped_at_10(self):
         assert self._retention(24, access_count=10) == self._retention(24, access_count=100)
 
-    def test_archive_threshold_reasonable(self):
-        # With default params, item shouldn't be archived instantly
-        assert self._retention(1) > 0.3
-        # But should eventually drop below
-        found = False
-        for h in range(1, 200):
-            if self._retention(h) < 0.3:
-                assert h >= 5
-                found = True
-                break
-        assert found
+    def test_high_importance_survives_one_week(self):
+        # PRD-154 S3 AC: an importance-0.8 row stays above the archive threshold
+        # after 7 days under the new rate — and the OLD 0.1/hr rate would not.
+        assert self._retention(7 * 24, importance=0.8) >= self.THRESHOLD
+        assert self._retention(7 * 24, importance=0.8, rate=0.1) < self.THRESHOLD
+
+    def test_eventually_archives_on_a_week_scale(self):
+        # Low-importance memory still decays — but over weeks, not hours.
+        first_below = next(
+            (d for d in range(1, 120) if self._retention(d * 24, importance=0.1) < self.THRESHOLD),
+            None,
+        )
+        assert first_below is not None and first_below >= 7
 
 
 # ===========================================================================
@@ -604,16 +605,16 @@ class TestDecayFormula:
 class TestDailyLogs:
 
     @pytest.mark.asyncio
-    async def test_store_daily_log(self, service, mock_mem0):
+    async def test_store_daily_log(self, service, mock_durable):
         result = await service.store_daily_log(WS_ID, "5 tasks done", metadata={"date": "2026-03-12"})
         assert result["success"] is True
-        assert mock_mem0.add.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
+        assert mock_durable.add.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
 
     @pytest.mark.asyncio
-    async def test_get_all_daily_logs(self, service, mock_mem0):
+    async def test_get_all_daily_logs(self, service, mock_durable):
         results = await service.get_all_daily_logs(WS_ID)
         assert len(results) == 1
-        assert mock_mem0.get_all.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
+        assert mock_durable.get_all.call_args[1]["user_id"] == f"mem:{WS_ID}:daily"
 
 
 # ===========================================================================
@@ -623,10 +624,10 @@ class TestDailyLogs:
 
 class TestSingleton:
 
-    def test_same_instance(self, mock_mem0, mock_redis_client):
+    def test_same_instance(self, mock_durable, mock_redis_client):
         # Bypass __init__ to avoid real imports
         svc = UnifiedMemoryService.__new__(UnifiedMemoryService)
-        svc._mem0 = mock_mem0
+        svc._durable = mock_durable
         svc._redis_client_getter = lambda: mock_redis_client
         UnifiedMemoryService._instance = svc
 
@@ -635,9 +636,9 @@ class TestSingleton:
         assert a is b
         assert a is svc
 
-    def test_reset_clears(self, mock_mem0, mock_redis_client):
+    def test_reset_clears(self, mock_durable, mock_redis_client):
         svc1 = UnifiedMemoryService.__new__(UnifiedMemoryService)
-        svc1._mem0 = mock_mem0
+        svc1._durable = mock_durable
         svc1._redis_client_getter = lambda: mock_redis_client
         UnifiedMemoryService._instance = svc1
 
@@ -645,7 +646,7 @@ class TestSingleton:
         UnifiedMemoryService.reset_instance()
 
         svc2 = UnifiedMemoryService.__new__(UnifiedMemoryService)
-        svc2._mem0 = mock_mem0
+        svc2._durable = mock_durable
         svc2._redis_client_getter = lambda: mock_redis_client
         UnifiedMemoryService._instance = svc2
 

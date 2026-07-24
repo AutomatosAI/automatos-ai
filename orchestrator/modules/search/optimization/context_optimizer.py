@@ -47,8 +47,11 @@ def _get_system_dimension() -> int:
         from core.models.system_settings import SystemSetting
         db = SessionLocal()
         try:
+            # PRD-197 S2: PRD-136 renamed the row to (embeddings, dimensions);
+            # the old key-only lookup missed on every read since.
             setting = db.query(SystemSetting).filter(
-                SystemSetting.key == "vector_store_dimensions"
+                SystemSetting.category == "embeddings",
+                SystemSetting.key == "dimensions",
             ).first()
             if setting and setting.value:
                 return int(setting.value)
@@ -91,7 +94,7 @@ logger = logging.getLogger(__name__)
 # Token counter for OpenAI models
 try:
     encoding = tiktoken.encoding_for_model("gpt-4")
-except:
+except Exception:
     encoding = tiktoken.get_encoding("cl100k_base")
 
 @dataclass

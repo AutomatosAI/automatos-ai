@@ -21,39 +21,31 @@ Usage::
 """
 
 import logging
-import os
 import time
 from typing import Optional
 
 from fastapi import HTTPException
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
 
-def _env_limit(name: str, default_max: int, default_window: int) -> tuple[int, int]:
-    """Read MAX/WINDOW pair from env with safe fallbacks."""
-    try:
-        max_req = int(os.getenv(f"RATE_LIMIT_{name.upper()}_MAX", str(default_max)))
-        window = int(os.getenv(f"RATE_LIMIT_{name.upper()}_WINDOW_SECONDS", str(default_window)))
-        return max(1, max_req), max(1, window)
-    except (TypeError, ValueError):
-        return default_max, default_window
-
-
 # Default limits per operation. Overridable via env vars
-# RATE_LIMIT_<OPERATION>_MAX and RATE_LIMIT_<OPERATION>_WINDOW_SECONDS.
+# RATE_LIMIT_<OPERATION>_MAX and RATE_LIMIT_<OPERATION>_WINDOW_SECONDS,
+# resolved through config.rate_limit_for (PRD-142 W3-S5 / G7).
 DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # (max_requests, window_seconds)
-    "git_clone":       _env_limit("git_clone", 5, 3600),         # 5 per hour
-    "nl2sql_query":    _env_limit("nl2sql_query", 30, 60),       # 30 per minute
-    "admin_action":    _env_limit("admin_action", 20, 60),       # 20 per minute
-    "skill_import":    _env_limit("skill_import", 3, 3600),      # 3 per hour
-    "plugin_import":   _env_limit("plugin_import", 3, 3600),     # 3 per hour
+    "git_clone":       config.rate_limit_for("git_clone", 5, 3600),         # 5 per hour
+    "nl2sql_query":    config.rate_limit_for("nl2sql_query", 30, 60),       # 30 per minute
+    "admin_action":    config.rate_limit_for("admin_action", 20, 60),       # 20 per minute
+    "skill_import":    config.rate_limit_for("skill_import", 3, 3600),      # 3 per hour
+    "plugin_import":   config.rate_limit_for("plugin_import", 3, 3600),     # 3 per hour
     # Bumped from 10/min → 60/min and now scopes per-agent when caller
     # supplies subject_id. A long working chat that touches many agents
     # (job_title / team / description updates etc.) no longer starves
     # itself or mission tasks running in parallel.
-    "platform_write":  _env_limit("platform_write", 60, 60),     # 60 write/destructive actions per minute, per subject
+    "platform_write":  config.rate_limit_for("platform_write", 60, 60),     # 60 write/destructive actions per minute, per subject
 }
 
 

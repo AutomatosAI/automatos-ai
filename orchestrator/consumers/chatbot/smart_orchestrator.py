@@ -27,6 +27,29 @@ from .intent_classifier import Intent, IntentResult, get_intent_classifier
 
 logger = logging.getLogger(__name__)
 
+# Strong references to in-flight fire-and-forget tasks. Without this the event
+# loop only holds a weak reference and a background write can be garbage
+# collected mid-flight ("Task was destroyed but it is pending").
+_BACKGROUND_TASKS: set = set()
+
+
+def _spawn_background(coro, *, label: str) -> None:
+    """Schedule a coroutine fire-and-forget, retaining a strong reference.
+
+    Memory writes (Mem0 fact extraction, daily summary, L1/L2 persistence) are
+    network-bound and must never block the streaming response. They run on the
+    module-level UnifiedMemoryService, so they are safe to outlive the request's
+    DB session.
+    """
+    try:
+        task = asyncio.create_task(coro)
+    except RuntimeError:
+        # No running event loop (shouldn't happen on the async request path).
+        logger.debug("[Orchestrator] No event loop for background task '%s' — skipping", label)
+        return
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
 
 @dataclass
 class OrchestratedRequest:
@@ -55,6 +78,12 @@ class OrchestratedRequest:
 
     # Timing
     preparation_time_ms: float
+
+    # PRD-201 S1: the per-turn context-assembly trace (mode, per-section
+    # token/trim detail, model, budget ceiling). Persisted on messages.context_trace
+    # for the assistant turn so "what did Auto know?" is answerable. None when
+    # the build predates this or produced no trace.
+    context_trace: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -110,11 +139,12 @@ class SmartChatOrchestrator:
         # Components
         self.classifier = get_intent_classifier()
 
-        # Legacy: keep memory_manager reference for store_exchange()
+        # SmartMemoryManager owns the L3/L2 write fan-out for a chat turn
+        # (distilled facts + verbatim transcript). UnifiedMemoryService is the
+        # shared singleton; we hold a reference for L1 session updates.
         from .smart_memory import get_smart_memory_manager
         self.memory_manager = get_smart_memory_manager()
 
-        # Unified memory service for store_exchange L2 + session updates
         from modules.memory.unified_memory_service import get_unified_memory_service
         self._unified_memory = get_unified_memory_service()
 
@@ -131,6 +161,7 @@ class SmartChatOrchestrator:
         complexity_assessment: Optional[Any] = None,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
+        viewer_subject_id: Optional[str] = None,
     ) -> OrchestratedRequest:
         """
         Prepare a chat request for the LLM.
@@ -141,8 +172,10 @@ class SmartChatOrchestrator:
 
         Args:
             messages: Conversation messages
-            available_tools: All tools available to this agent (kept for
-                backward compatibility — ContextService loads tools internally)
+            available_tools: The tool surface the chat entrypoint already
+                assembled (with is_super_admin + PRD-221 page_actions threaded
+                in). Non-empty → ContextService ships it as-is instead of
+                rebuilding blind; empty → ContextService loads tools itself.
             chat_id: Optional chat session ID
             complexity_assessment: Optional PRD-68 AutoBrain assessment
             attachment_ids: PRD-127 ephemeral attachments to resolve
@@ -210,8 +243,15 @@ class SmartChatOrchestrator:
             skip_memory=not _wants_memory,
             chat_id=chat_id,
             query=latest_query,
+            # The surface service.py::_get_tools built for this turn — carries
+            # is_super_admin + page-prior that ToolsSection can't resolve.
+            # None when empty so a failed upstream build falls back to the
+            # section's own loader.
+            prebuilt_tools=available_tools or None,
             agent_name=self.agent_name,
             user_name=self.state.user_name,
+            # PRD-206 S7: the driving human for the Q7 private-scope guard.
+            viewer_subject_id=viewer_subject_id,
         )
 
         # ─── 4. Update conversation state ───
@@ -237,6 +277,7 @@ class SmartChatOrchestrator:
             user_name=context.user_name or self.state.user_name,
             intent=intent_result.primary_intent,
             intent_confidence=intent_result.confidence,
+            context_trace=context.to_assembly_trace(),  # PRD-201 S1
             requires_tools=bool(context.tools) or intent_result.requires_tools,
             requires_memory=intent_result.requires_memory,
             preparation_time_ms=preparation_time,
@@ -342,12 +383,15 @@ class SmartChatOrchestrator:
         self,
         user_message: str,
         assistant_response: str,
-        chat_id: Optional[str] = None
+        chat_id: Optional[str] = None,
+        subject_id: Optional[str] = None,
     ) -> bool:
         """
         Store a conversation exchange in memory.
 
-        Call this after the LLM responds to save the exchange.
+        Call this after the LLM responds to save the exchange. All writes are
+        scheduled fire-and-forget so the response is never held open on memory
+        persistence.
 
         Args:
             user_message: The user's message
@@ -355,64 +399,58 @@ class SmartChatOrchestrator:
             chat_id: Optional chat session ID
 
         Returns:
-            Success status
+            True once the writes have been scheduled (not a persistence ack).
         """
-        stored = await self.memory_manager.store_conversation(
-            workspace_id=self.workspace_id,
-            agent_id=self.agent_id,
-            user_message=user_message,
-            assistant_response=assistant_response,
-            chat_id=chat_id,
-            widget_mode=self.widget_mode
+        # All memory writes are fire-and-forget. Mem0 fact extraction runs a
+        # synchronous server-side LLM call (seconds), and awaiting it here blocks
+        # the streaming generator — and therefore the HTTP connection — long
+        # after the user has seen the full response. None of these writes feed
+        # back into the current turn, so schedule them and return immediately.
+
+        # L3 distilled facts (two-tier global/agent Mem0) + L2 verbatim
+        # transcript — both fan out from store_conversation. Per W3-S7 / G12
+        # (write-once-per-layer) the L2 transcript IS the L2 write for a chat
+        # turn; the older direct ``_unified_memory.store_exchange`` spawn was
+        # a duplicate L2 row (content_type='exchange') that this collapse
+        # retires.
+        _spawn_background(
+            self.memory_manager.store_conversation(
+                workspace_id=self.workspace_id,
+                agent_id=self.agent_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                chat_id=chat_id,
+                widget_mode=self.widget_mode,
+                subject_id=subject_id,
+            ),
+            label="store_conversation",
         )
 
-        try:
-            await self.memory_manager.store_daily_summary(
+        # Daily activity log entry
+        _spawn_background(
+            self.memory_manager.store_daily_summary(
                 workspace_id=self.workspace_id,
                 user_message=user_message,
                 assistant_response=assistant_response,
                 agent_id=self.agent_id,
-            )
-        except Exception as exc:
-            logger.debug("[Orchestrator] Daily summary storage skipped: %s", exc)
+            ),
+            label="store_daily_summary",
+        )
 
-        # L2: Store raw exchange in Postgres (fire-and-forget — must not block TTFT)
-        try:
-            asyncio.create_task(
-                self._unified_memory.store_exchange(
+        # L1: session in Redis
+        if chat_id:
+            _spawn_background(
+                self._unified_memory.update_session(
                     workspace_id=self.workspace_id,
-                    agent_id=self.agent_id,
+                    conversation_id=chat_id,
                     user_msg=user_message,
                     assistant_msg=assistant_response,
-                    conversation_id=chat_id,
-                )
-            )
-        except Exception:
-            logger.warning(
-                "[Orchestrator] L2 store_exchange failed ws=%s — skipping",
-                self.workspace_id,
-                exc_info=True,
+                ),
+                label="l1_update_session",
             )
 
-        # Update L1 session in Redis (fire-and-forget — must not block response)
-        if chat_id:
-            try:
-                asyncio.create_task(
-                    self._unified_memory.update_session(
-                        workspace_id=self.workspace_id,
-                        conversation_id=chat_id,
-                        user_msg=user_message,
-                        assistant_msg=assistant_response,
-                    )
-                )
-            except Exception:
-                logger.warning(
-                    "[Orchestrator] Session update failed for chat_id=%s — skipping",
-                    chat_id,
-                    exc_info=True,
-                )
-
-        return stored
+        # Writes are scheduled; the turn does not wait on their outcome.
+        return True
 
     def get_user_name(self) -> Optional[str]:
         """Get the user's name if known."""

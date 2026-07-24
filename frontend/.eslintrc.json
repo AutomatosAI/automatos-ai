@@ -1,0 +1,24 @@
+{
+  "extends": ["next/core-web-vitals"],
+  "rules": {
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "CallExpression[callee.name='fetch'][arguments.0.value=/^\\u002Fapi/]",
+        "message": "Use apiClient instead of raw fetch('/api…'). Raw fetch bypasses the configured base URL and auth headers and 404s in split-origin deploys."
+      },
+      {
+        "selector": "CallExpression[callee.name='fetch'][arguments.0.quasis.0.value.raw=/^\\u002Fapi/]",
+        "message": "Use apiClient instead of raw fetch(`/api…`). Raw fetch bypasses the configured base URL and auth headers and 404s in split-origin deploys."
+      },
+      {
+        "selector": "Literal[value=/orange-[0-9]/]",
+        "message": "PRD-169 S3: use the `warning` semantic token, not Tailwind `orange-*`. The palette must read CSS-var tokens so light and dark themes stay correct."
+      },
+      {
+        "selector": "TemplateElement[value.raw=/orange-[0-9]/]",
+        "message": "PRD-169 S3: use the `warning` semantic token, not Tailwind `orange-*` (template-literal className)."
+      }
+    ]
+  }
+}

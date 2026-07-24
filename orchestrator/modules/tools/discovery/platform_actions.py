@@ -32,8 +32,20 @@ from .actions_analytics_enhanced import register_analytics_enhanced_actions
 from .actions_governance import register_governance_actions
 from .actions_harness import register_harness_actions
 from .actions_graph import register_graph_actions
+from .actions_codegraph import register_codegraph_actions  # PRD-165 S4
+from .actions_shopify import register_shopify_actions  # PRD-183 S3 (F088)
 from .actions_auto_reporting import register_auto_reporting_actions
 from .actions_notifications import register_notifications_actions
+from .actions_routing import register_routing_actions  # PRD-142 Wave 4 (W4-S6)
+from .actions_channels import register_channels_actions  # PRD-143 S10
+from .actions_widgets import register_widgets_actions  # PRD-143 S10
+from .actions_members import register_members_actions  # PRD-143 S11
+from .actions_api_keys import register_api_keys_actions  # PRD-143 S11
+from .actions_power import register_power_actions  # PRD-142 Wave 4 (W4-S5)
+from .actions_autonomy import register_autonomy_actions
+from .actions_deliverables import register_deliverables_actions  # PRD-164 S3
+from .actions_watches import register_watch_actions  # PRD-204 S9
+from .actions_capabilities import register_capabilities_actions  # tool-surface PR-B
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
@@ -59,8 +71,20 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_governance_actions(registry)
     register_harness_actions(registry)
     register_graph_actions(registry)
+    register_codegraph_actions(registry)  # PRD-165 S4: codegraph as an agent capability
+    register_shopify_actions(registry)  # PRD-183 S3 (F088): Shopify sync + freshness tools
     register_auto_reporting_actions(registry)
     register_notifications_actions(registry)
+    register_routing_actions(registry)  # PRD-142 Wave 4 (W4-S6): routing-rule tool
+    register_channels_actions(registry)  # PRD-143 S10: channel connect/configure surface
+    register_widgets_actions(registry)  # PRD-143 S10: widget-config surface
+    register_members_actions(registry)  # PRD-143 S11: member administration surface
+    register_api_keys_actions(registry)  # PRD-143 S11: SDK API-key administration surface
+    register_power_actions(registry)  # PRD-142 Wave 4 (W4-S5): power-mode tool
+    register_autonomy_actions(registry)
+    register_deliverables_actions(registry)  # PRD-164 S3: deliverable list/get tools
+    register_watch_actions(registry)  # PRD-204 S9: watch create/list/get/cancel
+    register_capabilities_actions(registry)  # PR-B: platform_find_tools discovery seam
 
     # Workspace tools (file I/O, grep, exec, git)
     from .workspace_actions import register_workspace_actions

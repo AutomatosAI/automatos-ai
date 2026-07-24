@@ -9,17 +9,21 @@ ADDITIVE: Building on existing statistics.py endpoints.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, desc, asc
+from sqlalchemy import func, and_, desc, asc, text
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from core.database.database import get_db
 from core.models import (
     Agent, Skill, Pattern, Workflow, WorkflowExecution,
     AgentStatistics, SystemMetrics
 )
 from core.models.core import LLMUsage
+from core.models.error_event import ErrorEvent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import RunState, TaskState, TERMINAL_RUN_STATES
+from core.models.sites import Site
+from core.models.widget_event_log import WIDGET_EVENT_TYPES, WidgetEventLog
+from core.models.workspaces import Workspace
 import logging
 import psutil
 import time
@@ -27,9 +31,28 @@ import json
 from pydantic import BaseModel
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.super_admin import require_super_admin
+from core.auth.workspace_admin import require_workspace_admin
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+# PRD-143 S6: observability tier — router-wide super-admin lock (fail-closed).
+# Platform/cross-workspace analytics (selection-health, platform activation, the
+# perf + dashboard suite) stay behind this router.
+router = APIRouter(
+    prefix="/api/analytics",
+    tags=["analytics"],
+    dependencies=[Depends(require_super_admin)],
+)
+
+# PRD-185 S12: own-workspace health tiles the Command Center "is-it-working"
+# strip needs. Same prefix, but gated by require_workspace_admin so the people
+# who run a workspace can see their own health (every endpoint here is filtered
+# by ctx.workspace_id — no cross-tenant leak). Platform tiles stay on `router`.
+ws_router = APIRouter(
+    prefix="/api/analytics",
+    tags=["analytics"],
+    dependencies=[Depends(require_workspace_admin)],
+)
 
 # Pydantic models for new endpoints
 class DashboardMetrics(BaseModel):
@@ -50,7 +73,7 @@ class PerformanceEnhancements(BaseModel):
 
 # ==== NEW DASHBOARD METRICS ====
 
-@router.get("/dashboard/success-rate")
+@ws_router.get("/dashboard/success-rate")
 async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get agent success rate percentage with trend (UNION: workflows + missions)"""
     try:
@@ -107,6 +130,531 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
     except Exception as e:
         logger.error(f"Error calculating success rate: {e}")
         return {"value": 0, "trend": 0, "total_executions": 0, "successful_executions": 0, "error": str(e)}
+
+
+@ws_router.get("/slos")
+async def get_slos(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """PRD-180 S5 (Observability) — the three tracked SLOs for this workspace.
+
+    Reuses ``services.slo_metrics`` (no parallel metrics stack): tool-call success
+    rate, board-dispatch p95 latency, and board-event freshness — each with its
+    target, comparator, sample size, and a pass/fail. Own-workspace only
+    (``ctx.workspace_id``-scoped), reachable by a workspace admin (PRD-185 S12).
+    Honest by construction: an SLI with no data reports a ``null`` value, never a
+    fabricated number.
+    """
+    from services.slo_metrics import compute_slos
+
+    try:
+        window_seconds = int(_parse_window(window).total_seconds())
+        return compute_slos(db, workspace_id=ctx.workspace_id, window_seconds=window_seconds)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error computing SLOs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute SLOs")
+
+
+@ws_router.get("/substrate-health")
+async def get_substrate_health(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """PRD-197 S4 — per-seam retrieval substrate health for this workspace.
+
+    Aggregates ``substrate_metric_events`` (documents / memory / field
+    seams) over the window into searches, error rate, empty rate, and p95
+    latency, rolled into a green/degraded/down/unknown status per seam —
+    the "is retrieval healthy?" number the Command Center strip renders.
+    Honest by construction: a seam with no searches reports ``unknown``,
+    never a fabricated green.
+    """
+    from services.substrate_health import compute_substrate_health
+
+    try:
+        window_seconds = int(_parse_window(window).total_seconds())
+        return compute_substrate_health(
+            db, workspace_id=ctx.workspace_id, window_seconds=window_seconds
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error computing substrate health: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute substrate health")
+
+
+def _parse_window(window: str) -> timedelta:
+    """Parse a window string like '24h' or '7d' into a timedelta.
+
+    Supports ``h`` (hours) and ``d`` (days). Falls back to 24h on malformed
+    input — dashboard queries should not 400 because a UI sent a stale param.
+    """
+    try:
+        if not window:
+            return timedelta(hours=24)
+        unit = window[-1].lower()
+        value = int(window[:-1])
+        if value <= 0:
+            return timedelta(hours=24)
+        if unit == "h":
+            return timedelta(hours=value)
+        if unit == "d":
+            return timedelta(days=value)
+    except (ValueError, IndexError):
+        pass
+    return timedelta(hours=24)
+
+
+@ws_router.get("/errors/by-subsystem")
+async def get_errors_by_subsystem(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Error count by subsystem over a rolling window (PRD-142 Wave 0 US-002).
+
+    Backs the dashboard "Error rate by subsystem" tile. Reads from the
+    ``error_events`` sink populated by ``record_error`` (US-001). Filters
+    by the caller's workspace; system-level rows (``workspace_id IS NULL``)
+    are excluded from this workspace-scoped view by design — the
+    dashboard tile shows per-tenant errors only.
+
+    Index path: ``idx_error_events_subsystem_created`` /
+    ``idx_error_events_workspace_created`` cover the ``(workspace_id,
+    created_at)`` filter + ``GROUP BY subsystem`` — no full-table scan.
+
+    Returns ``{window, total, by_subsystem: [{subsystem, count, rate}],
+    generated_at}``. ``rate = count / total`` over the window; 0 when
+    total is 0 (no divide-by-zero).
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    rows = (
+        db.query(
+            ErrorEvent.subsystem,
+            func.count(ErrorEvent.id).label("count"),
+        )
+        .filter(
+            ErrorEvent.workspace_id == ctx.workspace_id,
+            ErrorEvent.created_at >= window_start,
+        )
+        .group_by(ErrorEvent.subsystem)
+        .all()
+    )
+
+    total = int(sum(int(r.count or 0) for r in rows))
+    by_subsystem = [
+        {
+            "subsystem": r.subsystem,
+            "count": int(r.count or 0),
+            "rate": (int(r.count or 0) / total) if total > 0 else 0,
+        }
+        for r in rows
+    ]
+
+    return {
+        "window": window,
+        "total": total,
+        "by_subsystem": by_subsystem,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/selection-health")
+async def get_selection_health(
+    window: str = "24h",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Tool-selection health over a rolling window (PRD-143 S14).
+
+    Aggregates the per-dispatch selection outcomes the universal telemetry
+    hook persists at ``tool_execution_logs.router_decision->'selection'``:
+
+    * ``hit_rate``     — of narrowed dispatches, the fraction whose chosen
+      action came from the narrowed enum (``hits / narrowed``);
+    * ``fallback_rate`` — dispatches whose surface was NOT narrowed
+      (narrow_reason set / rank returned empty) over all selection-recorded
+      dispatches (``fallback / selections``).
+
+    Platform-wide by design: this is the super admin's watchtower — the
+    router-wide ``require_super_admin`` (S6) gates every caller. Index path:
+    ``idx_tool_logs_executed`` covers the window filter.
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    row = db.execute(
+        text(
+            """
+            SELECT
+                COUNT(*) FILTER (
+                    WHERE (router_decision->'selection'->>'narrowed')::boolean
+                ) AS narrowed,
+                COUNT(*) FILTER (
+                    WHERE NOT (router_decision->'selection'->>'narrowed')::boolean
+                ) AS fallback,
+                COUNT(*) FILTER (
+                    WHERE (router_decision->'selection'->>'narrowed')::boolean
+                      AND COALESCE((router_decision->'selection'->>'hit')::boolean, false)
+                ) AS hits
+            FROM tool_execution_logs
+            WHERE executed_at >= :window_start
+              AND router_decision->'selection' IS NOT NULL
+            """
+        ),
+        {"window_start": window_start},
+    ).fetchone()
+
+    narrowed, fallback, hits = (
+        (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)) if row else (0, 0, 0)
+    )
+    selections = narrowed + fallback
+
+    return {
+        "window": window,
+        "selections": selections,
+        "narrowed": narrowed,
+        "fallback": fallback,
+        "hits": hits,
+        "hit_rate": round(hits / narrowed, 4) if narrowed else 0.0,
+        "fallback_rate": round(fallback / selections, 4) if selections else 0.0,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@ws_router.get("/primitive-health")
+async def get_primitive_health(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Per-primitive health (PRD-142 Wave 3 · WS-M · W3-S2).
+
+    Backs the Command Centre "Is it working?" 8-primitive health tile (the
+    Wave 0 US-006 metric deferred until W3-S1 emitted real data). Reads the
+    LATEST ``primitive_check`` finding per primitive from ``heartbeat_results``;
+    the writer is W3-S1's ``emit_primitive_finding`` helper in
+    ``services/heartbeat_service.py``, and each primitive's hardening story
+    (S6 chat … S13 channels) wires its own caller as it comes online.
+
+    Honest gaps over fake greens: a primitive with NO finding renders
+    ``{status: "unknown", last_checked: null}``. The 8 canonical primitives
+    are ALWAYS returned — the closed set comes from
+    ``heartbeat_service.PRIMITIVE_NAMES`` (single source of truth).
+
+    Index path: ``ix_heartbeat_results_workspace_id`` +
+    ``ix_heartbeat_results_created_at`` cover the workspace filter +
+    ``ORDER BY created_at DESC`` — no full-table scan. The ``findings->0``
+    JSONB extraction runs only on the workspace-narrowed slice.
+
+    Returns ``{primitives: [{name, status, last_checked}], generated_at}``;
+    ``status`` is one of ``{green, degraded, down, unknown}``.
+    """
+    from services.heartbeat_service import PRIMITIVE_NAMES
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                findings->0->>'primitive' AS primitive,
+                findings->0->>'status'    AS status,
+                findings->0->>'detail'    AS detail,
+                created_at
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id
+              AND findings->0->>'finding_type' = 'primitive_check'
+            ORDER BY created_at DESC
+            """
+        ),
+        {"ws_id": str(ctx.workspace_id)},
+    ).fetchall()
+
+    # Latest-wins: rows arrive DESC, so the FIRST row per primitive is the
+    # latest finding. Ignore primitive names outside the canonical closed set
+    # (the writer rejects them, but a defence-in-depth filter keeps drift out
+    # of the tile if a row ever leaks in via direct SQL).
+    latest: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        primitive = r.primitive
+        if primitive not in PRIMITIVE_NAMES or primitive in latest:
+            continue
+        latest[primitive] = {"status": r.status, "last_checked": r.created_at}
+
+    primitives = [
+        {
+            "name": name,
+            "status": latest[name]["status"] if name in latest else "unknown",
+            "last_checked": (
+                latest[name]["last_checked"].isoformat()
+                if name in latest and latest[name]["last_checked"] is not None
+                else None
+            ),
+        }
+        for name in sorted(PRIMITIVE_NAMES)
+    ]
+
+    return {
+        "primitives": primitives,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@ws_router.get("/widget-engagement")
+async def get_widget_engagement(
+    window: str = "7d",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Widget engagement counts by event_type + distinct sessions (PRD-142 Wave 0 US-004).
+
+    Backs the dashboard "Widget engagement" tile. Read-only aggregation
+    over ``widget_event_log`` (writer: ``modules/widgets/telemetry.py``;
+    schema: ``core/models/widget_event_log.py``). This endpoint does NOT
+    construct ``WidgetEventLog`` rows — telemetry's writer remains the
+    single source of truth.
+
+    Tenant isolation: ``widget_event_log`` has no ``workspace_id``
+    column, so we resolve the caller's ``sites`` first (one workspace,
+    many sites — PRD-008-A) and restrict the aggregation to that set.
+    A workspace with zero sites short-circuits to an empty payload.
+
+    Index path: the aggregation filters
+    ``event_type IN WIDGET_EVENT_TYPES`` so
+    ``idx_widget_event_log_type_created`` is eligible alongside the
+    ``created_at >= cutoff`` window — no full-table scan.
+
+    Returns ``{window, by_event_type: [{event_type, count}], sessions,
+    generated_at}``.
+    """
+    window_start = datetime.utcnow() - _parse_window(window)
+
+    site_rows = (
+        db.query(Site.id).filter(Site.workspace_id == ctx.workspace_id).all()
+    )
+    site_ids = [row[0] for row in site_rows]
+
+    if not site_ids:
+        return {
+            "window": window,
+            "by_event_type": [],
+            "sessions": 0,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+    agg_rows = (
+        db.query(
+            WidgetEventLog.event_type,
+            func.count(WidgetEventLog.id).label("count"),
+        )
+        .filter(
+            WidgetEventLog.site_id.in_(site_ids),
+            WidgetEventLog.event_type.in_(WIDGET_EVENT_TYPES),
+            WidgetEventLog.created_at >= window_start,
+        )
+        .group_by(WidgetEventLog.event_type)
+        .all()
+    )
+
+    by_event_type = [
+        {"event_type": r.event_type, "count": int(r.count or 0)}
+        for r in agg_rows
+    ]
+
+    sessions = (
+        db.query(func.count(func.distinct(WidgetEventLog.session_id)))
+        .filter(
+            WidgetEventLog.site_id.in_(site_ids),
+            WidgetEventLog.event_type.in_(WIDGET_EVENT_TYPES),
+            WidgetEventLog.created_at >= window_start,
+        )
+        .scalar()
+    ) or 0
+
+    return {
+        "window": window,
+        "by_event_type": by_event_type,
+        "sessions": int(sessions),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/activation")
+async def get_activation(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Platform-wide activation rate (PRD-142 Wave 0 US-005).
+
+    Definition: a workspace is "activated" when it has >=1
+    ``OrchestrationRun`` with ``state == RunState.COMPLETED.value`` —
+    i.e. at least one mission has reached the canonical terminal success
+    state (``core/models/orchestration_enums.py``). The activation rate
+    is ``activated_workspaces / provisioned_workspaces``.
+
+    This is the one Wave 0 tile that is intentionally NOT filtered to a
+    single ``workspace_id`` — it answers a platform-level founder
+    question ("are new workspaces reaching first value?"), not a tenant
+    question. The endpoint still requires authentication via
+    ``get_request_context_hybrid`` to gate access to the aggregate.
+
+    Computed from ``OrchestrationRun`` only — NO new table, NO
+    ``WorkflowExecution`` reads (Wave 0 scope; the ``WorkflowExecution``
+    drop is owned by Wave 3 per PLAYBOOK-ENGINE-DESIGN.md §4.2).
+
+    Returns ``{activated, total_workspaces, rate, generated_at}``;
+    ``rate = activated / total_workspaces``, 0 when ``total_workspaces``
+    is 0 (no divide-by-zero, no fake fallback value).
+    """
+    activated = (
+        db.query(func.count(func.distinct(OrchestrationRun.workspace_id)))
+        .filter(OrchestrationRun.state == RunState.COMPLETED.value)
+        .scalar()
+    ) or 0
+
+    total_workspaces = db.query(func.count(Workspace.id)).scalar() or 0
+
+    rate = (activated / total_workspaces) if total_workspaces > 0 else 0
+
+    return {
+        "activated": int(activated),
+        "total_workspaces": int(total_workspaces),
+        "rate": rate,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@ws_router.get("/activation/workspace")
+async def get_workspace_activation(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Own-workspace activation (PRD-185 S12) — has THIS workspace reached first value?
+
+    The tenant-scoped counterpart to the platform ``/activation`` founder metric
+    (which stays super-admin): a workspace is "activated" once it has >=1
+    ``OrchestrationRun`` in the terminal COMPLETED state — at least one mission has
+    produced a real outcome. No cross-workspace counts are exposed here; the
+    strip's activation tile reads this, never the platform aggregate.
+
+    Returns ``{activated, completed_missions, generated_at}``.
+    """
+    completed = (
+        db.query(func.count(OrchestrationRun.id))
+        .filter(
+            OrchestrationRun.workspace_id == ctx.workspace_id,
+            OrchestrationRun.state == RunState.COMPLETED.value,
+        )
+        .scalar()
+    ) or 0
+
+    return {
+        "activated": completed > 0,
+        "completed_missions": int(completed),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@ws_router.get("/deliverable-freshness")
+async def get_deliverable_freshness(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Age of the most recent deliverable in the workspace (PRD-185 S12).
+
+    The "is Auto still producing?" tile — the freshness signal that would have
+    surfaced the 2026-06-16 silent stop on day one, when deliverable output
+    dropped to zero and nothing said so. Reads the ``v_workspace_outputs``
+    deliverables read-model, workspace-scoped. Honest empties: a workspace with no
+    deliverables reports ``last_produced_at = null`` and ``age_seconds = null``,
+    never a fabricated fresh zero.
+
+    Returns ``{last_produced_at, age_seconds, total, generated_at}``.
+    """
+    row = db.execute(
+        text(
+            """
+            SELECT MAX(created_at) AS last_at, COUNT(*) AS total
+            FROM v_workspace_outputs
+            WHERE workspace_id = :ws
+              AND deleted_at IS NULL
+            """
+        ),
+        {"ws": str(ctx.workspace_id)},
+    ).fetchone()
+
+    last_at = row.last_at if row else None
+    total = int(row.total) if row and row.total is not None else 0
+    age_seconds: Optional[float] = None
+    if last_at is not None:
+        aware = last_at if last_at.tzinfo else last_at.replace(tzinfo=timezone.utc)
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - aware).total_seconds())
+
+    return {
+        "last_produced_at": last_at.isoformat() if last_at else None,
+        "age_seconds": age_seconds,
+        "total": total,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@ws_router.get("/commerce-integrity")
+async def get_commerce_integrity(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Cross-sell persistence integrity — the Commerce tile (PRD-189 S2).
+
+    The one query that would have caught the F1 wipe on day one: the FBT
+    edges the last orders sync REPORTED (``orders_sync.fbt_edges_added``)
+    versus the ``frequently_bought_with`` edges actually PRESENT in the
+    workspace Knowledge Graph. Read-only — the sync status blocks are written
+    by ``api/shopify.py``; the graph is read through the same
+    ``GraphifyService`` the widget resolvers use.
+
+    Own-workspace only (PRD-185 S12 strip posture). Honest empties: a
+    workspace with no commerce sync history reports ``synced: false`` and
+    nulls; a workspace whose graph lost its cross-sell reads the drift, never
+    a fabricated green.
+
+    Returns ``{synced, reported_fbt_edges, present_fbt_edges, drift, ok,
+    last_orders_sync_at, last_catalog_sync_at, generated_at}``.
+    """
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    settings = (workspace.settings or {}) if workspace else {}
+    orders_sync = settings.get("orders_sync") or {}
+    product_sync = settings.get("product_sync") or {}
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    if not orders_sync and not product_sync:
+        return {
+            "synced": False,
+            "reported_fbt_edges": None,
+            "present_fbt_edges": None,
+            "drift": None,
+            "ok": None,
+            "last_orders_sync_at": None,
+            "last_catalog_sync_at": None,
+            "generated_at": generated_at,
+        }
+
+    from integrations.shopify.integrity import count_fbt_edges, fbt_integrity
+    from modules.knowledge.graph_service import GraphifyService
+
+    graph = await GraphifyService().load_graph(str(ctx.workspace_id))
+    present = count_fbt_edges(graph) if graph is not None else 0
+    integrity = fbt_integrity(orders_sync.get("fbt_edges_added"), present)
+
+    return {
+        "synced": True,
+        "reported_fbt_edges": integrity["reported"],
+        "present_fbt_edges": integrity["present"],
+        "drift": integrity["drift"],
+        "ok": integrity["ok"],
+        "last_orders_sync_at": orders_sync.get("completed_at"),
+        "last_catalog_sync_at": product_sync.get("completed_at"),
+        "generated_at": generated_at,
+    }
+
 
 @router.get("/dashboard/task-completion-time")
 async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:

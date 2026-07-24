@@ -13,9 +13,10 @@ Usage:
     AGENT_HEARTBEATS.labels(agent_id="cto", status="success").inc()
 """
 
-import os
 import time
 from typing import Optional
+
+from config import config
 
 try:
     from prometheus_client import (
@@ -32,7 +33,8 @@ try:
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
-SERVICE_NAME = os.environ.get("SERVICE_NAME", "automatos-backend")
+# PRD-142 W3-S5 / G7 — env reads routed through config.
+SERVICE_NAME = config.METRICS_SERVICE_NAME
 
 # ─────────────────────────────────────────────
 # Standard HTTP Metrics
@@ -164,7 +166,7 @@ def setup_metrics(app, service_name: Optional[str] = None):
     # Set service info
     SERVICE_INFO.info({
         "service": svc,
-        "environment": os.environ.get("ENVIRONMENT", "unknown"),
+        "environment": config.METRICS_ENVIRONMENT,
     })
 
     # Metrics endpoint

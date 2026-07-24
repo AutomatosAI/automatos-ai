@@ -1,12 +1,12 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-
 """
 Database Configuration and Session Management
 ============================================
 
 Database setup, connection management, and session handling for Automotas AI.
+
+(PRD-142 W3-S5 / G7) The redundant ``load_dotenv()`` that used to live at the
+top of this module is gone — importing ``config`` loads ``.env`` exactly once,
+so the duplicate call only fought back over already-set values.
 """
 
 from sqlalchemy import create_engine
@@ -108,6 +108,11 @@ def get_db() -> Session:
     try:
         yield db
     finally:
+        # Roll back any transaction the handler left open before returning the
+        # connection to the pool, so it is never 'idle in transaction' (holds
+        # row locks, blocks DDL). After a handler that committed, this is a
+        # no-op. Aligns with the get_db_session() pattern below.
+        db.rollback()
         db.close()
 
 @contextmanager
@@ -123,6 +128,23 @@ def get_db_session():
         raise
     finally:
         db.close()
+
+def end_open_transaction(db: Session) -> None:
+    """Commit to end the session's open transaction before a long ``await``.
+
+    SQLAlchemy opens a transaction on the first query and holds it until the
+    next commit/rollback. A long-lived session that issues a SELECT and then
+    awaits an LLM call (or an ``asyncio.gather`` of agent coroutines) leaves its
+    backing connection 'idle in transaction' for the whole await — holding row
+    locks and blocking DDL (PRD-135: a 9-hour idle SELECT on ``agents`` once
+    wedged a migration).
+
+    Call this immediately before such an await so the connection sits idle, not
+    idle-in-transaction. Any pending writes are flushed and committed at that
+    point, so the write boundary becomes incremental rather than one commit at
+    the end of the tick — a deliberate atomicity trade for connection safety.
+    """
+    db.commit()
 
 def init_database():
     """Initialize database with default data"""

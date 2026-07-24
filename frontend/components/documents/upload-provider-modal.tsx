@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { TeamMultiSelect } from './team-multi-select'
 
 interface Provider {
   id: string
@@ -49,7 +50,6 @@ export function UploadProviderModal({
 }: UploadProviderModalProps) {
   const [selectedProviderId, setSelectedProviderId] = useState<string>('manual')
   const [teamAccess, setTeamAccess] = useState<string[]>([])
-  const [newTeam, setNewTeam] = useState('')
   const [dragActive, setDragActive] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -97,7 +97,6 @@ export function UploadProviderModal({
     if (!uploading) {
       setSelectedProviderId('manual')
       setTeamAccess([])
-      setNewTeam('')
       setUploadProgress(0)
       setUploadComplete(false)
       setUploading(false)
@@ -200,51 +199,8 @@ export function UploadProviderModal({
                 <p className="text-xs text-muted-foreground">
                   Restrict visibility to specific teams. Leave empty for all teams.
                 </p>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add team..."
-                    value={newTeam}
-                    onChange={(e) => setNewTeam(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        const trimmed = newTeam.trim()
-                        if (trimmed && !teamAccess.includes(trimmed)) {
-                          setTeamAccess(prev => [...prev, trimmed])
-                        }
-                        setNewTeam('')
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const trimmed = newTeam.trim()
-                      if (trimmed && !teamAccess.includes(trimmed)) {
-                        setTeamAccess(prev => [...prev, trimmed])
-                      }
-                      setNewTeam('')
-                    }}
-                  >
-                    +
-                  </Button>
-                </div>
-                {teamAccess.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {teamAccess.map(team => (
-                      <Badge
-                        key={team}
-                        variant="outline"
-                        className="cursor-pointer text-xs"
-                        onClick={() => setTeamAccess(prev => prev.filter(t => t !== team))}
-                      >
-                        {team} <X className="w-3 h-3 ml-1" />
-                      </Badge>
-                    ))}
-                  </div>
-                )}
+                {/* PRD-158 S2: team dropdown from /api/teams (no free-text). */}
+                <TeamMultiSelect value={teamAccess} onChange={setTeamAccess} />
               </div>
 
               {/* File Drop Zone */}
@@ -299,7 +255,7 @@ export function UploadProviderModal({
 
               <div className="w-full bg-secondary rounded-full h-2">
                 <motion.div
-                  className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full"
+                  className="bg-gradient-to-r from-warning to-red-500 h-2 rounded-full"
                   initial={{ width: 0 }}
                   animate={{ width: `${uploadProgress}%` }}
                   transition={{ duration: 0.3 }}

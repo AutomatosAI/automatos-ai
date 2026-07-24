@@ -19,6 +19,7 @@ from sqlalchemy import and_, desc, func as sqlfunc, or_, text
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.marketplace_widget import MarketplaceWidget
@@ -54,7 +55,9 @@ def _require_user_db_id(db: Session, ctx: RequestContext):
 
 
 def _is_admin(ctx: RequestContext) -> bool:
-    return getattr(ctx.user, "system_role", "user") == "admin"
+    # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
+    from core.auth.roles import caller_is_admin
+    return caller_is_admin(ctx.user)
 
 
 def _assert_admin(ctx: RequestContext) -> None:
@@ -353,7 +356,7 @@ async def featured_widgets(
 # 5. POST /widgets/{widget_id}/install — Install widget (US-005)
 # ===================================================================
 
-@router.post("/widgets/{widget_id}/install", status_code=201)
+@router.post("/widgets/{widget_id}/install", status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def install_widget(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -402,7 +405,7 @@ async def install_widget(
 # 6. DELETE /widgets/{widget_id}/install — Uninstall widget (US-005)
 # ===================================================================
 
-@router.delete("/widgets/{widget_id}/install")
+@router.delete("/widgets/{widget_id}/install", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def uninstall_widget(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -499,7 +502,7 @@ async def list_reviews(
 # 9. POST /widgets/{widget_id}/reviews — Create review (US-006)
 # ===================================================================
 
-@router.post("/widgets/{widget_id}/reviews", response_model=ReviewOut, status_code=201)
+@router.post("/widgets/{widget_id}/reviews", response_model=ReviewOut, status_code=201, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def create_review(
     widget_id: str,
     body: CreateReviewRequest,
@@ -555,7 +558,7 @@ async def create_review(
 # 10. PUT /reviews/{review_id} — Update own review (US-006)
 # ===================================================================
 
-@router.put("/reviews/{review_id}", response_model=ReviewOut)
+@router.put("/reviews/{review_id}", response_model=ReviewOut, dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def update_review(
     review_id: str,
     body: UpdateReviewRequest,
@@ -589,7 +592,7 @@ async def update_review(
 # 11. DELETE /reviews/{review_id} — Delete own review (US-006)
 # ===================================================================
 
-@router.delete("/reviews/{review_id}")
+@router.delete("/reviews/{review_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_review(
     review_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -616,7 +619,7 @@ async def delete_review(
 # 12. POST /widgets — Create widget (US-007, developer)
 # ===================================================================
 
-@router.post("/widgets", response_model=WidgetDetailOut, status_code=201)
+@router.post("/widgets", response_model=WidgetDetailOut, status_code=201, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def create_widget(
     body: CreateWidgetRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -671,7 +674,7 @@ async def create_widget(
 # 13. PUT /widgets/{widget_id} — Update widget (US-007)
 # ===================================================================
 
-@router.put("/widgets/{widget_id}", response_model=WidgetDetailOut)
+@router.put("/widgets/{widget_id}", response_model=WidgetDetailOut, dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def update_widget(
     widget_id: str,
     body: UpdateWidgetRequest,
@@ -706,7 +709,7 @@ async def update_widget(
 # 14. POST /widgets/{widget_id}/submit — Submit for review (US-007)
 # ===================================================================
 
-@router.post("/widgets/{widget_id}/submit")
+@router.post("/widgets/{widget_id}/submit", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def submit_widget_for_review(
     widget_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

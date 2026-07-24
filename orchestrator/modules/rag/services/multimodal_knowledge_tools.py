@@ -13,10 +13,12 @@ Provides:
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+
+from core.team_access import normalize_team, metadata_team_filter_clause
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +35,66 @@ class MultimodalKnowledgeTools:
         """Initialize multimodal tools with database session"""
         self.db = db_session
         self.logger = logging.getLogger(f"{__name__}.MultimodalKnowledgeTools")
-    
+
+    async def _embed_query(self, query: str) -> Optional[str]:
+        """Embed the query text into a pgvector literal for real semantic ranking.
+
+        Replaces the broken ``WHERE content = :query`` exact-match subquery that
+        returned NULL (and NULL similarity / NULL ordering) for any novel query.
+        Returns ``None`` on failure so callers fail closed instead of running an
+        unranked scan.
+        """
+        try:
+            from core.llm.embedding_manager import create_embedding_manager
+            embedding_manager = create_embedding_manager()
+            embedding = await embedding_manager.generate_embedding(query)
+            if not embedding:
+                return None
+            return '[' + ','.join(str(v) for v in embedding) + ']'
+        except Exception as e:
+            self.logger.error(f"Query embedding failed: {e}")
+            return None
+
+    def _scope(
+        self,
+        workspace_id: str,
+        team: Optional[str] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Build the mandatory workspace + optional team scoping clause shared by
+        every multimodal tool (PRD-156 S1).
+
+        One source of truth so the four tools never drift into a hand-rolled
+        per-tool filter. ``knowledge_items`` has no ``team_access`` column — its
+        scoping lives in ``metadata->'team_access'`` — so team filtering reuses
+        ``core.team_access.metadata_team_filter_clause`` (the JSONB variant of
+        the canonical PRD-124 clause). Team filter applies only when a team is
+        supplied, mirroring ``modules/rag/service.py``.
+        """
+        clause = "AND ki.workspace_id = :workspace_id::uuid"
+        params: Dict[str, Any] = {"workspace_id": str(workspace_id)}
+        team_norm = normalize_team(team) if team else None
+        if team_norm:
+            clause += " " + metadata_team_filter_clause("ki.metadata", "team_access")
+            params["team"] = team_norm
+        return clause, params
+
     async def search_tables(
         self,
         query: str,
         limit: int = 5,
+        workspace_id: Optional[str] = None,
+        team: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Search for tables in the knowledge base.
-        
+
         Args:
             query: Search query for tables
             limit: Maximum number of results
-            
+            workspace_id: Tenant scope (mandatory; fails closed if absent)
+            team: Optional team scope (PRD-124)
+
         Returns:
             {
                 "success": bool,
@@ -55,15 +103,27 @@ class MultimodalKnowledgeTools:
             }
         """
         try:
-            self.logger.info(f"Searching tables: query='{query}', limit={limit}")
-            
+            self.logger.info(f"Searching tables: query='{query}', limit={limit}, workspace={workspace_id}")
+
+            # PRD-156 S1: cross-tenant fail-closed — never run an unscoped scan.
+            if not workspace_id:
+                self.logger.warning("search_tables called without workspace_id — failing closed")
+                return {"success": False, "error": "workspace_id is required for multimodal search", "results": [], "count": 0}
+
             # Query knowledge base for tables
             if not self.db:
                 from core.database.database import SessionLocal
                 self.db = SessionLocal()
-            
-            search_query = text("""
-                SELECT 
+
+            query_embedding = await self._embed_query(query)
+            if query_embedding is None:
+                return {"success": False, "error": "Failed to embed query", "results": [], "count": 0}
+
+            scope_sql, params = self._scope(workspace_id, team)
+            params.update({"query_embedding": query_embedding, "limit": limit})
+
+            search_query = text(f"""
+                SELECT
                     ki.id,
                     ki.title,
                     ki.content,
@@ -74,29 +134,19 @@ class MultimodalKnowledgeTools:
                     kt.column_count,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> (
-                        SELECT embedding FROM knowledge_items 
-                        WHERE content = :query 
-                        LIMIT 1
-                    )) as similarity
+                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
                 FROM knowledge_items ki
                 JOIN kb_tables kt ON kt.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
                 WHERE kbt.type_name = 'table'
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
-                ORDER BY ki.embedding <=> (
-                    SELECT embedding FROM knowledge_items 
-                    WHERE content = :query 
-                    LIMIT 1
-                )
+                    {scope_sql}
+                ORDER BY ki.embedding <=> :query_embedding::vector
                 LIMIT :limit
             """)
-            
-            results = self.db.execute(
-                search_query,
-                {"query": query, "limit": limit}
-            ).fetchall()
+
+            results = self.db.execute(search_query, params).fetchall()
             
             # Format results
             formatted_results = []
@@ -136,15 +186,19 @@ class MultimodalKnowledgeTools:
         self,
         query: str,
         limit: int = 5,
+        workspace_id: Optional[str] = None,
+        team: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Search for images and visual content.
-        
+
         Args:
             query: Search query for images
             limit: Maximum number of results
-            
+            workspace_id: Tenant scope (mandatory; fails closed if absent)
+            team: Optional team scope (PRD-124)
+
         Returns:
             {
                 "success": bool,
@@ -153,14 +207,26 @@ class MultimodalKnowledgeTools:
             }
         """
         try:
-            self.logger.info(f"Searching images: query='{query}', limit={limit}")
-            
+            self.logger.info(f"Searching images: query='{query}', limit={limit}, workspace={workspace_id}")
+
+            # PRD-156 S1: cross-tenant fail-closed — never run an unscoped scan.
+            if not workspace_id:
+                self.logger.warning("search_images called without workspace_id — failing closed")
+                return {"success": False, "error": "workspace_id is required for multimodal search", "results": [], "count": 0}
+
             if not self.db:
                 from core.database.database import SessionLocal
                 self.db = SessionLocal()
-            
-            search_query = text("""
-                SELECT 
+
+            query_embedding = await self._embed_query(query)
+            if query_embedding is None:
+                return {"success": False, "error": "Failed to embed query", "results": [], "count": 0}
+
+            scope_sql, params = self._scope(workspace_id, team)
+            params.update({"query_embedding": query_embedding, "limit": limit})
+
+            search_query = text(f"""
+                SELECT
                     ki.id,
                     ki.title,
                     ki.content,
@@ -171,29 +237,19 @@ class MultimodalKnowledgeTools:
                     kimg.format,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> (
-                        SELECT embedding FROM knowledge_items 
-                        WHERE content = :query 
-                        LIMIT 1
-                    )) as similarity
+                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
                 FROM knowledge_items ki
                 JOIN kb_images kimg ON kimg.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
                 WHERE kbt.type_name = 'image'
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
-                ORDER BY ki.embedding <=> (
-                    SELECT embedding FROM knowledge_items 
-                    WHERE content = :query 
-                    LIMIT 1
-                )
+                    {scope_sql}
+                ORDER BY ki.embedding <=> :query_embedding::vector
                 LIMIT :limit
             """)
-            
-            results = self.db.execute(
-                search_query,
-                {"query": query, "limit": limit}
-            ).fetchall()
+
+            results = self.db.execute(search_query, params).fetchall()
             
             # Format results
             formatted_results = []
@@ -233,15 +289,19 @@ class MultimodalKnowledgeTools:
         self,
         query: str,
         limit: int = 5,
+        workspace_id: Optional[str] = None,
+        team: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Search for mathematical formulas.
-        
+
         Args:
             query: Search query for formulas
             limit: Maximum number of results
-            
+            workspace_id: Tenant scope (mandatory; fails closed if absent)
+            team: Optional team scope (PRD-124)
+
         Returns:
             {
                 "success": bool,
@@ -250,14 +310,26 @@ class MultimodalKnowledgeTools:
             }
         """
         try:
-            self.logger.info(f"Searching formulas: query='{query}', limit={limit}")
-            
+            self.logger.info(f"Searching formulas: query='{query}', limit={limit}, workspace={workspace_id}")
+
+            # PRD-156 S1: cross-tenant fail-closed — never run an unscoped scan.
+            if not workspace_id:
+                self.logger.warning("search_formulas called without workspace_id — failing closed")
+                return {"success": False, "error": "workspace_id is required for multimodal search", "results": [], "count": 0}
+
             if not self.db:
                 from core.database.database import SessionLocal
                 self.db = SessionLocal()
-            
-            search_query = text("""
-                SELECT 
+
+            query_embedding = await self._embed_query(query)
+            if query_embedding is None:
+                return {"success": False, "error": "Failed to embed query", "results": [], "count": 0}
+
+            scope_sql, params = self._scope(workspace_id, team)
+            params.update({"query_embedding": query_embedding, "limit": limit})
+
+            search_query = text(f"""
+                SELECT
                     ki.id,
                     ki.title,
                     ki.content,
@@ -270,29 +342,19 @@ class MultimodalKnowledgeTools:
                     kf.complexity_level,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> (
-                        SELECT embedding FROM knowledge_items 
-                        WHERE content = :query 
-                        LIMIT 1
-                    )) as similarity
+                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
                 FROM knowledge_items ki
                 JOIN kb_formulas kf ON kf.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
                 WHERE kbt.type_name = 'formula'
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
-                ORDER BY ki.embedding <=> (
-                    SELECT embedding FROM knowledge_items 
-                    WHERE content = :query 
-                    LIMIT 1
-                )
+                    {scope_sql}
+                ORDER BY ki.embedding <=> :query_embedding::vector
                 LIMIT :limit
             """)
-            
-            results = self.db.execute(
-                search_query,
-                {"query": query, "limit": limit}
-            ).fetchall()
+
+            results = self.db.execute(search_query, params).fetchall()
             
             # Format results
             formatted_results = []
@@ -335,16 +397,20 @@ class MultimodalKnowledgeTools:
         query: str,
         kb_types: List[str] = None,
         limit: int = 10,
+        workspace_id: Optional[str] = None,
+        team: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Unified search across all knowledge types.
-        
+
         Args:
             query: Search query
             kb_types: List of knowledge types to search (default: all)
             limit: Maximum total results
-            
+            workspace_id: Tenant scope (mandatory; fails closed if absent)
+            team: Optional team scope (PRD-124)
+
         Returns:
             {
                 "success": bool,
@@ -354,8 +420,13 @@ class MultimodalKnowledgeTools:
             }
         """
         try:
-            self.logger.info(f"Multimodal search: query='{query}', types={kb_types}, limit={limit}")
-            
+            self.logger.info(f"Multimodal search: query='{query}', types={kb_types}, limit={limit}, workspace={workspace_id}")
+
+            # PRD-156 S1: cross-tenant fail-closed — never run an unscoped scan.
+            if not workspace_id:
+                self.logger.warning("search_multimodal called without workspace_id — failing closed")
+                return {"success": False, "error": "workspace_id is required for multimodal search", "results": [], "count": 0, "breakdown": {}}
+
             if kb_types is None:
                 kb_types = ["document", "table", "image", "formula", "codegraph"]
             else:
@@ -384,10 +455,17 @@ class MultimodalKnowledgeTools:
             if not self.db:
                 from core.database.database import SessionLocal
                 self.db = SessionLocal()
-            
+
+            query_embedding = await self._embed_query(query)
+            if query_embedding is None:
+                return {"success": False, "error": "Failed to embed query", "results": [], "count": 0, "breakdown": {}}
+
+            scope_sql, params = self._scope(workspace_id, team)
+            params.update({"query_embedding": query_embedding, "kb_types": kb_types, "limit": limit})
+
             # Search across all specified types
-            search_query = text("""
-                SELECT 
+            search_query = text(f"""
+                SELECT
                     ki.id,
                     ki.title,
                     ki.content,
@@ -397,32 +475,18 @@ class MultimodalKnowledgeTools:
                     ki.quality_score,
                     ki.importance_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> (
-                        SELECT embedding FROM knowledge_items 
-                        WHERE content = :query 
-                        LIMIT 1
-                    )) as similarity
+                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
                 FROM knowledge_items ki
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
                 WHERE kbt.type_name = ANY(:kb_types)
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
-                ORDER BY ki.embedding <=> (
-                    SELECT embedding FROM knowledge_items 
-                    WHERE content = :query 
-                    LIMIT 1
-                )
+                    {scope_sql}
+                ORDER BY ki.embedding <=> :query_embedding::vector
                 LIMIT :limit
             """)
-            
-            results = self.db.execute(
-                search_query,
-                {
-                    "query": query,
-                    "kb_types": kb_types,
-                    "limit": limit
-                }
-            ).fetchall()
+
+            results = self.db.execute(search_query, params).fetchall()
             
             # Format results
             formatted_results = []

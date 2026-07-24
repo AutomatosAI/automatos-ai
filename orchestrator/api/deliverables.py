@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from services.deliverable_service import DeliverableService
 
@@ -43,6 +44,7 @@ async def list_deliverables(
     artifact_type: Optional[str] = Query(None, description="Filter by artifact_type (report, image, document, code, slide, spreadsheet, archive, audio, video)"),
     source_type: Optional[str] = Query(None, description="Filter by source (chat, task, mission, heartbeat, playbook, trigger, upload)"),
     source_type_exclude: Optional[str] = Query(None, description="Comma-separated source_types to exclude (e.g. 'heartbeat')"),
+    source_id: Optional[str] = Query(None, description="Filter by originating mission/task/heartbeat id (PRD-164: mission deliverables tab)"),
     agent_id: Optional[int] = Query(None, description="Filter by agent id"),
     date_from: Optional[str] = Query(None, description="ISO timestamp — include rows created_at >= date_from"),
     date_to: Optional[str] = Query(None, description="ISO timestamp — include rows created_at <= date_to"),
@@ -58,6 +60,7 @@ async def list_deliverables(
         artifact_type=artifact_type,
         source_type=source_type,
         source_type_exclude=source_type_exclude,
+        source_id=source_id,
         agent_id=agent_id,
         date_from=date_from,
         date_to=date_to,
@@ -81,7 +84,7 @@ async def deliverable_stats(
 
 
 # ── Retention ───────────────────────────────────────────────────────
-@router.post("/retention")
+@router.post("/retention", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def apply_retention(
     source_type: str = Body("heartbeat", embed=True),
     keep_per_agent: int = Body(50, embed=True),
@@ -114,7 +117,7 @@ async def get_deliverable(
 
 
 # ── Soft Delete ──────────────────────────────────────────────────────
-@router.delete("/{deliverable_id}")
+@router.delete("/{deliverable_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_deliverable(
     deliverable_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

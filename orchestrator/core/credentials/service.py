@@ -44,16 +44,45 @@ class CredentialStore:
     Manages credential storage, retrieval, and lifecycle.
     Handles encryption, validation, testing, and audit logging.
     """
-    
+
     def __init__(self, db: Session):
         """
         Initialize credential store.
-        
+
         Args:
             db: SQLAlchemy database session
         """
         self.db = db
         self.encryption_service = get_encryption_service()
+
+    # ------------------------------------------------------------------
+    # Integration bridges (credential → execution-platform glue)
+    # ------------------------------------------------------------------
+    def dispatch_integration_bridge(
+        self,
+        credential_id: int,
+        workspace_id,
+        credential_type_name: str,
+        decrypted_data: Dict[str, Any],
+    ):
+        """
+        Dispatch a credential save to the matching integration bridge (if any).
+
+        Returns a BridgeResult or None when no bridge is registered for the
+        credential type. Imported lazily so the credentials module has no hard
+        dependency on the bridges (or their Composio imports).
+        """
+        from core.credentials.integration_bridges import dispatch as _dispatch_bridge
+        from core.credentials.integration_bridges.base import BridgeContext
+
+        return _dispatch_bridge(
+            BridgeContext(
+                workspace_id=workspace_id,
+                credential_id=credential_id,
+                credential_type_name=credential_type_name,
+                decrypted_data=decrypted_data,
+            )
+        )
     
     # ========================================================================
     # Credential Type Management
@@ -191,16 +220,38 @@ class CredentialStore:
     def get_credential_by_name(
         self,
         name: str,
-        environment: str = "production"
+        environment: str = "production",
+        *,
+        workspace_id=None,
+        include_global: bool = False,
     ) -> Optional[Credential]:
-        """Get credential by name (environment-agnostic for MVP single environment)"""
-        # For MVP: Just find the credential by name, ignore environment
-        return self.db.query(Credential).filter(
+        """Get credential by name (environment-agnostic for MVP single environment).
+
+        PRD-195 S7 (P2-14): tenant-facing callers MUST pass ``workspace_id`` —
+        the lookup then only sees that workspace's rows (plus, when
+        ``include_global`` is set for admin/service callers, platform-seeded
+        ``workspace_id IS NULL`` rows, with the workspace-scoped row preferred
+        on a name collision). ``workspace_id=None`` is the in-process platform
+        lane (core/llm/manager BYOK resolution) — it has no tenant by design
+        and keeps the unscoped lookup; never expose it through an HTTP path.
+        """
+        query = self.db.query(Credential).filter(
             and_(
                 Credential.name == name,
                 Credential.is_active == True
             )
-        ).first()
+        )
+        if workspace_id is not None:
+            if include_global:
+                query = query.filter(
+                    or_(
+                        Credential.workspace_id == workspace_id,
+                        Credential.workspace_id.is_(None),
+                    )
+                ).order_by(Credential.workspace_id.is_(None))  # own workspace first
+            else:
+                query = query.filter(Credential.workspace_id == workspace_id)
+        return query.first()
     
     def list_credentials(
         self,

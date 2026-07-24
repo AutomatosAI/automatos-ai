@@ -17,9 +17,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
+from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,33 @@ class MemoryDeleteResponse(BaseModel):
     deleted: bool
 
 
+class ResumeThread(BaseModel):
+    """One recent thread in the resume payload (PRD-206 S3)."""
+    chat_id: str
+    title: str
+    updated_at: Optional[str] = None
+    summary: Optional[Dict[str, Any]] = None
+
+
+class ResumeItem(BaseModel):
+    """One typed memory (decision / open loop) in the resume payload."""
+    id: Optional[str] = None
+    text: str
+    created_at: Optional[str] = None
+    chat_id: Optional[str] = None
+    importance: Optional[float] = None
+    scope: Optional[str] = None
+
+
+class ResumeResponse(BaseModel):
+    """Response for GET /api/memory/resume — 'where did we leave off?'"""
+    threads: List[ResumeThread]
+    recent_decisions: List[ResumeItem]
+    open_loops: List[ResumeItem]
+    suggested_next_steps: List[str]
+    projects: List[Dict[str, Any]]
+
+
 # ---------------------------------------------------------------------------
 # UnifiedMemoryService helper (lazy, optional)
 # ---------------------------------------------------------------------------
@@ -89,7 +120,7 @@ def _get_memory_service() -> Optional["UnifiedMemoryService"]:
     try:
         from modules.memory.unified_memory_service import get_unified_memory_service
         svc = get_unified_memory_service()
-        if svc.is_mem0_configured:
+        if svc.is_durable_configured:
             _memory_service = svc
             logger.info("[widget_memory] Using UnifiedMemoryService")
         else:
@@ -189,6 +220,57 @@ async def list_memories(
     return MemoryListResponse(memories=items, total=len(items))
 
 
+def _internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
+    """Resolve the authenticated principal to the INTEGER ``users.id``.
+
+    ``ctx.user.id`` on the Clerk path is the Clerk STRING — never usable as
+    ``users.id`` (the #513 lesson). An already-integer id (local edition)
+    passes through; otherwise resolve via ``users.clerk_user_id``. None when
+    unresolvable — the resume payload then simply carries no threads.
+    """
+    user = getattr(ctx, "user", None)
+    if user is None:
+        return None
+    uid = getattr(user, "id", None)
+    if isinstance(uid, int):
+        return uid
+    clerk = getattr(user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
+    if not clerk:
+        return None
+    try:
+        row = db.execute(
+            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+            {"cid": clerk},
+        ).fetchone()
+    except Exception:
+        logger.warning("[widget_memory] internal user resolution failed", exc_info=True)
+        return None
+    return int(row[0]) if row else None
+
+
+@router.get("/resume", response_model=ResumeResponse)
+async def resume_context(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+    limit_threads: int = Query(5, ge=1, le=20, description="Max recent threads"),
+    limit_items: int = Query(8, ge=1, le=50, description="Max decisions/open loops"),
+) -> ResumeResponse:
+    """PRD-206 S3: 'Where did we leave off?' — the viewer's recent threads
+    (with their S2 checkpoint summaries), recent decisions, open loops and
+    suggested next steps. Private-scoped memories only surface for their
+    owner (Q7)."""
+    from modules.memory.resume_context import build_resume_payload
+
+    payload = await build_resume_payload(
+        db,
+        workspace_id=_ws_key(ctx.workspace_id),
+        viewer_user_id=_internal_user_id(db, ctx),
+        limit_threads=limit_threads,
+        limit_items=limit_items,
+    )
+    return ResumeResponse(**payload)
+
+
 @router.get("/search", response_model=MemorySearchResponse)
 async def search_memories(
     q: str = Query(..., min_length=1, description="Search query"),
@@ -226,7 +308,7 @@ async def search_memories(
     return MemorySearchResponse(query=q, results=items, total=len(items))
 
 
-@router.post("", response_model=MemoryItem, status_code=201)
+@router.post("", response_model=MemoryItem, status_code=201, dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def store_memory(
     body: MemoryCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -265,7 +347,7 @@ async def store_memory(
     return MemoryItem(**record)
 
 
-@router.delete("/{memory_id}", response_model=MemoryDeleteResponse)
+@router.delete("/{memory_id}", response_model=MemoryDeleteResponse, dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_memory(
     memory_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -276,7 +358,10 @@ async def delete_memory(
 
     if service is not None:
         try:
-            deleted = await service.delete_memory(memory_id=memory_id)
+            # PRD-156 S5: scope the delete to the caller's workspace so a memory
+            # id from another workspace can't be deleted (the service enforces
+            # ownership via workspace_id; previously omitted = cross-tenant delete).
+            deleted = await service.delete_memory(memory_id=memory_id, workspace_id=ws)
             return MemoryDeleteResponse(id=memory_id, deleted=deleted)
         except Exception as exc:
             logger.warning("[widget_memory] Memory delete failed, falling back: %s", exc, exc_info=True)

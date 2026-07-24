@@ -60,8 +60,27 @@ class GraphRouter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _cache_key(query: str, agent_id: Optional[int], top_k: int) -> str:
-        raw = json.dumps({"q": query, "a": agent_id, "k": top_k}, sort_keys=True)
+    def _cache_key(
+        query: str,
+        agent_id: Optional[int],
+        top_k: int,
+        include_super_admin: bool = False,
+        workspace_id: Optional[str] = None,
+    ) -> str:
+        # PRD-143: the su flag is part of the key — a super-admin result
+        # cached under an operator key (or vice versa) would cross the tier.
+        # PRD-177 S5: workspace_id is part of the key — a per-tenant graph result
+        # cached under one workspace must never be served to another (moat leak).
+        raw = json.dumps(
+            {
+                "q": query,
+                "a": agent_id,
+                "k": top_k,
+                "su": include_super_admin,
+                "ws": str(workspace_id) if workspace_id else None,
+            },
+            sort_keys=True,
+        )
         h = hashlib.sha256(raw.encode()).hexdigest()[:16]
         return f"cache:graph_router:{h}"
 
@@ -106,17 +125,32 @@ class GraphRouter:
     async def rank_chains(
         self,
         query: str,
+        *,
+        workspace_id: Optional[str],
         agent_id: Optional[int] = None,
         top_k: int = 15,
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
+        include_super_admin: bool = False,
     ) -> List[Tuple[str, float, List[str]]]:
         """Rank tool chains by combining embedding similarity with graph edges.
+
+        PRD-177 S5: ``workspace_id`` is a REQUIRED keyword. The learned operating
+        graph is per-tenant (owner decision) — edge/affinity reads are filtered
+        to this workspace, and there is no unfiltered global-read fallback that
+        would bleed one tenant's edges into another's routing. Pass the caller's
+        workspace id, or ``None`` explicitly for a genuinely unscoped read (the
+        offline eval harness); the keyword is required so no caller can silently
+        reintroduce a global read.
+
+        PRD-143: fail-closed — super_admin_only actions are excluded from
+        entry nodes AND from edge-expansion targets unless
+        include_super_admin=True is passed explicitly.
 
         Returns:
             List of (primary_action, score, chain_actions) sorted descending by score.
         """
-        cache_key = self._cache_key(query, agent_id, top_k)
+        cache_key = self._cache_key(query, agent_id, top_k, include_super_admin, workspace_id)
         cached = self._read_cache(cache_key)
         if cached is not None:
             return cached
@@ -127,16 +161,23 @@ class GraphRouter:
             top_k=_ENTRY_TOP_K,
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
+            include_super_admin=include_super_admin,
         )
         if not entry_nodes:
             return []
 
-        # Step 2: expand through graph edges + affinities
+        # Step 2: expand through graph edges + affinities (workspace-scoped)
         try:
-            chains = self._expand_with_graph(entry_nodes, agent_id)
+            chains = self._expand_with_graph(entry_nodes, agent_id, workspace_id)
         except Exception as e:
             logger.warning("GraphRouter: graph expansion failed, falling back to embedding-only: %s", e)
             chains = self._to_single_chains(entry_nodes)
+
+        # Step 2.5 (PRD-143): edges learned from super-admin usage can point
+        # AT su actions even when every entry node is operator-eligible —
+        # drop any chain touching the su tier before it reaches a consumer.
+        if not include_super_admin:
+            chains = self._drop_super_admin_chains(chains)
 
         # Step 3: deduplicate by action set, keep highest
         chains = self._deduplicate(chains)
@@ -156,8 +197,13 @@ class GraphRouter:
         self,
         entry_nodes: List[Tuple[str, float]],
         agent_id: Optional[int],
+        workspace_id: Optional[str],
     ) -> List[Tuple[str, float, List[str]]]:
-        """Query edge + affinity tables and build scored chains."""
+        """Query edge + affinity tables and build scored chains.
+
+        PRD-177 S5: all edge/affinity reads are scoped to ``workspace_id`` — the
+        learned graph is per-tenant.
+        """
         from core.database.database import get_db_session
 
         min_conf = self._min_confidence()
@@ -178,19 +224,21 @@ class GraphRouter:
                 agent_sample_count = self._agent_total_samples(db, agent_id)
                 use_agent_scope = agent_sample_count >= sample_floor
 
-            # Batch-query edges for all entry nodes
+            # Batch-query edges for all entry nodes (workspace-scoped)
             edges = self._query_edges(
                 db, entry_action_names, min_conf,
                 agent_id if use_agent_scope else None,
+                workspace_id,
             )
 
-            # Batch-query affinities for entry + expansion targets
+            # Batch-query affinities for entry + expansion targets (workspace-scoped)
             all_action_names = set(entry_action_names)
             for edge in edges:
                 all_action_names.add(edge["to_action"])
-            affinities = self._query_affinities(
+            positive_boosts, negative_penalties = self._query_affinities(
                 db, list(all_action_names),
                 agent_id if use_agent_scope else None,
+                workspace_id,
             )
 
         # Build chains from edges (depth 1 only -- _MAX_DEPTH = 2 means
@@ -204,12 +252,15 @@ class GraphRouter:
             cosine = cosine_by_name.get(from_action, 0.0)
             edge_confidence = edge["confidence"]
 
-            # Affinity boosts for the chain actions
+            # Affinity boosts (succeeds/prefers) lift the chain; negative
+            # penalties (fails_for_intent) lower it — PRD-141 US-017.
             boost = 0.0
+            penalty = 0.0
             for action in (from_action, to_action):
-                boost += affinities.get(action, 0.0)
+                boost += positive_boosts.get(action, 0.0)
+                penalty += negative_penalties.get(action, 0.0)
 
-            score = cosine * edge_confidence + boost
+            score = cosine * edge_confidence + boost - penalty
             chains.append((from_action, score, [from_action, to_action]))
             expanded += 1
 
@@ -238,8 +289,15 @@ class GraphRouter:
         from_actions: List[str],
         min_confidence: float,
         agent_id: Optional[int],
+        workspace_id: Optional[str],
     ) -> List[dict]:
-        """Query tool_routing_edges for used_after edges from entry nodes."""
+        """Query tool_routing_edges for used_after edges from entry nodes.
+
+        PRD-177 S5: filtered to ``workspace_id``. The learned graph is per-tenant,
+        so a read for workspace A returns ONLY workspace A's edges (or the
+        genuinely unscoped ``workspace_id IS NULL`` rows when the caller passes
+        None). There is no cross-tenant global-read fallback.
+        """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingEdge
 
@@ -248,8 +306,18 @@ class GraphRouter:
 
         filters = [
             ToolRoutingEdge.from_action.in_(from_actions),
-            ToolRoutingEdge.edge_type == "used_after",
+            # used_after = learned co-occurrence (telemetry); meta_sibling =
+            # metadata cold-start (PRD-143 metadata_graph_seed) so zero-telemetry
+            # tools are still graph-reachable. Both are confidence-filtered, so
+            # real usage (higher Wilson confidence) outranks metadata edges.
+            ToolRoutingEdge.edge_type.in_(("used_after", "meta_sibling")),
             ToolRoutingEdge.confidence >= min_confidence,
+            # Per-tenant isolation (moat): scope to this workspace exactly. A
+            # None workspace_id reads only the unscoped rows (IS NULL — e.g. the
+            # global meta_sibling cold-start seeds), never a tenant's rows.
+            ToolRoutingEdge.workspace_id == workspace_id
+            if workspace_id is not None
+            else ToolRoutingEdge.workspace_id.is_(None),
         ]
 
         if agent_id is not None:
@@ -288,16 +356,36 @@ class GraphRouter:
         db,
         action_names: List[str],
         agent_id: Optional[int],
-    ) -> dict:
-        """Query tool_routing_affinities and return action_name -> total boost."""
+        workspace_id: Optional[str],
+    ) -> Tuple[dict, dict]:
+        """Query tool_routing_affinities, returning (positive_boosts, negative_penalties).
+
+        PRD-141 US-017: positive and negative signals are kept in separate dicts
+        rather than netted into one, so the caller can apply them explicitly as
+        ``score = cosine * edge_confidence + boost - penalty``.
+
+        * ``succeeds_for_intent`` / ``agent_prefers`` -> positive_boosts[action]
+          += weight*confidence.
+        * ``fails_for_intent`` -> negative_penalties[action] += weight*confidence,
+          recorded as a POSITIVE magnitude (the caller subtracts it).
+
+        PRD-177 S5: filtered to ``workspace_id`` — affinities are per-tenant, so a
+        succeeds/fails-for-intent signal learned in one workspace never boosts or
+        penalizes another's routing.
+        """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingAffinity
 
         if not action_names:
-            return {}
+            return {}, {}
 
         filters = [
             ToolRoutingAffinity.action_name.in_(action_names),
+            # Per-tenant isolation (moat): scope to this workspace exactly.
+            # None reads only the unscoped rows (IS NULL), never a tenant's.
+            ToolRoutingAffinity.workspace_id == workspace_id
+            if workspace_id is not None
+            else ToolRoutingAffinity.workspace_id.is_(None),
         ]
 
         if agent_id is not None:
@@ -316,17 +404,16 @@ class GraphRouter:
             .all()
         )
 
-        boosts: dict = {}
+        positive_boosts: dict = {}
+        negative_penalties: dict = {}
         for r in rows:
-            # succeeds_for_intent adds positive boost; fails subtracts
-            if r.affinity_type == "succeeds_for_intent":
-                boosts[r.action_name] = boosts.get(r.action_name, 0.0) + r.weight * r.confidence
+            magnitude = r.weight * r.confidence
+            if r.affinity_type in ("succeeds_for_intent", "agent_prefers"):
+                positive_boosts[r.action_name] = positive_boosts.get(r.action_name, 0.0) + magnitude
             elif r.affinity_type == "fails_for_intent":
-                boosts[r.action_name] = boosts.get(r.action_name, 0.0) - r.weight * r.confidence
-            elif r.affinity_type == "agent_prefers":
-                boosts[r.action_name] = boosts.get(r.action_name, 0.0) + r.weight * r.confidence
+                negative_penalties[r.action_name] = negative_penalties.get(r.action_name, 0.0) + magnitude
 
-        return boosts
+        return positive_boosts, negative_penalties
 
     # ------------------------------------------------------------------
     # Helpers
@@ -338,6 +425,25 @@ class GraphRouter:
     ) -> List[Tuple[str, float, List[str]]]:
         """Convert embedding-only results to single-action chains."""
         return [(name, score, [name]) for name, score in entry_nodes]
+
+    def _drop_super_admin_chains(
+        self,
+        chains: List[Tuple[str, float, List[str]]],
+    ) -> List[Tuple[str, float, List[str]]]:
+        """Drop every chain that touches a super_admin_only action (PRD-143).
+
+        The registry is resolved via the semantic index's reference (always
+        present in production; keeps unit fakes lightweight) with the
+        canonical singleton as fallback.
+        """
+        registry = getattr(self._semantic_index, "_registry", None)
+        if registry is None:
+            from .action_registry import get_action_registry
+            registry = get_action_registry()
+        su_names = {a.name for a in registry.get_all() if a.super_admin_only}
+        if not su_names:
+            return chains
+        return [c for c in chains if not su_names.intersection(c[2])]
 
     @staticmethod
     def _deduplicate(

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.models.cloud_sync import CloudDocument, CloudSyncConfig, CloudSyncJob
 from core.models.composio import ComposioConnection, ComposioEntity
@@ -61,6 +62,10 @@ class CloudFileResponse(BaseModel):
 
 class SelectFolderRequest(BaseModel):
     root_folder_path: str = Field(..., min_length=1)
+    default_team_access: Optional[List[str]] = Field(
+        default=None,
+        description="PRD-158: teams applied to docs synced from this connection (normalized server-side)",
+    )
 
 
 class SelectFolderResponse(BaseModel):
@@ -333,6 +338,8 @@ async def list_files(
 @router.post(
     "/connections/{connection_id}/select-folder",
     response_model=SelectFolderResponse,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def select_folder(
     connection_id: int,
@@ -344,6 +351,10 @@ async def select_folder(
     try:
         conn = _get_connection_or_404(db, connection_id, ctx.workspace_id)
 
+        # PRD-158 S2/Q5: normalize the connection's default team(s) once, here.
+        from core.team_access import ensure_teams
+        default_team_access = ensure_teams(db, ctx.workspace_id, body.default_team_access or [])
+
         # Upsert sync config
         sync_cfg = db.query(CloudSyncConfig).filter(
             CloudSyncConfig.connection_id == connection_id
@@ -352,11 +363,13 @@ async def select_folder(
         if sync_cfg:
             sync_cfg.root_folder_path = body.root_folder_path
             sync_cfg.sync_enabled = True
+            sync_cfg.default_team_access = default_team_access
         else:
             sync_cfg = CloudSyncConfig(
                 connection_id=connection_id,
                 root_folder_path=body.root_folder_path,
                 sync_enabled=True,
+                default_team_access=default_team_access,
             )
             db.add(sync_cfg)
 
@@ -383,6 +396,8 @@ async def select_folder(
 @router.post(
     "/connections/{connection_id}/sync",
     response_model=SyncTriggerResponse,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def trigger_sync(
     connection_id: int,
@@ -520,6 +535,8 @@ async def get_sync_status(
 @router.delete(
     "/connections/{connection_id}",
     response_model=DisconnectResponse,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def disconnect_connection(
     connection_id: int,
@@ -536,13 +553,24 @@ async def disconnect_connection(
         ).count()
 
         if delete_vectors and documents_affected > 0:
-            # Delete vectors from S3 Vectors backend
+            # Delete vectors file-by-file, scoped to THIS connection's
+            # documents (PRD-186 S1). The bucket may be shared across tenants,
+            # so an index-wide sweep would reach every workspace's vectors —
+            # these file ids belong to a workspace-checked connection
+            # (_get_connection_or_404 above) and nothing else is touched.
+            file_ids = [
+                row[0]
+                for row in db.query(CloudDocument.external_file_id)
+                .filter(CloudDocument.connection_id == connection_id)
+                .distinct()
+                .all()
+            ]
             from modules.search.vector_store import get_vector_store
             backend = get_vector_store(
                 backend="s3_vectors",
                 workspace_id=str(ctx.workspace_id)
             )
-            backend.delete_all_for_connection(connection_id)
+            backend.delete_for_files(file_ids)
 
             # Remove cloud_documents records
             db.query(CloudDocument).filter(
@@ -578,7 +606,7 @@ async def disconnect_connection(
 # US-012: Cloud RAG query endpoint
 # ===================================================================
 
-@router.post("/rag/query", response_model=RAGQueryResponse)
+@router.post("/rag/query", response_model=RAGQueryResponse, dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def cloud_rag_query(
     body: RAGQueryRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

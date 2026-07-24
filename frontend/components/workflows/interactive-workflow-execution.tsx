@@ -366,7 +366,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
       case 'completed': return 'text-success bg-success/10 border-success/20'
       case 'failed':
       case 'error': return 'text-destructive bg-destructive/10 border-destructive/20'
-      case 'waiting_input': return 'text-orange-400 bg-orange-500/10 border-orange-500/20'
+      case 'waiting_input': return 'text-warning bg-warning/10 border-warning/20'
       case 'paused': return 'text-warning bg-warning/10 border-warning/20'
       default: return 'text-muted-foreground bg-secondary/50 border-border/30'
     }

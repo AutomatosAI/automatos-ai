@@ -1,19 +1,47 @@
 "use client";
 
 /**
- * Business Graph Visualization Component
- * D3 force-directed graph for business entity relationships
- * Features: community coloring, god-node scaling, confidence-based edge styling
+ * Knowledge Graph Visualization — WebGL/Canvas force-directed graph.
+ *
+ * Features (PRD-009 Phase-2 polish):
+ *  - Color modes: by node type OR by community (toggleable from panel)
+ *  - Per-type visibility filtering (panel-controlled)
+ *  - Click-to-focus: clicked node becomes the center, the rest dims unless
+ *    it's in the 1-hop neighbourhood. ESC / second click clears focus.
+ *  - Hover tooltip: label + type + degree
+ *  - Edge directional particles ("data flow" feel) on focused subgraph
+ *  - God-node halo for the top-5 highest-degree nodes
+ *  - Adaptive labels: only top-degree nodes labelled at low zoom; expand
+ *    as the user zooms in
+ *  - Imperative ref forwarded so the panel can trigger zoomToFit / focus
  */
 
-import React, { useEffect, useRef, useCallback, useMemo } from "react";
-import * as d3 from "d3";
+import React, {
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
+import dynamic from "next/dynamic";
+import { idOf, colorForType, colorForCommunity, graphCanvasBackground } from "../graph/graph-viz-utils";
+
+const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+      Loading graph renderer…
+    </div>
+  ),
+}) as any;
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface GraphNode {
+export interface GraphNode {
   id: string;
   label: string;
   file_type: string;
@@ -21,7 +49,7 @@ interface GraphNode {
   source_file?: string;
 }
 
-interface GraphLink {
+export interface GraphLink {
   source: string;
   target: string;
   relation: string;
@@ -29,434 +57,559 @@ interface GraphLink {
   confidence_score: number;
 }
 
-interface BusinessGraphVisualizationProps {
-  graphData: {
-    nodes: GraphNode[];
-    links: GraphLink[];
-  };
-  onNodeSelect?: (node: GraphNode) => void;
+export type ColorMode = "type" | "community";
+
+export interface BusinessGraphVisualizationProps {
+  graphData: { nodes: GraphNode[]; links: GraphLink[] };
+  onNodeSelect?: (node: GraphNode | null) => void;
   selectedCommunity?: number | null;
   minConfidence?: number;
+  /** Which node `file_type` values to display. Undefined = show all. */
+  visibleTypes?: Set<string>;
+  /** Which edge `relation` values to display. Undefined = show all. */
+  visibleRelations?: Set<string>;
+  /** Coloring strategy. */
+  colorMode?: ColorMode;
+  /** How many node types the panel legend currently hides — named in the
+   *  empty state so an empty filter intersection is explainable. */
+  hiddenTypeCount?: number;
+  /** Panel-side filter reset (hidden node types) for the empty state's
+   *  "Clear filters" button. Focus is cleared viz-side by the same button. */
+  onClearFilters?: () => void;
 }
 
-// D3 simulation node (extends GraphNode with x/y/fx/fy)
-interface SimNode extends d3.SimulationNodeDatum {
-  id: string;
-  label: string;
-  file_type: string;
-  community?: number;
-  source_file?: string;
+export interface BusinessGraphHandle {
+  zoomToFit: () => void;
+  resetFocus: () => void;
+}
+
+interface VizNode extends GraphNode {
   degree: number;
-}
-
-interface SimLink extends d3.SimulationLinkDatum<SimNode> {
-  relation: string;
-  confidence: string;
-  confidence_score: number;
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
 }
 
 // ---------------------------------------------------------------------------
-// Constants
+// Node colour — a deterministic hash over a shared DATA palette (see
+// graph-viz-utils). Type→colour is no longer a hardcoded per-type map: ANY
+// node type gets a stable, distinct hue, and the panel legend reads the same
+// helper so swatches always match the rendered nodes (BINDING Q26).
 // ---------------------------------------------------------------------------
 
-const ORANGE_ACCENT = "#FF6B35";
-const BG_COLOR = "#0f1117";
-const NODE_STROKE = "#ffffff";
-const LABEL_COLOR = "#e5e7eb";
-const DIMMED_OPACITY = 0.15;
-
-// Warm palette for community coloring (up to 12 distinct communities)
-const COMMUNITY_COLORS = [
-  "#e6194b", // red
-  "#f58231", // orange
-  "#ffe119", // yellow
-  "#3cb44b", // green
-  "#42d4f4", // cyan
-  "#4363d8", // blue
-  "#911eb4", // purple
-  "#f032e6", // magenta
-  "#fabebe", // pink
-  "#9a6324", // brown
-  "#800000", // maroon
-  "#aaffc3", // mint
-];
-
-const communityColor = (community: number | undefined): string => {
-  if (community == null) return "#6b7280";
-  return COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
+// Edge colour per relation type — so structure reads at a glance even
+// when zoomed out and individual nodes blur together. Used when no
+// neighbourhood / community focus is dimming the edges.
+const RELATION_COLORS: Record<string, string> = {
+  variant_of:            "#ffb347",   // amber — matches variant nodes
+  in_collection:         "#10e89e",   // emerald — matches collections
+  by_vendor:             "#c084fc",   // purple — matches vendors
+  has_metafield:         "#38bdf8",   // sky — matches metafields
+  // PRD-009 Phase 2: customer co-purchase signal — hot magenta so it
+  // visually pops out from the static catalog structure. These edges
+  // ARE the recommendation surface.
+  frequently_bought_with: "#ff3d8c",
 };
+const DEFAULT_LINK = "#94a3b8";
 
-/** Map confidence label to SVG stroke-dasharray */
-const confidenceDash = (confidence: string): string => {
-  switch (confidence.toUpperCase()) {
-    case "EXTRACTED":
-      return "none"; // solid
-    case "INFERRED":
-      return "6,4"; // dashed
-    case "AMBIGUOUS":
-      return "2,3"; // dotted
-    default:
-      return "none";
-  }
-};
+// Relations whose edge width scales with co-occurrence weight rather
+// than being constant. FBT edges carry a `weight` (raw co_count) so the
+// strongest co-purchases visually thicken; weaker ones recede.
+const WEIGHTED_RELATIONS = new Set(["frequently_bought_with"]);
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-const BusinessGraphVisualization: React.FC<BusinessGraphVisualizationProps> = ({
-  graphData,
-  onNodeSelect,
-  selectedCommunity = null,
-  minConfidence = 0,
-}) => {
-  const svgRef = useRef<SVGSVGElement>(null);
+const BusinessGraphVisualization = forwardRef<
+  BusinessGraphHandle,
+  BusinessGraphVisualizationProps
+>(function BusinessGraphVisualization(
+  {
+    graphData,
+    onNodeSelect,
+    selectedCommunity = null,
+    minConfidence = 0,
+    visibleTypes,
+    visibleRelations,
+    colorMode = "community",
+    hiddenTypeCount = 0,
+    onClearFilters,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const fgRef = useRef<any>(null);
+  const [size, setSize] = useState({ w: 800, h: 600 });
+  const [hoverNode, setHoverNode] = useState<VizNode | null>(null);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
 
-  // ---- Derived data (filtered, with degree counts) -----------------------
-
-  const { nodes, links } = useMemo(() => {
-    // Filter links by minConfidence
-    const filteredLinks: SimLink[] = graphData.links
-      .filter((l) => l.confidence_score >= minConfidence)
-      .map((l) => ({
-        source: l.source,
-        target: l.target,
-        relation: l.relation,
-        confidence: l.confidence,
-        confidence_score: l.confidence_score,
-      }));
-
-    // Compute degree per node from filtered links
-    const degreeMap = new Map<string, number>();
-    for (const l of filteredLinks) {
-      const src = typeof l.source === "string" ? l.source : (l.source as SimNode).id;
-      const tgt = typeof l.target === "string" ? l.target : (l.target as SimNode).id;
-      degreeMap.set(src, (degreeMap.get(src) ?? 0) + 1);
-      degreeMap.set(tgt, (degreeMap.get(tgt) ?? 0) + 1);
-    }
-
-    const simNodes: SimNode[] = graphData.nodes.map((n) => ({
-      ...n,
-      degree: degreeMap.get(n.id) ?? 0,
-    }));
-
-    return { nodes: simNodes, links: filteredLinks };
-  }, [graphData, minConfidence]);
-
-  // ---- Node radius (god-node scaling) ------------------------------------
-
-  const nodeRadius = useCallback(
-    (d: SimNode): number => {
-      const maxDegree = Math.max(1, ...nodes.map((n) => n.degree));
-      const normalized = d.degree / maxDegree;
-      return 6 + normalized * 20; // 6px min, 26px max
-    },
-    [nodes],
-  );
-
-  // ---- Render D3 graph ---------------------------------------------------
+  // ── Resize observer ────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!svgRef.current || nodes.length === 0) return;
+    if (!containerRef.current) return;
+    const el = containerRef.current;
+    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight || 500 });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
+  // ── Clearing focus ─────────────────────────────────────────────────────
+  // The one focus-clear implementation — ESC, background click, the
+  // imperative resetFocus() (cluster drill), and the empty-state
+  // "Clear filters" button all funnel through here.
 
-    const width = svgRef.current.clientWidth || 800;
-    const height = svgRef.current.clientHeight || 600;
+  const clearFocus = useCallback(() => setFocusNodeId(null), []);
 
-    // Background
-    svg
-      .append("rect")
-      .attr("width", width)
-      .attr("height", height)
-      .attr("fill", BG_COLOR);
-
-    // Zoom container
-    const g = svg.append("g");
-
-    const zoomBehavior = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 6])
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
-      });
-
-    svg.call(zoomBehavior);
-
-    // ---- Simulation -------------------------------------------------------
-
-    const simulation = d3
-      .forceSimulation<SimNode>(nodes)
-      .force(
-        "link",
-        d3
-          .forceLink<SimNode, SimLink>(links)
-          .id((d) => d.id)
-          .distance(100),
-      )
-      .force("charge", d3.forceManyBody().strength(-250))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force(
-        "collision",
-        d3.forceCollide<SimNode>().radius((d) => nodeRadius(d) + 4),
-      );
-
-    simulationRef.current = simulation;
-
-    // ---- Links ------------------------------------------------------------
-
-    const linkGroup = g.append("g").attr("class", "links");
-
-    const linkSelection = linkGroup
-      .selectAll<SVGLineElement, SimLink>("line")
-      .data(links)
-      .enter()
-      .append("line")
-      .attr("stroke", "#8b8b8b")
-      .attr("stroke-width", (d) => 1 + d.confidence_score * 2)
-      .attr("stroke-opacity", 0.6)
-      .attr("stroke-dasharray", (d) => confidenceDash(d.confidence));
-
-    // Link labels (relation)
-    const linkLabelGroup = g.append("g").attr("class", "link-labels");
-
-    const linkLabels = linkLabelGroup
-      .selectAll<SVGTextElement, SimLink>("text")
-      .data(links)
-      .enter()
-      .append("text")
-      .attr("font-size", 9)
-      .attr("fill", "#9ca3af")
-      .attr("text-anchor", "middle")
-      .attr("pointer-events", "none")
-      .text((d) => d.relation);
-
-    // ---- Nodes ------------------------------------------------------------
-
-    const nodeGroup = g.append("g").attr("class", "nodes");
-
-    const nodeSelection = nodeGroup
-      .selectAll<SVGCircleElement, SimNode>("circle")
-      .data(nodes)
-      .enter()
-      .append("circle")
-      .attr("r", (d) => nodeRadius(d))
-      .attr("fill", (d) => communityColor(d.community))
-      .attr("fill-opacity", (d) => {
-        if (selectedCommunity != null && d.community !== selectedCommunity) {
-          return DIMMED_OPACITY;
-        }
-        return 0.85;
-      })
-      .attr("stroke", NODE_STROKE)
-      .attr("stroke-width", 1.5)
-      .style("cursor", "pointer")
-      .call(
-        d3
-          .drag<SVGCircleElement, SimNode>()
-          .on("start", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on("drag", (event, d) => {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on("end", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          }),
-      );
-
-    // Hover effects
-    nodeSelection
-      .on("mouseenter", function (_event, d) {
-        d3.select(this)
-          .attr("stroke", ORANGE_ACCENT)
-          .attr("stroke-width", 3);
-      })
-      .on("mouseleave", function (_event, _d) {
-        d3.select(this)
-          .attr("stroke", NODE_STROKE)
-          .attr("stroke-width", 1.5);
-      });
-
-    // Click handler
-    nodeSelection.on("click", (_event, d) => {
-      // Highlight selected node
-      nodeSelection
-        .attr("stroke", NODE_STROKE)
-        .attr("stroke-width", 1.5);
-      d3.select(_event.currentTarget as SVGCircleElement)
-        .attr("stroke", ORANGE_ACCENT)
-        .attr("stroke-width", 3);
-
-      if (onNodeSelect) {
-        onNodeSelect({
-          id: d.id,
-          label: d.label,
-          file_type: d.file_type,
-          community: d.community,
-          source_file: d.source_file,
-        });
-      }
-    });
-
-    // Tooltips
-    nodeSelection
-      .append("title")
-      .text(
-        (d) =>
-          `${d.label}\nType: ${d.file_type}\nCommunity: ${d.community ?? "none"}\nConnections: ${d.degree}`,
-      );
-
-    // ---- Node labels ------------------------------------------------------
-
-    const nodeLabelGroup = g.append("g").attr("class", "node-labels");
-
-    const nodeLabels = nodeLabelGroup
-      .selectAll<SVGTextElement, SimNode>("text")
-      .data(nodes)
-      .enter()
-      .append("text")
-      .attr("font-size", 11)
-      .attr("fill", (d) => {
-        if (selectedCommunity != null && d.community !== selectedCommunity) {
-          return `rgba(229,231,235,${DIMMED_OPACITY})`;
-        }
-        return LABEL_COLOR;
-      })
-      .attr("text-anchor", "middle")
-      .attr("dy", (d) => nodeRadius(d) + 14)
-      .attr("pointer-events", "none")
-      .text((d) => {
-        // Truncate long labels
-        return d.label.length > 20 ? d.label.slice(0, 18) + "\u2026" : d.label;
-      });
-
-    // ---- Tick -------------------------------------------------------------
-
-    simulation.on("tick", () => {
-      linkSelection
-        .attr("x1", (d) => (d.source as SimNode).x ?? 0)
-        .attr("y1", (d) => (d.source as SimNode).y ?? 0)
-        .attr("x2", (d) => (d.target as SimNode).x ?? 0)
-        .attr("y2", (d) => (d.target as SimNode).y ?? 0);
-
-      linkLabels
-        .attr(
-          "x",
-          (d) =>
-            (((d.source as SimNode).x ?? 0) + ((d.target as SimNode).x ?? 0)) /
-            2,
-        )
-        .attr(
-          "y",
-          (d) =>
-            (((d.source as SimNode).y ?? 0) + ((d.target as SimNode).y ?? 0)) /
-            2,
-        );
-
-      nodeSelection
-        .attr("cx", (d) => d.x ?? 0)
-        .attr("cy", (d) => d.y ?? 0);
-
-      nodeLabels
-        .attr("x", (d) => d.x ?? 0)
-        .attr("y", (d) => d.y ?? 0);
-    });
-
-    // ---- Cleanup ----------------------------------------------------------
-
-    return () => {
-      simulation.stop();
-      simulationRef.current = null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clearFocus();
     };
-  }, [nodes, links, selectedCommunity, nodeRadius, onNodeSelect]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clearFocus]);
 
-  // ---- Render -------------------------------------------------------------
+  // ── Filter + augment ───────────────────────────────────────────────────
+
+  const data = useMemo(() => {
+    const wantedTypes = visibleTypes;
+    const allowed = (n: GraphNode) =>
+      !wantedTypes || wantedTypes.size === 0 || wantedTypes.has(n.file_type);
+
+    const nodes = graphData.nodes.filter(allowed);
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const wantedRels = visibleRelations;
+    const relAllowed = (l: GraphLink) =>
+      !wantedRels || wantedRels.size === 0 || wantedRels.has(l.relation);
+    const links = graphData.links.filter((l) => {
+      const sid = idOf(l.source);
+      const tid = idOf(l.target);
+      return (
+        l.confidence_score >= minConfidence &&
+        relAllowed(l) &&
+        sid != null &&
+        nodeIds.has(sid) &&
+        tid != null &&
+        nodeIds.has(tid)
+      );
+    });
+
+    const degree = new Map<string, number>();
+    for (const l of links) {
+      const s = idOf(l.source);
+      const t = idOf(l.target);
+      if (s != null) degree.set(s, (degree.get(s) ?? 0) + 1);
+      if (t != null) degree.set(t, (degree.get(t) ?? 0) + 1);
+    }
+    const vizNodes: VizNode[] = nodes.map((n) => ({
+      ...n,
+      degree: degree.get(n.id) ?? 0,
+    }));
+    return { nodes: vizNodes, links };
+  }, [graphData, visibleTypes, visibleRelations, minConfidence]);
+
+  const maxDegree = useMemo(
+    () => Math.max(1, ...data.nodes.map((n) => n.degree)),
+    [data.nodes],
+  );
+
+  // ── 1-hop neighbourhood of the focused node ────────────────────────────
+
+  const focusNeighbourhood = useMemo(() => {
+    if (!focusNodeId) return null;
+    const neighbours = new Set<string>([focusNodeId]);
+    for (const l of data.links) {
+      const s = idOf(l.source);
+      const t = idOf(l.target);
+      if (s === focusNodeId && t != null) neighbours.add(t);
+      if (t === focusNodeId && s != null) neighbours.add(s);
+    }
+    return neighbours;
+  }, [focusNodeId, data.links]);
+
+  // Top-5 god nodes by degree — get the halo.
+  const godNodeIds = useMemo(() => {
+    const sorted = [...data.nodes].sort((a, b) => b.degree - a.degree);
+    return new Set(sorted.slice(0, 5).map((n) => n.id));
+  }, [data.nodes]);
+
+  // ── Coloring ───────────────────────────────────────────────────────────
+
+  const getColor = useCallback(
+    (n: VizNode): string =>
+      colorMode === "type" ? colorForType(n.file_type) : colorForCommunity(n.community),
+    [colorMode],
+  );
+
+  // ── Per-node canvas draw ───────────────────────────────────────────────
+
+  const nodeCanvasObject = useCallback(
+    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const n = node as VizNode;
+      // d3-force can emit a paint frame before initial positions are set
+      // (warmupTicks=0 path inside the lib). createRadialGradient throws if
+      // x/y aren't finite, which surfaces as 'Couldn't render the graph view'
+      // in the GraphErrorBoundary. Skip non-finite frames; the simulation
+      // settles into finite coords within a few ticks.
+      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
+      const baseR = 2 + 7 * (n.degree / maxDegree);
+
+      // Dim if community filtered OR outside focus neighbourhood
+      const dimmedByCommunity =
+        selectedCommunity != null && n.community !== selectedCommunity;
+      const dimmedByFocus =
+        focusNeighbourhood != null && !focusNeighbourhood.has(n.id);
+      const dimmed = dimmedByCommunity || dimmedByFocus;
+      ctx.globalAlpha = dimmed ? 0.12 : 0.95;
+
+      const fill = getColor(n);
+
+      // God-node halo (top-5 by degree)
+      if (godNodeIds.has(n.id) && !dimmed) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, baseR + 6, 0, 2 * Math.PI);
+        const halo = ctx.createRadialGradient(
+          node.x, node.y, baseR,
+          node.x, node.y, baseR + 6,
+        );
+        halo.addColorStop(0, fill + "AA");
+        halo.addColorStop(1, fill + "00");
+        ctx.fillStyle = halo;
+        ctx.fill();
+      }
+
+      // Hover/focus emphasis ring
+      const isHover = hoverNode?.id === n.id;
+      const isFocus = focusNodeId === n.id;
+      if (isHover || isFocus) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, baseR + 3, 0, 2 * Math.PI);
+        ctx.lineWidth = 2 / globalScale;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+      }
+
+      // The node itself
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, baseR, 0, 2 * Math.PI);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.lineWidth = 0.5 / globalScale;
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.stroke();
+
+      // Label policy — at 24k nodes, labels become text-soup. Tight rules:
+      //   - Always: hovered, focused (clicked), or in the focus 1-hop.
+      //   - Zoom > 3.5: top god-nodes (top-5).
+      //   - Zoom > 5:   any node with degree above ~30% of max.
+      //   - Otherwise: no label.
+      // Net effect: at default zoom users see ONLY the node they're
+      // pointing at; the rest of the graph is colour-coded shapes.
+      const inFocusHood = focusNeighbourhood?.has(n.id);
+      const showLabel =
+        isHover ||
+        isFocus ||
+        inFocusHood ||
+        (globalScale > 3.5 && godNodeIds.has(n.id)) ||
+        (globalScale > 5 && n.degree > maxDegree * 0.3);
+      if (showLabel && n.label) {
+        // ctx is pre-scaled by globalScale, so size/globalScale renders at a
+        // constant screen size. No graph-unit floor here — a floor stops
+        // cancelling the zoom and labels balloon as you zoom in.
+        const fontSize = 13 / globalScale;
+        ctx.font = `${fontSize}px Inter, ui-sans-serif`;
+        ctx.fillStyle = "#f1f5f9";
+        ctx.textBaseline = "middle";
+        // Background pill so the label is readable over dense edges.
+        const padding = 3 / globalScale;
+        const metrics = ctx.measureText(n.label);
+        const pillX = node.x + baseR + 4 / globalScale;
+        const pillY = node.y - fontSize / 2 - padding / 2;
+        ctx.fillStyle = "rgba(10,13,20,0.85)";
+        ctx.fillRect(
+          pillX - padding,
+          pillY,
+          metrics.width + padding * 2,
+          fontSize + padding,
+        );
+        ctx.fillStyle = "#f1f5f9";
+        ctx.fillText(n.label, pillX, node.y);
+      }
+      ctx.globalAlpha = 1;
+    },
+    [maxDegree, selectedCommunity, focusNeighbourhood, getColor, godNodeIds, hoverNode, focusNodeId],
+  );
+
+  const nodePointerAreaPaint = useCallback(
+    (node: any, color: string, ctx: CanvasRenderingContext2D) => {
+      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
+      const baseR = 2 + 7 * ((node as VizNode).degree / maxDegree);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, baseR + 4, 0, 2 * Math.PI);
+      ctx.fill();
+    },
+    [maxDegree],
+  );
+
+  // ── Link styling ───────────────────────────────────────────────────────
+
+  // Convert a #rrggbb to rgba(...) at a given alpha.
+  const withAlpha = (hex: string, alpha: number): string => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  };
+
+  const linkColor = useCallback(
+    (l: any) => {
+      const s = typeof l.source === "object" ? l.source : null;
+      const t = typeof l.target === "object" ? l.target : null;
+      const relColor = RELATION_COLORS[l.relation] ?? DEFAULT_LINK;
+
+      // Focus dim: only the focused neighbourhood's edges keep their colour
+      if (focusNeighbourhood) {
+        const touches =
+          focusNeighbourhood.has(s?.id) && focusNeighbourhood.has(t?.id);
+        return touches ? withAlpha(relColor, 0.65) : "rgba(120,130,150,0.05)";
+      }
+      // Community dim
+      if (selectedCommunity != null) {
+        const touches =
+          s?.community === selectedCommunity || t?.community === selectedCommunity;
+        return touches ? withAlpha(relColor, 0.55) : "rgba(120,130,150,0.08)";
+      }
+      // Default — relation-coloured edge, low alpha so dense graphs don't drown
+      return withAlpha(relColor, 0.22);
+    },
+    [selectedCommunity, focusNeighbourhood],
+  );
+
+  // Pre-compute max FBT weight once so edge width scales relative to the
+  // strongest co-purchase in this dataset (rather than a hardcoded ceiling).
+  const maxFbtWeight = useMemo(() => {
+    let max = 1;
+    for (const l of data.links) {
+      if (WEIGHTED_RELATIONS.has((l as any).relation) && (l as any).weight > max) {
+        max = (l as any).weight;
+      }
+    }
+    return max;
+  }, [data.links]);
+
+  const linkWidth = useCallback(
+    (l: any) => {
+      const isFbt = WEIGHTED_RELATIONS.has(l.relation);
+      // FBT edges: width proportional to co_count → strongest pairs pop visually
+      if (isFbt) {
+        const weight = (l.weight ?? 1) as number;
+        const base = 0.4 + 2.6 * Math.min(1, weight / maxFbtWeight);  // 0.4 → 3.0
+        if (!focusNeighbourhood) return base;
+        const s = typeof l.source === "object" ? l.source : null;
+        const t = typeof l.target === "object" ? l.target : null;
+        const inHood = s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id);
+        return inHood ? base + 1 : 0.3;
+      }
+      // Catalog edges: thin default, slightly thicker when in focus neighbourhood
+      if (!focusNeighbourhood) return 0.5;
+      const s = typeof l.source === "object" ? l.source : null;
+      const t = typeof l.target === "object" ? l.target : null;
+      return s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id) ? 1.5 : 0.4;
+    },
+    [maxFbtWeight, focusNeighbourhood],
+  );
+
+  // Directional particles only on the focused neighbourhood edges — keeps
+  // the "data flow" feel without overwhelming a 30k-edge graph.
+  const linkParticleCount = useCallback(
+    (l: any) => {
+      if (!focusNeighbourhood) return 0;
+      const s = typeof l.source === "object" ? l.source : null;
+      const t = typeof l.target === "object" ? l.target : null;
+      return s && t && focusNeighbourhood.has(s.id) && focusNeighbourhood.has(t.id)
+        ? 2
+        : 0;
+    },
+    [focusNeighbourhood],
+  );
+
+  // ── Click handlers ─────────────────────────────────────────────────────
+
+  const handleNodeClick = useCallback(
+    (node: any) => {
+      const n = node as VizNode;
+      // Click same node again = clear focus.
+      const next = focusNodeId === n.id ? null : n.id;
+      setFocusNodeId(next);
+
+      if (
+        next &&
+        fgRef.current?.centerAt &&
+        Number.isFinite(n.x) &&
+        Number.isFinite(n.y)
+      ) {
+        fgRef.current.centerAt(n.x, n.y, 600);
+        fgRef.current.zoom(Math.max(2.5, fgRef.current.zoom() ?? 1), 600);
+      }
+
+      onNodeSelect?.(next ? (n as GraphNode) : null);
+    },
+    [focusNodeId, onNodeSelect],
+  );
+
+  const handleBgClick = useCallback(() => {
+    clearFocus();
+    onNodeSelect?.(null);
+  }, [clearFocus, onNodeSelect]);
+
+  // ── Pre-filtered render data ───────────────────────────────────────────
+  // At 24k nodes, the per-tick nodeVisibility/linkVisibility callback path
+  // in react-force-graph causes the simulation to never settle. Filter the
+  // arrays ahead of time instead — the simulation runs once on the active
+  // subset, fast and stable.
+  const renderData = useMemo(() => {
+    const noFilter = selectedCommunity == null && !focusNeighbourhood;
+    if (noFilter) return data;
+
+    const nodes = data.nodes.filter((n) => {
+      if (selectedCommunity != null && n.community !== selectedCommunity) return false;
+      if (focusNeighbourhood && !focusNeighbourhood.has(n.id)) return false;
+      return true;
+    });
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const links = data.links.filter((l) => {
+      const s = idOf(l.source);
+      const t = idOf(l.target);
+      return s != null && t != null && nodeIds.has(s) && nodeIds.has(t);
+    });
+    return { nodes, links };
+  }, [data, selectedCommunity, focusNeighbourhood]);
+
+  // ── Imperative API ─────────────────────────────────────────────────────
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      zoomToFit: () => fgRef.current?.zoomToFit?.(500, 40),
+      resetFocus: clearFocus,
+    }),
+    [clearFocus],
+  );
+
+  // ── Empty-state explanation ────────────────────────────────────────────
+  // Cluster selection, neighbourhood focus, and hidden node types AND
+  // together — the intersection can be empty. Name the active filters and
+  // offer a one-click reset (focus + hidden types; the cluster is kept).
+
+  const activeFilterSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedCommunity != null) parts.push(`Cluster ${selectedCommunity}`);
+    if (focusNodeId) parts.push("neighbourhood focus");
+    if (hiddenTypeCount > 0) {
+      parts.push(`${hiddenTypeCount} node type${hiddenTypeCount === 1 ? "" : "s"} hidden`);
+    }
+    return parts.join(" + ");
+  }, [selectedCommunity, focusNodeId, hiddenTypeCount]);
+
+  const handleClearFilters = useCallback(() => {
+    clearFocus();
+    onClearFilters?.();
+  }, [clearFocus, onClearFilters]);
+
+  // ── Auto zoom-to-fit on data change ────────────────────────────────────
+
+  useEffect(() => {
+    if (!fgRef.current || data.nodes.length === 0) return;
+    const timer = setTimeout(() => {
+      try {
+        fgRef.current.zoomToFit(500, 40);
+      } catch {
+        /* ignore */
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [data.nodes.length]);
+
+  // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} className="relative w-full h-full min-h-[400px]">
-      <svg
-        ref={svgRef}
-        className="w-full h-full"
-        style={{ backgroundColor: BG_COLOR }}
-      />
+    <div ref={containerRef} className="relative w-full h-full min-h-[500px]">
+      {renderData.nodes.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center text-sm text-muted-foreground">
+          <div>
+            No nodes match the current filters.
+            {activeFilterSummary && (
+              <div className="mt-1 text-xs text-muted-foreground/70">
+                Active: {activeFilterSummary}
+              </div>
+            )}
+          </div>
+          {(focusNodeId != null || hiddenTypeCount > 0) && (
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              className="rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-foreground hover:bg-white/10 transition-colors"
+              title="Clear neighbourhood focus and hidden node types (keeps the selected cluster)"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      ) : (
+        <ForceGraph2D
+          ref={fgRef}
+          graphData={renderData}
+          width={size.w}
+          height={size.h}
+          backgroundColor={graphCanvasBackground()}
+          nodeRelSize={4}
+          nodeCanvasObject={nodeCanvasObject}
+          nodePointerAreaPaint={nodePointerAreaPaint}
+          linkColor={linkColor}
+          linkWidth={linkWidth}
+          linkDirectionalParticles={linkParticleCount}
+          linkDirectionalParticleSpeed={0.006}
+          linkDirectionalParticleWidth={2}
+          linkDirectionalParticleColor={() => "#ffffff"}
+          cooldownTicks={140}
+          d3AlphaDecay={0.025}
+          d3VelocityDecay={0.35}
+          warmupTicks={20}
+          enableNodeDrag={false}
+          onNodeClick={handleNodeClick}
+          onNodeHover={(n: any) => setHoverNode(n)}
+          onBackgroundClick={handleBgClick}
+        />
+      )}
 
-      {/* Legend overlay — bottom-left */}
-      {nodes.length > 0 && (
-        <div
-          className="absolute bottom-3 left-3 px-3 py-2 rounded-lg text-xs"
-          style={{
-            background: "rgba(15, 17, 23, 0.8)",
-            backdropFilter: "blur(8px)",
-            border: "1px solid rgba(255,255,255,0.1)",
-          }}
-        >
-          <div className="flex items-center gap-4 flex-wrap">
-            <span className="text-muted-foreground font-medium">Edges:</span>
-            <span className="text-foreground/90 flex items-center gap-1">
-              <svg width="24" height="8">
-                <line
-                  x1="0"
-                  y1="4"
-                  x2="24"
-                  y2="4"
-                  stroke="#9ca3af"
-                  strokeWidth="2"
-                />
-              </svg>
-              Extracted
-            </span>
-            <span className="text-foreground/90 flex items-center gap-1">
-              <svg width="24" height="8">
-                <line
-                  x1="0"
-                  y1="4"
-                  x2="24"
-                  y2="4"
-                  stroke="#9ca3af"
-                  strokeWidth="2"
-                  strokeDasharray="6,4"
-                />
-              </svg>
-              Inferred
-            </span>
-            <span className="text-foreground/90 flex items-center gap-1">
-              <svg width="24" height="8">
-                <line
-                  x1="0"
-                  y1="4"
-                  x2="24"
-                  y2="4"
-                  stroke="#9ca3af"
-                  strokeWidth="2"
-                  strokeDasharray="2,3"
-                />
-              </svg>
-              Ambiguous
-            </span>
+      {/* Hover tooltip */}
+      {hoverNode && (
+        <div className="pointer-events-none absolute top-3 left-3 max-w-xs rounded-md border border-white/10 bg-black/80 backdrop-blur-sm px-3 py-2 text-xs text-foreground shadow-lg">
+          <div className="font-medium text-sm text-white">{hoverNode.label}</div>
+          <div className="text-muted-foreground mt-0.5">
+            {hoverNode.file_type.replace(/_/g, " ")}
+          </div>
+          <div className="text-muted-foreground">
+            {hoverNode.degree} relation{hoverNode.degree === 1 ? "" : "s"}
+            {hoverNode.community != null && (
+              <span className="ml-2">· cluster {hoverNode.community}</span>
+            )}
           </div>
         </div>
       )}
 
-      {/* Empty state */}
-      {nodes.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-muted-foreground text-sm">
-            No graph data available
-          </p>
+      {/* Focus hint — only over a live canvas; the empty state explains itself */}
+      {focusNodeId && renderData.nodes.length > 0 && (
+        <div className="absolute bottom-3 left-3 rounded-md border border-white/10 bg-black/70 backdrop-blur-sm px-3 py-1.5 text-xs text-muted-foreground">
+          Focused on neighbourhood — press <kbd className="px-1 rounded bg-white/10 text-white">Esc</kbd> or click background to clear
         </div>
       )}
     </div>
   );
-};
+});
 
-export { BusinessGraphVisualization };
 export default BusinessGraphVisualization;

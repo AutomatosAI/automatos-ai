@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.composio import TriggerSubscription
 from core.models.routing import (
@@ -159,7 +160,7 @@ async def list_decisions(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/rules")
+@router.post("/rules", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_rule(
     body: CreateRuleRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -251,7 +252,7 @@ async def list_rules(
 # ---------------------------------------------------------------------------
 
 
-@router.delete("/rules/{rule_id}")
+@router.delete("/rules/{rule_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_rule(
     rule_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -288,7 +289,7 @@ async def delete_rule(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/corrections")
+@router.post("/corrections", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def record_correction(
     body: CorrectionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -365,7 +366,7 @@ async def get_cache_stats(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/triggers/setup")
+@router.post("/triggers/setup", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def setup_trigger(
     body: TriggerSetupRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -451,7 +452,7 @@ async def setup_trigger(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/semantic/reindex")
+@router.post("/semantic/reindex", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def reindex_semantic_embeddings(
     force: bool = Query(False, description="Force re-embed even if unchanged"),
     ctx: RequestContext = Depends(get_request_context_hybrid),

@@ -58,6 +58,31 @@ _SNAPSHOT: Dict[str, Optional[types.ModuleType]] = {
     k: sys.modules.get(k) for k in _DISCOVERY_KEYS
 }
 
+# The low-level stubs below SHADOW real importable packages (core,
+# core.database.database, modules.tools.*, config). Left in sys.modules after
+# this module imports, they poison the collection of every sibling test that
+# imports the real ``core.*`` / ``modules.tools.*`` tree. We snapshot them
+# before install and restore at module level right after tool_router is loaded
+# (its top-level imports are already bound by then). ``config`` is read lazily
+# at runtime, so the autouse fixture re-installs it per-test. (PRD-142 W2-S2b.)
+_LOW_LEVEL_KEYS = (
+    "core",
+    "core.database",
+    "core.database.database",
+    "modules",
+    "modules.tools",
+    # _install_discovery_stubs() creates this package object via _ensure_pkg;
+    # snapshot+restore it here too so a pathless stub never leaks to siblings.
+    "modules.tools.discovery",
+    "modules.tools.registry",
+    "modules.tools.execution",
+    "modules.tools.formatting",
+    "modules.tools.formatting.result_formatter",
+    "config",
+)
+_LOW_LEVEL_SNAPSHOT: Dict[str, Optional[types.ModuleType]] = {}
+_FAKE_CONFIG_MOD: Optional[types.ModuleType] = None
+
 
 # ---------------------------------------------------------------------------
 # Fakes wired into sys.modules BEFORE we import tool_router.
@@ -78,6 +103,11 @@ def _ensure_pkg(name: str) -> types.ModuleType:
 
 
 def _install_low_level_stubs():
+    # Snapshot every key we are about to shadow BEFORE touching it, so the
+    # module-level restore can return sys.modules to its real state.
+    for _k in _LOW_LEVEL_KEYS:
+        _LOW_LEVEL_SNAPSHOT.setdefault(_k, sys.modules.get(_k))
+
     # core.database.database.SessionLocal — sync no-op factory
     _ensure_pkg("core")
     _ensure_pkg("core.database")
@@ -103,10 +133,15 @@ def _install_low_level_stubs():
         reg_mod.get_tool_registry = lambda db_session=None: fake_registry
         sys.modules["modules.tools.registry"] = reg_mod
 
-    if "modules.tools.execution" not in sys.modules:
-        exec_mod = types.ModuleType("modules.tools.execution")
-        exec_mod.UnifiedToolExecutor = MagicMock()
-        sys.modules["modules.tools.execution"] = exec_mod
+    # Always shadow with our complete stub — the snapshot above preserves any
+    # prior entry for restore. A `not in sys.modules` guard here would inherit
+    # a half-initialised modules.tools.execution left by an earlier-collected
+    # test (its real __init__ pulls a long exec_* chain and can land in
+    # sys.modules without UnifiedToolExecutor bound), which is the
+    # "(unknown location)" collection error this suite hit in CI.
+    exec_mod = types.ModuleType("modules.tools.execution")
+    exec_mod.UnifiedToolExecutor = MagicMock()
+    sys.modules["modules.tools.execution"] = exec_mod
 
     if "modules.tools.formatting.result_formatter" not in sys.modules:
         _ensure_pkg("modules.tools.formatting")
@@ -126,8 +161,20 @@ def _install_low_level_stubs():
 
         config_mod.config = _FakeConfig()
         sys.modules["config"] = config_mod
+    global _FAKE_CONFIG_MOD
+    _FAKE_CONFIG_MOD = sys.modules["config"]
     fake_config_cls = type(sys.modules["config"].config)
     return fake_config_cls
+
+
+def _restore_low_level_snapshot():
+    """Undo _install_low_level_stubs at module level so the leaked stubs never
+    reach the collection of sibling test modules."""
+    for _k, _prior in _LOW_LEVEL_SNAPSHOT.items():
+        if _prior is None:
+            sys.modules.pop(_k, None)
+        else:
+            sys.modules[_k] = _prior
 
 
 _FAKE_CONFIG_CLS = _install_low_level_stubs()
@@ -210,6 +257,14 @@ def _install_discovery_stubs():
     attribute that ``tool_router`` reads via
     ``from modules.tools.discovery import get_action_registry``."""
     pkg = _ensure_pkg("modules.tools.discovery")
+    # tool_router.py top-level-imports modules.tools.discovery.signal_recorder
+    # (NOT stubbed; it's leaf-loadable — stdlib-only top imports). Point the
+    # (possibly pathless) discovery package at the real dir so that real
+    # submodule resolves, while our action_registry / action_semantic_index
+    # stubs below still shadow via their explicit sys.modules entries.
+    _real_discovery_dir = str(_ORCH / "modules" / "tools" / "discovery")
+    if _real_discovery_dir not in getattr(pkg, "__path__", []):
+        pkg.__path__ = [_real_discovery_dir]
     global _PKG_ATTR_SNAPSHOT
     _PKG_ATTR_SNAPSHOT = (
         getattr(pkg, _DISCOVERY_PKG_ATTR)
@@ -257,6 +312,7 @@ def _load_tool_router():
 
 tool_router = _load_tool_router()
 _restore_discovery_snapshot()
+_restore_low_level_snapshot()
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +326,9 @@ _restore_discovery_snapshot()
 @pytest.fixture(autouse=True)
 def _swap_in_router_stubs():
     """Swap our discovery stubs in for the duration of one test."""
+    prior_config = sys.modules.get("config")
+    if _FAKE_CONFIG_MOD is not None:
+        sys.modules["config"] = _FAKE_CONFIG_MOD
     prior_ar = sys.modules.get("modules.tools.discovery.action_registry")
     prior_asi = sys.modules.get("modules.tools.discovery.action_semantic_index")
     pkg = _ensure_pkg("modules.tools.discovery")
@@ -300,6 +359,10 @@ def _swap_in_router_stubs():
                 delattr(pkg, _DISCOVERY_PKG_ATTR)
         else:
             setattr(pkg, _DISCOVERY_PKG_ATTR, prior_pkg_attr)
+        if prior_config is None:
+            sys.modules.pop("config", None)
+        else:
+            sys.modules["config"] = prior_config
         _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = False
         _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING_TOP_K = 15
 
@@ -366,7 +429,7 @@ def test_run_coroutine_blocking_inside_running_loop():
 
 
 def test_rank_actions_for_dispatcher_happy_path():
-    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted):
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
         return [
             ("platform_list_agents", 0.91),
             ("platform_create_agent", 0.83),
@@ -450,7 +513,7 @@ def test_get_tools_for_agent_with_query_narrows_enum(caplog):
     """AC: query + flag on → dispatcher enum is the ranked subset."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
         return [
             ("platform_list_agents", 0.95),
             ("platform_create_agent", 0.80),
@@ -531,7 +594,7 @@ def test_get_tools_for_agent_excludes_admin_when_not_admin():
     regardless of query / ranking output."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
         # Even if the ranker tried to surface an admin action, the schema
         # builder should drop it.
         return [
@@ -549,3 +612,98 @@ def test_get_tools_for_agent_excludes_admin_when_not_admin():
     enum = _enum_of_tool(_dispatcher_from(tools))
     assert "platform_list_agents" in enum
     assert "platform_admin_only_action" not in enum
+
+
+# ===========================================================================
+# Test: get_tools_for_agent_async — async-native narrowing (no thread bridge)
+# ===========================================================================
+
+
+def test_get_tools_for_agent_async_narrows_enum_without_bridge(caplog):
+    """The async entry awaits ranking on the caller's loop — narrowed enum,
+    and the thread-bridge helper is never engaged."""
+    _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+        return [
+            ("platform_list_agents", 0.95),
+            ("platform_create_agent", 0.80),
+        ]
+
+    _dummy_index.rank_actions = _rank
+    with caplog.at_level(logging.INFO):
+        tools = asyncio.run(
+            tool_router.get_tools_for_agent_async(
+                agent_id=None,
+                workspace_id=None,
+                is_admin=True,
+                query="list all agents",
+            )
+        )
+    enum = _enum_of_tool(_dispatcher_from(tools))
+    assert sorted(enum) == ["platform_create_agent", "platform_list_agents"]
+    assert any(
+        "dispatcher enum narrowed to 2 actions" in r.message for r in caplog.records
+    )
+    assert not any(
+        "_run_coroutine_blocking" in r.message for r in caplog.records
+    ), "async entry must not pay the thread bridge"
+
+
+def test_get_tools_for_agent_async_rank_failure_falls_back(caplog):
+    """Async entry: a raising ranker still yields the full-enum dispatcher."""
+    _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("ranker exploded")
+
+    _dummy_index.rank_actions = _boom
+    with caplog.at_level(logging.INFO):
+        tools = asyncio.run(
+            tool_router.get_tools_for_agent_async(
+                agent_id=None,
+                workspace_id=None,
+                is_admin=True,
+                query="list all agents",
+            )
+        )
+    enum = _enum_of_tool(_dispatcher_from(tools))
+    assert "platform_list_agents" in enum
+    assert "platform_get_workspace_info" in enum
+    assert any(
+        "rank_actions returned empty or raised" in r.message for r in caplog.records
+    )
+
+
+def test_get_tools_for_agent_async_no_query_full_enum():
+    """Async entry mirrors the sync no-query behavior (full enum)."""
+    _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+    tools = asyncio.run(
+        tool_router.get_tools_for_agent_async(
+            agent_id=None,
+            workspace_id=None,
+            is_admin=True,
+        )
+    )
+    enum = _enum_of_tool(_dispatcher_from(tools))
+    assert "platform_list_agents" in enum
+    assert "platform_get_workspace_info" in enum
+
+
+def test_rank_actions_for_dispatcher_async_happy_path():
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+        return [
+            ("platform_list_agents", 0.91),
+            ("platform_create_agent", 0.83),
+        ]
+
+    _dummy_index.rank_actions = _fake_rank
+    names = asyncio.run(
+        tool_router._rank_actions_for_dispatcher_async(
+            query="list all agents",
+            top_k=5,
+            exclude_admin=True,
+            exclude_promoted=True,
+        )
+    )
+    assert names == ["platform_list_agents", "platform_create_agent"]

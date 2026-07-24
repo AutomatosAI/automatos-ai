@@ -21,6 +21,30 @@ if _orchestrator_root not in sys.path:
     sys.path.insert(0, _orchestrator_root)
 
 
+@pytest.fixture(autouse=True)
+def _restore_config_module():
+    """Contain the reload blast radius (PRD-142 W2-S/WS-F test isolation).
+
+    ``_reload_config`` pops ``config`` from ``sys.modules`` and re-imports it,
+    which rebinds the shared ``config.config`` singleton to a fresh instance
+    built from the *current* env. ``monkeypatch`` restores the env but NOT the
+    swapped module, so without this fixture every later test in the run that
+    reads ``config`` via a live ``from config import config`` would see this
+    reloaded instance — while its own import-time reference is stale. That
+    object-identity split silently defeats ``monkeypatch.setattr(config, ...)``
+    downstream (e.g. the HARNESS command handler read the flag as its env
+    default regardless of the patch). Snapshot the module and put it back.
+    """
+    saved = sys.modules.get("config")
+    try:
+        yield
+    finally:
+        if saved is not None:
+            sys.modules["config"] = saved
+        else:
+            sys.modules.pop("config", None)
+
+
 def _reload_config(monkeypatch, env_value):
     """Set/clear SEMANTIC_TOOL_ROUTING_TOP_K and reload the config module."""
     if env_value is None:

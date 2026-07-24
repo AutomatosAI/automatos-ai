@@ -20,22 +20,38 @@ import { RotateCw } from 'lucide-react'
 
 import { useActivityStats, useActivityFeed } from '@/hooks/use-activity-api'
 import { useBoardTasks } from '@/hooks/use-board-tasks'
+import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useActivitySchedule } from '@/hooks/use-activity-api'
 import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
+import { useWatches } from '@/hooks/use-watches-api'
 
 import { StatsStrip } from './stats-strip'
+import { IsItWorkingStrip } from './is-it-working-strip'
 import { SummaryTab } from './summary-tab'
 import { BoardTab } from './board-tab'
 import { CalendarTab } from './calendar-tab'
 import { ActivityTab } from './activity-tab'
+import { WatchlistTab } from './watchlist-tab'
+import { GovernanceTab } from './governance-tab'
 
-type TabKey = 'summary' | 'board' | 'calendar' | 'activity'
+type TabKey =
+  | 'summary'
+  | 'board'
+  | 'calendar'
+  | 'activity'
+  | 'watchlist'
+  | 'governance'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'summary', label: 'Summary' },
   { key: 'board', label: 'Board' },
   { key: 'calendar', label: 'Calendar' },
   { key: 'activity', label: 'Activity' },
+  // PRD-204 S11: the watchlist -- work Auto is supervising to a verdict.
+  { key: 'watchlist', label: 'Watchlist' },
+  // PRD-196 (P2-15): the governance pillar (Approvals · Audit · Policy ·
+  // Compliance), ws-admin-only. The human surface for the policy plane.
+  { key: 'governance', label: 'Governance' },
 ]
 
 const VALID_TABS = new Set<TabKey>(TABS.map((t) => t.key))
@@ -67,6 +83,14 @@ export function CommandCenterShell() {
   // Backend caps limit at 100; sending 200 returns 422.
   const { data: feed } = useActivityFeed({ limit: 100 })
   const { data: decisions } = useDecisionsNeeded(10)
+  // PRD-204 S11: live watches only (the default list) -- the tab badge is
+  // "how many things is Auto supervising right now".
+  const { data: watchlist } = useWatches()
+
+  // PRD-180 S1 (F090): real-time board push. Subscribes to the LISTEN/NOTIFY
+  // SSE and invalidates the board cache on each pushed event — this is what
+  // makes "Streaming live" honest (the board no longer polls on an interval).
+  useBoardEventStream(true)
 
   const dateline = useMemo(todayDateline, [])
 
@@ -79,8 +103,12 @@ export function CommandCenterShell() {
       ),
       calendar: schedule?.scheduled?.length ?? 0,
       activity: feed?.total ?? feed?.items?.length ?? 0,
+      watchlist: watchlist?.total ?? 0,
+      // No live badge on Governance — the pending-approvals count lives inside
+      // the ws-admin-gated pane, not fetched for every member on the shell.
+      governance: 0,
     }),
-    [decisions, columns, schedule, feed],
+    [decisions, columns, schedule, feed, watchlist],
   )
 
   const working = stats?.working_now ?? 0
@@ -139,6 +167,7 @@ export function CommandCenterShell() {
       </div>
 
       <StatsStrip />
+      <IsItWorkingStrip />
 
       <nav className="cc-tabs" aria-label="Command Centre sections">
         {TABS.map((t) => {
@@ -164,6 +193,8 @@ export function CommandCenterShell() {
         {activeTab === 'board' && <BoardTab />}
         {activeTab === 'calendar' && <CalendarTab />}
         {activeTab === 'activity' && <ActivityTab />}
+        {activeTab === 'watchlist' && <WatchlistTab />}
+        {activeTab === 'governance' && <GovernanceTab />}
       </div>
     </div>
   )

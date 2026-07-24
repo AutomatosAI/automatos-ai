@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.composio.client import get_composio_client
 from core.composio.entity_manager import EntityManager
 from core.database.database import get_db
@@ -30,6 +31,41 @@ from config import config
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tools", tags=["Tools"])
+
+# Bound at module level (not inside the endpoint) so the auto-sync helper below
+# is unit-patchable and its dependency is explicit.
+from api.shopify import _product_sync_impl  # noqa: E402
+
+
+def _fire_shopify_autosync(workspace_id: str) -> None:
+    """Kick off the first-connect Shopify catalog → graph sync (F033-safe).
+
+    When SHOPIFY first goes active we sync the catalog into the knowledge
+    graph. This runs as a detached background task, so it MUST own its DB
+    session: the request-scoped ``Depends(get_db)`` session is torn down the
+    moment the listing endpoint returns, and the previous code passed *that*
+    session into the task — it died mid-flight (F033). The task opens its own
+    ``SessionLocal`` and closes it when done.
+    """
+    from core.database.database import SessionLocal
+    import asyncio as _asyncio
+
+    async def _run() -> None:
+        db = SessionLocal()
+        try:
+            await _product_sync_impl(str(workspace_id), db)
+            logger.info(
+                "[PRD-183 S2] Auto-sync complete for workspace %s", workspace_id,
+            )
+        except Exception as e:  # noqa: BLE001 — background task must not raise
+            logger.warning(
+                "[PRD-183 S2] Auto-sync failed for workspace %s: %s",
+                workspace_id, e,
+            )
+        finally:
+            db.close()
+
+    _asyncio.create_task(_run())
 
 
 def _assert_workspace_admin(ctx: RequestContext, db: Session = None) -> None:
@@ -100,6 +136,11 @@ class StatsOut(BaseModel):
 class ConnectIn(BaseModel):
     app_name: str
     callback_url: Optional[str] = None
+    # Optional per-workspace overrides for hosted-auth scheme selection.
+    # Use auth_scheme="API_KEY" for Shopify merchants where managed-install
+    # breaks the OAuth bounce; pass auth_config_id for an explicit pin.
+    auth_scheme: Optional[str] = None
+    auth_config_id: Optional[str] = None
 
 
 @router.get("/marketplace", response_model=MarketplaceOut)
@@ -259,6 +300,22 @@ async def connected(
                     conn["status"] = "active"
                     conn["connection_id"] = composio_status.get("id")
                     logger.info(f"[CONNECTED_APPS] Synced {conn.get('app_name')} from pending → active")
+                    # PRD-009 Layer 2 — when SHOPIFY first goes active, kick
+                    # off the catalog → knowledge graph sync. Detached task with
+                    # its OWN session (F033): never the request-scoped `db`,
+                    # which is torn down when this listing endpoint returns.
+                    if (conn.get("app_name") or "").upper() == "SHOPIFY":
+                        try:
+                            _fire_shopify_autosync(str(ctx.workspace_id))
+                            logger.info(
+                                "[PRD-009] Auto-fired Shopify product sync for workspace %s",
+                                ctx.workspace_id,
+                            )
+                        except Exception as sync_err:
+                            logger.warning(
+                                "[PRD-009] Auto-sync trigger failed for workspace %s: %s",
+                                ctx.workspace_id, sync_err,
+                            )
             except Exception as e:
                 logger.debug(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
 
@@ -379,7 +436,7 @@ async def app_triggers(
     return triggers if isinstance(triggers, list) else []
 
 
-@router.post("/{app_name}/actions")
+@router.post("/{app_name}/actions", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_app_actions(
     app_name: str,
     payload: Dict[str, Any],
@@ -417,7 +474,7 @@ async def save_app_actions(
     return {"status": "success", "enabled_count": len(enabled_actions), "app_name": app_name.upper()}
 
 
-@router.post("/connect")
+@router.post("/connect", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def connect_app(
     payload: ConnectIn,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -430,17 +487,31 @@ async def connect_app(
 
     app_name = payload.app_name.upper()
     try:
-        redirect_url = client.initiate_connection(
+        link = client.initiate_connection(
             entity_id=entity["composio_entity_id"],
             app=app_name,
             callback_url=payload.callback_url,
+            auth_config_id=payload.auth_config_id,
+            auth_scheme=payload.auth_scheme,
         )
     except Exception as e:
         raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
 
-    # Store pending connection in DB
-    entity_manager.add_connection(entity_id=entity["id"], app_name=app_name, status="pending")
-    return {"redirect_url": redirect_url, "app_name": app_name}
+    entity_manager.add_connection(
+        entity_id=entity["id"],
+        app_name=app_name,
+        status="pending",
+        metadata={
+            "auth_config_id": link.get("auth_config_id"),
+            "auth_scheme": link.get("auth_scheme"),
+        },
+    )
+    return {
+        "redirect_url": link["redirect_url"],
+        "app_name": app_name,
+        "auth_config_id": link.get("auth_config_id"),
+        "auth_scheme": link.get("auth_scheme"),
+    }
 
 
 @router.get("/workspace")
@@ -498,7 +569,7 @@ async def workspace_tools(
     return {"apps": out, "total": len(out)}
 
 
-@router.post("/add-to-workspace")
+@router.post("/add-to-workspace", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def add_to_workspace(
     payload: ConnectIn,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -613,7 +684,7 @@ async def debug_connections(
     }
 
 
-@router.delete("/remove-from-workspace/{app_name}")
+@router.delete("/remove-from-workspace/{app_name}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def remove_from_workspace(
     app_name: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -653,7 +724,7 @@ async def remove_from_workspace(
 # transitions instead (e.g. active → expired → active on re-auth).
 
 
-@router.post("/sync")
+@router.post("/sync", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def sync(
     sync_type: str = Query("full", description="full or incremental"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -669,7 +740,7 @@ async def sync(
     return result
 
 
-@router.post("/sync/backfill-params")
+@router.post("/sync/backfill-params", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def backfill_params(
     request: Request,
     apps: str = Query(None, description="Comma-separated app names (e.g. JIRA,GITHUB,SLACK). Omit for auto."),
@@ -694,7 +765,7 @@ async def backfill_params(
     return result
 
 
-@router.post("/refresh-connections")
+@router.post("/refresh-connections", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def refresh_connections(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),

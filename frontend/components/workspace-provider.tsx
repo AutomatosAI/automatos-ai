@@ -37,6 +37,13 @@ interface WorkspaceContextType {
     isLoading: boolean
     error: Error | null
     refreshWorkspace: () => Promise<void>
+    /**
+     * PRD-195 (G5): false when the caller's workspace role is 'viewer' —
+     * write affordances (create/edit/delete buttons) should render disabled
+     * instead of letting the click 403 against the backend gates.
+     * `/api/workspaces/current` now returns the REAL per-tenant role.
+     */
+    canEdit: boolean
 }
 
 const WorkspaceContext = createContext<WorkspaceContextType | null>(null)
@@ -148,7 +155,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     return (
-        <WorkspaceContext.Provider value={{ workspace, isLoading, error, refreshWorkspace }}>
+        <WorkspaceContext.Provider value={{
+            workspace,
+            isLoading,
+            error,
+            refreshWorkspace,
+            // Fail-open while loading (workspace === null) so solo/local users
+            // never see a flash of disabled chrome; the backend gates are the
+            // enforcement — this flag is UI honesty for real viewers (G5).
+            canEdit: workspace ? workspace.role !== 'viewer' : true,
+        }}>
             {children}
         </WorkspaceContext.Provider>
     )

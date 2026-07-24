@@ -77,21 +77,8 @@ def _fake_actions() -> List[_FakeAction]:
     ]
 
 
-# Stub the modules.tools.discovery package hierarchy so prompt_builder
-# can be imported without the full orchestrator dependency chain.
-def _ensure_stub(name: str) -> None:
-    if name in sys.modules:
-        return
-    mod = types.ModuleType(name)
-    mod.__path__ = []
-    sys.modules[name] = mod
-
-
-for _pkg in ("modules", "modules.tools", "modules.tools.discovery"):
-    _ensure_stub(_pkg)
-
-
-# Stub ActionSemanticIndex
+# Build the fake discovery modules (just objects — NOT installed into
+# sys.modules at import time; see setup_module below).
 _fake_asi = MagicMock()
 _fake_asi.rank_actions = AsyncMock(return_value=[
     ("platform_list_agents", 0.95),
@@ -100,27 +87,58 @@ _fake_asi.rank_actions = AsyncMock(return_value=[
 ])
 _fake_asi_mod = types.ModuleType("modules.tools.discovery.action_semantic_index")
 _fake_asi_mod.get_action_semantic_index = lambda: _fake_asi
-sys.modules["modules.tools.discovery.action_semantic_index"] = _fake_asi_mod
 
-
-# Stub ActionRegistry
 _fake_registry = MagicMock()
 _fake_registry.build_filtered_prompt_summary.return_value = (
     "\n## Available Platform Actions\n\n- `platform_list_agents`: List all agents\n"
 )
 _fake_reg_mod = types.ModuleType("modules.tools.discovery.action_registry")
 _fake_reg_mod.get_action_registry = lambda: _fake_registry
-sys.modules["modules.tools.discovery.action_registry"] = _fake_reg_mod
 
-
-# Stub GraphRouter
 _fake_graph_router = MagicMock()
 _fake_graph_router_mod = types.ModuleType("modules.tools.discovery.graph_router")
 _fake_graph_router_mod.get_graph_router = lambda: _fake_graph_router
-sys.modules["modules.tools.discovery.graph_router"] = _fake_graph_router_mod
 
 
-# Now import prompt_builder
+# prompt_builder imports modules.tools.discovery.* LAZILY (inside methods), so
+# the fakes must be live during THIS file's test phase — but installing them at
+# import time leaks pathless ``modules`` / ``modules.tools`` / ``modules.tools.discovery``
+# into the collection of every sibling test that imports the real tree (turning
+# their real imports into ModuleNotFoundError). Install in setup_module and
+# restore in teardown_module so the fakes stay scoped to this file's tests and
+# never reach collection. (PRD-142 W2-S2b.)
+_PARENT_PKGS = ("modules", "modules.tools", "modules.tools.discovery")
+_STUB_SUBMODULES = {
+    "modules.tools.discovery.action_semantic_index": _fake_asi_mod,
+    "modules.tools.discovery.action_registry": _fake_reg_mod,
+    "modules.tools.discovery.graph_router": _fake_graph_router_mod,
+}
+_saved_eval_modules: Dict[str, Any] = {}
+
+
+def setup_module(module):
+    for _k in (*_PARENT_PKGS, *_STUB_SUBMODULES):
+        _saved_eval_modules[_k] = sys.modules.get(_k)
+    for _pkg in _PARENT_PKGS:
+        if _pkg not in sys.modules:
+            _m = types.ModuleType(_pkg)
+            _m.__path__ = []
+            sys.modules[_pkg] = _m
+    for _name, _mod in _STUB_SUBMODULES.items():
+        sys.modules[_name] = _mod
+
+
+def teardown_module(module):
+    for _k, _prior in _saved_eval_modules.items():
+        if _prior is None:
+            sys.modules.pop(_k, None)
+        else:
+            sys.modules[_k] = _prior
+
+
+# Import prompt_builder (top-level imports are stdlib-only; the
+# modules.tools.discovery.* imports are lazy inside methods, satisfied by the
+# stubs installed in setup_module).
 from scripts.eval.tool_routing.prompt_builder import PromptBuilder, _PREAMBLE, _CHAIN_HINT_HEADER
 
 

@@ -19,6 +19,7 @@ from core.database.database import get_db
 from core.models import RAGConfiguration, Document
 from modules.rag import get_rag_service, RAGService
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 # Request models
@@ -52,8 +53,11 @@ class ContextAddRequest(BaseModel):
 
 router = APIRouter(prefix="/api/context", tags=["Context Engineering"])
 
-@router.post("/add")
-async def add_to_context(request: ContextAddRequest):
+@router.post("/add", dependencies=[Depends(require_workspace_permission("documents:create"))])
+async def add_to_context(
+    request: ContextAddRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """
     Add database query results to context system.
     Makes query results available for AI agent context and future retrieval.
@@ -83,14 +87,17 @@ async def add_to_context(request: ContextAddRequest):
 
 @router.get("/stats")
 async def get_context_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
-    """Get real-time context engineering statistics"""
+    """Get real-time context engineering statistics (workspace-scoped)"""
     try:
-        # Get retrieval stats from RAG service (now reads from database)
-        retrieval_stats = rag_service.get_retrieval_stats(db)
-        
+        # PRD-172 F045: scope the document counts to the caller's workspace.
+        # admin_all_workspaces → None → unfiltered admin aggregate.
+        ws = None if getattr(ctx, "admin_all_workspaces", False) else ctx.workspace_id
+        retrieval_stats = rag_service.get_retrieval_stats(db, workspace_id=ws)
+
         return {
             "contextQueries": retrieval_stats['total_queries'],
             "retrievalSuccess": retrieval_stats['success_rate'],
@@ -107,6 +114,7 @@ async def get_context_stats(
 @router.get("/performance")
 async def get_rag_performance_data(
     time_range: str = Query("24h", regex="^(1h|24h|7d|30d)$", description="Time range: 1h, 24h, 7d, or 30d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -121,6 +129,7 @@ async def get_rag_performance_data(
 
 @router.get("/sources")
 async def get_context_sources(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -135,6 +144,7 @@ async def get_context_sources(
 @router.get("/queries/recent")
 async def get_recent_queries(
     limit: int = Query(default=10, ge=1, le=50),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -148,6 +158,7 @@ async def get_recent_queries(
 
 @router.get("/patterns")
 async def get_context_patterns(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -159,10 +170,11 @@ async def get_context_patterns(
         logger.error(f"Error getting context patterns: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/rag/{config_id}/test")
+@router.post("/rag/{config_id}/test", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_rag_configuration(
     config_id: int,
     query: str = Query(..., description="Test query for RAG system"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
@@ -183,12 +195,14 @@ async def test_rag_configuration(
 
 @router.get("/system/health")
 async def get_context_system_health(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service),
     db: Session = Depends(get_db)
 ):
-    """Get context engineering system health"""
+    """Get context engineering system health (workspace-scoped)"""
     try:
-        stats = rag_service.get_retrieval_stats(db)
+        ws = None if getattr(ctx, "admin_all_workspaces", False) else ctx.workspace_id
+        stats = rag_service.get_retrieval_stats(db, workspace_id=ws)
         
         return {
             "status": "healthy" if stats['system_status'] == 'operational' else "degraded",
@@ -211,9 +225,10 @@ async def get_context_system_health(
         logger.error(f"Error getting system health: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/initialize")
+@router.post("/initialize", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def initialize_context_system(
     database_url: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     rag_service: RAGService = Depends(get_rag_service)
 ):
     """Initialize or reinitialize the context engineering system"""
@@ -277,10 +292,11 @@ async def get_optimization_recommendations(
             SELECT AVG(execution_time_ms) as avg_time
             FROM document_usage
             WHERE event_type IN ('document_searched', 'rag_query')
+                AND metadata->>'workspace_id' = :workspace_id
                 AND timestamp >= NOW() - INTERVAL '24 hours'
         """)
-        
-        perf = db.execute(perf_query).fetchone()
+
+        perf = db.execute(perf_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
         
         if perf and perf.avg_time and perf.avg_time > 1000:
             recommendations.append({
@@ -297,10 +313,11 @@ async def get_optimization_recommendations(
             SELECT COUNT(*) as query_count
             FROM document_usage
             WHERE event_type IN ('document_searched', 'rag_query')
+                AND metadata->>'workspace_id' = :workspace_id
                 AND timestamp >= NOW() - INTERVAL '24 hours'
         """)
-        
-        usage = db.execute(usage_query).fetchone()
+
+        usage = db.execute(usage_query, {"workspace_id": str(ctx.workspace_id)}).fetchone()
         
         if usage and usage.query_count == 0:
             recommendations.append({
@@ -355,7 +372,7 @@ async def get_optimization_recommendations(
 
 # ===== RAG CONFIGURATION CRUD ENDPOINTS =====
 
-@router.post("/rag/config")
+@router.post("/rag/config", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def create_rag_configuration(
     config: RAGConfigCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -464,7 +481,7 @@ async def get_rag_configuration(
         logger.error(f"Error getting RAG configuration: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/rag/config/{config_id}")
+@router.put("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_rag_configuration(
     config_id: int,
     config_update: RAGConfigUpdate,
@@ -511,7 +528,7 @@ async def update_rag_configuration(
         logger.error(f"Error updating RAG configuration: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/rag/config/{config_id}")
+@router.delete("/rag/config/{config_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_rag_configuration(
     config_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),

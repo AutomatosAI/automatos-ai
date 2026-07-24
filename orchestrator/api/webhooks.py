@@ -5,7 +5,9 @@ General Webhook Endpoints
 Two webhook paths:
 1. POST /api/webhooks/ws/{workspace_key}  — General workspace webhook
    Routes incoming requests through UniversalRouter to the right agent.
-   No auth required — the workspace_key in the URL is the credential.
+   The workspace_key in the URL is the credential floor; when a webhook
+   secret (or Slack signing secret) is configured, a valid signature is
+   additionally mandatory.
 
 2. POST /api/webhooks/recipe/{webhook_id} — Recipe-specific webhook
    (Defined in workflow_recipes.py, registered separately.)
@@ -15,6 +17,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import time
 from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
 
@@ -27,6 +30,7 @@ from core.models.workspaces import Workspace
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.webhook import WebhookIngestor
+from services import webhook_dedup
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -51,8 +55,9 @@ async def _verify_webhook_signature(
     Checks headers: X-Hub-Signature-256 (GitHub), X-Composio-Signature,
     X-Webhook-Signature.
 
-    If a secret is configured and a signature header is present, the signature
-    must match. If no secret is configured, verification is skipped (URL-as-secret
+    When a secret is configured, a valid signature is mandatory: a missing
+    header, a mismatch, or a verification error all reject with 401 (P2-13).
+    If no secret is configured, verification is skipped (URL-as-secret
     pattern still applies).
     """
     if not secret:
@@ -65,8 +70,8 @@ async def _verify_webhook_signature(
         or request.headers.get("x-webhook-signature")
     )
     if not sig_header:
-        # No signature header present — skip if not required
-        return
+        logger.warning("[webhook] Rejected: secret configured but no signature header present")
+        raise HTTPException(status_code=401, detail="Missing webhook signature")
 
     raw_body = await request.body()
 
@@ -81,6 +86,67 @@ async def _verify_webhook_signature(
 
     if not hmac.compare_digest(computed, expected_sig):
         logger.warning("[webhook] HMAC signature mismatch")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+
+# Slack's documented v0 replay window: reject requests whose signing
+# timestamp is further than 5 minutes from now.
+_SLACK_TS_SKEW_SECONDS = 60 * 5
+
+
+def _resolve_slack_signing_secret(db: Session, workspace: Workspace) -> Optional[str]:
+    """The signing secret collected for this workspace's Slack channel, if any.
+
+    Prefers an active ``channel_connections`` row; falls back to any Slack row
+    that carries a secret. Returns ``None`` when Slack was never configured
+    with a signing secret (verification is then skipped — URL-as-secret floor).
+    """
+    from core.models.channels import ChannelConnection
+
+    rows = (
+        db.query(ChannelConnection)
+        .filter(
+            ChannelConnection.workspace_id == workspace.id,
+            ChannelConnection.platform == "slack",
+        )
+        .all()
+    )
+    fallback: Optional[str] = None
+    for row in rows:
+        secret = (row.config or {}).get("signing_secret")
+        if not secret:
+            continue
+        if row.status == "active":
+            return str(secret)
+        fallback = fallback or str(secret)
+    return fallback
+
+
+async def _verify_slack_signature(request: Request, signing_secret: str) -> None:
+    """Verify Slack's v0 signing scheme.
+
+    Slack signs ``v0:{timestamp}:{raw_body}`` with the app's signing secret and
+    sends ``X-Slack-Signature: v0=<hex>`` + ``X-Slack-Request-Timestamp``.
+    Mandatory once a signing secret is collected: bad timestamp, stale
+    timestamp, or mismatch ⇒ 401 (P2-13).
+    """
+    sig_header = request.headers.get("x-slack-signature", "")
+    ts = request.headers.get("x-slack-request-timestamp", "")
+    raw_body = await request.body()
+
+    try:
+        ts_int = int(ts)
+    except (TypeError, ValueError):
+        logger.warning("[webhook] Slack signature rejected: bad timestamp header")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    if abs(time.time() - ts_int) > _SLACK_TS_SKEW_SECONDS:
+        logger.warning("[webhook] Slack signature rejected: stale timestamp")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    base = f"v0:{ts}:".encode("utf-8") + raw_body
+    computed = "v0=" + hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(computed, sig_header):
+        logger.warning("[webhook] Slack signature mismatch")
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
 
@@ -148,130 +214,76 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
 
 
 # =============================================================================
-# Platform Reply Functions
+# Platform Reply — single entry point
+#
+# All outbound platform messages flow through ``channels.sender.send_to_channel``
+# which delegates to the per-platform driver. The driver reads creds from
+# ``channel_connections`` (with a fallback to the legacy
+# ``workspace.settings.integrations`` bag for not-yet-migrated workspaces).
+#
+# The legacy ``_send_telegram_reply`` / ``_send_slack_reply`` /
+# ``_send_whatsapp_reply`` helpers that used to live here have been removed —
+# nothing should import them. ``notification_service.send_workspace_notification``
+# now calls the sender directly.
 # =============================================================================
-
-async def _send_telegram_reply(
-    chat_id: int,
-    text: str,
-    bot_token: str,
-) -> bool:
-    """Send a message back to a Telegram chat."""
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    # Truncate to Telegram's 4096 char limit
-    if len(text) > 4000:
-        text = text[:4000] + "\n\n... (truncated)"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "Markdown",
-            })
-            if resp.status_code != 200:
-                # Retry without markdown in case of parse errors
-                resp = await client.post(url, json={
-                    "chat_id": chat_id,
-                    "text": text,
-                })
-            logger.info("[telegram] Reply sent to chat %s: %d", chat_id, resp.status_code)
-            return resp.status_code == 200
-    except Exception:
-        logger.exception("[telegram] Failed to send reply to chat %s", chat_id)
-        return False
-
-
-async def _send_slack_reply(
-    channel: str,
-    text: str,
-    bot_token: str,
-    thread_ts: Optional[str] = None,
-) -> bool:
-    """Send a message back to a Slack channel."""
-    url = "https://slack.com/api/chat.postMessage"
-    payload: Dict[str, Any] = {
-        "channel": channel,
-        "text": text,
-    }
-    if thread_ts:
-        payload["thread_ts"] = thread_ts
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload, headers={
-                "Authorization": f"Bearer {bot_token}",
-                "Content-Type": "application/json",
-            })
-            data = resp.json()
-            ok = data.get("ok", False)
-            logger.info("[slack] Reply sent to %s: ok=%s", channel, ok)
-            return ok
-    except Exception:
-        logger.exception("[slack] Failed to send reply to %s", channel)
-        return False
-
-
-async def _send_whatsapp_reply(
-    to_phone: str,
-    text: str,
-    phone_number_id: str,
-    access_token: str,
-) -> bool:
-    """Send a message back via WhatsApp Business API."""
-    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json={
-                "messaging_product": "whatsapp",
-                "to": to_phone,
-                "type": "text",
-                "text": {"body": text[:4096]},
-            }, headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            })
-            logger.info("[whatsapp] Reply sent to %s: %d", to_phone, resp.status_code)
-            return resp.status_code == 200
-    except Exception:
-        logger.exception("[whatsapp] Failed to send reply to %s", to_phone)
-        return False
 
 
 async def _deliver_reply(
     reply_text: str,
     reply_ctx: Dict[str, Any],
     integrations: Dict[str, str],
+    *,
+    workspace_id: Optional[Any] = None,
 ) -> bool:
-    """Deliver agent response back to the originating platform."""
+    """Deliver agent response back to the originating platform via the
+    unified ``channels.sender`` — which routes through the per-platform
+    driver and reads creds from ``channel_connections`` (with legacy
+    ``integrations`` fallback for pre-migration workspaces).
+
+    Opens its own DB session so it's safe to fire from a background
+    task after the request session has been closed. ``integrations``
+    is accepted for backward compat but unused — the sender reads
+    everything it needs from the DB.
+    """
     platform = reply_ctx.get("platform")
+    if not platform:
+        logger.debug("[reply] No platform in reply_ctx")
+        return False
+    if workspace_id is None:
+        logger.warning("[reply] _deliver_reply: workspace_id is required")
+        return False
 
-    if platform == "telegram":
-        token = integrations.get("telegram_bot_token")
-        chat_id = reply_ctx.get("chat_id")
-        if token and chat_id:
-            return await _send_telegram_reply(chat_id, reply_text, token)
-        logger.warning("[reply] Telegram: missing token or chat_id")
+    target = (
+        reply_ctx.get("chat_id")
+        or reply_ctx.get("channel")
+        or reply_ctx.get("from_phone")
+    )
+    if target is not None:
+        target = str(target)
 
-    elif platform == "slack":
-        token = integrations.get("slack_bot_token")
-        channel = reply_ctx.get("channel")
-        if token and channel:
-            return await _send_slack_reply(
-                channel, reply_text, token, reply_ctx.get("thread_ts"),
-            )
-        logger.warning("[reply] Slack: missing token or channel")
+    from channels.sender import send_to_channel
+    from core.database.database import SessionLocal
 
-    elif platform == "whatsapp":
-        access_token = integrations.get("whatsapp_access_token")
-        phone_id = integrations.get("whatsapp_phone_number_id")
-        from_phone = reply_ctx.get("from_phone")
-        if access_token and phone_id and from_phone:
-            return await _send_whatsapp_reply(from_phone, reply_text, phone_id, access_token)
-        logger.warning("[whatsapp] Missing credentials or from_phone")
+    db = SessionLocal()
+    try:
+        result = await send_to_channel(
+            db=db,
+            workspace_id=workspace_id,
+            platform=platform,
+            text=reply_text,
+            target=target,
+        )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
-    else:
-        logger.debug("[reply] No reply delivery for platform=%s", platform)
-
-    return False
+    if not result.ok:
+        logger.warning(
+            "[reply] platform=%s send failed: %s", platform, result.error,
+        )
+    return result.ok
 
 
 # =============================================================================
@@ -368,8 +380,9 @@ async def general_workspace_webhook(
     """
     General workspace webhook — routes incoming requests to the right agent.
 
-    The workspace_key in the URL is the credential (URL-as-secret pattern).
-    No authentication required.
+    The workspace_key in the URL is the credential floor (URL-as-secret
+    pattern). When a webhook secret is configured — or a Slack signing
+    secret has been collected — a valid signature is mandatory on top.
 
     Body (JSON):
     - message / text / content: The message to route
@@ -415,9 +428,46 @@ async def general_workspace_webhook(
     if not workspace:
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
-    # 1b. Verify HMAC signature if a webhook secret is configured
-    webhook_secret = (workspace.settings or {}).get("webhook_secret") or config.WEBHOOK_SECRET
-    await _verify_webhook_signature(request, webhook_secret)
+    # 1b. Verify inbound authenticity. Slack signs with its own v0 scheme
+    # (X-Slack-Signature), so when a Slack signing secret has been collected
+    # the request verifies against it. Every other request goes through the
+    # generic HMAC, which is mandatory once a webhook secret is configured —
+    # including requests that *carry* an x-slack-signature header when no
+    # Slack secret was ever collected. Branching on the header alone would
+    # let any caller bypass the mandatory generic check by adding a garbage
+    # Slack header (P2-13, fail closed).
+    slack_secret = (
+        _resolve_slack_signing_secret(db, workspace)
+        if request.headers.get("x-slack-signature")
+        else None
+    )
+    if slack_secret:
+        await _verify_slack_signature(request, slack_secret)
+    else:
+        webhook_secret = (workspace.settings or {}).get("webhook_secret") or config.WEBHOOK_SECRET
+        await _verify_webhook_signature(request, webhook_secret)
+
+    # 1c. Replay guard + event dedup (PRD-194 S2, P2-13). This lane executes
+    # the agent synchronously inside the HTTP request; a slow run triggers
+    # provider redelivery (Slack/Telegram retry on slow ack) and, until this
+    # guard, the SAME event ran again — burning tokens and re-firing
+    # side-effects. Keyed per-workspace on the platform's own event id
+    # (Telegram update_id / Slack event_id / webhook-id header); a
+    # redelivery is a fast no-op ack before any routing. The Shopify
+    # /events debounce (PRD-189 S3) is a different endpoint — untouched.
+    if webhook_dedup.timestamp_is_stale(request.headers.get("webhook-timestamp")):
+        logger.warning("[webhook/ws] Rejected: stale webhook-timestamp (replay guard)")
+        raise HTTPException(status_code=401, detail="Stale webhook timestamp")
+    dedup_event_id = None
+    if isinstance(body, dict):
+        dedup_event_id = body.get("update_id") or body.get("event_id")
+    dedup_event_id = dedup_event_id or request.headers.get("webhook-id")
+    if await webhook_dedup.seen_before(f"ws:{workspace.id}", dedup_event_id):
+        logger.info(
+            "[webhook/ws] Duplicate event %s for workspace %s — no-op ack",
+            dedup_event_id, workspace.id,
+        )
+        return {"status": "duplicate_ignored", "event_id": str(dedup_event_id)}
 
     # 2. Detect platform and extract reply context
     platform = _detect_platform(body) if isinstance(body, dict) else None
@@ -471,7 +521,7 @@ async def general_workspace_webhook(
                 if platform and integrations:
                     reply_text = _extract_response_text(result)
                     task = asyncio.create_task(
-                        _deliver_reply(reply_text, reply_ctx, integrations)
+                        _deliver_reply(reply_text, reply_ctx, integrations, workspace_id=workspace.id)
                     )
                     _background_tasks.add(task)
                     task.add_done_callback(_background_tasks.discard)
@@ -505,6 +555,7 @@ async def general_workspace_webhook(
                     "Please set up agents and routing in the Automatos dashboard.",
                     reply_ctx,
                     integrations,
+                    workspace_id=workspace.id,
                 )
             )
             _background_tasks.add(task)
@@ -531,7 +582,7 @@ async def general_workspace_webhook(
             if platform and integrations:
                 reply_text = _extract_response_text(result)
                 task = asyncio.create_task(
-                    _deliver_reply(reply_text, reply_ctx, integrations)
+                    _deliver_reply(reply_text, reply_ctx, integrations, workspace_id=workspace.id)
                 )
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
@@ -555,6 +606,7 @@ async def general_workspace_webhook(
                         "Sorry, I encountered an error processing your request. Please try again.",
                         reply_ctx,
                         integrations,
+                        workspace_id=workspace.id,
                     )
                 )
                 _background_tasks.add(task)
@@ -584,6 +636,7 @@ async def general_workspace_webhook(
                     "I'll process it in the background.",
                     reply_ctx,
                     integrations,
+                    workspace_id=workspace.id,
                 )
             )
             _background_tasks.add(task)
@@ -618,7 +671,7 @@ async def general_workspace_webhook(
             if platform and integrations:
                 reply_text = _extract_response_text(result)
                 task = asyncio.create_task(
-                    _deliver_reply(reply_text, reply_ctx, integrations)
+                    _deliver_reply(reply_text, reply_ctx, integrations, workspace_id=workspace.id)
                 )
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
@@ -644,6 +697,7 @@ async def general_workspace_webhook(
                         "Sorry, I encountered an error processing your request. Please try again.",
                         reply_ctx,
                         integrations,
+                        workspace_id=workspace.id,
                     )
                 )
                 _background_tasks.add(task)
@@ -701,7 +755,8 @@ async def _dispatch_workflow_async(
     """Dispatch a workflow/recipe execution asynchronously, return execution_id."""
     from core.models.core import RecipeExecution
     from core.models import WorkflowTemplate as WorkflowRecipe
-    from api.recipe_executor import execute_recipe_direct
+    # PRD-142 W3-S12: workspace webhook dispatch goes via the engine seam.
+    from services.playbook_engine import get_playbook_engine
     from datetime import datetime, timezone
 
     recipe = db.query(WorkflowRecipe).filter(
@@ -730,7 +785,7 @@ async def _dispatch_workflow_async(
     db.commit()
 
     task = asyncio.create_task(
-        execute_recipe_direct(
+        get_playbook_engine().execute_direct(
             recipe_execution_id=execution_id,
             recipe_id=recipe.id,
             workspace_id=envelope.workspace_id,

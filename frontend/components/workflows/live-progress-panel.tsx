@@ -127,7 +127,7 @@ export function LiveProgressPanel({ workflowId, workflowName, isOpen, onClose }:
   const getLogLevelColor = (level: string) => {
     switch (level.toLowerCase()) {
       case 'error': return 'text-destructive'
-      case 'warning': return 'text-orange-400'
+      case 'warning': return 'text-warning'
       case 'info': return 'text-info'
       default: return 'text-muted-foreground'
     }

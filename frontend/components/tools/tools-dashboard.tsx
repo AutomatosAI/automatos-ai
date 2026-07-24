@@ -63,7 +63,7 @@ import { ToolActionsModal } from './tool-actions-modal'
 import { useInitiateConnection, useDisconnectApp } from '@/hooks/use-composio-api'
 import { Loader2, ExternalLink, Wrench } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 
 // Tool Categories are now loaded dynamically from the API
 // See toolCategories useMemo below for the dynamic implementation
@@ -114,7 +114,6 @@ interface Tool {
 }
 
 export function ToolsDashboard() {
-  const { toast } = useToast()
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -178,18 +177,11 @@ export function ToolsDashboard() {
       queryClient.invalidateQueries({ queryKey: ['tools'] })
       queryClient.invalidateQueries({ queryKey: ['tools', 'stats'] })
       queryClient.invalidateQueries({ queryKey: ['tools', 'categories'] })
-      toast({
-        title: 'Sync started/completed',
-        description: 'Marketplace cache sync finished. Refreshing tools list…',
-      })
+      toast('Sync started/completed', { description: 'Marketplace cache sync finished. Refreshing tools list…' })
     },
     onError: (err: any) => {
       console.error('[TOOLS_SYNC] Failed', err)
-      toast({
-        title: 'Sync failed',
-        description: err?.message || 'Failed to sync tools cache.',
-        variant: 'destructive',
-      })
+      toast.error('Sync failed', { description: err?.message || 'Failed to sync tools cache.' })
     },
   })
 
@@ -265,10 +257,7 @@ export function ToolsDashboard() {
         await queryClient.invalidateQueries({ queryKey: ['composio', 'connections'] })
         console.log('[AUTO-REFRESH] Queries refetched successfully')
 
-        toast({
-          title: 'Connected!',
-          description: `${event.data.app_name || 'App'} is now connected and ready to use.`,
-        })
+        toast('Connected!', { description: `${event.data.app_name || 'App'} is now connected and ready to use.` })
       }
     }
     window.addEventListener('message', handleMessage)
@@ -609,17 +598,10 @@ export function ToolsDashboard() {
       queryClient.invalidateQueries({ queryKey: ['tools'] })
       queryClient.refetchQueries({ queryKey: ['tools'] })
 
-      toast({
-        title: 'Removed from Workspace',
-        description: `${tool.name} has been removed from your workspace.`,
-      })
+      toast('Removed from Workspace', { description: `${tool.name} has been removed from your workspace.` })
     } catch (error) {
       console.error('Failed to remove from workspace:', error)
-      toast({
-        title: 'Error',
-        description: `Failed to remove ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        variant: 'destructive',
-      })
+      toast.error('Error', { description: `Failed to remove ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}` })
     } finally {
       setLoading(false)
     }

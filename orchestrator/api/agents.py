@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import and_, or_, func, text
@@ -24,6 +25,7 @@ from core.models import (
 )
 # Import hybrid auth (supports both Clerk JWT and API key)
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,28 @@ def _stable_tool_id(name: str) -> int:
     if h == 0:
         return -1
     return -abs(int(h))
+
+
+def _fetch_attachable_skills(db: Session, skill_ids: List[int], ctx: RequestContext) -> List["Skill"]:
+    """Resolve skill ids to rows the caller may attach (PRD-191 S5, Sec §3.2.a).
+
+    Visibility parity with api/skills.py: global (workspace_id IS NULL) or
+    own-workspace skills only — a foreign workspace's private skill is
+    reported exactly like a nonexistent id, never silently attached (and thus
+    never prompt-injected into the caller's agent).
+    """
+    from api.skills import _skill_visible_to
+
+    rows = db.query(Skill).filter(
+        Skill.id.in_(skill_ids),
+        Skill.is_active == True  # noqa: E712
+    ).all()
+    visible = [sk for sk in rows if _skill_visible_to(sk, ctx)]
+    if len(visible) != len(skill_ids):
+        found_ids = {sk.id for sk in visible}
+        missing_ids = [sid for sid in skill_ids if sid not in found_ids]
+        raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
+    return visible
 
 
 def _assigned_by_user_id(ctx: RequestContext) -> Optional[int]:
@@ -328,17 +352,13 @@ async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybr
             "active_agents": active_agents,
             "inactive_agents": inactive_agents,
             "agents_by_type": agent_types,
-            "average_performance": 85.5,  # Placeholder
-            "total_executions": 0,  # Placeholder
-            "successful_executions": 0,  # Placeholder
-            "failed_executions": 0,  # Placeholder
-            "timestamp": "2025-08-01T12:57:03Z"
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/bulk", response_model=List[AgentResponse])
+@router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
@@ -365,16 +385,9 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
             db.add(agent)
             db.flush()  # Get the ID
 
-            # Add skills if provided
+            # Add skills if provided (PRD-191 S5: visibility-gated)
             if agent_data.skill_ids:
-                skills = db.query(Skill).filter(
-                    Skill.id.in_(agent_data.skill_ids),
-                    Skill.is_active == True
-                ).all()
-                if len(skills) != len(agent_data.skill_ids):
-                    found_ids = [skill.id for skill in skills]
-                    missing_ids = [sid for sid in agent_data.skill_ids if sid not in found_ids]
-                    raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
+                skills = _fetch_attachable_skills(db, agent_data.skill_ids, ctx)
                 agent.skills.extend(skills)
             
             # Note: agent.tags is the single source of truth for tags.
@@ -403,7 +416,7 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
         logger.error(f"Error creating bulk agents: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/", response_model=AgentResponse)
+@router.post("/", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
     print("🚀 API CALL: create_agent function called!")
@@ -435,16 +448,9 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         db.add(agent)
         db.flush()  # Get the ID
         
-        # Add skills if provided
+        # Add skills if provided (PRD-191 S5: visibility-gated)
         if agent_data.skill_ids:
-            skills = db.query(Skill).filter(
-                Skill.id.in_(agent_data.skill_ids),
-                Skill.is_active == True
-            ).all()
-            if len(skills) != len(agent_data.skill_ids):
-                found_ids = [skill.id for skill in skills]
-                missing_ids = [sid for sid in agent_data.skill_ids if sid not in found_ids]
-                raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
+            skills = _fetch_attachable_skills(db, agent_data.skill_ids, ctx)
             agent.skills.extend(skills)
 
         # Note: agent.tags is the single source of truth for tags.
@@ -583,6 +589,7 @@ async def get_org_chart(
     """
     try:
         from core.models.composio_cache import AgentAppAssignment
+        from core.team_access import list_teams
 
         # Fetch active workspace agents — the workspace Auto (slug=auto-{ws_id})
         # is included so the chart has a single root. Excludes the global
@@ -630,7 +637,6 @@ async def get_org_chart(
 
         nodes = []
         edges = []
-        teams_set: set = set()
 
         for a in agents:
             skill_names = [s.name for s in a.skills] if a.skills else []
@@ -659,14 +665,15 @@ async def get_org_chart(
             if parent_id is not None:
                 edges.append({"from": parent_id, "to": a.id})
 
-            if a.team:
-                teams_set.add(a.team)
+        # PRD-158 S1: teams come from the Teams table (same source as /api/teams)
+        # so the org-chart and the team API never disagree.
+        teams = [t.name for t in list_teams(db, ctx.workspace_id)]
 
         return {
             "success": True,
             "nodes": nodes,
             "edges": edges,
-            "teams": sorted(teams_set),
+            "teams": teams,
         }
 
     except Exception as e:
@@ -700,7 +707,7 @@ async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_requ
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{agent_id}/execute")
+@router.post("/{agent_id}/execute", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
@@ -730,7 +737,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestCo
         logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/{agent_id}", response_model=AgentResponse)
+@router.get("/{agent_id:int}", response_model=AgentResponse)
 async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get a specific agent by ID with skills and tools"""
     try:
@@ -776,7 +783,7 @@ async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_requ
         logger.error(f"Error getting agent skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{agent_id}/skills")
+@router.post("/{agent_id}/skills", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Add skills to an agent"""
     try:
@@ -784,12 +791,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        skills = db.query(Skill).filter(Skill.id.in_(skill_ids), Skill.is_active == True).all()
-        if len(skills) != len(skill_ids):
-            found_ids = [skill.id for skill in skills]
-            missing_ids = [sid for sid in skill_ids if sid not in found_ids]
-            raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
-        
+        skills = _fetch_attachable_skills(db, skill_ids, ctx)  # PRD-191 S5
         agent.skills.extend(skills)
         db.commit()
 
@@ -804,7 +806,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestCont
         logger.error(f"Error adding agent skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{agent_id}/skills/{skill_id}")
+@router.delete("/{agent_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Remove a single skill from an agent"""
     try:
@@ -827,7 +829,7 @@ async def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext =
         logger.error(f"Error removing skill from agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/{agent_id}", response_model=AgentResponse)
+@router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Update an existing agent"""
     try:
@@ -939,7 +941,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         logger.error(f"Error updating agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{agent_id}")
+@router.delete("/{agent_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
 async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete an agent and all related records"""
     try:
@@ -1010,7 +1012,7 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
 # PRD-64: Bulk re-index semantic embeddings
 # ------------------------------------------------------------------
 
-@router.post("/reindex-embeddings")
+@router.post("/reindex-embeddings", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def reindex_embeddings(
     force: bool = Query(False, description="Force re-embed even if text unchanged"),
     ctx: RequestContext = Depends(get_request_context_hybrid),

@@ -22,6 +22,7 @@ from ..capabilities.taxonomy import (
     INTENT_TO_CAPABILITIES,
     DESTRUCTIVE_CAPABILITIES,
     get_capabilities_for_intent,
+    intent_is_destructive,
 )
 from ..capabilities.models import ComposioActionMetadata
 
@@ -270,14 +271,29 @@ class ActionCapabilityFilter:
         ).scalar_one_or_none()
 
         if not metadata:
-            # If the metadata table is empty (sync hasn't been run yet),
-            # don't block — classification hasn't been performed.
+            # PRD-177 S3 (F018): the metadata table has no row for this action.
             total = self.db.execute(
                 select(ComposioActionMetadata.action_id).limit(1)
             ).first()
             if not total:
-                logger.info(f"Action metadata table empty (sync not run), allowing: {action_id}")
-                return True, "Metadata not yet synced (allowing)"
+                # Empty table (sync not yet run) — we cannot classify. Fail
+                # CLOSED for destructive intent so an unclassified action is
+                # never silently permitted to do damage; still allow clearly
+                # non-destructive intent so a cold start is not bricked.
+                from config import config
+
+                fail_closed = bool(getattr(config, "COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", True))
+                if fail_closed and not allow_destructive and intent_is_destructive(intent):
+                    logger.warning(
+                        f"Action metadata empty and intent reads destructive — "
+                        f"failing CLOSED (requires confirmation): {action_id}"
+                    )
+                    return False, (
+                        "Action metadata not yet synced and the request looks "
+                        "destructive — confirmation required before running."
+                    )
+                logger.info(f"Action metadata table empty (sync not run), allowing non-destructive: {action_id}")
+                return True, "Metadata not yet synced (non-destructive, allowing)"
             return False, f"Unknown action: {action_id}"
 
         # Extract capabilities from intent
@@ -291,11 +307,9 @@ class ActionCapabilityFilter:
                 f"don't match intent capabilities {required_caps}"
             )
 
-        # Check destructive action safeguards
+        # Check destructive action safeguards (shared destructive-intent heuristic)
         if metadata.destructive and not allow_destructive:
-            destructive_keywords = ['delete', 'remove', 'archive', 'revoke', 'destroy']
-            intent_lower = intent.lower()
-            if not any(kw in intent_lower for kw in destructive_keywords):
+            if not intent_is_destructive(intent):
                 return False, "Destructive action not allowed for non-destructive intent"
 
         return True, "Action is eligible"

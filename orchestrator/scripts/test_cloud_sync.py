@@ -100,11 +100,11 @@ async def test_mock_s3_vectors():
     print(f"   📊 Remaining vectors: {backend.get_vector_count()}")
 
     # Test connection cleanup
-    print(f"\n5️⃣  Testing connection cleanup...")
+    print(f"\n5️⃣  Testing connection cleanup (file-scoped, PRD-186 S1)...")
 
     remaining = backend.get_vector_count()
-    deleted_all = backend.delete_all_for_connection(connection_id=1)
-    print(f"   ✅ Deleted all {deleted_all} vectors")
+    deleted_all = backend.delete_for_files(["gdrive_file_123", "dropbox_file_456"])
+    print(f"   ✅ Deleted {deleted_all} vectors across the connection's files")
     print(f"   📊 Final vector count: {backend.get_vector_count()}")
 
     # Cleanup

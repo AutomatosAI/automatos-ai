@@ -27,6 +27,7 @@ load_dotenv(env_path)
 
 # Import centralized config
 from config import config
+from router_manifest import mount_manifest_routers  # PRD-155 S3: fail-loud router mounts
 
 # Import database and models
 from core.database.database import init_database, get_db, SessionLocal
@@ -39,19 +40,15 @@ from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router, webhook_router as recipe_webhook_router
 from api.webhooks import router as general_webhooks_router
 from api.marketplace import router as marketplace_router
-try:
-    from api.shopify import router as shopify_router
-except ImportError:
-    shopify_router = None
 from api.documents import router as documents_router
+from api.teams import router as teams_router  # PRD-158: Teams entity
 from api.cache import router as cache_router
 from api.system import router as system_router
-from api.context_engineering import router as context_engineering_router
-from api.memory import router as memory_router
 from api.widget_memory import router as widget_memory_router  # US-013: Widget memory panel
 from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.memory_stats import router as memory_stats_router
+from api.memory_stats import admin_router as memory_stats_admin_router  # PRD-77: delete/consolidate stay super-admin (PRD-143 S7)
 from api.context_policy import router as context_policy_router
 from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.github_webhooks import router as github_webhooks_router  # GitHub PR automation
@@ -63,29 +60,15 @@ from api.system_settings import router as system_settings_router  # System Setti
 from api.tools import router as tools_router
 from api.wizard import router as wizard_router  # PRD-130: Business Intake Wizard (PoC)
 from api.onboarding_agents import router as onboarding_agents_router
-# PRD-36: Composio Integration (optional module)
-try:
-    from api.composio import router as composio_router
-except ImportError:
-    composio_router = None
-# PRD-42: Cloud Document Sync with S3 Vectors (optional module)
-try:
-    from api.cloud_documents import router as cloud_documents_router
-except ImportError:
-    cloud_documents_router = None
 from api.statistics import router as statistics_router
-from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+from api.blog import router as blog_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router, public_router as team_public_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
 from api.admin_workspaces import router as admin_workspaces_router  # Admin workspace lifecycle (pause/delete)
-try:
-    from api.admin_prompts import router as admin_prompts_router  # PRD-58: System Prompt Management
-except ImportError:
-    admin_prompts_router = None
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
 from api.workspace_skills import router as workspace_skills_router  # PRD-71: Workspace Skill Enablement
@@ -96,77 +79,34 @@ from api.notifications import (  # PRD-128: Unified notification system
     router as notifications_router,
     preferences_router as notification_preferences_router,
 )
-# Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
-try:
-    from api.bug_reports import router as bug_reports_router
-except ImportError:
-    bug_reports_router = None
-# US-012: Widget Email operations (optional — Composio dependency)
-try:
-    from api.widget_email import router as widget_email_router
-except ImportError:
-    widget_email_router = None
-# PRD-37: SaaS Foundation stubs (optional — may not exist in all branches)
-try:
-    from api.auth import router as auth_router
-except ImportError:
-    auth_router = None
-try:
-    from api.api_keys import router as api_keys_router
-except ImportError:
-    api_keys_router = None
-try:
-    from api.evaluation import router as evaluation_router
-except ImportError:
-    evaluation_router = None
-try:
-    from api.widgets.router import router as widget_api_router
-except ImportError:
-    widget_api_router = None
-try:
-    from api.widget_marketplace import router as widget_marketplace_router
-except ImportError:
-    widget_marketplace_router = None
 
-# PRD-56: Workspace Tasks
-from api.tasks import router as tasks_router
+# PRD-56's /api/tasks direct-step router was DELETED (PRD-192 S6, locked #5):
+# an ungoverned side-effecting ingress with zero product callers (grep-proven
+# across backend, frontend, SDK, tests). The workspace worker + its exec
+# sandbox stay (workspace_github still enqueues background jobs).
 
 # PRD-127: Ephemeral multimodal attachments
 from api.attachments import router as attachments_router
 
 # PRD-66: Workspace File Browser (Code Viewer Widget)
 from api.workspace_files import router as workspace_files_router
-# PRD-66: Workspace GitHub Integration (repo listing + cloning)
-try:
-    from api.workspace_github import router as workspace_github_router
-except ImportError:
-    logging.getLogger(__name__).warning("workspace_github router unavailable", exc_info=True)
-    workspace_github_router = None
 
 # Import MISSING API routers
 from api.analytics_api import router as analytics_api_router
 from api.analytics_real import router as analytics_real_router
+from api.analytics_real import ws_router as analytics_ws_router  # PRD-185 S12: own-workspace health tiles
+from api.harness import router as harness_router  # PRD-142 Wave 4: HARNESS approve/reject (W4-S1)
 from api.kpi_api import router as kpi_router  # KPI Command Centre Widgets
-from api.insights import router as insights_router
 from api.knowledge import router as knowledge_router
 from api.knowledge_multimodal import router as knowledge_multimodal_router
 from api.knowledge_graph import router as knowledge_graph_router
 from api.learning import router as learning_router
-from api.problems import router as problems_router
 from api.query import router as query_router
 from api.recommendations import router as recommendations_router
-from api.solutions import router as solutions_router
-from api.synthesis import router as synthesis_router
 # WebSocket removed - using AI SDK SSE streaming instead
-from api.chatbot_llm import router as chatbot_router
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 # document_processing removed - use api/documents.py instead
 from api.agent_endpoints import router as agent_endpoints_router
-# PRD-37: Workspace context (optional module - may not exist in all branches)
-try:
-    from api.workspaces import router as workspaces_router
-except ImportError:
-    workspaces_router = None
 # redis_websocket removed - using AI SDK SSE streaming instead
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.llm_marketplace import router as llm_marketplace_router  # PRD-54: LLM Marketplace
@@ -177,42 +117,10 @@ from api.analytics_charts import router as analytics_charts_router  # PRD-54: Pa
 from api.user_api_keys import router as user_api_keys_router  # PRD-54: BYOK API Keys
 from api.execution_history import router as execution_history_router  # Enhanced execution history
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
+from api.rag_feedback import router as rag_feedback_router  # PRD-168 S2: RAG feedback (Q87)
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 from api.document_generation import router as document_generation_router  # PRD-63: Document Generation
 from api.widget_workflows import router as widget_workflows_router  # US-014: Widget Workflow Control
-
-# PRD-72: Activity Command Centre
-try:
-    from api.activity import router as activity_router
-except ImportError:
-    activity_router = None
-
-# PRD-55: Autonomous Assistant Platform (optional modules)
-try:
-    from api.heartbeat import router as heartbeat_router
-except ImportError:
-    heartbeat_router = None
-try:
-    from api.channels import router as channels_router
-except ImportError:
-    channels_router = None
-
-# PRD-72: Activity Command Centre
-try:
-    from api.activity import router as activity_router
-except ImportError:
-    activity_router = None
-
-# PRD-74: Voice Chat
-try:
-    from api.chat_voice import router as chat_voice_router
-except ImportError:
-    chat_voice_router = None
-# PRD-74 Phase 2: Voice Profiles
-try:
-    from api.voice_profiles import router as voice_profiles_router
-except ImportError:
-    voice_profiles_router = None
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -264,6 +172,15 @@ async def _boot_phase_1_core():
     import core.models.core  # noqa: F811 — registers all models with Base
     from core.database.database import create_tables, get_db_session, engine
     from core.database.boot_lock import boot_leader_lock
+
+    # PRD-172 F004/F005 + PRD-186 S3: fail-closed on tenant-isolation secrets
+    # and vector-plane config integrity BEFORE any traffic is served — outside
+    # any swallowing run_stage. Raises RuntimeError (aborting boot) if the
+    # Shopify internal key is unset, S3 Vectors is enabled without a bucket or
+    # with an incoherent dimension, or saas widget CORS would rest allow-all.
+    # (A shared bucket with no {workspace_id} placeholder is valid — isolation
+    # is enforced per-query, fail-closed, by S3VectorsBackend.search().)
+    config.validate_security()
 
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)
     create_tables()
@@ -347,68 +264,39 @@ async def _boot_phase_1_core():
 
         logger.info("Boot seeds completed (leader worker)")
 
+        # ── Orphaned-run reaper (PRD-142 Wave 1 · WS-C · W1-S6) ──
+        # Runs under the leader lock so exactly one worker reaps per deploy.
+        # In-flight rows whose background executor died with the previous
+        # process (board 'in_progress', wizard 'scraping', workflow 'running')
+        # are marked terminal here. Guarded: a reaper failure must never abort
+        # boot — it surfaces on the ERRORS-by-subsystem tile instead.
+        try:
+            from core.boot.reaper import reap_orphaned_runs
+            with get_db_session() as db:
+                reap_orphaned_runs(db)
+        except Exception as reap_err:
+            logger.warning("Boot reaper failed (non-fatal): %s", reap_err, exc_info=True)
+            from core.utils.exception_telemetry import record_error
+            record_error(subsystem="startup", operation="boot_reaper", error=reap_err)
+
 
 async def _seed_semantic_embeddings():
-    """Phase 1 continued: Background embedding seed (non-blocking)."""
+    """Phase 1 continued: launch the non-blocking boot seeds.
+
+    The seed bodies live in ``core.boot.startup_tasks`` — importable, tested,
+    and observable: on failure they report into ``error_events`` via
+    ``record_error(subsystem="startup")`` (WS-A sink) instead of dying with
+    only a log line. Both are self-guarding (never raise), so a bare
+    ``create_task`` cannot leak an unretrieved exception.
+    """
     import asyncio as _asyncio
-    from core.routing.semantic_indexer import embed_workspace_agents as _embed_ws
-    from core.models.workspaces import Workspace as _Workspace
+    from core.boot.startup_tasks import (
+        embed_all_agents_on_startup,
+        ensure_field_memory_collection,
+    )
 
-    async def _embed_all_agents_on_startup():
-        """Background task: embed agents in all workspaces."""
-        try:
-            from core.database.database import SessionLocal as _SL
-            from core.llm.embedding_manager import get_embedding_manager
-            from core.models.core import Agent as _Agent
-
-            _db = _SL()
-            try:
-                emgr = get_embedding_manager()
-                emgr._ensure_provider()
-                logger.info(f"PRD-64: Embedding provider: {emgr.get_provider_info()}")
-
-                ws_ids = [w.id for w in _db.query(_Workspace.id).all()]
-                total = 0
-                for ws_id in ws_ids:
-                    try:
-                        total += await _embed_ws(ws_id, _db)
-                    except Exception:
-                        logger.warning("PRD-64: Failed to embed workspace %s", ws_id, exc_info=True)
-
-                all_agents = _db.query(_Agent).filter(_Agent.status == "active").count()
-                with_embeddings = _db.query(_Agent).filter(
-                    _Agent.status == "active",
-                    _Agent.semantic_embedding.isnot(None),
-                ).count()
-                logger.info(
-                    f"PRD-64: Semantic embeddings seeded — "
-                    f"{total} new, {with_embeddings}/{all_agents} agents have embeddings"
-                )
-            finally:
-                _db.close()
-        except Exception as e:
-            logger.warning(f"PRD-64: Startup embedding seed failed (non-fatal): {e}", exc_info=True)
-
-    _asyncio.create_task(_embed_all_agents_on_startup())
-
-    # PRD-108 single-collection refactor: ensure the shared field_memory
-    # collection + payload indexes exist before the coordinator boots.
-    async def _ensure_field_memory_collection() -> None:
-        try:
-            from modules.context.factory import get_shared_context
-            from modules.context.adapters.vector_field import VectorFieldSharedContext
-            ctx = get_shared_context()
-            inner = getattr(ctx, "_inner", ctx)
-            if isinstance(inner, VectorFieldSharedContext):
-                await inner.ensure_shared_collection()
-                logger.info("PRD-108: shared field_memory collection ready")
-        except Exception:
-            logger.warning(
-                "PRD-108: shared field_memory bootstrap failed (non-fatal)",
-                exc_info=True,
-            )
-
-    _asyncio.create_task(_ensure_field_memory_collection())
+    _asyncio.create_task(embed_all_agents_on_startup())
+    _asyncio.create_task(ensure_field_memory_collection())
 
 
 class TrustGateError(RuntimeError):
@@ -500,6 +388,18 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                 except Exception as _tr_err:
                     logger.warning("Could not start TaskReconciler: %s", _tr_err)
 
+                # PRD-204 S5: Auto Watcher tick -- heartbeat sweep for watches
+                # (terminal fallback, missed-run/benched detection, expiry).
+                # Rides the same fcntl-locked scheduler: single owner across
+                # workers, so watch claims never race between processes.
+                if config.WATCHER_ENABLED:
+                    try:
+                        from services.watch_ticker import get_watch_ticker
+                        await get_watch_ticker().start(scheduler=shared_sched)
+                        logger.info("WatchTicker started on unified scheduler")
+                    except Exception as _wt_err:
+                        logger.warning("Could not start WatchTicker: %s", _wt_err)
+
                 # PRD-79: Memory background jobs (consolidation, decay, promotion)
                 if config.MEMORY_JOBS_ENABLED:
                     try:
@@ -509,6 +409,17 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                     except Exception as _mj_err:
                         logger.warning("Could not start MemoryJobScheduler: %s", _mj_err)
 
+                # PRD-178 S4: field → durable promotion (the moat arm) — distill
+                # strong, untainted field patterns into durable memory
+                # before compaction hard-deletes them. Taint-gated.
+                if config.FIELD_PROMOTION_ENABLED:
+                    try:
+                        from jobs.promote_field_memory import get_field_promotion_scheduler
+                        await get_field_promotion_scheduler().start(scheduler=shared_sched)
+                        logger.info("FieldPromotionJobScheduler started on unified scheduler")
+                    except Exception as _fp_err:
+                        logger.warning("Could not start FieldPromotionJobScheduler: %s", _fp_err)
+
                 # PRD-139: Nightly edge builder (populates graph regardless of flag)
                 try:
                     from services.edge_builder_scheduler import get_edge_builder_scheduler
@@ -516,6 +427,17 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                     logger.info("EdgeBuilderScheduler started on unified scheduler")
                 except Exception as _eb_err:
                     logger.warning("Could not start EdgeBuilderScheduler: %s", _eb_err)
+
+                # PRD-177 S3 (F018): daily Composio action-metadata sync — keeps
+                # the classification table (which backs the fail-closed
+                # destructive gate) fresh, on the same scheduler as the recompute.
+                if config.COMPOSIO_SYNC_ENABLED:
+                    try:
+                        from services.composio_sync_scheduler import get_composio_sync_scheduler
+                        await get_composio_sync_scheduler().start(scheduler=shared_sched)
+                        logger.info("ComposioSyncScheduler started on unified scheduler")
+                    except Exception as _cs_err:
+                        logger.warning("Could not start ComposioSyncScheduler: %s", _cs_err)
 
                 # PRD-77: Load agent-scheduled tasks into APScheduler
                 try:
@@ -605,6 +527,19 @@ async def lifespan(app: FastAPI):
 
         logger.info("Phase 1 complete: core ready")
 
+        # ── PRD-181 S1: attach the audit handler to the policy bus ──
+        # The bus becomes the single write point for the per-tenant Art.12
+        # record of every tool call + policy verdict. Only meaningful when the
+        # plane is on; idempotent and never fatal (a registration failure must
+        # not stop the server booting).
+        try:
+            from modules.policy import policy_plane_enabled, register_audit_handler
+
+            if policy_plane_enabled():
+                register_audit_handler()
+        except Exception as _audit_reg_err:  # noqa: BLE001
+            logger.warning("Policy audit handler registration failed: %s", _audit_reg_err)
+
         # NOTE: Redis client uses lazy initialization via get_redis_client()
         logger.info("Redis client will lazy-initialize on first use")
 
@@ -627,6 +562,18 @@ async def lifespan(app: FastAPI):
             await run_stage(
                 report, BootstrapStage.SCHEDULER_INIT, lambda: None, skip_condition=True
             )
+
+        # ── PRD-161: board dispatch spine (single claim/lease/requeue loop) ──
+        # Assigned BoardTasks flow through this, not the heartbeat fold-in.
+        if trust_passed and config.BOARD_DISPATCH_ENABLED:
+            import asyncio as _asyncio
+            from services.board_dispatcher import run_dispatch_loop
+
+            app.state.board_dispatch_stop = _asyncio.Event()
+            app.state.board_dispatch_task = _asyncio.create_task(
+                run_dispatch_loop(stop_event=app.state.board_dispatch_stop)
+            )
+            logger.info("Board dispatch loop started (PRD-161)")
 
         # ── Ready ──
         report.ready_at = datetime.now(timezone.utc)
@@ -664,6 +611,19 @@ async def lifespan(app: FastAPI):
             logger.info("Unified scheduler stopped")
         except Exception:
             pass
+
+    # PRD-161: stop the board dispatch loop
+    _bd_task = getattr(app.state, "board_dispatch_task", None)
+    if _bd_task is not None:
+        _bd_stop = getattr(app.state, "board_dispatch_stop", None)
+        if _bd_stop is not None:
+            _bd_stop.set()
+        _bd_task.cancel()
+        try:
+            await _bd_task
+        except Exception:
+            pass
+        logger.info("Board dispatch loop stopped")
 
     # PRD-55: Stop ChannelManager
     if config.CHANNELS_ENABLED:
@@ -746,7 +706,6 @@ app = FastAPI(
     | 📄 **Documents** | `/api/documents` | Document processing |
     | 🧠 **Context Engineering** | `/api/context-engineering` | Mathematical foundations |
     | 📊 **Evaluation** | `/api/evaluation` | System evaluation |
-    | 🧩 **Memory** | `/api/memory` | Memory management |
     | ⚙️ **System** | `/api/system` | System configuration |
     
     ### 🔌 **Real-time Features**
@@ -851,22 +810,22 @@ app.add_middleware(
 )
 
 # PRD-38.4: Widget SDK middleware
-try:
-    from api.widgets.cors import WidgetCORSMiddleware
-    app.add_middleware(WidgetCORSMiddleware)
-except ImportError:
-    pass
+from api.widgets.cors import WidgetCORSMiddleware
+from api.widgets.rate_limit import WidgetRateLimitMiddleware
 
-try:
-    from api.widgets.rate_limit import WidgetRateLimitMiddleware
-    app.add_middleware(WidgetRateLimitMiddleware)
-except ImportError:
-    pass
+app.add_middleware(WidgetCORSMiddleware)
+app.add_middleware(WidgetRateLimitMiddleware)
 
 # Rate limiting (US-017)
+# PRD-174 F040 — the limiter was constructed but SlowAPIMiddleware was never
+# registered, so the default_limits never applied to any route: a placebo, and
+# the stack's only fail-OPEN gate. Fix: register the middleware AND fail closed —
+# swallow_errors=False means a limiter that can't evaluate (storage error) raises
+# instead of waving the request through. A gate that can't decide must deny.
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 def _get_real_client_ip(request) -> str:
     """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
@@ -875,9 +834,24 @@ def _get_real_client_ip(request) -> str:
         return forwarded.split(",")[0].strip()
     return get_remote_address(request)
 
-limiter = Limiter(key_func=_get_real_client_ip, default_limits=["60/minute"])
+# F040 fix is gated on the policy-plane flag so flag-OFF is byte-for-byte today's
+# behaviour (limiter constructed but inert). swallow_errors follows the flag:
+# fail-CLOSED only when the plane is on, else the historical fail-open default.
+from config import config as _app_config
+_policy_plane_on = bool(getattr(_app_config, "POLICY_PLANE_ENABLED", False))
+
+limiter = Limiter(
+    key_func=_get_real_client_ip,
+    default_limits=["60/minute"],
+    swallow_errors=not _policy_plane_on,  # F040: fail CLOSED when the plane is on
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# F040: actually enforce the limits — without this middleware the limiter above
+# is inert on every route. Registered ONLY under the policy-plane flag; OFF keeps
+# today's (placebo) behaviour so the rollout stays byte-for-byte reversible.
+if _policy_plane_on:
+    app.add_middleware(SlowAPIMiddleware)
 
 # Request body size limit middleware (10MB default, 50MB for uploads)
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
@@ -992,15 +966,14 @@ app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(recipe_webhook_router)  # Recipe webhook triggers (no auth)
 app.include_router(general_webhooks_router)  # General workspace webhooks (no auth)
 app.include_router(marketplace_router)  # Community Marketplace
-if shopify_router is not None:
-    app.include_router(shopify_router)  # Shopify App Store provisioning & webhook forwarding
 app.include_router(document_generation_router)  # PRD-63: Must be BEFORE documents_router (has /templates, /generated specific routes that would otherwise be caught by documents_router's /{document_id} catch-all → 422)
 app.include_router(documents_router)
+app.include_router(teams_router)  # PRD-158: Teams entity (list/create)
+app.include_router(blog_router)  # Authenticated blog management (Deliverables → Blogs)
 app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
-app.include_router(context_engineering_router)
-app.include_router(memory_stats_router)  # PRD-77: Must be BEFORE memory_router (has /browse, /health, /stats/real specific routes that would otherwise be caught by memory_router's /{memory_id} catch-all)
-app.include_router(memory_router)
+app.include_router(memory_stats_router)  # PRD-77 memory explorer reads (/browse, /health, /stats/real) — workspace-scoped, member-visible
+app.include_router(memory_stats_admin_router)  # PRD-77 memory mutations (delete/consolidate) — super-admin only (PRD-143 S7 obs tier)
 app.include_router(widget_memory_router)  # US-013: Widget memory panel (/api/memory)
 app.include_router(analytics_router)
 app.include_router(workflow_history_router)
@@ -1016,12 +989,7 @@ app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(wizard_router)  # PRD-130: Business Intake Wizard (PoC)
 app.include_router(onboarding_agents_router)
-if composio_router is not None:
-    app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
-if cloud_documents_router is not None:
-    app.include_router(cloud_documents_router)  # PRD-42: Cloud Document Sync
 app.include_router(statistics_router)
-app.include_router(permissions_router)
 app.include_router(skills_router)
 app.include_router(templates_router)
 app.include_router(context_summarization_router)  # Context Engineering 2.0: Self-baking
@@ -1029,38 +997,29 @@ app.include_router(context_summarization_router)  # Context Engineering 2.0: Sel
 # Include MISSING API routers
 app.include_router(analytics_api_router)
 app.include_router(analytics_real_router)
+app.include_router(analytics_ws_router)  # PRD-185 S12: own-workspace health tiles (workspace-admin gated)
+app.include_router(harness_router)  # PRD-142 Wave 4: HARNESS approve/reject (W4-S1)
 app.include_router(kpi_router)  # KPI Command Centre Widgets
-app.include_router(insights_router)
 app.include_router(knowledge_router)
 app.include_router(knowledge_multimodal_router)
 app.include_router(knowledge_graph_router)
 app.include_router(learning_router)
-app.include_router(problems_router)
 app.include_router(query_router)
 app.include_router(recommendations_router)
-app.include_router(solutions_router)
-app.include_router(synthesis_router)
 # WebSocket routers removed - using AI SDK SSE streaming
-app.include_router(chatbot_router)  # Legacy chatbot endpoint (kept for backward compatibility)
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 # document_processing_router removed - api/documents.py handles all document processing
 app.include_router(agent_endpoints_router)
-if workspaces_router is not None:
-    app.include_router(workspaces_router)  # PRD-37: Workspace context
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
+app.include_router(rag_feedback_router)  # PRD-168 S2: RAG feedback (Q87)
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
-app.include_router(tasks_router)  # PRD-56: Workspace task management
 app.include_router(attachments_router)  # PRD-127: Ephemeral multimodal attachments
 app.include_router(workspace_files_router)  # PRD-66: Workspace file browser
-if workspace_github_router is not None:
-    app.include_router(workspace_github_router)  # PRD-66: Workspace GitHub integration
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(team_public_router)  # Accept-invitation public endpoints
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
 app.include_router(admin_workspaces_router)  # Admin workspace lifecycle
-if admin_prompts_router is not None:
-    app.include_router(admin_prompts_router)  # PRD-58: System Prompt Management
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
 app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)
@@ -1074,84 +1033,16 @@ app.include_router(workspace_skills_router)  # PRD-71: Workspace Skill Enablemen
 app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
 app.include_router(personas_router)  # PRD-42: Persona API
 app.include_router(generated_images_router)  # Generated image serving from S3
-if bug_reports_router is not None:
-    app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 app.include_router(notifications_router)  # PRD-128: Unified notification system
 app.include_router(notification_preferences_router)  # PRD-128: Notification preferences
-if widget_email_router is not None:
-    app.include_router(widget_email_router)  # US-012: Widget Email operations
-if auth_router is not None:
-    app.include_router(auth_router)  # PRD-37: Auth endpoints
-if api_keys_router is not None:
-    app.include_router(api_keys_router)  # PRD-37: API key management
-if widget_api_router is not None:
-    app.include_router(widget_api_router)  # PRD-38.4: Widget SDK API
-if widget_marketplace_router is not None:
-    app.include_router(widget_marketplace_router)  # PRD-38.5: Widget Marketplace
-if evaluation_router is not None:
-    app.include_router(evaluation_router)  # Evaluation methodologies
 
-# PRD-72: Activity Command Centre
-if activity_router is not None:
-    app.include_router(activity_router)
-
-# PRD-76: Agent Reports
-try:
-    from api.reports import router as reports_router
-    app.include_router(reports_router)
-except ImportError as e:
-    logger.warning("Could not load reports router: %s", e)
-
-# PRD-129: Workspace Outputs Hub — deliverables gallery
-try:
-    from api.deliverables import router as deliverables_router
-    app.include_router(deliverables_router)
-except ImportError as e:
-    logger.warning("Could not load deliverables router: %s", e)
-
-# PRD-72: Board Tasks
-try:
-    from api.board_tasks import router as board_tasks_router
-    app.include_router(board_tasks_router)
-except ImportError as e:
-    logger.warning("Could not load board tasks router: %s", e)
-
-# PRD-82A: Sequential Mission Coordinator
-try:
-    from api.missions import router as missions_router, agent_telemetry_router
-    app.include_router(missions_router)
-    app.include_router(agent_telemetry_router)
-except ImportError as e:
-    logger.warning("Could not load missions router: %s", e)
-
-# Cluster 1A: Assignments recommendations
-try:
-    from api.assignments import router as assignments_router
-    app.include_router(assignments_router)
-except ImportError as e:
-    logger.warning("Could not load assignments router: %s", e)
-
-# PRD-77: Agent Self-Scheduling
-try:
-    from api.scheduled_tasks import router as scheduled_tasks_router
-    app.include_router(scheduled_tasks_router)
-except ImportError as e:
-    logger.warning("Could not load scheduled tasks router: %s", e)
-
-# PRD-55: Autonomous Assistant Platform
-if heartbeat_router is not None:
-    app.include_router(heartbeat_router)
-if channels_router is not None:
-    app.include_router(channels_router)
-if activity_router is not None:
-    app.include_router(activity_router)  # PRD-72: Activity Command Centre
-
-# PRD-74: Voice Chat
-if chat_voice_router is not None:
-    app.include_router(chat_voice_router)
-# PRD-74 Phase 2: Voice Profiles
-if voice_profiles_router is not None:
-    app.include_router(voice_profiles_router)
+# PRD-155 S3: conditionally-mounted routers — previously a wall of silent
+# import guards that swallowed failures into `x_router = None` (two of which,
+# api.auth and api.evaluation, failed on every boot unnoticed). router_manifest.py
+# declares each as required or optional; a required router that fails to import now
+# aborts boot naming it, unless ALLOW_DEGRADED_BOOT is set. Mounted after the core
+# routers so it never disturbs their catch-all ordering.
+mount_manifest_routers(app, allow_degraded=config.ALLOW_DEGRADED_BOOT)
 
 # PRD-73: Monitoring Stack Integration
 # Prometheus /metrics endpoint + request instrumentation
@@ -1179,13 +1070,6 @@ try:
     logger.info("Loki log query API enabled at /api/logs/query")
 except Exception as e:
     logger.warning(f"Loki log query API disabled: {e}")
-
-# PRD-74: Voice Chat (duplicate guard — first registration above)
-if chat_voice_router is not None:
-    pass  # already registered above
-# PRD-74 Phase 2: Voice Profiles (duplicate guard)
-if voice_profiles_router is not None:
-    pass  # already registered above
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
@@ -1455,11 +1339,6 @@ async def root():
                 "base_url": "/api/documents",
                 "description": "Document processing and analysis",
                 "features": ["RAG integration", "Document analysis", "Knowledge extraction", "Multi-format support"]
-            },
-            "🧠 context_engineering": {
-                "base_url": "/api/context-engineering",
-                "description": "Mathematical foundations for intelligent processing",
-                "features": ["Information theory", "Vector operations", "Statistical analysis", "Optimization algorithms"]
             },
             "📊 evaluation": {
                 "base_url": "/api/evaluation",

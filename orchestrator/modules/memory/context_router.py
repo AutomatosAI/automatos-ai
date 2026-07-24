@@ -34,6 +34,27 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Context budget weights (PRD-141 US-011)
+# ---------------------------------------------------------------------------
+# Each section gets a fixed proportion of the *usable* context window
+# (usable = 80% of the raw window, reserving 20% for the model's response).
+# Weights sum to 0.80 of the usable window — the remaining 0.20 is slack for
+# estimator error and untracked overhead. ``tools`` and ``system_prompt`` are
+# reserved headroom the router does not fill itself — they keep the memory
+# sections from claiming space the prompt assembler needs.
+_CONTEXT_BUDGET_WEIGHTS: Dict[str, float] = {
+    "session": 0.10,
+    "long_term": 0.15,
+    "temporal": 0.10,
+    "daily": 0.08,
+    "awareness": 0.05,
+    "tools": 0.20,
+    "system_prompt": 0.12,
+}
+_USABLE_WINDOW_FRACTION = 0.80
+
+
+# ---------------------------------------------------------------------------
 # ContextSignals — output of query analysis
 # ---------------------------------------------------------------------------
 
@@ -346,6 +367,41 @@ class ContextRouter:
         return len(text) // 4 if text else 0
 
     @staticmethod
+    def _compute_budgets(context_window: Optional[int]) -> Dict[str, int]:
+        """Resolve per-section token budgets for context assembly.
+
+        When the model's ``context_window`` is known (a positive int), each
+        section gets a fixed proportion of the *usable* window
+        (``usable = int(context_window * 0.80)``), so budgets scale with the
+        model — a 128K model gets far larger sections than an 8K model.
+
+        When the window is unknown (``None`` / non-positive), fall back to the
+        static ``CONTEXT_BUDGET_*`` config values. The config values are
+        therefore a fallback only, never the primary source when a window is
+        available.
+
+        Returns a dict keyed by section name with token budgets.
+        """
+        from config import config
+
+        if not context_window or context_window <= 0:
+            return {
+                "session": config.CONTEXT_BUDGET_SESSION,
+                "long_term": config.CONTEXT_BUDGET_LONG_TERM,
+                "temporal": config.CONTEXT_BUDGET_TEMPORAL,
+                "daily": config.CONTEXT_BUDGET_DAILY,
+                "awareness": config.CONTEXT_BUDGET_AWARENESS,
+                "tools": config.CONTEXT_BUDGET_TOOLS,
+                "system_prompt": config.CONTEXT_BUDGET_SYSTEM_PROMPT,
+            }
+
+        usable = int(context_window * _USABLE_WINDOW_FRACTION)
+        return {
+            name: int(usable * weight)
+            for name, weight in _CONTEXT_BUDGET_WEIGHTS.items()
+        }
+
+    @staticmethod
     def _truncate_to_budget(text: str, token_budget: int) -> str:
         """Truncate *text* so its estimated token count fits within *token_budget*."""
         max_chars = token_budget * 4
@@ -384,6 +440,7 @@ class ContextRouter:
         agent_id: int,
         query: str,
         conversation_id: Optional[str] = None,
+        context_window: Optional[int] = None,
     ) -> ContextBundle:
         """
         Assemble a budget-constrained context bundle by fetching from L1/L2/L3
@@ -391,26 +448,30 @@ class ContextRouter:
 
         Fetch strategy (driven by ``analyze_query`` signals):
           - **session_continuation** or default with conversation_id → L1 session
-          - **temporal** → L2 short-term with time filter
-          - **personal_fact** or default → L3 long-term via Mem0 (cached)
+          - **temporal** → L2 short-term with time filter (window'd listing)
+          - every other non-live-data turn → L2 SEMANTIC recall (PRD-187 S3 —
+            the always-on path; matching is by meaning, never gated behind the
+            temporal regex)
+          - **personal_fact** or default → L3 long-term (durable store, cached)
           - **knowledge_query** / **live_data** → awareness text only (no pre-fetch)
 
-        Default (no strong signal): L3 top-5 memories + L1 session summary.
+        Both memory lists pass ``filter_injectable_memories`` (PRD-185 S11) —
+        sub-floor and noise-typed rows never reach the prompt.
 
         All layer fetches are concurrent via ``asyncio.gather``.
         Any single-layer failure is logged and skipped — never breaks the bundle.
         """
-        from config import config
         from modules.memory.unified_memory_service import get_unified_memory_service
 
         service = get_unified_memory_service()
         signals = self.analyze_query(query)
 
-        budget_session = config.CONTEXT_BUDGET_SESSION
-        budget_long_term = config.CONTEXT_BUDGET_LONG_TERM
-        budget_temporal = config.CONTEXT_BUDGET_TEMPORAL
-        budget_daily = config.CONTEXT_BUDGET_DAILY
-        budget_awareness = config.CONTEXT_BUDGET_AWARENESS
+        budgets = self._compute_budgets(context_window)
+        budget_session = budgets["session"]
+        budget_long_term = budgets["long_term"]
+        budget_temporal = budgets["temporal"]
+        budget_daily = budgets["daily"]
+        budget_awareness = budgets["awareness"]
 
         # ----- Determine which fetches to launch -----
         fetch_session = (
@@ -421,15 +482,20 @@ class ContextRouter:
                 signals.is_live_data,
             ]))
         )
-        fetch_long_term = (
-            signals.is_personal_fact
-            or not any([
-                signals.is_temporal,
-                signals.is_knowledge_query,
-                signals.is_live_data,
-            ])
-        )
+        # PRD-159 S3: operational memories (tool_outcome / task_learning /
+        # playbook_pattern / …) live in L3 and must be recallable for ANY
+        # query — including temporal ("why did the deploy mission fail?") and
+        # knowledge queries — not gated behind the temporal-regex signal. The
+        # server-side relevance floor in search_long_term keeps irrelevant junk
+        # out instead of this coarse signal gate. Live-data queries (weather,
+        # prices) still skip memory.
+        fetch_long_term = not signals.is_live_data
         fetch_temporal = signals.is_temporal and signals.temporal_window is not None
+        # PRD-187 S3: L2 recall is ALWAYS-ON. Temporal queries keep the
+        # window'd listing; every other non-live-data turn gets semantic L2
+        # recall — "what did we learn about the Shopify sync?" matched zero
+        # rows by construction under the old ILIKE-behind-a-temporal-regex.
+        fetch_l2_semantic = not fetch_temporal and not signals.is_live_data
         # Daily logs on default path (no strong signal)
         fetch_daily = not any([
             signals.is_temporal,
@@ -451,10 +517,18 @@ class ContextRouter:
             self._safe_fetch("L3 long-term", service.search_long_term(workspace_id, query, agent_id=agent_id, limit=5))
             if fetch_long_term else _noop()
         )
-        temporal_task = (
-            self._safe_fetch("L2 temporal", service.search_short_term(workspace_id, query, days=self._window_days(signals.temporal_window)))
-            if fetch_temporal else _noop()
-        )
+        if fetch_temporal:
+            temporal_task = self._safe_fetch(
+                "L2 temporal",
+                service.search_short_term(workspace_id, query, days=self._window_days(signals.temporal_window)),
+            )
+        elif fetch_l2_semantic:
+            temporal_task = self._safe_fetch(
+                "L2 semantic",
+                service.search_short_term_semantic(workspace_id, query),
+            )
+        else:
+            temporal_task = _noop()
         daily_task = (
             self._safe_fetch("daily logs", service.get_all_daily_logs(workspace_id, limit=10))
             if fetch_daily else _noop()
@@ -477,12 +551,22 @@ class ContextRouter:
                     budget_session,
                 )
 
+        # PRD-185 S11 chokepoint: sub-floor and noise-typed rows (heartbeat
+        # digests, playbook summaries) never reach the prompt — re-asserted
+        # here over BOTH memory lists, whatever their source path.
+        from config import config as _cfg
+        from modules.memory.injection_filter import filter_injectable_memories
+
+        _floor = _cfg.MEMORY_RELEVANCE_FLOOR
+
         # Long-term memories
         lt_memories: List[Dict[str, Any]] = lt_result if isinstance(lt_result, list) else []
+        lt_memories = filter_injectable_memories(lt_memories, floor=_floor)
         kept_lt, lt_text = self._memories_to_text(lt_memories, budget_long_term)
 
-        # Temporal results
+        # L2 results (temporal window'd listing, or the always-on semantic recall)
         temporal_memories: List[Dict[str, Any]] = temporal_result if isinstance(temporal_result, list) else []
+        temporal_memories = filter_injectable_memories(temporal_memories, floor=_floor)
         kept_temporal, temporal_text = self._memories_to_text(temporal_memories, budget_temporal)
 
         # Daily logs

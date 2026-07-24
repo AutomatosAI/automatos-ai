@@ -56,6 +56,7 @@ from graphify.serve import (
 from config import config
 from core.graph_storage import DbWorkspaceClient
 from core.llm.manager import get_system_setting
+from modules.knowledge.primitive_heartbeat import _emit_graph_primitive
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,11 @@ _META_JSON_PATH = f"{_GRAPH_DIR}/meta.json"
 _COMMUNITIES_JSON_PATH = f"{_GRAPH_DIR}/communities.json"
 _GRAPH_HTML_PATH = f"{_GRAPH_DIR}/graph.html"
 
+# Confidence backfilled onto an exported node that arrived without one
+# (e.g. a merged graph.json edge target). Matches _node()'s default in
+# graph_extraction.py so the value space stays a single enum.
+_DEFAULT_NODE_CONFIDENCE = "EXTRACTED"
+
 _HISTORY_DIR = f"{_GRAPH_DIR}/history"
 _REPORTS_DIR = f"{_GRAPH_DIR}/reports"
 _LATEST_DIFF_PATH = f"{_GRAPH_DIR}/latest_diff.json"
@@ -77,6 +83,61 @@ def _max_history_snapshots() -> int:
 
 _CACHE_MAX_SIZE = 20
 _DEBOUNCE_SECONDS = 60
+
+# PRD-164 S3 (Q58): agent-output pending types the incremental build
+# understands. mission_synthesis / generated_document pendings reference the
+# document the flywheel already ingested (extracted via the document path —
+# no second LLM pass); report pendings carry their text for the
+# agent-attributed report extractor.
+_AGENT_OUTPUT_DOC_TYPES = ("mission_synthesis", "generated_document")
+_AGENT_OUTPUT_TEXT_TYPES = ("report",)
+
+
+def partition_pending_sources(
+    pending: List[Dict[str, Any]],
+) -> tuple:
+    """Split debounced pending sources into (changed_doc_ids, text_sources).
+
+    Before PRD-164 the incremental build only honored ``type == 'document'``
+    and silently DROPPED the three agent-output source types (mission
+    syntheses, generated documents, submitted reports). Now:
+
+      * ``document``                                  → its ``id``
+      * ``mission_synthesis`` / ``generated_document`` → their ingested
+        ``document_id`` (falling back to ``id``)
+      * ``report``                                     → a text source for
+        :func:`graph_extraction.extract_from_report` (must carry ``text``)
+
+    Anything else (roster/db_schema/shopify pendings have their own full
+    rebuild paths) still falls through untouched.
+    """
+    changed_doc_ids: set = set()
+    text_sources: List[Dict[str, Any]] = []
+
+    for source in pending or []:
+        stype = source.get("type")
+        if stype == "document" and source.get("id"):
+            changed_doc_ids.add(source["id"])
+        elif stype in _AGENT_OUTPUT_DOC_TYPES:
+            doc_id = source.get("document_id") or source.get("id")
+            if doc_id:
+                changed_doc_ids.add(doc_id)
+        elif stype in _AGENT_OUTPUT_TEXT_TYPES:
+            text = (source.get("text") or "").strip()
+            if not text:
+                logger.debug(
+                    "partition_pending_sources: %s pending without text, skipping", stype
+                )
+                continue
+            text_sources.append({
+                "type": "report",
+                "id": source.get("id"),
+                "path": source.get("path") or f"report_{source.get('id')}",
+                "text": text,
+                "agent_name": source.get("agent_name") or "unknown",
+            })
+
+    return changed_doc_ids, text_sources
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +238,7 @@ class GraphifyService:
         async with self._lock_for(workspace_id):
             build_timeout = int(get_system_setting("knowledge_graph", "build_timeout", "1800"))
             try:
-                return await asyncio.wait_for(
+                meta = await asyncio.wait_for(
                     self._build_graph_unlocked(workspace_id),
                     timeout=build_timeout,
                 )
@@ -187,9 +248,26 @@ class GraphifyService:
                     build_timeout,
                     workspace_id,
                 )
+                _emit_graph_primitive(
+                    workspace_id, success=False, detail=f"timeout:{build_timeout}s"
+                )
                 raise TimeoutError(
                     f"Graph build timed out after {build_timeout}s for workspace {workspace_id}"
                 )
+            except Exception as exc:  # noqa: BLE001 — emit then re-raise unchanged
+                _emit_graph_primitive(
+                    workspace_id, success=False, detail=str(exc)[:200]
+                )
+                raise
+            _emit_graph_primitive(
+                workspace_id,
+                success=True,
+                detail=(
+                    f"nodes={meta.get('node_count', 0)} "
+                    f"edges={meta.get('edge_count', 0)}"
+                ),
+            )
+            return meta
 
     async def _build_graph_unlocked(self, workspace_id: str) -> Dict[str, Any]:
         """Full graph build (caller must hold the workspace lock)."""
@@ -229,8 +307,14 @@ class GraphifyService:
             None, partial(surprising_connections, graph, communities)
         )
 
+        # 5b. Build-time community reports (PRD-165 S3): cheap-LLM titles +
+        # summaries for the top-N communities, ranked by size. Degrades to
+        # ranks-only on any LLM failure — never fails the build.
+        from modules.knowledge.community_reports import generate_community_reports
+        community_reports = await generate_community_reports(graph, communities)
+
         # 6. Export artefacts
-        await self._export_graph(ws, graph, communities, top_gods)
+        await self._export_graph(ws, graph, communities, top_gods, community_reports)
 
         # 7. Build and save meta
         meta = self._build_meta(graph, communities, top_gods)
@@ -322,9 +406,24 @@ class GraphifyService:
             Meta dict with node_count, edge_count, community_count.
         """
         async with self._lock_for(workspace_id):
-            return await self._import_graph_unlocked(
-                workspace_id, graph_data, merge=merge
+            try:
+                meta = await self._import_graph_unlocked(
+                    workspace_id, graph_data, merge=merge
+                )
+            except Exception as exc:  # noqa: BLE001 — emit then re-raise unchanged
+                _emit_graph_primitive(
+                    workspace_id, success=False, detail=str(exc)[:200]
+                )
+                raise
+            _emit_graph_primitive(
+                workspace_id,
+                success=True,
+                detail=(
+                    f"import nodes={meta.get('node_count', 0)} "
+                    f"edges={meta.get('edge_count', 0)}"
+                ),
             )
+            return meta
 
     async def _import_graph_unlocked(
         self, workspace_id: str, graph_data: Dict[str, Any], *, merge: bool = False
@@ -524,6 +623,197 @@ class GraphifyService:
         )
 
     # ------------------------------------------------------------------
+    # PRD-165 S2: cluster-first drill-in + path-finding
+    # Server-side subgraph extraction so the client never downloads the full
+    # graph.json (Q28 — ends full-graph downloads, LightRAG pattern).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _node_payload(graph: "nx.Graph", node_id: Any) -> Dict[str, Any]:
+        """A single node in the {id,label,file_type,community,source_file}
+        shape the force renderer + node side-panel consume."""
+        attrs = graph.nodes.get(node_id, {})
+        return {
+            "id": str(node_id),
+            "label": attrs.get("label", str(node_id)),
+            "file_type": attrs.get("file_type"),
+            "community": attrs.get("community"),
+            "source_file": attrs.get("source_file"),
+            "confidence": attrs.get("confidence"),
+        }
+
+    @staticmethod
+    def _edge_payload(u: Any, v: Any, data: Dict[str, Any]) -> Dict[str, Any]:
+        """A single link in the renderer's edge shape."""
+        score = data.get("confidence_score")
+        if score is None:
+            score = data.get("confidence", data.get("weight", 1.0))
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = 1.0
+        return {
+            "source": str(u),
+            "target": str(v),
+            "relation": data.get("relation", "related_to"),
+            "confidence": data.get("confidence", score),
+            "confidence_score": score,
+        }
+
+    def _serialize_subgraph(self, graph: "nx.Graph", node_ids: List[Any]) -> Dict[str, Any]:
+        """Induced subgraph: the given nodes + every edge between them, in
+        {nodes, links} form. Pure/sync — callers run it in an executor."""
+        present = [n for n in node_ids if n in graph]
+        present_set = set(present)
+        nodes = [self._node_payload(graph, n) for n in present]
+        links = [
+            self._edge_payload(u, v, data)
+            for u, v, data in graph.edges(present, data=True)
+            if u in present_set and v in present_set
+        ]
+        return {"nodes": nodes, "links": links}
+
+    async def community_subgraph(
+        self, graph: "nx.Graph", member_ids: List[str], max_nodes: int = 300,
+    ) -> Dict[str, Any]:
+        """Induced subgraph for a community's members, capped at ``max_nodes``
+        (highest-degree first so the cap keeps the structurally important
+        nodes). Sets ``truncated`` honestly when the cap bites."""
+        members = [n for n in member_ids if n in graph]
+        truncated = False
+        if len(members) > max_nodes:
+            members.sort(key=lambda n: graph.degree(n), reverse=True)
+            members = members[:max_nodes]
+            truncated = True
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(
+            None, partial(self._serialize_subgraph, graph, members)
+        )
+        data["truncated"] = truncated
+        return data
+
+    async def node_neighbors_subgraph(
+        self, graph: "nx.Graph", node_id: str, max_nodes: int = 150,
+    ) -> Optional[Dict[str, Any]]:
+        """The node + its 1-hop neighbourhood as a {nodes, links} subgraph
+        ('expand from here'). ``None`` when the node is absent."""
+        if node_id not in graph:
+            return None
+        neighbours = list(graph.neighbors(node_id))
+        if len(neighbours) > max_nodes:
+            neighbours.sort(key=lambda n: graph.degree(n), reverse=True)
+            neighbours = neighbours[:max_nodes]
+        ids = [node_id, *neighbours]
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, partial(self._serialize_subgraph, graph, ids)
+        )
+
+    async def shortest_path(
+        self, graph: "nx.Graph", source: str, target: str,
+    ) -> Dict[str, Any]:
+        """Shortest path between two nodes: an ordered node list + the
+        {nodes, links} subgraph along it. Powers platform_graph_path + the UI
+        path-finding mode."""
+        if source not in graph:
+            return {"found": False, "error": f"Node '{source}' not found in the graph."}
+        if target not in graph:
+            return {"found": False, "error": f"Node '{target}' not found in the graph."}
+
+        loop = asyncio.get_event_loop()
+
+        def _compute():
+            try:
+                return nx.shortest_path(graph, source, target)
+            except nx.NetworkXNoPath:
+                return None
+
+        path = await loop.run_in_executor(None, _compute)
+        if path is None:
+            return {"found": False, "error": "No path connects the two nodes."}
+
+        sub = self._serialize_subgraph(graph, path)
+        return {
+            "found": True,
+            "length": len(path) - 1,
+            "path": [self._node_payload(graph, n) for n in path],
+            "nodes": sub["nodes"],
+            "links": sub["links"],
+        }
+
+    async def search_nodes(
+        self, graph: "nx.Graph", query: str, limit: int = 25,
+    ) -> List[Dict[str, Any]]:
+        """Label search for search-to-focus. Ranked exact > prefix > substring,
+        ties broken by degree (the more-connected node first)."""
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+
+        def _search():
+            scored = []
+            for nid, attrs in graph.nodes(data=True):
+                label = str(attrs.get("label", nid))
+                ll = label.lower()
+                if q == ll:
+                    rank = 0
+                elif ll.startswith(q):
+                    rank = 1
+                elif q in ll:
+                    rank = 2
+                else:
+                    continue
+                scored.append((rank, -graph.degree(nid), nid, label, attrs))
+            scored.sort(key=lambda t: (t[0], t[1]))
+            return [
+                {
+                    "id": str(nid),
+                    "label": label,
+                    "file_type": attrs.get("file_type"),
+                    "community": attrs.get("community"),
+                }
+                for _rank, _negdeg, nid, label, attrs in scored[:limit]
+            ]
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _search)
+
+    async def set_community_label(
+        self,
+        workspace_id: str,
+        community_id: int,
+        title: str,
+        summary: Optional[str] = None,
+    ) -> bool:
+        """Persist a user-edited community title/summary into communities.json
+        (PRD-165 S3 — labels are editable, and the ``edited`` flag stops the
+        next build's LLM titling from clobbering a hand-set label). Returns
+        False if the community or the communities file is missing."""
+        ws = DbWorkspaceClient(str(workspace_id))
+        result = await ws.read_file(_COMMUNITIES_JSON_PATH)
+        if not result.get("success") or not result.get("content"):
+            return False
+        try:
+            communities = json.loads(result["content"])
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+        found = False
+        for c in communities:
+            if c.get("community_id") == community_id:
+                c["title"] = title.strip()[:80]
+                if summary is not None:
+                    c["summary"] = summary.strip()[:240]
+                c["edited"] = True
+                found = True
+                break
+        if not found:
+            return False
+
+        await self._write_json(ws, _COMMUNITIES_JSON_PATH, communities)
+        return True
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -646,6 +936,7 @@ class GraphifyService:
 
         Dispatches each source to the appropriate extractor:
           - ``document`` → LLM-based ``extract_from_document`` (parallel, max 5 concurrent)
+          - ``report``   → LLM-based ``extract_from_report`` (PRD-164 S3 — agent-attributed)
           - ``agents``   → deterministic ``map_agent_roster``
 
         Returns a list of extraction dicts (each with nodes/edges keys).
@@ -654,6 +945,7 @@ class GraphifyService:
         from modules.knowledge.graph_extraction import (
             _get_graph_extraction_model,
             extract_from_document,
+            extract_from_report,
             map_agent_roster,
         )
 
@@ -674,7 +966,7 @@ class GraphifyService:
                     )
                 except Exception:
                     logger.exception("_extract_all: agent roster mapping failed")
-            elif src_type == "document":
+            elif src_type in ("document", "report"):
                 doc_sources.append(source)
             else:
                 logger.warning("_extract_all: unknown source type '%s', skipping", src_type)
@@ -695,15 +987,26 @@ class GraphifyService:
         async def _extract_one(source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             async with sem:
                 try:
-                    extraction = await extract_from_document(
-                        doc_text=source["text"],
-                        doc_path=source["path"],
-                        workspace_id=str(workspace_id),
-                        team_access=source.get("team_access"),
-                        llm=llm,
-                    )
+                    if source.get("type") == "report":
+                        # PRD-164 S3: agent-attributed report extraction —
+                        # the source type the incremental build used to drop.
+                        extraction = await extract_from_report(
+                            report_text=source["text"],
+                            report_path=source["path"],
+                            agent_name=source.get("agent_name") or "unknown",
+                            llm=llm,
+                        )
+                    else:
+                        extraction = await extract_from_document(
+                            doc_text=source["text"],
+                            doc_path=source["path"],
+                            workspace_id=str(workspace_id),
+                            team_access=source.get("team_access"),
+                            llm=llm,
+                        )
                     logger.debug(
-                        "_extract_all: doc '%s' → %d nodes, %d edges",
+                        "_extract_all: %s '%s' → %d nodes, %d edges",
+                        source.get("type", "document"),
                         source["path"],
                         len(extraction.get("nodes", [])),
                         len(extraction.get("edges", [])),
@@ -766,18 +1069,24 @@ class GraphifyService:
         graph: nx.Graph,
         communities: Dict[int, List[str]],
         god_node_list: List[Any],
+        community_reports: Optional[Dict[int, Dict[str, Any]]] = None,
     ) -> None:
         """Export graph artefacts to workspace files."""
         loop = asyncio.get_event_loop()
 
-        # graph.json — NetworkX node_link_data (in-memory, not graphify's to_json)
+        # graph.json — NetworkX node_link_data (in-memory, not graphify's to_json).
+        # node_link_data carries only node *attributes*; community membership
+        # lives in the separate `communities` map and confidence may be absent
+        # on merged-in targets — annotate both onto each node so the UI's
+        # default community colouring (and confidence) has something to read.
         graph_data = await loop.run_in_executor(
             None, partial(nx.node_link_data, graph)
         )
+        graph_data = self._annotate_export_nodes(graph_data, communities)
         await self._write_json(ws, _GRAPH_JSON_PATH, graph_data)
 
         # communities.json
-        community_data = self._format_communities(communities)
+        community_data = self._format_communities(communities, community_reports)
         await self._write_json(ws, _COMMUNITIES_JSON_PATH, community_data)
 
         # graph.html — use graphify's to_html (writes to temp file, then upload)
@@ -803,17 +1112,63 @@ class GraphifyService:
                 )
 
     @staticmethod
+    def _annotate_export_nodes(
+        graph_data: Dict[str, Any],
+        communities: Dict[int, List[str]],
+    ) -> Dict[str, Any]:
+        """Attach ``community`` + a backfilled ``confidence`` to each node.
+
+        ``nx.node_link_data`` serialises only node attributes; the community a
+        node belongs to lives in the separate ``communities`` map (community_id
+        → member node_ids) and never reaches the node. The React panel's
+        default colour mode reads ``node.community``, so without this the whole
+        graph renders the neutral fallback colour. Confidence is likewise
+        absent on any node that arrived without one (merged graph.json edge
+        targets) — backfill it so every node carries a value.
+
+        Returns a NEW dict; the caller's ``graph_data`` is never mutated.
+        """
+        node_to_community: Dict[str, int] = {
+            nid: cid for cid, members in communities.items() for nid in members
+        }
+        nodes = [
+            {
+                **node,
+                "community": node_to_community.get(node.get("id")),
+                "confidence": node.get("confidence") or _DEFAULT_NODE_CONFIDENCE,
+            }
+            for node in graph_data.get("nodes", [])
+        ]
+        return {**graph_data, "nodes": nodes}
+
+    @staticmethod
     def _format_communities(
         communities: Dict[int, List[str]],
+        reports: Optional[Dict[int, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """Format community data for export.
 
-        Takes the communities dict from ``cluster()`` (maps community_id → member list).
+        Takes the communities dict from ``cluster()`` (maps community_id → member
+        list) and merges in any PRD-165 S3 report (``title``/``summary``/``rank``).
         """
-        return [
-            {"community_id": cid, "member_count": len(members), "members": members}
-            for cid, members in sorted(communities.items())
-        ]
+        reports = reports or {}
+        out: List[Dict[str, Any]] = []
+        for cid, members in sorted(communities.items()):
+            entry: Dict[str, Any] = {
+                "community_id": cid,
+                "member_count": len(members),
+                "members": members,
+            }
+            report = reports.get(cid)
+            if report:
+                if report.get("title"):
+                    entry["title"] = report["title"]
+                if report.get("summary"):
+                    entry["summary"] = report["summary"]
+                if report.get("rank") is not None:
+                    entry["rank"] = report["rank"]
+            out.append(entry)
+        return out
 
     @staticmethod
     def _build_meta(
@@ -1046,21 +1401,23 @@ class GraphifyService:
         )
         ws = DbWorkspaceClient(str(workspace_id))
 
-        # Collect only the changed document IDs
-        changed_doc_ids = {
-            s.get("id") for s in pending
-            if s.get("type") == "document" and s.get("id")
-        }
+        # PRD-164 S3: documents (incl. flywheel-ingested mission syntheses and
+        # generated documents) resolve to doc IDs; report pendings carry their
+        # text and go straight to the report extractor — no longer dropped.
+        changed_doc_ids, text_sources = partition_pending_sources(pending)
 
-        if not changed_doc_ids:
-            logger.info("_incremental_build: no document IDs in pending, skipping")
+        if not changed_doc_ids and not text_sources:
+            logger.info("_incremental_build: no extractable sources in pending, skipping")
             return {"node_count": existing_graph.number_of_nodes(),
                     "edge_count": existing_graph.number_of_edges()}
 
         # Collect only those docs from DB
-        sources = await self._collect_sources(
-            workspace_id, doc_ids=changed_doc_ids
-        )
+        sources: List[Dict[str, Any]] = []
+        if changed_doc_ids:
+            sources = await self._collect_sources(
+                workspace_id, doc_ids=changed_doc_ids
+            )
+        sources.extend(text_sources)
         if not sources:
             logger.info("_incremental_build: changed docs not found in DB, skipping")
             return {"node_count": existing_graph.number_of_nodes(),

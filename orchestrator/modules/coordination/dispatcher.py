@@ -286,6 +286,13 @@ class MissionDispatcher:
                 )
 
         # --- Agent matching ---
+        # PRD-164 S2 (Q21): blend in capability-card similarity + live field
+        # signal — one embedding call per dispatch, fail-open to lexical-only.
+        semantic_signals = AgentMatcher.compute_semantic_signals_sync(
+            task=task,
+            agents=agents,
+            workspace_id=run.workspace_id,
+        )
         match_result: Optional[MatchResult] = AgentMatcher.match(
             db=db,
             task=task,
@@ -298,6 +305,7 @@ class MissionDispatcher:
                     else []
                 ),
             },
+            semantic=semantic_signals,
         )
 
         if match_result is None:
@@ -371,6 +379,21 @@ class MissionDispatcher:
                 skipped_reason="claim_failed",
             )
 
+        # PRD-164 S2: persist the dispatch decision + reason on the task row
+        # (supersedes the plan-time preview) so the approval card / mission
+        # views can show WHY this agent ran the task.
+        task.input_context = {
+            **(task.input_context if isinstance(task.input_context, dict) else {}),
+            "agent_match": {
+                "agent_id": match_result.agent_id,
+                "agent_name": match_result.agent_name,
+                "score": match_result.total_score,
+                "reason": match_result.reason,
+                "is_override": match_result.is_override,
+                "decided_at": "dispatch",
+            },
+        }
+
         # --- Emit TASK_ASSIGNED event ---
         emit_event(
             db=db,
@@ -383,6 +406,8 @@ class MissionDispatcher:
                 "agent_id": match_result.agent_id,
                 "agent_name": match_result.agent_name,
                 "match_score": match_result.total_score,
+                "match_reason": match_result.reason,
+                "match_is_override": match_result.is_override,
             },
         )
 
@@ -415,26 +440,52 @@ class MissionDispatcher:
         )
 
     @staticmethod
+    def _budget_ceiling_usd(run: OrchestrationRun) -> float:
+        """PRD-163 S5: the run's DOLLAR budget ceiling — an explicit
+        ``config['cost_ceiling']`` when set, otherwise the plan's token estimate
+        priced through ``modules.policy.pricing`` (PRD-192 S3 — one pricing
+        source; a run aggregates several agents/models so no single model id
+        exists here and pricing's flat last-resort applies). 0 = unlimited."""
+        from modules.policy import pricing as _pricing
+
+        config = run.config or {}
+        ceiling = config.get("cost_ceiling")
+        if isinstance(ceiling, (int, float)) and ceiling > 0:
+            return float(ceiling)
+        return _pricing.price_total_tokens_usd(None, None, run.token_budget_estimate or 0)
+
+    @staticmethod
+    def _cost_used_usd(run: OrchestrationRun) -> float:
+        """Actual dollar cost incurred so far (tokens_used priced through the
+        one pricing source, PRD-192 S3)."""
+        from modules.policy import pricing as _pricing
+
+        return _pricing.price_total_tokens_usd(None, None, run.tokens_used or 0)
+
+    @staticmethod
     def _get_budget_status(run: OrchestrationRun) -> BudgetStatus:
+        """Budget health as a fraction of the DOLLAR ceiling consumed (PRD-163 S5:
+        $ ceilings replace the token-estimate pause). HEALTHY when no ceiling is
+        set (unlimited).
+
+        PRD-181 S2: the band arithmetic is delegated to the shared
+        ``services.budget_ceiling`` helper so missions, board tasks, and playbook
+        runs all read the SAME ceiling definition (F060 — no parallel plane). The
+        OrchestrationRun-specific ceiling/used accessors stay here.
         """
-        Compute the budget health status for a run.
+        from services.budget_ceiling import BudgetBand, budget_status
 
-        Returns HEALTHY if no budget is set (unlimited).
-        """
-        budget = run.token_budget_estimate
-        if not budget or budget <= 0:
-            return BudgetStatus.HEALTHY
-
-        used = run.tokens_used or 0
-        pct = (used / budget) * 100
-
-        if pct > 100:
-            return BudgetStatus.EXCEEDED
-        if pct >= 80:
-            return BudgetStatus.CRITICAL
-        if pct >= 50:
-            return BudgetStatus.WARNING
-        return BudgetStatus.HEALTHY
+        band = budget_status(
+            ceiling_usd=MissionDispatcher._budget_ceiling_usd(run),
+            used_usd=MissionDispatcher._cost_used_usd(run),
+        )
+        # Map the shared band onto the mission's BudgetStatus enum (same tiers).
+        return {
+            BudgetBand.HEALTHY: BudgetStatus.HEALTHY,
+            BudgetBand.WARNING: BudgetStatus.WARNING,
+            BudgetBand.CRITICAL: BudgetStatus.CRITICAL,
+            BudgetBand.EXCEEDED: BudgetStatus.EXCEEDED,
+        }[band]
 
     @staticmethod
     def _pre_dispatch_budget_check(
@@ -450,8 +501,8 @@ class MissionDispatcher:
             'defer' — skip this task but continue checking others.
             'block' — stop dispatching entirely, pause the run.
         """
-        budget = run.token_budget_estimate
-        if not budget or budget <= 0:
+        ceiling_usd = MissionDispatcher._budget_ceiling_usd(run)
+        if ceiling_usd <= 0:
             return "allow"
 
         # User can disable budget pausing via mission config
@@ -470,8 +521,8 @@ class MissionDispatcher:
 
         if status == BudgetStatus.WARNING:
             logger.warning(
-                "Budget WARNING for run %s: %d/%d tokens used — dispatching task %s anyway",
-                run.id, run.tokens_used or 0, budget, task.id,
+                "Budget WARNING for run %s: $%.2f/$%.2f used — dispatching task %s anyway",
+                run.id, MissionDispatcher._cost_used_usd(run), ceiling_usd, task.id,
             )
             emit_event(
                 db=db,
@@ -480,8 +531,9 @@ class MissionDispatcher:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="dispatcher",
                 payload={
+                    "cost_used_usd": round(MissionDispatcher._cost_used_usd(run), 4),
+                    "cost_ceiling_usd": round(ceiling_usd, 4),
                     "tokens_used": run.tokens_used or 0,
-                    "token_budget_estimate": budget,
                     "task_id": str(task.id),
                 },
             )
@@ -502,8 +554,8 @@ class MissionDispatcher:
 
         # EXCEEDED
         logger.warning(
-            "Budget EXCEEDED for run %s: %d/%d tokens — blocking dispatch",
-            run.id, run.tokens_used or 0, budget,
+            "Budget EXCEEDED for run %s: $%.2f/$%.2f — blocking dispatch",
+            run.id, MissionDispatcher._cost_used_usd(run), ceiling_usd,
         )
         return "block"
 
@@ -799,8 +851,12 @@ class MissionDispatcher:
         """
         Build the user prompt for execute_with_prompt() from task data.
 
-        Includes task title, description, any input context from
-        upstream task outputs or retry feedback.
+        Includes task title, description, and input context (the PRD-164 S4
+        dispatch digest, retry feedback, field instructions).
+
+        Upstream dependency outputs are NOT stuffed here (Q22): they arrive
+        as the token-budgeted ``field_digest`` block that _prepare_task pins
+        via _attach_field_digest, with platform_field_query for the rest.
 
         PRD-127: Attachments are no longer injected here — they're passed
         as attachment_ids to execute_with_prompt() → build_context().
@@ -810,7 +866,7 @@ class MissionDispatcher:
         if task.description:
             parts.append(f"\n{task.description}")
 
-        # Include input context (upstream outputs, retry feedback, etc.)
+        # Include input context (dispatch digest, retry feedback, etc.)
         if isinstance(task.input_context, dict):
             # Check if this is a revision retry (has previous output)
             previous_output = task.input_context.get("previous_output")
@@ -836,26 +892,8 @@ class MissionDispatcher:
                 parts.append(
                     f"\n## Your Previous Output (revise this)\n\n{previous_output}"
                 )
-                # Still include upstream outputs for reference if needed
-                upstream_outputs = task.input_context.get("upstream_outputs")
-                if upstream_outputs:
-                    parts.append("\n## Reference: Upstream Task Outputs")
-                    for output in upstream_outputs:
-                        parts.append(
-                            f"\n### {output.get('title', 'Previous Task')}\n"
-                            f"{output.get('output', '')}"
-                        )
             else:
                 # FIRST ATTEMPT: Standard prompt construction
-                upstream_outputs = task.input_context.get("upstream_outputs")
-                if upstream_outputs:
-                    parts.append("\n## Previous Task Outputs")
-                    for output in upstream_outputs:
-                        parts.append(
-                            f"\n### {output.get('title', 'Previous Task')}\n"
-                            f"{output.get('output', '')}"
-                        )
-
                 retry_feedback = task.input_context.get("retry_feedback")
                 if retry_feedback:
                     parts.append(
@@ -869,6 +907,12 @@ class MissionDispatcher:
                     parts.append(
                         f"\n## Quality Requirements\n{verification_criteria}"
                     )
+
+            # PRD-166 S3: pinned field digest — accumulated knowledge relevant to
+            # this task, surfaced up front so the agent doesn't have to query for it.
+            field_digest = task.input_context.get("field_digest") if isinstance(task.input_context, dict) else None
+            if field_digest:
+                parts.append(f"\n{field_digest}")
 
             # PRD-108: Tell agents about the shared field
             field_id = task.input_context.get("field_id") if isinstance(task.input_context, dict) else None

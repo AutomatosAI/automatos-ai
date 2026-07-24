@@ -3,7 +3,7 @@
  * "Task" in UI = "Recipe" in backend. No backend rename.
  */
 
-export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'blocked' | 'done'
+export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'failed'
 
 export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low'
 
@@ -30,6 +30,10 @@ export interface BoardTask {
   duration_ms?: number
   step_progress?: { current: number; total: number }
   error_message?: string
+  // PRD-161: dispatch retry counter. >0 means a prior attempt's lease expired
+  // (worker crashed/hung) and the task was requeued → render an "unresponsive"
+  // badge so the user sees the agent missed its ack deadline.
+  attempts?: number
   report_id?: string
   source_id: string
   project_id?: number
@@ -70,6 +74,7 @@ export const BOARD_COLUMNS: { status: BoardStatus; label: string }[] = [
   { status: 'review', label: 'Review' },
   { status: 'blocked', label: 'Blocked' },
   { status: 'done', label: 'Done' },
+  { status: 'failed', label: 'Failed' },
 ]
 
 export const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: string; cssVar: string }> = {
@@ -86,4 +91,5 @@ export const STATUS_CONFIG: Record<BoardStatus, { label: string; dotColor: strin
   review: { label: 'Review', dotColor: 'bg-[hsl(var(--warning))]', cssVar: '--warning' },
   blocked: { label: 'Blocked', dotColor: 'bg-[hsl(var(--destructive))]', cssVar: '--destructive' },
   done: { label: 'Done', dotColor: 'bg-[hsl(var(--success))]', cssVar: '--success' },
+  failed: { label: 'Failed', dotColor: 'bg-[hsl(var(--destructive))]', cssVar: '--destructive' },
 }

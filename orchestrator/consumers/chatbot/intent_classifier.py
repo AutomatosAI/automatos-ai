@@ -272,7 +272,12 @@ class SmartIntentClassifier:
 
         # 4. Check for data/analytics queries
         if self._matches_patterns(query, self._data_re):
-            suggested = ["smart_query_database", "query_database"]
+            # PRD-160 S1: NL2SQL is back on the chat surface, now workspace-scoped
+            # and in-process (PRD-156 S3 had disabled the unsafe unscoped path).
+            # smart_query_database routes between direct SQL and analysis and is
+            # preferred for ambiguous questions; the executor fails closed without
+            # a workspace context.
+            suggested = ["smart_query_database"]
             # PRD-64: Suggest platform actions for platform-specific queries
             suggested += self._get_platform_tool_hints(query_lower)
             return IntentResult(

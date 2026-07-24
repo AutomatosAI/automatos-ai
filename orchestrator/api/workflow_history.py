@@ -16,6 +16,7 @@ import logging
 from core.database.database import get_db
 from core.models import WorkflowExecution, Workflow
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -227,7 +228,7 @@ async def get_live_progress(
             "error": str(e)
         }
 
-@router.post("/{workflow_id}/store-orchestration-event")
+@router.post("/{workflow_id}/store-orchestration-event", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def store_orchestration_event(
     workflow_id: int,
     event_type: str,

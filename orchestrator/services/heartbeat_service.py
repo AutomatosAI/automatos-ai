@@ -12,13 +12,115 @@ import json
 import logging
 import asyncio
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Primitive-mapped heartbeat findings (PRD-142 Wave 3 · WS-M · W3-S1)
+#
+# The Command Centre's per-primitive health tile reads ``heartbeat_results``
+# rows whose JSONB ``findings`` carry the ``primitive_check`` shape. Each
+# primitive's hardening story (S6 chat … S13 channels) wires its own caller
+# of ``emit_primitive_finding`` once it has a real signal; until then the
+# primitive emits NOTHING (the tile reads ``unknown`` — never a fake green).
+# Canonical lowercase keys only (CLAUDE.md §10 — no legacy nouns).
+# ---------------------------------------------------------------------------
+
+PRIMITIVE_NAMES = frozenset({
+    "chat",
+    "memory",
+    "rag",
+    "nl2sql",
+    "graph",
+    "missions",
+    "playbooks",
+    "channels",
+})
+PRIMITIVE_STATUSES = frozenset({"green", "degraded", "down"})
+
+
+# Board-task pickup priority now lives in the dispatch claim query
+# (services/board_dispatcher.py, _PRIORITY_ORDER_SQL) — PRD-161 moved task
+# dispatch out of the heartbeat.
+
+
+def emit_primitive_finding(
+    workspace_id: str,
+    primitive: str,
+    status: str,
+    detail: str = "",
+) -> bool:
+    """Best-effort write of a primitive-mapped heartbeat finding.
+
+    Mirrors the ``_store_heartbeat_result`` INSERT path — same table, same
+    columns. The ``primitive`` / ``status`` / ``finding_type`` keys live
+    inside the existing JSONB ``findings`` column, so NO schema change is
+    required. Each call writes exactly one row whose ``findings`` payload is
+    a single ``primitive_check`` dict; the W3-S2 analytics endpoint picks the
+    latest-per-primitive when it reads.
+
+    Returns True on a written row, False on validation reject or write
+    failure. NEVER raises — a failure here cannot break the heartbeat cycle
+    or the primitive's own code path.
+    """
+    try:
+        if primitive not in PRIMITIVE_NAMES:
+            logger.warning(
+                "[Heartbeat] emit_primitive_finding rejected unknown primitive=%r",
+                primitive,
+            )
+            return False
+        if status not in PRIMITIVE_STATUSES:
+            logger.warning(
+                "[Heartbeat] emit_primitive_finding rejected invalid status=%r",
+                status,
+            )
+            return False
+
+        from core.database.database import SessionLocal
+        from sqlalchemy import text
+
+        db = SessionLocal()
+        try:
+            finding = {
+                "finding_type": "primitive_check",
+                "primitive": primitive,
+                "status": status,
+                "detail": (str(detail) if detail else "")[:500],
+            }
+            db.execute(
+                text(
+                    """
+                    INSERT INTO heartbeat_results
+                        (source_type, source_id, workspace_id, status,
+                         findings, actions_taken, tokens_used, created_at)
+                    VALUES
+                        ('orchestrator', :source_id, :workspace_id, 'success',
+                         :findings, '[]', 0, NOW())
+                    """
+                ),
+                {
+                    "source_id": str(workspace_id),
+                    "workspace_id": str(workspace_id),
+                    "findings": json.dumps([finding]),
+                },
+            )
+            db.commit()
+            return True
+        finally:
+            db.close()
+    except Exception:
+        logger.error(
+            "[Heartbeat] emit_primitive_finding failed ws=%s primitive=%s",
+            workspace_id, primitive, exc_info=True,
+        )
+        return False
 
 
 class HeartbeatService:
@@ -34,6 +136,9 @@ class HeartbeatService:
         self._scheduler: Optional[AsyncIOScheduler] = None
         self._owns_scheduler: bool = False  # True when we created our own scheduler (tests)
         self._running_ticks: Dict[str, bool] = {}  # track concurrent ticks
+        # PRD-185 S11: last emitted memory-primitive status, so the durable-store
+        # probe writes a heartbeat_results row only on a state CHANGE (not every tick).
+        self._last_durable_probe_status: Optional[str] = None
         self._max_concurrent_per_workspace = 5
 
     # ------------------------------------------------------------------
@@ -80,6 +185,58 @@ class HeartbeatService:
             replace_existing=True,
             max_instances=1,
         )
+
+        # PRD-187 S1: durable-store health probe (was the PRD-141 US-006 mem0
+        # HTTP probe). Pings the in-process Qdrant durable store on a fixed
+        # interval and feeds the per-workspace memory primitive tile (W3-S1).
+        try:
+            from config import config as _app_config
+
+            from apscheduler.triggers.interval import IntervalTrigger
+
+            probe_interval = int(_app_config.DURABLE_MEMORY_PROBE_INTERVAL_SECONDS)
+            self._scheduler.add_job(
+                self._durable_memory_probe_tick,
+                IntervalTrigger(seconds=probe_interval),
+                id="durable_memory_probe",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info(
+                "[Heartbeat] Durable-memory health probe scheduled every %ds", probe_interval
+            )
+        except Exception:
+            logger.error("[Heartbeat] Failed to schedule Mem0 health probe", exc_info=True)
+
+        # PRD-185 S2: per-lane telemetry canary. Alarms when organic tool-execution
+        # rows stop landing (the 2-month type-poison outage S1 repaired had no such
+        # signal). Registered here beside the Mem0 probe; the first run fires at boot
+        # as the boot-probe, then every TELEMETRY_CANARY_INTERVAL_SECONDS.
+        try:
+            from config import config as _cfg
+
+            if _cfg.TELEMETRY_CANARY_ENABLED:
+                from apscheduler.triggers.interval import IntervalTrigger
+                from services.telemetry_canary import telemetry_canary_tick
+
+                canary_interval = int(_cfg.TELEMETRY_CANARY_INTERVAL_SECONDS)
+                self._scheduler.add_job(
+                    telemetry_canary_tick,
+                    IntervalTrigger(seconds=canary_interval),
+                    id="telemetry_canary",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    next_run_time=datetime.now(timezone.utc),  # boot-probe: run once now
+                )
+                logger.info(
+                    "[Heartbeat] Telemetry canary scheduled every %ds (boot-probe now)",
+                    canary_interval,
+                )
+        except Exception:
+            logger.error("[Heartbeat] Failed to schedule telemetry canary", exc_info=True)
+
         logger.info("[Heartbeat] Service started (daily summary at 01:00 UTC)")
 
     async def stop(self):
@@ -88,6 +245,56 @@ class HeartbeatService:
             self._scheduler.shutdown(wait=True)
             logger.info("[Heartbeat] Standalone scheduler stopped")
         logger.info("[Heartbeat] Service stopped")
+
+    async def _durable_memory_probe_tick(self) -> None:
+        """Probe the durable store + emit memory primitive finding (PRD-187 S1 + W3-S1).
+
+        Pings the shared in-process durable store (the one real traffic uses)
+        via its ``health()`` Qdrant round-trip — an unreachable store surfaces
+        here LOUDLY instead of skipping silently (the old mem0 failure mode).
+
+        W3-S1 (pathfinder wiring): after the probe lands, emit a ``memory``
+        primitive_check finding per workspace that has an active orchestrator
+        heartbeat, so the per-workspace memory tile reflects the latest probe
+        result. Richer multi-layer (L1/L2/L3) signal lands with W3-S7.
+        """
+        try:
+            from modules.memory.unified_memory_service import get_unified_memory_service
+
+            health = await get_unified_memory_service()._durable.health()
+            healthy = bool(health.get("healthy"))
+            if not healthy:
+                logger.error(
+                    "[Heartbeat] Durable-memory probe FAILED: %s", health.get("error")
+                )
+        except Exception:
+            logger.error("[Heartbeat] Durable-memory probe tick errored", exc_info=True)
+            return
+
+        if self._scheduler is None:
+            return
+        primitive_status = "green" if healthy else "down"
+        # PRD-185 S11: emit the memory primitive finding ONLY on a state change.
+        # This probe previously wrote one heartbeat_results row per workspace
+        # EVERY tick (~2880/ws/day) — pure noise that polluted the table and the
+        # primitive-health read. The tile is latest-wins with no freshness gate
+        # (api/analytics_real.get_primitive_health), so one row per transition
+        # keeps it correct while ending the spam. First tick emits the baseline.
+        if primitive_status == self._last_durable_probe_status:
+            return
+        detail = "durable store ok" if healthy else "durable store unreachable"
+        try:
+            for job in self._scheduler.get_jobs():
+                jid = getattr(job, "id", "") or ""
+                if not jid.startswith("orch_hb_"):
+                    continue
+                ws_id = jid[len("orch_hb_"):]
+                emit_primitive_finding(ws_id, "memory", primitive_status, detail)
+            self._last_durable_probe_status = primitive_status
+        except Exception:
+            logger.error(
+                "[Heartbeat] memory primitive emit loop errored", exc_info=True
+            )
 
     # ------------------------------------------------------------------
     # Config loading
@@ -140,35 +347,17 @@ class HeartbeatService:
     def _interval_to_cron_trigger(minutes: int) -> CronTrigger:
         """Convert an interval in minutes to a CronTrigger firing at fixed times.
 
-        Examples:
-            15    → ``0,15,30,45 * * * *``
-            30    → ``0,30 * * * *``
-            60    → ``0 * * * *``  (top of every hour)
-            120   → ``0 */2 * * *``  (every 2 hours)
-            480   → ``0 */8 * * *``  (every 8 hours)
-            1440  → ``0 9 * * *``   (daily at 9am)
-            10080 → ``0 9 * * 1``   (weekly, Monday 9am)
-        """
-        if minutes <= 0:
-            minutes = 60
+        The cron-field math is the single source of truth in
+        ``schedule_util.interval_to_cron`` (PRD-162) — the calendar and the
+        ``platform_get_schedule`` tool compute the same firing times from it.
+        This just builds the APScheduler trigger from that one cron string:
 
-        if minutes < 60:
-            # Sub-hour: distribute evenly within the hour
-            offsets = list(range(0, 60, minutes))
-            minute_field = ",".join(str(o) for o in offsets)
-            return CronTrigger(minute=minute_field)
-        elif minutes >= 10080:
-            # Weekly: Monday at 9am
-            return CronTrigger(minute="0", hour="9", day_of_week="mon")
-        elif minutes >= 1440:
-            # Daily: at 9am
-            return CronTrigger(minute="0", hour="9")
-        else:
-            # Hourly or multi-hour
-            hours = minutes // 60
-            if hours == 1:
-                return CronTrigger(minute="0")
-            return CronTrigger(minute="0", hour=f"*/{hours}")
+            15→``0,15,30,45 * * * *``  30→``0,30 * * * *``  60→``0 * * * *``
+            120→``0 */2 * * *``  1440→``0 9 * * *``  10080→``0 9 * * 1`` (Mon 9am)
+        """
+        from services.schedule_util import interval_to_cron
+
+        return CronTrigger.from_crontab(interval_to_cron(minutes))
 
     def schedule_orchestrator_heartbeat(
         self, workspace_id: str, hb_config: dict
@@ -464,7 +653,7 @@ class HeartbeatService:
         from core.llm.manager import LLMManager
         from modules.context import ContextService, ContextMode
         from modules.tools.discovery.platform_executor import PlatformActionExecutor
-        from core.database.database import SessionLocal
+        from core.database.database import SessionLocal, end_open_transaction
         from types import SimpleNamespace
 
         # 1. Load personality settings for heartbeat-specific instructions
@@ -523,6 +712,9 @@ class HeartbeatService:
                 agent=orchestrator_agent,
                 workspace_id=workspace_id,
                 task_description=task_description,
+                # Narrow the dispatcher enum to heartbeat-relevant actions —
+                # without a query this lane shipped all 137 on every run.
+                query=task_description,
             )
 
             system_prompt = context.system_prompt
@@ -547,6 +739,11 @@ class HeartbeatService:
             executor = PlatformActionExecutor(db, workspace_id)
 
             for iteration in range(max_iterations):
+                # End the open transaction before each LLM call so the heartbeat
+                # connection is not idle-in-transaction across the await (PRD-135
+                # / W1-S9). First pass commits build_context()'s reads; later
+                # passes commit the prior tool's writes.
+                end_open_transaction(db)
                 response = await llm.generate_response(messages, tools=platform_tools if platform_tools else None)
 
                 # Track tokens
@@ -736,48 +933,11 @@ class HeartbeatService:
                 )
                 auto_act = hb_config.get("auto_act", False)
 
-                # --- PRD-72: Scan for assigned board tasks ---
-                assigned_tasks = []
-                task_context = ""
-                try:
-                    from core.models.core import BoardTask
-                    assigned_tasks = (
-                        db.query(BoardTask)
-                        .filter(
-                            BoardTask.assigned_agent_id == agent_id,
-                            BoardTask.status == "assigned",
-                            BoardTask.workspace_id == workspace_id,
-                        )
-                        .order_by(BoardTask.priority.desc(), BoardTask.created_at.asc())
-                        .limit(3)
-                        .all()
-                    )
-                    if assigned_tasks:
-                        task_lines = []
-                        for t in assigned_tasks:
-                            t.status = "in_progress"
-                            t.started_at = datetime.utcnow()
-                            task_lines.append(
-                                f"- [TASK-{t.id}] {t.title}: {t.description or ''}"
-                            )
-                        db.commit()
-                        task_context = (
-                            "\n\n## ASSIGNED TASKS (Priority Work)\n"
-                            "You have tasks assigned to you. Complete them and report results.\n"
-                            + "\n".join(task_lines)
-                            + "\n\nAfter completing each task, use platform_submit_report or respond with results."
-                        )
-                        logger.info(
-                            "[Heartbeat] Agent %s picked up %d assigned tasks",
-                            agent_id,
-                            len(assigned_tasks),
-                        )
-                except Exception as task_err:
-                    logger.warning(
-                        "[Heartbeat] Failed to scan board tasks for agent=%s: %s",
-                        agent_id,
-                        task_err,
-                    )
+                # PRD-161: board-task pickup moved OUT of the heartbeat into the
+                # dedicated dispatch loop (services/board_dispatcher.py), which
+                # claims each assigned task with FOR UPDATE SKIP LOCKED and runs
+                # it individually. The heartbeat is monitoring/recurring only now
+                # (Q40) — it no longer batches 3 tasks into one prompt.
 
                 # PRD-140 Phase 1 — opt-in cadence blocks (e.g. team_review
                 # when this agent has team_lead_enabled=True). Same module as
@@ -794,7 +954,6 @@ class HeartbeatService:
                         if auto_act
                         else "Report findings only."
                     )
-                    + task_context
                 )
 
                 # Execute through AgentFactory so the agent has its full toolset
@@ -831,29 +990,6 @@ class HeartbeatService:
                         {"check": "llm_analysis", "detail": str(llm_text)[:1000]}
                     )
                     result["tokens_used"] = exec_result.get("tokens_used", 0) if isinstance(exec_result, dict) else 0
-
-                    # PRD-72: Auto-complete board tasks after successful execution
-                    if assigned_tasks:
-                        try:
-                            from core.models.core import BoardTask as BT
-                            for t in assigned_tasks:
-                                t_fresh = db.query(BT).get(t.id)
-                                if t_fresh and t_fresh.status == "in_progress":
-                                    t_fresh.status = "done" if t_fresh.review_mode == "auto" else "review"
-                                    t_fresh.completed_at = datetime.utcnow()
-                                    t_fresh.result = str(llm_text)[:2000]
-                            db.commit()
-                            logger.info(
-                                "[Heartbeat] Agent %s completed %d tasks",
-                                agent_id,
-                                len(assigned_tasks),
-                            )
-                        except Exception as tc_err:
-                            logger.warning(
-                                "[Heartbeat] Failed to complete board tasks for agent=%s: %s",
-                                agent_id,
-                                tc_err,
-                            )
 
                 except Exception as exec_err:
                     logger.warning(
@@ -933,66 +1069,17 @@ class HeartbeatService:
                     error_count = sum(1 for r in ws_rows if r.status == "error")
                     total_tokens = sum(r.tokens_used or 0 for r in ws_rows)
 
-                    summary_text = (
-                        f"Heartbeat Daily Summary ({cutoff.strftime('%Y-%m-%d')} to {datetime.utcnow().strftime('%Y-%m-%d')}):\n"
-                        f"- Total ticks: {len(ws_rows)}\n"
-                        f"- Successful: {success_count}\n"
-                        f"- Errors: {error_count}\n"
-                        f"- Tokens used: {total_tokens}\n"
+                    # PRD-185 S11: the daily digest is an OPERATIONAL LOG, not a
+                    # memory. It used to be double-written into the memory plane —
+                    # once as a fabricated user/assistant L3 turn (a fake summary
+                    # "request" + digest reply) that then got injected into real
+                    # client prompts, and once as an L2 heartbeat_log row. Both are
+                    # removed: the raw ticks are the source of truth in
+                    # heartbeat_results; the digest is logged here, never injected.
+                    logger.info(
+                        "[Heartbeat] Daily summary ws=%s: %d ticks, %d ok, %d errors, %d tokens",
+                        ws_id, len(ws_rows), success_count, error_count, total_tokens,
                     )
-
-                    # Add notable findings
-                    notable = []
-                    for r in ws_rows:
-                        findings = r.findings if isinstance(r.findings, list) else json.loads(r.findings or "[]")
-                        for f in findings:
-                            if f.get("check") in ("error", "llm_error"):
-                                notable.append(f"[{r.source_type}/{r.source_id}] {f.get('detail', '')[:120]}")
-                    if notable:
-                        summary_text += "\nNotable issues:\n" + "\n".join(f"- {n}" for n in notable[:10])
-
-                    # Store in SmartMemoryManager as long-term memory
-                    try:
-                        from consumers.chatbot.smart_memory import get_smart_memory_manager
-
-                        mem_mgr = get_smart_memory_manager()
-                        await mem_mgr.store_conversation(
-                            workspace_id=ws_id,
-                            agent_id=None,
-                            user_message="Daily heartbeat summary request",
-                            assistant_response=summary_text,
-                            chat_id=None,
-                        )
-                        logger.info("[Heartbeat] Stored daily summary for ws=%s (%d ticks)", ws_id, len(ws_rows))
-                    except Exception as mem_err:
-                        logger.warning("[Heartbeat] Failed to store summary in memory for ws=%s: %s", ws_id, mem_err)
-
-                    # L2: Store heartbeat summary in short-term memory (fire-and-forget)
-                    try:
-                        from modules.memory.unified_memory_service import get_unified_memory_service
-
-                        unified = get_unified_memory_service()
-                        asyncio.create_task(
-                            unified.store_short_term(
-                                workspace_id=ws_id,
-                                content=summary_text[:1500],
-                                content_type="heartbeat_log",
-                                importance=0.4,
-                                metadata={
-                                    "type": "heartbeat_daily_summary",
-                                    "date": cutoff.strftime("%Y-%m-%d"),
-                                    "tick_count": len(ws_rows),
-                                    "success_count": success_count,
-                                    "error_count": error_count,
-                                },
-                            )
-                        )
-                    except Exception:
-                        logger.debug(
-                            "[Heartbeat] L2 store_short_term failed for ws=%s",
-                            ws_id,
-                            exc_info=True,
-                        )
 
             finally:
                 db.close()

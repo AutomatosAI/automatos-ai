@@ -20,6 +20,50 @@ from .action_registry import ActionDefinition, get_action_registry
 logger = logging.getLogger(__name__)
 
 
+def _relevance_floor_config() -> Tuple[float, float]:
+    """(absolute_floor, ratio_floor) from the canonical config singleton.
+
+    Both default 0 (floor off). Read lazily so pure unit tests need no config.
+    """
+    try:
+        from config import config
+
+        return (
+            float(getattr(config, "SEMANTIC_TOOL_ROUTING_FLOOR", 0) or 0),
+            float(getattr(config, "SEMANTIC_TOOL_ROUTING_FLOOR_RATIO", 0) or 0),
+        )
+    except Exception:
+        return 0.0, 0.0
+
+
+def _apply_relevance_floor(
+    scored: List[Tuple[str, float]],
+    floor: float,
+    ratio: float,
+) -> List[Tuple[str, float]]:
+    """Drop candidates below max(floor, best*ratio). Pure; order-preserving.
+
+    ``scored`` must be sorted best-first. With both dials 0 this is the
+    identity — the legacy blind top-K. A ratio floor only bites when the
+    best score is positive (cosine can be negative on a hostile query;
+    a negative cutoff would keep everything and mean nothing).
+    """
+    if not scored or (floor <= 0 and ratio <= 0):
+        return scored
+    cutoffs = []
+    if floor > 0:
+        cutoffs.append(floor)
+    if ratio > 0 and scored[0][1] > 0:
+        cutoffs.append(scored[0][1] * ratio)
+    if not cutoffs:
+        # Only the ratio dial is set and the best score is non-positive —
+        # there is no meaningful cutoff; dropping everything here would turn
+        # a hostile query into an empty surface by accident.
+        return scored
+    cutoff = max(cutoffs)
+    return [(n, s) for n, s in scored if s >= cutoff]
+
+
 class ActionSemanticIndex:
     """Per-process semantic index over platform ActionDefinitions."""
 
@@ -33,6 +77,12 @@ class ActionSemanticIndex:
         self._action_embeddings: Dict[str, List[float]] = {}
         self._indexed: bool = False
         self._lock: Optional[asyncio.Lock] = None
+        # In-flight live query embeds, keyed by (loop id, model_key, query):
+        # concurrent same-query callers (enum narrowing + the prompt catalog
+        # rank the same turn text) share ONE upstream embed instead of racing
+        # duplicates. Loop id in the key because a task is only awaitable on
+        # the loop that created it (the sync bridge runs on its own loop).
+        self._inflight: Dict[tuple, asyncio.Task] = {}
 
     def _get_lock(self) -> asyncio.Lock:
         if self._lock is None:
@@ -67,16 +117,29 @@ class ActionSemanticIndex:
         dimension = info.get("dimension") or self._embedding_manager.get_dimension()
         return f"{provider}:{model}:{dimension}"
 
-    def _eligible_actions(self, exclude_admin: bool, exclude_promoted: bool) -> List[ActionDefinition]:
+    def _eligible_actions(
+        self,
+        exclude_admin: bool,
+        exclude_promoted: bool,
+        include_super_admin: bool = False,
+    ) -> List[ActionDefinition]:
+        # PRD-143: fail-closed — super_admin_only actions are eligible ONLY
+        # when include_super_admin=True is passed explicitly.
         return [
             a for a in self._registry.get_all()
             if not (exclude_admin and a.admin_only)
             and not (exclude_promoted and a.promoted)
+            and (include_super_admin or not a.super_admin_only)
         ]
 
-    async def ensure_indexed(self, exclude_admin: bool = True, exclude_promoted: bool = True) -> None:
+    async def ensure_indexed(
+        self,
+        exclude_admin: bool = True,
+        exclude_promoted: bool = True,
+        include_super_admin: bool = False,
+    ) -> None:
         async with self._get_lock():
-            actions = self._eligible_actions(exclude_admin, exclude_promoted)
+            actions = self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
             missing = [a for a in actions if a.name not in self._action_embeddings]
             if not missing:
                 return
@@ -106,14 +169,103 @@ class ActionSemanticIndex:
                 logger.info("ActionSemanticIndex: indexed %d actions", len(self._action_embeddings))
                 self._indexed = True
 
+    def _embed_timeout_s(self) -> Optional[float]:
+        """Budget for a LIVE query embed, from the canonical config singleton.
+
+        <= 0 disables the bound. Defaults to 2.5s when config is unavailable
+        (pure unit-test environments)."""
+        try:
+            from config import config
+            timeout = float(getattr(config, "SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S", 2.5))
+        except Exception:
+            timeout = 2.5
+        return timeout if timeout > 0 else None
+
+    async def _embed_query_bounded(
+        self, query: str, model_key: str, timeout_s: Optional[float]
+    ) -> Tuple[Optional[List[float]], bool, bool]:
+        """Resolve the query vector: Redis cache first, then a time-bounded
+        live embed.
+
+        Returns (vector-or-None, cache_hit, timed_out). On timeout the embed
+        task is NOT cancelled — it finishes in the background and writes the
+        Redis cache so the next identical query narrows instantly. Rationale:
+        narrowing is an optimization; it must never cost more than it saves
+        (observed 37–67s/call when the OpenRouter embedding upstream degrades).
+        """
+        try:
+            cached = self._cache.get_embeddings_batch([query], model=model_key).get(query)
+        except Exception:
+            cached = None
+        if cached:
+            return cached, True, False
+
+        # One live embed per (loop, model, query) — concurrent callers share
+        # it. The finalize callback owns cleanup + the cache write, so the
+        # vector lands in Redis whether the winner was awaited or timed out.
+        # Lazy-init like _get_lock(): tests construct the index via __new__,
+        # so instance state must not assume __init__ ran.
+        inflight = getattr(self, "_inflight", None)
+        if inflight is None:
+            inflight = self._inflight = {}
+        key = (id(asyncio.get_running_loop()), model_key, query)
+        task = inflight.get(key)
+        if task is None:
+            task = asyncio.ensure_future(self._embedding_manager.generate_embedding(query))
+            inflight[key] = task
+
+            def _finalize(t: "asyncio.Task", _key: tuple = key) -> None:
+                inflight.pop(_key, None)
+                try:
+                    self._cache.set_embeddings_batch({query: t.result()}, model=model_key)
+                except Exception:
+                    logger.debug("query-embed background cache write failed", exc_info=True)
+
+            task.add_done_callback(_finalize)
+
+        done, pending = await asyncio.wait({task}, timeout=timeout_s)
+        if pending:
+            logger.warning(
+                "ActionSemanticIndex: query embed exceeded %.1fs — narrowing "
+                "falls back to the full enum; embed continues in background "
+                "to warm the cache (query=%r)",
+                timeout_s,
+                query[:80],
+            )
+            return None, False, True
+
+        vec = task.result()  # raises if the embed failed — caller's fallback handles it
+        try:
+            self._cache.set_embeddings_batch({query: vec}, model=model_key)
+        except Exception:
+            logger.debug("query-embed cache write failed", exc_info=True)
+        return vec, False, False
+
     async def rank_actions(
         self,
         query: str,
         top_k: int = 15,
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
+        include_super_admin: bool = False,
+        embed_timeout_s: Optional[float] = None,
     ) -> List[Tuple[str, float]]:
-        await self.ensure_indexed(exclude_admin=exclude_admin, exclude_promoted=exclude_promoted)
+        """Rank eligible actions by cosine similarity to ``query``.
+
+        PR-B (tool-surface review): results below the configured relevance
+        floor — max(SEMANTIC_TOOL_ROUTING_FLOOR, best*FLOOR_RATIO) — are
+        dropped BEFORE the top_k cut, so a greeting can legitimately rank
+        zero actions instead of the 15 least-dissimilar. Both dials default
+        to 0 (floor off, exact legacy behavior).
+        """
+        import time as _perf_t
+        _perf_t0 = _perf_t.monotonic()
+        await self.ensure_indexed(
+            exclude_admin=exclude_admin,
+            exclude_promoted=exclude_promoted,
+            include_super_admin=include_super_admin,
+        )
+        _perf_t1 = _perf_t.monotonic()
         # Pre-filter eligibility (admin/promoted), then score every remaining
         # action and let cosine similarity decide ranking. Earlier revisions
         # truncated `candidate_names` at 50 in registration order BEFORE
@@ -122,11 +274,32 @@ class ActionSemanticIndex:
         # PRD-138 Appendix A baselines (US-005) caught this. The PRD allows
         # a wider-candidate-set heuristic only AFTER ranking; we keep things
         # simple by ranking the full eligible set (≤ ~110 actions, sub-ms).
-        eligible_names = [a.name for a in self._eligible_actions(exclude_admin, exclude_promoted)]
+        eligible_names = [
+            a.name
+            for a in self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
+        ]
         candidate_names = [n for n in eligible_names if n in self._action_embeddings]
         if not candidate_names:
             return []
-        query_vec = np.asarray(await self._embedding_manager.generate_embedding(query), dtype=float)
+        if embed_timeout_s is None:
+            embed_timeout_s = self._embed_timeout_s()
+        elif embed_timeout_s <= 0:
+            embed_timeout_s = None
+        raw_vec, cache_hit, timed_out = await self._embed_query_bounded(
+            query,
+            model_key=self._cache_model_key(),
+            timeout_s=embed_timeout_s,
+        )
+        _perf_t2 = _perf_t.monotonic()
+        if raw_vec is None:
+            logger.info(
+                "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms (TIMED OUT) n_candidates=%d",
+                (_perf_t1 - _perf_t0) * 1000,
+                (_perf_t2 - _perf_t1) * 1000,
+                len(candidate_names),
+            )
+            return []
+        query_vec = np.asarray(raw_vec, dtype=float)
         q_norm = float(np.linalg.norm(query_vec))
         if q_norm == 0.0:
             return []
@@ -138,6 +311,15 @@ class ActionSemanticIndex:
                 continue
             scored.append((name, float(np.dot(query_vec, vec) / (q_norm * v_norm))))
         scored.sort(key=lambda x: x[1], reverse=True)
+        scored = _apply_relevance_floor(scored, *_relevance_floor_config())
+        logger.info(
+            "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms cosine=%.0fms n_candidates=%d cache_hit=%d",
+            (_perf_t1 - _perf_t0) * 1000,
+            (_perf_t2 - _perf_t1) * 1000,
+            (_perf_t.monotonic() - _perf_t2) * 1000,
+            len(candidate_names),
+            int(cache_hit),
+        )
         return scored[:top_k]
 
 

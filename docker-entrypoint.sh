@@ -2,10 +2,12 @@
 # =============================================================================
 # Automatos AI - Backend Entrypoint Script
 # =============================================================================
-# This script:
+# This script is the single wait-migrate-seed lifecycle (PRD-176 F051):
 #   1. Waits for PostgreSQL to be ready
-#   2. Loads seed data (if not already loaded)
-#   3. Starts the backend application
+#   2. Verifies the database connection
+#   3. Runs Alembic migrations (fails closed — a bad migration aborts startup)
+#   4. Loads seed data (idempotent, if not already loaded)
+#   5. Starts the backend application
 # =============================================================================
 
 set -e
@@ -34,6 +36,28 @@ wait_for_postgres() {
     done
     
     echo "✅ PostgreSQL is ready!"
+}
+
+# =============================================================================
+# Function: Run Database Migrations (PRD-176 F051)
+# =============================================================================
+# Brings the schema to head via Alembic. This is the single owner of schema
+# lifecycle for a fresh clone: `alembic upgrade heads` replays every revision
+# against the (initdb-populated or empty) database.
+#
+# Fails CLOSED: unlike seed loading, a failed migration exits non-zero so the
+# app never starts against a half-built schema. Alembic is idempotent — on an
+# already-migrated database `upgrade heads` is a no-op.
+run_migrations() {
+    echo ""
+    echo "🗄️  Running database migrations (alembic upgrade heads)..."
+
+    if alembic upgrade heads; then
+        echo "✅ Migrations applied (schema at head)"
+    else
+        echo "❌ Migration failed — aborting startup (will not run on a half-built schema)"
+        exit 1
+    fi
 }
 
 # =============================================================================
@@ -102,6 +126,9 @@ wait_for_postgres
 
 # Check database
 check_database
+
+# Run migrations (fail-closed) — the single owner of schema lifecycle
+run_migrations
 
 # Load seed data (idempotent)
 load_seed_data

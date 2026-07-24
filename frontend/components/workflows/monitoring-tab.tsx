@@ -31,8 +31,6 @@ export function MonitoringTab() {
   // Memory Tab State (from communication-log.tsx)
   const [memoryStats, setMemoryStats] = useState<any>(null)
   const [loadingMemoryStats, setLoadingMemoryStats] = useState(false)
-  const [accessPatternsData, setAccessPatternsData] = useState<any[]>([])
-  const [consolidationData, setConsolidationData] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<string>('memory')
   
   // RAG Tab State (from communication-log.tsx)
@@ -47,15 +45,8 @@ export function MonitoringTab() {
       if (activeTab === 'memory' && !memoryStats && !loadingMemoryStats) {
         setLoadingMemoryStats(true)
         try {
-          const [stats, accessPatterns, consolidation] = await Promise.all([
-            apiClient.request('/api/v1/memory/stats/real'),
-            apiClient.request('/api/v1/memory/stats/timeseries/access-patterns?hours=24').catch(() => []),
-            apiClient.request('/api/v1/memory/stats/timeseries/consolidation?hours=24').catch(() => [])
-          ])
-          
+          const stats = await apiClient.request('/api/v1/memory/stats/real')
           setMemoryStats(stats)
-          setAccessPatternsData(Array.isArray(accessPatterns) ? accessPatterns : [])
-          setConsolidationData(Array.isArray(consolidation) ? consolidation : [])
         } catch (error) {
           console.error('Error fetching memory stats:', error)
         } finally {
@@ -273,7 +264,7 @@ export function MonitoringTab() {
                     </div>
 
                     {/* Middle Section: Charts Side by Side */}
-                    <div className="col-span-6 bg-background/50 border border-border/30 rounded-lg p-3">
+                    <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
                       <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
                         <Layers className="w-4 h-4 text-agent" />
                         Memory Hierarchy Distribution
@@ -284,10 +275,8 @@ export function MonitoringTab() {
                             data={(() => {
                               const levels = memoryStats?.system_stats?.memory_levels || {}
                               return [
-                                { name: 'Immediate', value: levels.immediate || 0, color: '#ef4444' },
-                                { name: 'Working', value: levels.working || 0, color: '#f97316' },
-                                { name: 'Short-term', value: levels.short_term || 0, color: '#eab308' },
-                                { name: 'Long-term', value: levels.long_term || 0, color: '#3b82f6' }
+                                { name: 'Short-term (L2)', value: levels.short_term || 0, color: '#eab308' },
+                                { name: 'Promoted to durable (L3)', value: levels.promoted_to_durable || 0, color: '#3b82f6' }
                               ].filter(item => item.value > 0)
                             })()}
                             cx="50%"
@@ -327,88 +316,6 @@ export function MonitoringTab() {
                       </ResponsiveContainer>
                     </div>
 
-                    <div className="col-span-6 bg-background/50 border border-border/30 rounded-lg p-3">
-                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-info" />
-                        Access Patterns (24h)
-                        {accessPatternsData.length > 0 && <Badge variant="outline" className="ml-2 text-xs">Real Data</Badge>}
-                      </h4>
-                      <ResponsiveContainer width="100%" height={180}>
-                        <BarChart data={accessPatternsData.length > 0 ? accessPatternsData : [
-                          { time: '00:00', reads: 45, writes: 12 },
-                          { time: '04:00', reads: 23, writes: 8 },
-                          { time: '08:00', reads: 89, writes: 34 },
-                          { time: '12:00', reads: 156, writes: 67 },
-                          { time: '16:00', reads: 134, writes: 45 },
-                          { time: '20:00', reads: 98, writes: 28 }
-                        ]}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                          <XAxis dataKey="time" stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                          <YAxis stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: 'rgba(0, 0, 0, 0.95)',
-                              border: '1px solid rgba(255, 255, 255, 0.3)',
-                              borderRadius: '8px',
-                              padding: '12px',
-                              fontSize: '12px',
-                              fontWeight: '500',
-                              color: '#fff'
-                            }}
-                            labelStyle={{ color: '#fff', fontWeight: '600' }}
-                            itemStyle={{ color: '#fff' }}
-                          />
-                          <Bar dataKey="reads" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                          <Bar dataKey="writes" fill="#10b981" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    {/* Bottom Section: Consolidation Stats */}
-                    <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
-                      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-success" />
-                        Consolidation & Performance Trends
-                        {consolidationData.length > 0 && <Badge variant="outline" className="ml-2 text-xs">Real Data</Badge>}
-                      </h4>
-                      <ResponsiveContainer width="100%" height={120}>
-                        <LineChart data={consolidationData.length > 0 ? consolidationData.map(d => ({
-                          time: d.time,
-                          consolidated: d.items_consolidated,
-                          compression: d.compression_ratio,
-                          storage: d.storage_saved_pct
-                        })) : [
-                          { time: '6h ago', consolidated: 45, compression: 2.3, storage: 89 },
-                          { time: '5h ago', consolidated: 67, compression: 2.5, storage: 76 },
-                          { time: '4h ago', consolidated: 89, compression: 2.8, storage: 65 },
-                          { time: '3h ago', consolidated: 103, compression: 3.1, storage: 54 },
-                          { time: '2h ago', consolidated: 124, compression: 3.4, storage: 45 },
-                          { time: '1h ago', consolidated: 145, compression: 3.6, storage: 38 },
-                          { time: 'Now', consolidated: 167, compression: 3.8, storage: 32 }
-                        ]}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                          <XAxis dataKey="time" stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                          <YAxis stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: 'rgba(0, 0, 0, 0.95)',
-                              border: '1px solid rgba(255, 255, 255, 0.3)',
-                              borderRadius: '8px',
-                              padding: '12px',
-                              fontSize: '12px',
-                              fontWeight: '500',
-                              color: '#fff'
-                            }}
-                            labelStyle={{ color: '#fff', fontWeight: '600' }}
-                            itemStyle={{ color: '#fff' }}
-                          />
-                          <Legend wrapperStyle={{ fontSize: '10px' }} />
-                          <Line type="monotone" dataKey="consolidated" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} name="Items Consolidated" />
-                          <Line type="monotone" dataKey="compression" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} name="Compression Ratio" />
-                          <Line type="monotone" dataKey="storage" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Storage Saved %" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
                   </div>
                 )}
               </TabsContent>

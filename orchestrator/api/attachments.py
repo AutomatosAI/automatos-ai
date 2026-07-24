@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from modules.attachments.store import (
     AttachmentNotFoundError,
     AttachmentRef,
@@ -67,7 +68,7 @@ class AttachmentMetadata(BaseModel):
     media_type: str
 
 
-@router.post("", response_model=AttachmentResponse)
+@router.post("", response_model=AttachmentResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def upload_attachment(
     file: UploadFile = File(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -138,7 +139,7 @@ async def get_attachment(
     return AttachmentResponse.from_ref(ref)
 
 
-@router.delete("/{attachment_id}")
+@router.delete("/{attachment_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_attachment(
     attachment_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),

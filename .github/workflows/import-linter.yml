@@ -1,0 +1,44 @@
+name: import-linter
+
+# PRD-211 In-repo topology discipline — a dedicated (non-required) lane that
+# enforces the feature-module `independence` contract in orchestrator/
+# .importlinter. Thesis T2 measured Automatos as a healthy modular monolith
+# (~3.0% true feature-to-feature import coupling); this gate fails loud when a
+# NEW lateral edge between feature modules appears, keeping "stay a monolith,
+# harden the boundaries in-repo" enforced rather than aspirational.
+#
+# grimp analyses the source statically (AST — it does NOT execute module code),
+# so only import-linter itself is installed; the heavy orchestrator runtime deps
+# are not needed. `modules` resolves via PYTHONPATH=orchestrator (there is no
+# orchestrator/__init__.py; features are imported as modules.*).
+#
+# Mirrors check-shopify-isolation.yml. Kept OUT of the required-checks set.
+
+on:
+  push:
+    branches:
+      - main
+      - "ralph/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  import-linter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install import-linter
+        run: pip install import-linter==2.1
+
+      - name: Run feature-module independence contract
+        env:
+          PYTHONPATH: orchestrator
+        run: lint-imports --config orchestrator/.importlinter

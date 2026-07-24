@@ -65,21 +65,6 @@ export default function ChatPage() {
     setIsHistoryOpen(false)
   }
 
-  // Pick up conversation context handed off from the Auto widget
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem('auto-widget-handoff')
-      if (raw) {
-        sessionStorage.removeItem('auto-widget-handoff')
-        const handoffMessages: ChatMessage[] = JSON.parse(raw)
-        if (handoffMessages.length > 0) {
-          setCurrentMessages(handoffMessages)
-          setChatInstance((v) => v + 1)
-        }
-      }
-    } catch { /* corrupt data — start fresh */ }
-  }, [])
-
   // Toggle chat history from main Automatos sidebar (chat-only menu item)
   useEffect(() => {
     const handler = () => setIsHistoryOpen((v) => !v)
@@ -119,7 +104,6 @@ export default function ChatPage() {
       key={`${currentChatId || 'new'}-${chatInstance}`}
       id={currentChatId}
       initialMessages={currentMessages}
-      initialChatModel="gpt-4"
       initialVisibilityType={selectedChat?.visibility || 'private'}
       isReadonly={false}
       autoResume={false}
@@ -176,7 +160,7 @@ export default function ChatPage() {
                 transition={{ type: 'spring', stiffness: 320, damping: 30 }}
                 className="absolute left-0 top-0 z-20 h-full w-[320px]"
               >
-                <div className="h-full rounded-r-3xl border-r border-orange-500/20 bg-background/35 backdrop-blur-xl shadow-[0_0_80px_rgba(0,0,0,0.55)]">
+                <div className="h-full rounded-r-3xl border-r border-warning/20 bg-background/35 backdrop-blur-xl shadow-[0_0_80px_rgba(0,0,0,0.55)]">
                   <AppSidebar onChatSelect={handleChatSelect} onNewChat={handleNewChat} />
                 </div>
               </motion.aside>

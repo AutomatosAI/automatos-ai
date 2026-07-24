@@ -7,9 +7,12 @@ when it approaches the model's context limit.
 
 Strategy:
 1. Count tokens in the full message payload (system + user + assistant + tool)
-2. If below 80% of model context → pass through unchanged
-3. If above 80% → compact: summarize older turns, keep recent context
-4. Flush key facts to Mem0 before discarding messages
+2. Resolve a model-aware compaction threshold + kept-turns from the context
+   window (_thresholds_for_model): bigger windows compact later and keep more
+   turns; small windows compact earlier and keep fewer
+3. If below the threshold → pass through unchanged; above → compact: summarize
+   older turns, keep recent context
+4. Flush key facts to durable memory before discarding messages
 
 This prevents context_length_exceeded errors and keeps conversations going
 indefinitely without manual truncation.
@@ -53,6 +56,34 @@ def count_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def truncate_to_token_budget(
+    text: str,
+    max_tokens: int,
+    *,
+    suffix: str = "\n... (truncated)",
+) -> str:
+    """Truncate ``text`` to at most ``max_tokens`` tokens on a token boundary.
+
+    The single token-aware truncation primitive for the whole platform — it
+    lands on a token boundary rather than mid-word/mid-JSON (what a raw
+    ``text[: max_tokens * 4]`` char slice does). Lives here, beside
+    ``count_tokens``, so the context assembler (PRD-201 S2) and the RAG budgeter
+    share one definition of "how big is this" without the context module having
+    to import the heavier ``modules.rag`` package. ``modules.rag.budget``
+    re-exports this name for its existing callers. Falls back to a ~4-chars/token
+    estimate only when tiktoken is unavailable.
+    """
+    if not text or max_tokens <= 0:
+        return text
+    if _encoding is None:
+        limit = max_tokens * 4
+        return text if len(text) <= limit else text[:limit] + suffix
+    tokens = _encoding.encode(text)
+    if len(tokens) <= max_tokens:
+        return text
+    return _encoding.decode(tokens[:max_tokens]) + suffix
+
+
 def count_message_tokens(messages: List[Dict[str, Any]]) -> int:
     """
     Estimate total tokens across all messages.
@@ -83,6 +114,35 @@ def count_tool_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
     if not tools:
         return 0
     return count_tokens(json.dumps(tools))
+
+
+def estimate_turn_budget(
+    llm_manager: Any, messages: Optional[List[Dict[str, Any]]]
+) -> Dict[str, Any]:
+    """PRD-192 S3: the turn's budget-admission estimate at a tool-loop boundary.
+
+    Estimator (locked): prompt tokens of the assembled context + the configured
+    output cap, priced later by ``modules.policy.pricing`` against the driving
+    model. Returns the three ``caller_context`` keys the policy chokepoint
+    lifts into ``ToolCall`` (``model_id`` / ``est_input_tokens`` /
+    ``est_output_tokens``) — or ``{}`` when the runtime exposes no model (the
+    gate then admits on spend-to-date alone, exactly as before). Shared by the
+    chat and agent lanes so the two callers can never drift. Never raises: an
+    estimator fault must not touch the tool hot path.
+    """
+    try:
+        cfg = getattr(llm_manager, "config", None)
+        model_id = getattr(cfg, "model", None) if cfg is not None else None
+        if not model_id:
+            return {}
+        return {
+            "model_id": model_id,
+            "est_input_tokens": int(count_message_tokens(messages or [])),
+            "est_output_tokens": int(getattr(cfg, "max_tokens", None) or 0),
+        }
+    except Exception:
+        logger.debug("[PRD-192 S3] turn budget estimate skipped", exc_info=True)
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -137,10 +197,41 @@ def get_context_window(model_name: str, db_session=None) -> int:
 # Context Guard
 # ---------------------------------------------------------------------------
 
-# Thresholds
+# Thresholds — static fallbacks only. The model-aware values come from
+# _thresholds_for_model(); these are used when the context window is unknown.
 COMPACT_THRESHOLD = 0.80   # Compact when >80% of context used
 KEEP_RECENT_TURNS = 6      # Always keep the last N user+assistant messages
 SUMMARY_MAX_TOKENS = 500   # Max tokens for the compaction summary
+
+
+def _thresholds_for_model(context_window: int) -> Tuple[float, int]:
+    """Resolve (compact_threshold, keep_recent_turns) for a model's window.
+
+    Large-context models can safely fill a higher fraction of the window and
+    keep more recent turns; small-context models must compact earlier and keep
+    fewer turns to avoid context_length_exceeded (provider 400s).
+
+    Tiers (PRD-141 US-012):
+        >=200K -> (0.90, 12)
+        >=100K -> (0.85, 8)
+        >= 32K -> (0.80, 6)
+        >=  8K -> (0.75, 4)
+        else   -> (0.70, 3)
+
+    An unknown / non-positive window falls back to the static COMPACT_THRESHOLD
+    and KEEP_RECENT_TURNS constants.
+    """
+    if not context_window or context_window <= 0:
+        return COMPACT_THRESHOLD, KEEP_RECENT_TURNS
+    if context_window >= 200_000:
+        return 0.90, 12
+    if context_window >= 100_000:
+        return 0.85, 8
+    if context_window >= 32_000:
+        return 0.80, 6
+    if context_window >= 8_000:
+        return 0.75, 4
+    return 0.70, 3
 
 # PRD-123 Pattern #7: Proactive compaction thresholds
 PROACTIVE_COMPACT_AFTER_TURNS = int(
@@ -182,10 +273,11 @@ class ContextGuard:
             (messages, was_compacted, tools) — tools may be None if they don't fit
         """
         context_window = get_context_window(model_name, db_session)
+        compact_threshold, keep_recent_turns = _thresholds_for_model(context_window)
         tool_tokens = count_tool_tokens(tools)
         current_tokens = count_message_tokens(messages)
         total_tokens = current_tokens + tool_tokens
-        threshold = int(context_window * COMPACT_THRESHOLD)
+        threshold = int(context_window * compact_threshold)
 
         logger.debug(
             "[ContextGuard] tokens=%d (msgs=%d tools=%d) / %d (%.0f%% of %d window)",
@@ -217,6 +309,7 @@ class ContextGuard:
             llm_manager=llm_manager,
             workspace_id=workspace_id,
             agent_id=agent_id,
+            keep_recent_turns=keep_recent_turns,
         )
 
         new_tokens = count_message_tokens(compacted)
@@ -233,6 +326,7 @@ class ContextGuard:
         llm_manager: Any,
         workspace_id: Optional[str] = None,
         agent_id: Optional[int] = None,
+        keep_recent_turns: int = KEEP_RECENT_TURNS,
     ) -> List[Dict[str, Any]]:
         """
         Compact messages by summarizing older turns.
@@ -240,7 +334,7 @@ class ContextGuard:
         Strategy:
         1. Split messages into: system_msgs | old_turns | recent_turns
         2. Summarize old_turns into a single context message
-        3. Flush key facts from old_turns to Mem0
+        3. Flush key facts from old_turns to durable memory
         4. Return: system_msgs + [summary] + recent_turns
         """
         # Separate system messages (always keep) from conversation turns
@@ -253,12 +347,12 @@ class ContextGuard:
                 conversation.append(msg)
 
         # If conversation is short enough, keep everything
-        if len(conversation) <= KEEP_RECENT_TURNS:
+        if len(conversation) <= keep_recent_turns:
             return messages
 
         # Split: old turns (to summarize) | recent turns (to keep)
-        old_turns = conversation[:-KEEP_RECENT_TURNS]
-        recent_turns = conversation[-KEEP_RECENT_TURNS:]
+        old_turns = conversation[:-keep_recent_turns]
+        recent_turns = conversation[-keep_recent_turns:]
 
         # Build text from old turns for summarization
         old_text = self._turns_to_text(old_turns)
@@ -283,8 +377,8 @@ class ContextGuard:
             "_compact_tombstone": {
                 "compacted_count": len(old_turns),
                 "compacted_roles": [m.get("role") for m in old_turns],
-                "summary_token_est": self.count_tokens(summary),
-                "original_token_est": sum(self.count_message_tokens(m) for m in old_turns),
+                "summary_token_est": count_tokens(summary),
+                "original_token_est": count_message_tokens(old_turns),
             },
         }
 
@@ -343,7 +437,7 @@ class ContextGuard:
         workspace_id: str,
         agent_id: Optional[int] = None,
     ):
-        """Flush key facts from compacted turns to Mem0 for long-term retention."""
+        """Flush key facts from compacted turns to durable memory for long-term retention."""
         try:
             from consumers.chatbot.smart_memory import get_smart_memory_manager
 
@@ -356,7 +450,7 @@ class ContextGuard:
                 user_message="[Context compaction — key facts from earlier conversation]",
                 assistant_response=key_facts,
             )
-            logger.info("[ContextGuard] Flushed key facts to Mem0")
+            logger.info("[ContextGuard] Flushed key facts to durable memory")
         except Exception as exc:
             logger.warning("[ContextGuard] Memory flush failed (non-fatal): %s", exc)
 

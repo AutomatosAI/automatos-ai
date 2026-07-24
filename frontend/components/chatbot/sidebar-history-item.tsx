@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { MessageSquare, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { deleteChat } from '@/lib/chat/api'
 import { truncate } from '@/lib/utils'
@@ -67,7 +68,13 @@ export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false 
     >
       <MessageSquare className="w-4 h-4 flex-shrink-0" />
       <span className="flex-1 text-sm truncate">{truncate(chat.title, 30)}</span>
-      
+      {/* PRD-205 S7: subtle marker for the thread where Auto speaks unprompted */}
+      {chat.kind === 'auto' && (
+        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] bg-warning/10 border-warning/20 text-warning">
+          Auto
+        </Badge>
+      )}
+
       <Button
         variant="ghost"
         size="sm"

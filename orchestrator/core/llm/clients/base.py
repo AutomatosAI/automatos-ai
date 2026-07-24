@@ -22,8 +22,11 @@ def _get_system_dimension() -> int:
         from core.models.system_settings import SystemSetting
         db = SessionLocal()
         try:
+            # PRD-197 S2: PRD-136 renamed the row to (embeddings, dimensions);
+            # the old key-only lookup missed on every read since.
             setting = db.query(SystemSetting).filter(
-                SystemSetting.key == "vector_store_dimensions"
+                SystemSetting.category == "embeddings",
+                SystemSetting.key == "dimensions",
             ).first()
             if setting and setting.value:
                 return int(setting.value)
@@ -197,8 +200,25 @@ class BaseEmbeddingProvider(ABC):
         pass
 
 
+class EmbeddingUnavailableError(RuntimeError):
+    """Raised when no real embedding provider is configured/reachable (PRD-185 S3).
+
+    The old fallback returned hash-seeded RANDOM vectors, so similarity search ran
+    over noise and returned confident-but-meaningless matches with nothing on any
+    dashboard. Failing loud lets selection paths return a typed EMPTY result
+    (honest "no grounding") instead of silent noise.
+    """
+
+
 class DeterministicEmbeddingProvider(BaseEmbeddingProvider):
-    """Fallback provider using deterministic hash-based embeddings"""
+    """Degraded no-op provider used when no real embedding provider is available.
+
+    Intentionally does NOT produce vectors — ``generate_embedding`` raises
+    ``EmbeddingUnavailableError`` so callers fail loud / return empty rather than
+    searching over random noise.
+    """
+
+    is_degraded = True
     
     def __init__(self, dimension: Optional[int] = None):
         import numpy as np
@@ -218,11 +238,10 @@ class DeterministicEmbeddingProvider(BaseEmbeddingProvider):
         pass  # No client needed
     
     async def generate_embedding(self, text: str) -> List[float]:
-        """Generate deterministic embedding based on text hash"""
-        import numpy as np
-        text_hash = hash(text)
-        rng = np.random.default_rng(abs(text_hash) % (2**32))
-        return rng.standard_normal(self.dimension).tolist()
+        """No real provider configured — fail loud instead of returning noise."""
+        raise EmbeddingUnavailableError(
+            "No embedding provider configured/reachable; refusing to return random vectors."
+        )
     
     def get_dimension(self) -> int:
         return self.dimension

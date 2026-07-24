@@ -19,6 +19,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
+import { TeamMultiSelect } from './team-multi-select'
+import { useBulkUpdateTeamAccess } from '@/hooks/use-teams'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,24 +73,40 @@ export function LocalStorageBrowser({
   const [viewMode, setViewMode] = useViewMode('documents')
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
-  const [filterTeam, setFilterTeam] = useState<string>('all')
+  // PRD-158 S4: bulk team-assignment selection.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkTeams, setBulkTeams] = useState<string[]>([])
+  const bulkUpdate = useBulkUpdateTeamAccess()
 
-  // Collect unique team names from all documents
-  const availableTeams = Array.from(
-    new Set(documents.flatMap(d => d.team_access || []).filter(Boolean))
-  ).sort()
-
+  // PRD-158 S3: team filtering is promoted to the page header (server-side),
+  // so this browser no longer filters by team client-side (which capped at the
+  // ≤100 loaded docs). It receives the already-team-scoped document set.
   const filteredDocuments = documents.filter(doc => {
     const matchesSearch = doc.filename.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesFilter =
       filterStatus === 'all' ||
       (doc.status || 'completed').toLowerCase() === filterStatus
-    const matchesTeam =
-      filterTeam === 'all' ||
-      !doc.team_access?.length ||
-      doc.team_access.includes(filterTeam)
-    return matchesSearch && matchesFilter && matchesTeam
+    return matchesSearch && matchesFilter
   })
+
+  const toggleSelect = (id: number) =>
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const applyBulkTeams = async () => {
+    if (selectedIds.size === 0) return
+    try {
+      await bulkUpdate.mutateAsync({ ids: Array.from(selectedIds), teamAccess: bulkTeams })
+      setSelectedIds(new Set())
+      setBulkTeams([])
+    } catch {
+      /* toast handled in the hook */
+    }
+  }
 
   const stats = {
     total: documents.length,
@@ -136,26 +155,33 @@ export function LocalStorageBrowser({
             className="pl-10 bg-secondary/50"
           />
         </div>
-        {availableTeams.length > 0 && (
-          <select
-            value={filterTeam}
-            onChange={(e) => setFilterTeam(e.target.value)}
-            className="h-10 rounded-md border border-input bg-secondary/50 px-3 text-sm"
-          >
-            <option value="all">All Teams</option>
-            {availableTeams.map(team => (
-              <option key={team} value={team}>{team}</option>
-            ))}
-          </select>
-        )}
         <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
+
+      {/* PRD-158 S4: bulk team assignment for the selected documents */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-end gap-3 p-3 rounded-lg border border-border bg-secondary/30">
+          <div className="flex-1 min-w-[220px]">
+            <p className="text-xs text-muted-foreground mb-1">
+              Set teams for {selectedIds.size} selected document{selectedIds.size > 1 ? 's' : ''}
+              {' '}(empty = visible to all)
+            </p>
+            <TeamMultiSelect value={bulkTeams} onChange={setBulkTeams} />
+          </div>
+          <Button size="sm" disabled={bulkUpdate.isLoading} onClick={applyBulkTeams}>
+            {bulkUpdate.isLoading ? 'Applying…' : 'Apply teams'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
 
       {/* Files List */}
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <File className="w-5 h-5 text-orange-400" />
+            <File className="w-5 h-5 text-warning" />
             Documents ({filteredDocuments.length})
           </CardTitle>
         </CardHeader>
@@ -191,7 +217,11 @@ export function LocalStorageBrowser({
                       className="flex items-center justify-between p-4 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors"
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <TypeIcon className="w-5 h-5 text-orange-400 shrink-0" />
+                        <Checkbox
+                          checked={selectedIds.has(doc.id)}
+                          onCheckedChange={() => toggleSelect(doc.id)}
+                        />
+                        <TypeIcon className="w-5 h-5 text-warning shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="font-medium truncate">{doc.filename}</p>
                           <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
@@ -278,7 +308,14 @@ export function LocalStorageBrowser({
                       onClick={() => onViewDetails(doc.id)}
                     >
                       <div className="flex items-start justify-between mb-3">
-                        <TypeIcon className="w-8 h-8 text-orange-400" />
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={selectedIds.has(doc.id)}
+                            onCheckedChange={() => toggleSelect(doc.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <TypeIcon className="w-8 h-8 text-warning" />
+                        </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>

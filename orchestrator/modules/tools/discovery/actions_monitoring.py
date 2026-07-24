@@ -52,7 +52,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
-        admin_only=True,
+        super_admin_only=True,
         tags=["logs", "monitoring", "loki", "observability", "debugging"],
         examples=[
             "show me error logs from the last hour",
@@ -96,7 +96,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
             "required": ["query"],
         },
         permission_level="read",
-        admin_only=True,
+        super_admin_only=True,
         tags=["metrics", "monitoring", "prometheus", "health", "observability"],
         examples=[
             "check if all services are healthy",
@@ -137,7 +137,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
-        admin_only=True,
+        super_admin_only=True,
         tags=["alerts", "monitoring", "infrastructure", "health"],
         examples=[
             "are there any firing alerts?",
@@ -185,7 +185,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
             "required": ["service"],
         },
         permission_level="read",
-        admin_only=True,
+        super_admin_only=True,
         tags=["logs", "infrastructure", "railway", "observability", "debugging"],
         examples=[
             "get error logs from the API",
@@ -208,7 +208,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
             "required": [],
         },
         permission_level="read",
-        admin_only=True,
+        super_admin_only=True,
         tags=["services", "infrastructure", "railway"],
         examples=[
             "what services are running?",

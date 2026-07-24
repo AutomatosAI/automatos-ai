@@ -1,0 +1,58 @@
+name: smoke-fresh-clone
+
+# PRD-176 Headline B — the deployability bar: a fresh clone boots to a green
+# /health with NO external credentials via `docker compose up`.
+#
+# NON-REQUIRED and BLOCKED ON WAVE 5. Until W5's boot-before-auth lands on main,
+# compose hard-requires Clerk keys, so a no-credential boot cannot reach /health.
+# The job runs the smoke script with continue-on-error so it reports the real
+# state without blocking; drop continue-on-error (and flip to required in branch
+# protection) once W5 is merged and the fresh-clone boot is green.
+#
+# Runs on manual dispatch and on pushes that touch the boot substrate (compose,
+# entrypoint, this workflow, or the script) — not on every push, since it builds
+# and boots the full stack.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "docker-compose.yml"
+      - "docker-entrypoint.sh"
+      - "scripts/ci/smoke-fresh-clone.sh"
+      - ".github/workflows/smoke-fresh-clone.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "docker-compose.yml"
+      - "docker-entrypoint.sh"
+      - "scripts/ci/smoke-fresh-clone.sh"
+      - ".github/workflows/smoke-fresh-clone.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fresh-clone-boot:
+    name: Fresh-clone docker compose up -> /health 200 (non-required, blocked on W5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Local-only secrets — throwaway values for an ephemeral stack. No external
+      # SaaS credential (Clerk / AWS / LLM) is provided, on purpose: that is the
+      # bar this test proves.
+      - name: Run fresh-clone smoke test
+        continue-on-error: true
+        env:
+          POSTGRES_PASSWORD: smoke_pg_pw
+          REDIS_PASSWORD: smoke_redis_pw
+          API_KEY: smoke_api_key
+          AUTH_EDITION: local
+          REQUIRE_AUTH: "false"
+        run: bash scripts/ci/smoke-fresh-clone.sh

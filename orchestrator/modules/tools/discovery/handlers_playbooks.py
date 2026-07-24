@@ -481,10 +481,55 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
     db.add(execution)
     db.commit()  # Must commit before async task (it opens its own session)
 
-    # Launch async execution fire-and-forget
+    # PRD-204 S9 (Q1): Auto-launched playbook runs get a run_and_report
+    # watch by default (workspace setting watch_auto_create, default ON);
+    # criteria seeded from the request context. Fail-soft by contract --
+    # committed separately AFTER the execution row so a watch problem can
+    # never poison the launch transaction.
     try:
-        from api.recipe_executor import launch_recipe_task
-        launch_recipe_task(
+        from modules.tools.discovery.handlers_watches import (
+            _origin_chat_id,
+            auto_create_watch,
+        )
+
+        criteria = f"Playbook '{playbook.name}' completes and delivers its expected output."
+        if input_data:
+            import json as _json
+
+            try:
+                criteria += f" Inputs: {_json.dumps(input_data, default=str)[:400]}"
+            except Exception:
+                pass
+        watch = auto_create_watch(
+            db,
+            workspace_id,
+            target_type="playbook_execution",
+            target_id=execution_id,
+            title=f"Watch: {playbook.name[:80]}",
+            origin_chat_id=_origin_chat_id(params),
+            success_criteria=criteria,
+            created_by=(str(params.get("_created_by")) if params.get("_created_by") else None),
+            owner_agent_id=(
+                int(params["_agent_id"])
+                if str(params.get("_agent_id") or "").isdigit()
+                else None
+            ),
+        )
+        if watch is not None:
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.warning(
+            "[PlatformExecutor] watch auto-create commit failed for %s -- "
+            "launch unaffected", execution_id, exc_info=True,
+        )
+
+    # Launch async execution via the consolidated PlaybookEngine seam.
+    # PRD-142 W3-S12: every backend launch site goes through the engine —
+    # the strangler-fig that lets durability/observability land in one place.
+    try:
+        from services.playbook_engine import get_playbook_engine
+        get_playbook_engine().launch(
             recipe_execution_id=execution_id,
             recipe_id=playbook.id,
             workspace_id=workspace_id,
@@ -625,25 +670,28 @@ async def delete_playbook(db: Session, workspace_id: UUID, params: Dict[str, Any
         logger.warning("[PlatformExecutor] Trigger cleanup failed for playbook %d: %s", playbook.id, e)
         cleanup_notes.append(f"Trigger cleanup failed: {e}")
 
-    # Mem0 memory cleanup (non-fatal)
+    # Durable memory cleanup (non-fatal). The old HTTP cleanup deleted a
+    # "playbook-{id}" namespace no writer ever used — this erases the real
+    # buckets the playbook memory writer stores under: the recipe namespace
+    # plus one recipe_agent namespace per agent in the steps (the same set
+    # retrieve_relevant_memories enumerates).
     try:
-        import httpx
-        from config import config
-        mem0_url = config.MEM0_API_URL
-        if mem0_url:
-            import asyncio
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                headers = {}
-                if config.MEM0_API_KEY:
-                    headers["Authorization"] = f"Bearer {config.MEM0_API_KEY}"
-                await client.delete(
-                    f"{mem0_url}/api/v1/memories/",
-                    params={"user_id": f"playbook-{playbook.id}"},
-                    headers=headers,
-                )
-            cleanup_notes.append("Playbook memories cleaned up")
+        from modules.memory.unified_memory_service import get_unified_memory_service
+
+        svc = get_unified_memory_service()
+        ns = svc.namespace(str(playbook.workspace_id))
+        playbook_key = playbook.template_id or str(playbook.id)
+        erased = await svc._durable.erase_namespace(ns.recipe(playbook_key))
+        agent_ids = {
+            step.get("agent_id")
+            for step in (playbook.steps or [])
+            if isinstance(step, dict) and step.get("agent_id")
+        }
+        for aid in agent_ids:
+            erased += await svc._durable.erase_namespace(ns.recipe_agent(playbook_key, aid))
+        cleanup_notes.append(f"Playbook memories cleaned up ({erased})")
     except Exception as e:
-        logger.debug("[PlatformExecutor] Mem0 cleanup skipped for playbook %d: %s", playbook.id, e)
+        logger.warning("[PlatformExecutor] Durable-memory cleanup failed for playbook %d: %s", playbook.id, e)
 
     # Delete the playbook (cascades to executions via FK)
     db.delete(playbook)

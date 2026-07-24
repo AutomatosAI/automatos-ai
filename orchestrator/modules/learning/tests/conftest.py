@@ -6,7 +6,6 @@ Uses centralized credential system for database access
 import pytest
 import os
 from uuid import uuid4
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 
@@ -15,19 +14,12 @@ from core.models.workspaces import Workspace
 # Set test environment
 os.environ['ENVIRONMENT'] = 'development'
 
-# Use real database like CodeGraph/Memory
-TEST_DB_URL = "postgresql://postgres:secure_password_123@127.0.0.1:5432/orchestrator_db"
-
 # Shared test workspace ID
 TEST_WORKSPACE_ID = uuid4()
 
-
-@pytest.fixture(scope="session")
-def test_engine():
-    """Create test database engine"""
-    engine = create_engine(TEST_DB_URL)
-    yield engine
-    engine.dispose()
+# ``test_engine`` (and its DB URL) come from the root orchestrator/conftest.py
+# (PRD-142 W2-S4). This module overrides ``db_session`` only to seed a
+# Workspace row so the learning tables' FK constraints are satisfied.
 
 
 @pytest.fixture(scope="function")

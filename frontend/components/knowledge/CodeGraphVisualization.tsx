@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { apiClient } from '@/lib/api-client'
+import { GraphErrorBoundary } from '../graph'
 import ReactFlow, {
   Node,
   Edge,
@@ -334,7 +335,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              className="w-full pl-10 pr-4 py-2 bg-secondary/80 border border-border/40 rounded-lg text-white placeholder-muted-foreground focus:outline-none focus:border-orange-500"
+              className="w-full pl-10 pr-4 py-2 bg-secondary/80 border border-border/40 rounded-lg text-white placeholder-muted-foreground focus:outline-none focus:border-warning"
             />
           </div>
           <button
@@ -347,7 +348,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
           <button
             onClick={handleSearch}
             disabled={loading || !searchQuery.trim()}
-            className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-secondary/50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+            className="px-4 py-2 bg-warning hover:bg-warning disabled:bg-secondary/50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
           >
             {loading ? 'Loading...' : 'Visualize'}
           </button>
@@ -400,7 +401,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
           <div className="flex items-center gap-1 ml-auto">
             <button
               onClick={() => setViewMode('default')}
-              className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'default' ? 'bg-orange-600 text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'}`}
+              className={`px-2 py-1 rounded text-xs transition-colors ${viewMode === 'default' ? 'bg-warning text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'}`}
               title="Default colors by type"
             >
               Default
@@ -410,7 +411,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 if (!archData && !archLoading) fetchArchitecture()
                 setViewMode('clusters')
               }}
-              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'clusters' ? 'bg-orange-700 text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
+              className={`px-2 py-1 rounded text-xs transition-colors flex items-center gap-1 ${viewMode === 'clusters' ? 'bg-warning text-white' : 'bg-secondary/80 text-muted-foreground hover:text-white'} ${archLoading ? 'opacity-50' : ''}`}
               title="Color by Louvain module cluster"
             >
               <Layers className="w-3 h-3" /> Clusters {archLoading && '...'}
@@ -451,7 +452,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 placeholder="Filter files..."
                 value={fileFilter}
                 onChange={(e) => setFileFilter(e.target.value)}
-                className="w-full px-2 py-1 bg-secondary/80 border border-border/40 rounded text-xs text-white placeholder-muted-foreground focus:outline-none focus:border-orange-500"
+                className="w-full px-2 py-1 bg-secondary/80 border border-border/40 rounded text-xs text-white placeholder-muted-foreground focus:outline-none focus:border-warning"
               />
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -473,7 +474,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                     })))
                   }}
                   className={`w-full text-left px-2 py-1.5 text-xs hover:bg-secondary/80 transition-colors ${
-                    highlightedFile === file.file_path ? 'bg-orange-900/30 border-l-2 border-orange-500' : ''
+                    highlightedFile === file.file_path ? 'bg-warning/30 border-l-2 border-warning' : ''
                   }`}
                 >
                   <div className="text-foreground/80 truncate font-mono">{file.file_path.split('/').pop()}</div>
@@ -512,6 +513,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
               </div>
             </div>
           ) : (
+            <GraphErrorBoundary>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -578,6 +580,7 @@ export function CodeGraphVisualization({ project, projectId }: CodeGraphVisualiz
                 </div>
               </Panel>
             </ReactFlow>
+            </GraphErrorBoundary>
           )}
         </div>
 

@@ -25,7 +25,9 @@ from uuid import UUID, uuid4
 from config import COMPLEXITY_TOKEN_BUDGET, Config
 from core.llm import create_llm_manager
 from core.models.core import Agent
+from core.utils.exception_telemetry import record_error
 from core.models.orchestration_enums import ComplexityTier, TaskType
+from modules.coordination.agent_matcher import CANONICAL_ROLES, _compute_skill_match
 from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
     CyclicDependencyError,
@@ -112,10 +114,53 @@ async def _resolve_attachments_for_planning(
 
 
 # ---------------------------------------------------------------------------
+# Planning context pack (PRD-164 S1, Q61)
+# ---------------------------------------------------------------------------
+
+
+async def _build_planning_context(
+    goal: str,
+    workspace_id: UUID,
+    db: Any,
+) -> Optional[str]:
+    """Fetch the ONE platform planning pack for the decomposition prompt.
+
+    Q61: planners converge on ``ContextService.build_planning_context`` — RAG
+    on the goal (PRD-157 choke point), mission summaries + task failures
+    (PRD-159 recall), KG subgraph, token-budgeted. ``include_roster=False``
+    because the decomposition prompt already renders the capability roster.
+
+    Requires a DB session (the coordinator passes its own); without one the
+    planner runs context-free rather than half-assembling something here.
+    Never raises — planning proceeds without the pack on any failure.
+    """
+    if db is None:
+        return None
+    try:
+        from modules.context.service import ContextService
+
+        pack = await ContextService(db).build_planning_context(
+            goal=goal,
+            workspace_id=str(workspace_id),
+            include_roster=False,
+        )
+        return pack.content if not pack.is_empty else None
+    except Exception:
+        logger.warning(
+            "MissionPlanner: planning context pack unavailable — continuing without it",
+            exc_info=True,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-MIN_TASKS = 3
+# PRD-163 S2/Q55: the 3-task floor is removed — a single-task plan is legal.
+# Decomposition still prefers multiple tasks for genuinely complex goals, but the
+# validator no longer rejects a 1-task plan.
+MIN_TASKS = 1
 MAX_TASKS = 20
 MAX_PLAN_RETRIES = 3
 TOKENS_PER_TASK_ESTIMATE = 2000  # legacy fallback
@@ -311,6 +356,7 @@ class MissionPlanner:
         failed_task_reason: str,
         user_notes: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        db: Any = None,
     ) -> DecompositionResult:
         """
         Replan a failed mission — generate replacement tasks for the failed
@@ -337,6 +383,9 @@ class MissionPlanner:
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
+        # PRD-164 S1 (Q61): same one planning pack as decompose().
+        planning_context = await _build_planning_context(goal, workspace_id, db)
+
         for attempt in range(1, MAX_PLAN_RETRIES + 1):
             logger.info(
                 "MissionPlanner.replan: attempt %d/%d for goal='%s' workspace=%s",
@@ -354,6 +403,7 @@ class MissionPlanner:
                 failed_task_reason=failed_task_reason,
                 user_notes=user_notes,
                 validation_errors=last_errors if attempt > 1 else None,
+                planning_context=planning_context,
             )
 
             messages = [
@@ -424,7 +474,15 @@ class MissionPlanner:
                 max_concurrent=max_concurrent,
             )
 
-        raise PlanValidationError(last_errors)
+        err = PlanValidationError(last_errors)
+        record_error(
+            subsystem="planner",
+            operation="replan",
+            error=err,
+            workspace_id=workspace_id,
+            extra={"goal": goal[:200], "failed_task_title": failed_task_title},
+        )
+        raise err
 
     @staticmethod
     async def decompose(
@@ -432,6 +490,7 @@ class MissionPlanner:
         workspace_id: UUID,
         agents: Sequence[Agent],
         config: Optional[Dict[str, Any]] = None,
+        db: Any = None,
     ) -> DecompositionResult:
         """
         Decompose *goal* into a task DAG validated against available *agents*.
@@ -441,6 +500,8 @@ class MissionPlanner:
             workspace_id: Owning workspace UUID.
             agents: Available roster agents for this workspace.
             config: Optional overrides (unused in v1, reserved for 82B).
+            db: Optional DB session — enables the PRD-164 planning context
+                pack (RAG + mission memory + KG) in the decomposition prompt.
 
         Returns:
             DecompositionResult with tasks, dependencies, and token estimate.
@@ -538,6 +599,11 @@ class MissionPlanner:
         agent_roster = _render_agent_roster(agents)
         last_errors: List[str] = []
 
+        # PRD-164 S1 (Q61): the ONE planning context pack — RAG on the goal,
+        # prior mission summaries/failures, KG subgraph — built once, reused
+        # across retries.
+        planning_context = await _build_planning_context(goal, workspace_id, db)
+
         # PRD-127: Resolve attachment_ids for planner context
         attachment_contents: Optional[List[Dict[str, str]]] = None
         mission_attachment_ids: List[str] = (config or {}).get("attachment_ids", [])
@@ -571,6 +637,7 @@ class MissionPlanner:
                 attachment_contents=attachment_contents,
                 chat_context=chat_context,
                 power_mode=power_mode,
+                planning_context=planning_context,
             )
 
             messages = [
@@ -641,8 +708,17 @@ class MissionPlanner:
                 max_concurrent=max_concurrent,
             )
 
-        # All retries exhausted
-        raise PlanValidationError(last_errors)
+        # All retries exhausted — record the terminal planning failure so the
+        # ERRORS-by-subsystem tile reflects it, then surface to the caller.
+        err = PlanValidationError(last_errors)
+        record_error(
+            subsystem="planner",
+            operation="decompose",
+            error=err,
+            workspace_id=workspace_id,
+            extra={"goal": goal[:200]},
+        )
+        raise err
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +742,9 @@ name (e.g. "research", "analysis"). Tasks in the same parallel_group MUST NOT \
 depend on each other.
 - After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
 that merges and integrates the outputs of the parallel tasks.
-- Every task must specify an agent_role matching one of the available agents.
+- Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
+researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
+platform routes each capability to the best-fit agent.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
@@ -683,11 +761,17 @@ def _build_decomposition_prompt(
     attachment_contents: Optional[List[Dict[str, str]]] = None,
     chat_context: Optional[List[Dict[str, str]]] = None,
     power_mode: str = "standard",
+    planning_context: Optional[str] = None,
 ) -> str:
     """Build the user prompt for goal decomposition."""
     parts = [
         f"## Goal\n<user_goal>\n{goal}\n</user_goal>\n",
     ]
+
+    # PRD-164 S1: the platform planning pack (RAG + mission memory + KG),
+    # assembled by ContextService.build_planning_context — the one assembler.
+    if planning_context:
+        parts.append(f"{planning_context}\n")
 
     # PRD-125 Phase 1: Include recent chat context when mission is launched from chat
     if chat_context:
@@ -835,7 +919,9 @@ Rules:
 Tasks in the same parallel_group MUST NOT depend on each other.
 - After parallel groups converge, include a "synthesis" task (task_type="synthesis") \
 that merges the parallel outputs.
-- Every task must specify an agent_role matching one of the available agents.
+- Every task must specify an agent_role naming the CAPABILITY it needs (e.g. \
+researcher, writer, analyst, summarizer) — NOT a specific agent's name. The \
+platform routes each capability to the best-fit agent.
 - The plan MUST contain between 3 and 20 tasks inclusive.
 - Return ONLY a single JSON object (no markdown, no explanation).
 """
@@ -850,6 +936,7 @@ def _build_replan_prompt(
     failed_task_reason: str,
     user_notes: Optional[str] = None,
     validation_errors: Optional[List[str]] = None,
+    planning_context: Optional[str] = None,
 ) -> str:
     """Build the user prompt for replanning a failed mission."""
     completed_summary = ""
@@ -870,6 +957,10 @@ def _build_replan_prompt(
         f"## Failed Task\n- **Title**: {failed_task_title}\n- **Failure Reason**: {failed_task_reason}\n",
     ]
 
+    # PRD-164 S1: the platform planning pack — same assembler as decompose().
+    if planning_context:
+        parts.append(f"{planning_context}\n")
+
     if user_notes:
         parts.append(f"## User Guidance for Replan\n{user_notes}\n")
 
@@ -886,8 +977,36 @@ def _build_replan_prompt(
     return "\n".join(parts)
 
 
+# A capability role is "fillable" when at least one active agent has a
+# non-trivial skill/description/tag match for it. Below this floor the matcher
+# would return NO_AGENT_AVAILABLE at dispatch, so the plan is rejected up front
+# rather than failing a task at runtime.
+_ROLE_FILLABILITY_FLOOR = 0.3
+
+
+def _best_role_fit(role: str, agents: Sequence[Agent]) -> float:
+    """Highest capability fit any *active* agent has for ``role`` (0.0 = none)."""
+    role_lower = (role or "").lower()
+    return max(
+        (
+            _compute_skill_match(a, role_lower)
+            for a in agents
+            if getattr(a, "status", None) == "active"
+        ),
+        default=0.0,
+    )
+
+
 def _render_agent_roster(agents: Sequence[Agent]) -> str:
-    """Render available agents as a concise description for the planner prompt."""
+    """Render available agents by CAPABILITY for the planner prompt.
+
+    Agents are listed by what they can do (skills, focus, tags) so the planner
+    understands the roster's coverage — but never as a ``role: <name>`` mapping.
+    Binding a task to a specific agent NAME is what mis-routed research work to a
+    non-research agent (the matcher scores an exact name match at 1.0). Instead
+    the planner must choose ``agent_role`` from the canonical capability
+    vocabulary, and the matcher resolves each capability to the best-fit agent.
+    """
     if not agents:
         return "(No agents available)\n"
 
@@ -915,13 +1034,23 @@ def _render_agent_roster(agents: Sequence[Agent]) -> str:
 
         desc = (agent.description or "")[:120]
         lines.append(
-            f"- **{agent.name}** (role: {agent.name.lower()})"
-            f" — {desc}"
+            f"- {agent.name}: {desc}"
             f"{skills_text}{tags_text}"
             f"{f' | Model: {model_id}' if model_id else ''}"
         )
 
-    return "\n".join(lines) if lines else "(No active agents)\n"
+    if not lines:
+        return "(No active agents)\n"
+
+    vocab = ", ".join(sorted(CANONICAL_ROLES))
+    return (
+        "\n".join(lines)
+        + "\n\n"
+        + "Set each task's `agent_role` to the CAPABILITY the task needs, chosen "
+        + f"from: {vocab}.\n"
+        + "Do NOT use an agent's name as the role — the platform routes each "
+        + "capability to the best-fit agent listed above.\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1323,35 +1452,16 @@ def _validate_plan(
     except InvalidDependencyError as exc:
         errors.append(str(exc))
 
-    # 4. Agent role matching
-    active_agent_names = set()
-    for agent in agents:
-        if agent.status == "active":
-            active_agent_names.add(agent.name.lower())
-            # Also match by skill names
-            try:
-                if agent.skills:
-                    for s in agent.skills:
-                        if s.name:
-                            active_agent_names.add(s.name.lower())
-            except Exception:
-                pass
-            # Also match by tags
-            if agent.tags and isinstance(agent.tags, list):
-                for t in agent.tags:
-                    active_agent_names.add(str(t).lower())
-
+    # 4. Agent role capability coverage.
+    #    A role is a CAPABILITY (researcher, writer, ...), valid when some active
+    #    agent can actually fill it — scored the same way the matcher dispatches.
+    #    This catches unfillable roles at plan time instead of failing the task
+    #    with NO_AGENT_AVAILABLE at dispatch.
     for task in tasks:
-        role_lower = task.agent_role.lower()
-        # Fuzzy: check if role matches any agent name, skill, or tag
-        matched = any(
-            role_lower == name or role_lower in name or name in role_lower
-            for name in active_agent_names
-        )
-        if not matched:
+        if _best_role_fit(task.agent_role, agents) < _ROLE_FILLABILITY_FLOOR:
             errors.append(
                 f"Task '{task.title}' references agent_role '{task.agent_role}' "
-                f"which does not match any active agent"
+                f"which no active agent can fill"
             )
 
     # 5. Parallel group cross-dependency check (PRD-82C)

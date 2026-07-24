@@ -49,14 +49,14 @@ ARCHITECTURE_SUMMARY = """\
 **Core Pipeline (Chat):**
 1. api/chat.py → AutoBrain (complexity assessment)
 2. Universal Router: Tier 1 (keywords) → Tier 2 (keyword classifier) → Tier 2.5 (semantic) → Tier 3 (LLM)
-3. SmartChatIntegration: personality + memory (Mem0 two-tier) + tool filtering
+3. SmartChatIntegration: personality + memory (two-tier durable) + tool filtering
 4. StreamingChatService.stream_response_with_agent() → LLM + tool loop (max 10 iterations)
 
 **Key Modules:**
 - RAG: S3 Vectors (qwen/qwen3-embedding-8b, 2048 dims), hybrid search (70% vector / 30% keyword)
 - CodeGraph: Codebase indexing, symbols, call graphs, PageRank
 - NL2SQL: Natural language → PostgreSQL queries
-- Memory: Mem0 two-tier (global + agent-specific)
+- Memory: two-tier durable (global + agent-specific)
 - Tools: ToolRegistry (19 core) + ActionRegistry (platform_* tools) + Composio (external)
 - Document Gen: PDF/DOCX/XLSX generation from data
 

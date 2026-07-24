@@ -6,6 +6,7 @@ import logging
 from core.database.database import get_db
 from core.models import Pattern, PatternCreate, PatternResponse
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,9 @@ async def list_patterns(
         logger.error(f"Error listing patterns: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/", )
+@router.post("/", 
+    dependencies=[Depends(require_workspace_permission("knowledge:create"))],
+)
 async def create_pattern(
     pattern_data: PatternCreate, 
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -116,7 +119,9 @@ async def get_pattern(
         logger.error(f"Error getting pattern: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{pattern_id}", )
+@router.delete("/{pattern_id}", 
+    dependencies=[Depends(require_workspace_permission("knowledge:delete"))],
+)
 async def delete_pattern(
     pattern_id: int, 
     ctx: RequestContext = Depends(get_request_context_hybrid),

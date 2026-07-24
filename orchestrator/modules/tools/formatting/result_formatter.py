@@ -365,7 +365,7 @@ class ToolResultFormatter:
             if isinstance(similarity, str):
                 try:
                     similarity = float(similarity)
-                except:
+                except Exception:
                     similarity = 0.0
             
             formatted.append({
@@ -536,10 +536,36 @@ class ToolResultFormatter:
         }
     
     @staticmethod
+    def _mission_oversight(risk_class: Optional[str]) -> Dict[str, Any]:
+        """PRD-181 S5: resolve the AI-Act oversight tier + rationale for a mission
+        approval card. A mission awaiting approval is human-in-the-loop by
+        definition, so an absent/monitor-only risk signal is floored to the
+        dominant 'ask' class (external side-effect) — the card must never imply
+        'no human oversight' on a plan a human is being asked to approve.
+        """
+        try:
+            from modules.policy.ai_act import OversightTier, oversight_for_risk
+            from modules.policy.policy_document import RISK_EXTERNAL
+
+            mapping = oversight_for_risk(risk_class)
+            if mapping.tier != OversightTier.HUMAN_IN_THE_LOOP:
+                mapping = oversight_for_risk(RISK_EXTERNAL)
+            return mapping.to_dict()
+        except Exception:
+            # Fail-safe: still describe human oversight even if the module import
+            # hiccups — never emit a card that implies no oversight.
+            return {
+                "risk_class": risk_class or "unknown",
+                "tier": "human_in_the_loop",
+                "rationale": "This plan requires human approval before it runs.",
+                "requires_approval": True,
+            }
+
+    @staticmethod
     def format_for_frontend(result: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
         """
         Format tool result specifically for frontend artifact viewer.
-        
+
         Returns structure expected by frontend components.
         """
         standardized = ToolResultFormatter.standardize_result(result, tool_name)
@@ -734,7 +760,85 @@ class ToolResultFormatter:
             }
             logger.info(f"[FrontendData] generate_document: {frontend_data['generated_document']['filename']}")
 
+        elif tool_name == "widget_open_callback_form":
+            # PRD-008-A.2: pass the widget signal straight through so the
+            # SSE bridge in api/widgets/chat.py can convert it to an
+            # `event: open-callback-form` event for the SDK.
+            passthrough = result.get("frontend_data") or {}
+            frontend_data.update(passthrough)
+
+        elif tool_name == "platform_create_mission":
+            # PRD-163 S4: an auto-created mission that's awaiting approval surfaces
+            # an in-chat approval card. (raw_result fallback covers wrapped results.)
+            mres = result if result.get("mission_id") else (result.get("raw_result") or {})
+            if mres.get("awaiting_approval") and mres.get("mission_id"):
+                # PRD-181 S5 (EU-AI-Act Art.14): the card carries the autonomy risk
+                # tier + the oversight rationale so a human approver sees the risk
+                # classification and WHY they are in the loop. A mission that
+                # reached AWAITING_APPROVAL is human-in-the-loop by definition, so
+                # an absent/low risk signal is floored to the dominant "ask" class.
+                oversight = ToolResultFormatter._mission_oversight(mres.get("risk_class"))
+                frontend_data["mission_approval"] = {
+                    "mission_id": str(mres.get("mission_id")),
+                    "goal": mres.get("goal", ""),
+                    "state": mres.get("state"),
+                    "task_count": mres.get("task_count", 0),
+                    "tasks": mres.get("tasks", []),
+                    # S5 — AI-Act oversight fields.
+                    "risk_class": oversight["risk_class"],
+                    "risk_tier": oversight["tier"],
+                    "oversight_rationale": oversight["rationale"],
+                    "requires_approval": True,
+                }
+
+        # PRD-193 S3 (P2-12): a confirmation ask that carries a grant surfaces
+        # the in-chat tool-approval card — the human's affordance beside the
+        # S15 prose (which stays the model's view). Result-shape driven, not a
+        # tool_name branch: any gated action (direct platform_* call or the
+        # platform_execute meta-dispatch) gets the card when the S1 gate
+        # attached a grant. Mirrors the mission_approval payload above.
+        if result.get("requires_confirmation") and result.get("grant_id") is not None:
+            frontend_data["tool_approval"] = {
+                "grant_id": result.get("grant_id"),
+                "action": result.get("action") or tool_name,
+                "message": result.get("message", ""),
+                "permission_level": result.get("permission_level"),
+                # The human must see exactly what they are approving — a
+                # key/value digest of the model-provided params, never a raw
+                # dump of server plumbing.
+                "params": ToolResultFormatter._tool_params_digest(result.get("params")),
+                # AI-Act oversight fields (attached by the S1 gate; floored
+                # fail-safe here so the card never implies "no oversight").
+                "risk_class": result.get("risk_class") or "unknown",
+                "risk_tier": result.get("risk_tier") or "human_in_the_loop",
+                "oversight_rationale": result.get("oversight_rationale") or (
+                    "This action requires human approval before it runs."
+                ),
+                "requires_approval": True,
+            }
+
         return frontend_data
+
+    @staticmethod
+    def _tool_params_digest(params: Any) -> Dict[str, Any]:
+        """PRD-193 S3: human-readable digest of a gated call's params.
+
+        Server-injected ``_``-prefixed plumbing is dropped; long values are
+        truncated. The approver sees the tool's real arguments (target ids,
+        keys, values) — not a raw JSON dump.
+        """
+        if not isinstance(params, dict):
+            return {}
+        digest: Dict[str, Any] = {}
+        for key, value in params.items():
+            if str(key).startswith("_"):
+                continue
+            if isinstance(value, (int, float, bool)) or value is None:
+                digest[str(key)] = value
+                continue
+            text = value if isinstance(value, str) else str(value)
+            digest[str(key)] = (text[:117] + "…") if len(text) > 120 else text
+        return digest
     
     @staticmethod
     def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 20000) -> str:
@@ -755,6 +859,13 @@ class ToolResultFormatter:
                 ws_json = str(ws_data)
             llm_text = f"Tool: {tool_name}\nStatus: success\n\n{ws_json}"
             return llm_text[:max_chars]
+
+        # PRD-008-A.2: widget UI tools return a short llm_context that the
+        # agent uses to confirm to the shopper. Pass it through verbatim.
+        if tool_name == "widget_open_callback_form":
+            if not result.get("success"):
+                return f"Tool {tool_name} failed: {result.get('error', 'Unknown error')}"
+            return result.get("llm_context") or "Callback form opened in shopper's chat panel."
 
         # Platform tools return data under custom keys (agents, recipes, etc.)
         # Bypass standardizer which only looks for "results"/"result" keys.

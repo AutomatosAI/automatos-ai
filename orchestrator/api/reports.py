@@ -15,12 +15,18 @@ from sqlalchemy.orm import Session
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.super_admin import require_super_admin
 from core.workspace_client import WorkspaceClient
 from services.report_service import ReportService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/reports", tags=["reports"])
+# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed).
+router = APIRouter(
+    prefix="/api/reports",
+    tags=["reports"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 
 # ── List Reports ─────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ Uses httpx (already in requirements) — no cohere SDK dependency.
 Graceful degradation: if no API key configured, returns documents unchanged.
 """
 
+import asyncio
 import logging
 import threading
 from dataclasses import dataclass
@@ -21,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 COHERE_RERANK_URL = config.COHERE_RERANK_URL
 COHERE_DOC_CHAR_LIMIT = 4096
-DEFAULT_RERANK_MODEL = "rerank-v3.5"
 
 
 @dataclass
@@ -36,9 +36,12 @@ class RerankManager:
 
     def __init__(self):
         self._api_key: Optional[str] = None
-        self._model: str = DEFAULT_RERANK_MODEL
+        # Model default lives in config (PRD-188 S1) — resolved at construction
+        # (the singleton is lazy), never at module import.
+        self._model: str = config.RAG_RERANK_MODEL
         self._loaded = False
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop: Optional[asyncio.AbstractEventLoop] = None
 
     def _load_config(self):
         """Lazy-load API key and model from system_settings, fallback to env."""
@@ -58,8 +61,12 @@ class RerankManager:
                 if key_setting and key_setting.value:
                     self._api_key = key_setting.value
 
+                # PRD-197 S2: PRD-136 renamed the row to (embeddings,
+                # rerank_model); the old key missed on every read, silently
+                # pinning the model to config regardless of the admin's choice.
                 model_setting = db.query(SystemSetting).filter(
-                    SystemSetting.key == "rag_rerank_model"
+                    SystemSetting.category == "embeddings",
+                    SystemSetting.key == "rerank_model",
                 ).first()
                 if model_setting and model_setting.value:
                     self._model = model_setting.value
@@ -85,8 +92,21 @@ class RerankManager:
         return bool(self._api_key)
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
+        # httpx binds a client's connection pool to the loop its connections
+        # open on. This singleton outlives request loops (thread bridges,
+        # per-run asyncio.run callers), so a process-wide cached client raises
+        # "Event loop is closed" for every caller on a later loop — silently
+        # degrading rerank to identity order. Rebind per running loop instead;
+        # a client stranded on a dead loop can't be awaited closed from here,
+        # so its reference is dropped for GC to reclaim.
+        loop = asyncio.get_running_loop()
+        if (
+            self._client is None
+            or self._client.is_closed
+            or self._client_loop is not loop
+        ):
             self._client = httpx.AsyncClient(timeout=30.0)
+            self._client_loop = loop
         return self._client
 
     async def rerank(

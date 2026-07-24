@@ -115,7 +115,7 @@ export function TeamManagement() {
     const getRoleBadgeColor = (role: string) => {
         switch (role) {
             case 'owner': return 'text-purple-400 border-purple-400/30 bg-purple-400/10'
-            case 'admin': return 'text-orange-400 border-orange-400/30 bg-orange-400/10'
+            case 'admin': return 'text-warning border-warning/30 bg-warning/10'
             case 'editor': return 'text-blue-400 border-blue-400/30 bg-blue-400/10'
             case 'viewer': return 'text-green-400 border-green-400/30 bg-green-400/10'
             default: return 'text-muted-foreground border-border bg-secondary/50'
@@ -239,7 +239,7 @@ export function TeamManagement() {
                                 className="flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 items-start md:items-center hover:bg-white/5 transition-colors group"
                             >
                                 <div className="md:col-span-5 flex items-center gap-3 w-full md:w-auto">
-                                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-orange-500/20 to-purple-500/20 flex items-center justify-center border border-white/10 shrink-0">
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-warning/20 to-purple-500/20 flex items-center justify-center border border-white/10 shrink-0">
                                         <span className="font-semibold text-foreground">
                                             {member.name ? member.name[0].toUpperCase() : member.email[0].toUpperCase()}
                                         </span>
@@ -261,7 +261,7 @@ export function TeamManagement() {
                                             className={`appearance-none pl-3 pr-8 py-1.5 text-xs font-semibold rounded-full border bg-transparent focus:outline-none focus:ring-1 focus:ring-offset-0 cursor-pointer ${getRoleBadgeColor(member.role)}`}
                                         >
                                             <option value="owner" className="bg-[#1a1a1a] text-purple-400">Owner</option>
-                                            <option value="admin" className="bg-[#1a1a1a] text-orange-400">Admin</option>
+                                            <option value="admin" className="bg-[#1a1a1a] text-warning">Admin</option>
                                             <option value="editor" className="bg-[#1a1a1a] text-blue-400">Editor</option>
                                             <option value="viewer" className="bg-[#1a1a1a] text-green-400">Viewer</option>
                                         </select>

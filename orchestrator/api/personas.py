@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -242,7 +243,7 @@ async def get_persona(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/workspaces/{workspace_id}/personas", status_code=201, response_model=PersonaOut)
+@router.post("/workspaces/{workspace_id}/personas", status_code=201, response_model=PersonaOut, dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_workspace_persona(
     workspace_id: UUID,
     body: CreatePersonaBody,
@@ -289,7 +290,7 @@ async def create_workspace_persona(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/workspaces/{workspace_id}/personas/{persona_id}", response_model=PersonaOut)
+@router.put("/workspaces/{workspace_id}/personas/{persona_id}", response_model=PersonaOut, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_workspace_persona(
     workspace_id: UUID,
     persona_id: UUID,
@@ -343,7 +344,7 @@ async def update_workspace_persona(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/workspaces/{workspace_id}/personas/{persona_id}")
+@router.delete("/workspaces/{workspace_id}/personas/{persona_id}", dependencies=[Depends(require_workspace_permission("agents:delete"))])
 async def delete_workspace_persona(
     workspace_id: UUID,
     persona_id: UUID,
@@ -397,7 +398,7 @@ async def delete_workspace_persona(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/agents/{agent_id}/persona", response_model=AgentPersonaOut)
+@router.put("/agents/{agent_id}/persona", response_model=AgentPersonaOut, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def set_agent_persona(
     agent_id: int,
     body: SetAgentPersonaBody,

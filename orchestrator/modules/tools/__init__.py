@@ -5,16 +5,12 @@ Tools Module
 Tool registry, execution, and management.
 
 Usage:
-    from modules.tools import ToolService, ToolRegistry
-    
-    service = ToolService(db_session)
-    tools = service.list_tools(category='research')
-    result = await service.execute('search_knowledge', {'query': '...'})
+    from modules.tools import ToolRegistry, get_tools_for_agent
+
+    tools = get_tools_for_agent(agent_id, workspace_id)
 
 Sellable as: automatos-tools
 """
-
-from .service import ToolService, ToolServiceConfig
 
 # Registry exports
 from .registry import (
@@ -36,6 +32,7 @@ from .tool_router import (
     ToolRouter,
     get_tool_router,
     get_tools_for_agent,
+    get_tools_for_agent_async,
     execute_tool,
     execute_tool_with_validation,
     validate_action_for_intent,
@@ -44,10 +41,6 @@ from .tool_router import (
 )
 
 __all__ = [
-    # Main Service
-    "ToolService",
-    "ToolServiceConfig",
-
     # Registry
     "ToolRegistry",
     "ToolCategory",
@@ -63,6 +56,7 @@ __all__ = [
     "ToolRouter",
     "get_tool_router",
     "get_tools_for_agent",
+    "get_tools_for_agent_async",
     "execute_tool",
     "execute_tool_with_validation",
     "validate_action_for_intent",

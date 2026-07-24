@@ -31,59 +31,81 @@ if _orchestrator_root not in sys.path:
     sys.path.insert(0, _orchestrator_root)
 
 # ---------------------------------------------------------------------------
-# Stub qdrant_client before any project module imports it.
-# This prevents ModuleNotFoundError when qdrant_client is not installed.
-# ---------------------------------------------------------------------------
-_qdrant_stub = MagicMock()
-_qdrant_stub.AsyncQdrantClient = MagicMock
-# Expose every qdrant_client.models symbol the adapter uses
-_models_stub = MagicMock()
-for _sym in ("Distance", "FieldCondition", "Filter", "MatchValue",
-             "PayloadSchemaType", "PointStruct", "VectorParams"):
-    setattr(_models_stub, _sym, MagicMock())
-_qdrant_stub.models = _models_stub
-sys.modules.setdefault("qdrant_client", _qdrant_stub)
-sys.modules.setdefault("qdrant_client.models", _models_stub)
-
-# ---------------------------------------------------------------------------
-# Import the module under test ONCE after stubs are in place.
+# Import VectorFieldSharedContext under stubbed heavy deps, then restore.
 # Monkey-patching the instance (not the constructor) avoids re-import races.
 # ---------------------------------------------------------------------------
-_fake_config_for_import = MagicMock()
-_fake_config_for_import.QDRANT_URL = "http://localhost:6333"
-_fake_config_for_import.QDRANT_API_KEY = ""
-_fake_config_for_import.FIELD_DECAY_RATE = 0.1
-_fake_config_for_import.FIELD_REINFORCE_BONUS = 0.05
-_fake_config_for_import.FIELD_REINFORCE_CAP = 2.0
-_fake_config_for_import.FIELD_ARCHIVAL_THRESHOLD = 0.05
-_fake_config_for_import.FIELD_BOUNDARY_PERMEABILITY = 1.0
-_fake_config_for_import.FIELD_EMBEDDING_DIM = 2048
+def _import_vector_field_isolated():
+    """Load VectorFieldSharedContext with qdrant_client / core.llm / core.ports
+    stubbed, then restore sys.modules.
 
-# Import the real SharedContextPort ABC BEFORE stubbing core.*
-# (vector_field.py subclasses it — MagicMock would break object.__new__)
-from core.ports.context import SharedContextPort  # noqa: E402
+    The adapter captures the real SharedContextPort base at class-definition
+    time, so the stubs can be torn down once the import completes. Restoring
+    sys.modules stops the MagicMock ``core.ports.context`` (and the qdrant /
+    core.llm stubs) from leaking into sibling modules' collection. (PRD-142
+    W2-S2b.)
+    """
+    _keys = (
+        "qdrant_client", "qdrant_client.models", "config",
+        "core.llm", "core.llm.embedding_manager", "core.ports.context",
+    )
+    _saved = {k: sys.modules.get(k) for k in _keys}
+    try:
+        _qdrant_stub = MagicMock()
+        _qdrant_stub.AsyncQdrantClient = MagicMock
+        # Expose every qdrant_client.models symbol the adapter uses
+        _models_stub = MagicMock()
+        for _sym in ("Distance", "FieldCondition", "Filter", "MatchValue",
+                     "PayloadSchemaType", "PointStruct", "VectorParams"):
+            setattr(_models_stub, _sym, MagicMock())
+        _qdrant_stub.models = _models_stub
+        sys.modules.setdefault("qdrant_client", _qdrant_stub)
+        sys.modules.setdefault("qdrant_client.models", _models_stub)
 
-# Stub heavy transitive imports so we don't need the full dep tree
-_config_mod = MagicMock()
-_config_mod.config = _fake_config_for_import
-sys.modules.setdefault("config", _config_mod)
+        _fake_config_for_import = MagicMock()
+        _fake_config_for_import.QDRANT_URL = "http://localhost:6333"
+        _fake_config_for_import.QDRANT_API_KEY = ""
+        _fake_config_for_import.FIELD_DECAY_RATE = 0.1
+        _fake_config_for_import.FIELD_REINFORCE_BONUS = 0.05
+        _fake_config_for_import.FIELD_REINFORCE_CAP = 2.0
+        _fake_config_for_import.FIELD_ARCHIVAL_THRESHOLD = 0.05
+        _fake_config_for_import.FIELD_BOUNDARY_PERMEABILITY = 1.0
+        _fake_config_for_import.FIELD_EMBEDDING_DIM = 2048
 
-# Stub core.llm chain so EmbeddingManager import doesn't pull the world
-_core_stub = MagicMock()
-sys.modules.setdefault("core.llm", _core_stub)
-sys.modules.setdefault("core.llm.embedding_manager", _core_stub)
+        # Import the real SharedContextPort ABC BEFORE stubbing core.*
+        # (vector_field.py subclasses it — MagicMock would break object.__new__)
+        from core.ports.context import SharedContextPort
 
-# Re-register the real ports module so the subclass import resolves
-_ports_ctx_mod = MagicMock()
-_ports_ctx_mod.SharedContextPort = SharedContextPort
-sys.modules["core.ports.context"] = _ports_ctx_mod
+        # Stub heavy transitive imports so we don't need the full dep tree
+        _config_mod = MagicMock()
+        _config_mod.config = _fake_config_for_import
+        sys.modules.setdefault("config", _config_mod)
 
-with (
-    patch("modules.context.adapters.vector_field.AsyncQdrantClient", return_value=MagicMock()),
-    patch("modules.context.adapters.vector_field.EmbeddingManager", return_value=MagicMock()),
-    patch("modules.context.adapters.vector_field.config", _fake_config_for_import),
-):
-    from modules.context.adapters.vector_field import VectorFieldSharedContext
+        # Stub core.llm chain so EmbeddingManager import doesn't pull the world
+        _core_stub = MagicMock()
+        sys.modules.setdefault("core.llm", _core_stub)
+        sys.modules.setdefault("core.llm.embedding_manager", _core_stub)
+
+        # Re-register a ports module exposing the real ABC so the subclass resolves
+        _ports_ctx_mod = MagicMock()
+        _ports_ctx_mod.SharedContextPort = SharedContextPort
+        sys.modules["core.ports.context"] = _ports_ctx_mod
+
+        with (
+            patch("modules.context.adapters.vector_field.AsyncQdrantClient", return_value=MagicMock()),
+            patch("modules.context.adapters.vector_field.EmbeddingManager", return_value=MagicMock()),
+            patch("modules.context.adapters.vector_field.config", _fake_config_for_import),
+        ):
+            from modules.context.adapters.vector_field import VectorFieldSharedContext
+        return VectorFieldSharedContext
+    finally:
+        for _k, _v in _saved.items():
+            if _v is None:
+                sys.modules.pop(_k, None)
+            else:
+                sys.modules[_k] = _v
+
+
+VectorFieldSharedContext = _import_vector_field_isolated()
 
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
@@ -137,6 +159,7 @@ def mock_qdrant():
     """Patch AsyncQdrantClient for every test that uses it."""
     client = MagicMock()
     # Every method the adapter awaits must be an AsyncMock
+    client.collection_exists = AsyncMock(return_value=False)
     client.create_collection = AsyncMock()
     client.create_payload_index = AsyncMock()
     client.upsert = AsyncMock()
@@ -146,7 +169,9 @@ def mock_qdrant():
     client.scroll = AsyncMock(return_value=([], None))
     client.retrieve = AsyncMock(return_value=[])
     client.set_payload = AsyncMock()
-    client.delete_collection = AsyncMock()
+    # PRD-108: destroy is delete-by-filter on the shared collection, not
+    # delete_collection (collections are no longer per-field).
+    client.delete = AsyncMock()
     return client
 
 
@@ -175,6 +200,12 @@ def adapter(mock_qdrant, mock_embedder):
     inst._archival_threshold = 0.05
     inst._boundary_permeability = 1.0
     inst._dimension = 2048
+    inst._half_life_access_scale = 0.5  # PRD-166 S2: adaptive half-life
+    # PRD-108: the single shared collection is bootstrapped once via
+    # ensure_shared_collection(). Behavioural tests pin it done so the
+    # method-under-test runs without the bootstrap side-trip; the dedicated
+    # bootstrap tests flip it back to False to exercise that path.
+    inst._bootstrap_done = True
     return inst
 
 
@@ -184,7 +215,9 @@ def adapter(mock_qdrant, mock_embedder):
 
 
 class TestComputeDecayedStrength:
-    """S(t) = S₀ × e^(−λt) × access_boost, λ=0.1, boost capped at 2.0."""
+    """PRD-166 S2: stability × recency = S₀ × access_boost × e^(−λ_eff·t),
+    λ_eff = 0.1 / (1 + 0.5·access_count) (adaptive half-life), boost capped at 2.0.
+    For access_count=0 this is identical to the original fixed-λ formula."""
 
     def test_zero_age_no_accesses(self, adapter):
         result = adapter._compute_decayed_strength(1.0, age_hours=0.0, access_count=0)
@@ -229,10 +262,13 @@ class TestComputeDecayedStrength:
         assert math.isclose(result, 0.5, rel_tol=1e-9)
 
     def test_decay_combined_with_access_boost(self, adapter):
-        # S(2, count=10) = 1.0 × e^(-0.2) × 1.5
-        expected = math.exp(-0.2) * 1.5
+        # PRD-166 S2 adaptive half-life: count=10 → boost=1.5, λ_eff=0.1/(1+0.5*10)=0.1/6
+        # S(2,count=10) = 1.5 × e^(-(0.1/6)·2)
+        expected = 1.5 * math.exp(-(0.1 / 6.0) * 2.0)
         result = adapter._compute_decayed_strength(1.0, age_hours=2.0, access_count=10)
         assert math.isclose(result, expected, rel_tol=1e-9)
+        # And it decays SLOWER than the old fixed-λ formula (the point of adaptive)
+        assert result > math.exp(-0.2) * 1.5
 
     def test_zero_initial_strength_always_zero(self, adapter):
         result = adapter._compute_decayed_strength(0.0, age_hours=5.0, access_count=50)
@@ -257,17 +293,33 @@ class TestCreateContext:
         assert len(field_id) == 36  # UUID4 canonical form
 
     @pytest.mark.asyncio
-    async def test_creates_qdrant_collection(self, adapter, mock_qdrant):
-        field_id = await adapter.create_context([1])
+    async def test_bootstraps_single_shared_collection(self, adapter, mock_qdrant):
+        # PRD-108: ONE shared collection (field_memory), not one per field.
+        adapter._bootstrap_done = False
+        mock_qdrant.collection_exists.return_value = False
+        await adapter.create_context([1])
         mock_qdrant.create_collection.assert_awaited_once()
         call_kwargs = mock_qdrant.create_collection.call_args
-        assert call_kwargs.kwargs["collection_name"] == f"field_{field_id}"
+        assert call_kwargs.kwargs["collection_name"] == "field_memory"
 
     @pytest.mark.asyncio
     async def test_creates_payload_indexes(self, adapter, mock_qdrant):
+        adapter._bootstrap_done = False
+        mock_qdrant.collection_exists.return_value = False
         await adapter.create_context([1])
-        # Three indexes: content_hash, agent_id, created_at
-        assert mock_qdrant.create_payload_index.await_count == 3
+        # Six indexes: field_id, workspace_id (PRD-166 S1), subject_id (PRD-196 S6
+        # GDPR subject tag), content_hash, agent_id, created_at.
+        assert mock_qdrant.create_payload_index.await_count == 6
+        indexed = {c.kwargs["field_name"] for c in mock_qdrant.create_payload_index.await_args_list}
+        assert "subject_id" in indexed  # PRD-196 S6: subject-erase filters on it
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_skipped_when_collection_present(self, adapter, mock_qdrant):
+        # Idempotent: an existing collection is not re-created.
+        adapter._bootstrap_done = False
+        mock_qdrant.collection_exists.return_value = True
+        await adapter.create_context([1])
+        mock_qdrant.create_collection.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_no_initial_data_no_inject(self, adapter, mock_qdrant):
@@ -575,7 +627,7 @@ class TestHebbianReinforcement:
         pt = _make_point("pt-1", strength=0.8, access_count=2)
         mock_qdrant.retrieve.return_value = [pt]
 
-        await adapter._reinforce_batch("ctx-1", ["pt-1"])
+        await adapter._reinforce_batch(["pt-1"])
 
         payload = mock_qdrant.set_payload.call_args.kwargs["payload"]
         assert math.isclose(payload["strength"], 0.8, rel_tol=1e-9)
@@ -588,7 +640,7 @@ class TestHebbianReinforcement:
         pt_b = _make_point("pt-b", strength=1.0, access_count=0)
         mock_qdrant.retrieve.return_value = [pt_a, pt_b]
 
-        await adapter._reinforce_batch("ctx-1", ["pt-a", "pt-b"])
+        await adapter._reinforce_batch(["pt-a", "pt-b"])
 
         all_payloads = [call.kwargs["payload"] for call in mock_qdrant.set_payload.call_args_list]
         strengths = [p["strength"] for p in all_payloads]
@@ -602,7 +654,7 @@ class TestHebbianReinforcement:
         pts = [_make_point(f"pt-{i}", strength=1.0, access_count=0) for i in range(100)]
         mock_qdrant.retrieve.return_value = pts
 
-        await adapter._reinforce_batch("ctx-1", [f"pt-{i}" for i in range(100)])
+        await adapter._reinforce_batch([f"pt-{i}" for i in range(100)])
 
         all_payloads = [call.kwargs["payload"] for call in mock_qdrant.set_payload.call_args_list]
         for payload in all_payloads:
@@ -614,7 +666,7 @@ class TestHebbianReinforcement:
         pt_b = _make_point("pt-b", access_count=10)
         mock_qdrant.retrieve.return_value = [pt_a, pt_b]
 
-        await adapter._reinforce_batch("ctx-1", ["pt-a", "pt-b"])
+        await adapter._reinforce_batch(["pt-a", "pt-b"])
 
         payloads = {
             call.kwargs["points"][0]: call.kwargs["payload"]["access_count"]
@@ -628,14 +680,14 @@ class TestHebbianReinforcement:
         """Empty ids list → retrieve not called, set_payload not called."""
         # simulate empty result
         mock_qdrant.retrieve.return_value = []
-        await adapter._reinforce_batch("ctx-1", [])
+        await adapter._reinforce_batch([])
         mock_qdrant.set_payload.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_set_payload_called_once_per_pattern(self, adapter, mock_qdrant):
         pts = [_make_point(f"pt-{i}", strength=1.0) for i in range(3)]
         mock_qdrant.retrieve.return_value = pts
-        await adapter._reinforce_batch("ctx-1", [f"pt-{i}" for i in range(3)])
+        await adapter._reinforce_batch([f"pt-{i}" for i in range(3)])
         assert mock_qdrant.set_payload.await_count == 3
 
 
@@ -646,20 +698,23 @@ class TestHebbianReinforcement:
 
 class TestDestroyContext:
     @pytest.mark.asyncio
-    async def test_deletes_correct_collection(self, adapter, mock_qdrant):
+    async def test_deletes_by_filter_on_shared_collection(self, adapter, mock_qdrant):
+        # PRD-108: destroy = delete-by-field_id-filter on the shared
+        # collection, NOT a per-field delete_collection.
         await adapter.destroy_context("abc-123")
-        mock_qdrant.delete_collection.assert_awaited_once_with("field_abc-123")
+        mock_qdrant.delete.assert_awaited_once()
+        assert mock_qdrant.delete.call_args.kwargs["collection_name"] == "field_memory"
 
     @pytest.mark.asyncio
     async def test_does_not_raise_on_qdrant_error(self, adapter, mock_qdrant):
-        mock_qdrant.delete_collection.side_effect = Exception("network error")
+        mock_qdrant.delete.side_effect = Exception("network error")
         # Must swallow the exception gracefully
         await adapter.destroy_context("abc-123")  # no raise
 
     @pytest.mark.asyncio
-    async def test_delete_collection_called_once(self, adapter, mock_qdrant):
+    async def test_delete_called_once(self, adapter, mock_qdrant):
         await adapter.destroy_context("some-id")
-        assert mock_qdrant.delete_collection.await_count == 1
+        assert mock_qdrant.delete.await_count == 1
 
 
 # ===========================================================================
@@ -781,7 +836,8 @@ class TestFindByHash:
         mock_qdrant.scroll.return_value = ([], None)
         await adapter._find_by_hash("my-ctx", "hash123")
         scroll_call = mock_qdrant.scroll.call_args
-        assert scroll_call.kwargs.get("collection_name") == "field_my-ctx"
+        # PRD-108: lookups hit the shared collection; field isolation is via filter.
+        assert scroll_call.kwargs.get("collection_name") == "field_memory"
 
     @pytest.mark.asyncio
     async def test_scroll_limits_to_1(self, adapter, mock_qdrant):

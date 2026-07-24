@@ -3,10 +3,13 @@ S3 Vectors Backend (PRD-42)
 ============================
 
 AWS S3 Vectors backend for vector storage and retrieval.
-Creates workspace-scoped buckets with cosine similarity search.
 
-Each workspace gets its own S3 vector bucket: automatos-vectors-{workspace_id}
-with a single index: documents-index (dimension from S3_VECTORS_DIMENSION, metric=COSINE).
+The bucket may be shared across workspaces or templated per workspace
+(``{workspace_id}`` placeholder) — both layouts are supported. Tenant
+isolation does not depend on the layout: ``search()`` is fail-closed on
+``workspace_id`` metadata (PRD-186 S1), and deletes are scoped to the
+caller's own file keys. One index per bucket: dimension from
+S3_VECTORS_DIMENSION, metric from S3_VECTORS_METRIC.
 """
 
 import logging
@@ -21,9 +24,18 @@ from config import config
 logger = logging.getLogger(__name__)
 
 
+class IndexDimensionMismatchError(RuntimeError):
+    """A populated S3 Vectors index reports a dimension different from config.
+
+    Serving across the mismatch is silently wrong (vectors written or scored
+    against a foreign geometry), so setup aborts instead of proceeding — and
+    never deletes the index, which would destroy stored vectors (PRD-186 S2).
+    """
+
+
 class S3VectorsBackend:
     """
-    AWS S3 Vectors backend for EnhancedVectorStore.
+    AWS S3 Vectors document backend (the SaaS document plane).
 
     Implements search, add_documents, and delete_documents using the
     S3 Vectors API (boto3 s3vectors client).
@@ -43,6 +55,15 @@ class S3VectorsBackend:
         bucket_template = config.S3_VECTORS_BUCKET
         if not bucket_template:
             raise ValueError("S3_VECTORS_BUCKET not configured in .env")
+        # A bucket name may be a single shared bucket, or carry a {workspace_id}
+        # placeholder for physically per-workspace buckets — both are supported.
+        # Tenant isolation does NOT depend on the bucket layout: search() is
+        # fail-closed on workspace_id (it drops any hit whose metadata
+        # workspace_id != this backend's, and returns [] on a mismatched filter),
+        # so a shared bucket is still isolated at query time. PRD-172 F005 also
+        # *required* per-workspace buckets as belt-and-suspenders; that hard
+        # requirement broke a working shared-bucket deployment (2026-07-02) and is
+        # dropped — the query-level filter is the enforced isolation guarantee.
         self.bucket_name = bucket_template.replace("{workspace_id}", self.workspace_id)
 
         # Get index configuration from config
@@ -71,8 +92,9 @@ class S3VectorsBackend:
     def _ensure_setup(self) -> None:
         """Create bucket and index if they don't already exist.
 
-        If an existing index has a different dimension than configured,
-        it is deleted and recreated so embeddings can be stored correctly.
+        If an existing index reports a dimension different from the configured
+        one, setup raises ``IndexDimensionMismatchError`` (PRD-186 S2) — a
+        populated index is never deleted or recreated from here.
         """
         # Create bucket
         try:
@@ -98,27 +120,49 @@ class S3VectorsBackend:
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("ConflictException", "ResourceAlreadyExistsException"):
-                # Index exists — verify the dimension matches
-                self._verify_or_recreate_index()
+                # Index exists — its dimension must match config, loudly
+                self._assert_index_dimension()
             else:
                 raise
 
         self._setup_complete = True
 
-    def _verify_or_recreate_index(self) -> None:
-        """Log existing index info. Never delete — that destroys stored vectors."""
+    def _assert_index_dimension(self) -> None:
+        """Raise on a confirmed index-vs-config dimension mismatch (PRD-186 S2).
+
+        Never deletes or recreates — that destroys stored vectors. A mismatch
+        that can't be confirmed (index unreadable) only warns: reachability
+        problems surface elsewhere; this guard is for confirmed wrong geometry,
+        which previously was logged and served through.
+        """
         try:
             response = self.client.get_index(
                 vectorBucketName=self.bucket_name,
                 indexName=self.index_name,
             )
-            existing_dim = response.get("dimension", 0)
-            logger.info(
-                f"S3 vector index exists: {self.index_name} "
-                f"(reported dimension={existing_dim}, config={self.index_dimension})"
-            )
         except ClientError as e:
             logger.warning(f"Could not verify S3 vector index: {e}")
+            return
+
+        existing_dim = (
+            response.get("dimension")
+            or (response.get("index", {}) or {}).get("dimension")
+            or 0
+        )
+        if existing_dim and existing_dim != self.index_dimension:
+            raise IndexDimensionMismatchError(
+                f"S3 Vectors index '{self.index_name}' in bucket "
+                f"'{self.bucket_name}' reports dimension {existing_dim} but "
+                f"config.S3_VECTORS_DIMENSION is {self.index_dimension}. "
+                "Refusing to write/query mismatched geometry. Fix the "
+                "configured dimension, or re-embed into a correctly-"
+                "dimensioned index (scripts/migrate_to_s3_vectors.py) — this "
+                "index is never auto-deleted."
+            )
+        logger.info(
+            f"S3 vector index exists: {self.index_name} "
+            f"(dimension={existing_dim or 'unreported'}, config={self.index_dimension})"
+        )
 
     def search(
         self,
@@ -131,8 +175,32 @@ class S3VectorsBackend:
         Search vectors by cosine similarity.
 
         Returns list of dicts with keys: key, score, metadata.
+
+        PRD-172 F005: the ``filters`` param is now enforced. Isolation on S3
+        Vectors previously rested entirely on a per-workspace bucket name; if a
+        deploy ever pointed multiple workspaces at one bucket (no
+        ``{workspace_id}`` placeholder), search leaked cross-workspace chunk
+        text into LLM context. We ALWAYS post-filter on the backend's own
+        ``workspace_id`` and, when a ``workspace_id`` filter is supplied, on that
+        too — dropping any hit whose metadata ``workspace_id`` does not match.
         """
         self._ensure_setup()
+
+        # Fail-closed workspace scope: the backend is bound to exactly one
+        # workspace at construction; every hit must carry that workspace_id.
+        # An explicit filters['workspace_id'] must agree with it.
+        required_ws = str(self.workspace_id)
+        if filters:
+            filter_ws = filters.get("workspace_id")
+            if filter_ws is not None and str(filter_ws) != required_ws:
+                # A caller asked to search a different workspace through a
+                # workspace-bound backend — refuse rather than silently widen.
+                logger.warning(
+                    "S3 Vectors search: filter workspace_id=%s != backend "
+                    "workspace_id=%s — returning no results",
+                    filter_ws, required_ws,
+                )
+                return []
 
         try:
             response = self.client.query_vectors(
@@ -153,6 +221,15 @@ class S3VectorsBackend:
                     continue
 
                 metadata = match.get("metadata", {})
+                # PRD-172 F005 + PRD-186 S1: drop any hit not PROVEN scoped to
+                # this workspace — mismatched OR unlabeled. On a shared bucket
+                # an unstamped chunk must never reach another tenant's context,
+                # so isolation cannot depend on every writer remembering to
+                # stamp; legitimate chunks are stamped by add_documents.
+                hit_ws = metadata.get("workspace_id")
+                if hit_ws is None or str(hit_ws) != required_ws:
+                    continue
+
                 results.append({
                     "key": match.get("key", ""),
                     "score": similarity,
@@ -221,8 +298,9 @@ class S3VectorsBackend:
         if not vector_objects:
             return []
 
-        # Batch puts to stay under S3 Vectors max request size (~10MB)
-        # With 4096-dim float32 vectors (~16KB each) + metadata, ~50 vectors per batch is safe
+        # Batch puts to stay under S3 Vectors max request size (~10MB).
+        # At the configured dimension (config.S3_VECTORS_DIMENSION, live 2048
+        # → ~8KB float32 each) + metadata, 50 vectors per batch is safe.
         BATCH_SIZE = 50
         try:
             for i in range(0, len(vector_objects), BATCH_SIZE):
@@ -283,48 +361,24 @@ class S3VectorsBackend:
 
         return deleted
 
-    def delete_all_for_connection(self, connection_id: int) -> int:
+    def delete_for_files(self, external_file_ids: List[str]) -> int:
         """
-        Delete ALL vectors associated with a Composio connection.
+        Delete vectors for the given cloud documents, file by file.
 
-        Used when disconnecting a cloud storage provider with delete_vectors=true.
+        Used when disconnecting a cloud storage provider with
+        delete_vectors=true. Replaces the index-wide sweep its predecessor
+        (``delete_all_for_connection``) performed: on a shared bucket, listing
+        the whole index reaches EVERY tenant's vectors, so deletes must stay
+        scoped to the caller's own file ids — each one a workspace-checked
+        CloudDocument, deleted via the key-prefix pattern (PRD-186 S1).
         """
-        # This requires listing all vectors and filtering by metadata.
-        # S3 Vectors list_vectors returns keys; we delete in batches.
-        self._ensure_setup()
         deleted = 0
-
-        try:
-            # List all vectors in the index
-            paginator_token = None
-            while True:
-                kwargs = {
-                    "vectorBucketName": self.bucket_name,
-                    "indexName": self.index_name,
-                }
-                if paginator_token:
-                    kwargs["nextToken"] = paginator_token
-
-                response = self.client.list_vectors(**kwargs)
-                keys_to_delete = [v["key"] for v in response.get("vectors", [])]
-
-                if keys_to_delete:
-                    self.client.delete_vectors(
-                        vectorBucketName=self.bucket_name,
-                        indexName=self.index_name,
-                        keys=keys_to_delete,
-                    )
-                    deleted += len(keys_to_delete)
-
-                paginator_token = response.get("nextToken")
-                if not paginator_token:
-                    break
-
-            logger.info(f"Deleted {deleted} vectors for connection cleanup")
-
-        except ClientError as e:
-            logger.error(f"S3 Vectors bulk delete failed: {e}")
-
+        for external_file_id in external_file_ids:
+            deleted += self.delete_documents(str(external_file_id))
+        logger.info(
+            f"Deleted {deleted} vectors across {len(external_file_ids)} files "
+            "for connection cleanup"
+        )
         return deleted
 
     async def close(self) -> None:

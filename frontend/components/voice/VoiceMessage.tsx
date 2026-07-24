@@ -37,7 +37,7 @@ export function VoiceMessage({
         /* User voice message: icon + label + transcript */
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Mic className="w-3.5 h-3.5 text-orange-400" />
+            <Mic className="w-3.5 h-3.5 text-warning" />
             <span className="font-medium">Voice message</span>
           </div>
           {transcript && (
@@ -51,7 +51,7 @@ export function VoiceMessage({
         <div className="space-y-2">
           {(audioBase64 || audioUrl) && (
             <div className="flex items-center gap-2">
-              <Volume2 className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+              <Volume2 className="w-3.5 h-3.5 text-warning flex-shrink-0" />
               <VoicePlayer
                 audioUrl={audioUrl || ''}
                 audioBase64={audioBase64 || undefined}
@@ -74,12 +74,12 @@ export function VoiceMessage({
       {showLatency && (
         <div className="flex items-center gap-2">
           {sttLatencyMs !== undefined && sttLatencyMs > 0 && (
-            <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] text-orange-300/80 tabular-nums">
+            <span className="rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-[10px] text-warning/80 tabular-nums">
               STT: {sttLatencyMs}ms
             </span>
           )}
           {ttsLatencyMs !== undefined && ttsLatencyMs > 0 && (
-            <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[10px] text-orange-300/80 tabular-nums">
+            <span className="rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-[10px] text-warning/80 tabular-nums">
               TTS: {ttsLatencyMs}ms
             </span>
           )}

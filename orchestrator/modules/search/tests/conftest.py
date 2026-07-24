@@ -3,90 +3,30 @@ Search Module Test Configuration and Fixtures
 ==============================================
 
 Pytest configuration and shared fixtures for Search module testing.
+
+PRD-197 S1: fixtures for the deleted F079 zombie layer (SearchService /
+SearchConfig / EnhancedVectorStore / VectorDocument) are gone with it. What
+remains serves the live surface: the context optimizer and the math
+foundations.
 """
 
 import os
 import pytest
 import numpy as np
-from datetime import datetime
 from typing import List
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
 
 TEST_EMBEDDING_DIM = int(os.getenv("VECTOR_STORE_DIMENSIONS", "2048"))
 
-from modules.search import (
-    SearchService, SearchConfig,
-    ContextOptimizer, ContextItem,
-    EnhancedVectorStore, VectorDocument, SearchMode, RankingStrategy
-)
+from modules.search import ContextOptimizer, ContextItem
 
-
-# Test database URL
-TEST_DB_URL = "postgresql://postgres:secure_password_123@127.0.0.1:5432/orchestrator_db"
-
-
-@pytest.fixture(scope="session")
-def test_engine():
-    """Create test database engine"""
-    engine = create_engine(TEST_DB_URL)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture(scope="function")
-def db_session(test_engine):
-    """Provide a transactional database session for each test"""
-    connection = test_engine.connect()
-    transaction = connection.begin()
-    
-    SessionLocal = sessionmaker(bind=connection)
-    session = SessionLocal()
-    
-    yield session
-    
-    session.close()
-    transaction.rollback()
-    connection.close()
-
-
-@pytest.fixture
-async def vector_store():
-    """Provide EnhancedVectorStore instance"""
-    store = EnhancedVectorStore(
-        database_url=TEST_DB_URL,
-        embedding_dimension=TEST_EMBEDDING_DIM,
-        similarity_function="cosine",
-        table_name="test_vector_documents"
-    )
-    await store.initialize()
-    yield store
-    await store.close()
+# ``test_db_url``, ``test_engine`` and the transactional ``db_session`` fixture
+# come from the root orchestrator/conftest.py (PRD-142 W2-S4).
 
 
 @pytest.fixture
 def context_optimizer():
     """Provide ContextOptimizer instance"""
     return ContextOptimizer()
-
-
-@pytest.fixture
-def search_config():
-    """Provide SearchConfig for testing"""
-    return SearchConfig(
-        database_url=TEST_DB_URL,
-        embedding_dimension=TEST_EMBEDDING_DIM,
-        default_max_results=10,
-        mmr_lambda=0.7
-    )
-
-
-@pytest.fixture
-async def search_service(search_config):
-    """Provide SearchService instance"""
-    service = SearchService(config=search_config)
-    yield service
-    await service.close()
 
 
 @pytest.fixture
@@ -104,32 +44,10 @@ def sample_embeddings():
 
 
 @pytest.fixture
-def sample_documents(sample_embeddings):
-    """Provide sample VectorDocuments for testing"""
-    embeddings = sample_embeddings(count=10)
-    
-    documents = []
-    for i, embedding in enumerate(embeddings):
-        doc = VectorDocument(
-            id=f"test-doc-{i}",
-            content=f"This is test document {i} with some content about topic {i % 3}",
-            embedding=embedding,
-            metadata={"topic": i % 3, "category": "test"},
-            timestamp=datetime.now(),
-            source=f"source-{i % 3}",
-            document_type="general",
-            importance_score=0.5 + (i * 0.05)
-        )
-        documents.append(doc)
-    
-    return documents
-
-
-@pytest.fixture
 def sample_context_items(sample_embeddings):
     """Provide sample ContextItems for optimization testing"""
     embeddings = sample_embeddings(count=20)
-    
+
     items = []
     for i, embedding in enumerate(embeddings):
         item = ContextItem(
@@ -141,7 +59,7 @@ def sample_context_items(sample_embeddings):
             metadata={"index": i}
         )
         items.append(item)
-    
+
     return items
 
 
@@ -182,10 +100,3 @@ def diverse_context_items():
         ),
     ]
     return items
-
-
-@pytest.fixture
-def cleanup_vector_store():
-    """Clean up test vector store after tests"""
-    yield
-    # Cleanup logic here if needed

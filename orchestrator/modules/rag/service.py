@@ -13,13 +13,13 @@ import logging
 import json
 import os
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # Accurate token counting
 try:
     import tiktoken
     _encoding = tiktoken.encoding_for_model("gpt-4")
-except:
+except Exception:
     import tiktoken
     _encoding = tiktoken.get_encoding("cl100k_base")
 
@@ -30,6 +30,25 @@ def _count_tokens(text: str) -> int:
     return len(_encoding.encode(text))
 
 logger = logging.getLogger(__name__)
+
+# PRD-185 S9: vendor-neutral tracing seam. Import is cheap (no backend loaded at
+# module import — langfuse is lazy, config-gated, default-OFF).
+from core.observability.tracer import (
+    fire_retrieval_score,
+    STATUS_HIT,
+    STATUS_EMPTY,
+    STATUS_ERROR,
+)
+
+# PRD-197 S4: per-seam substrate telemetry (documents seam) — always-on DB
+# sink behind the Command Center substrate tile; fire-and-forget, never
+# blocks or fails retrieval.
+import time as _time
+
+from core.observability.substrate_metrics import (
+    SEAM_DOCUMENTS,
+    record_substrate_search_nowait,
+)
 
 
 @dataclass
@@ -42,57 +61,67 @@ class RAGResult:
     query: str
     diversity_score: float = 0.0
     information_gain: float = 0.0
+    # PRD-157 S3: numbered-citation source map — [{citation, source_file, document_id, score}]
+    sources_map: List[Dict[str, Any]] = field(default_factory=list)
+
+
+# PRD-157 S4: RAGConfig used to open up to 7 SessionLocal()s per instantiation
+# (one per setting). Load them once, in a single session, and memoize — so the
+# per-request RAGService construction costs zero DB round-trips after warm-up.
+_RAG_SETTINGS_CACHE: Optional[Dict[str, str]] = None
+
+
+def _load_rag_settings(force: bool = False) -> Dict[str, str]:
+    """Load all RAG-related system_settings in ONE session (memoized).
+
+    Only a successful read is cached, so a transient DB error falls back to
+    defaults without poisoning the cache.
+    """
+    global _RAG_SETTINGS_CACHE
+    if _RAG_SETTINGS_CACHE is not None and not force:
+        return _RAG_SETTINGS_CACHE
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+
+        db = SessionLocal()
+        try:
+            rows = db.query(SystemSetting.key, SystemSetting.value).all()
+            settings = {k: v for k, v in rows if v is not None}
+        finally:
+            db.close()
+        _RAG_SETTINGS_CACHE = settings  # cache only on success
+        return settings
+    except Exception:
+        logger.error("Failed to load RAG settings, using defaults", exc_info=True)
+        return {}
+
+
+def reset_rag_settings_cache() -> None:
+    """Drop the memoized RAG settings (call after changing them at runtime)."""
+    global _RAG_SETTINGS_CACHE
+    _RAG_SETTINGS_CACHE = None
 
 
 def _get_rag_setting_int(key: str, default: int) -> int:
-    """Get RAG setting from system_settings"""
+    raw = _load_rag_settings().get(key)
     try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value:
-                return int(setting.value)
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (int), using default=%d", key, default, exc_info=True)
-    return default
+        return int(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _get_rag_setting_str(key: str, default: str) -> str:
-    """Get RAG setting string from system_settings"""
-    try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value is not None:
-                return setting.value
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (str), using default='%s'", key, default, exc_info=True)
-    return default
+    raw = _load_rag_settings().get(key)
+    return raw if raw is not None else default
 
 
 def _get_rag_setting_float(key: str, default: float) -> float:
-    """Get RAG setting from system_settings"""
+    raw = _load_rag_settings().get(key)
     try:
-        from core.database.database import SessionLocal
-        from core.models.system_settings import SystemSetting
-        db = SessionLocal()
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
-            if setting and setting.value:
-                return float(setting.value)
-        finally:
-            db.close()
-    except Exception:
-        logger.error("Failed to read RAG setting '%s' (float), using default=%s", key, default, exc_info=True)
-    return default
+        return float(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -106,13 +135,22 @@ class RAGConfig:
     min_similarity: float = None
     
     # Phase 2: Advanced retrieval options
-    enable_query_enhancement: bool = True
+    # None = "caller didn't choose" → resolved in __post_init__ from the
+    # canonical config accessor (default OFF — the 2026-07 live baseline
+    # measured enhancement at −26.9 recall@5 vs plain retrieval while paying
+    # ~4 extra LLM calls per query). An explicit True/False wins: the eval
+    # lever grid relies on that.
+    enable_query_enhancement: Optional[bool] = None
     enable_rrf_fusion: bool = True
-    enable_reranking: bool = False
+    # None = "caller didn't choose" → resolved in __post_init__ from the
+    # canonical config accessor (default ON). An explicit True/False wins.
+    enable_reranking: Optional[bool] = None
     rrf_k: int = 60
 
-    # Hybrid search settings
-    hybrid_search_enabled: bool = True
+    # Hybrid search settings. The weights are REAL (PRD-188 S3): they weight
+    # the dense vs sparse legs inside the RRF fusion. None = resolved from the
+    # canonical config accessor in __post_init__; an explicit value wins.
+    hybrid_search_enabled: Optional[bool] = None
     hybrid_vector_weight: float = 0.7
     hybrid_keyword_weight: float = 0.3
     parent_child_expansion: bool = True
@@ -133,8 +171,27 @@ class RAGConfig:
         if self.min_similarity is None:
             self.min_similarity = _get_rag_setting_float("min_similarity", 0.5)
         
-        # Load reranking toggle from system_settings
-        self.enable_reranking = _get_rag_setting_str("rag_rerank_enabled", "false") == "true"
+        # PRD-188 S1+S3: rerank and hybrid default ON via the canonical config
+        # accessors (system_settings 'rag' group, then env). An explicit caller
+        # value wins: the eval lever grid and per-request overrides rely on
+        # that. The old read of the flat 'rag_rerank_enabled' key is deleted —
+        # PRD-136 renamed that settings key, so the lookup always missed,
+        # always returned "false", and silently pinned the pipeline's
+        # highest-precision stage off.
+        if (
+            self.enable_reranking is None
+            or self.hybrid_search_enabled is None
+            or self.enable_query_enhancement is None
+        ):
+            from config import config as app_config
+            if self.enable_reranking is None:
+                self.enable_reranking = bool(app_config.RAG_RERANK_ENABLED)
+            if self.hybrid_search_enabled is None:
+                self.hybrid_search_enabled = bool(app_config.RAG_HYBRID_ENABLED)
+            if self.enable_query_enhancement is None:
+                self.enable_query_enhancement = bool(
+                    app_config.RAG_QUERY_ENHANCEMENT_ENABLED
+                )
 
         logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}, reranking={self.enable_reranking}")
 
@@ -155,6 +212,11 @@ class RAGService:
     ):
         self.config = config or RAGConfig()
         self._workspace_id = workspace_id
+        # PRD-157 S4: one initialized document backend per workspace, reused
+        # across queries instead of rebuilt+reinitialized on every
+        # _get_candidates call. PRD-197 S5: which backend (S3 Vectors on SaaS,
+        # pgvector-local on the OSS edition) is decided by config at build.
+        self._doc_backends: Dict[str, Any] = {}
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
@@ -217,6 +279,49 @@ class RAGService:
         workspace_id: str = None,
         team: str = None,
     ) -> RAGResult:
+        """Public retrieval funnel — the single place a turn's docs + scores are
+        known. Wraps the implementation to emit a live grounding score at the
+        retrieval chokepoint (PRD-185 S9): num_docs, top similarity, and a
+        hit/empty/error status (the "was retrieval grounded" number over real
+        traffic). Fire-and-forget + fully guarded — a tracing fault, or the
+        seam being OFF, never changes what retrieval returns.
+        """
+        result: Optional[RAGResult] = None
+        status = STATUS_ERROR
+        try:
+            result = await self._retrieve_impl(
+                query,
+                max_chunks=max_chunks,
+                max_tokens=max_tokens,
+                diversity=diversity,
+                context_type=context_type,
+                workspace_id=workspace_id,
+                team=team,
+            )
+            status = STATUS_HIT if result.chunks else STATUS_EMPTY
+            return result
+        finally:
+            fire_retrieval_score(
+                query=query,
+                num_docs=len(result.chunks) if result else 0,
+                top_score=(
+                    max((c.get("similarity", 0.0) or 0.0 for c in result.chunks), default=0.0)
+                    if result else 0.0
+                ),
+                status=status,
+                workspace_id=workspace_id,
+            )
+
+    async def _retrieve_impl(
+        self,
+        query: str,
+        max_chunks: int = 8,
+        max_tokens: int = None,
+        diversity: float = None,
+        context_type: str = "chatbot",
+        workspace_id: str = None,
+        team: str = None,
+    ) -> RAGResult:
         """
         Retrieve optimized RAG context using existing ContextOptimizer.
         
@@ -252,11 +357,26 @@ class RAGService:
             except Exception as e:
                 logger.warning(f"Query enhancement failed, using original: {e}")
         
-        # PRD-124: normalize team name and over-fetch to compensate for post-filter reduction
-        if team:
-            from core.team_access import normalize_team
-            team = normalize_team(team)
-        team_multiplier = 2 if team else 1
+        # PRD-157 S1: derive the scope through the single fail-closed choke point.
+        # A team restriction without a workspace is unscoped → fail closed.
+        from modules.rag.retrieval_filters import build_retrieval_filters, RetrievalScopeError
+        try:
+            filters = build_retrieval_filters(
+                workspace_id=workspace_id,
+                team=team,
+                require_workspace=bool(team),
+            )
+        except RetrievalScopeError:
+            logger.warning("retrieve() requested team scope without workspace_id — failing closed")
+            return RAGResult(
+                chunks=[],
+                formatted_context="No relevant context found.",
+                total_tokens=0,
+                sources=[],
+                query=query,
+            )
+        team = filters.team  # canonical (lowercased) team or None
+        team_multiplier = 2 if filters.has_team_restriction else 1
 
         # Multi-query retrieval with RRF fusion
         if len(queries_to_search) > 1 and self.config.enable_rrf_fusion:
@@ -274,7 +394,20 @@ class RAGService:
                 min_similarity=self.config.min_similarity,
                 workspace_id=workspace_id
             )
-        
+
+        # PRD-188 S3: real hybrid — fuse the dense candidates with the
+        # Postgres BM25 sparse leg (the reader the always-maintained
+        # search_vector index never had). Runs BEFORE the empty-check so an
+        # exact-term query the embeddings miss can still be rescued by the
+        # lexical leg (the audit's keyword-vs-natural failure mode).
+        if self.config.hybrid_search_enabled:
+            candidates = await self._fuse_with_sparse_leg(
+                query,
+                candidates,
+                filters,
+                limit=max_chunks * 3 * team_multiplier,
+            )
+
         if not candidates:
             return RAGResult(
                 chunks=[],
@@ -300,8 +433,15 @@ class RAGService:
         if self.config.enable_reranking:
             candidates = await self._rerank_candidates(query, candidates)
 
-        # Parent-child context expansion
-        candidates = await self._expand_to_parent_context(candidates, self.config.expansion_window)
+        # PRD-179 S4 (F070): rag_feedback shapes ranking on the live path — a
+        # document a user marked unhelpful de-ranks (and can fall out of top-K).
+        if workspace_id:
+            candidates = self._apply_feedback_penalty(candidates, workspace_id)
+
+        # Parent-child context expansion (PRD-172 F005: scoped to workspace).
+        candidates = await self._expand_to_parent_context(
+            candidates, self.config.expansion_window, workspace_id=workspace_id
+        )
 
         # Use existing ContextOptimizer if available
         if self._context_optimizer:
@@ -312,11 +452,35 @@ class RAGService:
             # Fallback to basic retrieval
             result = self._basic_retrieval(query, candidates, max_chunks, max_tokens)
 
-        # Track document access for analytics (fire-and-forget)
+        # Track document access for analytics (PRD-157 S4: fire-and-forget, run
+        # off the event loop so it never blocks the retrieval response).
         if result.chunks and workspace_id:
-            self._track_document_access(result.chunks, workspace_id)
+            self._schedule_access_tracking(result.chunks, workspace_id)
 
         return result
+
+    def _schedule_access_tracking(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
+        """Run the (blocking) access-tracking update without blocking the caller.
+
+        Inside the async retrieve path this offloads to a worker thread and does
+        not await it; with no running loop (sync caller) it runs inline.
+        """
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            task = loop.create_task(
+                asyncio.to_thread(self._track_document_access, chunks, workspace_id)
+            )
+            # Keep a reference so the task isn't garbage-collected mid-flight.
+            self._pending_tracking = getattr(self, "_pending_tracking", set())
+            self._pending_tracking.add(task)
+            task.add_done_callback(lambda t: self._pending_tracking.discard(t))
+        else:
+            self._track_document_access(chunks, workspace_id)
 
     def _track_document_access(self, chunks: List[Dict[str, Any]], workspace_id: str) -> None:
         """Update last_accessed timestamp on documents retrieved via RAG."""
@@ -338,7 +502,7 @@ class RAGService:
                         UPDATE documents
                         SET last_accessed = NOW(),
                             rag_query_count = COALESCE(rag_query_count, 0) + 1
-                        WHERE id = ANY(:ids::int[]) AND workspace_id = :ws::uuid
+                        WHERE id = ANY(CAST(:ids AS int[])) AND workspace_id = CAST(:ws AS uuid)
                     """),
                     {"ids": list(doc_ids), "ws": str(workspace_id)},
                 )
@@ -347,66 +511,179 @@ class RAGService:
                 db.close()
         except Exception as e:
             logger.debug(f"Document access tracking failed: {e}")
-    
+
+    # ------------------------------------------------------------------
+    # PRD-179 S4 (F070): rag_feedback → live retrieval ranking
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _negative_feedback_doc_ids(workspace_id: str) -> set:
+        """Document ids this workspace marked unhelpful (recent, hot-path read).
+
+        Negative = a ``thumbs_down`` or a ``rating`` at/below
+        ``RAG_FEEDBACK_NEGATIVE_RATING_MAX``, within the lookback window. Returns
+        a set of stringified doc ids. Fail-soft: any error yields an empty set so
+        retrieval ranking is never blocked by the feedback read.
+        """
+        from config import config
+        from core.database.database import SessionLocal
+        from sqlalchemy import text
+
+        db = SessionLocal()
+        try:
+            # UNNEST expands the document_ids INT[] so each flagged doc surfaces
+            # once. Bind params go through CAST(:p AS type), the SQLAlchemy-2.0
+            # form (the raw colon-colon cast does not bind under 2.0).
+            rows = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT UNNEST(document_ids) AS doc_id
+                    FROM rag_feedback
+                    WHERE workspace_id = CAST(:ws AS uuid)
+                      AND document_ids IS NOT NULL
+                      AND (
+                            feedback_type = 'thumbs_down'
+                            OR (rating IS NOT NULL AND rating <= CAST(:rating_max AS int))
+                      )
+                      AND created_at >= NOW() - CAST(:days AS int) * INTERVAL '1 day'
+                    """
+                ),
+                {
+                    "ws": str(workspace_id),
+                    "rating_max": config.RAG_FEEDBACK_NEGATIVE_RATING_MAX,
+                    "days": config.RAG_FEEDBACK_LOOKBACK_DAYS,
+                },
+            ).fetchall()
+            return {str(r.doc_id) for r in rows if r.doc_id is not None}
+        except Exception as e:
+            logger.debug(f"rag_feedback ranking read failed: {e}")
+            return set()
+        finally:
+            db.close()
+
+    def _apply_feedback_penalty(
+        self, candidates: List[Dict[str, Any]], workspace_id: str
+    ) -> List[Dict[str, Any]]:
+        """De-rank candidates whose document was marked unhelpful (F070).
+
+        Multiplies the retrieval score of each penalised candidate by
+        ``RAG_FEEDBACK_PENALTY_FACTOR`` and re-sorts descending, so a doc a user
+        thumbed-down drops in rank (and out of a tight top-K) on the next
+        retrieval. Pure re-ranking on the ranking path — no tool-affinity edges.
+        Immutable: returns a new list of shallow-copied candidates. Fail-soft.
+        """
+        from config import config
+
+        if not candidates:
+            return candidates
+        factor = config.RAG_FEEDBACK_PENALTY_FACTOR
+        if factor >= 1.0:  # feature disabled — leave ranking untouched
+            return candidates
+        try:
+            penalised_ids = self._negative_feedback_doc_ids(workspace_id)
+        except Exception as e:
+            logger.debug(f"feedback penalty skipped (read failed): {e}")
+            return candidates
+        if not penalised_ids:
+            return candidates
+
+        adjusted: List[Dict[str, Any]] = []
+        demoted = 0
+        for c in candidates:
+            doc_id = self._candidate_doc_id(c)
+            if doc_id is not None and doc_id in penalised_ids:
+                new_c = dict(c)
+                # Lower every score key the downstream ranker might sort on.
+                for key in ("score", "similarity", "rerank_score", "rrf_score"):
+                    if isinstance(new_c.get(key), (int, float)):
+                        new_c[key] = new_c[key] * factor
+                new_c["feedback_penalised"] = True
+                adjusted.append(new_c)
+                demoted += 1
+            else:
+                adjusted.append(c)
+
+        if demoted:
+            adjusted.sort(
+                key=lambda x: x.get("score", x.get("similarity", 0.0) or 0.0),
+                reverse=True,
+            )
+            logger.info(
+                "[RAG] Feedback penalty de-ranked %d/%d candidates (ws=%s)",
+                demoted, len(candidates), workspace_id,
+            )
+        return adjusted
+
+    @staticmethod
+    def _candidate_doc_id(c: Dict) -> Optional[str]:
+        """Best-effort document id for a candidate chunk (S3 stores it as external_file_id)."""
+        meta = c.get("metadata", {}) or {}
+        doc_id = (
+            c.get("document_id")
+            or meta.get("document_id")
+            or meta.get("doc_id")
+            or meta.get("external_file_id")
+        )
+        return str(doc_id) if doc_id else None
+
+    @staticmethod
+    def _candidate_is_public(c: Dict) -> bool:
+        """True when a candidate's document carries no team restriction.
+
+        ``team_access`` empty or absent → visible workspace-wide; a non-empty list
+        → team-restricted. Consulted only on the DB-error fallback, where the live
+        access-check is unavailable and we degrade to candidate metadata.
+        """
+        meta = c.get("metadata", {}) or {}
+        return not meta.get("team_access")
+
     async def _filter_by_team(
         self,
         candidates: List[Dict],
         team: str,
         workspace_id: str,
     ) -> List[Dict]:
-        """PRD-124: Filter candidates to only include chunks from team-accessible documents.
+        """Filter candidates to team-accessible documents through the centralized
+        fail-closed scope helper (PRD-157 S1), preserving the PRD-154 S2 contract:
 
-        Queries PostgreSQL for document IDs where:
-          team_access = '{}' (empty = visible to all) OR team = ANY(team_access)
+        * a team-restricted document is NEVER leaked;
+        * a DB error degrades to **public docs only** (empty ``team_access``) and
+          logs at error level — a transient hiccup must neither blank the results
+          nor expose a restricted doc;
+        * a candidate with no identifiable document is not document-scoped, so it
+          passes through (document ``team_access`` cannot apply to it).
         """
-        # Collect unique document IDs from candidates
-        doc_ids: set = set()
-        for c in candidates:
-            meta = c.get("metadata", {})
-            doc_id = meta.get("document_id") or meta.get("doc_id") or meta.get("external_file_id")
-            if doc_id:
-                doc_ids.add(str(doc_id))
+        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
 
+        filters = build_retrieval_filters(workspace_id=workspace_id, team=team)
+        if not filters.has_team_restriction:
+            return candidates  # no team → workspace-only, nothing to post-filter
+
+        doc_ids = {d for d in (self._candidate_doc_id(c) for c in candidates) if d}
         if not doc_ids:
-            return candidates  # No doc IDs to filter — pass through
+            return candidates  # nothing document-scoped to verify
+
+        from core.database.database import SessionLocal
 
         try:
-            from core.database.database import SessionLocal
-            from sqlalchemy import text as sa_text
-
             db = SessionLocal()
             try:
-                rows = db.execute(
-                    sa_text("""
-                        SELECT id::text FROM documents
-                        WHERE id = ANY(:ids::int[])
-                          AND workspace_id = :ws::uuid
-                          AND (team_access = '{}' OR :team = ANY(team_access))
-                    """),
-                    {"ids": list(doc_ids), "ws": str(workspace_id), "team": team},
-                ).fetchall()
-                allowed_ids = {str(r[0]) for r in rows}
+                allowed_ids = allowed_document_ids(db, doc_ids, filters)
             finally:
                 db.close()
-        except Exception as e:
-            logger.warning(f"Team filtering query failed, passing all candidates: {e}")
-            return candidates
-
-        filtered = [
-            c for c in candidates
-            if str(
-                c.get("metadata", {}).get("document_id")
-                or c.get("metadata", {}).get("doc_id")
-                or c.get("metadata", {}).get("external_file_id")
-                or ""
-            ) in allowed_ids
-            or not (  # Keep candidates without doc ID (shouldn't happen, but safe)
-                c.get("metadata", {}).get("document_id")
-                or c.get("metadata", {}).get("doc_id")
-                or c.get("metadata", {}).get("external_file_id")
+        except Exception:
+            # Fail CLOSED to public docs: never leak a team-restricted document on a
+            # DB error, but public docs degrade gracefully (PRD-154 S2).
+            logger.error(
+                "team filter access-check failed; returning public docs only (fail-closed)",
+                exc_info=True,
             )
-        ]
-        logger.info(f"PRD-124 team filter: {len(candidates)} → {len(filtered)} candidates (team={team})")
+            return [c for c in candidates if self._candidate_is_public(c)]
+
+        filtered = [c for c in candidates if self._candidate_doc_id(c) in allowed_ids]
+        logger.info(
+            f"team filter: {len(candidates)} → {len(filtered)} candidates (team={filters.team})"
+        )
         return filtered
 
     async def _multi_query_retrieval_with_rrf(
@@ -422,47 +699,78 @@ class RAGService:
         RRF score: sum(1 / (k + rank_i)) for each query where document appears
         This is the standard approach from Context-Engineering research.
         """
-        from collections import defaultdict
-        
-        # Collect results from each query variation
-        all_results = defaultdict(lambda: {"ranks": [], "doc": None})
-        
-        for query in queries[:5]:  # Max 5 query variations
+        # Run the query variations CONCURRENTLY. Each variation is an
+        # independent embed + vector search, so the old serial await-loop made
+        # retrieval latency the SUM of all variations — the dominant cost in the
+        # ~80-113s context-prep times. asyncio.gather bounds it to the slowest
+        # single variation. RRF is order-independent (a sum of 1/(k+rank) per
+        # doc) and results are consumed in query order, so the fused output is
+        # unchanged from the serial version.
+        import asyncio
+
+        async def _candidates_for(q: str) -> List[Dict]:
             try:
-                results = await self._get_candidates(
-                    query,
+                return await self._get_candidates(
+                    q,
                     limit=limit_per_query,
                     min_similarity=min_similarity,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
                 )
-                
-                for rank, doc in enumerate(results):
-                    doc_id = doc.get("id", doc.get("content", "")[:100])
-                    all_results[doc_id]["ranks"].append(rank)
-                    all_results[doc_id]["doc"] = doc
-                    
             except Exception as e:
                 logger.debug(f"Query variation failed: {e}")
-                continue
-        
-        # Calculate RRF scores
-        k = self.config.rrf_k  # Standard RRF constant (usually 60)
-        rrf_scored = []
-        
-        for doc_id, data in all_results.items():
-            if data["doc"]:
-                rrf_score = sum(1.0 / (k + rank) for rank in data["ranks"])
-                doc = data["doc"].copy()
-                doc["rrf_score"] = rrf_score
-                doc["query_count"] = len(data["ranks"])  # Appears in N queries
-                rrf_scored.append(doc)
-        
-        # Sort by RRF score (higher is better)
-        rrf_scored.sort(key=lambda x: x["rrf_score"], reverse=True)
-        
+                return []
+
+        per_query_results = await asyncio.gather(
+            *[_candidates_for(q) for q in queries[:5]]
+        )
+
+        # PRD-188 S3: the fusion math lives in the shared pure fuser — the
+        # same function the dense+sparse hybrid uses. One fusion path.
+        from modules.rag.fusion import reciprocal_rank_fuse
+
+        rrf_scored = reciprocal_rank_fuse(per_query_results, k=self.config.rrf_k)
         logger.info(f"RRF fusion: {len(rrf_scored)} unique docs from {len(queries)} queries")
         return rrf_scored
-    
+
+    async def _fuse_with_sparse_leg(
+        self,
+        query: str,
+        dense_candidates: List[Dict],
+        filters,
+        limit: int = 20,
+    ) -> List[Dict]:
+        """Fuse dense + BM25 sparse through the one shared RRF (PRD-188 S3).
+
+        The hybrid_vector_weight / hybrid_keyword_weight knobs finally do what
+        they always claimed: weight the two legs inside the fusion. A sparse-leg
+        failure degrades to dense-only with a WARNING — loud, never fatal,
+        mirroring the rerank seam's posture.
+        """
+        try:
+            from modules.rag.bm25_leg import bm25_search
+
+            sparse = await bm25_search(query, filters=filters, limit=limit)
+        except Exception as e:
+            logger.warning(f"BM25 sparse leg failed — dense-only for this query: {e}")
+            return dense_candidates
+
+        if not sparse:
+            return dense_candidates
+        if not dense_candidates:
+            logger.info(f"hybrid: dense leg empty, sparse leg rescued {len(sparse)} candidates")
+
+        from modules.rag.fusion import reciprocal_rank_fuse
+
+        fused = reciprocal_rank_fuse(
+            [dense_candidates, sparse],
+            k=self.config.rrf_k,
+            weights=[self.config.hybrid_vector_weight, self.config.hybrid_keyword_weight],
+        )
+        logger.info(
+            f"hybrid fusion: dense {len(dense_candidates)} + sparse {len(sparse)} → {len(fused)}"
+        )
+        return fused
+
     async def _rerank_candidates(
         self,
         query: str,
@@ -532,7 +840,9 @@ class RAGService:
         max_tokens: int,
         diversity: float
     ) -> RAGResult:
-        """Use REAL 0/1 knapsack DP algorithm with content quality and source diversity"""
+        """Score candidates (content quality + source diversity), then select whole
+        chunks under the token budget (PRD-157 S3 budgeter) and assemble numbered
+        citations. Replaces the former pure-Python knapsack DP."""
         
         logger.info(f"🔍 Starting optimization: {len(candidates)} candidates, max_chunks={max_chunks}, max_tokens={max_tokens}")
         
@@ -541,7 +851,8 @@ class RAGService:
         source_counts = {}
         
         for i, c in enumerate(candidates):
-            content = c.get("content", "")
+            # Prefer the hydrated full chunk text; fall back to the 500-char preview.
+            content = c.get("expanded_content") or c.get("content", "")
             source = c.get("source_file", c.get("filename", "unknown"))
             
             # Calculate content quality
@@ -577,55 +888,49 @@ class RAGService:
                 preview = content[:100].replace('\n', ' ')
                 logger.info(f"  Candidate {i+1}: base={base_relevance:.3f}, quality={quality_score:.2f}, source_penalty={source_penalty:.2f}, final={adjusted_score:.3f}, tokens={item.token_count}, source={source}, preview='{preview}...'")
         
-        # Calculate information value for each chunk
-        values = [item.relevance_score for item in context_items]
-        weights = [item.token_count for item in context_items]
-        
-        logger.info(f"📊 Value range: {min(values):.3f} - {max(values):.3f}, Weight range: {min(weights)} - {max(weights)} tokens")
-        
-        # Apply REAL 0/1 Knapsack Dynamic Programming
-        logger.info(f"🎯 Running 0/1 Knapsack DP algorithm with quality-adjusted scores...")
-        selected_indices = self._knapsack_dp(values, weights, max_tokens, max_chunks)
-        
-        logger.info(f"✅ Knapsack selected {len(selected_indices)} items: {selected_indices}")
-        
-        # Get selected contexts
-        selected_contexts = [context_items[i] for i in selected_indices]
-        
-        # Log selected chunks
-        for i, idx in enumerate(selected_indices):
-            ctx = context_items[idx]
-            preview = ctx.content[:80].replace('\n', ' ')
-            logger.info(f"  Selected {i+1}: idx={idx}, score={ctx.relevance_score:.3f}, tokens={ctx.token_count}, source={ctx.source}, preview='{preview}...'")
-        
-        # Format results
-        chunks = []
-        total_tokens = 0
-        final_source_counts = {}
-        for ctx in selected_contexts:
-            chunks.append({
-                "content": ctx.content,
-                "source_file": ctx.source,
-                "similarity": ctx.relevance_score,
-                "tokens": ctx.token_count,
-                "document_id": ctx.metadata.get("document_id") if ctx.metadata else None,
-                "metadata": ctx.metadata.get("original_metadata", {}) if ctx.metadata else {},
-            })
-            total_tokens += ctx.token_count
-            final_source_counts[ctx.source] = final_source_counts.get(ctx.source, 0) + 1
-        
-        # Calculate diversity score
+        # PRD-157 S3/S4: token-budgeted whole-chunk selection replaces the
+        # pure-Python knapsack DP. context_items already carry the
+        # quality-adjusted relevance score and per-chunk token count computed
+        # above; the budgeter accumulates whole chunks highest-score-first under
+        # the token budget, then assembles numbered [1]..[n] citations.
+        from modules.rag.budget import select_within_budget, assemble_with_citations
+
+        scored_chunks = [
+            {
+                "content": item.content,
+                "source_file": item.source,
+                "similarity": item.relevance_score,
+                "tokens": item.token_count,
+                "document_id": item.metadata.get("document_id") if item.metadata else None,
+                "metadata": item.metadata.get("original_metadata", {}) if item.metadata else {},
+            }
+            for item in context_items
+        ]
+
+        selection = select_within_budget(
+            scored_chunks, max_tokens, max_chunks=max_chunks, score_key="similarity"
+        )
+        chunks = selection.chunks
+        total_tokens = selection.total_tokens
+
+        final_source_counts: Dict[str, int] = {}
+        for c in chunks:
+            final_source_counts[c["source_file"]] = final_source_counts.get(c["source_file"], 0) + 1
         diversity_score = len(final_source_counts) / len(chunks) if chunks else 0.0
-        
-        logger.info(f"📈 Results: {len(chunks)} chunks, {total_tokens} tokens, source_diversity={diversity_score:.2f}")
-        logger.info(f"📁 Source distribution: {final_source_counts}")
-        
-        # Format context
-        formatted_context = self._format_context(chunks, query)
-        
-        info_gain = sum(values[i] for i in selected_indices) / len(values) if values else 0.0
-        logger.info(f"💡 Information gain: {info_gain:.3f}")
-        
+
+        logger.info(
+            "Token-budgeted selection: %d/%d chunks, %d tokens (budget=%d), dropped=%d, diversity=%.2f",
+            len(chunks), len(scored_chunks), total_tokens, max_tokens, selection.dropped, diversity_score,
+        )
+
+        # Numbered, citation-grade context assembly [1]..[n] + source map.
+        formatted_context, sources_map = assemble_with_citations(chunks, query)
+
+        all_values = [item.relevance_score for item in context_items]
+        info_gain = (
+            sum(c["similarity"] for c in chunks) / len(all_values) if all_values else 0.0
+        )
+
         return RAGResult(
             chunks=chunks,
             formatted_context=formatted_context,
@@ -633,7 +938,8 @@ class RAGService:
             sources=list(set(c["source_file"] for c in chunks)),
             query=query,
             diversity_score=diversity_score,
-            information_gain=info_gain
+            information_gain=info_gain,
+            sources_map=sources_map,
         )
     
     def _calculate_content_quality(self, text: str) -> float:
@@ -671,67 +977,6 @@ class RAGService:
             return 1.0
     
     
-    def _knapsack_dp(
-        self,
-        values: List[float],
-        weights: List[int],
-        capacity: int,
-        max_items: int
-    ) -> List[int]:
-        """
-        REAL 0/1 Knapsack with Dynamic Programming
-        
-        Finds optimal subset of items that:
-        1. Maximizes total value
-        2. Stays within weight capacity
-        3. Respects max_items constraint
-        
-        Time: O(n * capacity * max_items)
-        Space: O(n * capacity * max_items)
-        """
-        n = len(values)
-        if n == 0 or capacity <= 0 or max_items <= 0:
-            logger.warning(f"⚠️ Knapsack: invalid params n={n}, capacity={capacity}, max_items={max_items}")
-            return []
-        
-        logger.info(f"🎒 Knapsack DP: n={n} items, capacity={capacity} tokens, max_items={max_items}")
-        
-        # DP table: dp[i][w][k] = max value using first i items, weight w, k items selected
-        # For memory efficiency, use 2D table and track item count separately
-        dp = [[0.0 for _ in range(capacity + 1)] for _ in range(n + 1)]
-        item_count = [[0 for _ in range(capacity + 1)] for _ in range(n + 1)]
-        
-        # Build DP table
-        for i in range(1, n + 1):
-            for w in range(capacity + 1):
-                # Option 1: Don't include item i-1
-                dp[i][w] = dp[i-1][w]
-                item_count[i][w] = item_count[i-1][w]
-                
-                # Option 2: Include item i-1 (if it fits and we haven't hit max_items)
-                if weights[i-1] <= w and item_count[i-1][w - weights[i-1]] < max_items:
-                    value_with_item = dp[i-1][w - weights[i-1]] + values[i-1]
-                    
-                    if value_with_item > dp[i][w]:
-                        dp[i][w] = value_with_item
-                        item_count[i][w] = item_count[i-1][w - weights[i-1]] + 1
-        
-        # Backtrack to find selected items
-        selected = []
-        w = capacity
-        for i in range(n, 0, -1):
-            # Check if item i-1 was included
-            if dp[i][w] != dp[i-1][w]:
-                selected.append(i-1)
-                w -= weights[i-1]
-        
-        final_value = dp[n][capacity]
-        final_weight = sum(weights[i] for i in selected)
-        logger.info(f"✅ Knapsack result: {len(selected)} items, total_value={final_value:.3f}, total_weight={final_weight} tokens")
-        
-        return list(reversed(selected))
-    
-    
     def _basic_retrieval(
         self,
         query: str,
@@ -752,7 +997,8 @@ class RAGService:
         total_tokens = 0
         
         for c in sorted_candidates:
-            content = c.get("content", "")
+            # Prefer the hydrated full chunk text; fall back to the 500-char preview.
+            content = c.get("expanded_content") or c.get("content", "")
             chunk_tokens = _count_tokens(content)  # Use tiktoken for accuracy
             if total_tokens + chunk_tokens > max_tokens:
                 break
@@ -776,9 +1022,42 @@ class RAGService:
             query=query
         )
     
+    async def _get_doc_backend(self, workspace_id: str):
+        """PRD-157 S4: reuse one initialized document backend per workspace.
+
+        The backend is workspace-scoped, so caching by workspace_id is safe and
+        removes the client + bucket/index checks from every query (the RRF
+        path calls _get_candidates up to 5x per retrieve()).
+
+        PRD-197 S5: S3 Vectors is the SaaS document plane; with
+        S3_VECTORS_ENABLED=false (the open-core/local default — S3 Vectors is
+        AWS-only) the pgvector-local backend serves the same contract from
+        document_chunks.embedding, which "legacy pgvector mode" ingestion
+        already populates. Previously the local edition constructed the S3
+        backend unconditionally, failed on the unset bucket, and every
+        retrieval came back empty.
+        """
+        key = str(workspace_id)
+        backend = self._doc_backends.get(key)
+        if backend is None:
+            from config import config as app_config
+
+            if app_config.S3_VECTORS_ENABLED:
+                from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+
+                backend = S3VectorsBackend(workspace_id=key)
+            else:
+                from modules.search.vector_store.backends.pgvector_local_backend import PgVectorLocalBackend
+
+                backend = PgVectorLocalBackend(workspace_id=key)
+            await backend.initialize()
+            self._doc_backends[key] = backend
+        return backend
+
     async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5, workspace_id: str = None) -> List[Dict]:
         """
-        Get candidate chunks via S3 Vectors.
+        Get candidate chunks from the workspace's document-vector backend
+        (S3 Vectors on SaaS, pgvector-local on the OSS edition — PRD-197 S5).
 
         Args:
             workspace_id: Workspace ID for multi-tenant isolation.
@@ -788,26 +1067,34 @@ class RAGService:
             logger.error("Embedding manager not initialized — cannot search")
             return []
 
-        effective_workspace_id = workspace_id or self._workspace_id
+        effective_workspace_id = workspace_id or getattr(self, "_workspace_id", None)
         if not effective_workspace_id:
-            logger.error("No workspace_id available — cannot search S3 Vectors")
+            logger.error("No workspace_id available — cannot search document vectors")
             return []
 
+        seam_t0 = _time.perf_counter()
         try:
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
 
-            # Create S3VectorsBackend for this workspace
-            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
-            vector_store = S3VectorsBackend(workspace_id=effective_workspace_id)
-            await vector_store.initialize()
+            # PRD-157 S4: reuse the per-workspace document backend
+            # (built+initialized once; S3 on SaaS, pgvector-local on OSS).
+            vector_store = await self._get_doc_backend(effective_workspace_id)
 
-            logger.info(f"🔎 S3 Vectors search: workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}")
+            logger.info(
+                f"🔎 Document-vector search ({type(vector_store).__name__}): "
+                f"workspace={effective_workspace_id}, min_similarity={min_similarity}, limit={limit}"
+            )
 
+            # PRD-172 F005: pass an explicit workspace_id filter so the backend
+            # drops any hit not scoped to this workspace (defence-in-depth over
+            # the per-workspace bucket; a shared/mis-templated bucket no longer
+            # leaks cross-workspace chunks into LLM context).
             results = vector_store.search(
                 query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding),
                 limit=limit,
                 min_score=min_similarity,
+                filters={"workspace_id": str(effective_workspace_id)},
             )
 
             candidates = []
@@ -846,61 +1133,128 @@ class RAGService:
                 logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
             logger.info(f"✅ Retrieved {len(candidates)} candidates from S3 Vectors")
 
+            record_substrate_search_nowait(
+                seam=SEAM_DOCUMENTS,
+                workspace_id=effective_workspace_id,
+                candidates=len(candidates),
+                latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_HIT if candidates else STATUS_EMPTY,
+            )
             return candidates
 
         except Exception as e:
+            # Substrate tile semantics: ANY failed search — including an
+            # unavailable embedding key — is an error on the documents seam
+            # (the dark-plane signal S4 exists to catch). The grounding
+            # semantics below are unchanged: embedding-unavailable still
+            # returns a typed EMPTY result to the caller (PRD-185 S3).
+            record_substrate_search_nowait(
+                seam=SEAM_DOCUMENTS,
+                workspace_id=effective_workspace_id,
+                candidates=0,
+                latency_ms=(_time.perf_counter() - seam_t0) * 1000.0,
+                status=STATUS_ERROR,
+            )
+            from core.llm.clients.base import EmbeddingUnavailableError
+            if isinstance(e, EmbeddingUnavailableError):
+                # PRD-185 S3: typed EMPTY (honest "no grounding"), NOT an error
+                # result — loud so a lapsed/absent embedding key is visible, never
+                # silent noise from random-vector retrieval.
+                logger.warning(f"Retrieval returned EMPTY — embeddings unavailable: {e}")
+                return []
             logger.error(f"Error getting candidates from S3 Vectors: {e}", exc_info=True)
             return []
     
     async def _expand_to_parent_context(
         self,
         candidates: List[Dict],
-        expand_window: int = 1
+        expand_window: int = 1,
+        workspace_id: str = None,
     ) -> List[Dict]:
         """
         For each retrieved chunk, fetch surrounding chunks from the same document.
         Uses chunk_index from metadata to find neighbors.
+
+        PRD-172 F005: ``workspace_id`` scopes the document_chunks hydration to
+        the caller's workspace. Previously this joined document_chunks by
+        (document_id, chunk_index) alone with NO workspace predicate, so on a
+        shared store it could hydrate another tenant's chunk text into context.
         """
         if not candidates or not self.config.parent_child_expansion:
+            return candidates
+
+        effective_workspace_id = workspace_id or getattr(self, "_workspace_id", None)
+
+        window = expand_window or self.config.expansion_window
+
+        # Plan each candidate's window once, collecting the union of
+        # (document_id, chunk_index) keys to hydrate. The full chunk text lives
+        # in document_chunks.content; candidate['content'] is only the 500-char
+        # S3 preview. One batched query replaces the old query-per-candidate N+1.
+        plans = []  # (candidate, doc_id|None, [chunk_index, ...]|None)
+        needed = set()
+        for candidate in candidates:
+            raw_doc_id = candidate.get("document_id")
+            chunk_metadata = candidate.get("metadata", {})
+            chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
+
+            # Cast document_id to int (S3 Vectors stores as string)
+            try:
+                doc_id = int(raw_doc_id) if raw_doc_id else None
+            except (ValueError, TypeError):
+                doc_id = None
+
+            if doc_id is None or chunk_index is None:
+                plans.append((candidate, None, None))
+                continue
+
+            idx_window = list(range(max(0, chunk_index - window), chunk_index + window + 1))
+            for ci in idx_window:
+                needed.add((doc_id, ci))
+            plans.append((candidate, doc_id, idx_window))
+
+        if not needed:
+            for candidate, _, _ in plans:
+                candidate["expanded_content"] = candidate.get("content", "")
             return candidates
 
         try:
             import asyncpg
             from config import config as app_config
-            db_url = app_config.DATABASE_URL
-            conn = await asyncpg.connect(db_url)
+            conn = await asyncpg.connect(app_config.DATABASE_URL)
 
             try:
-                for candidate in candidates:
-                    raw_doc_id = candidate.get("document_id")
-                    chunk_metadata = candidate.get("metadata", {})
-                    chunk_index = chunk_metadata.get("chunk_index") if isinstance(chunk_metadata, dict) else None
-
-                    # Cast document_id to int (S3 Vectors stores as string)
-                    try:
-                        doc_id = int(raw_doc_id) if raw_doc_id else None
-                    except (ValueError, TypeError):
-                        doc_id = None
-
-                    if doc_id is None or chunk_index is None:
-                        candidate["expanded_content"] = candidate.get("content", "")
-                        continue
-
-                    window = expand_window or self.config.expansion_window
-                    surrounding = await conn.fetch("""
-                        SELECT content, metadata
-                        FROM document_chunks
-                        WHERE document_id = $1
-                          AND chunk_index BETWEEN $2 AND $3
-                        ORDER BY chunk_index
-                    """, doc_id, max(0, chunk_index - window), chunk_index + window)
-
-                    if surrounding:
-                        candidate["expanded_content"] = "\n\n".join(r["content"] for r in surrounding)
-                    else:
-                        candidate["expanded_content"] = candidate.get("content", "")
+                pairs = list(needed)
+                doc_ids = [p[0] for p in pairs]
+                chunk_idxs = [p[1] for p in pairs]
+                # ONE round-trip: join the requested (doc_id, chunk_index) keys
+                # against document_chunks via unnest of two parallel arrays.
+                # PRD-172 F005: additionally join documents and pin
+                # documents.workspace_id so a chunk is hydrated ONLY when its
+                # parent document belongs to this workspace. When workspace_id
+                # is unavailable ($3 IS NULL) the predicate is a no-op (only
+                # reachable for a non-multi-tenant / self._workspace_id-less
+                # caller), preserving prior behaviour without widening a
+                # tenant's scope.
+                rows = await conn.fetch("""
+                    SELECT dc.document_id, dc.chunk_index, dc.content
+                    FROM document_chunks dc
+                    JOIN unnest($1::int[], $2::int[]) AS k(document_id, chunk_index)
+                      ON dc.document_id = k.document_id
+                     AND dc.chunk_index = k.chunk_index
+                    JOIN documents d ON d.id = dc.document_id
+                    WHERE ($3::uuid IS NULL OR d.workspace_id = $3::uuid)
+                """, doc_ids, chunk_idxs, str(effective_workspace_id) if effective_workspace_id else None)
             finally:
                 await conn.close()
+
+            hydrated = {(r["document_id"], r["chunk_index"]): r["content"] for r in rows}
+            for candidate, doc_id, idx_window in plans:
+                if doc_id is None or idx_window is None:
+                    candidate["expanded_content"] = candidate.get("content", "")
+                    continue
+                pieces = [hydrated[(doc_id, ci)] for ci in idx_window if (doc_id, ci) in hydrated]
+                candidate["expanded_content"] = "\n\n".join(pieces) if pieces else candidate.get("content", "")
         except Exception as e:
             logger.warning(f"Parent-child expansion failed, using original content: {e}")
             for candidate in candidates:
@@ -909,22 +1263,15 @@ class RAGService:
         return candidates
 
     def _format_context(self, chunks: List[Dict], query: str) -> str:
-        """Format chunks into context string"""
-        
-        if not chunks:
-            return "No relevant context found."
-        
-        parts = [f"## Retrieved Context for: {query}\n"]
-        
-        for i, chunk in enumerate(chunks, 1):
-            source = chunk.get("source_file", "unknown")
-            similarity = chunk.get("similarity", 0)
-            content = chunk.get("content", "")
-            
-            parts.append(f"\n### Source {i}: {source} (relevance: {similarity:.0%})")
-            parts.append(content)
-        
-        return "\n".join(parts)
+        """Format chunks into a numbered-citation context string (PRD-157 S3).
+
+        Delegates to the shared budget assembler so every retrieval path renders
+        sources as ``[1]..[n]`` consistently.
+        """
+        from modules.rag.budget import assemble_with_citations
+
+        formatted_context, _ = assemble_with_citations(chunks, query)
+        return formatted_context
     
     async def enhance_prompt_with_context(
         self,
@@ -1004,19 +1351,28 @@ class RAGService:
     # Stats & Analytics Methods (for api/context.py)
     # =========================================================================
     
-    def get_retrieval_stats(self, db) -> Dict[str, Any]:
-        """Get retrieval statistics from database"""
+    def get_retrieval_stats(self, db, workspace_id=None) -> Dict[str, Any]:
+        """Get retrieval statistics from database.
+
+        PRD-172 F045: ``workspace_id`` scopes the document counts to the caller's
+        workspace. Previously the ``documents`` COUNT(*) was unscoped, so every
+        caller saw a platform-wide total (cross-tenant count). When
+        ``workspace_id`` is None the caller is an unfiltered admin aggregate.
+        """
         try:
             from sqlalchemy import text
-            
-            # Count total RAG queries from documents table
-            result = db.execute(text("""
+
+            # Count total RAG queries from documents table, scoped to workspace.
+            ws = str(workspace_id) if workspace_id is not None else None
+            where = "WHERE workspace_id = :workspace_id" if ws else ""
+            result = db.execute(text(f"""
                 SELECT
                     COUNT(*) as total_docs,
                     SUM(chunk_count) as total_chunks,
                     COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs
                 FROM documents
-            """)).fetchone()
+                {where}
+            """), ({"workspace_id": ws} if ws else {})).fetchone()
 
             total_docs = result.total_docs or 0
             total_chunks = result.total_chunks or 0
@@ -1035,7 +1391,8 @@ class RAGService:
                         MAX(timestamp) as last_query
                     FROM document_usage
                     WHERE event_type IN ('document_searched', 'rag_query')
-                """)).fetchone()
+                        AND metadata->>'workspace_id' = :workspace_id
+                """), {"workspace_id": self._workspace_id}).fetchone()
                 if usage_result:
                     avg_response_time = round(usage_result.avg_time or 0, 1)
                     last_query_time = usage_result.last_query.isoformat() if usage_result.last_query else None
@@ -1146,9 +1503,10 @@ class RAGService:
                     timestamp
                 FROM document_usage
                 WHERE event_type = 'rag_query' AND query IS NOT NULL
+                    AND metadata->>'workspace_id' = :workspace_id
                 ORDER BY timestamp DESC
                 LIMIT :limit
-            """), {"limit": limit}).fetchall()
+            """), {"limit": limit, "workspace_id": self._workspace_id}).fetchall()
             
             return [
                 {

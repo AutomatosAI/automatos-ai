@@ -99,6 +99,79 @@ SOLUTIONS_SCHEMA: dict[str, Any] = {
     },
 }
 
+# PRD-203 O·S3: per-page schemas for the non-Shopify verticals (SaaS,
+# services/agency, content/media). One schema per page TYPE; the archetypes'
+# target-page selectors feed the same pick_schema_for_url() mapping.
+
+PRICING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "plans": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "price": {"type": "string"},
+                    "billing_period": {"type": "string"},
+                    "key_features": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+        "has_free_tier": {"type": "string"},
+    },
+}
+
+FEATURES_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "features": {"type": "array", "items": {"type": "string"}},
+        "capabilities": {"type": "array", "items": {"type": "string"}},
+        "target_users": {"type": "array", "items": {"type": "string"}},
+        "integrations": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+DOCS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "topics": {"type": "array", "items": {"type": "string"}},
+        "getting_started": {"type": "string"},
+        "api_reference": {"type": "string"},
+    },
+}
+
+SERVICES_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "service_offerings": {"type": "array", "items": {"type": "string"}},
+        "industries_served": {"type": "array", "items": {"type": "string"}},
+        "engagement_models": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+CASE_STUDY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "client": {"type": "string"},
+        "challenge": {"type": "string"},
+        "solution": {"type": "string"},
+        "outcome": {"type": "string"},
+        "industries_served": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+ARTICLE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "author": {"type": "string"},
+        "published_date": {"type": "string"},
+        "category": {"type": "string"},
+        "summary": {"type": "string"},
+    },
+}
+
 GENERIC_PAGE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -109,8 +182,11 @@ GENERIC_PAGE_SCHEMA: dict[str, Any] = {
 }
 
 
-# URL substring → schema mapping. First match wins.
+# URL substring → schema mapping. First match wins. Shopify's ``/pages/*`` and
+# ``/policies/*`` patterns come first (most specific); the bare paths that the
+# SaaS / services / content verticals use follow.
 SCHEMA_BY_URL_PATTERN: list[tuple[str, dict[str, Any], str]] = [
+    # Shopify catalog (PRD-130)
     ("/pages/about",     ABOUT_US_SCHEMA,  "about"),
     ("/pages/contact",   CONTACT_SCHEMA,   "contact"),
     ("/pages/faq",       FAQ_SCHEMA,       "faq"),
@@ -119,6 +195,23 @@ SCHEMA_BY_URL_PATTERN: list[tuple[str, dict[str, Any], str]] = [
     ("/pages/solutions", SOLUTIONS_SCHEMA, "solutions"),
     ("/pages/brands",    BRANDS_SCHEMA,    "brands"),
     ("/policies/",       POLICY_SCHEMA,    "policy"),
+    # Cross-vertical bare paths (PRD-203 O·S3)
+    ("/pricing",         PRICING_SCHEMA,     "pricing"),
+    ("/features",        FEATURES_SCHEMA,    "features"),
+    ("/integrations",    FEATURES_SCHEMA,    "features"),
+    ("/docs",            DOCS_SCHEMA,        "docs"),
+    ("/case-studies",    CASE_STUDY_SCHEMA,  "case_study"),
+    ("/portfolio",       CASE_STUDY_SCHEMA,  "case_study"),
+    ("/services",        SERVICES_SCHEMA,    "services"),
+    ("/articles",        ARTICLE_SCHEMA,     "article"),
+    ("/author",          ARTICLE_SCHEMA,     "article"),
+    ("/category",        ARTICLE_SCHEMA,     "article"),
+    ("/about",           ABOUT_US_SCHEMA,    "about"),
+    ("/contact",         CONTACT_SCHEMA,     "contact"),
+    ("/faq",             FAQ_SCHEMA,         "faq"),
+    ("/privacy",         POLICY_SCHEMA,      "policy"),
+    ("/terms",           POLICY_SCHEMA,      "policy"),
+    ("/security",        POLICY_SCHEMA,      "policy"),
 ]
 
 

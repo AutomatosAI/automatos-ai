@@ -1,13 +1,135 @@
-"""
-Database / research tool executors -- NL-to-SQL, smart queries, direct DB fallback.
-Extracted from unified_executor.py.
-"""
+"""Database / research tool executors — workspace-scoped, in-process (PRD-160 S1).
 
+The natural-language-to-SQL tools — ``query_database`` (execute_database_tool)
+and ``smart_query_database`` (execute_smart_database_tool) — were turned OFF by
+PRD-156 S3 because the old path executed raw LLM-generated SQL against the ENTIRE
+main database with no workspace filter (a confirmed cross-tenant leak) and made
+unauthenticated HTTP self-calls to the knowledge API.
+
+PRD-160 S1 re-enables them as a first-class Auto tool, but *safely*:
+
+  * In-process — no HTTP self-call. We call ``DatabaseKnowledgeService`` directly
+    (the deleted ``query_main_database`` unscoped-SQL helper stays deleted).
+  * Workspace-scoped — every call resolves a source *within the caller's
+    workspace* (``resolve_source_id``) and threads ``workspace_id`` through to
+    ``_get_source``, which fails closed on a cross-workspace source. An agent
+    can only ever address sources by name inside its own workspace.
+  * Fail-closed — a call with no ``workspace_id`` is refused outright; this is
+    the defense-in-depth backstop if the path is reached without scope (e.g. a
+    Playbook step).
+"""
 import logging
-import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _error(message: str, *, disabled: bool = False) -> Dict[str, Any]:
+    """Structured, leak-free failure response matching the success shape."""
+    resp: Dict[str, Any] = {
+        "success": False,
+        "error": message,
+        "data": [],
+        "columns": [],
+        "row_count": 0,
+    }
+    if disabled:
+        resp["disabled"] = True
+    return resp
+
+
+async def _run_nl2sql(
+    *,
+    method: str,
+    parameters: Dict[str, Any],
+    agent_id: int,
+    workspace_id: Optional[Any],
+    caller_context: Optional[Dict[str, Any]],
+    db_session: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Shared in-process NL2SQL invocation for both database tools.
+
+    ``method`` is ``"smart_query"`` (intelligent router) or ``"query_database"``
+    (direct). Resolution and execution are workspace-scoped end to end.
+    """
+    # Fail-closed: NL2SQL must never run without a workspace scope.
+    if not workspace_id:
+        logger.warning(
+            "Agent %s invoked '%s' without a workspace scope — refused (PRD-160 S1)",
+            agent_id,
+            method,
+        )
+        return _error(
+            "Natural-language database querying requires a workspace context; "
+            "none was supplied."
+        )
+
+    query = (parameters or {}).get("query")
+    if not query or not str(query).strip():
+        return _error("A natural-language 'query' is required.")
+
+    database_name = (parameters or {}).get("database_name")
+    ws_id = str(workspace_id)
+    user_id = str((caller_context or {}).get("user_id") or "")
+
+    from modules.nl2sql import get_database_knowledge_service
+
+    service = get_database_knowledge_service()
+
+    # Resolve the target source *within the caller's workspace*. Reuse the
+    # executor's request session when present (one fewer pooled connection).
+    source_id = await service.resolve_source_id(ws_id, database_name, db_session=db_session)
+    if not source_id:
+        if database_name:
+            return _error(
+                f"No active database source named '{database_name}' is available "
+                "in this workspace."
+            )
+        return _error(
+            "No database source is configured for this workspace, or several are "
+            "and none was named — pass 'database_name' to choose one."
+        )
+
+    agent = str(agent_id) if agent_id is not None else None
+    try:
+        if method == "smart_query":
+            result = await service.smart_query(
+                source_id=source_id,
+                text=query,
+                user_id=user_id,
+                agent_id=agent,
+                workspace_id=ws_id,
+            )
+        else:
+            result = await service.query_database(
+                source_id=source_id,
+                natural_language_query=query,
+                user_id=user_id,
+                agent_id=agent,
+                workspace_id=ws_id,
+            )
+    except Exception as e:  # noqa: BLE001 — surface a safe message, never leak internals
+        logger.error(
+            "Agent %s NL2SQL '%s' failed (workspace=%s): %s",
+            agent_id,
+            method,
+            ws_id,
+            e,
+        )
+        return _error("Database query failed.")
+
+    # PRD-160 S4: every NL query lands one audit row (best-effort).
+    try:
+        await service.write_nl_audit(
+            source_id=source_id,
+            user_id=user_id or None,
+            agent_id=agent,
+            nl_query=query,
+            result=result if isinstance(result, dict) else {},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 
 async def execute_database_tool(
@@ -15,170 +137,18 @@ async def execute_database_tool(
     tool_name: str,
     parameters: Dict[str, Any],
     agent_id: int,
+    workspace_id: Optional[Any] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Execute database query using natural language.
-    Routes to knowledge sources or main database fallback.
-    """
-    import httpx
-    from config import config
-    from modules.tools.services.pandas_ai_service import get_pandasai_service
-
-    query = parameters.get('query', '')
-    database_name = parameters.get('database_name')
-    analysis_prompt = parameters.get('analysis_prompt', query)
-
-    logger.info(f"Agent {agent_id} querying database: {query[:50]}...")
-
-    try:
-        base_url = config.KNOWLEDGE_API_BASE_URL
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Get available database sources
-            sources = []
-            try:
-                resp = await client.get(f"{base_url}/api/knowledge/sources/database/", params={"active_only": True})
-                if resp.status_code == 200:
-                    sources = resp.json() or []
-            except Exception as e:
-                logger.warning(f"Failed to list database sources: {e}")
-
-            # Select source
-            selected = None
-            if database_name and sources:
-                selected = next((s for s in sources if str(s.get("name", "")).lower() == database_name.lower()), None)
-            if not selected and sources:
-                selected = sources[0]
-
-            # Fallback to direct main DB query if no sources
-            if not selected:
-                logger.info("No knowledge sources - using direct DB fallback")
-                return await query_main_database(executor, query, analysis_prompt)
-
-            # Query via knowledge API
-            source_id = int(selected.get("id"))
-            resp = await client.post(
-                f"{base_url}/api/knowledge/sources/database/{source_id}/query",
-                json={"query": query, "source_id": source_id, "use_cache": True, "include_explanation": True}
-            )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                result = {
-                    "success": True,
-                    "database": data.get('database') or selected.get('name', ''),
-                    "sql": data.get('sql', ''),
-                    "row_count": data.get('row_count', 0),
-                    "data": data.get('data', []),
-                    "columns": data.get('columns', []),
-                    "execution_time_ms": data.get('execution_time_ms', 0)
-                }
-
-                # Add PandasAI insight if available
-                pandasai = get_pandasai_service()
-                if pandasai and result.get('data'):
-                    insight = pandasai.generate_insight(analysis_prompt, result['data'], result['columns'])
-                    if insight:
-                        result["pandas_ai"] = insight
-
-                return result
-            else:
-                # Knowledge API failed - fallback to direct main database query
-                logger.warning(f"Knowledge API returned {resp.status_code}, falling back to direct DB")
-                return await query_main_database(executor, query, analysis_prompt)
-
-    except Exception as e:
-        logger.error(f"Database tool error: {e}")
-        return {"success": False, "error": str(e)}
-
-
-async def query_main_database(executor, query: str, analysis_prompt: str = None) -> Dict[str, Any]:
-    """Direct query to main Automatos database using NL-to-SQL."""
-    from core.llm import create_llm_manager
-    from modules.tools.services.pandas_ai_service import get_pandasai_service
-    from core.database.database import get_db_session
-    from sqlalchemy import text
-
-    try:
-        start_time = time.time()
-
-        # Get schema from centralized provider
-        from modules.nl2sql import get_schema_provider
-        schema_provider = get_schema_provider(executor.db)
-        schema = schema_provider.get_database_schema_overview()
-
-        # Add query guidance
-        schema += "\n\nUse DATE_TRUNC('day', col) for daily grouping. Use NOW() - INTERVAL 'N days' for date ranges.\nAlways use explicit JOIN syntax. Aggregate by date for time-based queries."
-
-        # Get LLM from orchestrator service settings
-        llm_manager = create_llm_manager(service_name="orchestrator")
-
-        response = await llm_manager.generate_response([
-            {"role": "system", "content": f"You are a PostgreSQL expert. Generate ONLY the SQL query, nothing else. Only SELECT allowed. Always include proper date handling and grouping.\n\n{schema}"},
-            {"role": "user", "content": f"Generate SQL for: {query}"}
-        ])
-
-        sql = response.content.strip()
-        # Clean markdown code blocks
-        if "```" in sql:
-            parts = sql.split("```")
-            for part in parts:
-                if "SELECT" in part.upper():
-                    sql = part.strip()
-                    break
-            sql = sql.replace("sql", "").strip()
-
-        sql = sql.strip()
-
-        if not sql.upper().startswith("SELECT"):
-            return {"success": False, "error": "Only SELECT queries allowed"}
-
-        logger.info(f"[Database Tool] Generated SQL: {sql[:200]}...")
-
-        # Execute SQL
-        with get_db_session() as session:
-            result = session.execute(text(sql))
-            columns = list(result.keys())
-            rows = result.fetchall()
-
-            data = []
-            for row in rows[:1000]:  # Limit to 1000 rows
-                row_dict = {}
-                for i, col in enumerate(columns):
-                    val = row[i]
-                    # Handle datetime serialization
-                    if hasattr(val, 'isoformat'):
-                        val = val.isoformat()
-                    # Handle Decimal
-                    elif hasattr(val, '__float__'):
-                        val = float(val)
-                    # Handle JSON/dict
-                    elif isinstance(val, dict):
-                        val = val
-                    row_dict[col] = val
-                data.append(row_dict)
-
-        tool_result = {
-            "success": True,
-            "database": "automatos_main",
-            "sql": sql,
-            "row_count": len(data),
-            "data": data,
-            "columns": columns,
-            "execution_time_ms": int((time.time() - start_time) * 1000)
-        }
-
-        # Generate insight if analysis prompt provided
-        if analysis_prompt and data:
-            pandasai = get_pandasai_service()
-            if pandasai:
-                insight = pandasai.generate_insight(analysis_prompt, data, columns)
-                if insight:
-                    tool_result["pandas_ai"] = insight
-
-        return tool_result
-    except Exception as e:
-        logger.error(f"Direct DB query error: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+    """``query_database`` — direct NL→SQL, workspace-scoped, in-process (PRD-160 S1)."""
+    return await _run_nl2sql(
+        method="query_database",
+        parameters=parameters,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        caller_context=caller_context,
+        db_session=getattr(executor, "db", None),
+    )
 
 
 async def execute_smart_database_tool(
@@ -186,130 +156,16 @@ async def execute_smart_database_tool(
     tool_name: str,
     parameters: Dict[str, Any],
     agent_id: int,
+    workspace_id: Optional[Any] = None,
+    caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Execute smart database query using SmartNL2SQLAgent.
-
-    Features:
-    - Query clarification (returns questions if query is ambiguous)
-    - Query rephrasing (improves vague queries)
-    - Result explanation (explains what the data means)
-    - Visualization suggestions (recommends chart types)
-    - Multi-turn conversation support
-    """
-    from core.llm import create_llm_manager
-    from modules.nl2sql import SmartNL2SQLAgent, get_schema_provider
-    from modules.tools.services.pandas_ai_service import get_pandasai_service
-    from sqlalchemy import text
-
-    query = parameters.get('query', '')
-    skip_clarification = parameters.get('skip_clarification', False)
-    clarification_answers = parameters.get('clarification_answers')
-    database_name = parameters.get('database_name')
-    include_visualization = parameters.get('include_visualization', True)
-
-    logger.info(f"Smart DB Query: {query[:50]}...")
-
-    try:
-        # Get schema
-        schema_provider = get_schema_provider(executor.db)
-        schema_metadata = schema_provider.get_schema_metadata()
-
-        # Get LLM
-        llm_manager = create_llm_manager(service_name="nl2sql")
-
-        # Create smart agent
-        agent = SmartNL2SQLAgent(
-            llm_provider=llm_manager,
-            schema_metadata=schema_metadata,
-            auto_clarify=not skip_clarification,
-            auto_rephrase=True,
-            auto_explain=True,
-            auto_visualize=include_visualization,
-        )
-
-        # Define SQL executor - use fresh session to avoid transaction conflicts
-        async def execute_sql(sql: str):
-            from core.database.database import SessionLocal
-            session = SessionLocal()
-            try:
-                result = session.execute(text(sql))
-                columns = list(result.keys())
-                rows = result.fetchall()
-                data = []
-                for row in rows[:1000]:
-                    row_dict = {}
-                    for i, col in enumerate(columns):
-                        val = row[i]
-                        if hasattr(val, 'isoformat'):
-                            val = val.isoformat()
-                        elif hasattr(val, '__float__'):
-                            val = float(val)
-                        row_dict[col] = val
-                    data.append(row_dict)
-                return data
-            finally:
-                session.close()
-
-        # Execute smart query
-        result = await agent.query(
-            natural_language_query=query,
-            clarification_answers=clarification_answers,
-            skip_clarification=skip_clarification,
-            execute_sql=True,
-            db_executor=execute_sql,
-        )
-
-        # Handle clarification needed
-        if result.get('status') == 'needs_clarification':
-            return {
-                "success": True,
-                "status": "needs_clarification",
-                "clarifications": result.get('clarifications', []),
-                "message": "Please provide more details to complete the query.",
-                "original_query": query,
-            }
-
-        # Handle error from SmartNL2SQLAgent (e.g., SQL validation failed)
-        if result.get('status') == 'error':
-            error_msg = result.get('error') or result.get('message') or 'Query failed'
-            logger.warning(f"Smart query failed: {error_msg}")
-            return {
-                "success": False,
-                "error": error_msg,
-                "sql": result.get('sql', ''),
-                "original_query": query,
-            }
-
-        # Add PandasAI insight if not already present
-        if result.get('data') and not result.get('pandas_ai'):
-            pandasai = get_pandasai_service()
-            if pandasai:
-                insight = pandasai.generate_insight(query, result['data'], list(result['data'][0].keys()) if result['data'] else [])
-                if insight:
-                    result['pandas_ai'] = insight
-
-        # Debug: Log what we're returning
-        return_data = result.get('data', [])
-        logger.info(f"Smart query returning {len(return_data)} rows")
-        if return_data:
-            logger.info(f"Sample row: {return_data[0] if return_data else 'EMPTY'}")
-
-        return {
-            "success": True,
-            "database": database_name or "automatos_main",
-            "sql": result.get('sql', ''),
-            "row_count": len(return_data),
-            "data": return_data,
-            "columns": list(return_data[0].keys()) if return_data else [],
-            "execution_time_ms": 0,
-            "explanation": result.get('explanation', ''),
-            "rephrased_query": result.get('rephrased_query'),
-            "visualization": result.get('visualization'),
-            "follow_up_questions": result.get('follow_up_questions', []),
-            "pandas_ai": result.get('pandas_ai'),
-        }
-
-    except Exception as e:
-        logger.error(f"Smart DB query error: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+    """``smart_query_database`` — intelligent NL→SQL/analysis router, workspace-scoped,
+    in-process (PRD-160 S1)."""
+    return await _run_nl2sql(
+        method="smart_query",
+        parameters=parameters,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        caller_context=caller_context,
+        db_session=getattr(executor, "db", None),
+    )

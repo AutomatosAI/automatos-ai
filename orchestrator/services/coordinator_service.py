@@ -17,6 +17,7 @@ Source: PRD-82A Sections 6, 8, 9, 12 (US-014)
 """
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -27,7 +28,9 @@ from sqlalchemy import and_, text
 from sqlalchemy.orm import Session
 
 from config import COMPLEXITY_TOKEN_BUDGET, Config, config
+from core.database.database import end_open_transaction
 from core.models.core import Agent
+from core.models.system_settings import SystemSetting
 from core.models.orchestration import (
     OrchestrationArchive,
     OrchestrationEvent,
@@ -40,17 +43,21 @@ from core.models.orchestration_enums import (
     EventType,
     FailureReasonCode,
     RunState,
+    StopReason,
     TaskState,
     TaskType,
     TERMINAL_RUN_STATES,
     DONE_TASK_STATES,
 )
+from modules.coordination import progress_ledger
+from modules.coordination.agent_matcher import AgentMatcher, build_match_annotation
 from modules.coordination.dispatcher import MissionDispatcher
 from modules.coordination.planner import (
     DecompositionResult,
     MissionPlanner,
     PlanValidationError,
 )
+from modules.coordination.primitive_heartbeat import _emit_missions_primitive
 from modules.coordination.reconciler import MissionReconciler
 from modules.coordination.verification import ConsistencyResult, VerificationService
 from services.orchestration_board_bridge import (
@@ -70,121 +77,201 @@ from services.orchestration_state import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Mission Power Modes — per-mode caps for model, tokens, and tool iterations.
+# Mission Power Modes — per-mode caps for the LLM tier and tool iterations.
+# Token budget is deliberately NOT a power-mode concern: it is resolved from
+# the agent's own Max Output Tokens setting (see AgentFactory, falling back to
+# the model's registry ceiling, then DEFAULT_MAX_OUTPUT_TOKENS).
 # "standard" is the default when power_mode is absent from mission config.
+# These are the hardcoded FALLBACK only. Operators retune live values via
+# system_settings (category 'power_modes', key '<mode>'); see
+# _get_power_mode_caps(). Stored settings win; absent keys fall back here.
 # ---------------------------------------------------------------------------
-_POWER_MODE_CAPS: Dict[str, Dict[str, Any]] = {
-    "light":    {"max_tokens": 2_000,  "max_tool_iterations": 5,  "force_llm_tier": "system_llm"},
-    "standard": {"max_tokens": 4_000,  "max_tool_iterations": 10, "force_llm_tier": None},
-    "max":      {"max_tokens": 16_000, "max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm"},
+# PRD-163 S5: timeout scales with power mode — light work shouldn't hang for the
+# full window, and max-power deep work needs more than the 4-min default.
+_POWER_MODE_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "light":    {"max_tool_iterations": 5,  "force_llm_tier": "system_llm", "timeout_seconds": 120},
+    "standard": {"max_tool_iterations": 10, "force_llm_tier": None, "timeout_seconds": 240},
+    "max":      {"max_tool_iterations": 50, "force_llm_tier": "orchestrator_llm", "timeout_seconds": 600},
 }
+
+
+# PRD-163 S4/Q57: approval-time plan editing — only these per-task fields are
+# editable from the approval card. Structural changes (add/remove tasks, rewire
+# dependencies) go through plan-import (Q54), not this field-PATCH path.
+_EDITABLE_TASK_FIELDS = ("agent_role", "title", "description")
+
+
+# ---------------------------------------------------------------------------
+# PRD-164 S4 (Q22): dispatch context goes through the field digest.
+# One value cap shared by field injection and the upstream digest rows, so a
+# row read straight from the DB is byte-identical to what the field would
+# echo back for the same task output (~1000 tokens at 4 chars/token).
+# ---------------------------------------------------------------------------
+FIELD_VALUE_CAP_CHARS = 4000
+
+_BASE64_IMAGE_RE = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+")
+
+
+def _sanitize_for_field(raw: str) -> str:
+    """Strip inline base64 image blobs before a task output enters dispatch
+    context (field injection or upstream digest rows) — a single data-URI
+    would otherwise burn the whole row cap on undecodable noise."""
+    return _BASE64_IMAGE_RE.sub("[image — see generated-images API]", raw or "")
+
+
+def annotate_plan_with_matches(plan: Optional[Dict[str, Any]],
+                               match_by_seq: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    """PRD-164 S2: mirror per-task agent-match previews into the ``run.plan``
+    snapshot (keyed by ``sequence_number``) so the approval card — which is
+    built from the plan tasks — can show WHO would run each task and WHY.
+
+    Pure and immutable: returns a NEW plan dict (the JSON column needs the
+    reassignment to track the change); the input plan is never mutated.
+    """
+    plan = plan or {}
+    new_tasks: List[Dict[str, Any]] = []
+    for pt in (plan.get("tasks") or []):
+        seq = pt.get("sequence_number")
+        match = match_by_seq.get(int(seq)) if seq is not None else None
+        if match:
+            pt = {
+                **pt,
+                "match_agent": match.get("agent_name"),
+                "match_agent_id": match.get("agent_id"),
+                "match_reason": match.get("reason"),
+                "match_is_override": bool(match.get("is_override", False)),
+            }
+        new_tasks.append(pt)
+    return {**plan, "tasks": new_tasks}
+
+
+def apply_plan_task_edits(tasks: List[Any], plan: Optional[Dict[str, Any]],
+                          edits: List[Dict[str, Any]]) -> tuple:
+    """Apply per-task field edits to OrchestrationTask rows and mirror them into
+    the ``run.plan`` snapshot. Pure w.r.t. its arguments (no DB) so it is unit
+    testable: the caller supplies the loaded task rows + plan dict.
+
+    Each edit matches a task by (in priority order) ``task_id`` (str of the row
+    id), ``temp_id`` (resolved to a sequence via the plan snapshot), or
+    ``sequence_number``. Only ``_EDITABLE_TASK_FIELDS`` are honoured. Task rows
+    are mutated in place (the ORM idiom); a NEW plan dict is returned so the JSON
+    column's change is tracked. Returns ``(new_plan, fields_changed)``.
+    """
+    by_id = {str(getattr(t, "id", "")): t for t in tasks}
+    by_seq = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
+
+    plan = plan or {}
+    plan_tasks = list(plan.get("tasks") or [])
+    # temp_id -> sequence_number, so a temp_id edit can find the row by sequence.
+    temp_to_seq = {
+        str(pt.get("temp_id")): pt.get("sequence_number")
+        for pt in plan_tasks if pt.get("temp_id") is not None
+    }
+
+    fields_changed = 0
+    edited_rows = set()
+    for edit in (edits or []):
+        if not isinstance(edit, dict):
+            continue
+        task = None
+        if edit.get("task_id") is not None:
+            task = by_id.get(str(edit["task_id"]))
+        if task is None and edit.get("temp_id") is not None:
+            seq = temp_to_seq.get(str(edit["temp_id"]))
+            if seq is not None:
+                task = by_seq.get(int(seq))
+        if task is None and edit.get("sequence_number") is not None:
+            try:
+                task = by_seq.get(int(edit["sequence_number"]))
+            except (ValueError, TypeError):
+                task = None
+        if task is None:
+            continue
+        for field in _EDITABLE_TASK_FIELDS:
+            if field in edit and edit[field] is not None:
+                new_val = edit[field]
+                if getattr(task, field, None) != new_val:
+                    setattr(task, field, new_val)
+                    fields_changed += 1
+        edited_rows.add(int(getattr(task, "sequence_number", -1)))
+
+    # Mirror the row state back into the plan snapshot (by sequence_number).
+    if edited_rows:
+        seq_to_row = {int(getattr(t, "sequence_number", -1)): t for t in tasks}
+        new_plan_tasks = []
+        for pt in plan_tasks:
+            seq = pt.get("sequence_number")
+            row = seq_to_row.get(int(seq)) if seq is not None else None
+            if row is not None and int(seq) in edited_rows:
+                pt = {**pt, **{f: getattr(row, f, pt.get(f)) for f in _EDITABLE_TASK_FIELDS}}
+            new_plan_tasks.append(pt)
+        plan = {**plan, "tasks": new_plan_tasks}
+
+    return plan, fields_changed
+
+
+def _get_power_mode_caps(power_mode: str, db: Session) -> Dict[str, Any]:
+    """Resolve power-mode caps: ``system_settings('power_modes', <mode>)`` merged
+    over ``_POWER_MODE_DEFAULTS``.
+
+    Operators can retune caps at runtime (no deploy) by storing a JSON object
+    under category ``power_modes``, key ``<mode>`` — e.g.
+    ``{"max_tool_iterations": 20}``. Stored keys override the defaults; absent
+    keys fall back. An unknown mode falls back to ``standard``.
+
+    Must run on the serial DB path (e.g. ``_prepare_task``). Do NOT call from
+    ``_run_agent_io`` — that runs concurrently via ``asyncio.gather`` with no DB
+    access; pass the already-resolved caps down instead.
+    """
+    defaults = _POWER_MODE_DEFAULTS.get(power_mode, _POWER_MODE_DEFAULTS["standard"])
+    caps: Dict[str, Any] = dict(defaults)  # copy — never mutate the module default
+
+    try:
+        setting = (
+            db.query(SystemSetting)
+            .filter(
+                SystemSetting.category == "power_modes",
+                SystemSetting.key == power_mode,
+            )
+            .first()
+        )
+        if setting and setting.value:
+            override = json.loads(setting.value)
+            if isinstance(override, dict):
+                caps.update(override)
+    except Exception:
+        logger.warning(
+            "Could not load power_mode caps for '%s' from system_settings; "
+            "using hardcoded defaults.",
+            power_mode,
+            exc_info=True,
+        )
+
+    return caps
+
+
+def _workspace_power_mode_default(workspace_id, db: Session) -> Optional[str]:
+    """The workspace's default power mode (``workspace.settings['power_mode']``),
+    set via ``platform_set_power_mode`` or a HARNESS ``power_mode_*`` prescription
+    (PRD-142 Wave 4, W4-S5). Returns the stored mode when it's a known tier, else
+    None so the caller falls back to ``'standard'``.
+
+    Best-effort by design: this runs on the per-task dispatch path, so a lookup
+    failure (or an unknown stored value) degrades silently to the default rather
+    than failing the task. One indexed workspace read; fine at pilot scale.
+    """
+    try:
+        from core.models.workspaces import Workspace
+
+        ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        mode = (ws.settings or {}).get("power_mode") if ws else None
+        return mode if mode in _POWER_MODE_DEFAULTS else None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Synthesis model override (Fix 1)
-# ---------------------------------------------------------------------------
-# Synthesis tasks consolidate prior step outputs and don't need premium
-# reasoning. We bias toward fast, cheap models (Gemini Flash → Haiku → agent
-# default). Order: try primary → try fallback → leave untouched.
-#
-# A model is "available" if it's globally active in llm_models OR installed
-# in the workspace (workspace_models). The agent's existing model is always
-# considered available so the override never makes things worse.
-#
-# Telemetry: the LLM call itself logs the OVERRIDE model_id under the
-# original agent_id, so cost/latency rolls up to the right model while task
-# ownership stays with the assigned agent (Auto / specialist).
-# ---------------------------------------------------------------------------
-
-def _resolve_synthesis_model(
-    db: Session,
-    workspace_id: Optional[Any],
-    current_model_id: str,
-) -> Optional[str]:
-    """Return the model_id to use for synthesis, or None to leave unchanged.
-
-    Picks the first override from (primary, fallback) that:
-      - is not the current agent model (no-op overrides skipped),
-      - is active in the global llm_models registry, OR
-      - is installed in this workspace.
-
-    Returns None if synthesis override is disabled or no valid candidate
-    is available — caller should leave the agent's model in place.
-    """
-    if not Config.COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED:
-        return None
-
-    candidates = [
-        Config.COORDINATOR_SYNTHESIS_MODEL_PRIMARY,
-        Config.COORDINATOR_SYNTHESIS_MODEL_FALLBACK,
-    ]
-    candidates = [c for c in candidates if c and c != current_model_id]
-    if not candidates:
-        return None
-
-    try:
-        from core.models.core import LLMModel, WorkspaceModel
-        from sqlalchemy import or_
-
-        global_active = {
-            row[0] for row in db.query(LLMModel.model_id).filter(
-                LLMModel.model_id.in_(candidates),
-                LLMModel.status == "active",
-            ).all()
-        }
-        ws_installed: set = set()
-        if workspace_id is not None:
-            ws_installed = {
-                row[0] for row in db.query(LLMModel.model_id)
-                .join(WorkspaceModel, WorkspaceModel.model_id == LLMModel.id)
-                .filter(
-                    LLMModel.model_id.in_(candidates),
-                    WorkspaceModel.workspace_id == workspace_id,
-                    WorkspaceModel.is_active.is_(True),
-                ).all()
-            }
-        available = global_active | ws_installed
-    except Exception:
-        logger.exception("Synthesis model availability lookup failed; leaving model unchanged")
-        return None
-
-    for candidate in candidates:
-        if candidate in available:
-            return candidate
-    return None
-
-
-def _apply_synthesis_override(
-    agent_runtime: Any,
-    target_model_id: str,
-    task_id: Any,
-    agent_id: int,
-) -> Optional[Tuple[str, str]]:
-    """Mutate agent_runtime.llm_manager.config to use the override model.
-
-    Returns the previous (provider, model) tuple so the caller can restore
-    afterwards (avoids polluting the factory cache for the next task on
-    this agent).
-    """
-    if not (agent_runtime and hasattr(agent_runtime, "llm_manager")):
-        return None
-    cfg = agent_runtime.llm_manager.config
-    previous = (getattr(cfg.provider, "value", str(cfg.provider)), cfg.model)
-
-    # OpenRouter slash-format models route through OpenRouter; let the
-    # provider resolver sort out the rest. Both gemini-2.5-flash and
-    # claude-haiku-4.5 ship as openrouter/<vendor>/<model> in this codebase.
-    from core.llm.clients.base import LLMProvider
-    cfg.provider = LLMProvider.OPENROUTER
-    cfg.model = target_model_id
-
-    logger.info(
-        "Task %s: synthesis model override applied — agent=%d %s/%s → openrouter/%s",
-        task_id, agent_id, previous[0], previous[1], target_model_id,
-    )
-    return previous
-
-
 # ---------------------------------------------------------------------------
 # PRD-128: Unified notification dispatch helpers
 # ---------------------------------------------------------------------------
@@ -240,6 +327,82 @@ async def _dispatch_mission_event(
         logger.error(
             "[Coordinator] %s dispatch failed for run %s",
             event_type,
+            getattr(run, "id", "?"),
+            exc_info=True,
+        )
+
+
+async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
+    """PRD-204 S4: dispatch ``mission_failed`` at the run-failure boundary.
+
+    ONE owner of the failure message shape, called from every async
+    failure site (reconciler task-failure cascades, joiner halt, plan
+    validation). Reuses the ``_dispatch_mission_event`` seam (resolves
+    ``run.created_by`` to a user_id; never raises). Previously a failed
+    run emitted only an internal RUN_FAILED audit event -- the user was
+    never told.
+    """
+    try:
+        detail = (
+            getattr(run, "stop_detail", None)
+            or getattr(run, "stop_reason", None)
+            or "Mission failed"
+        )
+        goal = getattr(run, "goal", None) or "Mission"
+        await _dispatch_mission_event(
+            db=db,
+            run=run,
+            event_type="mission_failed",
+            title=f"Mission failed: {goal[:110]}",
+            message=str(detail)[:500],
+            status="error",
+        )
+    except Exception:
+        # A notification must never break the failure path it reports on.
+        logger.error(
+            "[Coordinator] mission_failed notify failed for run %s",
+            getattr(run, "id", "?"),
+            exc_info=True,
+        )
+
+
+async def notify_mission_budget_paused(db: Session, run: OrchestrationRun) -> None:
+    """PRD-204 S4: dispatch ``mission_budget_paused`` at the budget-pause
+    transition (the dispatcher blocked and moved the run to PAUSED --
+    previously silent). Single owner of this event; the dead
+    ``escalation_service.notify_budget_exceeded`` board-card path was
+    removed in the same story.
+    """
+    try:
+        spent = getattr(run, "budget_spent", None) or {}
+        budget_cfg = getattr(run, "budget_config", None) or {}
+        token_budget = getattr(run, "token_budget_estimate", None)
+        parts = []
+        if spent.get("cost") is not None:
+            parts.append(f"spent ${float(spent.get('cost') or 0):.2f}")
+        if budget_cfg.get("max_cost") is not None:
+            parts.append(f"ceiling ${float(budget_cfg['max_cost']):.2f}")
+        if token_budget:
+            parts.append(
+                f"tokens {getattr(run, 'tokens_used', 0) or 0}/{token_budget}"
+            )
+        detail = "; ".join(parts) or "budget exceeded"
+        goal = getattr(run, "goal", None) or "Mission"
+        await _dispatch_mission_event(
+            db=db,
+            run=run,
+            event_type="mission_budget_paused",
+            title=f"Mission paused on budget: {goal[:100]}",
+            message=(
+                f"Budget exceeded ({detail}). Increase the budget and resume "
+                f"to continue."
+            ),
+            status="warning",
+        )
+    except Exception:
+        # A notification must never break the pause path it reports on.
+        logger.error(
+            "[Coordinator] mission_budget_paused notify failed for run %s",
             getattr(run, "id", "?"),
             exc_info=True,
         )
@@ -466,6 +629,7 @@ class CoordinatorService:
         self._scheduler = None
         self._owns_scheduler: bool = False
         self._last_archive_at: Optional[datetime] = None
+        self._last_field_compaction_at: Optional[datetime] = None  # PRD-166 S1
         self._field = None  # Lazy-init via factory
 
     def _get_field(self):
@@ -504,10 +668,12 @@ class CoordinatorService:
             )
             team_ids = [a.id for a in agents]
 
-            # Seed the field with the mission goal
+            # Seed the field with the mission goal. PRD-166 S1: carry provenance
+            # so patterns keep workspace/mission lineage into the workspace field.
             field_id = await field.create_context(
                 team_agent_ids=team_ids,
                 initial_data={"mission_goal": run.goal},
+                provenance={"workspace_id": str(run.workspace_id), "mission_id": str(run.id)},
             )
 
             # Store field_id in run config (no migration needed — JSONB)
@@ -537,18 +703,6 @@ class CoordinatorService:
             )
             return None
 
-    async def _destroy_mission_field(self, run: OrchestrationRun) -> None:
-        """Destroy the shared field when a mission ends."""
-        field = self._get_field()
-        field_id = (run.config or {}).get("field_id")
-        if not field or not field_id:
-            return
-        try:
-            await field.destroy_context(field_id)
-            logger.info("[PRD-108] Destroyed field %s for mission %s", field_id, run.id)
-        except Exception as e:
-            logger.warning("[PRD-108] Failed to destroy field %s: %r", field_id, e, exc_info=True)
-
     async def _inject_task_output_into_field(
         self,
         run: OrchestrationRun,
@@ -564,9 +718,16 @@ class CoordinatorService:
             await field.inject(
                 context_id=field_id,
                 key=task.title or f"task_{task.sequence_number}",
-                value=str(task.output)[:4000],  # Cap to prevent embedding blow-up
+                # Cap to prevent embedding blow-up; sanitized so a base64 blob
+                # can't burn the cap (same treatment as upstream digest rows).
+                value=_sanitize_for_field(str(task.output))[:FIELD_VALUE_CAP_CHARS],
                 agent_id=agent_id,
                 strength=1.0,
+                provenance={
+                    "workspace_id": str(run.workspace_id),
+                    "mission_id": str(run.id),
+                    "task_id": str(task.id),
+                },
             )
             logger.info(
                 "[PRD-108] Injected output from task %s into field %s",
@@ -574,6 +735,84 @@ class CoordinatorService:
             )
         except Exception as e:
             logger.warning("[PRD-108] Failed to inject task output: %r", e, exc_info=True)
+
+    async def _attach_field_digest(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        task: OrchestrationTask,
+        field_id: Optional[str],
+        agent_id: int,
+        upstream_rows: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """PRD-166 S3 + PRD-164 S4 (Q22): pin THE budgeted dispatch digest into
+        a task's prompt — the single channel for upstream/accumulated context.
+
+        Immediate upstream-dependency outputs (``upstream_rows``, collected by
+        ``_collect_upstream_digest_rows``) are merged AHEAD of semantic field
+        hits, deduped against the field's echo of the same outputs, and the
+        whole block is trimmed to ``Config.FIELD_QUERY_TOKEN_BUDGET`` — the
+        per-task budget that replaced the 8K-chars-per-upstream stuffing.
+        Anything the budget drops stays reachable via ``platform_field_query``.
+
+        When the mission is tight on budget (CRITICAL/EXCEEDED) the digest is
+        DROPPED to save tokens and a ``RUN_FIELD_CONTEXT_DROPPED`` warning is
+        emitted — the budget-gate checkpoint for dispatch context.
+        """
+        from modules.context import field_scoring
+
+        upstream_rows = upstream_rows or []
+
+        # Budget-gate: drop the digest rather than spend tokens we don't have.
+        try:
+            from modules.coordination.dispatcher import BudgetStatus, MissionDispatcher
+            status = MissionDispatcher._get_budget_status(run)
+        except Exception:
+            status, BudgetStatus = None, None
+        if status is not None and status in (BudgetStatus.CRITICAL, BudgetStatus.EXCEEDED):
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_FIELD_CONTEXT_DROPPED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={"reason": "budget", "budget_status": status.value},
+            )
+            logger.info("[Field] Digest dropped for budget on task %s (%s)", task.id, status.value)
+            return
+
+        # Semantic field hits — fail-open to upstream rows only, so a missing
+        # or unhealthy Qdrant degrades dispatch context, never breaks dispatch.
+        field_rows: List[Dict[str, Any]] = []
+        field = self._get_field()
+        if field and field_id:
+            try:
+                query = f"{task.title or ''}\n{task.description or ''}".strip() or (run.goal or "")
+                results = await field.query(
+                    context_id=field_id,
+                    query=query,
+                    agent_id=agent_id,
+                    top_k=Config.FIELD_QUERY_TOP_K,
+                )
+                field_rows = [{"key": r["key"], "value": r["value"]} for r in (results or [])]
+            except Exception:
+                logger.warning("[Field] digest query failed for task %s", task.id, exc_info=True)
+
+        merged = field_scoring.merge_dispatch_rows(upstream_rows, field_rows)
+        if not merged:
+            return
+        kept, truncated = field_scoring.budget_results(merged, Config.FIELD_QUERY_TOKEN_BUDGET)
+        if not kept:
+            return
+        task.input_context = {
+            **(task.input_context or {}),
+            "field_digest": field_scoring.format_digest(kept, truncated=truncated),
+        }
+        logger.info(
+            "[Field] Pinned dispatch digest (%d patterns, %d upstream) into task %s",
+            len(kept), len(upstream_rows), task.id,
+        )
 
     async def _seed_field_with_documents(
         self,
@@ -608,6 +847,7 @@ class CoordinatorService:
                     ),
                     agent_id=0,
                     strength=1.2,  # Above default so reference material ranks higher
+                    provenance={"workspace_id": str(workspace_id)},
                 )
                 logger.info("[PRD-108] Seeded field %s with doc %s (%s)", field_id, doc_id, doc.filename)
             except Exception as e:
@@ -618,15 +858,32 @@ class CoordinatorService:
         db: Session,
         run: OrchestrationRun,
     ) -> Optional[int]:
-        """On mission completion, save assembled task outputs as a document for future intelligence.
+        """On mission completion, route the assembled synthesis through the
+        knowledge flywheel (PRD-164 S3, Q58) so it is retrievable via RAG and
+        the Knowledge Graph next turn. ``source_type='agent_output'``.
 
-        For app_builder missions, also downloads the zip bundle from the workspace
-        and saves it as a separate downloadable document.
+        Honors the per-workspace opt-out: an opted-out workspace ingests
+        NOTHING (the run is marked so the sweep doesn't retry forever).
+
+        For app_builder missions, also downloads the zip bundle from the
+        workspace and saves it as a separate downloadable document. Can also
+        emit a rendered document deliverable via the PRD-167 template path
+        when ``run.config['emit_document']`` is set.
         """
-        from api.documents import get_document_manager
-        from pathlib import Path
+        from services.knowledge_flywheel import flywheel_enabled, ingest_agent_output
 
         try:
+            if not flywheel_enabled(db, run.workspace_id):
+                # Q58 opt-out: ingest nothing; mark so the tick sweep moves on.
+                run.config = {**(run.config or {}), "output_ingest": "skipped_opt_out"}
+                db.flush()
+                logger.info(
+                    "[Mission] Workspace %s opted out of the knowledge flywheel — "
+                    "skipping output ingest for mission %s",
+                    run.workspace_id, run.id,
+                )
+                return None
+
             tasks = (
                 db.query(OrchestrationTask)
                 .filter(
@@ -648,34 +905,34 @@ class CoordinatorService:
                 parts.append("")
             content = "\n".join(parts)
 
-            # Write to temp file
-            output_dir = Path("/tmp/automatos_mission_outputs")
-            output_dir.mkdir(exist_ok=True)
             slug = re.sub(r"[^a-z0-9]+", "-", run.goal[:60].lower()).strip("-")
-            temp_path = output_dir / f"mission_{run.id}_{slug}.md"
-            temp_path.write_text(content, encoding="utf-8")
 
-            doc_manager = get_document_manager(str(run.workspace_id))
-            document_id = None
-
-            try:
-                document_id = await doc_manager.upload_document(
-                    file_path=str(temp_path),
-                    filename=f"mission-output-{slug}.md",
-                    tags=["mission-output", f"mission:{run.id}"],
-                    description=f"Output from completed mission: {run.goal[:200]}",
-                    created_by="coordinator",
-                )
+            document_id = await ingest_agent_output(
+                db,
+                run.workspace_id,
+                content=content,
+                filename=f"mission-output-{slug}.md",
+                source="mission_synthesis",
+                source_id=str(run.id),
+                title=f"Mission output: {run.goal[:120]}",
+                description=f"Output from completed mission: {run.goal[:200]}",
+                created_by="coordinator",
+                extra_tags=["mission-output", f"mission:{run.id}"],
+            )
+            if document_id is not None:
                 run.config = {**(run.config or {}), "output_document_id": document_id}
                 db.flush()
                 logger.info("[Mission] Saved output document %s for mission %s", document_id, run.id)
-            finally:
-                if temp_path.exists():
-                    temp_path.unlink()
+
+            # --- PRD-167 wiring: emit a rendered document deliverable -------
+            await self._emit_mission_document(db, run, content)
 
             # --- App builder: also save the zip bundle ---
             template_used = (run.config or {}).get("template_used")
             if template_used == "app_builder":
+                from api.documents import get_document_manager
+
+                doc_manager = get_document_manager(str(run.workspace_id))
                 zip_doc_id = await self._save_app_bundle_zip(db, run, slug, doc_manager)
                 if zip_doc_id:
                     run.config = {**(run.config or {}), "app_bundle_document_id": zip_doc_id}
@@ -684,6 +941,93 @@ class CoordinatorService:
             return document_id
         except Exception as e:
             logger.warning("[Mission] Failed to save output document for %s: %s", run.id, e, exc_info=True)
+            # PRD-179 S2 (F049): stamp a failure marker so the flywheel sweep's
+            # SQL-side exclusion drops this run next tick instead of re-selecting
+            # it forever. Without it, one poison run silently starves the backlog.
+            try:
+                run.config = {
+                    **(run.config or {}),
+                    "output_ingest_failed": datetime.now(timezone.utc).isoformat(),
+                }
+                db.flush()
+            except Exception:
+                logger.debug(
+                    "[Mission] Could not persist ingest-failure marker for run %s",
+                    run.id, exc_info=True,
+                )
+            return None
+
+    async def _emit_mission_document(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        content: str,
+    ) -> Optional[str]:
+        """PRD-164 S3: mission completion can emit ``generate_document`` via the
+        PRD-167 template path (merged — wired directly, no feature flag).
+
+        Driven by ``run.config['emit_document']``::
+
+            {"format": "pdf"|"docx"|"xlsx", "title": "...",
+             "template_id": "<uuid>" | "template_name": "..."}
+
+        The rendered file is registered as a mission deliverable (it shows in
+        the mission Deliverables tab). The synthesis markdown is already
+        flywheel-ingested by the caller, so the render is NOT re-ingested —
+        no duplicate knowledge. Fail-soft: a render failure never fails the
+        mission output flow. Idempotent via config['emitted_deliverable_id'].
+        """
+        spec = (run.config or {}).get("emit_document")
+        if not spec or not isinstance(spec, dict):
+            return None
+        if (run.config or {}).get("emitted_deliverable_id"):
+            return None
+
+        try:
+            from uuid import UUID as _UUID
+
+            from modules.documents.generation_service import DocumentGenerationService
+
+            fmt = str(spec.get("format") or "pdf").lower()
+            title = spec.get("title") or f"Mission report: {run.goal[:120]}"
+            template_id = None
+            if spec.get("template_id"):
+                template_id = _UUID(str(spec["template_id"]))
+
+            gen_service = DocumentGenerationService(db, run.workspace_id)
+            result = await gen_service.generate(
+                title=title,
+                format=fmt,
+                data={"content": content},
+                workspace_id=run.workspace_id,
+                template_name=spec.get("template_name"),
+                template_id=template_id,
+            )
+            registration = gen_service.register_as_deliverable(
+                result,
+                title=title,
+                source_type="mission",
+                source_id=str(run.id),
+                agent_name="coordinator",
+                template_id=template_id,
+            )
+            deliverable_id = (registration or {}).get("deliverable_id")
+            run.config = {
+                **(run.config or {}),
+                "emitted_document": result.filename,
+                "emitted_deliverable_id": deliverable_id or result.filename,
+            }
+            db.flush()
+            logger.info(
+                "[Mission] Emitted %s document '%s' for mission %s (deliverable %s)",
+                fmt, result.filename, run.id, deliverable_id,
+            )
+            return deliverable_id
+        except Exception:
+            logger.warning(
+                "[Mission] emit_document failed for mission %s (non-fatal)",
+                run.id, exc_info=True,
+            )
             return None
 
     async def _save_app_bundle_zip(
@@ -742,30 +1086,51 @@ class CoordinatorService:
             return None
 
     async def _cleanup_terminal_fields(self, db: Session) -> None:
-        """Destroy fields for missions that have ended.
+        """Archive fields for missions that have ended (BINDING D7 stepping stone).
 
-        Each field is its own Qdrant collection — Qdrant loads all collections
-        into memory on startup, so a backlog OOM-crashes Qdrant. Throttle
-        is intentionally generous to drain the backlog quickly.
+        Fields now share ONE Qdrant collection (``field_memory``) keyed by a
+        ``field_id`` payload filter — there is no longer a per-mission
+        collection to tear down. Destroying the data here made a completed
+        mission's Field tab read ``not_created`` with zero patterns forever.
+        Instead, archive in place: stamp ``field_archived`` + ``field_expired_at``
+        and KEEP both ``field_id`` and the data, so the field stays queryable
+        after the mission ends. The orphan reaper (_cleanup_orphan_field_data)
+        still removes data whose run row has been purged.
         """
         terminal_with_fields = (
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.state.in_([s.value for s in TERMINAL_RUN_STATES]),
                 OrchestrationRun.config["field_id"].astext.isnot(None),
+                OrchestrationRun.config["field_archived"].astext.is_(None),
             )
             .limit(50)
             .all()
         )
+        field = self._get_field()
+        field_inner = getattr(field, "_inner", field) if field else None
         for run in terminal_with_fields:
-            field_id = (run.config or {}).get("field_id")
-            if not field_id:
+            cfg = run.config or {}
+            field_id = cfg.get("field_id")
+            if not field_id or cfg.get("field_archived"):
                 continue
-            await self._destroy_mission_field(run)
-            # Remove field_id from config so we don't try again
-            updated_config = {**(run.config or {})}
-            updated_config.pop("field_id", None)
-            run.config = updated_config
+            # PRD-166 S1: merge the mission field into the workspace-persistent
+            # field — stamp workspace_id + expired_at on its points so they join
+            # cross-mission recall while the mission-scoped view soft-archives.
+            if field_inner is not None and hasattr(field_inner, "archive_into_workspace"):
+                try:
+                    await field_inner.archive_into_workspace(field_id, str(run.workspace_id))
+                except Exception:
+                    logger.warning(
+                        "[Field] archive_into_workspace failed for run %s", run.id, exc_info=True,
+                    )
+            # Archive in place — data and field_id are retained so the
+            # /field endpoint can still read this mission's field.
+            run.config = {
+                **cfg,
+                "field_archived": True,
+                "field_expired_at": datetime.now(timezone.utc).isoformat(),
+            }
             db.flush()
 
     async def _cleanup_orphan_field_data(self, db: Session) -> None:
@@ -859,18 +1224,35 @@ class CoordinatorService:
             logger.debug("[Coordinator] legacy-collection sweep skipped", exc_info=True)
 
     async def _save_pending_output_documents(self, db: Session) -> None:
-        """Save output documents for completed missions that don't have one yet."""
-        completed_without_output = (
+        """Route completed missions that have not been ingested through the
+        synthesis flywheel (PRD-179 S2, F049).
+
+        The exclusion of already-handled runs is done SQL-side, not by pulling a
+        batch and filtering in Python: a run is a candidate only when it carries
+        NONE of the three terminal markers — ``output_document_id`` (ingested),
+        ``output_ingest`` (opted out / skipped), ``output_ingest_failed``
+        (previous ingest errored). Ordering is ``created_at DESC`` so the newest
+        completed missions ingest first. Together these stop the pre-fix
+        starvation where an unordered ``LIMIT 3`` kept re-selecting the same
+        already-done rows once more than three accumulated.
+        """
+        candidates = (
             db.query(OrchestrationRun)
             .filter(
                 OrchestrationRun.state == RunState.COMPLETED.value,
+                # SQL-side already-ingested / failure exclusion (JSONB ->> IS NULL).
+                OrchestrationRun.config["output_document_id"].astext.is_(None),
+                OrchestrationRun.config["output_ingest"].astext.is_(None),
+                OrchestrationRun.config["output_ingest_failed"].astext.is_(None),
             )
-            .limit(3)
+            .order_by(OrchestrationRun.created_at.desc())
+            .limit(Config.FLYWHEEL_INGEST_BATCH)
             .all()
         )
-        for run in completed_without_output:
-            if (run.config or {}).get("output_document_id"):
-                continue
+        for run in candidates:
+            # _save_mission_output_as_document owns its own failure handling and
+            # stamps the output_ingest_failed marker on error (so a poison run
+            # drops out of the candidate set). The sweep stays a thin driver.
             await self._save_mission_output_as_document(db, run)
 
     # ------------------------------------------------------------------
@@ -970,6 +1352,35 @@ class CoordinatorService:
                         db.rollback()
                         summary["errors"].append(str(run.id))
 
+                # --- PRD-163 S5: async planning — run deferred planners ---
+                try:
+                    planned = await self._sweep_async_planning(db)
+                    if planned:
+                        summary["async_planned"] = planned
+                except Exception:
+                    logger.warning("[Coordinator] async planning sweep failed", exc_info=True)
+                    db.rollback()
+
+                # --- PRD-163 S3: approval countdowns — auto-proceed expired plans ---
+                try:
+                    n = self.check_approval_countdowns(db)
+                    if n:
+                        db.commit()
+                        summary["countdown_auto_approved"] = n
+                except Exception:
+                    logger.warning("[Coordinator] approval countdown sweep failed", exc_info=True)
+                    db.rollback()
+
+                # --- PRD-200 S3: re-notify (and optionally expire) parked approvals ---
+                try:
+                    r = await self.check_approval_renotify(db)
+                    if r:
+                        db.commit()
+                        summary["approval_renotified"] = r
+                except Exception:
+                    logger.warning("[Coordinator] approval re-notify sweep failed", exc_info=True)
+                    db.rollback()
+
                 # --- PRD-108: Clean up fields for terminal runs ---
                 await self._cleanup_terminal_fields(db)
                 db.commit()  # Persist field_id removal to stop destroy loop
@@ -986,6 +1397,9 @@ class CoordinatorService:
                 # --- Save output docs for completed missions ---
                 await self._save_pending_output_documents(db)
                 db.commit()
+
+                # --- PRD-166 S1 / PRD-178 S3: field compaction (throttled hourly) ---
+                await self._maybe_compact_fields(db, summary)
 
                 # --- Archive phase (throttled to once per hour) ---
                 self._maybe_archive(db, summary)
@@ -1079,6 +1493,20 @@ class CoordinatorService:
         # --- Dispatch phase (parallel via dispatch_ready) ---
         dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
 
+        # PRD-204 S4: the dispatcher's budget gate pauses silently (sync
+        # code cannot await the dispatcher). This is that transition's
+        # async seam: the run entered dispatch RUNNING and came out PAUSED
+        # with a budget skip reason -- tell the user, once (the tick will
+        # not re-process a PAUSED run, so this cannot repeat).
+        if (
+            RunState(run.state) == RunState.PAUSED
+            and any(
+                r.skipped_reason in ("budget_exceeded", "budget_critical_deferred")
+                for r in dispatch_results
+            )
+        ):
+            await notify_mission_budget_paused(db, run)
+
         # Collect successfully dispatched tasks for concurrent execution
         dispatched = [r for r in dispatch_results if r.dispatched]
 
@@ -1112,17 +1540,22 @@ class CoordinatorService:
                         exc_info=True,
                     )
 
-            # Flush all DB changes before entering the parallel phase
-            db.flush()
+            # Commit Phase-1 prep before the parallel phase so the connection
+            # is not idle-in-transaction for the whole asyncio.gather of agent
+            # LLM calls (PRD-135 / W1-S9). RUNNING transitions and agent
+            # activations become durable here — if the process dies mid-gather,
+            # the durable-execution reaper (WS-C) recovers them rather than a
+            # silent end-of-tick rollback.
+            end_open_transaction(db)
 
             # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
             if prepared:
                 agent_coros = [
                     self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
                                        p["task"], p["attachment_ids"],
-                                       run_config=p.get("run_config"),
+                                       mode_caps=p["mode_caps"],
                                        agent_runtime=p.get("agent_runtime"),
-                                       synthesis_override_previous=p.get("synthesis_override_previous"))
+                                       field_context=p.get("field_context"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -1150,7 +1583,184 @@ class CoordinatorService:
             _cleanup_ephemeral_agents(db, run)
 
         if RunState(run.state) == RunState.VERIFYING:
-            await self._build_and_advance_to_awaiting_human(db, run)
+            await self._complete_verified_run(db, run)
+            db.refresh(run)
+
+        # --- PRD-164 S4: joiner checkpoint (bounded replanning) ---
+        # After dispatch + reconcile, the progress ledger decides whether the
+        # run is looping without forward progress; the joiner replans within
+        # COORDINATOR_MAX_REPLANS or halts. Best-effort: a joiner error never
+        # breaks the tick.
+        if RunState(run.state) == RunState.RUNNING:
+            try:
+                await self._joiner_checkpoint(db, run)
+            except Exception:
+                logger.error(
+                    "Joiner checkpoint failed for run %s", run.id, exc_info=True,
+                )
+
+        # PRD-142 W3-S11: missions primitive heartbeat at terminal boundary.
+        # tick() only picks RunState.RUNNING runs, so a terminal state here is
+        # always a fresh transition this tick — emit exactly once. COMPLETED →
+        # green; FAILED / CANCELLED → down (the tile reflects the user-visible
+        # outcome). Best-effort: the helper swallows any emit error so a
+        # broken heartbeat writer cannot fail mission completion.
+        if RunState(run.state) in TERMINAL_RUN_STATES:
+            _emit_missions_primitive(
+                run.workspace_id,
+                success=RunState(run.state) == RunState.COMPLETED,
+                detail=(
+                    f"run={run.id} state={run.state} "
+                    f"stop_reason={run.stop_reason or 'unspecified'}"
+                ),
+            )
+
+    # ------------------------------------------------------------------
+    # Joiner checkpoint — bounded replanning (PRD-164 S4)
+    # ------------------------------------------------------------------
+
+    async def _joiner_checkpoint(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+    ) -> None:
+        """LLMCompiler-style joiner: after each tick, decide CONTINUE / REPLAN
+        / HALT from the run's progress ledger (Magentic-One stall counter).
+
+        Churn without forward progress for COORDINATOR_STALL_LEDGER_LIMIT
+        checks → REPLAN through the one existing ``replan_mission`` engine
+        while ``replan_count`` is under COORDINATOR_MAX_REPLANS, else HALT
+        (run FAILED, ``stop_reason='stalled'``). The ledger persists on
+        ``run.config['progress_ledger']`` and every verdict is emitted as a
+        ``run_stall_ledger`` event — the audit trail on the mission. No new
+        planner algorithm lives here (PRD-164 non-goal).
+        """
+        tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run.id)
+            .all()
+        )
+        if not tasks:
+            return
+
+        snapshot = progress_ledger.snapshot_tasks(tasks)
+        previous = (run.config or {}).get("progress_ledger")
+        ledger, decision = progress_ledger.advance(
+            previous,
+            snapshot,
+            stall_limit=Config.COORDINATOR_STALL_LEDGER_LIMIT,
+            replan_count=run.replan_count or 0,
+            max_replans=Config.COORDINATOR_MAX_REPLANS,
+        )
+        if ledger is not previous:
+            # New dict on change only — idle ticks skip the JSONB write.
+            run.config = {**(run.config or {}), "progress_ledger": ledger}
+
+        if decision is progress_ledger.JoinerDecision.CONTINUE:
+            return
+
+        # Audit the verdict on the mission event stream.
+        emit_event(
+            db=db,
+            run_id=run.id,
+            event_type=EventType.RUN_STALL_LEDGER,
+            actor_type=ActorType.COORDINATOR,
+            actor_id="joiner",
+            payload={
+                "decision": decision.value,
+                "stall_streak": ledger.get("stall_streak"),
+                "stall_limit": Config.COORDINATOR_STALL_LEDGER_LIMIT,
+                "snapshot": snapshot,
+                "replan_count": run.replan_count or 0,
+                "max_replans": Config.COORDINATOR_MAX_REPLANS,
+            },
+        )
+        logger.warning(
+            "[Joiner] Mission %s verdict=%s (streak=%s, replans=%s/%s)",
+            run.id, decision.value, ledger.get("stall_streak"),
+            run.replan_count or 0, Config.COORDINATOR_MAX_REPLANS,
+        )
+
+        if decision is progress_ledger.JoinerDecision.REPLAN:
+            try:
+                await self.replan_mission(
+                    db,
+                    run.id,
+                    actor_id="joiner",
+                    notes=(
+                        "Automatic replan: the progress ledger detected "
+                        f"{ledger.get('stall_streak')} consecutive checks of "
+                        "churn without forward progress (tasks retrying "
+                        "without completing). Replace the looping approach."
+                    ),
+                    actor_type=ActorType.COORDINATOR,
+                    trigger="stall_ledger",
+                )
+            except PlanValidationError:
+                # replan_mission already failed the run + emitted the audit.
+                logger.warning(
+                    "[Joiner] Auto-replan validation failed for run %s",
+                    run.id, exc_info=True,
+                )
+                return
+            except Exception as exc:
+                # A hard replan failure may not strand the loop — halt.
+                logger.error(
+                    "[Joiner] Auto-replan errored for run %s — halting",
+                    run.id, exc_info=True,
+                )
+                await self._halt_stalled_run(
+                    db, run, ledger, detail=f"auto-replan errored: {exc}",
+                )
+                return
+            # Fresh plan gets a fresh window — rebaseline the ledger.
+            run.config = {
+                **(run.config or {}),
+                "progress_ledger": progress_ledger.reset_after_replan(ledger),
+            }
+            return
+
+        # HALT — replan budget exhausted.
+        await self._halt_stalled_run(
+            db, run, ledger, detail="replan budget exhausted",
+        )
+
+    async def _halt_stalled_run(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        ledger: Dict[str, Any],
+        *,
+        detail: str,
+    ) -> None:
+        """Joiner HALT: fail a looping mission with a named stop reason and
+        record the failure in mission memory for PRD-159 recall."""
+        reason = (
+            "Joiner halt: no forward progress across "
+            f"{ledger.get('stall_streak')} ledger checks; {detail}"
+        )
+        try:
+            transition_run(
+                db=db,
+                run=run,
+                new_state=RunState.FAILED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="joiner",
+                reason=reason,
+                stop_reason=StopReason.STALLED.value,
+                stop_detail=reason,
+            )
+        except (ConflictError, InvalidTransitionError):
+            logger.warning(
+                "[Joiner] Could not halt run %s (state=%s)",
+                run.id, run.state, exc_info=True,
+            )
+            return
+        # PRD-204 S4: the user is told the mission failed (joiner halt path).
+        await notify_mission_failed(db, run)
+        await _store_mission_memory_safe(
+            db, run.id, outcome="failed", failure_reason=reason,
+        )
 
     # ------------------------------------------------------------------
     # Synthesis support (PRD-82C US-007)
@@ -1183,17 +1793,19 @@ class CoordinatorService:
             .all()
         )
 
-        # Sanitize and truncate — reuse same logic as _execute_task upstream
+        # Sanitize and truncate. Synthesis is the one consumer that still gets
+        # full upstream outputs — its whole job is merging them (min_length
+        # verification is 50% of the combined upstream), so the Q22 dispatch
+        # digest deliberately does NOT apply here.
         _PER_OUTPUT_LIMIT = 8000
         _TOTAL_BUDGET = 30_000
-        _BASE64_RE = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+")
 
         results: List[Dict[str, Any]] = []
         accumulated = 0
         for dt in dep_tasks:
             raw_output = dt.output or ""
             # Strip base64 blobs
-            cleaned = _BASE64_RE.sub("[image removed]", raw_output)
+            cleaned = _sanitize_for_field(raw_output)
             # Per-output truncation
             remaining = _TOTAL_BUDGET - accumulated
             if remaining <= 0:
@@ -1209,6 +1821,44 @@ class CoordinatorService:
                 "output": truncated,
             })
         return results
+
+    @staticmethod
+    def _collect_upstream_digest_rows(
+        db: Session,
+        task: OrchestrationTask,
+    ) -> List[Dict[str, Any]]:
+        """PRD-164 S4 (Q22): a task's immediate upstream-dependency outputs as
+        field-shaped ``{key, value}`` rows for the dispatch digest.
+
+        Keyed by the upstream task title — the same key the output was injected
+        into the field under (``_inject_task_output_into_field``) — so the
+        digest merge dedupes the field's echo of the same content. Values are
+        sanitized and capped exactly like field injection; the per-task TOKEN
+        budget is applied later by ``_attach_field_digest``.
+        """
+        upstream_deps = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.task_id == task.id)
+            .all()
+        )
+        if not upstream_deps:
+            return []
+
+        dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
+        dep_tasks = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.id.in_(dep_task_ids))
+            .order_by(OrchestrationTask.sequence_number)
+            .all()
+        )
+        return [
+            {
+                "key": dt.title or f"task_{dt.sequence_number}",
+                "value": _sanitize_for_field(str(dt.output))[:FIELD_VALUE_CAP_CHARS],
+            }
+            for dt in dep_tasks
+            if dt.output
+        ]
 
     @staticmethod
     def _build_synthesis_prompt(
@@ -1312,49 +1962,16 @@ class CoordinatorService:
             )
             return None
 
-        # Inject upstream task outputs into input_context so the agent
-        # can see what previous tasks produced (dependency chain context)
-        upstream_deps = (
-            db.query(OrchestrationTaskDependency)
-            .filter(OrchestrationTaskDependency.task_id == task.id)
-            .all()
+        # PRD-164 S4 (Q22): upstream task outputs reach the agent as the
+        # token-budgeted dispatch digest (PRD-166 field digest), NOT as raw
+        # 8K-chars-per-task stuffing. Synthesis tasks are the one exception —
+        # their job is merging full upstream content (_collect_upstream_outputs
+        # below), so they skip the digest rows.
+        is_synthesis = task.task_type == TaskType.SYNTHESIS.value
+        upstream_rows: List[Dict[str, Any]] = (
+            [] if is_synthesis
+            else self._collect_upstream_digest_rows(db, task)
         )
-        if upstream_deps:
-            dep_task_ids = [d.depends_on_task_id for d in upstream_deps]
-            dep_tasks = (
-                db.query(OrchestrationTask)
-                .filter(OrchestrationTask.id.in_(dep_task_ids))
-                .order_by(OrchestrationTask.sequence_number)
-                .all()
-            )
-            _MAX_UPSTREAM_CHARS = 8000  # per task — prevent context blow-up
-
-            def _sanitize_upstream(raw: str) -> str:
-                """Strip base64 images and truncate for downstream context."""
-                cleaned = re.sub(
-                    r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+",
-                    "[image — see generated-images API]",
-                    raw,
-                )
-                if len(cleaned) > _MAX_UPSTREAM_CHARS:
-                    cleaned = cleaned[:_MAX_UPSTREAM_CHARS] + "\n\n... (truncated)"
-                return cleaned
-
-            upstream_outputs = [
-                {"title": dt.title, "output": _sanitize_upstream(dt.output)}
-                for dt in dep_tasks
-                if dt.output
-            ]
-            if upstream_outputs:
-                task.input_context = {
-                    **(task.input_context or {}),
-                    "upstream_outputs": upstream_outputs,
-                }
-                logger.info(
-                    "Injected %d upstream outputs into task %s",
-                    len(upstream_outputs),
-                    task.id,
-                )
 
         # PRD-108: Pass field_id so agent can query the shared field
         field_id = (run.config or {}).get("field_id")
@@ -1363,6 +1980,15 @@ class CoordinatorService:
                 **(task.input_context or {}),
                 "field_id": field_id,
             }
+        # PRD-166 S3 + PRD-164 S4: pin the budgeted dispatch digest (immediate
+        # upstream outputs merged ahead of semantic field hits) into the prompt
+        # so the agent starts with accumulated knowledge instead of having to
+        # query for it. Runs even without a field backend — upstream rows
+        # still flow, under the same per-task budget.
+        if upstream_rows or field_id:
+            await self._attach_field_digest(
+                db, run, task, field_id, agent_id, upstream_rows=upstream_rows,
+            )
 
         # PRD-127: Get attachment_ids for this task
         task_attachment_ids: List[str] = []
@@ -1372,8 +1998,7 @@ class CoordinatorService:
             task_attachment_ids = (run.config or {}).get("attachment_ids", [])
 
         # Build the prompt — synthesis tasks use a specialised prompt
-        is_synthesis = task.task_type == TaskType.SYNTHESIS.value
-
+        # (is_synthesis resolved above, before the dispatch-digest step).
         ctx = task.input_context or {}
         previous_output = ctx.get("previous_output")
         verification_feedback = ctx.get("verification_feedback")
@@ -1424,8 +2049,15 @@ class CoordinatorService:
         # Activate agent with power-mode overrides
         factory = AgentFactory(db_session=db)
         run_config = run.config or {}
-        power_mode = run_config.get("power_mode", "standard")
-        mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
+        # An explicit run_config mode wins; otherwise inherit the workspace default
+        # (workspace.settings['power_mode'], set via platform_set_power_mode / a
+        # HARNESS power_mode_* prescription); falling back to 'standard'. (W4-S5.)
+        power_mode = (
+            run_config.get("power_mode")
+            or _workspace_power_mode_default(run.workspace_id, db)
+            or "standard"
+        )
+        mode_caps = _get_power_mode_caps(power_mode, db)
 
         force_tier = mode_caps.get("force_llm_tier")
         if force_tier:
@@ -1443,30 +2075,20 @@ class CoordinatorService:
             if not agent_runtime:
                 agent_runtime = await factory.activate_agent(agent_id, workspace_dir="/tmp/automatos_workspace")
 
-        if agent_runtime and hasattr(agent_runtime, "llm_manager"):
-            agent_runtime.llm_manager.config.max_tokens = max(
-                agent_runtime.llm_manager.config.max_tokens,
-                mode_caps["max_tokens"],
-            )
+        # The agent's max_tokens budget is resolved by AgentFactory from the
+        # agent's own Max Output Tokens setting (then the model's registry
+        # ceiling, then DEFAULT_MAX_OUTPUT_TOKENS). Power mode governs only the
+        # LLM tier and tool-iteration count — never the token budget. Do not
+        # re-introduce a power-mode token floor here: it silently capped large
+        # mission writes regardless of what the agent was configured to produce.
 
-        # Synthesis model override (Fix 1): consolidate-style tasks bias
-        # toward fast cheap models. Original (provider, model) is captured
-        # so we can restore in _run_agent_io's finally — keeps the factory
-        # cache pristine for the next task on this agent.
-        synthesis_override_previous: Optional[Tuple[str, str]] = None
-        if is_synthesis and agent_runtime and hasattr(agent_runtime, "llm_manager"):
-            workspace_id = getattr(run, "workspace_id", None)
-            current_model = agent_runtime.llm_manager.config.model
-            target = _resolve_synthesis_model(db, workspace_id, current_model)
-            if target:
-                synthesis_override_previous = _apply_synthesis_override(
-                    agent_runtime, target, task.id, agent_id,
-                )
-            else:
-                logger.info(
-                    "Task %s: synthesis override skipped (disabled or no available model) — using agent default %s",
-                    task.id, current_model,
-                )
+        # Model selection is driven by power_mode + the agent's own configured
+        # model. There is intentionally NO synthesis-specific override:
+        #   light    → force_llm_tier=system_llm   (gemini-2.5-flash)
+        #   standard → agent's own model           (e.g. DeepSeek for QUILL)
+        #   max      → force_llm_tier=orchestrator_llm (Auto's premium model)
+        # System LLM is reserved for codegraph / Mem0 / planner — never
+        # auto-applied to mission tasks just because they're synthesis-typed.
 
         return {
             "task": task,
@@ -1475,8 +2097,17 @@ class CoordinatorService:
             "prompt": prompt,
             "factory": factory,
             "attachment_ids": task_attachment_ids,
-            "run_config": run_config,
-            "synthesis_override_previous": synthesis_override_previous,
+            # Caps resolved here (serial DB path) so the concurrent I/O phase
+            # never touches the DB — see _get_power_mode_caps / _run_agent_io.
+            "mode_caps": mode_caps,
+            # PRD-178 S1 (F020): bind the agent's field tools to THIS task's run,
+            # resolved on the serial DB path. Threaded into execute_with_prompt →
+            # the tool loop → PlatformActionExecutor so field_id no longer comes
+            # from a `.first()` guess over concurrent running missions.
+            "field_context": {
+                "field_id": field_id,
+                "mission_id": str(run.id),
+            } if field_id else None,
         }
 
     async def _run_agent_io(
@@ -1486,24 +2117,23 @@ class CoordinatorService:
         prompt: str,
         task: Any,
         attachment_ids: List[str],
-        run_config: Optional[Dict[str, Any]] = None,
+        mode_caps: Optional[Dict[str, Any]] = None,
         agent_runtime: Optional[Any] = None,
-        synthesis_override_previous: Optional[Tuple[str, str]] = None,
+        field_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
-        No DB access here — only the LLM + tool loop.
-
-        ``synthesis_override_previous``: when set, the agent_runtime's LLM
-        config was mutated for a synthesis task. Restore it in finally so
-        the next task on the same cached agent gets the original model.
+        No DB access here — only the LLM + tool loop. ``mode_caps`` is resolved
+        upstream in _prepare_task (the serial DB phase) and passed in, so this
+        concurrent path never reads system_settings.
         """
-        power_mode = (run_config or {}).get("power_mode", "standard")
-        mode_caps = _POWER_MODE_CAPS.get(power_mode, _POWER_MODE_CAPS["standard"])
-        max_iters = mode_caps["max_tool_iterations"]
+        caps = mode_caps or _POWER_MODE_DEFAULTS["standard"]
+        max_iters = caps["max_tool_iterations"]
+        # PRD-163 S5: per-power-mode timeout (falls back to the global default).
+        task_timeout = caps.get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT
 
-        # Pass runtime directly when we have it so cache lookups can't replace
-        # a synthesis-overridden runtime with a stale cached one.
+        # Pass runtime directly when we have it so the factory cache can't
+        # swap in a stale cached runtime under us mid-flight.
         agent_arg: Any = agent_runtime if agent_runtime is not None else agent_id
 
         try:
@@ -1514,19 +2144,21 @@ class CoordinatorService:
                     max_retries=0,
                     max_tool_iterations=max_iters,
                     attachment_ids=attachment_ids,
+                    # PRD-178 S1 (F020): bind field tools to THIS task's run.
+                    context=field_context,
                 ),
-                timeout=Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                timeout=task_timeout,
             )
         except asyncio.TimeoutError:
             logger.error(
                 "Task %s execution timed out after %ds (agent=%d)",
                 task.id,
-                Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                task_timeout,
                 agent_id,
             )
             result = {
                 "status": "error",
-                "error": f"Execution timed out after {Config.COORDINATOR_TASK_EXECUTION_TIMEOUT}s",
+                "error": f"Execution timed out after {task_timeout}s",
             }
         except Exception as exc:
             logger.error(
@@ -1536,19 +2168,6 @@ class CoordinatorService:
                 exc_info=True,
             )
             result = {"status": "error", "error": str(exc)}
-        finally:
-            if synthesis_override_previous and agent_runtime is not None and hasattr(agent_runtime, "llm_manager"):
-                from core.llm.clients.base import LLMProvider
-                prev_provider, prev_model = synthesis_override_previous
-                try:
-                    agent_runtime.llm_manager.config.provider = LLMProvider(prev_provider)
-                except ValueError:
-                    pass  # Stick with whatever the override set; safer than crashing.
-                agent_runtime.llm_manager.config.model = prev_model
-                logger.debug(
-                    "Task %s: synthesis override restored (agent=%d → %s/%s)",
-                    task.id, agent_id, prev_provider, prev_model,
-                )
         return result
 
     async def _record_task_result(
@@ -1615,6 +2234,18 @@ class CoordinatorService:
                     actor_type=ActorType.COORDINATOR,
                     actor_id="coordinator",
                     payload={
+                        # US-009 user-facing fields: tell the user what limit was
+                        # hit and how to raise it, before any budget-driven pause.
+                        "limit_type": "mission_token_budget",
+                        "spent": run.tokens_used,
+                        "limit": run.token_budget_estimate,
+                        "message": (
+                            f"This mission has used {run.tokens_used:,} tokens, over its "
+                            f"estimated budget of {run.token_budget_estimate:,}. It will keep "
+                            "running; an admin can raise the mission token budget or the "
+                            "power-mode caps in Settings > Coordination."
+                        ),
+                        # Established diagnostic fields (parity with reconciler emit).
                         "tokens_used": run.tokens_used,
                         "token_budget_estimate": run.token_budget_estimate,
                         "ratio": round(run.tokens_used / run.token_budget_estimate, 2),
@@ -1692,6 +2323,31 @@ class CoordinatorService:
             actor_id="coordinator",
         )
 
+        # PRD-163 S5: async planning — return immediately in PLANNING; the
+        # coordinator tick sweep runs the planner and the plan lands via a
+        # mission_plan_ready notification. The default path stays synchronous
+        # (the in-chat approval card is emitted from the create tool result,
+        # which needs the plan inline).
+        if mission_config.get("async_planning"):
+            logger.info("Mission %s → async planning (deferred to coordinator tick)", run.id)
+            return run
+
+        return await self._run_planning(db, run)
+
+    async def _run_planning(self, db: Session, run: OrchestrationRun) -> OrchestrationRun:
+        """PRD-163 S5: the planning tail — load agents, decompose, persist, and
+        evaluate approval. Shared by synchronous ``create_mission`` and the async
+        planning tick sweep (``_sweep_async_planning``). On reaching
+        awaiting_approval it dispatches a ``mission_plan_ready`` notification to
+        the creating user (S1).
+
+        Raises PlanValidationError (after transitioning the run to FAILED) if the
+        planner cannot produce a valid plan.
+        """
+        workspace_id = run.workspace_id
+        goal = run.goal
+        mission_config = run.config or {}
+
         # Load roster agents
         agents: List[Agent] = (
             db.query(Agent)
@@ -1725,6 +2381,7 @@ class CoordinatorService:
                 workspace_id=workspace_id,
                 agents=agents,
                 config=mission_config,
+                db=db,  # PRD-164 S1: enables the planning context pack
             )
         except PlanValidationError:
             transition_run(
@@ -1737,98 +2394,37 @@ class CoordinatorService:
                 stop_reason="coordinator_error",
                 stop_detail="Plan validation failed after all retries",
             )
+            # PRD-204 S4: the user is told the mission failed (planning path).
+            await notify_mission_failed(db, run)
             await _store_mission_memory_safe(
                 db, run.id, outcome="failed",
                 failure_reason="Plan validation failed after all retries",
             )
             raise
 
-        # Store the plan on the run
-        run.plan = {
-            "tasks": [
-                {
-                    "temp_id": t.temp_id,
-                    "title": t.title,
-                    "description": t.description,
-                    "agent_role": t.agent_role,
-                    "sequence_number": t.sequence_number,
-                    "task_type": t.task_type,
-                    "complexity": getattr(t, "complexity", "moderate"),
-                    "parallel_group": getattr(t, "parallel_group", None),
-                }
-                for t in decomposition.tasks
-            ],
-            "dependencies": [
-                {
-                    "from": d.from_task_temp_id,
-                    "to": d.to_task_temp_id,
-                }
-                for d in decomposition.dependencies
-            ],
-        }
-        run.token_budget_estimate = decomposition.token_estimate
-        run.max_concurrent = decomposition.max_concurrent
+        # Store the plan + create task/dependency rows (PRD-163 S2: shared
+        # with import_plan so an imported plan persists the exact given DAG).
+        temp_id_to_task = self._persist_decomposition(db, run, decomposition)
 
-        # Persist template metadata for completion handler (e.g. app_builder → zip output)
-        if decomposition.template_used:
-            run.config = {
-                **(run.config or {}),
-                "template_used": decomposition.template_used,
-            }
-
-        # Create OrchestrationTask rows
-        temp_id_to_task: Dict[str, OrchestrationTask] = {}
-        for planned in decomposition.tasks:
-            task = OrchestrationTask(
-                run_id=run.id,
-                title=planned.title,
-                description=planned.description,
-                task_type=planned.task_type,
-                sequence_number=planned.sequence_number,
-                agent_role=planned.agent_role,
-                state=TaskState.PENDING.value,
-                state_type="initial",
-                verification_criteria=planned.verification_criteria or None,
-                input_context={
-                    "required_tools": planned.required_tools,
-                } if planned.required_tools else None,
-                max_retries=run.max_retries,
-                complexity=getattr(planned, "complexity", "moderate"),
-                parallel_group=getattr(planned, "parallel_group", None),
-                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
-                    getattr(planned, "complexity", "moderate"), 4000
+        # PRD-164 S2: agent-match preview — rank candidates per task (Q21
+        # blend, one embedding call per task) and persist the reasons on the
+        # task rows + plan snapshot so the approval card can show them.
+        planned_tasks = list(temp_id_to_task.values())
+        try:
+            signals_by_task = await asyncio.wait_for(
+                AgentMatcher.compute_signals_for_tasks(
+                    planned_tasks, agents, run.workspace_id,
                 ),
+                timeout=Config.AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS
+                * max(1, len(planned_tasks)),
             )
-            db.add(task)
-            db.flush()  # Get task.id
-            temp_id_to_task[planned.temp_id] = task
-
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.TASK_CREATED,
-                actor_type=ActorType.COORDINATOR,
-                actor_id="coordinator",
-                task_id=task.id,
-                payload={
-                    "title": planned.title,
-                    "sequence_number": planned.sequence_number,
-                    "agent_role": planned.agent_role,
-                },
+        except Exception:
+            logger.warning(
+                "Semantic match signals unavailable for run %s (lexical preview)",
+                run.id, exc_info=True,
             )
-
-        # Create dependency edges
-        for dep in decomposition.dependencies:
-            from_task = temp_id_to_task.get(dep.from_task_temp_id)
-            to_task = temp_id_to_task.get(dep.to_task_temp_id)
-            if from_task and to_task:
-                dep_row = OrchestrationTaskDependency(
-                    task_id=to_task.id,
-                    depends_on_task_id=from_task.id,
-                )
-                db.add(dep_row)
-
-        db.flush()
+            signals_by_task = {}
+        self._annotate_match_previews(db, run, agents, planned_tasks, signals_by_task)
 
         # Create board tasks for kanban visibility
         try:
@@ -1854,21 +2450,57 @@ class CoordinatorService:
             },
         )
 
-        # Auto-approve or await approval
-        auto_approve = mission_config.get("auto_approve", False)
-        if auto_approve:
+        # PRD-163 S3: decide auto-approve vs await-approval via the workspace
+        # approval policy ($ ceiling / full_auto + §12.3 gate). plan_only always
+        # awaits (S2). A per-request auto_approve from chat is an explicit override.
+        from core.services.approval_policy import evaluate_approval, ApprovalDecision
+
+        estimated_cost = self._estimate_cost_usd(decomposition.token_estimate)
+        if mission_config.get("plan_only"):
+            decision = ApprovalDecision(
+                auto_approve=False, reason="plan_only", policy="plan_only",
+                ceiling=None, estimated_cost=estimated_cost, countdown_seconds=None,
+            )
+        else:
+            decision = evaluate_approval(
+                db, workspace_id, estimated_cost,
+                override_auto_approve=bool(mission_config.get("auto_approve", False)),
+            )
+
+        if decision.auto_approve:
             transition_run(
                 db=db,
                 run=run,
                 new_state=RunState.RUNNING,
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
-                reason="Auto-approved",
+                reason=f"Auto-approved: {decision.reason}",
+            )
+            # PRD-163 S3: distinct audit event with the policy + ceiling snapshot.
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_AUTO_APPROVED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload=decision.audit_snapshot(),
             )
             self._queue_initial_tasks(db, run)
             await self._create_mission_field(db, run)
-            logger.info("Mission %s auto-approved → running", run.id)
+            logger.info("Mission %s auto-approved (%s) → running", run.id, decision.reason)
         else:
+            # PRD-163 S3: countdown — store a deadline; the tick loop auto-proceeds
+            # when it passes (cancelled by an explicit approve/reject in the meantime).
+            if decision.countdown_seconds:
+                # datetime/timezone/timedelta are module-level (see top imports);
+                # a local re-import here would shadow them as function-locals and
+                # UnboundLocalError the config stamp below on the no-countdown path.
+                deadline = datetime.now(timezone.utc) + timedelta(seconds=decision.countdown_seconds)
+                run.config = {
+                    **(run.config or {}),
+                    "approval_deadline_at": deadline.isoformat(),
+                    "approval_countdown_seconds": decision.countdown_seconds,
+                }
             transition_run(
                 db=db,
                 run=run,
@@ -1876,32 +2508,540 @@ class CoordinatorService:
                 actor_type=ActorType.COORDINATOR,
                 actor_id="coordinator",
             )
-            logger.info("Mission %s → awaiting_approval", run.id)
+            # PRD-200 S3: stamp the notification baseline (so the re-notify sweep
+            # can age this park) and the priced cost (so the approvals inbox card,
+            # which composes the mission list, can show est. cost — the run row
+            # carries no dollar field). Immutable merge preserves any countdown
+            # deadline set above.
+            run.config = {
+                **(run.config or {}),
+                "approval_last_notified_at": datetime.now(timezone.utc).isoformat(),
+                "approval_estimated_cost_usd": round(decision.estimated_cost, 2),
+            }
+            logger.info("Mission %s → awaiting_approval (%s)", run.id, decision.reason)
+            # PRD-163 S1/S5: tell the creating user the plan is ready for review.
+            # This is the "plan lands via notification" half of async planning and
+            # the mission_plan_ready notification S1 requires.
+            task_count = len((run.plan or {}).get("tasks", []))
+            await _dispatch_mission_event(
+                db=db,
+                run=run,
+                event_type="mission_plan_ready",
+                title=f"Mission plan ready: {(run.goal or 'Mission')[:120]}",
+                message=(
+                    f"{task_count} task(s) planned, est. ${decision.estimated_cost:.2f}. "
+                    f"Review and approve to start execution."
+                ),
+                status="action_required",
+            )
 
         return run
+
+    def _estimate_cost_usd(self, token_estimate: int) -> float:
+        """PRD-163 S3/S5: dollar cost for a token estimate — the currency the
+        approval policy and budget ceilings are denominated in.
+
+        PRD-192 S3 (F059 finish): priced through ``modules.policy.pricing`` —
+        the ONE pricing source. A mission plan spans multiple agents/models, so
+        no single model id exists at plan time; pricing applies its documented
+        flat last-resort rate (the demoted coordinator constant, now owned by
+        pricing.py alone — source-grep-guarded).
+        """
+        from modules.policy import pricing as _pricing
+
+        return _pricing.price_total_tokens_usd(None, None, token_estimate)
+
+    def check_approval_countdowns(self, db: Session, workspace_id: Optional[UUID] = None) -> int:
+        """PRD-163 S3: auto-proceed any awaiting-approval mission whose countdown
+        deadline has passed. Returns the number auto-approved. ``workspace_id=None``
+        sweeps every workspace (the coordinator tick uses this). Cancelable: an
+        explicit approve/reject moves the run out of awaiting_approval, so it is
+        no longer a candidate here.
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        q = db.query(OrchestrationRun).filter(
+            OrchestrationRun.state == RunState.AWAITING_APPROVAL.value,
+        )
+        if workspace_id is not None:
+            q = q.filter(OrchestrationRun.workspace_id == workspace_id)
+        candidates = q.all()
+        proceeded = 0
+        for run in candidates:
+            cfg = run.config or {}
+            deadline_raw = cfg.get("approval_deadline_at")
+            if not deadline_raw:
+                continue
+            try:
+                deadline = datetime.fromisoformat(deadline_raw)
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+            if now < deadline:
+                continue
+            transition_run(
+                db=db, run=run, new_state=RunState.RUNNING,
+                actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+                reason="Auto-approved: approval countdown elapsed",
+            )
+            emit_event(
+                db=db, run_id=run.id, event_type=EventType.RUN_AUTO_APPROVED,
+                actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+                payload={"auto_approved": True, "reason": "countdown_elapsed",
+                         "deadline_at": deadline_raw},
+            )
+            self._queue_initial_tasks(db, run)
+            proceeded += 1
+            logger.info("Mission %s auto-proceeded (countdown elapsed)", run.id)
+        return proceeded
+
+    async def check_approval_renotify(
+        self, db: Session, workspace_id: Optional[UUID] = None
+    ) -> int:
+        """PRD-200 S3: re-ping (and optionally expire) missions parked at
+        awaiting_approval so a parked plan does not die after one notification.
+
+        A parked run fires exactly one ``mission_plan_ready`` notification and is
+        then invisible to the coordinator (the tick only processes RUNNING runs),
+        so 47% of all missions ever created sit stranded at their approval gate.
+        This sweep re-dispatches that notification every
+        ``COORDINATOR_APPROVAL_RENOTIFY_SECONDS`` so the plan re-pings instead of
+        dying. When ``COORDINATOR_APPROVAL_EXPIRY_ENABLED`` (default OFF — under
+        the ``always_ask`` posture, terminating an unapproved plan is the
+        operator's call, Q5), a plan older than
+        ``COORDINATOR_APPROVAL_MAX_AGE_SECONDS`` is cancelled.
+
+        Never touches a non-AWAITING run. ``workspace_id=None`` sweeps every
+        workspace (the tick uses this). Returns the number of parked runs acted
+        on (re-notified or expired), so the caller commits only when something
+        changed.
+        """
+        def _aware(dt):
+            if dt is None:
+                return None
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+        def _parse_iso(raw):
+            if not raw:
+                return None
+            try:
+                return _aware(datetime.fromisoformat(raw))
+            except (ValueError, TypeError):
+                return None
+
+        now = datetime.now(timezone.utc)
+        renotify_after = Config.COORDINATOR_APPROVAL_RENOTIFY_SECONDS
+
+        q = db.query(OrchestrationRun).filter(
+            OrchestrationRun.state == RunState.AWAITING_APPROVAL.value,
+        )
+        if workspace_id is not None:
+            q = q.filter(OrchestrationRun.workspace_id == workspace_id)
+        candidates = q.all()
+
+        acted = 0
+        for run in candidates:
+            cfg = run.config or {}
+
+            # Optional expiry (OFF by default): cancel a plan that has sat
+            # unapproved past the max age, measured from creation.
+            if Config.COORDINATOR_APPROVAL_EXPIRY_ENABLED:
+                created = _aware(run.created_at)
+                if (
+                    created is not None
+                    and (now - created).total_seconds()
+                    >= Config.COORDINATOR_APPROVAL_MAX_AGE_SECONDS
+                ):
+                    try:
+                        transition_run(
+                            db=db,
+                            run=run,
+                            new_state=RunState.CANCELLED,
+                            actor_type=ActorType.COORDINATOR,
+                            actor_id="coordinator",
+                            reason="Approval expired: plan sat unapproved past the max age",
+                            stop_reason="approval_expired",
+                            stop_detail=(
+                                f"No approval within "
+                                f"{Config.COORDINATOR_APPROVAL_MAX_AGE_SECONDS}s"
+                            ),
+                        )
+                        acted += 1
+                        logger.info("Mission %s cancelled (approval expired)", run.id)
+                    except ConflictError:
+                        logger.warning(
+                            "Conflict cancelling expired approval %s", run.id
+                        )
+                    continue
+
+            # Re-notify baseline: last notification, else the parked run's last
+            # write (a parked run is not otherwise touched, so updated_at ~= park
+            # time), else creation.
+            baseline = (
+                _parse_iso(cfg.get("approval_last_notified_at"))
+                or _aware(run.updated_at)
+                or _aware(run.created_at)
+            )
+            if baseline is None:
+                continue
+            if (now - baseline).total_seconds() < renotify_after:
+                continue
+
+            task_count = len((run.plan or {}).get("tasks", []))
+            cost = cfg.get("approval_estimated_cost_usd")
+            cost_txt = f", est. ${cost:.2f}" if isinstance(cost, (int, float)) else ""
+            await _dispatch_mission_event(
+                db=db,
+                run=run,
+                event_type="mission_plan_ready",
+                title=f"Reminder — mission plan awaiting approval: {(run.goal or 'Mission')[:110]}",
+                message=(
+                    f"{task_count} task(s) planned{cost_txt}. "
+                    f"Still awaiting your review and approval."
+                ),
+                status="action_required",
+            )
+            run.config = {**cfg, "approval_last_notified_at": now.isoformat()}
+            acted += 1
+
+        return acted
+
+    async def _sweep_async_planning(self, db: Session) -> int:
+        """PRD-163 S5: run the planner for missions created with
+        ``config.async_planning`` that are parked in PLANNING with no plan yet.
+        ``create_mission`` returns those immediately; this sweep produces the
+        plan and (via ``_run_planning``) fires the mission_plan_ready
+        notification. Returns the number planned this tick.
+        """
+        candidates: List[OrchestrationRun] = (
+            db.query(OrchestrationRun)
+            .filter(OrchestrationRun.state == RunState.PLANNING.value)
+            .all()
+        )
+        planned = 0
+        for run in candidates:
+            cfg = run.config or {}
+            if not cfg.get("async_planning") or run.plan:
+                continue  # not an async-planning run, or already planned
+            try:
+                await self._run_planning(db, run)
+                db.commit()
+                planned += 1
+            except PlanValidationError:
+                # _run_planning already transitioned the run to FAILED in-session.
+                db.commit()
+                logger.warning("[Coordinator] async planning failed for run %s", run.id)
+            except Exception:
+                logger.error(
+                    "[Coordinator] async planning error for run %s", run.id, exc_info=True,
+                )
+                db.rollback()
+        return planned
 
     # ------------------------------------------------------------------
     # Lifecycle: approve_plan
     # ------------------------------------------------------------------
+
+    def _persist_decomposition(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        decomposition,
+    ) -> Dict[str, OrchestrationTask]:
+        """Write a decomposition (planner output OR an imported plan) to
+        ``run.plan`` + OrchestrationTask / dependency rows. Returns the
+        temp_id -> task map. PRD-163 S2: shared by create_mission and import_plan
+        so an imported plan persists the EXACT given DAG (no re-decomposition)."""
+        run.plan = {
+            "tasks": [
+                {
+                    "temp_id": t.temp_id,
+                    "title": t.title,
+                    "description": t.description,
+                    "agent_role": t.agent_role,
+                    "sequence_number": t.sequence_number,
+                    "task_type": t.task_type,
+                    "complexity": getattr(t, "complexity", "moderate"),
+                    "parallel_group": getattr(t, "parallel_group", None),
+                }
+                for t in decomposition.tasks
+            ],
+            "dependencies": [
+                {"from": d.from_task_temp_id, "to": d.to_task_temp_id}
+                for d in decomposition.dependencies
+            ],
+        }
+        run.token_budget_estimate = decomposition.token_estimate
+        run.max_concurrent = decomposition.max_concurrent
+        if decomposition.template_used:
+            run.config = {**(run.config or {}), "template_used": decomposition.template_used}
+
+        temp_id_to_task: Dict[str, OrchestrationTask] = {}
+        for planned in decomposition.tasks:
+            task = OrchestrationTask(
+                run_id=run.id,
+                title=planned.title,
+                description=planned.description,
+                task_type=planned.task_type,
+                sequence_number=planned.sequence_number,
+                agent_role=planned.agent_role,
+                state=TaskState.PENDING.value,
+                state_type="initial",
+                verification_criteria=planned.verification_criteria or None,
+                input_context={"required_tools": planned.required_tools} if planned.required_tools else None,
+                max_retries=run.max_retries,
+                complexity=getattr(planned, "complexity", "moderate"),
+                parallel_group=getattr(planned, "parallel_group", None),
+                estimated_tokens=COMPLEXITY_TOKEN_BUDGET.get(
+                    getattr(planned, "complexity", "moderate"), 4000
+                ),
+            )
+            db.add(task)
+            db.flush()  # Get task.id
+            temp_id_to_task[planned.temp_id] = task
+
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.TASK_CREATED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                task_id=task.id,
+                payload={
+                    "title": planned.title,
+                    "sequence_number": planned.sequence_number,
+                    "agent_role": planned.agent_role,
+                },
+            )
+
+        for dep in decomposition.dependencies:
+            from_task = temp_id_to_task.get(dep.from_task_temp_id)
+            to_task = temp_id_to_task.get(dep.to_task_temp_id)
+            if from_task and to_task:
+                db.add(OrchestrationTaskDependency(
+                    task_id=to_task.id,
+                    depends_on_task_id=from_task.id,
+                ))
+
+        db.flush()
+        return temp_id_to_task
+
+    def _annotate_match_previews(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        agents: List[Agent],
+        tasks: List[OrchestrationTask],
+        signals_by_task: Optional[Dict[Any, Any]] = None,
+    ) -> None:
+        """PRD-164 S2: rank candidate agents per planned task and persist the
+        match preview — ``input_context['agent_match']`` on each task row and
+        ``match_agent``/``match_reason`` mirrored into the plan snapshot (the
+        approval card's source). Explicit agent overrides (PRD-163 S4) rank
+        first by construction. Best-effort: a failure here never blocks
+        mission creation — the dispatcher re-matches authoritatively anyway.
+        """
+        try:
+            match_by_seq: Dict[int, Dict[str, Any]] = {}
+            for task in tasks:
+                input_context = task.input_context if isinstance(task.input_context, dict) else {}
+                spec = {
+                    "agent_role": task.agent_role,
+                    "required_tools": input_context.get("required_tools", []),
+                }
+                ranked = AgentMatcher.rank(
+                    db=db, task=task, agents=agents, task_spec=spec,
+                    semantic=(signals_by_task or {}).get(task.id),
+                )
+                if not ranked:
+                    continue
+                annotation = {**build_match_annotation(ranked), "decided_at": "plan"}
+                task.input_context = {**input_context, "agent_match": annotation}
+                match_by_seq[int(task.sequence_number)] = annotation
+
+            if match_by_seq:
+                run.plan = annotate_plan_with_matches(run.plan, match_by_seq)
+        except Exception:
+            logger.warning(
+                "Match preview annotation failed for run %s (non-fatal)",
+                run.id, exc_info=True,
+            )
+
+    def import_plan(
+        self,
+        db: Session,
+        workspace_id: UUID,
+        goal: str,
+        plan: Dict[str, Any],
+        created_by: str,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> OrchestrationRun:
+        """PRD-163 S2: create a mission from a pre-built plan WITHOUT re-running the
+        planner. The given tasks/dependencies are persisted verbatim and the
+        mission lands in awaiting_approval. Used by the plan-import endpoint and by
+        Auto when a chat-approved plan should execute exactly as agreed (Q54)."""
+        from modules.coordination.planner import (
+            DecompositionResult,
+            PlannedTask,
+            PlannedDependency,
+        )
+
+        raw_tasks = plan.get("tasks") or []
+        if not raw_tasks:
+            raise ValueError("Imported plan has no tasks")
+
+        planned_tasks: List[PlannedTask] = []
+        for idx, t in enumerate(raw_tasks):
+            temp_id = str(t.get("temp_id") or t.get("id") or f"t{idx + 1}")
+            planned_tasks.append(PlannedTask(
+                temp_id=temp_id,
+                title=str(t.get("title") or f"Task {idx + 1}"),
+                description=str(t.get("description") or ""),
+                agent_role=str(t.get("agent_role") or "generalist"),
+                sequence_number=int(t.get("sequence_number", idx + 1)),
+                task_type=str(t.get("task_type") or "execution"),
+                verification_criteria=t.get("verification_criteria") or [],
+                required_tools=t.get("required_tools") or [],
+                dependencies=[str(d) for d in (t.get("dependencies") or [])],
+                complexity=str(t.get("complexity") or "moderate"),
+                parallel_group=t.get("parallel_group"),
+            ))
+
+        valid_ids = {pt.temp_id for pt in planned_tasks}
+        deps: List[PlannedDependency] = []
+        for d in (plan.get("dependencies") or []):
+            frm = str(d.get("from") or d.get("from_task_temp_id") or "")
+            to = str(d.get("to") or d.get("to_task_temp_id") or "")
+            if frm in valid_ids and to in valid_ids:
+                deps.append(PlannedDependency(from_task_temp_id=frm, to_task_temp_id=to))
+
+        token_estimate = int(plan.get("token_estimate") or sum(
+            COMPLEXITY_TOKEN_BUDGET.get(pt.complexity, 4000) for pt in planned_tasks
+        ))
+        decomposition = DecompositionResult(
+            tasks=planned_tasks,
+            dependencies=deps,
+            token_estimate=token_estimate,
+            max_concurrent=int(plan.get("max_concurrent", 1)),
+        )
+
+        mission_config = {**(config or {}), "imported_plan": True}
+        run = OrchestrationRun(
+            workspace_id=workspace_id,
+            goal=goal,
+            created_by=created_by,
+            config=mission_config,
+            state=RunState.PENDING.value,
+            state_type="initial",
+            max_retries=mission_config.get("max_retries", Config.COORDINATOR_MAX_TASK_RETRIES),
+            max_concurrent=decomposition.max_concurrent,
+        )
+        db.add(run)
+        db.flush()
+
+        emit_event(
+            db=db, run_id=run.id, event_type=EventType.RUN_CREATED,
+            actor_type=ActorType.HUMAN, actor_id=created_by,
+            payload={"goal": goal[:500], "imported": True},
+        )
+        transition_run(
+            db=db, run=run, new_state=RunState.PLANNING,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+        )
+
+        temp_id_to_task = self._persist_decomposition(db, run, decomposition)
+
+        # PRD-164 S2: imported plans get the lexical match preview too (this
+        # path is sync, so no semantic signals — the dispatcher blends them at
+        # dispatch). An imported agent_role naming a roster agent is an
+        # explicit override and is flagged as such on the preview.
+        roster = (
+            db.query(Agent)
+            .filter(and_(
+                Agent.workspace_id == workspace_id,
+                Agent.status == "active",
+            ))
+            .all()
+        )
+        self._annotate_match_previews(
+            db, run, roster, list(temp_id_to_task.values()), None,
+        )
+
+        emit_event(
+            db=db, run_id=run.id, event_type=EventType.RUN_PLAN_READY,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+            payload={"task_count": len(planned_tasks), "imported": True},
+        )
+        transition_run(
+            db=db, run=run, new_state=RunState.AWAITING_APPROVAL,
+            actor_type=ActorType.COORDINATOR, actor_id="coordinator",
+        )
+        logger.info("Imported plan -> mission %s (%d tasks) awaiting_approval", run.id, len(planned_tasks))
+        return run
+
+    def update_mission_plan(
+        self,
+        db: Session,
+        run_id: UUID,
+        actor_id: str,
+        task_edits: List[Dict[str, Any]],
+    ) -> OrchestrationRun:
+        """PRD-163 S4/Q57: apply approval-time task/agent edits to an
+        awaiting-approval mission so they persist into execution.
+
+        ``task_edits`` is a list of ``{task_id|temp_id|sequence_number,
+        agent_role?, title?, description?}``. Edits mutate the OrchestrationTask
+        rows the dispatcher will execute (so an edited ``agent_role`` actually
+        changes who runs the task) and are mirrored into ``run.plan``. Field
+        edits only — structural changes go through plan-import (Q54). Valid only
+        while the mission is awaiting approval.
+        """
+        run = self._get_run(db, run_id)
+        if run.state != RunState.AWAITING_APPROVAL.value:
+            raise ValueError(
+                f"Mission is in '{run.state}' state, expected 'awaiting_approval'"
+            )
+
+        tasks: List[OrchestrationTask] = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.run_id == run.id)
+            .all()
+        )
+        new_plan, fields_changed = apply_plan_task_edits(tasks, run.plan, task_edits)
+        if fields_changed:
+            run.plan = new_plan  # reassign so the JSON column is marked dirty
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_PLAN_EDITED,
+                actor_type=ActorType.HUMAN,
+                actor_id=actor_id,
+                payload={"fields_changed": fields_changed,
+                         "edit_count": len(task_edits or [])},
+            )
+            logger.info(
+                "Mission %s plan edited by %s (%d field(s))",
+                run_id, actor_id, fields_changed,
+            )
+        return run
 
     def approve_plan(
         self,
         db: Session,
         run_id: UUID,
         actor_id: str,
-        modifications: Optional[Dict[str, Any]] = None,
     ) -> OrchestrationRun:
         """
         Approve a mission plan and start execution.
 
         Transitions: awaiting_approval → running.
         Queues initial tasks (those with no dependencies) as QUEUED.
+        Approval-time edits are applied beforehand via ``update_mission_plan``
+        (PRD-163 S4/Q57), so this executes the plan exactly as shown.
         """
         run = self._get_run(db, run_id)
-
-        if modifications:
-            # Apply plan modifications (e.g., reorder, remove tasks)
-            run.plan = {**(run.plan or {}), "modifications": modifications}
 
         transition_run(
             db=db,
@@ -1917,7 +3057,6 @@ class CoordinatorService:
             event_type=EventType.RUN_APPROVED,
             actor_type=ActorType.HUMAN,
             actor_id=actor_id,
-            payload={"modifications": modifications} if modifications else None,
         )
 
         self._queue_initial_tasks(db, run)
@@ -1968,132 +3107,6 @@ class CoordinatorService:
 
         VerificationService.clear_cache(run.id)
         logger.info("Mission %s rejected by %s: %s", run_id, actor_id, reason)
-        return run
-
-    # ------------------------------------------------------------------
-    # Lifecycle: review_mission
-    # ------------------------------------------------------------------
-
-    def review_mission(
-        self,
-        db: Session,
-        run_id: UUID,
-        actor_id: str,
-        verdict: str,
-        task_feedback: Optional[Dict[str, str]] = None,
-        feedback: Optional[str] = None,
-    ) -> OrchestrationRun:
-        """
-        Submit human review after all tasks are verified.
-
-        Args:
-            verdict: 'accept' or 'reject'
-            task_feedback: Optional dict mapping task_id → feedback string.
-                          On reject, tasks with feedback get re-queued.
-            feedback: Optional general rejection feedback (no per-task flags needed).
-        """
-        run = self._get_run(db, run_id)
-
-        if verdict == "accept":
-            transition_run(
-                db=db,
-                run=run,
-                new_state=RunState.COMPLETED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-            )
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.RUN_COMPLETED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-            )
-            VerificationService.clear_cache(run.id)
-            logger.info("Mission %s accepted by %s → completed", run_id, actor_id)
-
-        elif verdict == "reject":
-            # Re-queue specific tasks with feedback
-            requeued_count = 0
-            if task_feedback:
-                for task_id_str, fb in task_feedback.items():
-                    task = (
-                        db.query(OrchestrationTask)
-                        .filter(
-                            and_(
-                                OrchestrationTask.id == task_id_str,
-                                OrchestrationTask.run_id == run_id,
-                            )
-                        )
-                        .first()
-                    )
-                    if task:
-                        self._requeue_task_with_feedback(
-                            db, task, fb, actor_id,
-                        )
-                        requeued_count += 1
-
-            # Feedback-only rejection: re-queue the last verified task with the feedback
-            if requeued_count == 0 and feedback:
-                last_task = (
-                    db.query(OrchestrationTask)
-                    .filter(
-                        and_(
-                            OrchestrationTask.run_id == run_id,
-                            OrchestrationTask.state == TaskState.VERIFIED.value,
-                        )
-                    )
-                    .order_by(OrchestrationTask.sequence_number.desc())
-                    .first()
-                )
-                if last_task:
-                    self._requeue_task_with_feedback(
-                        db, last_task, feedback, actor_id,
-                    )
-                    requeued_count += 1
-
-            # Build reason string
-            if requeued_count > 0:
-                reason = f"Human rejected — {requeued_count} tasks re-queued"
-            elif feedback:
-                reason = f"Human rejected with feedback: {feedback[:200]}"
-            else:
-                reason = "Human rejected"
-
-            # Transition run back to running for re-execution
-            transition_run(
-                db=db,
-                run=run,
-                new_state=RunState.RUNNING,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-                reason=reason,
-            )
-
-            event_payload: Dict[str, object] = {
-                "verdict": "reject",
-                "tasks_requeued": requeued_count,
-            }
-            if feedback:
-                event_payload["feedback"] = feedback
-
-            emit_event(
-                db=db,
-                run_id=run.id,
-                event_type=EventType.RUN_RESUMED,
-                actor_type=ActorType.HUMAN,
-                actor_id=actor_id,
-                payload=event_payload,
-            )
-
-            logger.info(
-                "Mission %s rejected by %s — %d tasks re-queued, general_feedback=%s",
-                run_id,
-                actor_id,
-                requeued_count,
-                bool(feedback),
-            )
-
         return run
 
     # ------------------------------------------------------------------
@@ -2225,17 +3238,21 @@ class CoordinatorService:
         run_id: UUID,
         actor_id: str,
         notes: Optional[str] = None,
+        *,
+        actor_type: ActorType = ActorType.HUMAN,
+        trigger: str = "human",
     ) -> OrchestrationRun:
         """
-        Replan a failed mission by generating replacement tasks for the failed
-        subtree while preserving completed/verified tasks.
+        Replan a mission by generating replacement tasks for the failed (or
+        looping) subtree while preserving completed/verified tasks.
 
         Flow:
-          1. Validate: must be in 'failed' state, replan_count < max
-          2. Transition failed → replanning
-          3. Gather completed task outputs + identify failed task
+          1. Validate: 'failed' state (humans) or RUNNING via the joiner's
+             stall-ledger trigger (PRD-164 S4); replan_count < max
+          2. Transition → replanning
+          3. Gather completed task outputs + identify the failed/looping task
           4. Call planner.replan() to generate replacement tasks
-          5. Mark old failed/pending tasks as skipped
+          5. Mark replaced tasks as skipped
           6. Insert new tasks + dependencies
           7. Transition replanning → running
           8. Queue initial new tasks
@@ -2243,8 +3260,13 @@ class CoordinatorService:
         Args:
             db: SQLAlchemy session (caller manages transaction).
             run_id: Mission run UUID.
-            actor_id: Clerk user ID requesting the replan.
-            notes: Optional user guidance for the replanner.
+            actor_id: Clerk user ID requesting the replan ('joiner' for the
+                coordinator's stall-ledger path).
+            notes: Optional guidance for the replanner.
+            actor_type: HUMAN for the API/tool path (default), COORDINATOR
+                when the PRD-164 S4 joiner replans automatically.
+            trigger: 'human' (default) or 'stall_ledger' — recorded on the
+                audit events; the stall trigger may replan a RUNNING mission.
 
         Returns:
             The updated OrchestrationRun.
@@ -2255,8 +3277,14 @@ class CoordinatorService:
         """
         run = self._get_run(db, run_id)
 
-        # Validate state
-        if RunState(run.state) != RunState.FAILED:
+        # Validate state. Humans replan FAILED missions; the joiner's
+        # stall-ledger trigger replans a RUNNING mission that is looping.
+        allowed_states = (
+            {RunState.FAILED, RunState.RUNNING}
+            if trigger == "stall_ledger"
+            else {RunState.FAILED}
+        )
+        if RunState(run.state) not in allowed_states:
             raise ValueError(
                 f"Mission must be in 'failed' state to replan, "
                 f"currently in '{run.state}'"
@@ -2271,14 +3299,17 @@ class CoordinatorService:
                 f"maximum is {max_replans}"
             )
 
-        # Transition failed → replanning
+        # Transition failed/running → replanning
         transition_run(
             db=db,
             run=run,
             new_state=RunState.REPLANNING,
-            actor_type=ActorType.HUMAN,
+            actor_type=actor_type,
             actor_id=actor_id,
-            reason=f"Replan requested (attempt {current_replans + 1}/{max_replans})",
+            reason=(
+                f"Replan requested via {trigger} "
+                f"(attempt {current_replans + 1}/{max_replans})"
+            ),
         )
 
         # Gather completed task outputs
@@ -2309,6 +3340,22 @@ class CoordinatorService:
                     or "Unknown failure"
                 )
 
+        # PRD-164 S4: a stall-ledger replan usually has no FAILED task — the
+        # problem is a LOOP. Point the planner at the churning task instead.
+        if failed_task_title == "Unknown" and trigger == "stall_ledger":
+            looping = [
+                t for t in all_tasks
+                if TaskState(t.state) not in DONE_TASK_STATES
+            ]
+            if looping:
+                loop_task = max(looping, key=lambda t: (t.attempt_number or 0))
+                failed_task_title = loop_task.title
+                failed_task_reason = (
+                    f"Looping without forward progress: stuck in "
+                    f"'{loop_task.state}' after {loop_task.attempt_number or 0} "
+                    f"attempts (progress-ledger stall)"
+                )
+
         # Load roster agents
         agents: list[Agent] = (
             db.query(Agent)
@@ -2331,6 +3378,7 @@ class CoordinatorService:
                 failed_task_title=failed_task_title,
                 failed_task_reason=failed_task_reason,
                 user_notes=notes,
+                db=db,  # PRD-164 S1: enables the planning context pack
             )
         except PlanValidationError:
             # Replan failed — transition back to failed
@@ -2350,10 +3398,23 @@ class CoordinatorService:
             )
             raise
 
-        # Mark old failed and pending/queued tasks as skipped
+        # Mark replaced tasks as skipped. The human path (FAILED mission)
+        # replaces failed + not-yet-started tasks; the stall-ledger path also
+        # skips the mid-flight states — they ARE the loop being replaced, and
+        # leaving them live would run the old plan alongside the new one.
+        replaceable = {TaskState.FAILED, TaskState.PENDING, TaskState.QUEUED}
+        if trigger == "stall_ledger":
+            replaceable |= {
+                TaskState.ASSIGNED,
+                TaskState.RUNNING,
+                TaskState.COMPLETED,
+                TaskState.VERIFYING,
+                TaskState.STALLED,
+                TaskState.RETRYING,
+            }
         for task in all_tasks:
             task_state = TaskState(task.state)
-            if task_state in (TaskState.FAILED, TaskState.PENDING, TaskState.QUEUED):
+            if task_state in replaceable:
                 task.failure_reason_code = "replaced_by_replan"
                 task.failure_detail = f"Replaced during replan #{current_replans + 1}"
                 try:
@@ -2481,13 +3542,14 @@ class CoordinatorService:
             db=db,
             run_id=run.id,
             event_type=EventType.RUN_REPLANNED,
-            actor_type=ActorType.HUMAN,
+            actor_type=actor_type,
             actor_id=actor_id,
             payload={
                 "replan_number": current_replans + 1,
                 "new_task_count": len(decomposition.tasks),
                 "token_estimate": decomposition.token_estimate,
                 "user_notes": notes,
+                "trigger": trigger,
             },
         )
 
@@ -2699,6 +3761,69 @@ class CoordinatorService:
     # Archival (PRD-82B US-009)
     # ------------------------------------------------------------------
 
+    async def _maybe_compact_fields(self, db: Session, summary: Dict[str, Any]) -> None:
+        """PRD-166 S1 / PRD-178 S3 (F063): retention/compaction for field memory —
+        prune dead patterns so the shared Qdrant collection stays bounded as
+        workspace fields compound across missions. Throttled to once per hour;
+        errors never affect the rest of the tick. The prune decision is the
+        unit-tested ``field_scoring.is_prunable``.
+
+        F063 fix: the sweep is **workspace-scoped** (each workspace's points are
+        compacted under its own filter, never a full unscoped re-scan) and
+        **resumable** — the Qdrant scroll cursor is persisted per workspace so
+        the next run continues where this one stopped instead of re-scanning
+        compacted entries. ``next_offset=None`` from a completed pass clears the
+        cursor so the following run starts fresh."""
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_field_compaction_at is not None
+            and (now - self._last_field_compaction_at).total_seconds() < 3600
+        ):
+            return
+        self._last_field_compaction_at = now
+
+        field = self._get_field()
+        inner = getattr(field, "_inner", field) if field else None
+        if inner is None or not hasattr(inner, "compact"):
+            return
+
+        from modules.context.compaction_cursor import (
+            load_compaction_cursor,
+            save_compaction_cursor,
+        )
+
+        # Workspaces that have accumulated field data — scope compaction to each.
+        try:
+            workspace_ids = [
+                str(row[0]) for row in db.execute(
+                    text(
+                        "SELECT DISTINCT workspace_id FROM orchestration_runs "
+                        "WHERE config->>'field_id' IS NOT NULL"
+                    )
+                ).fetchall()
+                if row[0] is not None
+            ]
+        except Exception:
+            logger.warning("[Coordinator] Field compaction workspace scan failed", exc_info=True)
+            return
+
+        total_pruned = 0
+        for ws_id in workspace_ids:
+            try:
+                cursor = load_compaction_cursor(db, ws_id)
+                result = await inner.compact(workspace_id=ws_id, resume_offset=cursor)
+                save_compaction_cursor(db, ws_id, result.next_offset)
+                db.commit()
+                total_pruned += result.pruned
+            except Exception:
+                db.rollback()
+                logger.warning(
+                    "[Coordinator] Field compaction failed for ws=%s", ws_id, exc_info=True,
+                )
+        if total_pruned:
+            summary["field_pruned"] = total_pruned
+            logger.info("[Coordinator] Field compaction pruned %d pattern(s)", total_pruned)
+
     def _maybe_archive(self, db: Session, summary: Dict[str, Any]) -> None:
         """
         Run archive_old_runs() if at least 1 hour since last archive attempt.
@@ -2898,7 +4023,7 @@ class CoordinatorService:
 
         return archived_count
 
-    async def _build_and_advance_to_awaiting_human(
+    async def _complete_verified_run(
         self,
         db: Session,
         run: OrchestrationRun,

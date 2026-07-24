@@ -222,21 +222,26 @@ async def handle_graph_neighbors(
             if relation_filter and relation.lower() != relation_filter:
                 continue
             target = v if u == node_id else u
-            target_attrs = graph.nodes.get(target, {})
+            target_attrs = dict(graph.nodes.get(target, {}))
+            edge_attrs = dict(edge_data.get("attrs") or {})
             neighbors.append(
                 {
                     "target": str(target),
                     "target_label": target_attrs.get("label", str(target)),
+                    "target_attrs": target_attrs,
                     "relation": relation,
                     "confidence": edge_data.get("confidence", edge_data.get("weight", 1.0)),
+                    "weight": edge_data.get("weight"),
+                    "edge_attrs": edge_attrs,
                 }
             )
 
-        node_attrs = graph.nodes.get(node_id, {})
+        node_attrs = dict(graph.nodes.get(node_id, {}))
         return {
             "success": True,
             "node": str(node_id),
             "node_label": node_attrs.get("label", str(node_id)),
+            "node_attrs": node_attrs,
             "neighbor_count": len(neighbors),
             "neighbors": neighbors,
         }
@@ -266,9 +271,12 @@ async def handle_graph_communities(
     agent_team = _resolve_agent_team(db, params.get("_agent_id"))
 
     try:
-        from core.workspace_client import WorkspaceClient
+        # Read from the SAME store _export_graph wrote to — Postgres
+        # workspace_graphs via DbWorkspaceClient. The file-backed
+        # WorkspaceClient returns nothing for a DB-backed workspace.
+        from core.graph_storage import DbWorkspaceClient
 
-        ws = WorkspaceClient(str(workspace_id))
+        ws = DbWorkspaceClient(str(workspace_id))
         result = await ws.read_file("graph/communities.json")
 
         if not result.get("success"):
@@ -319,11 +327,15 @@ async def handle_graph_communities(
                 "community": matched[0],
             }
 
-        # Return summary of all communities (exclude empty after filtering)
+        # Return summary of all communities (exclude empty after filtering).
+        # PRD-165 S3: carry the LLM title/summary so agents get named clusters,
+        # not bare ids.
         summary = [
             {
                 "community_id": c.get("community_id"),
                 "member_count": c.get("member_count", len(c.get("members", []))),
+                "title": c.get("title"),
+                "summary": c.get("summary"),
             }
             for c in communities
             if c.get("member_count", len(c.get("members", []))) > 0
@@ -470,4 +482,65 @@ async def handle_graph_stats(
 
     except Exception as e:
         logger.error("handle_graph_stats failed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+# ------------------------------------------------------------------
+# 6. handle_graph_path (PRD-165 S2)
+# ------------------------------------------------------------------
+
+
+async def handle_graph_path(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Find the shortest path between two nodes in the knowledge graph.
+
+    Params:
+        source (str): Start node label or ID.
+        target (str): End node label or ID.
+    """
+    source_label = (params.get("source") or params.get("from") or "").strip()
+    target_label = (params.get("target") or params.get("to") or "").strip()
+    if not source_label or not target_label:
+        return {"success": False, "error": "source and target are required"}
+
+    try:
+        svc = _get_service()
+        graph = await svc.load_graph(str(workspace_id))
+        if graph is None:
+            return {
+                "success": False,
+                "error": "No knowledge graph built for this workspace yet.",
+            }
+
+        # PRD-124: filter graph to team-visible nodes
+        agent_team = _resolve_agent_team(db, params.get("_agent_id"))
+        graph = _get_filtered_graph(graph, agent_team)
+
+        source_id = _find_node_by_label(graph, source_label)
+        if source_id is None:
+            return {"success": False, "error": f"Node '{source_label}' not found in the graph."}
+        target_id = _find_node_by_label(graph, target_label)
+        if target_id is None:
+            return {"success": False, "error": f"Node '{target_label}' not found in the graph."}
+
+        result = await svc.shortest_path(graph, source_id, target_id)
+        if not result.get("found"):
+            return {"success": False, "error": result.get("error", "No path found.")}
+
+        # Compact, agent-friendly: the ordered label trail + the hop count,
+        # with the full node/edge payloads for any UI that wants to render it.
+        trail = [n.get("label", n.get("id")) for n in result.get("path", [])]
+        return {
+            "success": True,
+            "source": str(source_id),
+            "target": str(target_id),
+            "hops": result.get("length", max(0, len(trail) - 1)),
+            "path": trail,
+            "path_nodes": result.get("path", []),
+            "edges": result.get("links", []),
+        }
+
+    except Exception as e:
+        logger.error("handle_graph_path failed: %s", e, exc_info=True)
         return {"success": False, "error": str(e)}

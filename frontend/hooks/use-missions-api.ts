@@ -12,7 +12,7 @@ import type {
   MissionDetailResponse,
   MissionApproveRequest,
   MissionRejectRequest,
-  MissionReviewRequest,
+  MissionPlanEditRequest,
   MissionCreateRequest,
   MissionResponse,
   RunState,
@@ -81,6 +81,27 @@ export interface FieldPattern {
   created_at: string
   last_accessed: string
   is_archived: boolean
+  // PRD-166 S1: provenance + soft-archive surfaced for the inspector.
+  mission_id?: string | null
+  expired_at?: string | null
+}
+
+// PRD-166 S4: retrieval-trace — which patterns fired for a query and why.
+export interface FieldTraceHit {
+  id: string
+  key: string
+  value: string
+  score: number
+  cosine_similarity: number
+  decayed_strength: number
+  agent_id: number
+  mission_id?: string | null
+}
+
+export interface FieldTraceResponse {
+  field_id: string | null
+  query: string
+  results: FieldTraceHit[]
 }
 
 export interface FieldStability {
@@ -117,13 +138,28 @@ export interface MissionFieldResponse {
   metrics: FieldMetrics | null
 }
 
-export function useMissionField(id: string | null, enabled = true) {
+export type FieldScope = 'mission' | 'workspace'
+
+export function useMissionField(id: string | null, enabled = true, scope: FieldScope = 'mission') {
   return useQuery<MissionFieldResponse>({
-    queryKey: missionQueryKeys.field(id!),
-    queryFn: () => apiClient.request<MissionFieldResponse>(`/api/missions/${id}/field`),
+    queryKey: [...missionQueryKeys.field(id!), scope],
+    queryFn: () =>
+      apiClient.request<MissionFieldResponse>(`/api/missions/${id}/field?scope=${scope}`),
     enabled: !!id && enabled,
     staleTime: 5_000,
     refetchInterval: 8_000,
+  })
+}
+
+// PRD-166 S4: run a retrieval-trace query against a mission's field for the
+// inspector (which patterns fire for a given query, and why).
+export function useFieldQuery(missionId: string | null) {
+  return useMutation<FieldTraceResponse, Error, { query: string; topK?: number }>({
+    mutationFn: ({ query, topK }) =>
+      apiClient.request<FieldTraceResponse>(`/api/missions/${missionId}/field/query`, {
+        method: 'POST',
+        body: JSON.stringify({ query, top_k: topK ?? 0 }) as unknown as BodyInit,
+      }),
   })
 }
 
@@ -180,15 +216,15 @@ export function useRejectMission() {
   })
 }
 
-// ── Human Review ──────────────────────────────────────────────
+// ── Edit Plan (PRD-163 S4/Q57: approval-time task/agent edits) ─
 
-export function useReviewMission() {
+export function useUpdateMissionPlan() {
   const queryClient = useQueryClient()
 
-  return useMutation<MissionResponse, Error, { id: string; body: MissionReviewRequest }>({
+  return useMutation<MissionResponse, Error, { id: string; body: MissionPlanEditRequest }>({
     mutationFn: ({ id, body }) =>
-      apiClient.request<MissionResponse>(`/api/missions/${id}/review`, {
-        method: 'POST',
+      apiClient.request<MissionResponse>(`/api/missions/${id}/plan`, {
+        method: 'PATCH',
         body: body as unknown as BodyInit,
       }),
     onSuccess: (_data, { id }) => {

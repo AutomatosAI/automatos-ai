@@ -15,12 +15,15 @@ from .tools import *  # Import last - may extend models from core.py
 from .tool_assignments import *  # PRD-35: Tool catalog and assignments
 from .composio_cache import *  # Redesign: Composio metadata cache
 from .tool_routing import *  # PRD-139: Tool Routing Graph (edges, affinities, intent clusters)
+from .approval_grants import ApprovalGrant, GrantStatus  # noqa: F401  # PRD-181 S2 (F060)
 from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
 from .voice_profiles import *  # PRD-74: Voice Profiles
+from .voice_turns import VoiceTurn  # noqa: F401  # PRD-203 V·S6: Voice turn telemetry
+from .voice_calls import VoiceCall  # noqa: F401  # PRD-207 S3: Voice call lifecycle + metering
 from .business_profiles import BusinessProfile  # noqa: F401  # PRD-130: Business Intake Wizard
 from .blueprints import *  # Governance: Agent Blueprints
 
@@ -46,6 +49,21 @@ from .orchestration_enums import (  # noqa: F401
     TERMINAL_TASK_STATES,
     DONE_TASK_STATES,
     BOARD_STATUS_MAP,
+)
+
+# PRD-204: Auto Watcher -- watch registry
+from .watches import Watch, WatchEvent  # noqa: F401
+from .watch_enums import (  # noqa: F401
+    WatchStatus,
+    WatchType,
+    WatchTargetType,
+    WatchPolicy,
+    WatchEventType,
+    ALLOWED_WATCH_TRANSITIONS,
+    TERMINAL_WATCH_STATUSES,
+    LIVE_WATCH_STATUSES,
+    CLAIMABLE_WATCH_STATUSES,
+    WATCH_STATUS_FOR_TERMINAL_TARGET,
 )
 
 # PRD-72: Board Tasks — explicit import so `from core.models import BoardTask` works

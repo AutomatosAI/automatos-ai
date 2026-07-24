@@ -46,6 +46,7 @@ class EdgeBuildSummary:
     """Summary returned after an edge-build run."""
 
     edges_built: int = 0
+    failed_edges_built: int = 0
     affinities_built: int = 0
     intent_clusters: int = 0
     logs_processed: int = 0
@@ -63,11 +64,16 @@ def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
     return (centre - spread) / denominator
 
 
-async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummary:
+async def build_edges(
+    window: timedelta = timedelta(days=30),
+    workspace_id: Optional[str] = None,
+) -> EdgeBuildSummary:
     """Main entry point: read telemetry, compute edges + affinities, upsert.
 
     Args:
         window: How far back to look in tool_execution_logs.
+        workspace_id: Optional workspace UUID string — restrict the recompute
+            to one workspace's logs (PRD-143 S12 seed backfill scoping).
 
     Returns:
         EdgeBuildSummary with counts of what was built.
@@ -80,7 +86,7 @@ async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummar
     with get_db_session() as db:
         # 1. Load execution logs within window
         cutoff = datetime.utcnow() - window
-        logs = _load_logs(db, cutoff)
+        logs = _load_logs(db, cutoff, workspace_id=workspace_id)
         summary.logs_processed = len(logs)
 
         if not logs:
@@ -90,6 +96,13 @@ async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummar
         # 2. Compute used_after edges from sequences
         edge_data = _compute_used_after_edges(logs)
         summary.edges_built = _upsert_edges(db, edge_data)
+
+        # 2b. Compute failed_after edges (PRD-141 US-018): A succeeded then a
+        #     tool within 2 steps errored. Same table, distinct edge_type;
+        #     GraphRouter._query_edges only follows used_after, so these are
+        #     recorded for analysis / de-ranking but never expanded into chains.
+        failed_data = _compute_failed_after_edges(logs)
+        summary.failed_edges_built = _upsert_failed_after_edges(db, failed_data)
 
         # 3. Compute intent clusters from query embeddings
         cluster_map = await _compute_and_upsert_clusters(db, logs)
@@ -103,7 +116,8 @@ async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummar
     summary.duration_ms = elapsed_ms
 
     logger.info(
-        f"EdgeBuilder: built {summary.edges_built} edges, "
+        f"EdgeBuilder: built {summary.edges_built} used_after edges, "
+        f"{summary.failed_edges_built} failed_after edges, "
         f"{summary.affinities_built} affinities across "
         f"{summary.intent_clusters} intent clusters"
     )
@@ -115,14 +129,16 @@ async def build_edges(window: timedelta = timedelta(days=30)) -> EdgeBuildSummar
 # ---------------------------------------------------------------------------
 
 
-def _load_logs(db: Session, cutoff: datetime) -> List[Dict[str, Any]]:
+def _load_logs(
+    db: Session,
+    cutoff: datetime,
+    workspace_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Load tool_execution_logs rows from cutoff onwards, return as dicts."""
-    rows = (
-        db.query(ToolExecutionLog)
-        .filter(ToolExecutionLog.executed_at >= cutoff)
-        .order_by(ToolExecutionLog.executed_at.asc())
-        .all()
-    )
+    query = db.query(ToolExecutionLog).filter(ToolExecutionLog.executed_at >= cutoff)
+    if workspace_id:
+        query = query.filter(ToolExecutionLog.workspace_id == workspace_id)
+    rows = query.order_by(ToolExecutionLog.executed_at.asc()).all()
     results = []
     for row in rows:
         # Extract turn_id from router_decision JSONB
@@ -199,6 +215,67 @@ def _compute_used_after_edges(
     return dict(edge_counts)
 
 
+def _compute_failed_after_edges(
+    logs: List[Dict[str, Any]],
+) -> Dict[Tuple[str, str, Optional[str], Optional[int]], Tuple[int, int]]:
+    """Compute failed_after(A, B) edges.
+
+    Within a session, when tool A SUCCEEDS and a later tool B (within the next
+    2 steps) ERRORS, that is evidence the A->B transition is risky. We track
+    BOTH the failure count and the total number of (A-succeeded, B-within-2)
+    co-occurrences, so the edge confidence can be the Wilson lower bound of the
+    failure RATE (failed / total) rather than a raw count -- a pair that fails
+    3-of-100 times should not look as dangerous as one that fails 30-of-40.
+
+    Same grouping/windowing as used_after. failed_after edges are written to the
+    same table under a distinct edge_type; GraphRouter._query_edges only follows
+    'used_after', so these never become recommended chains.
+
+    Returns:
+        Dict mapping (from_action, to_action, workspace_id, agent_id)
+        -> (failed_count, total_count), only for pairs with >=1 failure.
+    """
+    sessions: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for log in logs:
+        key = _derive_session_key(log)
+        sessions[key].append(log)
+
+    failed_counts: Dict[Tuple[str, str, Optional[str], Optional[int]], int] = defaultdict(int)
+    total_counts: Dict[Tuple[str, str, Optional[str], Optional[int]], int] = defaultdict(int)
+
+    for session_key, session_logs in sessions.items():
+        if session_key.startswith("agent:"):
+            windows = _split_by_time_window(session_logs, window_seconds=300)
+        else:
+            windows = [session_logs]
+
+        for window_logs in windows:
+            for i in range(len(window_logs)):
+                a = window_logs[i]
+                if a.get("status") != "success":
+                    continue  # A must have succeeded to originate a failed_after edge
+                # Look ahead up to 2 steps within the same window
+                for j in range(i + 1, min(i + 3, len(window_logs))):
+                    b = window_logs[j]
+                    if a["action_name"] == b["action_name"]:
+                        continue  # Skip self-edges (chains never loop)
+                    edge_key = (
+                        a["action_name"],
+                        b["action_name"],
+                        a.get("workspace_id"),
+                        a.get("agent_id"),
+                    )
+                    total_counts[edge_key] += 1
+                    if b.get("status") != "success":
+                        failed_counts[edge_key] += 1
+
+    return {
+        key: (failed_counts[key], total)
+        for key, total in total_counts.items()
+        if failed_counts.get(key, 0) > 0
+    }
+
+
 def _split_by_time_window(
     logs: List[Dict[str, Any]], window_seconds: int = 300
 ) -> List[List[Dict[str, Any]]]:
@@ -216,11 +293,55 @@ def _split_by_time_window(
     return windows
 
 
+def _upsert_edge_row(
+    db: Session,
+    from_action: str,
+    to_action: str,
+    edge_type: str,
+    workspace_id: Optional[str],
+    agent_id: Optional[int],
+    weight: float,
+    confidence: float,
+    sample_count: int,
+    now: datetime,
+) -> None:
+    """Upsert a single routing edge (any edge_type) using ON CONFLICT UPDATE.
+
+    The unique key uq_tre_full_key includes edge_type, so used_after and
+    failed_after rows for the same (from, to, scope) coexist without clobbering.
+    """
+    stmt = text("""
+        INSERT INTO tool_routing_edges
+            (from_action, to_action, edge_type, workspace_id, agent_id,
+             weight, confidence, sample_count, last_updated)
+        VALUES
+            (:from_action, :to_action, :edge_type, :workspace_id, :agent_id,
+             :weight, :confidence, :sample_count, :last_updated)
+        ON CONFLICT ON CONSTRAINT uq_tre_full_key
+        DO UPDATE SET
+            weight = :weight,
+            confidence = :confidence,
+            sample_count = :sample_count,
+            last_updated = :last_updated
+    """)
+    db.execute(stmt, {
+        "from_action": from_action,
+        "to_action": to_action,
+        "edge_type": edge_type,
+        "workspace_id": workspace_id,
+        "agent_id": agent_id,
+        "weight": weight,
+        "confidence": confidence,
+        "sample_count": sample_count,
+        "last_updated": now,
+    })
+
+
 def _upsert_edges(
     db: Session,
     edge_data: Dict[Tuple[str, str, Optional[str], Optional[int]], int],
 ) -> int:
-    """Upsert edges into tool_routing_edges using ON CONFLICT UPDATE."""
+    """Upsert used_after edges into tool_routing_edges."""
     count = 0
     now = datetime.utcnow()
 
@@ -230,32 +351,39 @@ def _upsert_edges(
 
         weight = float(sample_count)
         confidence = wilson_lower_bound(sample_count, sample_count)
+        _upsert_edge_row(
+            db, from_action, to_action, "used_after",
+            workspace_id, agent_id, weight, confidence, sample_count, now,
+        )
+        count += 1
 
-        # Use raw SQL for ON CONFLICT upsert
-        stmt = text("""
-            INSERT INTO tool_routing_edges
-                (from_action, to_action, edge_type, workspace_id, agent_id,
-                 weight, confidence, sample_count, last_updated)
-            VALUES
-                (:from_action, :to_action, 'used_after', :workspace_id, :agent_id,
-                 :weight, :confidence, :sample_count, :last_updated)
-            ON CONFLICT ON CONSTRAINT uq_tre_full_key
-            DO UPDATE SET
-                weight = :weight,
-                confidence = :confidence,
-                sample_count = :sample_count,
-                last_updated = :last_updated
-        """)
-        db.execute(stmt, {
-            "from_action": from_action,
-            "to_action": to_action,
-            "workspace_id": workspace_id,
-            "agent_id": agent_id,
-            "weight": weight,
-            "confidence": confidence,
-            "sample_count": sample_count,
-            "last_updated": now,
-        })
+    db.flush()
+    return count
+
+
+def _upsert_failed_after_edges(
+    db: Session,
+    failed_data: Dict[Tuple[str, str, Optional[str], Optional[int]], Tuple[int, int]],
+) -> int:
+    """Upsert failed_after edges into tool_routing_edges.
+
+    weight = failure count; sample_count = total co-occurrences; confidence =
+    Wilson lower bound of the failure rate (failed / total). The _SAMPLE_FLOOR
+    is applied to the total co-occurrences, matching used_after's floor.
+    """
+    count = 0
+    now = datetime.utcnow()
+
+    for (from_action, to_action, workspace_id, agent_id), (failed, total) in failed_data.items():
+        if total < _SAMPLE_FLOOR:
+            continue
+
+        weight = float(failed)
+        confidence = wilson_lower_bound(failed, total)
+        _upsert_edge_row(
+            db, from_action, to_action, "failed_after",
+            workspace_id, agent_id, weight, confidence, total, now,
+        )
         count += 1
 
     db.flush()
@@ -309,11 +437,24 @@ async def _compute_and_upsert_clusters(
     dimension = info.get("dimension") or embedding_manager.get_dimension()
     embedding_model_key = f"{provider}:{model}:{dimension}"
 
-    # Upsert clusters - delete old ones and insert fresh (idempotent rebuild)
-    # Delete existing clusters for this model key, then insert new
-    db.query(ToolRoutingIntentCluster).filter(
-        ToolRoutingIntentCluster.embedding_model_key == embedding_model_key
-    ).delete(synchronize_session="fetch")
+    # Upsert clusters - delete old ones and insert fresh (idempotent rebuild).
+    # Affinities referencing the doomed clusters go FIRST: the FK has no
+    # cascade, so without this a re-run would either FK-error on the cluster
+    # delete or strand intent affinities under dead cluster ids (duplicating
+    # them under the regenerated ids) — re-runs must converge (PRD-143 S12).
+    existing_clusters = (
+        db.query(ToolRoutingIntentCluster)
+        .filter(ToolRoutingIntentCluster.embedding_model_key == embedding_model_key)
+        .all()
+    )
+    if existing_clusters:
+        doomed_ids = [c.id for c in existing_clusters]
+        db.query(ToolRoutingAffinity).filter(
+            ToolRoutingAffinity.intent_cluster_id.in_(doomed_ids)
+        ).delete(synchronize_session="fetch")
+        db.query(ToolRoutingIntentCluster).filter(
+            ToolRoutingIntentCluster.id.in_(doomed_ids)
+        ).delete(synchronize_session="fetch")
     db.flush()
 
     now = datetime.utcnow()

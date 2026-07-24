@@ -6,9 +6,13 @@ These tests verify:
 3. Graph path is never reached when TOOL_ROUTING_GRAPH=False
 4. Chain hints are rendered for multi-action sequences
 
-Strategy: imports the SAME PlatformActionsSection that the existing PRD-138
-tests set up. Monkeypatches config and graph_router at the pytest-function level
-so there are ZERO sys.modules conflicts regardless of collection order.
+Collection-pollution discipline (PRD-142 W2-S2b): the section is loaded with
+import-time stubs (estimator / base) that are restored immediately, so this
+module leaves sys.modules untouched at collection time. The runtime stubs the
+section imports lazily inside ``render()`` (config / action_registry /
+action_semantic_index / graph_router) are (re)installed per-test by the autouse
+fixture and torn down after each test. Each platform-actions test file is fully
+self-contained — no cross-file ``setdefault`` coupling.
 """
 from __future__ import annotations
 
@@ -22,111 +26,115 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# The existing test file (test_platform_actions_section.py) may or may not
-# have run first. We need the same PlatformActionsSection class and stubs.
-# Strategy: replicate the EXACT module-level setup from that file, but guard
-# with setdefault so whichever loads first wins — they're identical.
-# ---------------------------------------------------------------------------
-
 _THIS = Path(__file__).resolve()
 _ORCH = _THIS.parents[1]
 _SECTIONS = _ORCH / "modules" / "context" / "sections"
 _DISCOVERY = _ORCH / "modules" / "tools" / "discovery"
 
-# Load ActionRegistry class (private, doesn't interfere)
+
+# ---------------------------------------------------------------------------
+# Watched sys.modules keys — snapshot now, restore after the import-time block.
+# ---------------------------------------------------------------------------
+_IMPORT_KEYS = (
+    "core.context_guard",
+    "modules.context.sections",
+    "modules.context.sections.base",
+    "modules.context.sections.platform_actions",
+)
+# Read by the section's LAZY imports at render() time — live only during tests.
+_RUNTIME_KEYS = (
+    "config",
+    "modules.tools.discovery.action_registry",
+    "modules.tools.discovery.action_semantic_index",
+    "modules.tools.discovery.graph_router",
+)
+_GUARD_KEYS = (
+    "modules",
+    "modules.context",
+    "modules.tools",
+    "modules.tools.discovery",
+)
+_PRE_IMPORT_SNAPSHOT = {
+    k: sys.modules.get(k) for k in (_IMPORT_KEYS + _RUNTIME_KEYS + _GUARD_KEYS)
+}
+
+
+def _restore(snapshot: dict) -> None:
+    """Restore sys.modules to a captured snapshot (None ⇒ delete the key)."""
+    for key, original in snapshot.items():
+        if original is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = original
+
+
+# ---------------------------------------------------------------------------
+# Pre-load the real ActionRegistry under a private name (no pollution).
+# ---------------------------------------------------------------------------
 _ar_spec = importlib.util.spec_from_file_location(
     "action_registry_gt", _DISCOVERY / "action_registry.py"
 )
 _ar_mod = importlib.util.module_from_spec(_ar_spec)
-sys.modules.setdefault("action_registry_gt", _ar_mod)
-if not hasattr(_ar_mod, "ActionDefinition"):
-    _ar_spec.loader.exec_module(_ar_mod)
+sys.modules["action_registry_gt"] = _ar_mod
+_ar_spec.loader.exec_module(_ar_mod)
 ActionDefinition = _ar_mod.ActionDefinition
 ActionRegistry = _ar_mod.ActionRegistry
 
-# Ensure package stubs
-for pkg in ("modules", "modules.context", "modules.tools", "modules.tools.discovery"):
-    if pkg not in sys.modules:
-        m = ModuleType(pkg)
-        m.__path__ = []
-        sys.modules[pkg] = m
 
-# TokenEstimator
-if "modules.context.estimator" not in sys.modules:
-    _est = ModuleType("modules.context.estimator")
-    class _E:
-        def estimate(self, c: str) -> int:
-            return len(c) // 4 + 1
-    _est.TokenEstimator = _E
-    sys.modules["modules.context.estimator"] = _est
+# ---------------------------------------------------------------------------
+# Build stub module objects (installed transiently for import, then per-test).
+# ---------------------------------------------------------------------------
+class _StubConfig:
+    SEMANTIC_TOOL_ROUTING = True
+    SEMANTIC_TOOL_ROUTING_TOP_K = 3
+    TOOL_ROUTING_GRAPH = False
+    PLATFORM_ACTIONS_MAX_TOKENS = 4000
 
-# Config stub — must have all attrs both test files need
-if "config" not in sys.modules:
-    _cm = ModuleType("config")
-    class _C:
-        SEMANTIC_TOOL_ROUTING = True
-        SEMANTIC_TOOL_ROUTING_TOP_K = 3
-        TOOL_ROUTING_GRAPH = False
-    _cm.config = _C()
-    sys.modules["config"] = _cm
-else:
-    # Ensure TOOL_ROUTING_GRAPH exists on whatever config is already loaded
-    _existing_cfg = sys.modules["config"].config
-    if not hasattr(_existing_cfg, "TOOL_ROUTING_GRAPH"):
-        _existing_cfg.TOOL_ROUTING_GRAPH = False
 
-# BaseSection / SectionContext
-if "modules.context.sections" not in sys.modules:
-    _sp = ModuleType("modules.context.sections")
-    _sp.__path__ = [str(_SECTIONS)]
-    sys.modules["modules.context.sections"] = _sp
-if "modules.context.sections.base" not in sys.modules:
-    _bs = importlib.util.spec_from_file_location(
-        "modules.context.sections.base", _SECTIONS / "base.py"
-    )
-    _bm = importlib.util.module_from_spec(_bs)
-    sys.modules["modules.context.sections.base"] = _bm
-    _bs.loader.exec_module(_bm)
+_stub_config_module = ModuleType("config")
+_stub_config_module.config = _StubConfig()
 
-SectionContext = sys.modules["modules.context.sections.base"].SectionContext
 
-# Action registry stub
-if "modules.tools.discovery.action_registry" not in sys.modules:
-    _arm = ModuleType("modules.tools.discovery.action_registry")
-    _arm.ActionDefinition = ActionDefinition
-    _arm.ActionRegistry = ActionRegistry
-    _arm.get_action_registry = lambda: None
-    sys.modules["modules.tools.discovery.action_registry"] = _arm
+# PRD-201 S2: base.py counts + truncates via core.context_guard (the char/4
+# TokenEstimator was deleted). Stub it (cheap, no tiktoken) for isolated load.
+_cg_mod = ModuleType("core.context_guard")
+_cg_mod.count_tokens = lambda c: len(c or "") // 4 + 1
 
-_ar_module = sys.modules["modules.tools.discovery.action_registry"]
-# Ensure our classes are there
-if not hasattr(_ar_module, "get_action_registry"):
-    _ar_module.get_action_registry = lambda: None
 
-# Action semantic index stub
-if "modules.tools.discovery.action_semantic_index" not in sys.modules:
-    _asim = ModuleType("modules.tools.discovery.action_semantic_index")
+def _cg_truncate(text, max_tokens, *, suffix=""):
+    if not text or max_tokens <= 0:
+        return text
+    limit = max_tokens * 4
+    return text if len(text) <= limit else text[:limit] + suffix
 
-    class _FSI:
-        def __init__(self):
-            self.calls: List[dict] = []
-            self.next_result: List[Tuple[str, float]] = []
-            self.exception: Optional[Exception] = None
 
-        async def rank_actions(self, query, top_k=15, exclude_admin=True, exclude_promoted=True):
-            self.calls.append({"query": query, "top_k": top_k, "exclude_admin": exclude_admin, "exclude_promoted": exclude_promoted})
-            if self.exception:
-                raise self.exception
-            return list(self.next_result)
+_cg_mod.truncate_to_token_budget = _cg_truncate
 
-    _asim._fake_singleton = _FSI()
-    _asim.get_action_semantic_index = lambda: _asim._fake_singleton
-    sys.modules["modules.tools.discovery.action_semantic_index"] = _asim
 
-_asi_module = sys.modules["modules.tools.discovery.action_semantic_index"]
+_ar_module = ModuleType("modules.tools.discovery.action_registry")
+_ar_module.ActionDefinition = ActionDefinition
+_ar_module.ActionRegistry = ActionRegistry
+_ar_module.get_action_registry = lambda: None  # replaced per-test via _install_registry()
 
-# Graph router stub — this is the NEW module for PRD-139
+
+class _FakeSemanticIndex:
+    def __init__(self):
+        self.calls: List[dict] = []
+        self.next_result: List[Tuple[str, float]] = []
+        self.exception: Optional[Exception] = None
+
+    async def rank_actions(self, query, top_k=15, exclude_admin=True, exclude_promoted=True, include_super_admin=False):
+        self.calls.append({"query": query, "top_k": top_k, "exclude_admin": exclude_admin, "exclude_promoted": exclude_promoted, "include_super_admin": include_super_admin})
+        if self.exception:
+            raise self.exception
+        return list(self.next_result)
+
+
+_asi_module = ModuleType("modules.tools.discovery.action_semantic_index")
+_asi_module._fake_singleton = _FakeSemanticIndex()
+_asi_module.get_action_semantic_index = lambda: _asi_module._fake_singleton
+
+
 class _FakeGraphRouter:
     """Controllable fake for GraphRouter used by all tests in this file."""
 
@@ -135,31 +143,73 @@ class _FakeGraphRouter:
         self.next_result: List[Tuple[str, float, List[str]]] = []
         self.exception: Optional[Exception] = None
 
-    async def rank_chains(self, query, agent_id=None, top_k=15, exclude_admin=True, exclude_promoted=True):
-        self.calls.append({"query": query, "agent_id": agent_id, "top_k": top_k})
+    async def rank_chains(self, query, *, workspace_id, agent_id=None, top_k=15, exclude_admin=True, exclude_promoted=True):
+        # PRD-177 S5: workspace_id is now a required keyword — the section must
+        # thread the tenant's workspace so the per-tenant graph is read.
+        self.calls.append({
+            "query": query, "workspace_id": workspace_id,
+            "agent_id": agent_id, "top_k": top_k,
+        })
         if self.exception:
             raise self.exception
         return list(self.next_result)
 
 
 _fake_graph_router = _FakeGraphRouter()
-
 _grm = ModuleType("modules.tools.discovery.graph_router")
 _grm.get_graph_router = lambda: _fake_graph_router
 _grm.GraphRouter = _FakeGraphRouter
-sys.modules["modules.tools.discovery.graph_router"] = _grm
 
-# Load the section module (or reuse existing). The section uses lazy imports
-# so whatever is in sys.modules at CALL TIME is what gets resolved.
-if "modules.context.sections.platform_actions" not in sys.modules:
-    _ss = importlib.util.spec_from_file_location(
-        "modules.context.sections.platform_actions", _SECTIONS / "platform_actions.py"
-    )
-    _sm = importlib.util.module_from_spec(_ss)
-    sys.modules["modules.context.sections.platform_actions"] = _sm
-    _ss.loader.exec_module(_sm)
 
-PlatformActionsSection = sys.modules["modules.context.sections.platform_actions"].PlatformActionsSection
+# Runtime stubs the section's lazy imports resolve at render() time.
+_RUNTIME_STUBS = {
+    "config": _stub_config_module,
+    "modules.tools.discovery.action_registry": _ar_module,
+    "modules.tools.discovery.action_semantic_index": _asi_module,
+    "modules.tools.discovery.graph_router": _grm,
+}
+_runtime_live_snapshot: dict = {}
+
+
+def _install_runtime_stubs() -> None:
+    """Install runtime stubs, remembering whatever was there to restore later."""
+    global _runtime_live_snapshot
+    _runtime_live_snapshot = {k: sys.modules.get(k) for k in _RUNTIME_STUBS}
+    sys.modules.update(_RUNTIME_STUBS)
+
+
+def _restore_runtime_stubs() -> None:
+    _restore(_runtime_live_snapshot)
+
+
+# ---------------------------------------------------------------------------
+# Import-time block: bind SectionContext / PlatformActionsSection from disk,
+# then restore sys.modules (collection-safe). config / registry / index /
+# graph_router are render()-time only, so they stay out of the import.
+# ---------------------------------------------------------------------------
+sys.modules["core.context_guard"] = _cg_mod
+
+_sections_pkg = ModuleType("modules.context.sections")
+_sections_pkg.__path__ = [str(_SECTIONS)]
+sys.modules["modules.context.sections"] = _sections_pkg
+
+_base_spec = importlib.util.spec_from_file_location(
+    "modules.context.sections.base", _SECTIONS / "base.py"
+)
+_base_mod = importlib.util.module_from_spec(_base_spec)
+sys.modules["modules.context.sections.base"] = _base_mod
+_base_spec.loader.exec_module(_base_mod)
+SectionContext = _base_mod.SectionContext
+
+_sec_spec = importlib.util.spec_from_file_location(
+    "modules.context.sections.platform_actions", _SECTIONS / "platform_actions.py"
+)
+_sec_mod = importlib.util.module_from_spec(_sec_spec)
+sys.modules["modules.context.sections.platform_actions"] = _sec_mod
+_sec_spec.loader.exec_module(_sec_mod)
+PlatformActionsSection = _sec_mod.PlatformActionsSection
+
+_restore(_PRE_IMPORT_SNAPSHOT)
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +245,7 @@ def _ctx(query: str = "test query", agent_id: Optional[int] = None) -> SectionCo
 
 
 def _set_flags(semantic: bool = True, graph: bool = False, top_k: int = 3) -> None:
-    cfg = sys.modules["config"].config
+    cfg = _stub_config_module.config
     cfg.SEMANTIC_TOOL_ROUTING = semantic
     cfg.SEMANTIC_TOOL_ROUTING_TOP_K = top_k
     cfg.TOOL_ROUTING_GRAPH = graph
@@ -220,13 +270,16 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _reset_state():
+    _install_runtime_stubs()
     _set_flags(semantic=True, graph=False, top_k=3)
     _reset_graph_router()
     _reset_semantic_index()
-    yield
-    _set_flags(semantic=True, graph=False, top_k=3)
-    _reset_graph_router()
-    _reset_semantic_index()
+    try:
+        yield
+    finally:
+        _reset_graph_router()
+        _reset_semantic_index()
+        _restore_runtime_stubs()
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +336,9 @@ def test_graph_path_passes_agent_id_from_context():
     _run(section.render(_ctx(query="list agents", agent_id=42)))
 
     assert _fake_graph_router.calls[0]["agent_id"] == 42
+    # PRD-177 S5: the section threads ctx.workspace_id so the per-tenant graph
+    # is read for THIS workspace, not globally.
+    assert _fake_graph_router.calls[0]["workspace_id"] == "ws-1"
 
 
 def test_graph_path_no_agent_id_passes_none():

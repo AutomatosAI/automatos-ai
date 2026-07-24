@@ -85,26 +85,43 @@ class Config:
     MEMORY_SESSION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_TTL_SECONDS", "86400"))
     # L1 Session: TTL after end_session() called (1 hour consolidation window)
     MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS: int = int(os.getenv("MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS", "3600"))
-    # L3 Cache: TTL for Mem0 search result caching in Redis
+    # L3 Cache: TTL for durable-store search result caching in Redis
     MEMORY_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_CACHE_TTL_SECONDS", "300"))
-    # Context Router: per-source sub-budgets (tokens)
+    # Context Router: per-source sub-budgets (tokens).
+    # Fallback only — used when the model context window is unknown. When the
+    # window is known, ContextRouter._compute_budgets derives budgets as a
+    # proportion of the usable window instead (PRD-141 US-011).
     CONTEXT_BUDGET_SESSION: int = int(os.getenv("CONTEXT_BUDGET_SESSION", "500"))
     CONTEXT_BUDGET_LONG_TERM: int = int(os.getenv("CONTEXT_BUDGET_LONG_TERM", "800"))
     CONTEXT_BUDGET_TEMPORAL: int = int(os.getenv("CONTEXT_BUDGET_TEMPORAL", "600"))
     CONTEXT_BUDGET_DAILY: int = int(os.getenv("CONTEXT_BUDGET_DAILY", "400"))
     CONTEXT_BUDGET_AWARENESS: int = int(os.getenv("CONTEXT_BUDGET_AWARENESS", "200"))
+    CONTEXT_BUDGET_TOOLS: int = int(os.getenv("CONTEXT_BUDGET_TOOLS", "1000"))
+    CONTEXT_BUDGET_SYSTEM_PROMPT: int = int(os.getenv("CONTEXT_BUDGET_SYSTEM_PROMPT", "600"))
     # Knowledge awareness: TTL for per-workspace capability map cached in Redis
     MEMORY_AWARENESS_CACHE_TTL_SECONDS: int = int(os.getenv("MEMORY_AWARENESS_CACHE_TTL_SECONDS", "600"))
-    # L2 Decay: Ebbinghaus decay rate (higher = faster forgetting)
-    MEMORY_DECAY_RATE: float = float(os.getenv("MEMORY_DECAY_RATE", "0.1"))
+    # L2 Decay: Ebbinghaus decay rate per hour (higher = faster forgetting).
+    # Week-scale (PRD-154 S3): 0.1/hr archived importance-0.8 memories in ~15h;
+    # 0.004/hr keeps them above the 0.3 threshold for ~16 days.
+    MEMORY_DECAY_RATE: float = float(os.getenv("MEMORY_DECAY_RATE", "0.004"))
     # L2 Decay: threshold below which items are archived
     MEMORY_DECAY_ARCHIVE_THRESHOLD: float = float(os.getenv("MEMORY_DECAY_ARCHIVE_THRESHOLD", "0.3"))
     # L2 Decay: batch size per workspace (rows per transaction)
     MEMORY_DECAY_BATCH_SIZE: int = int(os.getenv("MEMORY_DECAY_BATCH_SIZE", "100"))
-    # L2→L3 Promotion: minimum importance score for promotion candidates
+    # L2→L3 Promotion (PRD-187 S4): fires on distilled IMPORTANCE with
+    # type-aware thresholds — the old `AND access_count > N` conjunct was a
+    # bootstrap deadlock (promotion needs access → access needs recall → recall
+    # couldn't match) and produced zero promotions ever. Policy lives in
+    # modules/memory/promotion_policy.py. Field→durable promotion keeps ITS
+    # access gate (FIELD_PROMOTION_MIN_ACCESS_COUNT) — there access is real.
     MEMORY_PROMOTION_MIN_IMPORTANCE: float = float(os.getenv("MEMORY_PROMOTION_MIN_IMPORTANCE", "0.7"))
-    # L2→L3 Promotion: minimum access count for promotion candidates
-    MEMORY_PROMOTION_MIN_ACCESS_COUNT: int = int(os.getenv("MEMORY_PROMOTION_MIN_ACCESS_COUNT", "3"))
+    # Types durable memory exists for — promoted from a lower importance bar.
+    MEMORY_PROMOTION_HIGH_SIGNAL_TYPES: str = os.getenv(
+        "MEMORY_PROMOTION_HIGH_SIGNAL_TYPES", "user_fact,preference,procedure"
+    )
+    MEMORY_PROMOTION_HIGH_SIGNAL_MIN_IMPORTANCE: float = float(
+        os.getenv("MEMORY_PROMOTION_HIGH_SIGNAL_MIN_IMPORTANCE", "0.5")
+    )
     # L2→L3 Promotion: batch size per workspace
     MEMORY_PROMOTION_BATCH_SIZE: int = int(os.getenv("MEMORY_PROMOTION_BATCH_SIZE", "50"))
     # Background job intervals (PRD-79 US-023)
@@ -121,13 +138,82 @@ class Config:
     MEMORY_ARCHIVAL_L2_DECAY_THRESHOLD: float = float(os.getenv("MEMORY_ARCHIVAL_L2_DECAY_THRESHOLD", "0.2"))
     MEMORY_ARCHIVAL_L3_RETENTION_DAYS: int = int(os.getenv("MEMORY_ARCHIVAL_L3_RETENTION_DAYS", "180"))
     MEMORY_ARCHIVAL_BATCH_SIZE: int = int(os.getenv("MEMORY_ARCHIVAL_BATCH_SIZE", "500"))
+    # PRD-197 S3: Qdrant memory snapshots (durable_memory + field_memory) — the
+    # memory planes' DR arm; the document plane is S3 Vectors (PRD-186's DR).
+    # Built to the §8-Q3 proposal: daily, 7-day retention, the platform object
+    # store. Hour 4 UTC = after the 03:00 L2→L3 promotion, so the snapshot
+    # includes the night's promotions. Empty bucket = S3_DOCUMENTS_BUCKET at
+    # run time (that attr is defined later in this file).
+    MEMORY_SNAPSHOT_ENABLED: bool = os.getenv("MEMORY_SNAPSHOT_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEMORY_SNAPSHOT_CRON_HOUR_UTC: int = int(os.getenv("MEMORY_SNAPSHOT_CRON_HOUR_UTC", "4"))
+    MEMORY_SNAPSHOT_RETENTION_DAYS: int = int(os.getenv("MEMORY_SNAPSHOT_RETENTION_DAYS", "7"))
+    MEMORY_SNAPSHOT_S3_BUCKET: str = os.getenv("MEMORY_SNAPSHOT_S3_BUCKET", "")
+    MEMORY_SNAPSHOT_S3_PREFIX: str = os.getenv("MEMORY_SNAPSHOT_S3_PREFIX", "qdrant-snapshots")
+    # PRD-197 S4: substrate telemetry retention — the per-seam retrieval
+    # metric rows behind the Command Center substrate tile are pruned past
+    # this window (the heartbeat_results 148k-row lesson: no unbounded
+    # telemetry tables). Sweep rides the memory-jobs scheduler daily.
+    SUBSTRATE_METRICS_RETENTION_DAYS: int = int(os.getenv("SUBSTRATE_METRICS_RETENTION_DAYS", "14"))
+    SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS: int = int(os.getenv("SUBSTRATE_METRICS_PRUNE_INTERVAL_SECONDS", "86400"))
+    # PRD-206 S7: composite recall ranking (semantic × recency × importance ×
+    # pin), applied ABOVE the relevance floor + type exclusions. Conservative
+    # defaults; the S10 continuity eval slice is the referee.
+    MEMORY_RANK_ENABLED: bool = os.getenv("MEMORY_RANK_ENABLED", "true").lower() in ("true", "1", "yes")
+    MEMORY_RANK_HALF_LIFE_DAYS: float = float(os.getenv("MEMORY_RANK_HALF_LIFE_DAYS", "30"))
+    MEMORY_RANK_PIN_BOOST: float = float(os.getenv("MEMORY_RANK_PIN_BOOST", "2.0"))
+    # PRD-206 S2: thread-checkpoint sweep — recently-idle chats get an LLM
+    # checkpoint (chats.summary + typed decision/open_loop memories). The
+    # batch cap bounds LLM spend per sweep; min-messages skips trivia.
+    THREAD_CHECKPOINT_ENABLED: bool = os.getenv("THREAD_CHECKPOINT_ENABLED", "true").lower() in ("true", "1", "yes")
+    THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS: int = int(os.getenv("THREAD_CHECKPOINT_SWEEP_INTERVAL_SECONDS", "900"))
+    THREAD_CHECKPOINT_IDLE_MINUTES: int = int(os.getenv("THREAD_CHECKPOINT_IDLE_MINUTES", "30"))
+    THREAD_CHECKPOINT_LOOKBACK_HOURS: int = int(os.getenv("THREAD_CHECKPOINT_LOOKBACK_HOURS", "48"))
+    THREAD_CHECKPOINT_BATCH: int = int(os.getenv("THREAD_CHECKPOINT_BATCH", "10"))
+    THREAD_CHECKPOINT_MIN_MESSAGES: int = int(os.getenv("THREAD_CHECKPOINT_MIN_MESSAGES", "4"))
+
+    # =============================================================================
+    # BOOT REAPER — orphaned in-flight runs (PRD-142 Wave 1 · WS-C · W1-S6)
+    # =============================================================================
+    # On restart, in-flight rows whose background executor died with the old
+    # process are stranded forever (a board task stuck 'in_progress', a wizard
+    # profile stuck 'scraping', a workflow execution stuck 'running'). The reaper
+    # sweeps them once per deploy under the boot leader lock.
+    BOOT_REAPER_ENABLED: bool = os.getenv("BOOT_REAPER_ENABLED", "true").lower() in ("true", "1", "yes")
+    # A row counts as orphaned only after it has been in-flight this long. Must
+    # exceed the slowest legitimate job (the wizard scrape runs ~10–20 min) so a
+    # live run is never reaped out from under itself.
+    BOOT_REAPER_STALE_MINUTES: int = int(os.getenv("BOOT_REAPER_STALE_MINUTES", "30"))
 
     # =============================================================================
     # API SECURITY
     # =============================================================================
     ORCHESTRATOR_API_KEY: str = os.getenv("ORCHESTRATOR_API_KEY") or os.getenv("AUTOMATOS_API_KEY") or os.getenv("API_KEY")
-    REQUIRE_AUTH: bool = os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
+
+    # PRD-175 (F008) — the open-core edition flag. One core, two editions, one seam.
+    #   saas  → Clerk is the identity boundary (the running product; the default).
+    #   local → a single auto-authenticated local user in a single local workspace;
+    #           no login, no external SaaS, no Clerk env (git clone && docker up).
+    # An unknown value falls back to `saas` so a typo never silently un-guards auth.
+    # This is the ONE flag the frontend mount-gate and the backend local-session
+    # posture both read (mirrored to the client as NEXT_PUBLIC_AUTH_EDITION).
+    _AUTH_EDITION_RAW = (os.getenv("AUTH_EDITION", "saas") or "saas").strip().lower()
+    AUTH_EDITION: str = _AUTH_EDITION_RAW if _AUTH_EDITION_RAW in ("local", "saas") else "saas"
+
+    # The `local` edition *implies* the no-login posture: REQUIRE_AUTH is forced
+    # false so operators set ONE flag, not three that can silently contradict
+    # (PRD §4.1/§4.3). In `saas`, REQUIRE_AUTH stays secure-by-default from env.
+    REQUIRE_AUTH: bool = (
+        False if AUTH_EDITION == "local"
+        else os.getenv("REQUIRE_AUTH", "true").strip().lower() in ("true", "1", "yes")
+    )
     AUTH_DEBUG: bool = os.getenv("AUTH_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+
+    # PRD-175 (F075) — the platform-staff email domain used by the Clerk
+    # defence-in-depth admin gate (core/auth/clerk.py). Configuration, not a
+    # baked-in literal, so a self-hosted/SaaS operator sets their own staff domain.
+    PLATFORM_STAFF_EMAIL_DOMAIN: str = (
+        os.getenv("PLATFORM_STAFF_EMAIL_DOMAIN", "automatos.app") or "automatos.app"
+    ).strip().lstrip("@").lower()
     
     # =============================================================================
     # CORS (Frontend origins)
@@ -182,6 +268,24 @@ class Config:
             return os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     
     @property
+    def BLOG_COVER_MODEL(self) -> str:
+        """
+        Image-gen model used by platform_generate_cover_image to produce blog
+        covers. Resolves from system_settings (category=content_creation,
+        key=blog_cover_model) → env BLOG_COVER_MODEL → DEFAULT_IMAGE_GEN_MODEL.
+        Operators change this per-deployment without code changes.
+        """
+        from core.llm.defaults import DEFAULT_IMAGE_GEN_MODEL
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting(
+                "content_creation", "blog_cover_model",
+                os.getenv("BLOG_COVER_MODEL", DEFAULT_IMAGE_GEN_MODEL),
+            )
+        except Exception:
+            return os.getenv("BLOG_COVER_MODEL", DEFAULT_IMAGE_GEN_MODEL)
+
+    @property
     def PLANNER_MODEL(self) -> str:
         """Planner model — resolves to System LLM tier (PRD-136)."""
         try:
@@ -208,6 +312,44 @@ class Config:
             return get_system_setting("system_llm", "model", os.getenv("GRAPHIFY_MODEL"))
         except Exception:
             return os.getenv("GRAPHIFY_MODEL")
+
+    @property
+    def MEMORY_DISTILL_MODEL(self) -> str:
+        """Cheap-tier model for L3 memory distillation (PRD-159 D11/Q16).
+
+        The distiller runs ~1×/chat turn, so it is deliberately pinned to a cheap
+        model rather than the conversation tier. Resolves system_settings
+        (memory.distill_model) → env MEMORY_DISTILL_MODEL → DEFAULT_LLM_MODEL
+        (already a fast/cheap flash tier)."""
+        from core.llm.defaults import DEFAULT_LLM_MODEL
+        try:
+            from core.llm.manager import get_system_setting
+            return get_system_setting(
+                "memory", "distill_model",
+                os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL),
+            )
+        except Exception:
+            return os.getenv("MEMORY_DISTILL_MODEL", DEFAULT_LLM_MODEL)
+
+    @property
+    def MEMORY_RELEVANCE_FLOOR(self) -> float:
+        """Server-side similarity floor for L3 recall (PRD-159 S3).
+
+        Scored search results below this are never injected, so low-relevance
+        junk can't leak into context. Resolves system_settings
+        (memory.relevance_floor) → env MEMORY_RELEVANCE_FLOOR → 0.3."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting(
+                "memory", "relevance_floor",
+                os.getenv("MEMORY_RELEVANCE_FLOOR", "0.3"),
+            )
+            return float(val)
+        except Exception:
+            try:
+                return float(os.getenv("MEMORY_RELEVANCE_FLOOR", "0.3"))
+            except (TypeError, ValueError):
+                return 0.3
 
     @property
     def COORDINATOR_TASK_MAX_TOKENS(self) -> int:
@@ -300,7 +442,16 @@ class Config:
     @property
     def IS_DEVELOPMENT(self) -> bool:
         return self.ENVIRONMENT.lower() == "development"
-    
+
+    # PRD-175 (F008) — edition helpers (read the one AUTH_EDITION flag).
+    @property
+    def IS_LOCAL_EDITION(self) -> bool:
+        return self.AUTH_EDITION == "local"
+
+    @property
+    def IS_SAAS_EDITION(self) -> bool:
+        return self.AUTH_EDITION == "saas"
+
     NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL")
     
     # =============================================================================
@@ -326,10 +477,16 @@ class Config:
     # =============================================================================
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     OPENROUTER_SITE_URL: str = os.getenv("OPENROUTER_SITE_URL", "https://automatos.app")
+    # OpenRouter routes embeddings by PRICE by default, so the slowest upstream
+    # can win ties (qwen3-embedding-8b measured 37-67s/call, 2026-07-09).
+    # "latency" re-sorts to the fastest measured provider. Empty string disables.
+    OPENROUTER_EMBEDDING_PROVIDER_SORT: str = os.getenv("OPENROUTER_EMBEDDING_PROVIDER_SORT", "latency")
     COHERE_RERANK_URL: str = os.getenv("COHERE_RERANK_URL", "https://api.cohere.com/v2/rerank")
     RAILWAY_GQL_URL: str = os.getenv("RAILWAY_GQL_URL", "https://backboard.railway.app/graphql/v2")
-    INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "automatos-ai.railway.internal")
-    INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "automatos-ai-frontend.railway.internal")
+    # PRD-176 F068: local-safe defaults. SaaS supplies the railway.internal host
+    # via env; a fresh local clone must not dial Railway topology by default.
+    INTERNAL_API_HOSTNAME: str = os.getenv("INTERNAL_API_HOSTNAME", "localhost")
+    INTERNAL_FRONTEND_HOSTNAME: str = os.getenv("INTERNAL_FRONTEND_HOSTNAME", "localhost")
     COMPOSIO_API_KEY: str = os.getenv("COMPOSIO_API_KEY") or os.getenv("COMPOSIO_KEY")
     # v3.1 default: tool endpoints automatically serve the latest toolkit version
     # (no `toolkit_versions=latest` param required). Only tool endpoints differ
@@ -352,12 +509,42 @@ class Config:
     GITHUB_WEBHOOK_SECRET: str = os.getenv("GITHUB_WEBHOOK_SECRET", "")
     GITHUB_WEBHOOK_WORKSPACE_ID: str = os.getenv("GITHUB_WEBHOOK_WORKSPACE_ID") or os.getenv("DEFAULT_WORKSPACE_ID")
     GITHUB_PR_WORKFLOW_NAME: str = os.getenv("GITHUB_PR_WORKFLOW_NAME", "PR Code Review")
+    # PRD-165 S4 (Q36): GitHub App installation auth. When all three are set,
+    # codegraph mints installation tokens instead of using the PAT above.
+    GITHUB_APP_ID: str = os.getenv("GITHUB_APP_ID", "")
+    GITHUB_APP_PRIVATE_KEY: str = os.getenv("GITHUB_APP_PRIVATE_KEY", "")
+    GITHUB_APP_INSTALLATION_ID: str = os.getenv("GITHUB_APP_INSTALLATION_ID", "")
 
     # Webhooks / Widgets
     WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET")
+    # PRD-194 S2 (P2-13): replay/dedup guard for the three EXTERNAL webhook
+    # lanes (Composio /webhook, workspace /ws/{key}, playbook /recipe/{id}).
+    # Dedup marks live in Redis (SETNX + TTL via core/redis/client.py — no
+    # new table). TTL covers provider retry windows with slack to spare.
+    WEBHOOK_DEDUP_TTL_SECONDS: int = int(os.getenv("WEBHOOK_DEDUP_TTL_SECONDS", "3600"))
+    # Replay skew: reject events whose provider timestamp is further than
+    # this from now (mirrors Slack's documented v0 5-minute window).
+    WEBHOOK_TIMESTAMP_SKEW_SECONDS: int = int(os.getenv("WEBHOOK_TIMESTAMP_SKEW_SECONDS", "300"))
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
     WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
+    # PRD-194 S5 (P2-13): Redis-backed shared widget rate limiter (replaces
+    # the per-process in-memory window). One window length; per-key limits by
+    # key type; and a per-IP ceiling on the two money-spending endpoints
+    # (/api/widgets/chat, /api/widgets/callback) that applies even when a
+    # key is presented.
+    WIDGET_RATE_LIMIT_WINDOW_SECONDS: int = int(os.getenv("WIDGET_RATE_LIMIT_WINDOW_SECONDS", "60"))
+    WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_PUBLIC_PER_WINDOW", "30"))
+    WIDGET_RATE_LIMIT_SERVER_PER_WINDOW: int = int(os.getenv("WIDGET_RATE_LIMIT_SERVER_PER_WINDOW", "1000"))
+    WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
+    WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
+    # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
+    # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
+    # /events coalesces the burst into ONE full Bulk-Op re-sync once it has
+    # been quiet for this long, instead of firing N concurrent re-syncs (each
+    # an embedding-bearing full rebuild). Same config-not-inline-getenv
+    # convention as PLAYBOOK_BREAKER_THRESHOLD.
+    SHOPIFY_SYNC_DEBOUNCE_SECONDS: float = float(os.getenv("SHOPIFY_SYNC_DEBOUNCE_SECONDS", "30"))
     PLAYBOOKS_REQUIRE_TENANT: bool = os.getenv("PLAYBOOKS_REQUIRE_TENANT", "0").lower() in ("1", "true", "yes")
 
     # =============================================================================
@@ -371,8 +558,62 @@ class Config:
     DEFAULT_MAX_CONCURRENT_RUNNING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_RUNNING", "3"))
     DEFAULT_MAX_CONCURRENT_PENDING: int = int(os.getenv("DEFAULT_MAX_CONCURRENT_PENDING", "10"))
 
+    # =============================================================================
+    # BOARD DISPATCH SPINE (PRD-161: claim/lease/requeue)
+    # =============================================================================
+    # One Postgres-native dispatch loop: assigned BoardTasks are claimed with
+    # FOR UPDATE SKIP LOCKED (exactly-once), leased, and requeued on crash.
+    BOARD_DISPATCH_ENABLED: bool = os.getenv("BOARD_DISPATCH_ENABLED", "true").lower() == "true"
+    # Lease a claimed task holds before the sweeper presumes the worker dead.
+    BOARD_DISPATCH_LEASE_SECONDS: int = int(os.getenv("BOARD_DISPATCH_LEASE_SECONDS", "600"))
+    # Poll fallback cadence when no NOTIFY arrives (NOTIFY drives sub-second pickup).
+    BOARD_DISPATCH_POLL_SECONDS: float = float(os.getenv("BOARD_DISPATCH_POLL_SECONDS", "5"))
+    # Tasks claimed per loop tick (a tick claims a batch, runs each individually).
+    BOARD_DISPATCH_CLAIM_BATCH: int = int(os.getenv("BOARD_DISPATCH_CLAIM_BATCH", "10"))
+    # Q41: attempts before a task is terminal 'failed' (crash → requeue until here).
+    BOARD_DISPATCH_MAX_ATTEMPTS: int = int(os.getenv("BOARD_DISPATCH_MAX_ATTEMPTS", "2"))
+    # Per-agent concurrency slots: at most this many of an agent's tasks run at
+    # once; the rest stay 'assigned' (the DB is the queue — double-texting is
+    # queued, never dropped). The claim honours this via in_progress counts.
+    BOARD_DISPATCH_AGENT_SLOTS: int = int(os.getenv("BOARD_DISPATCH_AGENT_SLOTS", "2"))
+    # S5: done tasks older than this drop off the active board (retained in DB).
+    BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
+    # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
+    # connection-liveness heartbeat cadence (a ':hb' comment), not a refresh tick.
+    BOARD_SSE_HEARTBEAT_SECONDS: float = float(os.getenv("BOARD_SSE_HEARTBEAT_SECONDS", "20"))
+
+    # =============================================================================
+    # AUTO WATCHER (PRD-204: persistent supervision of launched work)
+    # =============================================================================
+    # The watcher tick rides the fcntl-locked UnifiedScheduler (single owner
+    # across workers). Each tick claims due watches with FOR UPDATE SKIP
+    # LOCKED, sweeps terminal states the S3 event hooks missed, detects
+    # missed cron fires / benched schedules on scheduled-playbook watches,
+    # and expires past-deadline watches.
+    WATCHER_ENABLED: bool = os.getenv("WATCHER_ENABLED", "true").lower() == "true"
+    # Sweep cadence. The S3 hooks are the fast path; the tick is the
+    # fallback and the missed-run/trend brain, so 5 minutes is plenty.
+    WATCHER_TICK_SECONDS: int = int(os.getenv("WATCHER_TICK_SECONDS", "300"))
+
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
+
+    # PRD-202 S2 (Q4): the small set of "core" skills that stay always-L2 — their
+    # full body renders every turn because they are an agent's core operating
+    # manual (Auto's platform-management), not an optional capability. Every
+    # OTHER attached skill renders only its L1 metadata (~50-100 tokens) and
+    # loads its body on trigger via the load_skill tool. Comma-separated names.
+    SKILL_CORE_ALWAYS_ON = [
+        s.strip()
+        for s in os.getenv("SKILL_CORE_ALWAYS_ON", "platform-management").split(",")
+        if s.strip()
+    ]
+
+    # PRD-202 S3: L3 skill-script execution caps (via the workspace worker only).
+    # Wall-clock cap (seconds) and output-size cap (chars) — the worker is the
+    # isolation boundary; only the script OUTPUT (capped) enters context.
+    SKILL_SCRIPT_TIMEOUT_SECONDS: int = int(os.getenv("SKILL_SCRIPT_TIMEOUT_SECONDS", "60"))
+    SKILL_SCRIPT_OUTPUT_MAX_CHARS: int = int(os.getenv("SKILL_SCRIPT_OUTPUT_MAX_CHARS", "20000"))
 
     # Task Reconciliation (Symphony-inspired stall detection)
     TASK_STALL_TIMEOUT_SECONDS: int = int(os.getenv("TASK_STALL_TIMEOUT_SECONDS", "300"))  # 5 min
@@ -388,6 +629,12 @@ class Config:
     PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS", "1800"))  # 30 min
     PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS", "300"))            # 5 min floor
     PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS: int = int(os.getenv("PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS", "900"))          # 15 min floor
+    # PRD-185 S4: repeated-failure circuit breaker for cron playbooks. Once the
+    # last N *terminal* runs of a playbook are all 'failed', the cron scheduler
+    # stops re-firing it (the 2026-06 daily OpenRouter-402 spam re-fired forever).
+    # A manual run that succeeds breaks the streak and auto-resets the breaker.
+    # Set to 0 to disable the breaker entirely.
+    PLAYBOOK_BREAKER_THRESHOLD: int = int(os.getenv("PLAYBOOK_BREAKER_THRESHOLD", "3"))
 
     # =============================================================================
     # RAILWAY API (Log retrieval for agents)
@@ -399,19 +646,168 @@ class Config:
     # =============================================================================
     # MONITORING (PRD-73)
     # =============================================================================
-    LOKI_URL: str = os.getenv("LOKI_URL", "http://loki.railway.internal:3100")
-    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://prometheus.railway.internal:9090")
+    # PRD-176 F068: local-safe defaults (SaaS sets the railway host via env).
+    LOKI_URL: str = os.getenv("LOKI_URL", "http://localhost:3100")
+    PROMETHEUS_URL: str = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
     GRAFANA_URL: str = os.getenv("GRAFANA_URL", "")
     GRAFANA_SERVICE_ACCOUNT_TOKEN: str = os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
     GRAFANA_LOKI_DATASOURCE_UID: str = os.getenv("GRAFANA_LOKI_DATASOURCE_UID", "loki")
 
     # =============================================================================
+    # OBSERVABILITY — log relay, Prometheus metrics, Loki query API, alerts
+    # (PRD-142 W3-S5 / G7 — centralized so monitoring modules stop reading env directly)
+    # =============================================================================
+    # Log relay client (core/monitoring/automatos_logging.py).
+    # PRD-176 F068: local-safe default host + OFF by default. SaaS points this at
+    # log-relay.railway.internal and sets LOG_RELAY_ENABLED=true via env; a fresh
+    # local clone must not try to push logs to Railway topology.
+    LOG_RELAY_URL: str = os.getenv(
+        "LOG_RELAY_URL",
+        "http://localhost:8080/push",
+    )
+    LOG_RELAY_ENABLED: bool = os.getenv("LOG_RELAY_ENABLED", "false").lower() == "true"
+    LOG_RELAY_BATCH_SIZE: int = int(os.getenv("LOG_RELAY_BATCH_SIZE", "50"))
+    LOG_RELAY_FLUSH_INTERVAL: float = float(os.getenv("LOG_RELAY_FLUSH_INTERVAL", "2.0"))
+    # SERVICE_NAME has two distinct historical defaults — preserve both exactly.
+    # The logging client used "unknown"; the Prometheus exporter used "automatos-backend".
+    LOG_RELAY_SERVICE_NAME: str = os.getenv("SERVICE_NAME", "unknown")
+    METRICS_SERVICE_NAME: str = os.getenv("SERVICE_NAME", "automatos-backend")
+    # ENVIRONMENT also has two distinct historical defaults — preserve both.
+    # The logging client also falls back to RAILWAY_ENVIRONMENT; metrics defaulted to "unknown".
+    LOG_RELAY_ENVIRONMENT: str = os.getenv(
+        "ENVIRONMENT",
+        os.getenv("RAILWAY_ENVIRONMENT", "development"),
+    )
+    METRICS_ENVIRONMENT: str = os.getenv("ENVIRONMENT", "unknown")
+    # Loki query proxy (core/monitoring/automatos_logs_api.py) — separate from the
+    # PRD-73 LOKI_URL above because the existing module reads LOKI_QUERY_URL.
+    # PRD-176 F068: local-safe default (SaaS sets the railway host via env).
+    LOKI_QUERY_URL: str = os.getenv("LOKI_QUERY_URL", "http://localhost:3100")
+    # Shared by automatos_logs_api + automatos_alerts for HMAC verification.
+    ALERT_INGEST_TOKEN: str = os.getenv("ALERT_INGEST_TOKEN", "")
+    # PRD-180 S5: default measurement window (seconds) for the tracked SLOs
+    # (tool-call success rate, board dispatch p95). Overridable per-request.
+    SLO_DEFAULT_WINDOW_SECONDS: int = int(os.getenv("SLO_DEFAULT_WINDOW_SECONDS", "86400"))
+
+    # =============================================================================
+    # CHANNELS — public-facing host used to build inbound webhook URLs
+    # (PRD-142 W3-S5 / G7)
+    # =============================================================================
+    # rstrip('/') preserves api/channels.py's prior call-site behaviour.
+    PUBLIC_API_HOST: str = os.getenv("PUBLIC_API_HOST", "api.automatos.app").rstrip("/")
+
+    # =============================================================================
+    # RATE LIMITING — per-operation override helper
+    # (PRD-142 W3-S5 / G7; replaces core/security/rate_limiter.py::_env_limit)
+    # =============================================================================
+    @staticmethod
+    def rate_limit_for(name: str, default_max: int, default_window: int) -> tuple[int, int]:
+        """Read RATE_LIMIT_<NAME>_MAX and RATE_LIMIT_<NAME>_WINDOW_SECONDS env vars.
+
+        Returns ``(max_requests, window_seconds)``, both clamped to ``>= 1`` so
+        a malformed override cannot disable the bucket. Invalid integers (or any
+        TypeError/ValueError) fall back to the supplied defaults — same shape as
+        the previous in-module helper. No behaviour change.
+        """
+        try:
+            max_req = int(os.getenv(f"RATE_LIMIT_{name.upper()}_MAX", str(default_max)))
+            window = int(os.getenv(f"RATE_LIMIT_{name.upper()}_WINDOW_SECONDS", str(default_window)))
+            return max(1, max_req), max(1, window)
+        except (TypeError, ValueError):
+            return default_max, default_window
+
+    # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
+    # PRD-155 S3: startup mount honesty. By default a required router that fails
+    # to import aborts boot (RouterMountError names it) instead of being silently
+    # dropped. Set true to downgrade that to a logged skip and boot degraded —
+    # an operator escape hatch, not the norm. Default OFF.
+    ALLOW_DEGRADED_BOOT: bool = os.getenv("ALLOW_DEGRADED_BOOT", "false").lower() == "true"
     HEARTBEAT_ENABLED: bool = os.getenv("HEARTBEAT_ENABLED", "true").lower() == "true"
     RECIPE_SCHEDULER_ENABLED: bool = os.getenv("RECIPE_SCHEDULER_ENABLED", "true").lower() == "true"
     COORDINATOR_ENABLED: bool = os.getenv("COORDINATOR_ENABLED", "true").lower() == "true"
     HARNESS_ENABLED: bool = os.getenv("HARNESS_ENABLED", "true").lower() == "true"
+    # PRD-141 Phase 5: gates HARNESS self-management (auto-applying approved
+    # config changes back onto the platform). HIGH RISK — default OFF. Nothing
+    # in Phase 5 may take effect unless this is true.
+    HARNESS_SELF_MANAGEMENT_ENABLED: bool = os.getenv("HARNESS_SELF_MANAGEMENT_ENABLED", "false").lower() == "true"
+    # PRD-142 Wave 4 (§12.3): HARNESS risk thresholds — Railway-overridable env vars
+    # (change in Railway + restart, no file edit). Auto-apply ceilings: a prescription
+    # auto-applies only when its risk_score <= the workspace's ceiling; higher risk is
+    # queued for human approval. Workspaces at autonomy=full get the higher ceiling,
+    # standard workspaces the lower one.
+    HARNESS_AUTO_APPLY_MAX_RISK_STANDARD: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_STANDARD", "2"))
+    HARNESS_AUTO_APPLY_MAX_RISK_FULL: int = int(os.getenv("HARNESS_AUTO_APPLY_MAX_RISK_FULL", "3"))
+    # Escalation threshold: prescriptions at or above this risk are flagged high
+    # priority and escalated for human approval (when self-management is on).
+    HARNESS_HIGH_PRIORITY_RISK: int = int(os.getenv("HARNESS_HIGH_PRIORITY_RISK", "4"))
+
+    # PRD-174 Wave 4 / PRD-192 S1 (P2-11) — Unified Policy Plane staged mode
+    # dial. ONE env, `AUTOMATOS_POLICY_PLANE = off | shadow | destructive | on`:
+    #   off         ⇒ byte-for-byte today's per-router gates (no bus fire, no audit)
+    #   shadow      ⇒ evaluate + audit every verdict; NEVER block
+    #   destructive ⇒ enforce deny/ask only for the fail-closed risk classes
+    #                 (destructive / external_side_effect / publish); shadow-log the rest
+    #   on          ⇒ enforce all (PRD-174's original ON)
+    # Legacy booleans map (true/1/yes ⇒ on, false/0/no ⇒ off); unknown values
+    # fail safe to "off". Ships default OFF; stage flips are ops actions on the
+    # deploy env (Railway), never code — each retreat is one env value.
+    _POLICY_PLANE_RAW = os.getenv("AUTOMATOS_POLICY_PLANE", "off").strip().lower()
+    POLICY_PLANE_MODE: str = {
+        "true": "on", "1": "on", "yes": "on",
+        "false": "off", "0": "off", "no": "off", "": "off",
+    }.get(_POLICY_PLANE_RAW, _POLICY_PLANE_RAW)
+    POLICY_PLANE_MODE = POLICY_PLANE_MODE if POLICY_PLANE_MODE in ("off", "shadow", "destructive", "on") else "off"
+    # Derived boolean (mode ≠ off) so the existing registration sites — the
+    # audit-handler attach (main.py), limiter arming (main.py F040), roles.py
+    # F043, widgets/auth.py F042 — arm on ANY live stage, unchanged.
+    POLICY_PLANE_ENABLED: bool = POLICY_PLANE_MODE != "off"
+
+    # PRD-192 S3 (locked #2a): autonomy-enabled workspaces get a DEFAULT budget
+    # ceiling — max_cost_usd 50 per month — applied in the budget reader when
+    # the workspace has no explicit `plan_limits.budget` (code default, no
+    # migration; explicit budgets always win). 0 disables the default.
+    AUTONOMY_DEFAULT_BUDGET_USD: float = float(os.getenv("AUTOMATOS_AUTONOMY_DEFAULT_BUDGET_USD", "50"))
+
+    # PRD-196 S5 — audit-log retention. EU-AI-Act Art.12 mandates >= 6 months
+    # (a floor, so retention is a compliance requirement, not housekeeping) while
+    # GDPR data-minimisation forbids forever. Platform-wide default 365 days; a
+    # configured value below the 180-day Art.12 floor is CLAMPED UP at read
+    # (services/audit_retention.effective_retention_days) — a config can never
+    # dip under the legal floor. No per-workspace override in v1 (Gerard's call).
+    AUDIT_RETENTION_DAYS: int = int(os.getenv("AUDIT_RETENTION_DAYS", "365"))
+    # How often the retention sweep runs (default daily).
+    AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS: int = int(
+        os.getenv("AUDIT_RETENTION_SWEEP_INTERVAL_SECONDS", "86400")
+    )
+
+    # PRD-185 S2 — per-lane telemetry canary. The type-poison outage S1 repaired
+    # went unseen for ~2 months because nothing alarmed on "organic tool-execution
+    # rows/day = 0". This canary counts production (telemetry_source='production')
+    # ToolExecutionLog rows per lane (app_name) over a window and logs LOUD when a
+    # lane — or the platform — has gone silent. Default ON (it only reads + logs).
+    TELEMETRY_CANARY_ENABLED: bool = os.getenv("TELEMETRY_CANARY_ENABLED", "true").lower() == "true"
+    # How often the scheduled check runs (default hourly). Its first run fires at
+    # boot as the boot-probe.
+    TELEMETRY_CANARY_INTERVAL_SECONDS: int = int(os.getenv("TELEMETRY_CANARY_INTERVAL_SECONDS", "3600"))
+    # Look-back window for "have any organic rows landed?" (default 24h).
+    TELEMETRY_CANARY_WINDOW_SECONDS: int = int(os.getenv("TELEMETRY_CANARY_WINDOW_SECONDS", "86400"))
+    # Platform-wide organic-row count at/under which the canary alarms (default 0
+    # → alarm only on a totally silent platform; raise to catch partial silence).
+    TELEMETRY_CANARY_MIN_ROWS: int = int(os.getenv("TELEMETRY_CANARY_MIN_ROWS", "0"))
+
+    # =============================================================================
+    # PRD-181 W11 — Governance & Compliance staging
+    # =============================================================================
+    # EU-AI-Act Art.14 human-oversight tiers (S6 scaffold). The tier *mapping*
+    # from risk class → oversight lives in modules/policy/ai_act.py (pure); this
+    # constant is the canonical ordered vocabulary so config/UI reference the same
+    # strings. Do NOT branch autonomy on these — the policy plane's risk routing
+    # is authoritative; these describe the oversight posture for the approval card.
+    EU_AI_ACT_OVERSIGHT_TIERS: tuple = ("monitor", "human_on_the_loop", "human_in_the_loop")
+    # Default TTL (seconds) for a durable approval grant awaiting a human (S2).
+    APPROVAL_GRANT_TTL_SECONDS: int = int(os.getenv("APPROVAL_GRANT_TTL_SECONDS", str(24 * 3600)))
 
     # =============================================================================
     # PRD-130 — Business Intake Wizard (PoC)
@@ -430,10 +826,30 @@ class Config:
     COORDINATOR_ASSIGNED_STALL_THRESHOLD_SECONDS: int = int(os.getenv("COORDINATOR_ASSIGNED_STALL_THRESHOLD_SECONDS", "60"))
     COORDINATOR_RUNNING_STALL_THRESHOLD_SECONDS: int = int(os.getenv("COORDINATOR_RUNNING_STALL_THRESHOLD_SECONDS", "300"))
     COORDINATOR_MAX_TASK_RETRIES: int = int(os.getenv("COORDINATOR_MAX_TASK_RETRIES", "3"))
+    # PRD-164 S4: consecutive churn-without-progress joiner checks before a
+    # looping mission is auto-replanned (or halted once replans are exhausted).
+    COORDINATOR_STALL_LEDGER_LIMIT: int = int(os.getenv("COORDINATOR_STALL_LEDGER_LIMIT", "3"))
     COORDINATOR_MAX_VERIFICATION_RETRIES: int = int(os.getenv("COORDINATOR_MAX_VERIFICATION_RETRIES", "2"))
+    # PRD-200 S1: how many times a FAIL verdict may requeue a COMPLETED task
+    # with the verifier's feedback so the agent can revise (the judge "gates
+    # once"). This is a SEPARATE budget from COORDINATOR_MAX_VERIFICATION_RETRIES
+    # above (the LLM-judge's own malformed-response retry count) and from
+    # COORDINATOR_MAX_TASK_RETRIES (agent-error retries). Capped at 1 by
+    # decision: PARTIAL stays advisory, so the only re-judged verdict is FAIL,
+    # bounding the token-burn the advisory retreat originally closed.
+    COORDINATOR_MAX_VERIFICATION_REQUEUES: int = int(os.getenv("COORDINATOR_MAX_VERIFICATION_REQUEUES", "1"))
     COORDINATOR_VERIFICATION_PASS_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_PASS_THRESHOLD", "0.7"))
     COORDINATOR_VERIFICATION_FAIL_THRESHOLD: float = float(os.getenv("COORDINATOR_VERIFICATION_FAIL_THRESHOLD", "0.4"))
     COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION: float = float(os.getenv("COORDINATOR_VERIFICATION_CONFIDENCE_ESCALATION", "0.5"))
+    # PRD-200 S3: awaiting-approval re-notify + optional expiry sweep. A parked
+    # plan re-dispatches its mission_plan_ready notification every
+    # RENOTIFY_SECONDS so it does not die after one notification (the 47%-parked
+    # unblock). Expiry is OFF by default — under the always_ask posture,
+    # terminating an unapproved plan is the operator's call (Q5); when enabled, a
+    # plan older than MAX_AGE_SECONDS is cancelled.
+    COORDINATOR_APPROVAL_RENOTIFY_SECONDS: int = int(os.getenv("COORDINATOR_APPROVAL_RENOTIFY_SECONDS", "86400"))
+    COORDINATOR_APPROVAL_EXPIRY_ENABLED: bool = os.getenv("COORDINATOR_APPROVAL_EXPIRY_ENABLED", "false").lower() == "true"
+    COORDINATOR_APPROVAL_MAX_AGE_SECONDS: int = int(os.getenv("COORDINATOR_APPROVAL_MAX_AGE_SECONDS", "604800"))
     # Cross-model verification: reads from system_settings → env fallback
     @property
     def COORDINATOR_VERIFIER_MODEL_MAPPING(self) -> str:
@@ -463,26 +879,24 @@ class Config:
     # History-based agent scoring (PRD-82B US-003)
     COORDINATOR_HISTORY_LOOKBACK_DAYS: int = int(os.getenv("COORDINATOR_HISTORY_LOOKBACK_DAYS", "30"))
     COORDINATOR_HISTORY_MIN_DATAPOINTS: int = int(os.getenv("COORDINATOR_HISTORY_MIN_DATAPOINTS", "3"))
-    # Telemetry: cost estimation per 1K tokens (PRD-82B US-004)
+    # PRD-164 S2 (Q21): upper bound on the per-dispatch semantic-signal
+    # computation (task embedding + capability-card cosine + field query) so a
+    # hung embedding/Qdrant backend can never stall the dispatch tick — on
+    # timeout the matcher falls back to lexical-only scoring.
+    AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS: float = float(os.getenv("AGENT_MATCH_SIGNAL_TIMEOUT_SECONDS", "10"))
+    # Cost estimation per 1K tokens (PRD-82B US-004). PRD-192 S3 (F059 finish):
+    # DEMOTED to modules/policy/pricing.py's registry-miss last resort — pricing
+    # is this constant's ONLY consumer (source-grep-guarded); every dollar
+    # figure routes through the one pricing source.
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
-    # Synthesis model override — synthesis tasks consolidate prior step outputs and
-    # don't need premium reasoning, so we bias toward fast cheap models. Falls back
-    # to the assigned agent's model if neither override is available in the workspace.
-    # Set COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED=false to disable entirely.
-    COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED: bool = os.getenv(
-        "COORDINATOR_SYNTHESIS_MODEL_OVERRIDE_ENABLED", "true"
-    ).lower() in ("true", "1", "yes")
-    COORDINATOR_SYNTHESIS_MODEL_PRIMARY: str = os.getenv(
-        "COORDINATOR_SYNTHESIS_MODEL_PRIMARY", "google/gemini-2.5-flash"
-    )
-    COORDINATOR_SYNTHESIS_MODEL_FALLBACK: str = os.getenv(
-        "COORDINATOR_SYNTHESIS_MODEL_FALLBACK", "anthropic/claude-haiku-4.5"
-    )
+    # Note: synthesis-task model selection is now driven by power_mode +
+    # the agent's own configured model — no synthesis-specific override.
+    # System LLM (gemini-2.5-flash) is reserved for codegraph / memory / planner.
     # Cross-task consistency verification — feature flag, lives in `general`
     # (post PRD-136 collapse — no longer an LLM-tier setting).
     @property
@@ -506,6 +920,39 @@ class Config:
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING_TOP_K: int = int(os.getenv("SEMANTIC_TOOL_ROUTING_TOP_K", "15"))
+    # PRD-221 S4: ceiling on the narrowed dispatcher enum after the current
+    # page's manifest actions are unioned in with the semantic top-K. Bounds the
+    # prompt cost of page-prior exposure; role gates still apply before the cap.
+    TOOL_ROUTING_ENUM_CAP: int = int(os.getenv("TOOL_ROUTING_ENUM_CAP", "40"))
+    # PRD-221 S9: Auto's Read digest is cached per (workspace, state_hash) for
+    # this many seconds, so the digest LLM fires at most once per real state
+    # change rather than once per Command Centre pageview.
+    DIGEST_CACHE_TTL_S: int = int(os.getenv("DIGEST_CACHE_TTL_S", "900"))
+    # Max seconds a live query embedding may take before narrowing falls back
+    # to the full action enum (the embed keeps running and caches for next turn).
+    SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S: float = float(os.getenv("SEMANTIC_TOOL_ROUTING_EMBED_TIMEOUT_S", "2.5"))
+    # Tool-surface deep review PR-B (docs/reviews/TOOL-SURFACE-DEEP-REVIEW-2026-07-23.md).
+    # Relevance floor on rank_actions: drop candidates scoring below
+    # max(FLOOR, best*FLOOR_RATIO) so a greeting stops surfacing 15
+    # least-dissimilar actions. 0 = off (today's blind top-K, default).
+    SEMANTIC_TOOL_ROUTING_FLOOR: float = float(os.getenv("SEMANTIC_TOOL_ROUTING_FLOOR", "0"))
+    SEMANTIC_TOOL_ROUTING_FLOOR_RATIO: float = float(os.getenv("SEMANTIC_TOOL_ROUTING_FLOOR_RATIO", "0"))
+    # What ships when narrowing CAN'T decide (no query / rank error / embed
+    # timeout) while SEMANTIC_TOOL_ROUTING is on:
+    #   open-full   — today's posture: full enum + full catalog (default)
+    #   closed-pins — the pin set below + platform_find_tools discovery
+    # (flag off entirely = operator chose the wide surface; always open-full).
+    TOOL_FALLBACK_MODE: str = os.getenv("TOOL_FALLBACK_MODE", "open-full")
+    TOOL_FALLBACK_PINS: str = os.getenv(
+        "TOOL_FALLBACK_PINS",
+        "platform_find_tools,platform_search_memory,platform_store_memory,platform_resume_context",
+    )
+    # Shadow telemetry: log (never ship) what the PR-C relevance-gated surface
+    # WOULD have been for each turn — the eval data for the flip.
+    TOOL_SURFACE_SHADOW: bool = os.getenv("TOOL_SURFACE_SHADOW", "true").lower() == "true"
+    # PR-C hybrid: max promoted actions that earn per-turn first-class schemas.
+    # Shadow-only until the flip.
+    TOOL_SURFACE_HYBRID_CAP: int = int(os.getenv("TOOL_SURFACE_HYBRID_CAP", "6"))
     PLATFORM_ACTIONS_MAX_TOKENS: int = int(os.getenv("PLATFORM_ACTIONS_MAX_TOKENS", "4000"))
     PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "2000"))
     MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))
@@ -515,6 +962,41 @@ class Config:
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
+    # PRD-177 S3 (F018): Composio action-metadata sync scheduler + fail-CLOSED
+    # destructive gate. When the metadata table is empty (sync not yet run), a
+    # destructive intent is DENIED rather than silently permitted; clearly
+    # non-destructive intents still pass so a cold start is not bricked. The sync
+    # job refreshes classifications daily on the same scheduler as the nightly
+    # edge recompute.
+    COMPOSIO_DESTRUCTIVE_FAIL_CLOSED: bool = os.getenv("COMPOSIO_DESTRUCTIVE_FAIL_CLOSED", "true").lower() == "true"
+    COMPOSIO_SYNC_ENABLED: bool = os.getenv("COMPOSIO_SYNC_ENABLED", "true").lower() == "true"
+    COMPOSIO_SYNC_HOUR_UTC: int = int(os.getenv("COMPOSIO_SYNC_HOUR_UTC", "4"))
+    # PRD-141 US-019: batched incremental tool-execution signal recorder.
+    # Opt-in (default off). Drains an in-process queue with ONE DB session per
+    # flush — never a DB session or task per tool call.
+    TOOL_SIGNAL_RECORDER_ENABLED: bool = os.getenv("TOOL_SIGNAL_RECORDER_ENABLED", "false").lower() == "true"
+    TOOL_SIGNAL_FLUSH_BATCH_SIZE: int = int(os.getenv("TOOL_SIGNAL_FLUSH_BATCH_SIZE", "50"))
+    TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS: float = float(os.getenv("TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS", "5.0"))
+    TOOL_SIGNAL_QUEUE_MAXSIZE: int = int(os.getenv("TOOL_SIGNAL_QUEUE_MAXSIZE", "10000"))
+    # PRD-143 S14: bounded (workspace, agent) -> last-selection-outcome stash
+    # used to attach hit/fallback telemetry to platform_execute dispatches.
+    TOOL_SELECTION_STASH_MAXSIZE: int = int(os.getenv("TOOL_SELECTION_STASH_MAXSIZE", "512"))
+
+    # =============================================================================
+    # OBSERVABILITY / TRACING (PRD-185 S9) — vendor-neutral trace seam
+    # =============================================================================
+    # Default OFF: zero overhead + zero data egress until explicitly enabled.
+    # When ON, live traces/scores land at the tool-dispatch and retrieval
+    # chokepoints via a vendor-neutral seam (core/observability/tracer.py) —
+    # "was the tool call good / was retrieval grounded" as a queryable number.
+    # Backend today = Langfuse Cloud; swappable behind the seam (data residency
+    # is the axis that flips to self-host). `langfuse` is an OPTIONAL import: the
+    # OFF path never imports it, and enabled-but-missing degrades to no-op.
+    TRACING_ENABLED: bool = os.getenv("TRACING_ENABLED", "false").lower() in ("true", "1", "yes")
+    TRACING_BACKEND: str = os.getenv("TRACING_BACKEND", "langfuse")
+    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY")
+    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY")
+    LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
     # =============================================================================
     # AWS S3 VECTORS (PRD-42: Cloud Document Sync)
@@ -522,6 +1004,11 @@ class Config:
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    # PRD-176 F089: S3 endpoint override for a local S3-compatible object store
+    # (MinIO). Empty by default so prod/boto talks to real AWS S3; local compose
+    # sets it to the MinIO endpoint so the knowledge flywheel persists outputs
+    # instead of fail-softing to None on ephemeral disk.
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
 
     # S3 Vectors Configuration
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
@@ -537,7 +1024,8 @@ class Config:
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
     # =============================================================================
     FUTUREAGI_API_KEY: str = os.getenv("FUTUREAGI_API_KEY")
-    AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://agent-opt-worker.railway.internal:8080")
+    # PRD-176 F068: local-safe default (SaaS sets the railway worker host via env).
+    AGENT_OPT_WORKER_URL: str = os.getenv("AGENT_OPT_WORKER_URL", "http://localhost:8080")
 
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
@@ -560,30 +1048,63 @@ class Config:
     # =============================================================================
     RECIPE_SCRATCHPAD_TTL: int = int(os.getenv("RECIPE_SCRATCHPAD_TTL", "3600"))
     RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
-    MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
-    MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
-    # Read path (search/get_all) blocks TTFT — keep short.
-    MEM0_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_TIMEOUT_SECONDS", "3.0"))
-    # Write path runs post-LLM; mem0 does sync inference+embedding server-side
-    # (observed 2-7s). 3s causes constant timeouts → CB trips → 5min blackouts.
-    MEM0_WRITE_TIMEOUT_SECONDS: float = float(os.getenv("MEM0_WRITE_TIMEOUT_SECONDS", "15.0"))
-    # Open circuit after this many consecutive failures.
-    MEM0_CIRCUIT_THRESHOLD: int = int(os.getenv("MEM0_CIRCUIT_THRESHOLD", "3"))
-    # Stay open for this many seconds before allowing a probe.
-    MEM0_CIRCUIT_COOLDOWN_SECONDS: int = int(os.getenv("MEM0_CIRCUIT_COOLDOWN_SECONDS", "300"))
 
     # =============================================================================
     # QDRANT — PRD-108 Memory Field (Shared Semantic Context)
     # =============================================================================
     QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
     QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+    # PRD-187 S1: in-process L3 durable memory — a second collection on the same
+    # running Qdrant (field memory is the first). Wave-3 P2-16 consolidates both
+    # under one client/config; keep the collection name a config knob for that.
+    DURABLE_MEMORY_COLLECTION: str = os.getenv("DURABLE_MEMORY_COLLECTION", "durable_memory")
+    # Heartbeat pings the durable store on this interval and feeds the memory
+    # primitive tile (transition-only emits per PRD-185 S11).
+    DURABLE_MEMORY_PROBE_INTERVAL_SECONDS: int = int(os.getenv("DURABLE_MEMORY_PROBE_INTERVAL_SECONDS", "30"))
     FIELD_EMBEDDING_DIM: int = int(os.getenv("FIELD_EMBEDDING_DIM", "2048"))
     FIELD_DECAY_RATE: float = float(os.getenv("FIELD_DECAY_RATE", "0.1"))
     FIELD_REINFORCE_BONUS: float = float(os.getenv("FIELD_REINFORCE_BONUS", "0.05"))
     FIELD_REINFORCE_CAP: float = float(os.getenv("FIELD_REINFORCE_CAP", "2.0"))
     FIELD_ARCHIVAL_THRESHOLD: float = float(os.getenv("FIELD_ARCHIVAL_THRESHOLD", "0.05"))
     FIELD_BOUNDARY_PERMEABILITY: float = float(os.getenv("FIELD_BOUNDARY_PERMEABILITY", "1.0"))
+    # PRD-166 S2: adaptive half-life — each access divides the decay rate by
+    # (1 + scale·access_count), so reused patterns persist longer.
+    FIELD_HALF_LIFE_ACCESS_SCALE: float = float(os.getenv("FIELD_HALF_LIFE_ACCESS_SCALE", "0.5"))
+    # PRD-166 S2/D11: query shape is config, not hardcoded caps.
+    FIELD_QUERY_TOP_K: int = int(os.getenv("FIELD_QUERY_TOP_K", "10"))
+    FIELD_QUERY_OVER_FETCH: int = int(os.getenv("FIELD_QUERY_OVER_FETCH", "3"))
+    # Token budget for a field digest/query result block; over-budget → truncated=True.
+    FIELD_QUERY_TOKEN_BUDGET: int = int(os.getenv("FIELD_QUERY_TOKEN_BUDGET", "1200"))
+    # PRD-166 S1: compaction prunes points whose decayed strength falls below this
+    # HARD floor (stricter than archival — archived stays queryable, pruned is deleted).
+    FIELD_PRUNE_THRESHOLD: float = float(os.getenv("FIELD_PRUNE_THRESHOLD", "0.01"))
+    FIELD_COMPACTION_MAX_SCAN: int = int(os.getenv("FIELD_COMPACTION_MAX_SCAN", "10000"))
     SHARED_CONTEXT_BACKEND: str = os.getenv("SHARED_CONTEXT_BACKEND", "vector_field")  # "vector_field" or "redis"
+    # PRD-179 S2 (F049): how many completed missions the synthesis-flywheel ingest
+    # sweep processes per coordinator tick. The sweep now orders newest-first and
+    # excludes already-ingested / previously-failed runs SQL-side, so raising this
+    # drains a backlog faster without ever re-touching a done run.
+    FLYWHEEL_INGEST_BATCH: int = int(os.getenv("FLYWHEEL_INGEST_BATCH", "3"))
+
+    # PRD-178 S4 — Field → durable (L3) promotion.
+    # Strong, frequently-recalled field patterns are distilled into durable
+    # memory BEFORE compaction hard-deletes them (else the field never becomes
+    # durable). Thresholds are config, not hardcoded (D11).
+    FIELD_PROMOTION_ENABLED: bool = os.getenv("FIELD_PROMOTION_ENABLED", "true").lower() in ("true", "1", "yes")
+    # Minimum DECAYED strength for a pattern to be promotion-eligible.
+    FIELD_PROMOTION_MIN_STRENGTH: float = float(os.getenv("FIELD_PROMOTION_MIN_STRENGTH", "0.5"))
+    # Minimum access_count (reuse across tasks/missions) to promote.
+    FIELD_PROMOTION_MIN_ACCESS_COUNT: int = int(os.getenv("FIELD_PROMOTION_MIN_ACCESS_COUNT", "3"))
+    # Max points scanned per workspace per promotion run (bounds the scroll).
+    FIELD_PROMOTION_MAX_SCAN: int = int(os.getenv("FIELD_PROMOTION_MAX_SCAN", "10000"))
+    # Daily promotion job hour (UTC).
+    FIELD_PROMOTION_HOUR_UTC: int = int(os.getenv("FIELD_PROMOTION_HOUR_UTC", "4"))
+    # TAINT GATE (top-risk #4 — promotion is the memory-poisoning surface): a
+    # pattern whose provenance names an untrusted external source is NEVER
+    # promoted to durable memory. Comma-separated source tags treated as tainted.
+    FIELD_PROMOTION_UNTRUSTED_SOURCES: str = os.getenv(
+        "FIELD_PROMOTION_UNTRUSTED_SOURCES", "email,web,inbound,external,webhook,channel"
+    )
 
     # =============================================================================
     # EMBEDDINGS
@@ -641,14 +1162,100 @@ class Config:
     
     @property
     def RAG_RERANK_ENABLED(self) -> bool:
-        """Get rerank enabled from system settings (default: False)"""
+        """Rerank on the retrieval hot path (default: ON — PRD-188 S1).
+
+        Cohere stays a graceful-degrade seam: with no COHERE_API_KEY the
+        reranker returns identity order, never an error, so ON is safe even
+        before the key exists.
+        """
         try:
             from core.llm.manager import get_system_setting
-            val = get_system_setting("rag", "rerank_enabled", "false")
+            val = get_system_setting("rag", "rerank_enabled", "true")
+            return str(val).lower() == "true" if val else True
+        except Exception:
+            return os.getenv("RAG_RERANK_ENABLED", "true").lower() == "true"
+
+    @property
+    def RAG_RERANK_MODEL(self) -> str:
+        """Cohere rerank model id — the default lives here, not in
+        rerank_manager (PRD-188 S1). rerank-v3.5 is the current verified
+        Cohere id; upgrading is a setting/env flip, never a code change."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "rerank_model", "rerank-v3.5")
+            return str(val) if val else "rerank-v3.5"
+        except Exception:
+            return os.getenv("RAG_RERANK_MODEL", "rerank-v3.5")
+
+    @property
+    def RAG_HYBRID_ENABLED(self) -> bool:
+        """Real dense+sparse hybrid retrieval (default: ON — PRD-188 S3).
+
+        The BM25 leg reads the document_chunks.search_vector index the
+        platform already maintains on every insert; OFF preserves the old
+        dense-only behaviour exactly.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "hybrid_enabled", "true")
+            return str(val).lower() == "true" if val else True
+        except Exception:
+            return os.getenv("RAG_HYBRID_ENABLED", "true").lower() == "true"
+
+    @property
+    def RAG_QUERY_ENHANCEMENT_ENABLED(self) -> bool:
+        """LLM query enhancement — HyDE, decomposition, expansion — on the
+        retrieval hot path (default: OFF).
+
+        The 2026-07 live retrieval baseline measured enhancement at −26.9
+        recall@5 points versus plain dense retrieval while adding ~4 LLM
+        calls per query (evals/baseline/kg_retrieval_2026-07.json). OFF
+        until an eval shows a variant that pays; the setting keeps it one
+        flip away, and the eval lever grid still exercises it explicitly.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "query_enhancement_enabled", "false")
             return str(val).lower() == "true" if val else False
         except Exception:
-            return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
-    
+            return os.getenv("RAG_QUERY_ENHANCEMENT_ENABLED", "false").lower() == "true"
+
+    @property
+    def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
+        """Contextual chunk annotations at ingestion (default: OFF — PRD-188 S2).
+
+        Stays OFF until the existing background reprocess has re-annotated the
+        corpus, so live retrieval never sees a half-annotated store. Flipping
+        it on only affects documents ingested/reprocessed after the flip.
+        """
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "contextual_annotations_enabled", "false")
+            return str(val).lower() == "true" if val else False
+        except Exception:
+            return os.getenv("RAG_CONTEXTUAL_ANNOTATIONS_ENABLED", "false").lower() == "true"
+
+    @property
+    def RAG_CONTEXTUAL_ANNOTATION_MODEL(self) -> str:
+        """Haiku-class model for chunk situating contexts (PRD-188 S2) — cheap,
+        prompt-cached over the parent document."""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "contextual_annotation_model", "claude-haiku-4-5")
+            return str(val) if val else "claude-haiku-4-5"
+        except Exception:
+            return os.getenv("RAG_CONTEXTUAL_ANNOTATION_MODEL", "claude-haiku-4-5")
+
+    # PRD-179 S4 (F070): rag_feedback feeds retrieval ranking. A document that
+    # accrued negative feedback (thumbs_down, or a rating at/below the floor) has
+    # its retrieval score multiplied by this factor on the live hot path — a doc
+    # marked unhelpful de-ranks and can fall out of the top-K. 1.0 disables it.
+    RAG_FEEDBACK_PENALTY_FACTOR: float = float(os.getenv("RAG_FEEDBACK_PENALTY_FACTOR", "0.5"))
+    # A rating at/below this counts as negative (thumbs_down is always negative).
+    RAG_FEEDBACK_NEGATIVE_RATING_MAX: int = int(os.getenv("RAG_FEEDBACK_NEGATIVE_RATING_MAX", "2"))
+    # Only feedback from the last N days shapes ranking (stale opinions decay out).
+    RAG_FEEDBACK_LOOKBACK_DAYS: int = int(os.getenv("RAG_FEEDBACK_LOOKBACK_DAYS", "90"))
+
     # =============================================================================
     # LLM ANALYTICS (PRD-54: Model Tiers & Cost Optimization)
     # =============================================================================
@@ -668,7 +1275,8 @@ class Config:
     # =============================================================================
     # VOICE SERVICE (PRD-74)
     # =============================================================================
-    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://voice-service.railway.internal:8300")
+    # PRD-176 F068: local-safe default (SaaS sets the railway voice host via env).
+    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://localhost:8300")
     VOICE_SERVICE_TIMEOUT: int = int(os.getenv("VOICE_SERVICE_TIMEOUT", "90"))
     VOICE_STT_MODEL: str = os.getenv("VOICE_STT_MODEL", "Systran/faster-whisper-large-v3")
     VOICE_TTS_MODEL: str = os.getenv("VOICE_TTS_MODEL", "kokoro")
@@ -676,6 +1284,223 @@ class Config:
     VOICE_ENABLED: bool = os.getenv("VOICE_ENABLED", "true").lower() == "true"
     VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
     AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
+
+    # PRD-207 S4: Auto Live tuning constants. These are NUMERIC dials only —
+    # the ON-switch (`voice.live_enabled`) and the Retell credentials live in
+    # DB system_settings (category 'voice', masked; see
+    # modules/voice/live_settings.py) so arming is a super-admin Settings-page
+    # act: no env var, no redeploy. (The former RETELL_* env keys are gone —
+    # PRD-143 killed .env-as-config; PRD-207 moved the seam to settings.)
+    VOICE_LIVE_DEFAULT_MONTHLY_CAP_MINUTES: int = int(
+        os.getenv("VOICE_LIVE_DEFAULT_MONTHLY_CAP_MINUTES", "100")
+    )
+    VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES: int = int(
+        os.getenv("VOICE_LIVE_ACTIVE_CALL_RESERVE_MINUTES", "10")
+    )
+    VOICE_LIVE_MAX_CALL_MINUTES: int = int(os.getenv("VOICE_LIVE_MAX_CALL_MINUTES", "30"))
+    # Spoken turns ride a FAST PATH: only this many recent messages feed the
+    # prompt (a call is a conversation, not an archive replay) — first-token
+    # time is the product in voice.
+    VOICE_LIVE_TURN_HISTORY_MESSAGES: int = int(
+        os.getenv("VOICE_LIVE_TURN_HISTORY_MESSAGES", "12")
+    )
+    # If the brain has produced NO first frame this many seconds into a turn,
+    # speak a short honest acknowledgment so the caller hears life instead of
+    # dead air (0 disables the watchdog; empty text keeps the log but says
+    # nothing). Retell severs a socket after ~5s without its ping_pong echoed,
+    # so silence here used to read as a hang even when the turn was healthy.
+    VOICE_LIVE_FIRST_FRAME_ACK_SECONDS: float = float(
+        os.getenv("VOICE_LIVE_FIRST_FRAME_ACK_SECONDS", "2.5")
+    )
+    VOICE_LIVE_FIRST_FRAME_ACK_TEXT: str = os.getenv(
+        "VOICE_LIVE_FIRST_FRAME_ACK_TEXT", "One moment."
+    )
+    # PRD-207: Retell agent STT / turn-taking tuning — set at agent creation
+    # AND re-applied on every one-click re-arm. Pinning the language stops
+    # multilingual STT from hallucinating confident nonsense; background-speech
+    # denoising kills TV / room bleed (the classic corruptor); accurate STT
+    # trades a little latency for far fewer garbage transcripts; low
+    # interruption sensitivity stops ambient noise from grabbing the turn
+    # ("the mic is too sensitive"). All env-overridable — e.g. en-GB for a
+    # British/Irish speaker whose accent transcribes better there.
+    VOICE_LIVE_LANGUAGE: str = os.getenv("VOICE_LIVE_LANGUAGE", "en-US")
+    VOICE_LIVE_DENOISING_MODE: str = os.getenv(
+        "VOICE_LIVE_DENOISING_MODE", "noise-and-background-speech-cancellation"
+    )
+    VOICE_LIVE_STT_MODE: str = os.getenv("VOICE_LIVE_STT_MODE", "accurate")
+    VOICE_LIVE_INTERRUPTION_SENSITIVITY: float = float(
+        os.getenv("VOICE_LIVE_INTERRUPTION_SENSITIVITY", "0.2")
+    )
+    VOICE_LIVE_RESPONSIVENESS: float = float(os.getenv("VOICE_LIVE_RESPONSIVENESS", "0.8"))
+    # Spoken turns skip the Composio EXECUTION surface (third-party app actions:
+    # Gmail/Slack/etc.). Measured root cause of 20-90s voice latency: loading
+    # all 23 Composio apps → 44 promoted action schemas + a 137-action
+    # dispatcher enum inflated every turn's LLM calls to 24-36k input tokens and
+    # drove a ~5-call agentic loop. Dropping Composio takes the agent from ~58
+    # tools to ~14 core tools — memory, knowledge search, and reasoning are ALL
+    # retained (this is NOT the force_text_only memory-lobotomy). Dial: set
+    # false to restore full parity with typed chat at the latency cost.
+    VOICE_LIVE_SKIP_COMPOSIO: bool = os.getenv(
+        "VOICE_LIVE_SKIP_COMPOSIO", "true"
+    ).strip().lower() == "true"
+    # The public host Retell must reach for the custom-LLM socket + events
+    # webhook (one-click arming builds the URLs from it). Railway injects
+    # RAILWAY_PUBLIC_DOMAIN; override with PUBLIC_API_HOST where that's absent.
+    PUBLIC_API_HOST: str = (
+        os.getenv("PUBLIC_API_HOST", os.getenv("RAILWAY_PUBLIC_DOMAIN", "api.automatos.app"))
+        or "api.automatos.app"
+    ).strip().rstrip("/")
+
+    def validate_security(self) -> None:
+        """PRD-172: fail-closed validation of tenant-isolation secrets.
+
+        Called from the hard-fail boot phase (``main._boot_phase_1_core``) so a
+        misconfigured multi-tenant secret turns a silent cross-tenant leak into a
+        loud boot failure rather than shipping fail-open.
+
+        Raises ``RuntimeError`` (which aborts boot) when:
+
+        - F004: ``SHOPIFY_INTERNAL_API_KEY`` is unset while the Shopify
+          provisioning surface is reachable — an empty key previously made
+          ``_verify_internal_key`` accept any ``Authorization`` header.
+        - F005: S3 Vectors is enabled but ``S3_VECTORS_BUCKET`` is unset. (A
+          shared bucket with no ``{workspace_id}`` placeholder is allowed —
+          tenant isolation is enforced per-query by ``S3VectorsBackend.search()``
+          (fail-closed on ``workspace_id``), not by the bucket layout.)
+        - PRD-194 S4 (P2-13): ``WIDGET_ORIGIN_ALLOWLIST`` is empty in the
+          ``saas`` edition — widget CORS would rest at allow-all on the
+          internet-facing plane. Boot-abort in saas (same posture as F004 /
+          the Clerk edition guard); ``local`` keeps the permissive dev default.
+        """
+        errors: list[str] = []
+
+        # F004 — Shopify provisioning must not be fail-open.
+        if not (self.SHOPIFY_INTERNAL_API_KEY or "").strip():
+            errors.append(
+                "SHOPIFY_INTERNAL_API_KEY is unset — the Shopify provisioning "
+                "surface (/api/shopify/provision|connect|deactivate) would accept "
+                "any Authorization header (fail-open). Set SHOPIFY_INTERNAL_API_KEY."
+            )
+
+        # F005 / PRD-186 S3 — vector-plane config integrity, extracted so CI
+        # can pin the same rules the boot phase enforces (one assertion, no
+        # duplicate strings).
+        try:
+            self.assert_vector_config_integrity()
+        except RuntimeError as e:
+            errors.append(str(e))
+
+        # PRD-194 S4 (P2-13) — the internet-facing widget plane must not rest
+        # at allow-all CORS in production. In the saas edition an empty
+        # WIDGET_ORIGIN_ALLOWLIST is a boot error (locked decision: boot-abort,
+        # matching the F004 and Clerk edition guards). The local edition keeps
+        # the permissive dev default — choosing AUTH_EDITION=local IS the
+        # explicit opt-in.
+        if self.IS_SAAS_EDITION and not (self.WIDGET_ORIGIN_ALLOWLIST or "").strip():
+            errors.append(
+                "WIDGET_ORIGIN_ALLOWLIST is unset in the saas edition — widget "
+                "CORS (/api/widgets, /api/sites) would allow ALL origins on the "
+                "internet-facing plane (fail-open). Set WIDGET_ORIGIN_ALLOWLIST "
+                "to the comma-separated allowed storefront/dashboard origins, or "
+                "run AUTH_EDITION=local for a dev instance."
+            )
+
+        if errors:
+            raise RuntimeError(
+                "Tenant-isolation security config invalid (PRD-172):\n  - "
+                + "\n  - ".join(errors)
+            )
+
+        # PRD-175 (F008) — the edition boot guard runs in the same hard-fail phase
+        # so a saas deploy that lost its Clerk env aborts boot rather than silently
+        # downgrading to the anonymous local identity and serving tenant data.
+        self.validate_auth_edition()
+
+    def assert_vector_config_integrity(self) -> None:
+        """PRD-186 S3: pure vector-plane config-integrity assertion.
+
+        The shared-bucket rule set — raises ``RuntimeError`` when the committed
+        config would ship the document plane dark or geometrically wrong:
+
+        - S3 Vectors enabled with no ``S3_VECTORS_BUCKET`` set (the F005
+          lesson: exactly this drift left the plane dark for weeks while a
+          swallowing boot stage reported ``failed`` and served traffic anyway);
+        - a non-positive ``S3_VECTORS_DIMENSION`` (writes/queries would carry
+          meaningless geometry).
+
+        A shared bucket with NO ``{workspace_id}`` placeholder is VALID — the
+        live prod shape. Tenant isolation is enforced fail-closed at query
+        time by ``S3VectorsBackend.search()`` (PRD-186 S1), not by bucket
+        layout; the old hard placeholder requirement broke a working
+        shared-bucket deployment (2026-07-02) and stays retired.
+
+        Called from ``validate_security()`` in the hard-fail boot phase
+        (``main._boot_phase_1_core`` — outside any swallowing ``run_stage``)
+        and pinned directly by CI.
+        """
+        errors: list[str] = []
+
+        if self.S3_VECTORS_ENABLED:
+            bucket = (self.S3_VECTORS_BUCKET or "").strip()
+            if not bucket:
+                errors.append(
+                    "S3_VECTORS_ENABLED=true but S3_VECTORS_BUCKET is unset."
+                )
+            try:
+                dimension = int(self.S3_VECTORS_DIMENSION)
+            except (TypeError, ValueError):
+                dimension = 0
+            if dimension <= 0:
+                errors.append(
+                    "S3_VECTORS_DIMENSION must be a positive integer "
+                    f"(got {self.S3_VECTORS_DIMENSION!r})."
+                )
+
+        if errors:
+            raise RuntimeError(
+                "Vector config integrity invalid (PRD-186 S3):\n  - "
+                + "\n  - ".join(errors)
+            )
+
+    def validate_auth_edition(self) -> None:
+        """PRD-175 (F008): fail-closed boot guard for the open-core edition flag.
+
+        Keeps the two editions from silently blending into the accidental
+        "auth-not-configured" fallthrough that made local undeployable:
+
+        - ``saas``  requires the Clerk env (``CLERK_JWKS_URL`` +
+          ``CLERK_SECRET_KEY``). A saas boot with no Clerk is a misconfiguration,
+          not a silent anonymous downgrade (the one real danger, review §5.3) —
+          it must be a loud boot failure.
+        - ``local`` requires a ``DEFAULT_WORKSPACE_ID`` — the single local
+          workspace the auto-authenticated local session resolves to (W6 seeds it).
+          It requires NO Clerk env.
+
+        Raises ``RuntimeError`` (aborting boot) on a contradiction.
+        """
+        errors: list[str] = []
+
+        if self.AUTH_EDITION == "saas":
+            if not (self.CLERK_JWKS_URL or "").strip():
+                errors.append("CLERK_JWKS_URL is unset")
+            if not (self.CLERK_SECRET_KEY or "").strip():
+                errors.append("CLERK_SECRET_KEY is unset")
+            if errors:
+                raise RuntimeError(
+                    "AUTH_EDITION=saas requires Clerk to be configured, but "
+                    + " and ".join(errors)
+                    + ". A saas boot with no Clerk must fail fast, not fall through "
+                    "to the anonymous local identity (which would serve tenant data "
+                    "unauthenticated). Set the Clerk env, or set AUTH_EDITION=local "
+                    "for a no-login local instance."
+                )
+        elif self.AUTH_EDITION == "local":
+            if not (self.DEFAULT_WORKSPACE_ID or "").strip():
+                raise RuntimeError(
+                    "AUTH_EDITION=local requires DEFAULT_WORKSPACE_ID (the single "
+                    "local workspace the auto-authenticated local session resolves "
+                    "to). Set DEFAULT_WORKSPACE_ID to the seeded local workspace."
+                )
 
     def validate(self) -> bool:
         """

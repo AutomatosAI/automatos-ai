@@ -1,6 +1,0 @@
-# PRD-81: MISSION CLEANUP — Ralph Progress
-
-## Branch: ralph/81-mission-cleanup
-
----
-

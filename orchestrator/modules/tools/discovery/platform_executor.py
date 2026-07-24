@@ -49,12 +49,44 @@ from modules.tools.discovery.handlers_documents import (
     list_documents,
     delete_document,
     reprocess_document,
+    upload_document,
+    read_document,
+    grep_documents,
+    list_templates,
+    get_template_schema,
+)
+from modules.tools.discovery.handlers_channels import (  # PRD-143 S10
+    list_channels,
+    connect_channel,
+    configure_channel,
+    start_channel,
+    stop_channel,
+)
+from modules.tools.discovery.handlers_widgets import (  # PRD-143 S10
+    get_widget_config,
+    update_widget_config,
 )
 from modules.tools.discovery.handlers_workspace import (
     get_workspace_info,
     get_memory_stats,
     list_connected_apps,
     store_memory,
+    checkpoint_thread,  # PRD-206 S2
+    resume_context,  # PRD-206 S3
+    update_workspace_settings,  # PRD-143 S11
+    list_system_settings,  # PRD-143 S11
+    update_system_setting,  # PRD-143 S11
+)
+from modules.tools.discovery.handlers_members import (  # PRD-143 S11
+    list_members,
+    invite_member,
+    set_member_role,
+    remove_member,
+)
+from modules.tools.discovery.handlers_api_keys import (  # PRD-143 S11
+    list_api_keys,
+    create_api_key,
+    revoke_api_key,
 )
 from modules.tools.discovery.handlers_monitoring import (
     get_logs,
@@ -70,6 +102,7 @@ from modules.tools.discovery.handlers_search import (
     browse_memories,
     delete_memory,
 )
+from modules.tools.discovery.handlers_capabilities import find_tools
 from modules.tools.discovery.handlers_tools_llms import (
     list_tools,
     list_llms,
@@ -85,12 +118,18 @@ from modules.tools.discovery.handlers_marketplace import (
     install_plugin,
     install_skill,
     install_model,
+    uninstall_plugin,  # PRD-143 S11
 )
 from modules.tools.discovery.handlers_skills import (
     get_skill_content,
     create_workspace_skill,
     update_skill,
     delete_workspace_skill,
+)
+from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
+    load_skill,
+    run_skill_script,
+    set_skill_script_execution,
 )
 from modules.tools.discovery.handlers_board_tasks import (
     create_board_task,
@@ -103,6 +142,7 @@ from modules.tools.discovery.handlers_scheduling import (
     schedule_task,
     list_scheduled_tasks,
     cancel_scheduled_task,
+    get_schedule,
     query_data,
 )
 from modules.tools.discovery.handlers_reports import (
@@ -112,17 +152,27 @@ from modules.tools.discovery.handlers_reports import (
     acknowledge_report,
     link_report_to_task,
 )
+from modules.tools.discovery.handlers_deliverables import (  # PRD-164 S3
+    list_deliverables as handle_list_deliverables,
+    get_deliverable as handle_get_deliverable,
+)
 from modules.tools.discovery.handlers_harness import (
     harness_status,
     harness_trigger,
     harness_history,
 )
+from modules.tools.discovery.handlers_routing import create_routing_rule  # PRD-142 Wave 4 (W4-S6)
+from modules.tools.discovery.handlers_power import set_power_mode, get_power_mode  # PRD-142 W4-S5 / PRD-143 S10
 from modules.tools.discovery.handlers_auto_reporting import (
     get_auto_reporting_prefs,
     update_auto_reporting_prefs,
     send_notification,
 )
 from modules.tools.discovery.handlers_notifications import notify_owner
+from modules.tools.discovery.handlers_autonomy import (
+    get_autonomy_level as handle_get_autonomy_level,
+    set_autonomy_level as handle_set_autonomy_level,
+)
 from modules.tools.discovery.handlers_assignments import (
     assign_tool_to_agent,
     assign_skill_to_agent,
@@ -142,11 +192,26 @@ from modules.tools.discovery.handlers_blog import (
     list_blog_posts,
     get_blog_post,
     update_blog_post,
+    create_blog_post_from_topic,
+    generate_cover_image,
+)
+from modules.tools.discovery.handlers_watches import (  # PRD-204 S9
+    create_watch,
+    list_watches,
+    get_watch,
+    cancel_watch,
 )
 from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
     get_mission,
+    approve_mission,
+    reject_mission,
+    pause_mission,
+    resume_mission,
+    cancel_mission,
+    replan_mission,
+    update_mission_plan,
 )
 from modules.tools.discovery.handlers_governance import (
     list_blueprints,
@@ -162,6 +227,22 @@ from modules.tools.discovery.handlers_graph import (
     handle_graph_communities,
     handle_graph_impact,
     handle_graph_stats,
+    handle_graph_path,
+)
+from modules.tools.discovery.handlers_shopify import (  # PRD-183 S3 (F088)
+    shopify_sync_catalog,
+    shopify_sync_status,
+)
+from modules.tools.discovery.handlers_codegraph import (
+    codegraph_list_projects,
+    codegraph_search,
+    codegraph_get_symbol,
+    codegraph_call_graph,
+    codegraph_dependencies,
+    codegraph_architecture,
+    codegraph_index,          # PRD-183 S4 (F087)
+    codegraph_reindex,        # PRD-183 S4 (F087)
+    codegraph_set_auto_reindex,  # PRD-183 S4 (F022)
 )
 from modules.tools.discovery.handlers_analytics_enhanced import (
     get_success_rate,
@@ -256,6 +337,10 @@ class PlatformActionExecutor:
             "platform_get_llm_usage": get_llm_usage,
             "platform_get_cost_breakdown": get_cost_breakdown,
             "platform_list_documents": list_documents,
+            "platform_read_document": read_document,
+            "platform_grep_documents": grep_documents,
+            "platform_list_templates": list_templates,
+            "platform_get_template_schema": get_template_schema,
             "platform_get_workspace_info": get_workspace_info,
             "platform_get_memory_stats": get_memory_stats,
             "platform_list_connected_apps": list_connected_apps,
@@ -274,6 +359,8 @@ class PlatformActionExecutor:
             "platform_delete_playbook_step": delete_playbook_step,
             "platform_schedule_playbook": schedule_playbook,
             "platform_store_memory": store_memory,
+            "platform_checkpoint_thread": checkpoint_thread,  # PRD-206 S2
+            "platform_resume_context": resume_context,  # PRD-206 S3
             "platform_delete_agent": delete_agent,
             # Infrastructure / observability
             "platform_get_logs": get_logs,
@@ -286,6 +373,7 @@ class PlatformActionExecutor:
             "platform_query_prometheus": query_prometheus,
             "platform_get_alerts": get_alerts,
             # Visibility / discovery
+            "platform_find_tools": find_tools,  # PR-B: search the action catalog itself
             "platform_list_tools": list_tools,
             "platform_list_llms": list_llms,
             "platform_list_datasources": list_datasources,
@@ -316,6 +404,10 @@ class PlatformActionExecutor:
             "platform_create_workspace_skill": create_workspace_skill,
             "platform_update_skill": update_skill,
             "platform_delete_workspace_skill": delete_workspace_skill,
+            # Skill runtime (PRD-202): L2 trigger-load / L3 worker exec / L3 enablement
+            "platform_load_skill": load_skill,
+            "platform_run_skill_script": run_skill_script,
+            "platform_set_skill_script_execution": set_skill_script_execution,
             # Agent assignment (PRD-71)
             "platform_assign_tool_to_agent": assign_tool_to_agent,
             "platform_assign_skill_to_agent": assign_skill_to_agent,
@@ -326,10 +418,16 @@ class PlatformActionExecutor:
             "platform_unassign_tool_from_agent": unassign_tool_from_agent,
             # Owner escalation channel
             "platform_notify_owner": notify_owner,
+            # Full-autonomy dial (per-workspace setting)
+            "platform_get_autonomy_level": handle_get_autonomy_level,
+            "platform_set_autonomy_level": handle_set_autonomy_level,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
             "platform_browse_reports": browse_reports,
+            # PRD-164 S3: Deliverables (agent outputs) discovery
+            "platform_list_deliverables": handle_list_deliverables,
+            "platform_get_deliverable": handle_get_deliverable,
             # Wave 3 — operating-signal lifecycle
             "platform_acknowledge_report": acknowledge_report,
             "platform_link_report_to_task": link_report_to_task,
@@ -344,6 +442,7 @@ class PlatformActionExecutor:
             "platform_schedule_task": schedule_task,
             "platform_list_scheduled_tasks": list_scheduled_tasks,
             "platform_cancel_scheduled_task": cancel_scheduled_task,
+            "platform_get_schedule": get_schedule,
             # PRD-79: NL2SQL
             "platform_query_data": query_data,
             # PRD-77: Memory Browsing
@@ -358,10 +457,25 @@ class PlatformActionExecutor:
             "platform_list_blog_posts": list_blog_posts,
             "platform_get_blog_post": get_blog_post,
             "platform_update_blog_post": update_blog_post,
+            "platform_create_blog_post": create_blog_post_from_topic,
+            "platform_generate_cover_image": generate_cover_image,
             # PRD-82A: Missions
             "platform_create_mission": create_mission,
             "platform_list_missions": list_missions,
             "platform_get_mission": get_mission,
+            # PRD-204 S9: Watches (supervision to a verdict)
+            "platform_create_watch": create_watch,
+            "platform_list_watches": list_watches,
+            "platform_get_watch": get_watch,
+            "platform_cancel_watch": cancel_watch,
+            # PRD-163 S1: mission lifecycle control
+            "platform_approve_mission": approve_mission,
+            "platform_reject_mission": reject_mission,
+            "platform_pause_mission": pause_mission,
+            "platform_resume_mission": resume_mission,
+            "platform_cancel_mission": cancel_mission,
+            "platform_replan_mission": replan_mission,
+            "platform_update_mission_plan": update_mission_plan,
             # Governance & Blueprints
             "platform_list_blueprints": list_blueprints,
             "platform_get_blueprint": get_blueprint,
@@ -385,6 +499,32 @@ class PlatformActionExecutor:
             "platform_harness_status": harness_status,
             "platform_harness_trigger": harness_trigger,
             "platform_harness_history": harness_history,
+            # PRD-142 Wave 4 (W4-S6): routing-rule creation
+            "platform_create_routing_rule": create_routing_rule,
+            # PRD-142 Wave 4 (W4-S5): workspace power-mode knob
+            "platform_set_power_mode": set_power_mode,
+            # PRD-143 S10: setup-surface gap-fill (operator tier)
+            "platform_get_power_mode": get_power_mode,
+            "platform_list_channels": list_channels,
+            "platform_connect_channel": connect_channel,
+            "platform_configure_channel": configure_channel,
+            "platform_start_channel": start_channel,
+            "platform_stop_channel": stop_channel,
+            "platform_get_widget_config": get_widget_config,
+            "platform_update_widget_config": update_widget_config,
+            "platform_upload_document": upload_document,
+            # PRD-143 S11: administration surface (operator tier by design)
+            "platform_list_members": list_members,
+            "platform_invite_member": invite_member,
+            "platform_set_member_role": set_member_role,
+            "platform_remove_member": remove_member,
+            "platform_update_workspace_settings": update_workspace_settings,
+            "platform_list_system_settings": list_system_settings,
+            "platform_update_system_setting": update_system_setting,
+            "platform_list_api_keys": list_api_keys,
+            "platform_create_api_key": create_api_key,
+            "platform_revoke_api_key": revoke_api_key,
+            "platform_uninstall_plugin": uninstall_plugin,
             # Wave 2: Auto reporting preferences + send-notification wrapper
             "platform_get_auto_reporting_prefs": get_auto_reporting_prefs,
             "platform_update_auto_reporting_prefs": update_auto_reporting_prefs,
@@ -395,6 +535,21 @@ class PlatformActionExecutor:
             "platform_graph_communities": handle_graph_communities,
             "platform_graph_impact": handle_graph_impact,
             "platform_graph_stats": handle_graph_stats,
+            "platform_graph_path": handle_graph_path,
+            # PRD-183 S3 (F088): Shopify sync + freshness as tools
+            "platform_shopify_sync_catalog": shopify_sync_catalog,
+            "platform_shopify_sync_status": shopify_sync_status,
+            # PRD-165 S4: CodeGraph as an agent capability
+            "platform_codegraph_list_projects": codegraph_list_projects,
+            "platform_codegraph_search": codegraph_search,
+            "platform_codegraph_get_symbol": codegraph_get_symbol,
+            "platform_codegraph_call_graph": codegraph_call_graph,
+            "platform_codegraph_dependencies": codegraph_dependencies,
+            "platform_codegraph_architecture": codegraph_architecture,
+            # PRD-183 S4: codegraph write tools (index / reindex / auto-reindex)
+            "platform_codegraph_index": codegraph_index,
+            "platform_codegraph_reindex": codegraph_reindex,
+            "platform_codegraph_set_auto_reindex": codegraph_set_auto_reindex,
         }
 
     def _workspace_has_admin_owner(self) -> bool:
@@ -431,6 +586,58 @@ class PlatformActionExecutor:
             )
             return False
 
+    def _agent_inherits_admin(self) -> bool:
+        """Whether an agent (no caller identity) may act as admin here.
+
+        PRD-174 F014: closes the ``admin_only`` no-op. Historically a missing
+        caller_context fell back to "does the workspace have *an* admin member"
+        (true for every workspace) — so ``admin_only`` never actually gated an
+        agent. Under the policy plane this fallback is opt-in: it applies only
+        when the workspace's explicit, default-OFF ``agents_inherit_admin``
+        policy is set (and there really is an admin/owner to inherit from).
+
+        Plane OFF ⇒ historical behaviour (always fall back to the owner check)
+        so the rollout is byte-for-byte reversible.
+        """
+        try:
+            from modules.policy import policy_plane_enabled
+
+            if policy_plane_enabled():
+                from modules.policy.policy_document import load_policy_document
+
+                doc = load_policy_document(self.db, self.workspace_id)
+                if not doc.agents_inherit_admin:
+                    return False  # explicit default-off policy → agent is NOT admin
+                return self._workspace_has_admin_owner()
+        except Exception:
+            logger.warning(
+                "[PlatformExecutor] agents_inherit_admin policy read failed for %s "
+                "— falling back to legacy owner check", self.workspace_id,
+                exc_info=True,
+            )
+        # Plane OFF (or read failure): historical always-fallback behaviour.
+        return self._workspace_has_admin_owner()
+
+    def _full_autonomy(self) -> bool:
+        """True when this workspace is dialled to full autonomy.
+
+        Reads ``workspace.settings.autonomy`` via the canonical service.
+        Fail-safe: any error returns False (supervised), never True — the
+        dial fails to the gated behaviour, never past it.
+        """
+        try:
+            from core.services.auto_autonomy import is_full_autonomy
+
+            return is_full_autonomy(self.db, self.workspace_id)
+        except Exception:
+            logger.warning(
+                "[PlatformExecutor] autonomy-level lookup failed for %s — "
+                "defaulting to standard (supervised)",
+                self.workspace_id,
+                exc_info=True,
+            )
+            return False
+
     async def execute(
         self,
         action_name: str,
@@ -443,8 +650,9 @@ class PlatformActionExecutor:
             action_name: Registered platform action name.
             params: Action parameters.
             caller_context: Optional dict with keys user_id, system_role,
-                workspace_role.  Used by admin_only gate (US-003).
-                If None, admin_only actions are denied (fail-closed).
+                workspace_role.  Used by the super_admin_only gate (PRD-143)
+                and the admin_only gate (US-003).  If None, super_admin_only
+                and admin_only actions are denied (fail-closed).
         """
         # LLMs sometimes send params as a JSON string instead of a dict
         if isinstance(params, str):
@@ -456,15 +664,52 @@ class PlatformActionExecutor:
         if not handler:
             return {"success": False, "error": f"Unknown platform action: {action_name}"}
 
+        # PRD-193 S2 (P2-12): when a human grant authorises this exact call,
+        # its id is recorded here so the execution is audit-marked as
+        # grant-authorised — distinct from the full-autonomy dial skipping
+        # the gate.
+        approved_via_grant_id: Optional[int] = None
+
         # Permission check for write/destructive actions (fail-closed)
         try:
             from modules.tools.discovery import get_action_registry
             action_def = get_action_registry().get(action_name)
 
+            # PRD-143: Super-admin gate — fail-closed, BEFORE and independent
+            # of the admin gate below. The ONLY principal that passes is a
+            # literal system_role == 'super_admin' in caller_context. The
+            # full-autonomy dial, workspace roles, the workspace-owner
+            # fallback and API keys (system_role='admin') NEVER satisfy it;
+            # caller_context=None refuses (no identity resolution).
+            if action_def and action_def.super_admin_only:
+                if (caller_context or {}).get("system_role") != "super_admin":
+                    logger.warning(
+                        "[PlatformExecutor] Super-admin-only action '%s' denied — "
+                        "workspace_id=%s, caller_context=%s",
+                        action_name,
+                        self.workspace_id,
+                        {k: v for k, v in (caller_context or {}).items() if k != "user_id"},
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "error": (
+                            f"Action '{action_name}' is restricted to the platform "
+                            "super admin (observability tier)."
+                        ),
+                    }
+
+            # Full-autonomy dial (per-workspace setting). When on: Auto is
+            # treated as admin and the confirmation gate is skipped. Everything
+            # else (hierarchy check, rate limits, destructive backstop) stands.
+            full_autonomy = self._full_autonomy()
+
             # US-003: Admin gate — deny admin_only actions for non-admin callers
             if action_def and action_def.admin_only:
-                is_admin = False
-                if caller_context is not None:
+                if full_autonomy:
+                    # Workspace dialled to full autonomy — Auto runs as admin.
+                    is_admin = True
+                elif caller_context is not None:
                     # Explicit caller identity — check roles directly.
                     # A dict with no role keys means "known non-admin user".
                     is_admin = (
@@ -472,10 +717,13 @@ class PlatformActionExecutor:
                         or caller_context.get("system_role") == "admin"
                     )
                 else:
-                    # No caller_context (heartbeat, agent factory, etc.) —
-                    # resolve from workspace owner's role.  Agents inherit
-                    # admin privileges from their workspace owner.
-                    is_admin = self._workspace_has_admin_owner()
+                    # No caller_context (heartbeat, agent factory, etc.).
+                    # PRD-174 F014: the "agents inherit admin from the workspace
+                    # owner" fallback is no longer implicit — under the policy
+                    # plane it applies ONLY when the explicit, default-OFF
+                    # ``agents_inherit_admin`` workspace policy is set. Plane OFF
+                    # keeps the historical always-fallback behaviour.
+                    is_admin = self._agent_inherits_admin()
                 if not is_admin:
                     logger.warning(
                         "[PlatformExecutor] Admin-only action '%s' denied — "
@@ -492,25 +740,62 @@ class PlatformActionExecutor:
                         ),
                     }
 
-            if action_def and action_def.requires_confirmation:
-                return {
-                    "success": False,
-                    "requires_confirmation": True,
-                    "action": action_name,
-                    "permission_level": action_def.permission_level,
-                    "message": (
-                        f"This action ({action_def.permission_level}) requires confirmation. "
-                        f"Action: {action_name} — {action_def.description[:100]}"
-                    ),
-                    "params": params,
-                }
+            if action_def and action_def.requires_confirmation and not full_autonomy:
+                # PRD-193 S1/S2 (P2-12): the ask is no longer a dead end.
+                # S2 — consult FIRST: an authorising grant on this exact
+                # subject key (GRANTED + unexpired + params-hash equality)
+                # opens the gate; destructive grants are retired on use
+                # (single-use). Anything else — pending, expired, revoked,
+                # denied, params drift, or ANY error in the consult — falls
+                # through to the ask (fail closed; the ask is the floor).
+                # S1 — otherwise issue (or reuse) a PENDING tool_call
+                # ApprovalGrant and return the ask WITH the grant attached,
+                # so a human finally has something to say yes to.
+                from modules.tools.execution import tool_grants
+
+                _grant = tool_grants.consume_tool_grant(
+                    self.db,
+                    self.workspace_id,
+                    action=action_name,
+                    params=params,
+                    permission_level=action_def.permission_level,
+                )
+                if _grant is not None:
+                    approved_via_grant_id = getattr(_grant, "id", None)
+                    logger.info(
+                        "[PlatformExecutor] '%s' authorised by approval grant %s "
+                        "— proceeding (workspace=%s)",
+                        action_name, approved_via_grant_id, self.workspace_id,
+                    )
+                else:
+                    ask = {
+                        "success": False,
+                        "requires_confirmation": True,
+                        "action": action_name,
+                        "permission_level": action_def.permission_level,
+                        "message": (
+                            f"This action ({action_def.permission_level}) requires confirmation. "
+                            f"Action: {action_name} — {action_def.description[:100]}"
+                        ),
+                        "params": params,
+                    }
+                    return tool_grants.attach_ask_grant(
+                        self.db,
+                        self.workspace_id,
+                        action=action_name,
+                        params=params,
+                        ask=ask,
+                        permission_level=action_def.permission_level,
+                        description=action_def.description,
+                        caller_context=caller_context,
+                    )
         except Exception as e:
             # Fail-closed: if we can't verify permissions, require confirmation
             logger.warning(
                 "[PlatformExecutor] Registry lookup failed for %s: %s — requiring confirmation",
                 action_name, e,
             )
-            return {
+            ask = {
                 "success": False,
                 "requires_confirmation": True,
                 "action": action_name,
@@ -521,6 +806,25 @@ class PlatformActionExecutor:
                 ),
                 "params": params,
             }
+            # PRD-193 S1: the fail-closed ask gets the grant loop too (best
+            # effort — the same surface resolves it if/when the registry
+            # heals). NOTE: no grant is CONSUMED on this path — the permission
+            # stack could not be verified, so nothing may execute here.
+            try:
+                from modules.tools.execution import tool_grants
+
+                return tool_grants.attach_ask_grant(
+                    self.db,
+                    self.workspace_id,
+                    action=action_name,
+                    params=params,
+                    ask=ask,
+                    permission_level=None,
+                    description=None,
+                    caller_context=caller_context,
+                )
+            except Exception:  # pragma: no cover - attach_ask_grant never raises
+                return ask
 
         # PRD-140 Phase 1 — hierarchy permission check. Runs before the
         # rate limiter so denied calls don't spend rate-limit budget.
@@ -545,13 +849,39 @@ class PlatformActionExecutor:
                 except (TypeError, ValueError):
                     target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
 
-                decision = can_actor_modify(
-                    self.db,
-                    actor_agent_id=actor_id,
-                    target_type=target_type,
-                    target_id=target_id,
-                    change_type="update" if action_def.permission_level == "write" else "delete",
-                )
+                try:
+                    decision = can_actor_modify(
+                        self.db,
+                        actor_agent_id=actor_id,
+                        target_type=target_type,
+                        workspace_id=self.workspace_id,
+                        target_id=target_id,
+                        change_type="update" if action_def.permission_level == "write" else "delete",
+                        source="platform_tool",
+                    )
+                except Exception as e:
+                    # Fail closed: a permission check that errors must DENY, never
+                    # fall through to execution. can_actor_modify's DB probes
+                    # (_agent_row / _reports_to_id) aren't all savepoint-guarded,
+                    # so a transient DB error would otherwise raise out of the gate
+                    # and leave the write's fate to upstream handling. Deny locally
+                    # and escalate to Auto — mirrors the registry-lookup fail-closed
+                    # above.
+                    logger.warning(
+                        "[PlatformExecutor] hierarchy_check_failed action=%s actor=%s "
+                        "target=%s/%s err=%s — denying (fail-closed)",
+                        action_name, actor_id, target_type, target_id, e,
+                    )
+                    return {
+                        "success": False,
+                        "permission_denied": True,
+                        "reason": "permission_check_failed",
+                        "escalation_target": "auto",
+                        "error": (
+                            f"Action '{action_name}' denied — permission check could not be "
+                            "completed. Route this through the auto for arbitration."
+                        ),
+                    }
                 if not decision.allowed:
                     logger.warning(
                         "[PlatformExecutor] hierarchy_denied action=%s actor=%s target=%s/%s reason=%s",
@@ -619,8 +949,13 @@ class PlatformActionExecutor:
                 ),
             }
 
-        # PRD-124/126: Auto-inject _agent_id for graph tools (team scoping)
-        if action_name.startswith("platform_graph") or action_name == "platform_query_graph":
+        # PRD-124/126: Auto-inject _agent_id for graph tools (team scoping).
+        # PRD-157 S2: the document-reading tools are team-scoped the same way.
+        if (
+            action_name.startswith("platform_graph")
+            or action_name == "platform_query_graph"
+            or action_name in ("platform_read_document", "platform_grep_documents")
+        ):
             if "_agent_id" not in params:
                 # Resolve agent_id from the active mission or caller context
                 try:
@@ -640,31 +975,113 @@ class PlatformActionExecutor:
                 except Exception as e:
                     logger.debug("[PRD-124] Failed to resolve _agent_id for graph tool: %s", e)
 
-        # PRD-108: Auto-inject field_id for field tools from active mission
+        # PRD-108 / PRD-178 S1 (F020): Auto-inject field_id for field tools from
+        # the CALLING task's run — threaded down via caller_context["field_context"]
+        # by the agent runtime. The previous `.first()`-on-any-running-run lookup
+        # bound an arbitrary concurrent mission's field (F020) and let a running
+        # mission shadow workspace recall (F021); it is deleted, not shimmed.
+        # No threaded context ⇒ no injection (an explicit field_id still wins) —
+        # an ambient guess is exactly the bug we are removing.
         if action_name.startswith("platform_field_") and "field_id" not in params:
-            try:
-                from core.models.orchestration import OrchestrationRun
-                active_run = (
-                    self.db.query(OrchestrationRun)
-                    .filter(
-                        OrchestrationRun.workspace_id == self.workspace_id,
-                        OrchestrationRun.state == "running",
-                    )
-                    .first()
+            field_id = ((caller_context or {}).get("field_context") or {}).get("field_id")
+            if field_id:
+                params = {**params, "field_id": field_id}
+                logger.info(
+                    "[PRD-178 S1] Bound field_id %s to calling task for %s",
+                    field_id, action_name,
                 )
-                if active_run:
-                    field_id = (active_run.config or {}).get("field_id")
-                    if field_id:
-                        params = {**params, "field_id": field_id}
-                        logger.info(
-                            "[PRD-108] Auto-injected field_id %s for %s",
-                            field_id, action_name,
-                        )
-            except Exception as e:
-                logger.warning("[PRD-108] Failed to resolve field_id: %s", e)
+
+        # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
+        # user. The chat path threads the driving user's clerk id via
+        # caller_context['user_id']; inject it as _created_by so the handler sets
+        # created_by / actor to the user, not the agent.
+        _MISSION_ATTRIBUTED = (
+            "platform_create_mission",
+            "platform_approve_mission",
+            "platform_reject_mission",
+            "platform_pause_mission",
+            "platform_resume_mission",
+            "platform_cancel_mission",
+            "platform_replan_mission",
+            "platform_update_mission_plan",
+        )
+        if action_name in _MISSION_ATTRIBUTED:
+            # Hardened 2026-07-17 (Gerard's call, flagged in #563): STRIP any
+            # caller-supplied _created_by first, then inject from context --
+            # the original PRD-163 caller-preserving guard let a spoofed tool
+            # arg claim attribution on headless paths (board dispatcher,
+            # workflows) where caller_context carries no user_id. Grep-verified
+            # no legitimate params-side producer exists.
+            params = {k: v for k, v in params.items() if k != "_created_by"}
+            _driver = (caller_context or {}).get("user_id")
+            if _driver:
+                params = {**params, "_created_by": str(_driver)}
+
+        # PRD-205 S4: capture the originating conversation for watch-creating
+        # actions (direct create + the launches whose handlers auto-create a
+        # watch) so verdicts post back into that chat. Server-injected from
+        # caller_context; a caller-supplied param of the same name is ALWAYS
+        # stripped first -- inject-on-truthy alone would let a spoofed tool
+        # arg survive the headless paths (board dispatcher, workflows) where
+        # caller_context carries no conversation_id. The origin is never
+        # spoofable via tool args.
+        _WATCH_ORIGIN_ACTIONS = (
+            "platform_create_watch",
+            "platform_create_mission",
+            "platform_execute_playbook",
+            "platform_execute_recipe",
+            "platform_schedule_task",
+        )
+        if action_name in _WATCH_ORIGIN_ACTIONS:
+            params = {k: v for k, v in params.items() if k != "_origin_chat_id"}
+            _origin_chat = (caller_context or {}).get("conversation_id")
+            if _origin_chat:
+                params = {**params, "_origin_chat_id": str(_origin_chat)}
+
+        # PRD-206 S1: memory writes carry their owner (drives the Q7 private/
+        # workspace scope default) and their originating chat (the thread
+        # link). Server-injected from caller_context; caller-supplied values
+        # of the same names are ALWAYS stripped first (the #565 strip-then-
+        # inject hardening) so neither is spoofable via tool args.
+        _MEMORY_CONTEXT_ACTIONS = (
+            "platform_store_memory",
+            "platform_checkpoint_thread",
+            "platform_resume_context",
+        )
+        if action_name in _MEMORY_CONTEXT_ACTIONS:
+            params = {
+                k: v for k, v in params.items()
+                if k not in ("_user_id", "_origin_chat_id")
+            }
+            _mem_user = (caller_context or {}).get("user_id")
+            if _mem_user:
+                params = {**params, "_user_id": str(_mem_user)}
+            _mem_chat = (caller_context or {}).get("conversation_id")
+            if _mem_chat:
+                params = {**params, "_origin_chat_id": str(_mem_chat)}
 
         try:
-            return await handler(self.db, self.workspace_id, params)
+            result = await handler(self.db, self.workspace_id, params)
+            # PRD-143 S8: an invocation that ran only because the full-autonomy
+            # dial skipped the confirmation gate is marked here, and the
+            # universal telemetry hook persists it to tool_execution_logs
+            # (router_decision->>'autonomous') — the Wave 4 audit trail
+            # records autonomous actions distinctly and queryably.
+            if (
+                full_autonomy
+                and action_def is not None
+                and action_def.requires_confirmation
+                and isinstance(result, dict)
+            ):
+                result = {**result, "autonomous": True}
+            # PRD-193 S2: a grant-authorised execution records WHICH grant
+            # said yes (router_decision->>'approved_via_grant_id' via the
+            # same universal telemetry hook) — distinct from the dial-skip
+            # marker above. Attribution must be honest: approved is not
+            # autonomous.
+            if approved_via_grant_id is not None and isinstance(result, dict):
+                result = {**result, "approved_via_grant_id": approved_via_grant_id}
+            return result
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)
             try:

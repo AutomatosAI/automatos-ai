@@ -39,6 +39,7 @@ from core.credentials.encryption import EncryptionKeyError
 from core.utils.logging_adapter import set_request_id
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,22 @@ def get_client_ip(request: Request) -> str:
 
 
 def _check_credential_workspace(cred, ctx: RequestContext) -> None:
-    """Verify credential belongs to the caller's workspace (BOLA protection)."""
-    if hasattr(cred, 'workspace_id') and cred.workspace_id and str(cred.workspace_id) != str(ctx.workspace_id):
+    """Verify credential belongs to the caller's workspace (BOLA protection).
+
+    PRD-195 S7 (P2-14 / auth-identity J4): a row with ``workspace_id IS NULL``
+    is **denied for non-admin callers** — it used to pass for EVERY tenant
+    (null-permissive hole). System admins and the env-API-key service lane may
+    still read globally-seeded rows (G3). 404, not 403 — existence-hiding,
+    matching the spine's posture.
+    """
+    cred_ws = getattr(cred, "workspace_id", None)
+    if cred_ws is None:
+        from core.auth.roles import caller_is_admin
+
+        if ctx.auth_type == "api_key" or (ctx.user is not None and caller_is_admin(ctx.user)):
+            return
+        raise HTTPException(status_code=404, detail="Credential not found")
+    if str(cred_ws) != str(ctx.workspace_id):
         raise HTTPException(status_code=404, detail="Credential not found")
 
 
@@ -161,7 +176,7 @@ async def get_credential_type_by_name(
 # Credential CRUD Endpoints
 # ============================================================================
 
-@router.post("/", response_model=CredentialResponse)
+@router.post("/", response_model=CredentialResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def handle_request(
     credential: CredentialCreate,
     request: Request,
@@ -187,14 +202,22 @@ async def handle_request(
             ip_address=ip_address,
             workspace_id=ctx.workspace_id,
         )
-        
+
         # Build response (without decrypted values)
         cred_type = store.get_credential_type(created_cred.credential_type_id)
-        
+
         # Extract field names from encrypted data
         decrypted = store.encryption_service.decrypt_dict(created_cred.encrypted_data)
         field_names = list(decrypted.keys())
-        
+
+        # Dispatch integration bridge (Shopify→Composio etc.) — fail-soft.
+        bridge_result = store.dispatch_integration_bridge(
+            credential_id=created_cred.id,
+            workspace_id=ctx.workspace_id,
+            credential_type_name=cred_type.name,
+            decrypted_data=decrypted,
+        )
+
         response = CredentialResponse(
             id=created_cred.id,
             name=created_cred.name,
@@ -213,9 +236,15 @@ async def handle_request(
             created_at=created_cred.created_at,
             updated_at=created_cred.updated_at,
             has_credentials=True,
-            field_names=field_names
+            field_names=field_names,
+            connection_status=bridge_result.status if bridge_result else None,
+            connection_id=bridge_result.connection_id if bridge_result else None,
+            auth_config_id=bridge_result.auth_config_id if bridge_result else None,
+            auth_scheme=bridge_result.auth_scheme if bridge_result else None,
+            oauth_redirect_url=bridge_result.oauth_redirect_url if bridge_result else None,
+            connection_error=bridge_result.error if bridge_result else None,
         )
-        
+
         return response
     
     except CredentialValidationError as e:
@@ -292,7 +321,7 @@ async def get_item(
             try:
                 schema_fields = cred_type.schema_definition
                 field_names = [field.get('name', '') for field in schema_fields if field.get('name')]
-            except:
+            except Exception:
                 field_names = []
             
             responses.append(CredentialResponse(
@@ -356,7 +385,7 @@ async def get_credential(
         try:
             decrypted = store.encryption_service.decrypt_dict(cred.encrypted_data)
             field_names = list(decrypted.keys())
-        except:
+        except Exception:
             field_names = []
             decrypted = {}
 
@@ -389,7 +418,7 @@ async def get_credential(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{credential_id}", response_model=CredentialResponse)
+@router.put("/{credential_id}", response_model=CredentialResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_credential(
     credential_id: int,
     update_data: CredentialUpdate,
@@ -418,13 +447,25 @@ async def update_credential(
         )
         
         cred_type = store.get_credential_type(updated_cred.credential_type_id)
-        
+
+        decrypted: Dict[str, Any] = {}
         try:
             decrypted = store.encryption_service.decrypt_dict(updated_cred.encrypted_data)
-            field_names = list(decrypted.keys())
-        except:
-            field_names = []
-        
+        except Exception:
+            decrypted = {}
+        field_names = list(decrypted.keys())
+
+        # Re-dispatch the integration bridge so a rotated token / changed
+        # OAuth credentials reconnect (only when credential_data changed).
+        bridge_result = None
+        if update_data.credential_data is not None and decrypted:
+            bridge_result = store.dispatch_integration_bridge(
+                credential_id=updated_cred.id,
+                workspace_id=ctx.workspace_id,
+                credential_type_name=cred_type.name,
+                decrypted_data=decrypted,
+            )
+
         return CredentialResponse(
             id=updated_cred.id,
             name=updated_cred.name,
@@ -443,7 +484,13 @@ async def update_credential(
             created_at=updated_cred.created_at,
             updated_at=updated_cred.updated_at,
             has_credentials=True,
-            field_names=field_names
+            field_names=field_names,
+            connection_status=bridge_result.status if bridge_result else None,
+            connection_id=bridge_result.connection_id if bridge_result else None,
+            auth_config_id=bridge_result.auth_config_id if bridge_result else None,
+            auth_scheme=bridge_result.auth_scheme if bridge_result else None,
+            oauth_redirect_url=bridge_result.oauth_redirect_url if bridge_result else None,
+            connection_error=bridge_result.error if bridge_result else None,
         )
     
     except CredentialNotFoundError as e:
@@ -457,7 +504,7 @@ async def update_credential(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{credential_id}")
+@router.delete("/{credential_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def delete_credential(
     credential_id: int,
     request: Request,
@@ -500,7 +547,7 @@ async def delete_credential(
 # Credential Testing
 # ============================================================================
 
-@router.post("/{credential_id}/test", response_model=CredentialTestResponse)
+@router.post("/{credential_id}/test", response_model=CredentialTestResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def test_credential(
     credential_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -565,9 +612,14 @@ async def resolve_credential(
                 raise HTTPException(status_code=404, detail="Credential not found")
 
         elif resolve_request.credential_name:
+            # PRD-195 S7: by-name resolution is workspace-scoped — the caller
+            # sees its own workspace's rows first; the admin/service gate above
+            # is what allows the globally-seeded (NULL-workspace) fallback.
             credential = store.get_credential_by_name(
                 resolve_request.credential_name,
-                resolve_request.environment
+                resolve_request.environment,
+                workspace_id=ctx.workspace_id,
+                include_global=True,
             )
             if not credential:
                 raise HTTPException(
@@ -690,7 +742,7 @@ async def credentials_health(ctx: RequestContext = Depends(get_request_context_h
         }
 
 
-@router.post("/cache/clear")
+@router.post("/cache/clear", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def clear_credential_cache(
     credential_name: Optional[str] = Query(None, description="Specific credential to clear"),
     ctx: RequestContext = Depends(get_request_context_hybrid)

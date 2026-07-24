@@ -12,17 +12,19 @@ Usage:
 
 import json
 import logging
-import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from config import config
+from core.auth.super_admin import require_super_admin
 
 logger = logging.getLogger(__name__)
 
-LOKI_URL = os.environ.get("LOKI_QUERY_URL", "http://loki.railway.internal:3100")
-ALERT_INGEST_TOKEN = os.environ.get("ALERT_INGEST_TOKEN", "")
+# PRD-142 W3-S5 / G7 — env reads routed through config.
+LOKI_URL = config.LOKI_QUERY_URL
 
 
 def _build_logql(
@@ -81,8 +83,16 @@ def _parse_iso_or_relative(value: Optional[str], default_delta: timedelta) -> st
 
 
 def create_logs_router() -> APIRouter:
-    """Create the logs query router."""
-    router = APIRouter(tags=["logs"])
+    """Create the logs query router.
+
+    PRD-172 F007: the Loki log-query surface is the obs tier (PRD-143) — every
+    route is super-admin only. A caller-supplied ``workspace_id`` filter made
+    this a cross-workspace log-read oracle; ``require_super_admin`` at the router
+    level closes it. The old per-route ALERT_INGEST_TOKEN checks (a
+    machine-to-machine control misapplied to a human read surface) are removed
+    in favour of the canonical role gate.
+    """
+    router = APIRouter(tags=["logs"], dependencies=[Depends(require_super_admin)])
 
     @router.get("/logs/query")
     async def query_logs(
@@ -97,19 +107,11 @@ def create_logs_router() -> APIRouter:
         end: Optional[str] = Query(None, description="End time (ISO8601 or relative)"),
         limit: int = Query(100, ge=1, le=1000, description="Max entries to return"),
         direction: str = Query("backward", description="Sort direction: backward or forward"),
-        authorization: Optional[str] = Header(None),
     ):
-        """Query logs from Loki.
+        """Query logs from Loki (super-admin only — see router dependency).
 
         Supports raw LogQL or convenience parameters that auto-build the query.
-        Requires Bearer token authentication (same as alert ingest).
         """
-        # Auth
-        if ALERT_INGEST_TOKEN:
-            expected = f"Bearer {ALERT_INGEST_TOKEN}"
-            if authorization != expected:
-                raise HTTPException(status_code=401, detail="Invalid token")
-
         # Build LogQL
         logql = _build_logql(query, service, level, workspace_id, error_fingerprint, request_id, module)
 
@@ -181,15 +183,8 @@ def create_logs_router() -> APIRouter:
         }
 
     @router.get("/logs/labels")
-    async def list_labels(
-        authorization: Optional[str] = Header(None),
-    ):
-        """List available Loki label names."""
-        if ALERT_INGEST_TOKEN:
-            expected = f"Bearer {ALERT_INGEST_TOKEN}"
-            if authorization != expected:
-                raise HTTPException(status_code=401, detail="Invalid token")
-
+    async def list_labels():
+        """List available Loki label names (super-admin only)."""
         import asyncio
         from urllib.request import Request, urlopen
 
@@ -205,16 +200,8 @@ def create_logs_router() -> APIRouter:
             raise HTTPException(status_code=502, detail=f"Loki labels query failed: {e}")
 
     @router.get("/logs/label/{label_name}/values")
-    async def label_values(
-        label_name: str,
-        authorization: Optional[str] = Header(None),
-    ):
-        """List values for a specific Loki label."""
-        if ALERT_INGEST_TOKEN:
-            expected = f"Bearer {ALERT_INGEST_TOKEN}"
-            if authorization != expected:
-                raise HTTPException(status_code=401, detail="Invalid token")
-
+    async def label_values(label_name: str):
+        """List values for a specific Loki label (super-admin only)."""
         import asyncio
         from urllib.request import Request, urlopen
 

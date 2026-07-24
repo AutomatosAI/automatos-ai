@@ -21,7 +21,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Zap } from 'lucide-react'
-import { useActivitySchedule } from '@/hooks/use-activity-api'
+import { useActivitySchedule, useSchedulerHealth } from '@/hooks/use-activity-api'
 import { useHeartbeats } from '@/hooks/use-heartbeats-api'
 import { toneFor } from './agent-tones'
 
@@ -154,17 +154,45 @@ function buildMonthGrid(anchor: Date): DayCell[] {
   })
 }
 
+/** Relative "in 12m / in 3h / in 2d" label for the Next Up list. */
+function formatNextRun(iso: string | null): string {
+  if (!iso) return ''
+  const ms = new Date(iso).getTime() - Date.now()
+  if (Number.isNaN(ms)) return ''
+  if (ms <= 0) return 'now'
+  const mins = Math.round(ms / 60000)
+  if (mins < 60) return `in ${mins}m`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `in ${hrs}h`
+  return `in ${Math.round(hrs / 24)}d`
+}
+
 export function CalendarTab() {
   const router = useRouter()
   const [mode, setMode] = useState<ViewMode>('week')
   const [anchor, setAnchor] = useState<Date>(() => new Date())
 
   const range = mode === 'month' ? '30d' : '7d'
-  const { data: schedule, isLoading } = useActivitySchedule(range)
+  const { data: schedule, isLoading, isError, refetch } = useActivitySchedule(range)
   const { data: heartbeats } = useHeartbeats()
+  const { data: health } = useSchedulerHealth()
 
   const week = useMemo(() => buildWeek(anchor), [anchor])
   const monthCells = useMemo(() => buildMonthGrid(anchor), [anchor])
+
+  // Ported from the deleted classic ActivityCalendar (PRD-162 S4): the soonest
+  // upcoming items, straight from the DB-first schedule feed.
+  const nextUp = useMemo(() => {
+    const items = schedule?.scheduled ?? []
+    return [...items]
+      .filter((i) => i.next_run_at)
+      .sort(
+        (a, b) =>
+          new Date(a.next_run_at as string).getTime() -
+          new Date(b.next_run_at as string).getTime(),
+      )
+      .slice(0, 6)
+  }, [schedule])
 
   const visibleDays = useMemo<DayCell[]>(() => {
     if (mode === 'day') {
@@ -493,6 +521,41 @@ export function CalendarTab() {
         </span>
       </div>
 
+      {health?.healthy === false && (
+        <div
+          className="cc-cal-health"
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 10px',
+            marginBottom: 8,
+            fontSize: 12,
+            border: '1px solid hsl(45 80% 55% / 0.4)',
+            borderRadius: 8,
+            background: 'hsl(45 80% 55% / 0.08)',
+            color: 'hsl(45 80% 55%)',
+          }}
+        >
+          <Zap style={{ width: 12, height: 12 }} />
+          Scheduler hasn’t fired recently — configured schedules still shown below.
+        </div>
+      )}
+
+      {isError && (
+        <div
+          className="cc-panel-empty"
+          role="alert"
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}
+        >
+          <span>Couldn’t load the schedule.</span>
+          <button type="button" className="cc-btn" onClick={() => refetch()}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {mode !== 'month' && alwaysOn.length > 0 && (
         <div className="cc-cal-alwayson">
           <div className="lbl">
@@ -514,6 +577,55 @@ export function CalendarTab() {
               )
             })}
           </div>
+        </div>
+      )}
+
+      {nextUp.length > 0 && (
+        <div
+          className="cc-cal-nextup"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            flexWrap: 'wrap',
+            padding: '8px 10px',
+            marginBottom: 8,
+            border: '1px solid hsl(var(--border))',
+            borderRadius: 8,
+            background: 'hsl(var(--card) / 0.4)',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: 0.4,
+              color: 'hsl(var(--muted-foreground))',
+            }}
+          >
+            Next up
+          </span>
+          {nextUp.map((item) => {
+            const overdue = item.next_run_at
+              ? new Date(item.next_run_at).getTime() < Date.now()
+              : false
+            const accent = overdue ? 'hsl(45 80% 55%)' : 'hsl(var(--muted-foreground))'
+            return (
+              <span
+                key={item.id}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
+              >
+                <span
+                  style={{ width: 6, height: 6, borderRadius: 999, background: accent }}
+                />
+                <span style={{ fontWeight: 500 }}>{item.name}</span>
+                <span style={{ color: accent }}>
+                  {overdue ? 'overdue' : formatNextRun(item.next_run_at)}
+                </span>
+              </span>
+            )
+          })}
         </div>
       )}
 
@@ -654,6 +766,8 @@ function MonthGrid({
   anchorMonth: number
   onEventClick: (e: CalEvent) => void
 }) {
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
   return (
     <div className="cc-cal-month">
       <div className="cc-cal-month-head">
@@ -669,10 +783,11 @@ function MonthGrid({
             (e) => e.dayKey === d.date.toDateString(),
           )
           const outside = d.month !== anchorMonth
+          const past = d.date.getTime() < todayStart.getTime()
           return (
             <div
               key={d.iso}
-              className={`cc-cal-month-cell${outside ? ' outside' : ''}${d.today ? ' today' : ''}`}
+              className={`cc-cal-month-cell${outside ? ' outside' : ''}${d.today ? ' today' : ''}${past ? ' past' : ''}`}
             >
               <div className="n">{d.today ? <span>{d.n}</span> : d.n}</div>
               <div className="evts">
@@ -683,7 +798,7 @@ function MonthGrid({
                       key={evt.id}
                       type="button"
                       className="cc-cal-month-evt"
-                      style={{ borderLeftColor: tone.bg }}
+                      style={{ borderLeftColor: tone.bg, opacity: past ? 0.5 : 1 }}
                       onClick={() => onEventClick(evt)}
                       title={evt.name}
                     >

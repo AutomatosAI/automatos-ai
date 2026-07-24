@@ -23,7 +23,7 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
         'px-4 py-2',
         'text-sm font-normal',
         'rounded-full',
-        'border border-orange-500/20',
+        'border border-warning/20',
         'bg-background/80',
 
         // Fixed width - all boxes same size
@@ -35,8 +35,8 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
         'justify-start',
 
         // Hover effects
-        'hover:border-orange-500/40',
-        'hover:bg-orange-500/5',
+        'hover:border-warning/40',
+        'hover:bg-warning/5',
 
         // Active/pressed state
         'active:scale-95',
@@ -47,7 +47,7 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
         // Focus styles
         'focus-visible:outline-none',
         'focus-visible:ring-2',
-        'focus-visible:ring-orange-500/50',
+        'focus-visible:ring-warning/50',
 
         // Disabled state
         'disabled:pointer-events-none',

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.llm import LLMConfig, LLMManager, LLMProvider, LLMResponse, create_llm_manager
+from core.llm.defaults import DEFAULT_MAX_OUTPUT_TOKENS
 from core.models import Agent, Base, PriorityLevel, Skill
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 
@@ -63,7 +64,7 @@ class ModelConfiguration:
     provider: str
     model_id: str
     temperature: float = 0.7
-    max_tokens: int = 2000
+    max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
@@ -88,7 +89,7 @@ class ModelConfiguration:
             provider=data.get("provider") or DEFAULT_LLM_PROVIDER,
             model_id=data.get("model_id", DEFAULT_LLM_MODEL),
             temperature=data.get("temperature", 0.7),
-            max_tokens=data.get("max_tokens", 2000),
+            max_tokens=data.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
             top_p=data.get("top_p", 1.0),
             frequency_penalty=data.get("frequency_penalty", 0.0),
             presence_penalty=data.get("presence_penalty", 0.0),
@@ -131,7 +132,7 @@ class AgentMetadata:
                 provider=provider,
                 model_id=self.preferred_model,
                 temperature=self.temperature or 0.7,
-                max_tokens=self.max_tokens or 2000,
+                max_tokens=self.max_tokens or DEFAULT_MAX_OUTPUT_TOKENS,
             )
         return ModelConfiguration.get_default()
 
@@ -245,13 +246,13 @@ class AgentFactory:
                     "provider": DEFAULT_LLM_PROVIDER,
                     "model": DEFAULT_LLM_MODEL,
                     "temperature": 0.7,
-                    "max_tokens": 2000,
+                    "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                     "context_window": 8192,
                 }
 
             # Lookup context window from LLM models registry
             context_window = 8192
-            max_tokens = 2000
+            max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
             try:
                 from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
@@ -276,7 +277,7 @@ class AgentFactory:
                 "provider": DEFAULT_LLM_PROVIDER,
                 "model": DEFAULT_LLM_MODEL,
                 "temperature": 0.7,
-                "max_tokens": 2000,
+                "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                 "context_window": 8192,
             }
 
@@ -295,7 +296,7 @@ class AgentFactory:
                 model = DEFAULT_LLM_MODEL
 
             context_window = 8192
-            max_tokens = 2000
+            max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
             try:
                 from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
@@ -320,9 +321,24 @@ class AgentFactory:
                 "provider": DEFAULT_LLM_PROVIDER,
                 "model": DEFAULT_LLM_MODEL,
                 "temperature": 0.7,
-                "max_tokens": 2000,
+                "max_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
                 "context_window": 8192,
             }
+
+    def _model_max_output_tokens(self, model_id: Optional[str]) -> int:
+        """The selected model's own output ceiling from the LLM registry, or the
+        canonical default if the model isn't found. Lets an agent that hasn't set
+        an explicit Max Output Tokens default to what its model actually supports
+        — never a hardcoded literal."""
+        if model_id and self.db_session is not None:
+            try:
+                from core.models import LLMModel
+                m = self.db_session.query(LLMModel).filter_by(model_id=model_id).first()
+                if m and m.max_output_tokens:
+                    return m.max_output_tokens
+            except Exception as e:
+                self.logger.warning(f"max_output_tokens lookup failed for {model_id}: {e}")
+        return DEFAULT_MAX_OUTPUT_TOKENS
 
     def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> tuple[str, str]:
         """Auto-detect and correct provider-model mismatches.
@@ -705,7 +721,7 @@ class AgentFactory:
                     "provider": tier_config.get("provider"),
                     "model": tier_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", tier_config.get("temperature", 0.7)),
-                    "max_tokens": tier_config.get("max_tokens", 2000),
+                    "max_tokens": tier_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (force_llm_tier=system_llm)")
             elif force_llm_tier == "orchestrator_llm" or use_orchestrator_llm:
@@ -715,7 +731,7 @@ class AgentFactory:
                     "provider": orchestrator_llm_config.get("provider"),
                     "model": orchestrator_llm_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", 2000)),
+                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} ({reason})")
             elif agent_has_model:
@@ -723,7 +739,7 @@ class AgentFactory:
                     "provider": agent_model_config["provider"],
                     "model": agent_model_config["model_id"],
                     "temperature": agent_model_config.get("temperature", 0.7),
-                    "max_tokens": agent_model_config.get("max_tokens", 2000),
+                    "max_tokens": agent_model_config.get("max_tokens") or self._model_max_output_tokens(agent_model_config.get("model_id")),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (agent model_config)")
             else:
@@ -732,7 +748,7 @@ class AgentFactory:
                     "provider": orchestrator_llm_config.get("provider"),
                     "model": orchestrator_llm_config.get("model"),
                     "temperature": agent_llm_config.get("temperature", orchestrator_llm_config.get("temperature", 0.7)),
-                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", 2000)),
+                    "max_tokens": agent_llm_config.get("max_tokens", orchestrator_llm_config.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS)),
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (no agent model_config)")
 
@@ -773,7 +789,7 @@ class AgentFactory:
                 provider=provider,
                 model=model_id_str,
                 temperature=llm_config_dict.get("temperature", 0.7),
-                max_tokens=llm_config_dict.get("max_tokens", 2000),
+                max_tokens=llm_config_dict.get("max_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
                 api_key=resolved.api_key if resolved else None,
                 top_p=llm_config_dict.get("top_p"),
                 frequency_penalty=llm_config_dict.get("frequency_penalty"),
@@ -910,8 +926,19 @@ class AgentFactory:
                         agent=db_agent,
                         workspace_id=agent_runtime.workspace_id,
                         task_description=prompt,
+                        # Narrow the dispatcher enum to task-relevant actions —
+                        # without a query this lane shipped all 137 every run.
+                        query=prompt,
                     )
-                    messages.append({"role": "system", "content": context_result.system_prompt})
+                    # PRD-201 S4: carry the assembler's cache-stable prefix on the
+                    # system message so the Anthropic client can place its
+                    # cache_control breakpoint there. Non-Anthropic providers
+                    # ignore the extra key.
+                    messages.append({
+                        "role": "system",
+                        "content": context_result.system_prompt,
+                        "cache_prefix": context_result.cacheable_prefix,
+                    })
                 else:
                     # Last resort — should not happen
                     messages.append({"role": "system", "content": f"You are agent {agent_runtime.agent_id}."})
@@ -933,13 +960,14 @@ class AgentFactory:
                 tool_schemas = list(context_result.tools)
             else:
                 # Explicit system_prompt path: load tools directly
-                from modules.tools.tool_router import get_tools_for_agent
+                from modules.tools.tool_router import get_tools_for_agent_async
 
                 # PRD-138 US-009: pass the user prompt so the dispatcher
                 # enum narrows in lockstep with the prompt summary. Falls
                 # back to the full enum if SEMANTIC_TOOL_ROUTING is off,
-                # the prompt is empty, or ranking fails.
-                tool_schemas = get_tools_for_agent(
+                # the prompt is empty, or ranking fails. Awaited on this
+                # loop — never bridged through a helper thread.
+                tool_schemas = await get_tools_for_agent_async(
                     agent_id=agent_runtime.agent_id,
                     db_session=self.db_session,
                     workspace_id=agent_runtime.workspace_id,
@@ -1007,41 +1035,164 @@ class AgentFactory:
             # --- Execute with retries ---
             last_error = None
             messages_snapshot = list(messages)  # snapshot before retry loop
+
+            # PRD-201 S5: generalise ContextGuard beyond chat — missions and
+            # heartbeats now get the same model-aware compaction the chat path
+            # already had, run once before the tool loop. Guarded: a compaction
+            # fault must never fail the run.
+            try:
+                from core.context_guard import ContextGuard as _ContextGuard
+                _guard_model = getattr(
+                    getattr(agent_runtime.llm_manager, "config", None), "model", None
+                ) or ""
+                _compacted, _was_compacted, _guarded_tools = await _ContextGuard().check_and_compact(
+                    messages=messages_snapshot,
+                    model_name=_guard_model,
+                    llm_manager=agent_runtime.llm_manager,
+                    workspace_id=str(agent_runtime.workspace_id),
+                    agent_id=agent_runtime.agent_id,
+                    db_session=self.db_session,
+                    tools=tool_schemas,
+                )
+                if _was_compacted:
+                    messages_snapshot = _compacted
+                    self.logger.info(
+                        "[PRD-201 S5] ContextGuard compacted headless context for agent %s",
+                        agent_id,
+                    )
+                if _guarded_tools is None and tool_schemas:
+                    tool_schemas = []
+                    self.logger.warning(
+                        "[PRD-201 S5] ContextGuard dropped tools (over budget) for agent %s",
+                        agent_id,
+                    )
+            except Exception as _cg_err:
+                self.logger.debug("[PRD-201 S5] ContextGuard skipped: %s", _cg_err)
+
+            from core.llm.request_scope import headless_run
+
             for attempt in range(max(1, max_retries)):
                 try:
                     messages = list(messages_snapshot)  # reset each attempt
-                    response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                    # PRD-201 S5: mark the Anthropic call as a headless run so the
+                    # client seam emits context-editing + the memory tool.
+                    with headless_run():
+                        response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                     execution_time = time.time() - start_time
 
-                    # --- Tool loop: iterate until no more tool calls or max iterations ---
-                    tool_iteration = 0
-                    tool_results = []
-                    while response and response.tool_calls and tool_iteration < max_tool_iterations:
-                        tool_iteration += 1
-                        self.logger.info(
-                            f"Tool iteration {tool_iteration}/{max_tool_iterations}: "
-                            f"{len(response.tool_calls)} tool call(s)"
-                        )
+                    # --- Converged tool loop (PRD-142 W3-S4 / G6): same executor as chat ---
+                    from modules.tools.execution.tool_loop import ToolLoopExecutor
 
-                        tool_results = await self._execute_tool_calls(
-                            response.tool_calls,
-                            agent_runtime,
-                            workspace_id,
-                        )
+                    async def _agent_llm_cb(msgs, tls):
+                        # PRD-201 S5: keep the headless scope across the tool loop's
+                        # re-invocations so every iteration emits context-editing.
+                        with headless_run():
+                            return await agent_runtime.llm_manager.generate_response(msgs, tools=tls)
 
-                        # Append assistant message + tool results to conversation
-                        messages.append({
-                            "role": "assistant",
-                            "content": response.content or "",
-                            "tool_calls": response.tool_calls,
-                        })
-                        messages.extend(tool_results)
+                    # PRD-178 S1 (F020): thread the calling task's field context
+                    # so PlatformActionExecutor binds field tools to THIS run's
+                    # field_id — never a `.first()` guess over concurrent missions.
+                    _field_caller_context = (
+                        {"field_context": context}
+                        if context and context.get("field_id") else None
+                    )
+                    # PRD-193 S1/S4 (P2-12): a confirmation ask fired on a
+                    # board-task run must link its grant back to the task
+                    # (details.board_task_id), so the grant API's existing
+                    # board re-queue resumes the run into the now-active
+                    # grant. api/board_tasks passes source/task_id in context.
+                    if (
+                        context
+                        and context.get("source") == "board_task"
+                        and context.get("task_id") is not None
+                    ):
+                        _field_caller_context = {
+                            **(_field_caller_context or {}),
+                            "board_task_id": context.get("task_id"),
+                        }
 
-                        # Call LLM again with tool results
-                        response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
-                        execution_time = time.time() - start_time
+                    async def _agent_tool_cb(name, args, call_id, ws_id):
+                        # PRD-201 S5: the Anthropic memory tool is client-executed —
+                        # run it against the durable store with the /memories
+                        # traversal guard, never through the platform tool registry.
+                        if name == "memory":
+                            from modules.memory.memory_tool import (
+                                DurableMemoryStoreBackend,
+                                MemoryToolBackend,
+                            )
+                            _mem_result = await MemoryToolBackend(
+                                DurableMemoryStoreBackend(), workspace_id=ws_id
+                            ).handle(args or {})
+                            return {
+                                "success": True,
+                                "llm_context": _mem_result,
+                                "raw_result": _mem_result,
+                            }
+                        # SLACK empty-params guard.
+                        if not args and "SLACK" in name:
+                            return {
+                                "success": False,
+                                "llm_context": json.dumps(
+                                    {"error": "Empty parameters for tool requiring input"}
+                                ),
+                            }
+                        try:
+                            # PRD-192 S3: turn-level budget estimate on the
+                            # agent lane (same shared estimator as chat) so
+                            # the policy gate prices this call.
+                            from core.context_guard import estimate_turn_budget
+                            _turn_budget = estimate_turn_budget(
+                                agent_runtime.llm_manager, messages
+                            )
+                            _cb_caller_context = (
+                                {**(_field_caller_context or {}), **_turn_budget}
+                                or None
+                            )
+                            raw = await agent_runtime.tool_executor.execute_tool(
+                                tool_name=name,
+                                parameters=args,
+                                agent_id=agent_runtime.agent_id,
+                                workspace_id=ws_id,
+                                caller_context=_cb_caller_context,
+                            )
+                            return {
+                                "success": True,
+                                "llm_context": json.dumps(raw),
+                                "raw_result": raw,
+                            }
+                        except Exception as tool_err:
+                            self.logger.error(f"    [TRACE] {name} failed: {tool_err}")
+                            return {
+                                "success": False,
+                                "llm_context": json.dumps({"error": str(tool_err)}),
+                            }
 
-                    if tool_iteration >= max_tool_iterations:
+                    loop_executor = ToolLoopExecutor(
+                        llm_callback=_agent_llm_cb,
+                        tool_callback=_agent_tool_cb,
+                        max_iterations=max_tool_iterations,
+                        content_truncate_tokens=0,  # agent path historically did not truncate
+                    )
+                    loop_result = await loop_executor.run(
+                        initial_response=response,
+                        messages=messages,
+                        tools=tool_schemas,
+                        workspace_id=workspace_id,
+                    )
+                    response = loop_result.response
+                    tool_iteration = loop_result.iterations
+                    execution_time = time.time() - start_time
+
+                    # Recover the last round's tool messages for empty-response synthesis.
+                    tool_results: List[Dict[str, Any]] = []
+                    for msg in reversed(messages):
+                        if msg.get("role") == "tool":
+                            tool_results.append(msg)
+                        elif tool_results:
+                            break
+                    tool_results.reverse()
+
+                    if loop_result.max_iterations_reached:
                         self.logger.warning(f"Hit max tool iterations ({max_tool_iterations}) for agent {agent_id}")
 
                     # Synthesize empty response from tool results
@@ -1174,89 +1325,6 @@ class AgentFactory:
             agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
             self.logger.error(f"Task execution error: {e}")
             return {"status": "error", "error": str(e)}
-
-    # ==================================================================
-    # Tool Execution (extracted from execute_with_prompt)
-    # ==================================================================
-
-    async def _execute_tool_calls(
-        self,
-        tool_calls: List[Dict],
-        agent_runtime: AgentRuntime,
-        workspace_id: Optional[Any],
-    ) -> List[Dict]:
-        """Execute tool calls from LLM response, deduplicating within a turn."""
-        tool_results = []
-        executed_hashes: set = set()
-        tool_executor = agent_runtime.tool_executor
-
-        for tool_call in tool_calls:
-            func_name = tool_call["function"]["name"]
-            func_args_str = tool_call["function"]["arguments"]
-
-            try:
-                func_args = json.loads(func_args_str)
-                canonical_args = json.dumps(func_args, sort_keys=True)
-            except json.JSONDecodeError as jde:
-                self.logger.warning(
-                    "[tool_call] JSON decode failed for %s args (len=%d, first 200=%r): %s",
-                    func_name,
-                    len(func_args_str) if isinstance(func_args_str, str) else 0,
-                    func_args_str[:200] if isinstance(func_args_str, str) else func_args_str,
-                    jde,
-                )
-                canonical_args = func_args_str.strip() if isinstance(func_args_str, str) else ""
-                func_args = {}
-
-            call_hash = f"{func_name}:{canonical_args}"
-
-            if call_hash in executed_hashes:
-                self.logger.warning(f"[DEDUPE] Skipping duplicate tool call: {func_name}")
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps({"error": "Duplicate tool call skipped"}),
-                })
-                continue
-
-            # Filter empty params for critical tools
-            if not func_args and "SLACK" in func_name:
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps({"error": "Empty parameters for tool requiring input"}),
-                })
-                continue
-
-            executed_hashes.add(call_hash)
-            self.logger.info(f"  [TRACE] Calling {func_name}({func_args})")
-
-            try:
-                result = await tool_executor.execute_tool(
-                    tool_name=func_name,
-                    parameters=func_args,
-                    agent_id=agent_runtime.agent_id,
-                    workspace_id=workspace_id,
-                )
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps(result),
-                })
-                self.logger.info(f"    [TRACE] {func_name} completed")
-            except Exception as e:
-                self.logger.error(f"    [TRACE] {func_name} failed: {e}")
-                tool_results.append({
-                    "tool_call_id": tool_call["id"],
-                    "role": "tool",
-                    "name": func_name,
-                    "content": json.dumps({"error": str(e)}),
-                })
-
-        return tool_results
 
     # ==================================================================
     # Composio Hint Injection

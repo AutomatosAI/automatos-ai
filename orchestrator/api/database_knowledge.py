@@ -10,11 +10,11 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+from pydantic import BaseModel
+
 from core.database.database import get_db
 from core.models.database_knowledge import (
     DatabaseKnowledgeSourceCreate,
-    SemanticMetricCreate,
-    SemanticDimensionCreate,
     DatabaseQueryRequest,
     QueryTemplateExecute
 )
@@ -30,6 +30,7 @@ from core.models.database_knowledge import DatabaseKnowledgeSource, DatabaseQuer
 from core.credentials.service import CredentialStore
 from modules.nl2sql import DatabaseIntrospectionService
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
@@ -44,21 +45,14 @@ tool_integration = None
 def get_services():
     global db_service, cache_service, tool_integration
     if not db_service:
-        from core.llm import create_llm_manager
-        from modules.rag import RAGService
-        from modules.search.services.context_engineering_service import ContextEngineeringService
-        from core.services.audit_service import AuditService
-        
-        db_service = DatabaseKnowledgeService(
-            credential_resolver=get_credential_resolver(),
-            llm_provider=create_llm_manager(service_name="orchestrator"),
-            rag_service=RAGService(),
-            context_engineering=ContextEngineeringService(),
-            audit_service=AuditService()
-        )
+        # PRD-160 S1: single construction site shared with the in-process
+        # agent path (modules.nl2sql.get_database_knowledge_service).
+        from modules.nl2sql import get_database_knowledge_service
+
+        db_service = get_database_knowledge_service()
         cache_service = get_database_cache_service()
         tool_integration = get_database_tool_integration()
-    
+
     return db_service, cache_service, tool_integration
 
 
@@ -102,8 +96,6 @@ async def get_item(
                 "dialect": s.dialect,
                 "is_active": s.is_active,
                 "status": s.status,
-                "total_queries_executed": s.total_queries_executed or 0,
-                "avg_query_time_ms": s.avg_query_time_ms,
                 "last_introspected": s.last_introspected.isoformat() if s.last_introspected else None,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "schema_tables_count": len(s.schema_metadata.get('tables', {})) if s.schema_metadata else 0,
@@ -114,7 +106,7 @@ async def get_item(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/", response_model=Dict[str, Any])
+@router.post("/", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("knowledge:create"))])
 async def create_database_source(
     source: DatabaseKnowledgeSourceCreate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -137,7 +129,8 @@ async def create_database_source(
             name=source.name,
             credential_id=source.credential_id,
             workspace_id=ctx.workspace_id,
-            description=source.description
+            description=source.description,
+            dialect=source.dialect,
         )
         
         # Create tools for agents
@@ -166,7 +159,7 @@ async def create_database_source(
         raise HTTPException(status_code=400, detail="Failed to create database source")
 
 
-@router.post("/{source_id}/query", response_model=Dict[str, Any])
+@router.post("/{source_id}/query", response_model=Dict[str, Any], dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def query_database(
     source_id: int,
     request: DatabaseQueryRequest,
@@ -178,17 +171,30 @@ async def query_database(
     Returns results with visualization hints.
     """
     service, cache, _ = get_services()
-    
+
     try:
+        uid = str(ctx.user.id) if ctx.user and getattr(ctx.user, "id", None) else None
         result = await service.smart_query(
             source_id=str(source_id),
             text=request.query,
-            user_id="1",  # TODO: Get from auth
-            agent_id=None
+            user_id=uid or "1",
+            agent_id=None,
+            # W3-S9: scope the source lookup to the authenticated workspace
+            # so a workspace A token can't use workspace B's source_id.
+            workspace_id=str(ctx.workspace_id),
         )
-        
+
+        # PRD-160 S4: every NL query lands one audit row (best-effort).
+        await service.write_nl_audit(
+            source_id=source_id,
+            user_id=uid,
+            agent_id=None,
+            nl_query=request.query,
+            result=result if isinstance(result, dict) else {},
+        )
+
         return result
-    
+
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
@@ -196,7 +202,7 @@ async def query_database(
         raise HTTPException(status_code=400, detail="Query execution failed")
 
 
-@router.post("/{source_id}/introspect")
+@router.post("/{source_id}/introspect", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def introspect_schema(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -284,42 +290,85 @@ async def get_schema(
     return source.schema_metadata
 
 
-@router.post("/{source_id}/semantic")
+# PRD-199 S2: the canonical semantic doc is the READER's shape
+# (modules/nl2sql/query/nl2sql_service.py renders it into the generation
+# prompt) — instructions first-class, metrics dict-of-dicts keyed on 'sql',
+# dimensions nested {category: {name: sql}}. The API accepts flat rows and
+# builds that shape once, here.
+class SemanticMetricRow(BaseModel):
+    name: str
+    sql: str
+    description: Optional[str] = ""
+
+
+class SemanticDimensionRow(BaseModel):
+    category: str
+    name: str
+    sql: str
+
+
+class SemanticLayerBody(BaseModel):
+    instructions: str = ""
+    metrics: List[SemanticMetricRow] = []
+    dimensions: List[SemanticDimensionRow] = []
+
+
+def _dimension_rows_to_doc(rows: List[SemanticDimensionRow]) -> Dict[str, Dict[str, str]]:
+    doc: Dict[str, Dict[str, str]] = {}
+    for row in rows:
+        doc.setdefault(row.category, {})[row.name] = row.sql
+    return doc
+
+
+@router.get("/{source_id}/semantic")
+async def get_semantic_layer(
+    source_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """PRD-199 S2: the editor's load path. Only POST existed before, so
+    every load 405'd and was swallowed to console — the admin edited a
+    blank form regardless of what was stored."""
+    service, _, _ = get_services()
+    try:
+        doc = await service.get_semantic_layer(
+            str(source_id), workspace_id=str(ctx.workspace_id)
+        )
+        return {"success": True, **doc}
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Database source not found")
+
+
+@router.post("/{source_id}/semantic", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def update_semantic_layer(
     source_id: int,
-    metrics: List[SemanticMetricCreate] = Body(default=[]),
-    dimensions: List[SemanticDimensionCreate] = Body(default=[]),
+    body: SemanticLayerBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
 ):
-    """
-    Update semantic layer (metrics and dimensions).
-    """
-    service, cache, _ = get_services()
-    
+    """PRD-199 S1/S2: persist the canonical semantic doc (workspace-scoped —
+    the old handler never passed the workspace, so only its own crash
+    prevented a cross-tenant write)."""
+    service, _, _ = get_services()
     try:
-        # Convert to proper types
-        from modules.nl2sql import SemanticMetric, SemanticDimension
-        
-        metric_objects = [
-            SemanticMetric(**m.dict()) for m in metrics
-        ]
-        dimension_objects = [
-            SemanticDimension(**d.dict()) for d in dimensions
-        ]
-        
-        await service.update_semantic_layer(
+        doc = await service.update_semantic_layer(
             source_id=str(source_id),
-            metrics=metric_objects,
-            dimensions=dimension_objects
+            semantic_doc={
+                "instructions": body.instructions,
+                "metrics": {
+                    m.name: {"sql": m.sql, "description": m.description or ""}
+                    for m in body.metrics
+                },
+                "dimensions": _dimension_rows_to_doc(body.dimensions),
+            },
+            workspace_id=str(ctx.workspace_id),
         )
-        
         return {
             "success": True,
-            "metrics_updated": len(metrics),
-            "dimensions_updated": len(dimensions)
+            "instructions_saved": bool(doc["instructions"]),
+            "metrics_updated": len(body.metrics),
+            "dimensions_updated": len(body.dimensions),
         }
-    
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Database source not found")
     except Exception as e:
         logging.getLogger(__name__).error(f"Failed to update semantic layer for source {source_id}: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Failed to update semantic layer")
@@ -349,14 +398,12 @@ async def get_database_source(
         "dialect": source.dialect,
         "status": source.status,
         "is_active": source.is_active,
-        "total_queries_executed": source.total_queries_executed,
-        "avg_query_time_ms": source.avg_query_time_ms,
         "last_introspected": source.last_introspected,
         "created_at": source.created_at
     }
 
 
-@router.delete("/{source_id}")
+@router.delete("/{source_id}", dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_database_source(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -427,34 +474,37 @@ async def list_query_templates(
     ]
 
 
-@router.post("/{source_id}/template/execute")
+@router.post("/templates/{template_id}/execute", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def execute_template(
-    source_id: int,
-    request: QueryTemplateExecute,
+    template_id: int,
+    body: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
+    """Execute a saved Query Template against its source (PRD-160 S4).
+
+    Path matches the frontend's call (templates/{id}/execute with source_id in
+    the body); the previous /{source_id}/template/execute stub returned empty
+    data, so the Execute button could never succeed.
     """
-    Execute a query template with parameters.
-    """
+    source_id = body.get("source_id")
+    if not source_id:
+        raise HTTPException(status_code=400, detail="source_id is required")
+
     service, _, _ = get_services()
-    
-    try:
-        # This would execute the template
-        # Implementation would be in the service
-        return {
-            "success": True,
-            "template_id": request.template_id,
-            "data": [],
-            "visualization_type": "table"
-        }
-    
-    except Exception as e:
-        logging.getLogger(__name__).error(f"Failed to execute template for source {source_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Template execution failed")
+    result = await service.execute_template(
+        source_id=int(source_id),
+        template_id=template_id,
+        parameters=body.get("parameters") or {},
+        workspace_id=str(ctx.workspace_id),  # workspace-scoped source lookup
+        max_rows=int(body.get("max_rows", 1000)),
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Template execution failed"))
+    return result
 
 
-@router.post("/{source_id}/query/sql")
+@router.post("/{source_id}/query/sql", dependencies=[Depends(require_workspace_permission("knowledge:read"))])
 async def execute_validated_sql(
     source_id: int,
     payload: Dict[str, Any] = Body(...),
@@ -669,6 +719,20 @@ async def list_audit_entries(
     db: Session = Depends(get_db)
 ):
     """List query audit entries for a database source."""
+    # PRD-156 S3: verify the source belongs to the caller's workspace before
+    # returning its audit (natural-language queries + generated SQL are
+    # sensitive). Without this, any workspace could read another's audit by
+    # guessing a source_id.
+    source = (
+        db.query(DatabaseKnowledgeSource)
+        .filter(
+            DatabaseKnowledgeSource.id == source_id,
+            DatabaseKnowledgeSource.workspace_id == ctx.workspace_id,
+        )
+        .first()
+    )
+    if not source:
+        raise HTTPException(status_code=404, detail="Database source not found")
     entries = (
         db.query(DatabaseQueryAudit)
         .filter(DatabaseQueryAudit.source_id == source_id)
@@ -734,7 +798,7 @@ async def list_training_examples(
     ]
 
 
-@router.post("/{source_id}/examples")
+@router.post("/{source_id}/examples", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def add_training_example(
     source_id: int,
     body: Dict[str, Any] = Body(...),
@@ -760,7 +824,7 @@ async def add_training_example(
     return {"success": True, "example_id": example_id}
 
 
-@router.put("/{source_id}/examples/{example_id}")
+@router.put("/{source_id}/examples/{example_id}", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def update_training_example(
     source_id: int,
     example_id: int,
@@ -798,7 +862,7 @@ async def update_training_example(
     return {"success": True, "example_id": example_id}
 
 
-@router.put("/{source_id}/examples/{example_id}/verify")
+@router.put("/{source_id}/examples/{example_id}/verify", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def verify_training_example(
     source_id: int,
     example_id: int,
@@ -814,7 +878,7 @@ async def verify_training_example(
     return {"success": True, "example_id": example_id, "verified": True}
 
 
-@router.delete("/{source_id}/examples/{example_id}")
+@router.delete("/{source_id}/examples/{example_id}", dependencies=[Depends(require_workspace_permission("knowledge:delete"))])
 async def delete_training_example(
     source_id: int,
     example_id: int,
@@ -830,7 +894,7 @@ async def delete_training_example(
     return {"success": True, "deleted_id": example_id}
 
 
-@router.post("/{source_id}/examples/import")
+@router.post("/{source_id}/examples/import", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def import_training_examples(
     source_id: int,
     body: Dict[str, Any] = Body(...),
@@ -885,7 +949,7 @@ async def get_training_example_stats(
 # PRD-61: Schema Refresh API (US-010)
 # =============================================================================
 
-@router.post("/{source_id}/schema/refresh")
+@router.post("/{source_id}/schema/refresh", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def refresh_schema(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -947,7 +1011,7 @@ async def refresh_schema(
 # PRD-61: Benchmark API (US-018)
 # =============================================================================
 
-@router.post("/{source_id}/benchmark/run")
+@router.post("/{source_id}/benchmark/run", dependencies=[Depends(require_workspace_permission("knowledge:update"))])
 async def run_benchmark(
     source_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -976,11 +1040,20 @@ async def run_benchmark(
         example_store=SQLExampleStore(db_session=db)
     )
 
+    # PRD-199 S6 (§8-Q4: live source): execution accuracy against the
+    # connected database — each SQL is validated (read-only, LIMIT-capped)
+    # and runs under the pipeline's EXPLAIN/timeout guards. The old runner
+    # mirrored exact-match into execution_match (a TODO since PRD-61);
+    # equivalent-but-textually-different SQL now scores as the match it is.
+    async def _execute(sql: str):
+        return await service.run_validated_readonly_sql(source, sql)
+
     result = await runner.run_benchmark(
         database_source_id=str(source_id),
         workspace_id=str(ctx.workspace_id),
         schema_metadata=source.schema_metadata,
-        dialect=source.dialect or "postgresql"
+        dialect=source.dialect or "postgresql",
+        execute_sql=_execute,
     )
 
     # Persist benchmark run

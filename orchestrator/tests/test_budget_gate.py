@@ -63,14 +63,21 @@ def _make_task(
     return task
 
 
-def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, tokens_used=0):
-    """Create a mock OrchestrationRun."""
+def _make_run(*, run_id=None, max_concurrent=2, token_budget_estimate=None, tokens_used=0, config=None):
+    """Create a mock OrchestrationRun.
+
+    `config` mirrors the real OrchestrationRun.config JSONB column (DB default
+    '{}'). Defaulting to an empty dict is required: the budget gate reads
+    ``run.config.get("budget_pause_disabled")`` and a bare MagicMock would make
+    that truthy, short-circuiting the gate to "allow".
+    """
     run = MagicMock()
     run.id = run_id or uuid4()
     run.max_concurrent = max_concurrent
     run.token_budget_estimate = token_budget_estimate
     run.tokens_used = tokens_used
     run.state = RunState.RUNNING.value
+    run.config = {} if config is None else config
     return run
 
 
@@ -324,3 +331,30 @@ class TestDispatchReadyBudgetGate:
             )
         ]
         assert len(budget_events) == 0
+
+
+# ---------------------------------------------------------------------------
+# PRD-163 S5: dollar-ceiling budget (replaces the token-estimate pause).
+# An explicit config['cost_ceiling'] (USD) drives the gate; otherwise the token
+# estimate is priced out at COORDINATOR_COST_PER_1K_TOKENS ($0.003/1k).
+# ---------------------------------------------------------------------------
+
+class TestDollarCeiling:
+    def test_cost_ceiling_exceeded(self):
+        # 200k tokens -> $0.60 > $0.30 ceiling -> EXCEEDED
+        run = _make_run(config={"cost_ceiling": 0.30}, tokens_used=200_000)
+        assert MissionDispatcher._get_budget_status(run) == BudgetStatus.EXCEEDED
+
+    def test_cost_ceiling_healthy_under_half(self):
+        # 50k tokens -> $0.15 = 25% of a $0.60 ceiling -> HEALTHY
+        run = _make_run(config={"cost_ceiling": 0.60}, tokens_used=50_000)
+        assert MissionDispatcher._get_budget_status(run) == BudgetStatus.HEALTHY
+
+    def test_dollar_ceiling_overrides_token_estimate(self):
+        # The token estimate alone would read healthy, but the small $ ceiling wins.
+        run = _make_run(
+            token_budget_estimate=10_000_000, tokens_used=100_000,
+            config={"cost_ceiling": 0.10},
+        )
+        # cost = $0.30 > $0.10 ceiling -> EXCEEDED
+        assert MissionDispatcher._get_budget_status(run) == BudgetStatus.EXCEEDED

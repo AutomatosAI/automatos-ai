@@ -310,7 +310,11 @@ _RUN_STATE_TO_BOARD_STATUS: dict[str, str] = {
     RunState.VERIFYING.value: "in_progress",
     RunState.AWAITING_HUMAN.value: "review",
     RunState.COMPLETED.value: "done",
-    RunState.FAILED.value: "done",
+    # PRD-204 S4 (OS-review F023): a failed mission's card used to render
+    # "done" -- the board was lying. "failed" is a valid board status
+    # (api/board_tasks.VALID_STATUSES). cancelled stays "done": the user
+    # deliberately closed it.
+    RunState.FAILED.value: "failed",
     RunState.CANCELLED.value: "done",
 }
 
@@ -355,7 +359,8 @@ def sync_mission_board_status(
     if new_status == "in_progress" and board_task.started_at is None:
         board_task.started_at = run.started_at or datetime.now(timezone.utc)
 
-    if new_status == "done" and board_task.completed_at is None:
+    # "failed" is terminal for the card too (PRD-204 S4) -- stamp completion.
+    if new_status in ("done", "failed") and board_task.completed_at is None:
         board_task.completed_at = run.completed_at or datetime.now(timezone.utc)
 
     # Store failure info when mission fails

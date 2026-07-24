@@ -1,0 +1,51 @@
+{
+  "default_allowed_actions": {
+    "board_task": [
+      "escalate"
+    ],
+    "mission": [
+      "replan",
+      "reassign",
+      "spawn_agent",
+      "escalate"
+    ],
+    "playbook_execution": [
+      "rerun",
+      "tweak_rerun",
+      "escalate"
+    ],
+    "scheduled_playbook": [
+      "escalate"
+    ]
+  },
+  "policy_table": {
+    "persistent": {
+      "acts_on_failure": false,
+      "acts_on_low_score": false,
+      "compares": false,
+      "recurring": true,
+      "scores": false
+    },
+    "run_and_report": {
+      "acts_on_failure": false,
+      "acts_on_low_score": false,
+      "compares": false,
+      "recurring": false,
+      "scores": true
+    },
+    "score_and_improve": {
+      "acts_on_failure": true,
+      "acts_on_low_score": true,
+      "compares": false,
+      "recurring": false,
+      "scores": true
+    },
+    "watch_change": {
+      "acts_on_failure": false,
+      "acts_on_low_score": false,
+      "compares": true,
+      "recurring": false,
+      "scores": true
+    }
+  }
+}

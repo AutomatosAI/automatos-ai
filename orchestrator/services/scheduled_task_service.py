@@ -10,7 +10,6 @@ injecting the task description as the opening message.
 """
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -19,22 +18,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
+from services.schedule_util import is_valid_cron, next_run as _util_next_run
 
 logger = logging.getLogger(__name__)
 
 # Limits
 MAX_TASKS_PER_AGENT = 10
 MAX_RECURRING_PER_WORKSPACE = 25
-
-# Cron validation — 5-field standard cron (minute hour dom month dow)
-_CRON_RE = re.compile(
-    r"^("
-    r"(\*|[0-9]{1,2}(-[0-9]{1,2})?(,[0-9]{1,2}(-[0-9]{1,2})?)*(/[0-9]{1,2})?)"
-    r"\s+){4}"
-    r"(\*|[0-9]{1,2}(-[0-9]{1,2})?(,[0-9]{1,2}(-[0-9]{1,2})?)*(/[0-9]{1,2})?)"
-    r"$"
-)
-
 
 class ScheduledTaskService:
     """Creates, lists, cancels, and executes agent-scheduled tasks."""
@@ -55,6 +45,7 @@ class ScheduledTaskService:
         description: str,
         schedule: str,
         max_runs: Optional[int] = None,
+        origin_chat_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new scheduled task.
@@ -80,14 +71,9 @@ class ScheduledTaskService:
             except (ValueError, TypeError):
                 return {"success": False, "error": f"Invalid ISO datetime: {schedule}. Use format: 2026-03-11T09:00:00Z"}
         else:
-            # Validate using the same CronTrigger the scheduler will use
-            try:
-                parts = schedule.strip().split()
-                if len(parts) != 5:
-                    raise ValueError("Expected 5 fields")
-                from apscheduler.triggers.cron import CronTrigger
-                CronTrigger(minute=parts[0], hour=parts[1], day=parts[2], month=parts[3], day_of_week=parts[4])
-            except Exception:
+            # Validate with the shared cron util (croniter — standard crontab
+            # semantics, the same the calendar and firing use post-PRD-162).
+            if not is_valid_cron(schedule):
                 return {"success": False, "error": f"Invalid cron expression: {schedule}. Use 5-field format: '0 9 * * 1' (minute hour dom month dow)"}
 
         # Validate agents exist in workspace
@@ -144,10 +130,12 @@ class ScheduledTaskService:
             text("""
                 INSERT INTO agent_scheduled_tasks
                     (workspace_id, created_by_agent_id, target_agent_id,
-                     task_type, description, schedule, max_runs, next_run_at)
+                     task_type, description, schedule, max_runs, next_run_at,
+                     origin_chat_id)
                 VALUES
                     (:ws_id, :created_by, :target,
-                     :task_type, :description, :schedule, :max_runs, :next_run_at)
+                     :task_type, :description, :schedule, :max_runs, :next_run_at,
+                     CAST(:origin_chat_id AS uuid))
                 RETURNING id, created_at
             """),
             {
@@ -159,6 +147,7 @@ class ScheduledTaskService:
                 "schedule": schedule,
                 "max_runs": max_runs,
                 "next_run_at": next_run_at,
+                "origin_chat_id": str(origin_chat_id) if origin_chat_id else None,
             },
         )
         row = result.fetchone()
@@ -382,6 +371,8 @@ class ScheduledTaskService:
                 agent_id=task.target_agent_id,
                 message=f"[Scheduled Task #{task_id}] {task.description}",
                 db=db,
+                origin_chat_id=getattr(task, "origin_chat_id", None),
+                task_id=task_id,
             )
 
         except Exception as e:
@@ -404,6 +395,8 @@ class ScheduledTaskService:
         agent_id: int,
         message: str,
         db: Session,
+        origin_chat_id: Optional[str] = None,
+        task_id: Optional[int] = None,
     ) -> None:
         """
         Execute a task on the target agent via AgentFactory.
@@ -432,6 +425,27 @@ class ScheduledTaskService:
                 "[ScheduledTask] Agent %d completed task: %s",
                 agent_id, str(llm_text)[:200],
             )
+
+            # PRD-205 S6: the output is DELIVERED, not discarded (the PRD-77
+            # defect: this used to be a 200-char logger.info and nothing
+            # else). Target = the conversation the task was created from
+            # (origin_chat_id, captured at platform_schedule_task time) --
+            # scheduled-task rows are agent-created, so there is no user to
+            # fall back to; a task with no captured origin (pre-205 rows, API
+            # creations) keeps the log-only behaviour honestly. Fail-soft: a
+            # chat failure never fails the scheduled run.
+            if str(llm_text).strip() and origin_chat_id:
+                from services.chat_messenger import deliver_background_message
+
+                deliver_background_message(
+                    db,
+                    workspace_id=workspace_id,
+                    text=str(llm_text),
+                    source={"origin": "scheduled_task"},
+                    chat_id=str(origin_chat_id),
+                    link_type="scheduled_task",
+                    link_id=str(task_id) if task_id is not None else None,
+                )
         except Exception as e:
             logger.error("[ScheduledTask] Failed to trigger agent chat: %s", e, exc_info=True)
             raise
@@ -464,14 +478,9 @@ class ScheduledTaskService:
                 run_at = datetime.fromisoformat(schedule.replace("Z", "+00:00"))
                 trigger = DateTrigger(run_date=run_at)
             else:
-                parts = schedule.strip().split()
-                trigger = CronTrigger(
-                    minute=parts[0],
-                    hour=parts[1],
-                    day=parts[2],
-                    month=parts[3],
-                    day_of_week=parts[4],
-                )
+                # Standard crontab semantics so firing matches the calendar's
+                # croniter next_run (PRD-162 — one schedule truth).
+                trigger = CronTrigger.from_crontab(schedule)
 
             # APScheduler needs a sync wrapper for async execute_task
             import asyncio
@@ -497,21 +506,8 @@ class ScheduledTaskService:
 
     @staticmethod
     def _next_cron_run(cron_expr: str) -> Optional[datetime]:
-        """Compute next run time from a cron expression."""
-        try:
-            from apscheduler.triggers.cron import CronTrigger
-
-            parts = cron_expr.strip().split()
-            trigger = CronTrigger(
-                minute=parts[0],
-                hour=parts[1],
-                day=parts[2],
-                month=parts[3],
-                day_of_week=parts[4],
-            )
-            return trigger.get_next_fire_time(None, datetime.now(timezone.utc))
-        except Exception:
-            return None
+        """Next run from a cron expression via the shared schedule util (croniter)."""
+        return _util_next_run(cron_expr, now=datetime.now(timezone.utc))
 
     async def load_active_tasks_to_scheduler(self) -> int:
         """

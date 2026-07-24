@@ -111,14 +111,10 @@ class AnalyticsEngine:
             active_agents = self.db.query(Agent).filter(Agent.status == 'active').count()
             total_agents = self.db.query(Agent).count()
             
-            # Basic metrics
+            # Real counts only — agent success/exec/tokens are omitted until a real source exists (mission success rate lives in _get_workflow_metrics), not faked
             return {
                 "activeAgents": active_agents,
                 "totalAgents": total_agents,
-                "successRate": 85.0,  # Placeholder
-                "avgExecutionTime": 2.5,  # Placeholder
-                "totalTokensUsed": 0,  # Placeholder
-                "recentExecutions": 0  # Placeholder
             }
             
         except Exception as e:
@@ -407,19 +403,19 @@ class AnalyticsEngine:
             return "Unknown"
     
     async def get_agent_analytics(self, agent_id: int, period: str = "7d") -> Dict[str, Any]:
-        """Get detailed analytics for a specific agent"""
+        """Get detailed analytics for a specific agent.
+
+        Per-agent execution metrics (success rate, avg time, tokens) have no
+        persisted source yet — track_agent_execution only logs/publishes to
+        Redis — so they are omitted rather than faked. Mission-level success
+        rate lives in _get_workflow_metrics.
+        """
         try:
-            # Placeholder implementation
             return {
                 "agentId": agent_id,
                 "period": period,
-                "successRate": 85.0,
-                "avgExecutionTime": 2.5,
-                "totalTokensUsed": 0,
-                "totalExecutions": 0,
-                "performanceTrend": []
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting agent analytics: {e}", exc_info=True)
             return {"error": str(e)}

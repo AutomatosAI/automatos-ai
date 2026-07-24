@@ -5,7 +5,6 @@ GET  /api/chat/voice/audio/{message_id} -- Retrieve voice audio.
 GET  /api/voice/health -- Voice service health check.
 """
 
-import base64
 import json
 import logging
 import uuid
@@ -19,9 +18,11 @@ from sqlalchemy.orm import Session
 from config import config
 from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from modules.voice.client import VoiceServiceClient
 from modules.voice.audio import validate_audio, upload_voice_audio, get_voice_audio_url
+from modules.voice.telemetry import record_voice_turn
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["voice"])
@@ -150,7 +151,7 @@ async def _collect_streaming_response(
     return "".join(collected_text), effective_agent_id
 
 
-@router.post("/api/chat/voice")
+@router.post("/api/chat/voice", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def voice_chat(
     audio: UploadFile = File(...),
     conversation_id: str = Form(""),
@@ -277,31 +278,23 @@ async def voice_chat(
 
     tts_latency_ms = 0.0
     audio_s3_key = None
-    audio_bytes_raw: bytes | None = None
 
     if response_format in ("audio", "both"):
         try:
-            # Cap TTS text to ~500 chars to keep synthesis fast (esp. Chatterbox)
-            tts_text = response_text
-            if len(tts_text) > 500:
-                # Truncate at last sentence boundary within limit
-                truncated = tts_text[:500]
-                last_period = truncated.rfind('.')
-                last_question = truncated.rfind('?')
-                last_exclaim = truncated.rfind('!')
-                cut = max(last_period, last_question, last_exclaim)
-                tts_text = truncated[:cut + 1] if cut > 100 else truncated
-
+            # PRD-203 V·S5: synthesize the FULL reply so the audio the user hears
+            # matches the text on screen. The old ~500-char cap silently mutilated
+            # a substantive Auto answer mid-sentence — a trust bug, deleted outright.
             tts_result = await _voice_client.synthesize(
-                text=tts_text,
+                text=response_text,
                 voice=tts_voice,
                 model=tts_model,
                 reference_audio=tts_reference_audio,
             )
             tts_latency_ms = tts_result.duration_ms
-            audio_bytes_raw = tts_result.audio
 
-            # Store TTS audio in S3 (for persistence / replay)
+            # Single audio delivery path (V·S5): persist to S3 and serve it via
+            # GET /api/chat/voice/audio/{message_id} (presigned redirect). No inline
+            # base64 — one delivery mechanism per turn, not three.
             audio_s3_key = upload_voice_audio(
                 workspace_id=workspace_id,
                 message_id=message_id,
@@ -328,13 +321,27 @@ async def voice_chat(
         },
     )
 
+    # PRD-203 V·S6: persist the turn's decomposed latencies so voice is
+    # measurable (p50/p95, truncation-rate → 0). Fire-and-forget — never fatal.
+    record_voice_turn(
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        stt_latency_ms=stt_result.duration_ms,
+        tts_latency_ms=tts_latency_ms,
+        total_ms=total_ms,
+        transcript=transcript,
+        response_text=response_text,
+        truncated=False,  # V·S5 deleted the ~500-char cap — no turn is truncated
+        audio_delivered=audio_s3_key is not None,
+    )
+
     return JSONResponse({
         "conversation_id": conversation_id,
         "message_id": message_id,
         "transcript": transcript,
         "response_text": response_text,
         "audio_url": f"/api/chat/voice/audio/{message_id}" if audio_s3_key else None,
-        "audio_base64": base64.b64encode(audio_bytes_raw).decode() if audio_bytes_raw else None,
         "audio_format": "mp3",
         "stt_latency_ms": round(stt_result.duration_ms, 1),
         "tts_latency_ms": round(tts_latency_ms, 1),

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Database, Clock, CheckCircle, TrendingUp, AlertCircle, Target, Play } from 'lucide-react'
 import { toast } from 'sonner'
+import { apiClient } from '@/lib/api-client'
 
 export function DatabaseQueryAnalytics() {
   const [stats, setStats] = useState<any>(null)
@@ -21,25 +22,22 @@ export function DatabaseQueryAnalytics() {
 
   const fetchAnalytics = async () => {
     try {
-      const [statsRes, perfRes, queriesRes] = await Promise.all([
-        fetch('/api/database/analytics/stats'),
-        fetch('/api/database/analytics/performance'),
-        fetch('/api/database/analytics/top-queries?limit=5')
+      const [statsRes, perfRes, queriesRes] = await Promise.allSettled([
+        apiClient.get('/api/database/analytics/stats'),
+        apiClient.get('/api/database/analytics/performance'),
+        apiClient.get('/api/database/analytics/top-queries?limit=5')
       ])
 
-      if (statsRes.ok) setStats(await statsRes.json())
-      if (perfRes.ok) setPerformance(await perfRes.json())
-      if (queriesRes.ok) setTopQueries(await queriesRes.json())
+      if (statsRes.status === 'fulfilled') setStats(statsRes.value)
+      if (perfRes.status === 'fulfilled') setPerformance(perfRes.value)
+      if (queriesRes.status === 'fulfilled') setTopQueries(queriesRes.value)
 
       // Fetch benchmark history (best effort - may not have sources)
       try {
-        const sourcesRes = await fetch('/api/knowledge/sources/database')
-        if (sourcesRes.ok) {
-          const sources = await sourcesRes.json()
-          if (sources.length > 0) {
-            const benchRes = await fetch(`/api/knowledge/sources/database/${sources[0].id}/benchmark/history?limit=10`)
-            if (benchRes.ok) setBenchmarks(await benchRes.json())
-          }
+        const sources = await apiClient.get<any[]>('/api/knowledge/sources/database')
+        if (sources && sources.length > 0) {
+          const bench = await apiClient.get(`/api/knowledge/sources/database/${sources[0].id}/benchmark/history?limit=10`)
+          setBenchmarks(bench)
         }
       } catch { /* no benchmarks available */ }
     } catch (error) {
@@ -192,20 +190,12 @@ export function DatabaseQueryAnalytics() {
               onClick={async () => {
                 setRunningBenchmark(true)
                 try {
-                  const sourcesRes = await fetch('/api/knowledge/sources/database')
-                  if (!sourcesRes.ok) throw new Error('No sources')
-                  const sources = await sourcesRes.json()
-                  if (sources.length === 0) { toast.error('No database sources to benchmark'); return }
-                  const res = await fetch(`/api/knowledge/sources/database/${sources[0].id}/benchmark/run`, { method: 'POST' })
-                  if (res.ok) {
-                    const result = await res.json()
-                    toast.success(`Benchmark complete: ${(result.exact_match_rate * 100).toFixed(1)}% exact match`)
-                    setBenchmarks(prev => [result, ...prev].slice(0, 10))
-                  } else {
-                    const err = await res.json()
-                    toast.error(err.detail || 'Benchmark failed')
-                  }
-                } catch { toast.error('Could not run benchmark') }
+                  const sources = await apiClient.get<any[]>('/api/knowledge/sources/database')
+                  if (!sources || sources.length === 0) { toast.error('No database sources to benchmark'); return }
+                  const result = await apiClient.post(`/api/knowledge/sources/database/${sources[0].id}/benchmark/run`)
+                  toast.success(`Benchmark complete: ${(result.exact_match_rate * 100).toFixed(1)}% exact match`)
+                  setBenchmarks(prev => [result, ...prev].slice(0, 10))
+                } catch (e: any) { toast.error(e?.message || 'Could not run benchmark') }
                 finally { setRunningBenchmark(false) }
               }}
             >

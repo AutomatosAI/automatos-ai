@@ -70,6 +70,7 @@ class RedisSharedContext(SharedContextPort):
         self,
         team_agent_ids: list[int],
         initial_data: Optional[dict[str, Any]] = None,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> str:
         context_id = str(uuid.uuid4())
         r = await _get_async_redis()
@@ -82,6 +83,8 @@ class RedisSharedContext(SharedContextPort):
             }
             if initial_data:
                 meta["initial_data"] = json.dumps(initial_data)
+            if provenance:
+                meta["provenance"] = json.dumps(provenance)
 
             await r.hset(_meta_key(context_id), mapping=meta)
             logger.info(
@@ -100,6 +103,7 @@ class RedisSharedContext(SharedContextPort):
         value: str,
         agent_id: int,
         strength: float = 1.0,
+        provenance: Optional[dict[str, Any]] = None,
     ) -> None:
         r = await _get_async_redis()
         try:
@@ -113,6 +117,7 @@ class RedisSharedContext(SharedContextPort):
                     "strength": strength,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "injected_order": current_len,
+                    "provenance": provenance or {},
                 }
             )
             await r.rpush(_patterns_key(context_id), pattern)
@@ -131,7 +136,11 @@ class RedisSharedContext(SharedContextPort):
         query: str,
         agent_id: int,
         top_k: int = 10,
+        record_access: bool = True,
     ) -> list[dict[str, Any]]:
+        # PRD-178 S2: ``record_access`` is part of the port contract. The Redis
+        # baseline reads via lrange and never reinforces, so it is already
+        # read-only — the flag is accepted for interface parity, no-op here.
         r = await _get_async_redis()
         try:
             raw_patterns = await r.lrange(_patterns_key(context_id), 0, -1)

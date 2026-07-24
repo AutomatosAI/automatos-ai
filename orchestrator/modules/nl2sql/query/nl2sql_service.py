@@ -39,10 +39,13 @@ class NaturalLanguageToSQLService:
     Supports few-shot examples, error correction context, and schema linking.
     """
 
-    def __init__(self, llm_provider, example_store=None, schema_linker=None):
+    def __init__(self, llm_provider, example_store=None):
+        # PRD-199 S5: the schema_linker seam is deleted — production never
+        # injected one, so the branch below it was dead; the linker's own
+        # "embedding-based" docstring was false (embedding_manager assigned,
+        # never used). The wired keyword path IS the path.
         self.llm_provider = llm_provider
         self.example_store = example_store
-        self.schema_linker = schema_linker
 
     def generate_sql(
         self,
@@ -106,8 +109,11 @@ class NaturalLanguageToSQLService:
 
         except Exception as e:
             logger.error(f"Failed to generate SQL: {str(e)}")
+            # Return NO executable SQL on failure — an error-string SELECT would
+            # validate and then execute, surfacing the error text as a fake result
+            # row. Callers branch on metadata["success"] is False.
             return (
-                f"SELECT 'Error generating SQL: {str(e)}' as error",
+                "",
                 f"Failed to generate SQL: {str(e)}",
                 {"error": str(e), "success": False}
             )
@@ -124,15 +130,7 @@ class NaturalLanguageToSQLService:
     ) -> str:
         """Build a comprehensive prompt for the LLM."""
 
-        # Use schema linker if available, otherwise fall back to improved scoring
-        if self.schema_linker:
-            try:
-                linked = self.schema_linker.link(question, schema_metadata, semantic_layer)
-                relevant_tables = linked.tables
-            except Exception:
-                relevant_tables = self._get_relevant_tables(question, schema_metadata)
-        else:
-            relevant_tables = self._get_relevant_tables(question, schema_metadata)
+        relevant_tables = self._get_relevant_tables(question, schema_metadata)
 
         prompt_parts = []
 
@@ -194,6 +192,15 @@ Database Dialect: {dialect}
 
         # Add semantic layer if available
         if semantic_layer:
+            # PRD-160 S4: admin-instructions semantic layer v1 — free-text
+            # per-connection business definitions an admin writes (e.g. "active
+            # = status NOT IN ('churned','deleted'); fiscal year starts in Feb").
+            # Rendered first so the definitions steer everything below.
+            instructions = semantic_layer.get('instructions') or semantic_layer.get('business_context')
+            if instructions:
+                prompt_parts.append("\nBUSINESS DEFINITIONS (authoritative — follow exactly):")
+                prompt_parts.append(str(instructions).strip())
+
             if semantic_layer.get('metrics'):
                 prompt_parts.append("\nBUSINESS METRICS (use these when applicable):")
                 for name, metric in semantic_layer['metrics'].items():

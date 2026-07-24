@@ -73,12 +73,13 @@ This is why the same Auto can be CEO-voice for a Shopify operator and Casual-Sid
 Auto is **always present**. He is the product's spine.
 
 - **Chat page** — Auto, full-screen. Focused conversation. No distractions.
-- **Every other page** — Auto as a widget docked in the corner. Page-aware. `[Context: User is on the Agent Management page]` is surfaced visibly in the widget — a trust receipt, so the user never wonders whether Auto knows what they're looking at.
+- **Every other page** — Auto as a widget docked in the corner. Page-aware: the widget names the current page up front ("Ask me anything about Agent Management…") — a trust receipt, so the user never wonders whether Auto knows what they're looking at. The page context itself travels server-side with each request (PRD-220), so it never pollutes the saved conversation or its title.
 
 ### Widget behaviour
 
-- **Ephemeral by default.** Widget chats reset on page navigation. No "history graveyard" to curate.
-- **Promote to persist.** "Open in full chat" escalates the widget thread into the full Chat page, where it becomes a permanent thread.
+- **Persistent across navigation (PRD-220).** The widget remembers its active conversation (per workspace + user) and reconnects to it on the next page — Auto doesn't forget you exist because you clicked a link. The resume window is 24h of inactivity; after that the widget starts fresh.
+- **Multi-threaded.** A lightweight thread switcher (up to 5 recent conversations, with previews and unread dots) lets Chat A build playbooks while Chat B discusses a report. Closing a thread hides it from the widget; the conversation itself stays in full-chat history.
+- **Promote to persist.** "Open in full chat" deep-links the widget thread into the full Chat page (`/chat?chatId=…`) — same conversation, bigger surface.
 - **Bypass is legitimate.** Power users `@mention` a specific agent to skip Auto's routing — when you know the target, skipping the orchestrator saves tokens.
 
 ### Bug report surface (pilot only)

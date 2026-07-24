@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Button } from '@/components/ui/button'
+import { ErrorState, LoadingState } from '@/components/shared'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -60,7 +61,7 @@ import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-mode
 import { useTools } from '@/hooks/use-tools-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -110,7 +111,7 @@ export function AgentConfigurationModal({
   const [originalAgentType, setOriginalAgentType] = useState<string>('custom')
 
   // Use real API hooks
-  const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
+  const { data: agent, isLoading: loading, error: agentError, refetch: refetchAgent } = useAgent(agentId?.toString() || '')
   const { data: agentConfig } = useAgentConfig(agentId?.toString() || '')
   const updateConfigMutation = useUpdateAgentConfig()
 
@@ -775,24 +776,11 @@ export function AgentConfigurationModal({
 
           <CardContent className="overflow-y-auto p-6">
             {loading && (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                  <p className="text-muted-foreground">Loading configuration...</p>
-                </div>
-              </div>
+              <LoadingState variant="spinner" label="Loading configuration…" className="py-12" />
             )}
 
             {error && (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
-                  <p className="text-destructive mb-4">Error: {error}</p>
-                  <Button onClick={() => window.location.reload()} variant="outline">
-                    Try Again
-                  </Button>
-                </div>
-              </div>
+              <ErrorState description={error} onRetry={() => refetchAgent()} className="py-12" />
             )}
 
             {agent && (

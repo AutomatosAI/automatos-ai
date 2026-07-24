@@ -71,7 +71,7 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
                                 required
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="w-full bg-secondary/30 border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/50 transition-all placeholder:text-muted-foreground/50"
+                                className="w-full bg-secondary/30 border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-warning/50 transition-all placeholder:text-muted-foreground/50"
                                 placeholder="colleague@company.com"
                             />
                         </div>
@@ -85,7 +85,7 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
                         <select
                             value={role}
                             onChange={(e) => setRole(e.target.value)}
-                            className="w-full bg-secondary/30 border border-white/10 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/50 max-h-40"
+                            className="w-full bg-secondary/30 border border-white/10 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-warning/50 max-h-40"
                         >
                             <option value="admin">Admin</option>
                             <option value="editor">Editor</option>
@@ -105,7 +105,7 @@ export function InviteModal({ isOpen, onClose, onInvite, workspaceId }: InviteMo
                         <button
                             type="submit"
                             disabled={loading}
-                            className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            className="px-4 py-2 bg-warning hover:bg-warning text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
                             {loading ? 'Sending...' : 'Send Invitation'}
                         </button>

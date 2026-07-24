@@ -6,7 +6,7 @@ Database Models for Automotas AI System
 Comprehensive data models for agents, skills, workflows, documents, and system configuration.
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint, Index, text
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
@@ -26,9 +26,13 @@ class PriorityLevel(str, Enum):
     LOW = "low"
 
 # Association tables for many-to-many relationships
+# PRD-191 S1/S4: one link per (agent, skill) — enforced, not implied — and a
+# real per-attachment priority (the uncapped-primary slot is a decision, F054).
 agent_skills = Table('agent_skills', Base.metadata,
     Column('agent_id', Integer, ForeignKey('agents.id')),
-    Column('skill_id', Integer, ForeignKey('skills.id'))
+    Column('skill_id', Integer, ForeignKey('skills.id')),
+    Column('priority', Integer, nullable=False, server_default='0'),
+    UniqueConstraint('agent_id', 'skill_id', name='uq_agent_skills_agent_id_skill_id'),
 )
 
 workflow_agents = Table('workflow_agents', Base.metadata,
@@ -169,6 +173,29 @@ class LLMUsage(Base):
     created_at = Column(DateTime, default=func.now())
 
 # Database Models
+class Team(Base):
+    """PRD-158 S1: a real (small) Teams entity per workspace.
+
+    ``normalized_name`` is the canonical (lowercased/trimmed) form from
+    ``core.team_access.normalize_team`` — unique per workspace, so 'Support' and
+    'support' are one team. ``name`` keeps a human display label. Documents stay
+    multi-team via ``documents.team_access``; agents are single-team via
+    ``agents.team`` (schema leaves room for multi-team later).
+    """
+    __tablename__ = 'teams'
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'normalized_name', name='uq_teams_workspace_normalized'),
+        Index('ix_teams_workspace', 'workspace_id'),
+        {'extend_existing': True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
+    name = Column(String(100), nullable=False)
+    normalized_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
 class Agent(Base):
     __tablename__ = 'agents'
     __table_args__ = (
@@ -266,7 +293,12 @@ class Agent(Base):
     })  # Model usage tracking
     
     # Relationships
-    skills = relationship("Skill", secondary=agent_skills, back_populates="agents")
+    # PRD-191 S4: ordered by the attachment-level priority so the first skill
+    # is the real primary (highest priority wins; stable within equal priority).
+    skills = relationship(
+        "Skill", secondary=agent_skills, back_populates="agents",
+        order_by=agent_skills.c.priority.desc(),
+    )
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
     # Tool/app assignments are managed via `AgentAppAssignment` (Composio cache model).
@@ -578,6 +610,11 @@ class Document(Base):
     last_accessed = Column(DateTime, nullable=True)
     rag_query_count = Column(Integer, default=0)
 
+    # PRD-164 S3 (Q58): provenance scope. NULL = regular upload;
+    # 'agent_output' = flywheel-ingested agent output (mission synthesis,
+    # generated document, submitted report) — a filterable, team-like scope.
+    source_type = Column(String(50), nullable=True)
+
 class SystemConfiguration(Base):
     __tablename__ = 'system_configurations'
     
@@ -819,6 +856,9 @@ class DocumentResponse(BaseModel):
     original_filename: Optional[str]
     file_type: Optional[str]
     file_size: Optional[int]
+    # SHA-256 of the uploaded bytes. Exposed so callers (e.g. Academy corpus sync)
+    # can match a document by exact content rather than by filename.
+    content_hash: Optional[str] = None
     status: str
     chunk_count: Optional[int]
     tags: Optional[List[str]]
@@ -829,6 +869,8 @@ class DocumentResponse(BaseModel):
     created_by: Optional[str] = None
     last_accessed: Optional[datetime] = None
     rag_query_count: Optional[int] = 0
+    # PRD-164 S3 (Q58): 'agent_output' rows are the flywheel scope
+    source_type: Optional[str] = None
 
 class SystemConfigCreate(BaseModel):
     config_key: str
@@ -986,23 +1028,6 @@ class User(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-class ExternalKnowledge(Base):
-    """External knowledge for memory augmentation"""
-    __tablename__ = 'external_knowledge'
-    
-    id = Column(Integer, primary_key=True)
-    content = Column(JSON, nullable=False)
-    source = Column(String(255), nullable=False, default='external')
-    knowledge_metadata = Column(JSON, nullable=True)  # Renamed to avoid SQLAlchemy conflict
-    access_count = Column(Integer, default=0)
-    
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Ownership & Visibility (New)
-    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
-    is_shared = Column(Boolean, default=True)
-
 # Enhanced Pydantic Models for new functionality
 
 class TaskCreate(BaseModel):
@@ -1066,68 +1091,9 @@ class WebSocketMessage(BaseModel):
     data: Dict[str, Any]
     timestamp: datetime = Field(default_factory=datetime.now)
 
-# Evaluation-specific tables for enhanced assessment methodologies
-class EvaluationResult(Base):
-    __tablename__ = 'evaluation_results'
-    
-    id = Column(Integer, primary_key=True)
-    evaluation_id = Column(String(255), nullable=False, unique=True)
-    evaluation_type = Column(String(100), nullable=False)  # 'system_quality', 'component_assessment', etc.
-    scope = Column(String(100), nullable=False)  # 'single_task', 'component', 'system', 'enterprise'
-    target_id = Column(String(255), nullable=False)  # ID of evaluated entity
-    overall_score = Column(Float, nullable=False)
-    detailed_results = Column(JSON)  # Detailed evaluation data
-    success = Column(Boolean, default=True)
-    error_message = Column(Text, nullable=True)
-    execution_time_seconds = Column(Float, nullable=True)
-    user_id = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=func.now())
-
-class BenchmarkAssessment(Base):
-    __tablename__ = 'benchmark_assessments'
-    
-    id = Column(Integer, primary_key=True)
-    benchmark_id = Column(String(255), nullable=False)
-    benchmark_name = Column(String(255), nullable=False)
-    benchmark_type = Column(String(100), nullable=False)  # 'performance', 'quality', 'efficiency'
-    validity_score = Column(Float, nullable=True)
-    reliability_score = Column(Float, nullable=True)
-    discriminatory_power = Column(Float, nullable=True)
-    overall_quality = Column(Float, nullable=True)
-    quality_classification = Column(String(50), nullable=True)
-    assessment_data = Column(JSON)  # Detailed assessment results
-    recommendations = Column(JSON)  # List of improvement recommendations
-    created_at = Column(DateTime, default=func.now())
-
-class ComponentMetricsDB(Base):
-    __tablename__ = 'component_metrics'
-    
-    id = Column(Integer, primary_key=True)
-    component_id = Column(String(255), nullable=False)
-    component_type = Column(String(100), nullable=False)  # 'orchestrator', 'agent', 'workflow'
-    performance_score = Column(Float, nullable=True)
-    reliability_score = Column(Float, nullable=True)
-    readiness_score = Column(Float, nullable=True)
-    capability_rating = Column(Float, nullable=True)
-    complexity_index = Column(Float, nullable=True)
-    environment_factor = Column(Float, nullable=True)
-    assessment_details = Column(JSON)  # Detailed metrics
-    assessment_timestamp = Column(DateTime, default=func.now())
-
-class IntegrationAnalysisDB(Base):
-    __tablename__ = 'integration_analyses'
-    
-    id = Column(Integer, primary_key=True)
-    system_id = Column(String(255), nullable=False)
-    coherence_score = Column(Float, nullable=True)
-    efficiency_score = Column(Float, nullable=True)
-    emergence_score = Column(Float, nullable=True)
-    integration_score = Column(Float, nullable=True)
-    integration_classification = Column(String(50), nullable=True)
-    analysis_data = Column(JSON)  # Detailed analysis results
-    recommendations = Column(JSON)  # Integration improvement recommendations
-    confidence_level = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=func.now())
+# PRD-142 Wave 5 (WS-AA): the evaluation/benchmark/component-metrics/
+# integration-analysis models were verified dead and removed; their tables
+# are dropped by alembic/versions/prd142_wave5_drop_dead_tables.py.
 
 
 # ===================================================================
@@ -1146,6 +1112,16 @@ class Chat(Base):
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     visibility = Column(String(20), default='private', nullable=False)
     last_context = Column(JSONB, default=dict, server_default='{}')
+    # PRD-205 S2/S3: 'user' = ordinary conversation; 'auto' = the per-user
+    # per-workspace thread where Auto speaks unprompted (background verdicts,
+    # scheduled-task output). One 'auto' thread per (workspace, user) —
+    # enforced by the partial unique index below; ordinary in every other way.
+    kind = Column(String(20), nullable=False, default='user', server_default='user')
+    # PRD-206 S2: the thread checkpoint — {topic, decisions[], open_questions[],
+    # last_summary, next_step, updated_at, checkpointed_at, trigger}. Written by
+    # the checkpoint distill (idle sweep + platform_checkpoint_thread); read by
+    # the S3 resume payload. NULL until the thread has been checkpointed.
+    summary = Column(JSONB, nullable=True)
 
     # Relationships
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
@@ -1154,8 +1130,33 @@ class Chat(Base):
 
     __table_args__ = (
         CheckConstraint("visibility IN ('private', 'public')", name='check_chat_visibility'),
+        CheckConstraint("kind IN ('user', 'auto')", name='check_chat_kind'),
         Index('ix_chats_workspace_user', 'workspace_id', 'user_id'),
+        Index(
+            'uq_chats_auto_thread', 'workspace_id', 'user_id',
+            unique=True,
+            postgresql_where=text("kind = 'auto'"),
+        ),
         {'extend_existing': True}
+    )
+
+
+class PinnedDocument(Base):
+    """PRD-157 S5: a document pinned to a chat so its content is always present
+    in that conversation's context (within the token budget)."""
+    __tablename__ = 'pinned_documents'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id', ondelete='CASCADE'), nullable=False)
+    document_id = Column(Integer, ForeignKey('documents.id', ondelete='CASCADE'), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    created_by_user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('chat_id', 'document_id', name='uq_pinned_chat_document'),
+        Index('ix_pinned_documents_chat', 'chat_id'),
+        {'extend_existing': True},
     )
 
 
@@ -1169,8 +1170,26 @@ class Message(Base):
     role = Column(String(20), nullable=False)
     parts = Column(JSONB, nullable=False, default=list, server_default='[]')
     attachments = Column(JSONB, default=list, server_default='[]')
+    # PRD-185 S7: retrieval provenance for the turn that produced this message
+    # ({document_ids, chunk_ids, query}). Read at vote time to write a complete
+    # rag_feedback row. NULL for turns that retrieved nothing. Kept off `parts`
+    # so it never reaches the AI-SDK render contract.
+    retrieval_context = Column(JSONB, nullable=True)
+    # PRD-201 S1: the per-turn context-assembly trace — mode, per-section
+    # {name, priority, token_estimate, rendered_nonempty, trimmed}, the driving
+    # model, the resolved budget ceiling, injected memory ids and prep_ms. The
+    # durable answer to "what did Auto know when it said that?"; written
+    # regardless of TRACING_ENABLED. NULL for turns built before this shipped or
+    # by non-chat planes. Kept off `parts` so it never reaches the AI-SDK render
+    # contract (same discipline as retrieval_context).
+    context_trace = Column(JSONB, nullable=True)
+    # PRD-205 S3: background-author provenance — {origin: 'watcher'|
+    # 'scheduled_task', label: 'Auto · background', link_type, link_id}.
+    # NULL for every in-turn message. Kept off `parts` so it never reaches
+    # the AI-SDK render contract (same discipline as retrieval_context).
+    source = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
-    
+
     # Relationships
     chat = relationship("Chat", back_populates="messages")
     votes = relationship("Vote", back_populates="message", cascade="all, delete-orphan")
@@ -1444,6 +1463,11 @@ class DocumentTemplate(Base):
     # Sample data for preview
     sample_data = Column(JSONB, default=dict, server_default='{}')
 
+    # PRD-167 S2: canonical block-tree body ({"version", "blocks": [...]}).
+    # When present, this is the source of truth and renders to PDF/DOCX via the block
+    # renderers; templates without blocks fall back to the legacy template_content path.
+    blocks = Column(JSONB, nullable=True)
+
     # Metadata
     category = Column(String(100), default='general', server_default='general')
     tags = Column(PG_ARRAY(String), default=list)
@@ -1555,6 +1579,18 @@ class BoardTask(Base):
     blocked_at = Column(DateTime(timezone=True), nullable=True)
     blocked_reason = Column(Text, nullable=True)
     attachment_ids = Column(JSONB, default=list, server_default='[]')  # PRD-127: ephemeral attachments
+    # PRD-161: dispatch lease — claim/lease/requeue so assigned work executes
+    # exactly once. lease_until is the active claim's deadline (a worker holding
+    # it past this is presumed crashed → the sweeper requeues); attempts is the
+    # retry counter (Q41: 2 attempts then 'failed').
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default='0')
+    # PRD-161 Q44: reviewer feedback carried into the next execution's context
+    # when a task is rejected back to the same agent. Cleared once consumed.
+    review_feedback = Column(Text, nullable=True)
+    # PRD-161 S5: set once the SLA-breach notification has fired, so the sweeper
+    # flags an overdue task exactly once instead of every tick.
+    sla_breach_notified = Column(Boolean, nullable=False, default=False, server_default='false')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -1584,6 +1620,10 @@ class BoardTask(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "planning_data": self.planning_data,
+            "lease_until": self.lease_until.isoformat() if self.lease_until else None,
+            "attempts": self.attempts or 0,
+            "review_feedback": self.review_feedback,
+            "sla_breach_notified": bool(self.sla_breach_notified),
             "sla_deadline": self.sla_deadline.isoformat() if self.sla_deadline else None,
             "blocked_at": self.blocked_at.isoformat() if self.blocked_at else None,
             "blocked_reason": self.blocked_reason,
@@ -1662,5 +1702,32 @@ class BlogPost(Base):
         if include_content:
             d["content"] = self.content
         return d
+
+
+class DigestFeedback(Base):
+    """PRD-221 S10 — thumbs up/down on an Auto's Read digest.
+
+    Keyed by the digest's ``state_hash`` (not a digest row — the digest is
+    cache-only), so feedback attaches to the workspace state the read
+    described. One row per rating event; the endpoint validates rating ∈ {-1, 1}.
+    """
+
+    __tablename__ = "digest_feedback"
+    __table_args__ = (
+        CheckConstraint("rating IN (-1, 1)", name="ck_digest_feedback_rating"),
+        Index("ix_digest_feedback_workspace", "workspace_id"),
+        {"extend_existing": True},
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(String(255), nullable=True)
+    state_hash = Column(String(64), nullable=False)
+    rating = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

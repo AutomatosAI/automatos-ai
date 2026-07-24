@@ -27,10 +27,8 @@ const GROUP_ORDER: StudioMenuGroup[] = ['OPERATIONS', 'WORKFORCE', 'WORKSPACE'];
 
 export interface StudioSidebarProps {
   workspaceName?: string;
-  workspaceMeta?: string;
   workspaceMark?: string;
   alerts?: Record<string, string | number>;
-  showStats?: boolean;
   /** Collapse to icon-rail (60px). Defaults false. */
   collapsed?: boolean;
   /** Toggle handler. If absent, the toggle button is hidden. */
@@ -42,10 +40,8 @@ export interface StudioSidebarProps {
 // — kept as a static identity card showing the current workspace.
 export function StudioSidebar({
   workspaceName = 'Automatos AI',
-  workspaceMeta = 'pilot · 11 op',
   workspaceMark,
   alerts = {},
-  showStats = true,
   collapsed = false,
   onToggle,
 }: StudioSidebarProps) {
@@ -69,19 +65,9 @@ export function StudioSidebar({
           <span className="sh-glyph" />
           {!collapsed && <span>automatos</span>}
         </Link>
-        {!collapsed && (
-          <span
-            style={{
-              marginLeft: 'auto',
-              fontFamily: 'var(--font-geist-mono, monospace)',
-              fontSize: 9,
-              color: 'hsl(var(--muted-foreground))',
-              letterSpacing: '0.08em',
-            }}
-          >
-            v0.11
-          </span>
-        )}
+        {/* PRD-180 S2 (F038): removed the fabricated ``v0.11`` version literal —
+            no truthful version source exists to render, so the honest fix is to
+            drop it rather than display a made-up number. */}
         {onToggle && (
           <button
             type="button"
@@ -105,7 +91,6 @@ export function StudioSidebar({
         {!collapsed && (
           <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
             <div className="sh-nm">{workspaceName}</div>
-            <div className="sh-meta">{workspaceMeta}</div>
           </div>
         )}
       </div>
@@ -189,23 +174,10 @@ export function StudioSidebar({
             </Link>
           );
         })}
-
-        {showStats && !collapsed && (
-          <div className="sh-mini-stats">
-            <div className="sh-row">
-              <span>tick</span>
-              <span>5s</span>
-            </div>
-            <div className="sh-row">
-              <span>$/dec</span>
-              <span className="sh-ok">$0.0027</span>
-            </div>
-            <div className="sh-row">
-              <span>cache</span>
-              <span className="sh-ok">68%</span>
-            </div>
-          </div>
-        )}
+        {/* PRD-180 S2 (F038): removed the fabricated mini-stats block
+            (tick 5s / $/dec $0.0027 / cache 68%). Those numbers were hardcoded
+            literals, not real telemetry — a lie in the chrome corrodes trust in
+            every real metric. Deleted rather than wired (no real source here). */}
       </div>
     </aside>
   );

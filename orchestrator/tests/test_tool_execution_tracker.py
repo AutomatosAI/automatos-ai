@@ -77,36 +77,43 @@ ToolExecutionTracker = globals_copy["ToolExecutionTracker"]
 # ── Direct tool limits ──────────────────────────────────────────────
 
 
-def test_platform_tool_capped_at_2():
+def test_platform_tool_capped_at_limit():
     tracker = ToolExecutionTracker()
-    for i in range(3):
+    cap = tracker.TOOL_RETRY_LIMITS['platform_default']
+    for i in range(cap + 2):
         skip, _ = tracker.should_skip_execution("platform_get_settings", {"key": f"v{i}"})
         if not skip:
             tracker.record_execution("platform_get_settings", {"key": f"v{i}"})
 
-    assert tracker.tool_counts.get("platform_get_settings") == 2
-    skip, _ = tracker.should_skip_execution("platform_get_settings", {"key": "v3"})
+    assert tracker.tool_counts.get("platform_get_settings") == cap
+    skip, _ = tracker.should_skip_execution("platform_get_settings", {"key": "final"})
     assert skip
 
 
-def test_workspace_tool_capped_at_5():
+def test_workspace_tool_capped_at_limit():
     tracker = ToolExecutionTracker()
-    for i in range(6):
+    cap = tracker.TOOL_RETRY_LIMITS['workspace_default']
+    for i in range(cap + 2):
         skip, _ = tracker.should_skip_execution("workspace_grep", {"query": f"q{i}"})
         if not skip:
             tracker.record_execution("workspace_grep", {"query": f"q{i}"})
 
-    assert tracker.tool_counts.get("workspace_grep") == 5
+    assert tracker.tool_counts.get("workspace_grep") == cap
+    skip, _ = tracker.should_skip_execution("workspace_grep", {"query": "final"})
+    assert skip
 
 
-def test_default_tool_capped_at_3():
+def test_default_tool_capped_at_limit():
     tracker = ToolExecutionTracker()
-    for i in range(4):
+    cap = tracker.TOOL_RETRY_LIMITS['default']
+    for i in range(cap + 2):
         skip, _ = tracker.should_skip_execution("some_custom_tool", {"x": i})
         if not skip:
             tracker.record_execution("some_custom_tool", {"x": i})
 
-    assert tracker.tool_counts.get("some_custom_tool") == 3
+    assert tracker.tool_counts.get("some_custom_tool") == cap
+    skip, _ = tracker.should_skip_execution("some_custom_tool", {"x": 999})
+    assert skip
 
 
 # ── Exact-argument dedup ────────────────────────────────────────────
@@ -149,9 +156,14 @@ def test_dispatcher_counts_by_inner_action():
 
 
 def test_dispatcher_same_action_capped():
-    """Repeated calls to the same dispatcher action should be capped at 2."""
+    """Repeated dispatcher calls are capped by the inner action's prefix limit.
+
+    ``platform_execute:platform_list_agents`` resolves through the inner
+    ``platform_`` prefix to ``platform_default``, not the dispatcher name.
+    """
     tracker = ToolExecutionTracker()
-    for i in range(3):
+    cap = tracker.TOOL_RETRY_LIMITS['platform_default']
+    for i in range(cap + 2):
         skip, _ = tracker.should_skip_execution(
             "platform_execute", {"action": "platform_list_agents", "params": {"page": i}}
         )
@@ -160,9 +172,9 @@ def test_dispatcher_same_action_capped():
                 "platform_execute", {"action": "platform_list_agents", "params": {"page": i}}
             )
 
-    assert tracker.tool_counts.get("platform_execute:platform_list_agents") == 2
+    assert tracker.tool_counts.get("platform_execute:platform_list_agents") == cap
     skip, reason = tracker.should_skip_execution(
-        "platform_execute", {"action": "platform_list_agents", "params": {"page": 99}}
+        "platform_execute", {"action": "platform_list_agents", "params": {"page": 999}}
     )
     assert skip
     assert "platform_execute:platform_list_agents" in reason

@@ -442,31 +442,22 @@ async def get_system_health(db: Session, workspace_id: UUID, params: Dict[str, A
     except Exception as e:
         components["redis"] = {"status": "unhealthy", "error": str(e)[:100]}
 
-    # 3. Mem0 (long-term memory service)
+    # 3. Durable memory (in-process Qdrant L3, PRD-187 S1)
     try:
-        from modules.memory.integrations.mem0_client import _breaker as mem0_breaker
-        if mem0_breaker.is_open:
-            elapsed = _t.monotonic() - mem0_breaker.last_failure_time
-            components["mem0"] = {
-                "status": "unhealthy",
-                "error": "circuit breaker open",
-                "failures": mem0_breaker.failures,
-                "cooldown_remaining_s": max(0, int(60 - elapsed)),
+        from modules.memory.unified_memory_service import get_unified_memory_service
+        health = await get_unified_memory_service()._durable.health()
+        if health.get("healthy"):
+            components["durable_memory"] = {
+                "status": "healthy",
+                "collection": health.get("collection"),
             }
         else:
-            # Probe with a lightweight search (empty query, limit 1)
-            from modules.memory.unified_memory_service import get_unified_memory_service
-            svc = get_unified_memory_service()
-            probe = await svc.search_long_term(
-                workspace_id=str(workspace_id), query="health_probe", limit=1
-            )
-            components["mem0"] = {
-                "status": "healthy",
-                "circuit_breaker": "closed",
-                "failures": mem0_breaker.failures,
+            components["durable_memory"] = {
+                "status": "unhealthy",
+                "error": str(health.get("error", "unknown"))[:100],
             }
     except Exception as e:
-        components["mem0"] = {"status": "unhealthy", "error": str(e)[:100]}
+        components["durable_memory"] = {"status": "unhealthy", "error": str(e)[:100]}
 
     # 4. RAG pipeline (renumbered)
     try:

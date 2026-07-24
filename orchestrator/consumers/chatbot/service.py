@@ -12,6 +12,7 @@ Components:
 - StreamingChatService: SSE streaming orchestrator
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -26,24 +27,43 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, or_
 from difflib import SequenceMatcher
 
+# Converged tool-loop spine — chat + agent share this (PRD-142 W3-S4 / G6)
+from modules.tools.execution.tool_loop import (
+    RoundState,
+    ToolLoopExecutor,
+    ToolPostResult,
+)
+from modules.tools.execution.telemetry import resolve_action_name
+
 from core.models import Chat, Message, Vote, Workspace
 from core.services.image_store import get_image_store
 from config import config
 
 # Import from consumer's own modules
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
+from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
 from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
+# Async-native entries: the chat hot path must never bridge the narrowing
+# embed through a helper thread (freezes the event loop for its duration).
 from modules.tools.tool_router import (
-    _rank_actions_for_dispatcher,
+    _rank_actions_for_dispatcher_async,
     _semantic_routing_enabled,
     _semantic_routing_top_k,
-    get_tools_for_agent,
+    get_tools_for_agent_async,
+)
+from services.page_context import (
+    merge_into_trace,
+    page_actions_from_context as _page_actions_from_context,
 )
 
 logger = logging.getLogger(__name__)
+
+# PRD-157 S3: token budget for a single tool result fed back into the LLM loop
+# (replaces the former 6000/4000-char cuts). Truncation is token-aware.
+_TOOL_RESULT_TOKEN_BUDGET = 2000
 
 
 # =============================================================================
@@ -80,6 +100,58 @@ def _extract_query_from_args(tool_name: str, tool_args: Dict[str, Any]) -> Optio
     return None
 
 
+def build_tool_caller_context(
+    *,
+    user_query: Optional[str],
+    conversation_id: Optional[str],
+    turn_id: Optional[str],
+    driving_clerk: Optional[str],
+    prior_action: Optional[str],
+    model_id: Optional[str] = None,
+    est_input_tokens: int = 0,
+    est_output_tokens: int = 0,
+) -> Optional[Dict[str, Any]]:
+    """Build the caller_context threaded into every chat tool execution (PRD-177 S2 / F017).
+
+    Before this, the chat tool-callback threaded only ``{user_id}`` — so
+    ``user_query`` and the conversation/turn grouping never reached the edge
+    builder, and ``succeeds_for_intent`` intent affinities never materialized
+    from real traffic. This populates the fields telemetry.py already consumes:
+
+    * ``user_query``       — clusters intent (drives succeeds/fails_for_intent).
+    * ``conversation_id``  — groups a conversation's tool calls (router_decision).
+    * ``turn_id``          — groups ONE user turn's sequential calls; the edge
+      builder prefers turn_id for used_after pairing, so per-turn ordering is
+      exact rather than time-bucketed.
+    * ``user_id``          — the driving clerk (unchanged from before F017).
+    * ``prior_action``     — the previous tool this turn, for the signal recorder.
+    * ``model_id`` / ``est_input_tokens`` / ``est_output_tokens`` — PRD-192 S3:
+      the turn-level budget estimate (driving model, prompt tokens of the
+      assembled context, configured output cap) the policy chokepoint lifts
+      into ``ToolCall`` so budget admission prices the pending call.
+
+    Empty fields are omitted (not written as None) to keep the telemetry row
+    clean. Returns ``None`` when there is genuinely nothing to record, matching
+    the previous ``{...} if _driving_clerk else None`` contract.
+    """
+    ctx: Dict[str, Any] = {}
+    if user_query:
+        ctx["user_query"] = user_query
+    if conversation_id:
+        ctx["conversation_id"] = conversation_id
+    if turn_id:
+        ctx["turn_id"] = turn_id
+    if driving_clerk:
+        ctx["user_id"] = driving_clerk
+    if prior_action:
+        ctx["prior_action"] = prior_action
+    if model_id:
+        ctx["model_id"] = model_id
+        ctx["est_input_tokens"] = int(est_input_tokens or 0)
+        ctx["est_output_tokens"] = int(est_output_tokens or 0)
+    return ctx or None
+
+
 class ToolExecutionTracker:
     """
     Tracks tool executions within a conversation turn to prevent looping.
@@ -92,7 +164,10 @@ class ToolExecutionTracker:
     SEARCH_TOOLS = {
         'search_knowledge', 'semantic_search', 'search_codebase',
         'search_tables', 'search_images', 'search_formulas',
-        'search_multimodal', 'smart_query_database', 'query_database'
+        'search_multimodal',
+        # PRD-160 S1: NL2SQL re-enabled workspace-scoped & in-process. Treated as
+        # a search tool so semantically-similar repeat questions are deduped.
+        'smart_query_database', 'query_database',
     }
 
     TOOL_RETRY_LIMITS = {
@@ -100,11 +175,14 @@ class ToolExecutionTracker:
         'search_knowledge': 5,
         'semantic_search': 5,
         'search_codebase': 5,
-        'smart_query_database': 5,
-        'query_database': 5,
         'list_directory': 5,
         'read_file': 8,
         'write_file': 5,
+        # PRD-160 S1: NL2SQL is expensive and self-corrects internally
+        # (max_retries=2); cap turn-level reuse low to match the 2-attempt
+        # contract advertised in the tool description.
+        'smart_query_database': 2,
+        'query_database': 2,
         'platform_default': 25,
         'workspace_default': 8,
         'default': 5,
@@ -244,13 +322,19 @@ class ChatService:
         starting_after: Optional[datetime] = None,
         workspace_id: Optional[uuid.UUID] = None,
     ) -> List[Chat]:
-        """Get chat history for a user within a workspace."""
+        """Get chat history for a user within a workspace.
+
+        Ordered by most recent activity (``updated_at`` — bumped on every
+        ``save_message``), not creation time, so a thread that just received a
+        message surfaces first (PRD-220 S2). ``starting_after`` pages on the
+        same key.
+        """
         query = self.db.query(Chat).filter(Chat.user_id == user_id)
         if workspace_id is not None:
             query = query.filter(Chat.workspace_id == workspace_id)
         if starting_after:
-            query = query.filter(Chat.created_at < starting_after)
-        return query.order_by(desc(Chat.created_at)).limit(limit).all()
+            query = query.filter(Chat.updated_at < starting_after)
+        return query.order_by(desc(Chat.updated_at)).limit(limit).all()
 
     def update_chat_title(self, chat_id: str, title: str) -> bool:
         """Update chat title, handling unique constraint violations."""
@@ -314,9 +398,26 @@ class ChatService:
         role: str,
         parts: List[Dict[str, Any]],
         attachments: Optional[List[Dict[str, Any]]] = None,
-        workspace_id: Optional[str] = None
+        workspace_id: Optional[str] = None,
+        retrieval_context: Optional[Dict[str, Any]] = None,
+        context_trace: Optional[Dict[str, Any]] = None,
+        source: Optional[Dict[str, Any]] = None,
     ) -> Message:
-        """Save a message to the database."""
+        """Save a message to the database.
+
+        ``retrieval_context`` (PRD-185 S7) carries the turn's retrieved
+        ``{document_ids, chunk_ids, query}`` on assistant messages; NULL for
+        turns that retrieved nothing. Read back at vote time to feed rag_feedback.
+
+        ``context_trace`` (PRD-201 S1) carries the turn's context-assembly trace
+        (mode, per-section token/trim detail, model, budget ceiling) so "what did
+        Auto know?" is answerable; NULL for turns built before it shipped.
+
+        ``source`` (PRD-205 S3) carries background-author provenance
+        ({origin, label, link_type, link_id}) when the message was posted by
+        a server-side producer (watcher, scheduled task) rather than a turn;
+        NULL for every in-turn message.
+        """
         try:
             chat_uuid = uuid.UUID(chat_id)
         except ValueError:
@@ -359,6 +460,9 @@ class ChatService:
             role=role,
             parts=parts,
             attachments=attachments or [],
+            retrieval_context=retrieval_context,
+            context_trace=context_trace,
+            source=source,
             created_at=datetime.utcnow()
         )
         self.db.add(message)
@@ -389,6 +493,21 @@ class ChatService:
         if limit:
             query = query.limit(limit)
         return query.all()
+
+    def get_message(self, chat_id: str, message_id: str) -> Optional[Message]:
+        """Fetch a single message by (chat_id, message_id). None on bad id/miss.
+
+        PRD-185 S7: the vote path reads the assistant message's
+        ``retrieval_context`` to write a complete rag_feedback row.
+        """
+        try:
+            chat_uuid = uuid.UUID(chat_id)
+            message_uuid = uuid.UUID(message_id)
+        except ValueError:
+            return None
+        return self.db.query(Message).filter(
+            and_(Message.chat_id == chat_uuid, Message.id == message_uuid)
+        ).first()
 
     def vote_message(
         self,
@@ -475,9 +594,49 @@ class StreamingChatService:
         self.workspace_id = workspace_id
         self.widget_mode = widget_mode
 
+        # PRD-185 S7: per-turn retrieval provenance. The instance is constructed
+        # per request (one request == one turn), so these accumulate the turn's
+        # retrieved ids (pinned docs + retrieval-tool results) and are read at the
+        # assistant-message save. Reset defensively at each stream entrypoint.
+        self._turn_document_ids: Set[int] = set()
+        self._turn_chunk_ids: Set[int] = set()
+
         from modules.agents.factory.agent_factory import AgentFactory
         self.agent_factory = AgentFactory(db_session=db)
         logger.info("StreamingChatService initialized with AgentFactory integration")
+
+    def _reset_turn_retrieval(self) -> None:
+        """Clear per-turn retrieval provenance at the start of a turn."""
+        self._turn_document_ids = set()
+        self._turn_chunk_ids = set()
+
+    def _collect_tool_retrieval(self, tool_name: Optional[str], result: Any) -> None:
+        """Accumulate retrieved doc/chunk ids from a retrieval-tool result.
+
+        Best-effort and gated to retrieval tools — never raises into the turn.
+        """
+        try:
+            from modules.rag.retrieval_provenance import (
+                is_retrieval_tool, collect_doc_ids_from_tool_result,
+            )
+            if not is_retrieval_tool(tool_name):
+                return
+            docs, chunks = collect_doc_ids_from_tool_result(result)
+            self._turn_document_ids |= docs
+            self._turn_chunk_ids |= chunks
+        except Exception:
+            logger.debug("[PRD-185 S7] tool retrieval provenance collect failed", exc_info=True)
+
+    def _turn_retrieval_context(self, query: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Build the retrieval_context blob for the assistant message, or None."""
+        try:
+            from modules.rag.retrieval_provenance import build_retrieval_context
+            return build_retrieval_context(
+                self._turn_document_ids, self._turn_chunk_ids, query,
+            )
+        except Exception:
+            logger.debug("[PRD-185 S7] retrieval_context build failed", exc_info=True)
+            return None
 
     # ─────────────────────────────────────────────────────────────────────
     # Internal helpers
@@ -588,29 +747,6 @@ class StreamingChatService:
                 return m.get("content") or ""
         return ""
 
-    def _parse_model_selection(self, selected_model: Optional[str]) -> tuple:
-        """Parse model string to get provider and model."""
-        if not selected_model:
-            return None, None
-
-        model = selected_model
-        model_lower = selected_model.lower()
-
-        if model_lower.startswith('gpt-') or model_lower.startswith('o1') or model_lower.startswith('o3') or model_lower.startswith('o4'):
-            provider = 'openai'
-        elif model_lower.startswith('claude') or 'anthropic' in model_lower:
-            provider = 'anthropic'
-        elif model_lower.startswith('grok') or 'xai' in model_lower:
-            provider = 'grok'
-        elif model_lower.startswith('gemini') or 'google' in model_lower:
-            provider = 'google'
-        elif '/' in selected_model:
-            provider = 'openrouter'
-        else:
-            provider = None
-
-        return provider, model
-
     async def _load_agent_context(self, agent_runtime) -> dict:
         """
         Load agent-specific context: persona, description for chatbot identity injection.
@@ -651,11 +787,13 @@ class StreamingChatService:
     # Tool source — SINGLE SOURCE OF TRUTH
     # ─────────────────────────────────────────────────────────────────────
 
-    def _get_tools(
+    async def _get_tools(
         self,
         agent_id: int,
         skill_tools: Optional[List[Dict[str, Any]]] = None,
         query: Optional[str] = None,
+        is_super_admin: bool = False,
+        page_actions: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all tools for an agent from the SINGLE source: modules.tools.tool_router.
@@ -667,12 +805,17 @@ class StreamingChatService:
             query: Latest user turn — when set and SEMANTIC_TOOL_ROUTING is on,
                 the platform_execute dispatcher's action.enum is narrowed to
                 top-K relevant actions (PRD-138 US-009).
+            is_super_admin: PRD-143 — True ONLY when the driving chat principal
+                is system_role == 'super_admin'. Fail-closed default excludes
+                the su tool tier from the surface.
         """
-        all_tools = get_tools_for_agent(
+        all_tools = await get_tools_for_agent_async(
             agent_id=agent_id,
             db_session=self.db,
             workspace_id=self.workspace_id,
             query=query,
+            is_super_admin=is_super_admin,
+            page_actions=page_actions,
         )
         if skill_tools:
             all_tools = (all_tools or []) + skill_tools
@@ -696,6 +839,7 @@ class StreamingChatService:
         plan_mode: bool = False,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
+        force_text_only: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], Any]:
         """
         Prepare LLM messages with orchestration, persona, CTO override, and context guard.
@@ -721,6 +865,13 @@ class StreamingChatService:
             if complexity_assessment
             else Complexity.MOLECULE
         )
+        # Proactive openers (force_text_only) are self-contained: page-context
+        # directive in, one line of text out. They carry no complexity_assessment,
+        # so without this they'd default to MOLECULE and take the full
+        # ContextService path (internal tool load + Mem0 read) — exactly the
+        # work stream_response_with_agent already decided to skip. Pin to ATOM.
+        if force_text_only:
+            _complexity = Complexity.ATOM
 
         if _complexity == Complexity.ATOM:
             llm_messages, use_tools, orchestrated = await self._prepare_atom_path(
@@ -728,6 +879,7 @@ class StreamingChatService:
                 atom_tools=all_tools,
                 attachment_ids=attachment_ids,
                 model_id=model_id,
+                force_text_only=force_text_only,
             )
         else:
             llm_messages, use_tools, orchestrated = await self._prepare_full_path(
@@ -803,9 +955,18 @@ class StreamingChatService:
         atom_tools: Optional[List[Dict[str, Any]]] = None,
         attachment_ids: Optional[List[str]] = None,
         model_id: Optional[str] = None,
+        force_text_only: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Optional[List[Dict[str, Any]]], None]:
-        """ATOM path: lightweight memory only, but keeps platform_execute tool."""
-        logger.info("[PRD-68] ATOM path — lightweight (tools=%d), retrieving memory", len(atom_tools or []))
+        """ATOM path: lightweight memory only, but keeps platform_execute tool.
+
+        force_text_only (proactive openers) skips memory retrieval entirely —
+        the opener is self-contained and the Mem0 read only adds latency.
+        """
+        logger.info(
+            "[PRD-68] ATOM path — lightweight (tools=%d, memory=%s)",
+            len(atom_tools or []),
+            "skipped" if force_text_only else "on",
+        )
         _now = datetime.utcnow()
         _time_ctx = (
             "Good morning" if _now.hour < 12
@@ -820,12 +981,19 @@ class StreamingChatService:
                  if isinstance(m, dict) and m.get("role") == "user"),
                 ""
             )
-            if _user_msg and smart_chat.orchestrator and smart_chat.orchestrator.memory_manager:
+            if (
+                not force_text_only
+                and _user_msg
+                and smart_chat.orchestrator
+                and smart_chat.orchestrator.memory_manager
+            ):
                 _mem_result = await smart_chat.orchestrator.memory_manager.retrieve_memories(
                     workspace_id=str(self.workspace_id),
                     agent_id=agent_runtime.agent_id,
                     query=_user_msg if len(_user_msg) > 5 else "user context",
                     widget_mode=self.widget_mode,
+                    # PRD-206 S7: Q7 private-scope guard needs the viewer.
+                    viewer_subject_id=getattr(self, "_viewer_subject_id", None),
                 )
                 if _mem_result and _mem_result.formatted_context:
                     _memory_block = f"\n\n## What you remember about this user:\n{_mem_result.formatted_context}\n"
@@ -916,6 +1084,8 @@ class StreamingChatService:
             complexity_assessment=complexity_assessment,
             attachment_ids=attachment_ids,
             model_id=model_id,
+            # PRD-206 S7: viewer for the Q7 private-scope recall guard.
+            viewer_subject_id=getattr(self, "_viewer_subject_id", None),
         )
         llm_messages = apply_orchestration_to_messages(orchestrated)
         use_tools = orchestrated.tools if orchestrated.requires_tools else None
@@ -966,6 +1136,42 @@ class StreamingChatService:
     # PRD-137 Fix #3: removed _inject_agent_identity. IdentitySection now
     # owns description+persona injection for both chatbot and non-chatbot
     # modes — see modules/context/sections/identity.py.
+
+    def _inject_pinned_documents(
+        self, llm_messages: List[Dict[str, Any]], chat_id: Optional[str]
+    ) -> None:
+        """PRD-157 S5: prepend the chat's pinned-document content as a system
+        message so it is always present in context (within the token budget).
+
+        Inserted after any leading system prompt and before user/history. Best
+        effort — a failure never breaks the turn.
+        """
+        if not chat_id or self.workspace_id is None:
+            return
+        try:
+            from modules.rag.pinned_context import build_pinned_system_message
+
+            content = build_pinned_system_message(
+                self.db, chat_id=chat_id, workspace_id=self.workspace_id
+            )
+            if not content:
+                return
+            insert_at = 1 if (llm_messages and llm_messages[0].get("role") == "system") else 0
+            llm_messages.insert(insert_at, {"role": "system", "content": content})
+            logger.info("[PRD-157 S5] injected pinned-document context for chat %s", chat_id)
+
+            # PRD-185 S7: pinned documents are retrieved context for this turn —
+            # record their ids so a later vote writes complete rag_feedback.
+            try:
+                from modules.rag.pinned_context import list_pinned
+                for row in list_pinned(self.db, chat_id=chat_id, workspace_id=self.workspace_id):
+                    did = row.get("document_id")
+                    if isinstance(did, int):
+                        self._turn_document_ids.add(did)
+            except Exception:
+                logger.debug("[PRD-185 S7] pinned provenance collect failed", exc_info=True)
+        except Exception:
+            logger.warning("[PRD-157 S5] pinned-document injection failed", exc_info=True)
 
     # ─────────────────────────────────────────────────────────────────────
     # Composio per-action tool injection
@@ -1055,18 +1261,36 @@ class StreamingChatService:
         agent_id: int,
         response,
         orchestrated: Any,
+        user_id: Optional[int] = None,
     ) -> AsyncGenerator[str, None]:
         """Store memory, emit memory-stored event, update metrics, fire eval."""
         import asyncio
 
         smart_chat = getattr(self, '_smart_chat', None)
 
+        # PRD-196 S6 (GDPR): tag the distilled chat memory with the human
+        # principal as ``user:{users.id}``. ``user_id`` is the INTERNAL integer
+        # id (already resolved upstream — never the Clerk string, the #513
+        # lesson); if it's absent we write NO subject tag rather than a wrong one.
+        # This also keeps subject-erase working on the Clerk-less `local` edition
+        # (the internal id always exists). Reserved namespaces for the other
+        # memory-writing lanes — ``shopper:{salted-hash}`` (widget customer) and
+        # ``channel:{platform}:{peer-id}`` (channel peer) — are DEFERRED to when
+        # those lanes' memory writes go live; wiring them is Gerard's call
+        # (flagged in the PRD-196 PR body, not silently dropped — CLAUDE.md §12).
+        subject_id = f"user:{user_id}" if user_id else None
+
         # Store memory via SmartChatIntegration
         if latest_text and full_response and smart_chat:
             try:
-                _stored = await smart_chat.store(latest_text, full_response, chat_id)
-                if _stored:
-                    _tier = getattr(smart_chat.orchestrator.memory_manager, '_last_tier', 'conversation')
+                _stored = await smart_chat.store(latest_text, full_response, chat_id, subject_id=subject_id)
+                _mm = smart_chat.orchestrator.memory_manager
+                _facts_stored = getattr(_mm, '_last_l3_facts_stored', 0)
+                # PRD-159 S5: honest event — emit ONLY after durable facts were
+                # actually persisted to L3, with the real tier. Zero-fact turns
+                # (e.g. "user said hello") produce NO memory_stored event.
+                if _stored and _facts_stored > 0:
+                    _tier = getattr(_mm, '_last_tier', 'conversation')
                     yield self.streaming_handler.format_aisdk_memory_stored(
                         memory={
                             "userMessage": latest_text[:200],
@@ -1129,10 +1353,11 @@ class StreamingChatService:
                 pass
 
     # ─────────────────────────────────────────────────────────────────────
-    # Unified tool loop
+    # Streaming tool loop — delegates to the converged ToolLoopExecutor
+    # (PRD-142 W3-S4 / G6: one tool loop, shared with agent_factory).
     # ─────────────────────────────────────────────────────────────────────
 
-    async def _run_tool_loop(
+    async def _stream_tool_loop(
         self,
         response,
         llm_messages: List[Dict[str, Any]],
@@ -1140,404 +1365,356 @@ class StreamingChatService:
         tool_data: Dict[str, Any],
         use_tools: Optional[List[Dict[str, Any]]],
         composio_result: Any = None,
+        user_id: Optional[int] = None,
+        conversation_id: Optional[str] = None,
     ) -> AsyncGenerator[Any, None]:
-        """
-        Unified tool execution loop with dedup, retry limits, and Composio recovery.
+        """Drive :class:`ToolLoopExecutor` from the chat surface.
 
-        Yields SSE chunks and a final {'_final_response': response} dict.
-        Consolidates _handle_tool_calls_aisdk and _handle_tool_calls.
-        """
-        import asyncio
+        Yields SSE chunks as the executor runs and ends with
+        ``{'_final_response': response}`` — the exact contract the chat
+        caller consumes (see ``stream_response_with_agent`` below).
 
+        Chat-specific behaviour (Composio per-action shortcut, Composio
+        error recovery, fatal_error short-circuit, force-synth on dedup,
+        ContextGuard compaction recovery, frontend-data + workflow-update
+        SSE emissions) is layered on top of the converged spine via the
+        executor's callback hooks. The spine itself — dedup, per-tool
+        attempt caps, finish_reason=length recovery, iteration cap — is
+        shared with the agent ``execute_with_prompt`` inner loop.
+        """
         max_iterations = config.CHATBOT_MAX_TOOL_ITERATIONS
-        iteration = 0
-        current_response = response
-        tracker = ToolExecutionTracker()
+        action_budget = config.CHATBOT_ACTION_RETRY_BUDGET
+        param_budget = config.CHATBOT_PARAM_RETRY_BUDGET
 
-        # Recovery budgets
-        action_not_mapped_retry_budget = config.CHATBOT_ACTION_RETRY_BUDGET
-        invalid_parameters_retry_budget = config.CHATBOT_PARAM_RETRY_BUDGET
-
-        # Search spiral detection
+        # State shared by callbacks within this turn.
         last_tool_name: Optional[str] = None
-        empty_same_tool_streak = 0
+        empty_streak = 0
 
-        # Per-tool attempt tracking for loop prevention
-        tool_attempts: Dict[str, int] = {}
+        # PRD-163 S1/Q56: resolve the chatting user's clerk id once, so a mission
+        # created mid-chat is attributed to THEM (created_by) — not the agent — and
+        # plan-ready / awaiting-approval notifications land for the right person.
+        _driving_clerk: Optional[str] = None
+        if user_id:
+            try:
+                from core.models import User
+                _row = self.db.query(User.clerk_user_id).filter(User.id == user_id).first()
+                _driving_clerk = _row[0] if _row else None
+            except Exception:
+                _driving_clerk = None
 
-        # Multi-step tools that get a higher retry cap
+        # PRD-177 S2 (F017): one turn_id per user turn (this stream invocation).
+        # All sequential tool calls in this turn share it, so the edge builder
+        # pairs used_after edges by exact turn order (it prefers turn_id over the
+        # conversation grouping). conversation_id groups the whole conversation.
+        _turn_id: str = uuid.uuid4().hex
+        _prior_action: Optional[str] = None
+        cumulative_attempts: Dict[str, int] = {}
+        followup_messages: List[Dict[str, Any]] = []
+
         _MULTI_STEP_TOOLS = {
-            "composio_execute",
-            "generate_document",
+            "composio_execute", "generate_document",
             "workspace_read_file", "workspace_grep", "workspace_list_dir",
             "workspace_write_file", "workspace_exec", "workspace_git",
         }
+        _WORKFLOW_PREFIXES = (
+            "platform_list_recipes",
+            "platform_create_recipe",
+            "platform_execute_recipe",
+        )
 
-        while current_response.tool_calls and iteration < max_iterations:
-            iteration += 1
-            logger.info(f"Tool iteration {iteration}: {len(current_response.tool_calls)} tool calls")
+        # SSE bridge: executor on_event puts AI SDK chunks here, this generator drains.
+        sse_queue: "asyncio.Queue[Any]" = asyncio.Queue()
+        DONE = object()
 
-            start_times: Dict[str, float] = {}
-            tool_calls_prepared: List[Tuple[str, str, Dict]] = []
-            fatal_errors: List[Dict[str, Any]] = []
-            followup_system_messages: List[Dict[str, Any]] = []
-            executed_call_key_repeat = False
+        async def _on_event(event: Dict[str, Any]) -> None:
+            et = event.get("type")
+            if et == "tool-start":
+                await sse_queue.put(self.streaming_handler.format_aisdk_tool_start(
+                    event["tool_call_id"], event["tool_name"],
+                    tool_input=event.get("tool_input", {}),
+                ))
+            elif et == "tool-end":
+                # tool-result frame mirrors what the legacy loop emitted.
+                if not event.get("skipped"):
+                    await sse_queue.put(self.streaming_handler.format_aisdk_tool_end(
+                        tool_call_id=event["tool_call_id"],
+                        tool_name=event["tool_name"],
+                        success=bool(event.get("success")),
+                        duration_ms=int(event.get("duration_ms", 0)),
+                    ))
 
-            # Phase 1: Emit tool-start events
-            for tool_call in current_response.tool_calls:
-                tool_name = tool_call.get('function', {}).get('name', 'unknown')
-                tool_id = tool_call.get('id', f'call_{int(time.time() * 1000)}')
-
-                try:
-                    args_str = tool_call.get('function', {}).get('arguments', '{}')
-                    tool_input = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
-                except Exception:
-                    tool_input = {}
-
-                yield self.streaming_handler.format_aisdk_tool_start(tool_id, tool_name, tool_input=tool_input)
-                await asyncio.sleep(0)
-
-                start_times[tool_id] = time.time()
-                tool_calls_prepared.append((tool_id, tool_name, tool_call))
-
-            # Phase 2: Execute each tool
-            # Concurrency classification: log batch composition for future
-            # parallel execution optimization (free-code pattern).
-            try:
-                from modules.tools.execution.concurrency import partition_tool_batch
-                _read_safe, _mutating = partition_tool_batch(tool_calls_prepared)
-                if len(_read_safe) > 1 and len(_mutating) == 0:
-                    logger.info(
-                        f"[tool-batch] All {len(_read_safe)} tools are read-safe — "
-                        f"eligible for parallel execution"
-                    )
-            except Exception:
-                pass  # Classification is non-critical
-
-            # ── finish_reason: length → truncated tool call JSON ──
-            # When the LLM runs out of output tokens mid-tool-call, the JSON
-            # arguments are truncated. Detect this and ask the LLM to retry
-            # with shorter content instead of failing repeatedly.
-            _finish_reason = getattr(current_response, 'finish_reason', None)
-            if _finish_reason == 'length' and tool_calls_prepared:
-                logger.warning(
-                    f"LLM output truncated (finish_reason=length) with "
-                    f"{len(tool_calls_prepared)} tool calls — arguments likely malformed"
+        def _is_chat_composio_action(name: str) -> bool:
+            """A per-action Composio tool from this turn's SDK schema set."""
+            return bool(
+                composio_result and composio_result.entity_id and (
+                    name in composio_result.action_set
+                    or any(name.startswith(f"{app}_") for app in composio_result.app_names)
                 )
-                # Check if any tool call has unparseable JSON
-                _has_bad_json = False
-                for _tid, _tname, _tc in tool_calls_prepared:
-                    _astr = _tc.get('function', {}).get('arguments', '{}')
-                    if isinstance(_astr, str):
-                        try:
-                            json.loads(_astr)
-                        except json.JSONDecodeError:
-                            _has_bad_json = True
-                            break
-                if _has_bad_json:
-                    # Inject a system message telling the LLM to use shorter content
-                    llm_messages.append({
-                        "role": "system",
-                        "content": (
-                            "Your previous response was truncated (output token limit reached) "
-                            "while writing tool call arguments. The JSON was incomplete and could "
-                            "not be parsed. Please retry with SHORTER content — use concise text, "
-                            "fewer sections, or summarise instead of writing full prose in the "
-                            "tool arguments."
-                        ),
-                    })
-                    # Re-call LLM without tools to get a text response, or with tools
-                    # but the system message should guide it to be more concise
-                    current_response = await agent_runtime.llm_manager.generate_response(
-                        messages=llm_messages, tools=use_tools,
-                    )
-                    # If the retry also has tool calls, continue the loop normally
-                    # Otherwise yield the text response
-                    if not current_response.tool_calls:
-                        yield {"_final_response": current_response}
-                        return
-                    # Rebuild tool_calls_prepared from retry
-                    tool_calls_prepared = []
-                    for tool_call in current_response.tool_calls:
-                        t_name = tool_call.get('function', {}).get('name', 'unknown')
-                        t_id = tool_call.get('id', f'call_{int(time.time() * 1000)}')
-                        tool_calls_prepared.append((t_id, t_name, tool_call))
+            )
 
-            tool_results: List[Dict[str, Any]] = []
-            for tool_id, tool_name, tool_call in tool_calls_prepared:
-                try:
-                    args_str = tool_call.get('function', {}).get('arguments', '{}')
-                    tool_args = json.loads(args_str or '{}') if isinstance(args_str, str) else (args_str or {})
+        async def _tool_callback(name: str, args: Dict[str, Any], call_id: str, ws_id) -> Dict[str, Any]:
+            nonlocal last_tool_name, empty_streak, _prior_action
 
-                    # ── Dedup check via ToolExecutionTracker ──
-                    should_skip, skip_reason = tracker.should_skip_execution(tool_name, tool_args)
-                    if should_skip:
-                        executed_call_key_repeat = True
-                        llm_context = f"Skipped: {skip_reason}"
-                        tool_results.append({
-                            "tool_call_id": tool_id,
-                            "role": "tool",
-                            "name": tool_name,
-                            "content": llm_context,
-                        })
-                        yield self.streaming_handler.format_aisdk_data(
-                            "tool-result",
-                            {"toolCallId": tool_id, "toolName": tool_name, "result": llm_context},
-                        )
-                        await asyncio.sleep(0)
-                        continue
+            # PRD-192 S4: per-action Composio calls ride the SPINE. The legacy
+            # shortcut here called ComposioToolService.execute_action raw and
+            # returned success:True unconditionally — no policy gate, no
+            # telemetry, no outcome capture, no scope enforcement, and a
+            # dishonest envelope (tool-runtime C.3a). They now dispatch through
+            # execute_and_format like every other tool in this callback, as the
+            # composio_execute meta-tool (the executor's registry route — the
+            # per-action name travels in `action`, so the tracker, the policy
+            # gate's effective-name resolution, and the routing graph all see
+            # GMAIL_SEND_EMAIL, not the wrapper). The gate classifies it
+            # external_side_effect via the S1 is_composio hint.
+            dispatch_name, dispatch_args = name, args
+            if _is_chat_composio_action(name):
+                dispatch_name = "composio_execute"
+                dispatch_args = {
+                    "action": name,
+                    "params": args if isinstance(args, dict) else {},
+                }
 
-                    # Record execution
-                    tracker.record_execution(tool_name, tool_args)
+            user_text = self._extract_user_text(llm_messages)
+            # PRD-192 S3: turn-level budget estimate at the loop boundary —
+            # the driving model + prompt tokens + output cap, so the policy
+            # gate prices this call instead of admitting at a structural $0.
+            from core.context_guard import estimate_turn_budget
+            _turn_budget = estimate_turn_budget(agent_runtime.llm_manager, llm_messages)
+            # PRD-177 S2 (F017): thread user_query + conversation/turn ids so the
+            # edge builder can cluster intent and pair per-turn used_after edges.
+            result = await self.tool_router.execute_and_format(
+                tool_name=dispatch_name,
+                tool_args=dispatch_args,
+                agent_id=agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 1,
+                workspace_id=ws_id,
+                original_intent=user_text,
+                caller_context=build_tool_caller_context(
+                    user_query=user_text,
+                    conversation_id=conversation_id,
+                    turn_id=_turn_id,
+                    driving_clerk=_driving_clerk,
+                    prior_action=_prior_action,
+                    model_id=_turn_budget.get("model_id"),
+                    est_input_tokens=_turn_budget.get("est_input_tokens", 0),
+                    est_output_tokens=_turn_budget.get("est_output_tokens", 0),
+                ),
+            )
+            # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
+            self._collect_tool_retrieval(name, result)
+            # Record this call as the prior_action for the NEXT tool in the turn
+            # (resolved to the per-action name so composio chains pair correctly).
+            _prior_action = resolve_action_name(name, args if isinstance(args, dict) else {})
 
-                    # ── Execute via tool_router.execute_and_format ──
-                    user_text = self._extract_user_text(llm_messages)
+            # Search-spiral detection (chat-only signal).
+            empty_streak = self._track_search_spiral(
+                result, name, last_tool_name, empty_streak,
+            )
+            last_tool_name = name
 
-                    # Direct Composio action execution for per-action tools
-                    _is_composio_action = (
-                        composio_result and composio_result.entity_id and (
-                            tool_name in composio_result.action_set
-                            or any(tool_name.startswith(f"{app}_") for app in composio_result.app_names)
-                        )
-                    )
-                    if _is_composio_action:
-                        llm_context = await self._execute_composio_action(
-                            tool_name, tool_args, composio_result
-                        )
-                    else:
-                        result = await self.tool_router.execute_and_format(
-                            tool_name=tool_name,
-                            tool_args=tool_args,
-                            agent_id=agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else 1,
-                            workspace_id=self.workspace_id,
-                            original_intent=user_text,
-                        )
+            cumulative_attempts[name] = cumulative_attempts.get(name, 0) + 1
 
-                        # Track empty search results for spiral detection
-                        empty_same_tool_streak = self._track_search_spiral(
-                            result, tool_name, last_tool_name, empty_same_tool_streak
-                        )
-                        last_tool_name = tool_name
+            llm_context = result.get("llm_context", str(result.get("raw_result", "")))
+            # PRD-157 S3: token-budgeted truncation (model-aware), not a char cut.
+            from modules.rag.budget import truncate_to_token_budget
+            llm_context = truncate_to_token_budget(llm_context, _TOOL_RESULT_TOKEN_BUDGET)
 
-                        # Track per-tool attempts
-                        tool_attempts[tool_name] = tool_attempts.get(tool_name, 0) + 1
+            # Frontend data emission (widget tool-data).
+            # PRD-193 S3 (P2-12): an approval ask (success=False +
+            # requires_confirmation) still carries the tool_approval card —
+            # the human must see it live even though the tool did not run.
+            frontend_data = result.get("frontend_data", {})
+            _is_approval_ask = bool(
+                (result.get("raw_result") or {}).get("requires_confirmation")
+            )
+            if frontend_data and (result.get("success") or _is_approval_ask):
+                tool_data.update(frontend_data)
+                await sse_queue.put(self.streaming_handler.format_aisdk_tool_data(frontend_data))
 
-                        llm_context = result.get('llm_context', str(result.get('raw_result', '')))
-                        if len(llm_context) > 6000:
-                            llm_context = llm_context[:6000] + f"\n... (truncated {len(llm_context) - 6000} chars)"
+            # Recipe / workflow tool-update emission.
+            if name.startswith(_WORKFLOW_PREFIXES) or "workflow" in name.lower():
+                _raw = result.get("raw_result") or {}
+                _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or call_id)
+                _wf_status = "completed" if result.get("success") else "failed"
+                await sse_queue.put(self.streaming_handler.format_aisdk_workflow_update(
+                    workflow_id=_wf_id, status=_wf_status, current_step=name,
+                ))
 
-                        # Emit frontend data (tool-data for widgets)
-                        frontend_data = result.get("frontend_data", {})
-                        if result.get("success") and frontend_data:
-                            tool_data.update(frontend_data)
-                            yield self.streaming_handler.format_aisdk_tool_data(frontend_data)
-                            await asyncio.sleep(0)
+            # tool-result excerpt frame (legacy parity).
+            await sse_queue.put(self.streaming_handler.format_aisdk_data(
+                "tool-result",
+                {"toolCallId": call_id, "toolName": name, "result": llm_context[:500]},
+            ))
 
-                        # Emit workflow-update for recipe/workflow tools
-                        _WORKFLOW_TOOL_PREFIXES = ("platform_list_recipes", "platform_create_recipe", "platform_execute_recipe")
-                        if tool_name.startswith(_WORKFLOW_TOOL_PREFIXES) or "workflow" in tool_name.lower():
-                            _raw = result.get("raw_result") or {}
-                            _wf_id = str(_raw.get("id") or _raw.get("workflow_id") or _raw.get("recipe_id") or tool_id)
-                            _wf_status = "completed" if result.get("success") else "failed"
-                            yield self.streaming_handler.format_aisdk_workflow_update(
-                                workflow_id=_wf_id, status=_wf_status, current_step=tool_name,
-                            )
-                            await asyncio.sleep(0)
+            # Loop-prevention proceed instructions (mutates llm_messages).
+            self._inject_loop_prevention(
+                llm_messages, name, cumulative_attempts,
+                empty_streak, result, agent_runtime, _MULTI_STEP_TOOLS,
+            )
 
-                        # ── Composio error recovery ──
-                        recovery_result = self._handle_composio_error_recovery(
-                            result, tool_name, llm_messages, agent_runtime,
-                            action_not_mapped_retry_budget, invalid_parameters_retry_budget,
-                            followup_system_messages,
-                        )
-                        if recovery_result is not None:
-                            if recovery_result.get("_early_return"):
-                                yield {"_final_response": SimpleNamespace(
-                                    content=recovery_result["message"],
-                                    tool_calls=None, usage=None,
-                                )}
-                                return
-                            action_not_mapped_retry_budget = recovery_result.get(
-                                "action_not_mapped_retry_budget", action_not_mapped_retry_budget
-                            )
-                            invalid_parameters_retry_budget = recovery_result.get(
-                                "invalid_parameters_retry_budget", invalid_parameters_retry_budget
-                            )
+            # Hand back to executor with the truncated llm_context already prepared
+            # so it does not re-truncate.
+            return {
+                "success": result.get("success", True),
+                "llm_context": llm_context,
+                "raw_result": result.get("raw_result", {}),
+                "frontend_data": frontend_data,
+                "error_type": result.get("error_type"),
+                "fatal_error": result.get("fatal_error", False),
+            }
 
-                        if result.get('fatal_error'):
-                            fatal_errors.append(result)
+        async def _on_tool_result(
+            name: str, args: Dict[str, Any], result: Any,
+        ) -> Optional[ToolPostResult]:
+            nonlocal action_budget, param_budget
+            if not isinstance(result, dict):
+                return None
+            # PRD-192 S4: per-action Composio calls dispatch as the
+            # composio_execute meta-tool — the recovery hook reads the same
+            # honest envelope for both shapes.
+            recovery_name = (
+                "composio_execute" if _is_chat_composio_action(name) else name
+            )
+            recovery = self._handle_composio_error_recovery(
+                result, recovery_name, llm_messages, agent_runtime,
+                action_budget, param_budget, followup_messages,
+            )
+            if recovery is None:
+                return None
+            if recovery.get("_early_return"):
+                return ToolPostResult(
+                    force_final=True,
+                    final_content=recovery.get("message"),
+                )
+            action_budget = recovery.get(
+                "action_not_mapped_retry_budget", action_budget,
+            )
+            param_budget = recovery.get(
+                "invalid_parameters_retry_budget", param_budget,
+            )
+            return None
 
-                    # Store tool result
-                    tool_results.append({
-                        'tool_call_id': tool_id,
-                        'role': 'tool',
-                        'name': tool_name,
-                        'content': llm_context,
-                    })
+        async def _on_round_end(state: RoundState) -> Optional[ToolPostResult]:
+            # Flush any Composio follow-up system messages into llm_messages
+            # BEFORE the next LLM call (legacy ordering).
+            nonlocal followup_messages
+            if followup_messages:
+                llm_messages.extend(followup_messages)
+                followup_messages = []
 
-                    # Emit tool-end + tool-result events
-                    duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
-                    yield self.streaming_handler.format_aisdk_tool_end(
-                        tool_call_id=tool_id, tool_name=tool_name, success=True, duration_ms=duration_ms,
-                    )
-                    yield self.streaming_handler.format_aisdk_data('tool-result', {
-                        'toolCallId': tool_id,
-                        'toolName': tool_name,
-                        'result': llm_context[:500],
-                    })
-                    await asyncio.sleep(0)
-
-                    # ── Loop prevention: inject proceed instructions ──
-                    self._inject_loop_prevention(
-                        llm_messages, tool_name, tool_attempts,
-                        empty_same_tool_streak, result if not _is_composio_action else {"success": True},
-                        agent_runtime, _MULTI_STEP_TOOLS,
-                    )
-                except Exception as e:
-                    logger.error(f"Tool {tool_name} failed: {e}")
-                    error_msg = f"Error executing {tool_name}: {str(e)}"
-                    tool_results.append({
-                        'tool_call_id': tool_id,
-                        'role': 'tool',
-                        'name': tool_name,
-                        'content': error_msg,
-                    })
-                    yield self.streaming_handler.format_aisdk_data('tool-result', {
-                        'toolCallId': tool_id,
-                        'toolName': tool_name,
-                        'result': error_msg,
-                    })
-                    await asyncio.sleep(0)
-
-            # Phase 3: Append tool exchange to message history
-            llm_messages.append(self._build_assistant_tool_message(tool_calls_prepared))
-            llm_messages.extend(tool_results)
-
-            if followup_system_messages:
-                llm_messages.extend(followup_system_messages)
-
-            # Phase 4: Force synthesis if duplicate or exhausted
-            _any_tool_exhausted = any(v >= 8 for v in tool_attempts.values())
-            if executed_call_key_repeat or _any_tool_exhausted:
-                if _any_tool_exhausted:
-                    logger.warning(f"[tool-loop] Tool hard cap reached — forcing synthesis (attempts: {dict(tool_attempts)})")
-                llm_messages.append({
-                    "role": "system",
-                    "content": (
-                        "You now have the tool results needed. "
-                        "Do NOT call any more tools. "
-                        "Write the final answer for the user using the tool output above."
-                    ),
-                })
-                final = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
-                yield {"_final_response": SimpleNamespace(
-                    content=final.content or "", tool_calls=None,
-                    usage=getattr(final, "usage", None),
-                )}
-                return
-
-            if fatal_errors:
-                yield {"_final_response": SimpleNamespace(
-                    content=(
+            # Fatal error short-circuit (chat-only behaviour).
+            if state.had_fatal_errors:
+                return ToolPostResult(
+                    force_final=True,
+                    final_content=(
                         "I ran into a server configuration issue while executing that tool. "
                         "Please restart the backend and try again."
                     ),
-                    tool_calls=None, usage=None,
-                )}
-                return
+                )
 
-            # Phase 5: Next LLM call — withhold errors during recovery
+            # Force synthesis on dedup skip OR per-tool exhaustion (>=8 attempts).
+            any_exhausted = any(v >= 8 for v in cumulative_attempts.values())
+            if state.had_skips or any_exhausted:
+                if any_exhausted:
+                    logger.warning(
+                        f"[tool-loop] Tool hard cap reached — forcing synthesis "
+                        f"(attempts: {dict(cumulative_attempts)})"
+                    )
+                return ToolPostResult(force_final=True)
+            return None
+
+        async def _llm_callback(messages, tools):
             try:
-                current_response = await agent_runtime.llm_manager.generate_response(
-                    messages=llm_messages, tools=use_tools,
+                return await agent_runtime.llm_manager.generate_response(
+                    messages=messages, tools=tools,
                 )
             except Exception as llm_err:
-                # Withhold error: attempt compaction + retry before surfacing
                 logger.warning(
-                    f"LLM call failed (iteration {iteration}), attempting recovery: {llm_err}"
+                    f"LLM call failed in tool loop, attempting recovery: {llm_err}"
                 )
                 try:
                     from core.context_guard import ContextGuard
                     guard = ContextGuard()
-                    llm_messages, compacted, use_tools = await guard.check_and_compact(
-                        llm_messages, use_tools, agent_runtime.llm_manager,
+                    messages_new, compacted, tools_new = await guard.check_and_compact(
+                        messages, tools, agent_runtime.llm_manager,
                         workspace_id=self.workspace_id,
                     )
                     if compacted:
                         logger.info("Recovery compaction succeeded, retrying LLM call")
-                        current_response = await agent_runtime.llm_manager.generate_response(
-                            messages=llm_messages, tools=use_tools,
+                        return await agent_runtime.llm_manager.generate_response(
+                            messages=messages_new, tools=tools_new,
                         )
-                    else:
-                        raise  # No compaction possible, surface original error
+                    raise
                 except Exception:
-                    logger.error(f"Recovery failed, surfacing error: {llm_err}", exc_info=True)
+                    logger.error(
+                        f"Recovery failed, surfacing error: {llm_err}", exc_info=True
+                    )
                     raise llm_err
-            logger.info(f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}, Has content: {bool(current_response.content)}")
 
-            if not current_response.tool_calls:
-                yield {'_final_response': current_response}
-                return
+        executor = ToolLoopExecutor(
+            llm_callback=_llm_callback,
+            tool_callback=_tool_callback,
+            max_iterations=max_iterations,
+            content_truncate_tokens=2000,
+        )
 
-        # Max iterations reached
-        if iteration >= max_iterations:
-            logger.warning(f"Max tool iterations ({max_iterations}) reached. Forcing final response.")
+        async def _runner():
+            try:
+                return await executor.run(
+                    initial_response=response,
+                    messages=llm_messages,
+                    tools=use_tools,
+                    workspace_id=self.workspace_id,
+                    on_event=_on_event,
+                    on_tool_result=_on_tool_result,
+                    on_round_end=_on_round_end,
+                )
+            finally:
+                await sse_queue.put(DONE)
+
+        runner_task = asyncio.create_task(_runner())
+
+        while True:
+            item = await sse_queue.get()
+            if item is DONE:
+                break
+            yield item
+            await asyncio.sleep(0)
+
+        try:
+            result = await runner_task
+        except Exception as loop_err:
+            logger.error(f"Tool loop failed: {loop_err}", exc_info=True)
+            yield {"_final_response": SimpleNamespace(
+                content=f"Error: {loop_err}", tool_calls=None, usage=None,
+            )}
+            return
+
+        # Max-iterations reached → emit limit_reached SSE + synthesize.
+        if result.max_iterations_reached:
+            yield self.streaming_handler.format_aisdk_limit_reached(
+                limit="max_tool_iterations",
+                value=max_iterations,
+                message=(
+                    f"I reached the maximum of {max_iterations} tool steps for a "
+                    "single response, so I'm answering with what I have so far. "
+                    "An admin can raise this via the CHATBOT_MAX_TOOL_ITERATIONS "
+                    "setting (or the workspace power-mode caps)."
+                ),
+            )
             final = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages, tools=None,
             )
-            yield {'_final_response': final}
+            yield {"_final_response": final}
+            return
 
-    def _build_assistant_tool_message(
-        self,
-        tool_calls_prepared: List[Tuple[str, str, Dict]],
-    ) -> Dict[str, Any]:
-        """Build the assistant message with tool_calls (required by OpenAI API)."""
-        return {
-            'role': 'assistant',
-            'content': None,
-            'tool_calls': [
-                {
-                    'id': tc[0],
-                    'type': 'function',
-                    'function': {
-                        'name': tc[1],
-                        'arguments': tc[2].get('function', {}).get('arguments', '{}'),
-                    },
-                }
-                for tc in tool_calls_prepared
-            ],
-        }
+        yield {"_final_response": result.response}
 
-    async def _execute_composio_action(
-        self,
-        tool_name: str,
-        tool_args: Dict[str, Any],
-        composio_result: Any,
-    ) -> str:
-        """Execute a Composio per-action tool directly."""
-        try:
-            from modules.tools.services.composio_tool_service import ComposioToolService
-            _exec_svc = ComposioToolService(self.db)
-            exec_result = _exec_svc.execute_action(
-                action_name=tool_name,
-                params=tool_args,
-                entity_id=composio_result.entity_id,
-            )
-            success = exec_result.get("success", False)
-            data = exec_result.get("data")
-            error = exec_result.get("error")
-            if success:
-                llm_context = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
-            else:
-                llm_context = f"Error executing {tool_name}: {error or 'unknown error'}"
-            logger.info(f"[Composio direct] {tool_name}: success={success}")
-        except Exception as exc:
-            llm_context = f"Error executing {tool_name}: {exc}"
-            logger.error(f"[Composio direct] {tool_name} exception: {exc}", exc_info=True)
-
-        if len(llm_context) > 4000:
-            llm_context = llm_context[:4000] + "\n... (truncated)"
-        return llm_context
+    # PRD-192 S4: `_execute_composio_action` (the raw ComposioToolService
+    # shortcut) is DELETED — per-action Composio calls dispatch through
+    # execute_and_format → UnifiedToolExecutor like every other chat tool, so
+    # the policy gate, telemetry, outcome capture, and scope validation all
+    # fire on this lane and failures surface honestly (no unconditional
+    # success:True). No shim (CLAUDE.md §5).
 
     def _track_search_spiral(
         self,
@@ -1821,16 +1998,36 @@ class StreamingChatService:
         plan_mode: bool = False,
         team: Optional[str] = None,
         suggest_mission: bool = False,
+        force_text_only: bool = False,
+        is_super_admin: bool = False,
+        page_context: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
         Yields AISDK-formatted chunks for frontend consumption.
 
+        ``page_context`` (PRD-221) is the SANITIZED reference set from
+        services.page_context — never the raw client dict. It rides into the
+        turn's ``context_trace`` (S3) so "what did Auto know" includes page
+        state, and drives the page-prior action exposure (S4).
+
         PRD-137 Fix #2: parameter renamed from ``use_system_llm`` —
         when True, the orchestrator-tier defaults are used; when
         False, the agent's own model_config drives the LLM.
+
+        PRD-143: ``is_super_admin`` is derived by the caller from the driving
+        principal's system_role == 'super_admin' ONLY — it widens the tool
+        surface to the su tier and is never inferred from workspace roles.
         """
         import asyncio
+
+        # PRD-185 S7: start the turn with clean retrieval provenance.
+        self._reset_turn_retrieval()
+
+        # PRD-206 S7: the driving human as viewer for the Q7 private-scope
+        # recall guard (user_id here is the INTERNAL integer id — the same
+        # value the PRD-196 subject tag carries at store time).
+        self._viewer_subject_id = f"user:{user_id}" if user_id else None
 
         try:
             # Ensure workspace_id is available
@@ -1912,13 +2109,23 @@ class StreamingChatService:
                 if complexity_assessment
                 else Complexity.MOLECULE
             )
+            # PRD-007 v0.5 — proactive openers force ATOM path. The 45-tool
+            # discovery in _get_tools() takes ~12s and the agent doesn't need
+            # tools to produce a one-sentence opener from the directive.
+            if force_text_only:
+                _complexity = Complexity.ATOM
             agent_ctx = await self._load_agent_context(agent_runtime)
             all_tools = []
             if _complexity != Complexity.ATOM:
-                all_tools = self._get_tools(
+                all_tools = await self._get_tools(
                     agent_id,
                     agent_ctx.get("skill_tools"),
                     query=latest_text,
+                    is_super_admin=is_super_admin,
+                    # PRD-221 S4: the current page's manifest actions get folded
+                    # into the dispatcher enum (gate-filtered) so page-relevant
+                    # tools survive semantic narrowing.
+                    page_actions=_page_actions_from_context(page_context),
                 )
             else:
                 # ATOM path skips full tool loading, but always include
@@ -1930,19 +2137,22 @@ class StreamingChatService:
                 # surface as the full path.
                 try:
                     from modules.tools.discovery.action_registry import get_action_registry
-                    _allowed = None
-                    if _semantic_routing_enabled() and latest_text:
-                        _allowed = _rank_actions_for_dispatcher(
-                            query=latest_text,
-                            top_k=_semantic_routing_top_k(),
-                            exclude_admin=True,
-                            exclude_promoted=True,
-                        )
+                    from modules.tools.tool_router import _narrow_dispatcher_actions_async
+                    # Shared narrowing contract (PR-B): same ranking + fallback
+                    # posture as the full path, so ATOM turns honor closed-pins
+                    # instead of failing open to the full enum.
+                    _allowed, _nreason, _from_pins = await _narrow_dispatcher_actions_async(
+                        latest_text, is_admin=False, is_super_admin=is_super_admin
+                    )
                     _dispatcher = get_action_registry().to_dispatcher_schema(
                         exclude_admin=True,
                         allowed_names=_allowed,
+                        include_super_admin=is_super_admin,
+                        allow_promoted_in_allowlist=_from_pins,
                     )
-                    all_tools = [_dispatcher]
+                    # PRD-007 v0.5: proactive openers get zero tools — directive
+                    # is self-contained (page context + graph related products).
+                    all_tools = [] if force_text_only else [_dispatcher]
                 except Exception:
                     logger.debug("[chat] Could not load platform_execute for ATOM path")
 
@@ -1954,7 +2164,11 @@ class StreamingChatService:
                 plan_mode=plan_mode,
                 attachment_ids=_attachment_ids,
                 model_id=_model_id,
+                force_text_only=force_text_only,
             )
+
+            # PRD-157 S5: keep the chat's pinned documents always in context.
+            self._inject_pinned_documents(llm_messages, chat_id)
 
             if orchestrated:
                 logger.info(
@@ -2011,6 +2225,17 @@ class StreamingChatService:
             else:
                 _composio_result = None
 
+            # PRD-007 v0.5 — proactive openers must produce plain text, never tool calls.
+            # The skill forbids tools, but with 40+ tools wired in the agent still calls
+            # one and emits 0 text chars (STREAM_NO_TEXT). Force-clear here so the LLM
+            # literally has nothing to call.
+            if force_text_only and use_tools:
+                logger.info(
+                    f"[force_text_only] Clearing {len(use_tools)} tools for text-only generation"
+                )
+                use_tools = None
+                _composio_result = None
+
             # Generate LLM response
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
             logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}")
@@ -2037,9 +2262,11 @@ class StreamingChatService:
             if response.tool_calls:
                 logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
                 final_response = None
-                async for chunk in self._run_tool_loop(
+                async for chunk in self._stream_tool_loop(
                     response, llm_messages, agent_runtime, tool_data, use_tools,
                     composio_result=_composio_result,
+                    user_id=user_id,
+                    conversation_id=chat_id,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
@@ -2087,18 +2314,35 @@ class StreamingChatService:
             self.chat_service.save_message(
                 chat_id=chat_id, role="assistant",
                 parts=assistant_parts, workspace_id=self.workspace_id,
+                # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
+                retrieval_context=self._turn_retrieval_context(latest_text),
+                # PRD-201 S1: persist the assembly trace for this turn;
+                # PRD-221 S3: including the sanitized page context the turn saw.
+                context_trace=merge_into_trace(
+                    getattr(orchestrated, "context_trace", None), page_context
+                ),
             )
 
             # Post-response: memory, metrics, eval
             async for chunk in self._post_response(
                 latest_text, full_response, chat_id,
                 agent_runtime, agent_id, response, orchestrated,
+                user_id=user_id,
             ):
                 yield chunk
+
+            # PRD-142 W3-S6: chat primitive heartbeat — green on clean turn.
+            _emit_chat_primitive(
+                self.workspace_id, success=True, detail="chat turn completed",
+            )
 
         except Exception as e:
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
             yield self.streaming_handler.format_aisdk_error(str(e))
+            # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
+            _emit_chat_primitive(
+                self.workspace_id, success=False, detail=str(e),
+            )
 
     async def stream_response(
         self,
@@ -2109,12 +2353,15 @@ class StreamingChatService:
         """Stream chat response using legacy SSE format."""
         from core.llm import create_llm_manager
 
+        # PRD-185 S7: start the turn with clean retrieval provenance.
+        self._reset_turn_retrieval()
+
         # Get tools from SINGLE SOURCE if not provided.
         # PRD-138 US-009: extract latest user turn first so the dispatcher
         # enum can be narrowed to relevant actions for this query.
         if tools is None:
             _query = self.prompt_analyzer.extract_latest_user_text(messages)
-            tools = get_tools_for_agent(query=_query)
+            tools = await get_tools_for_agent_async(query=_query)
 
         try:
             llm_manager = create_llm_manager(service_name="chatbot", workspace_id=self.workspace_id, request_type="chat")
@@ -2125,6 +2372,8 @@ class StreamingChatService:
             llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                 messages, available_tools=tools,
             )
+            # PRD-157 S5: keep the chat's pinned documents always in context.
+            self._inject_pinned_documents(llm_messages, chat_id)
             assistant_parts = []
 
             if hasattr(llm_manager, 'generate_response_stream'):
@@ -2153,6 +2402,8 @@ class StreamingChatService:
                             agent_id=1, workspace_id=self.workspace_id,
                             original_intent=latest_text,
                         )
+                        # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
+                        self._collect_tool_retrieval(tool_name, result)
                         if result['success']:
                             tool_data.update(result['frontend_data'])
 
@@ -2187,13 +2438,24 @@ class StreamingChatService:
                 self.chat_service.save_message(
                     chat_id=chat_id, role='assistant',
                     parts=assistant_parts, workspace_id=self.workspace_id,
+                    # PRD-185 S7: stamp the turn's retrieved doc ids for vote feedback.
+                    retrieval_context=self._turn_retrieval_context(latest_text),
                 )
 
             yield self.streaming_handler.format_sse_done()
 
+            # PRD-142 W3-S6: chat primitive heartbeat — green on clean turn.
+            _emit_chat_primitive(
+                self.workspace_id, success=True, detail="chat turn completed",
+            )
+
         except Exception as e:
             logger.error(f"Error streaming response: {e}", exc_info=True)
             yield self.streaming_handler.format_sse_error(str(e))
+            # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
+            _emit_chat_primitive(
+                self.workspace_id, success=False, detail=str(e),
+            )
 
     async def _execute_pretriggered_tools(
         self,
@@ -2220,6 +2482,8 @@ class StreamingChatService:
                 agent_id=agent_id, workspace_id=self.workspace_id,
                 original_intent=query,
             )
+            # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
+            self._collect_tool_retrieval(tool_name, result)
 
             if result['success']:
                 tool_data.update(result['frontend_data'])

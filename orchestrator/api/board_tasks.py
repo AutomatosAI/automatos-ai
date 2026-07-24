@@ -14,20 +14,36 @@ from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from core.auth.hybrid import get_request_context_hybrid
+from config import config
+from core.auth.hybrid import get_request_context_hybrid, require_task_context
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from core.auth.scopes import TASKS_READ
 from core.database.database import get_db
 from core.models.core import BoardTask
 from core.models import Agent
+from core.utils.exception_telemetry import record_error
+from core.utils.background_tasks import launch_guarded
+from services.board_dispatcher import notify_task_available
+from services.board_events import board_event_stream, notify_board_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 
-VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done"}
+VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed"}
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
+
+# PRD-171 F025: source_types the board must NOT self-execute on drag/PATCH.
+# 'recipe' runs through the recipe executor; 'orchestration'/'orchestration_task'
+# are mission mirrors the mission engine already owns (orchestration_board_bridge)
+# — firing a board execution on them double-runs work the mission drives.
+_NON_EXECUTABLE_SOURCE_TYPES = frozenset(
+    {"recipe", "orchestration", "orchestration_task"}
+)
 
 # Priority → SLA deadline hours
 _PRIORITY_SLA_HOURS: dict[str, int] = {
@@ -200,16 +216,86 @@ async def _dispatch_task_complete(db: Session, workspace_id, task: BoardTask) ->
             exc_info=True,
         )
 
+    # PRD-204 S3: board-task terminal choke point (success) -- every
+    # completion path funnels through this helper. Fail-soft.
+    from services.watch_hooks import watch_ingest_terminal
+
+    watch_ingest_terminal(
+        db,
+        workspace_id=workspace_id,
+        target_type="board_task",
+        target_id=str(task.id),
+        terminal_state="completed",
+        summary=(str(task.result)[:500] if task.result else None),
+    )
+
+
+async def _dispatch_task_failed(db: Session, workspace_id, task: BoardTask) -> None:
+    """Fire a ``task_failed`` event (PRD-161 S3).
+
+    Mirrors ``_dispatch_task_complete`` but signals an error terminal state, so
+    the user is told the task did NOT succeed — previously a crashed execution
+    closed silently as 'done'. Never raises into the execution flow.
+    """
+    try:
+        from core.services.notification_dispatcher import NotificationDispatcher
+
+        agent_name = None
+        if task.assigned_agent_id:
+            agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
+            agent_name = agent.name if agent else f"agent-{task.assigned_agent_id}"
+
+        dispatcher = NotificationDispatcher(db, str(workspace_id))
+        await dispatcher.dispatch(
+            event_type="task_failed",
+            title=f"Task failed: {task.title}",
+            message=(task.error_message or "Execution failed")[:500],
+            link_type="task",
+            link_id=str(task.id),
+            agent_id=task.assigned_agent_id,
+            agent_name=agent_name,
+            status="error",
+        )
+    except Exception:
+        logger.error(
+            "[BoardTasks] task_failed dispatch failed for task %s",
+            getattr(task, "id", "?"),
+            exc_info=True,
+        )
+
+    # PRD-204 S3: board-task terminal choke point (failure). Fail-soft.
+    from services.watch_hooks import watch_ingest_terminal
+
+    watch_ingest_terminal(
+        db,
+        workspace_id=workspace_id,
+        target_type="board_task",
+        target_id=str(task.id),
+        terminal_state="failed",
+        summary=(task.error_message or "Execution failed")[:500],
+    )
+
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-def _enrich_with_agents(tasks: list, db: Session) -> list:
-    """Join agent info onto task dicts."""
+def _enrich_with_agents(tasks: list, db: Session, workspace_id) -> list:
+    """Join agent info onto task dicts.
+
+    Agents are resolved within ``workspace_id`` only: a task whose
+    ``assigned_agent_id`` points at another workspace's agent yields no ``agent``
+    block rather than leaking that agent's name/icon (defense-in-depth tenant
+    isolation — board reads are now reachable by per-workspace SDK keys).
+    """
     agent_ids = {t.assigned_agent_id for t in tasks if t.assigned_agent_id}
     if not agent_ids:
         return [t.to_dict() for t in tasks]
 
-    agents = {a.id: a for a in db.query(Agent).filter(Agent.id.in_(agent_ids)).all()}
+    agents = {
+        a.id: a
+        for a in db.query(Agent)
+        .filter(Agent.id.in_(agent_ids), Agent.workspace_id == workspace_id)
+        .all()
+    }
 
     result = []
     for t in tasks:
@@ -227,7 +313,7 @@ def _enrich_with_agents(tasks: list, db: Session) -> list:
 
 # ── CRUD ─────────────────────────────────────────────────────────────
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -270,6 +356,12 @@ async def create_task(
     if attachment_ids and not isinstance(attachment_ids, list):
         raise HTTPException(status_code=422, detail="attachment_ids must be a list")
 
+    # PRD-221 S14: a caller (e.g. a Command Centre activity card) may attach
+    # the source it was created from, so the board card links back. Defaults
+    # to 'user' when absent — unchanged for every existing caller.
+    source_type = body.get("source_type", "user")
+    source_id = body.get("source_id")
+
     task = BoardTask(
         workspace_id=ctx.workspace_id,
         title=title,
@@ -282,6 +374,8 @@ async def create_task(
         created_by_type="user",
         created_by_id=ctx.user.clerk_user_id or ctx.user.id,
         parent_task_id=body.get("parent_task_id"),
+        source_type=source_type,
+        source_id=source_id,
         tags=body.get("tags", []),
         planning_data=planning_data,
         attachment_ids=attachment_ids,  # PRD-127
@@ -291,13 +385,25 @@ async def create_task(
     db.commit()
     db.refresh(task)
 
+    # PRD-180 S1 (F090): push the new card to subscribed Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="task_created",
+    )
+
+    # PRD-161: assignment = immediate dispatch via the board loop (Q39/Q40).
+    # A created-as-assigned task notifies the claimant; the dispatch loop claims
+    # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
+    if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
     return task.to_dict()
 
 
 @router.get("")
 async def list_tasks(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None, description="Comma-separated statuses"),
     agent_id: Optional[int] = Query(None),
@@ -332,6 +438,17 @@ async def list_tasks(
         like_term = f"%{search}%"
         query = query.filter(BoardTask.title.ilike(like_term))
 
+    # PRD-161 S5: archive — done tasks completed longer ago than the configured
+    # window drop off the active board (retained in the DB, just not surfaced).
+    archive_before = datetime.now(timezone.utc) - timedelta(days=config.BOARD_ARCHIVE_DONE_DAYS)
+    query = query.filter(
+        ~(
+            (BoardTask.status == "done")
+            & BoardTask.completed_at.isnot(None)
+            & (BoardTask.completed_at < archive_before)
+        )
+    )
+
     total = query.count()
     tasks = (
         query.order_by(BoardTask.created_at.desc())
@@ -341,15 +458,43 @@ async def list_tasks(
     )
 
     return {
-        "tasks": _enrich_with_agents(tasks, db),
+        "tasks": _enrich_with_agents(tasks, db, ctx.workspace_id),
         "total": total,
     }
+
+
+@router.get("/stream")
+async def stream_board_events(
+    ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
+):
+    """Real-time board SSE via Postgres ``LISTEN/NOTIFY`` (PRD-180 S1, F090).
+
+    Replaces the old timed ping: the stream ``LISTEN``s the ``board_events``
+    channel and forwards each board-task mutation (insert / status change /
+    claim / requeue) to this client sub-second, scoped to the caller's
+    workspace. A heartbeat comment keeps the connection alive but does not drive
+    refreshes — real NOTIFY events do. Rides the read-only ``TASKS_READ`` scope
+    (Q42): the shared hybrid auth is untouched and no write scope is introduced.
+    """
+    workspace_id = str(ctx.workspace_id)
+
+    return StreamingResponse(
+        board_event_stream(
+            workspace_id, heartbeat_seconds=config.BOARD_SSE_HEARTBEAT_SECONDS
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/{task_id}")
 async def get_task(
     task_id: int,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
+    ctx: RequestContext = Depends(require_task_context(TASKS_READ)),
     db: Session = Depends(get_db),
 ):
     """Get a single board task."""
@@ -360,11 +505,11 @@ async def get_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    enriched = _enrich_with_agents([task], db)
+    enriched = _enrich_with_agents([task], db, ctx.workspace_id)
     return enriched[0]
 
 
-@router.patch("/{task_id}")
+@router.patch("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task(
     task_id: int,
     request: Request,
@@ -445,11 +590,13 @@ async def update_task(
         task.planning_data = body["planning_data"]
 
     # Check if we need to trigger execution
+    # PRD-171 F025: only user-owned board tasks self-execute on a status flip.
+    # Recipe + mission-mirror rows are driven by their own engines.
     trigger_execution = (
         "status" in body
         and body["status"] == "in_progress"
         and task.assigned_agent_id
-        and task.source_type != 'recipe'  # Recipe executor handles its own execution
+        and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
     )
 
     # PRD-128: dispatch task_complete on terminal transition
@@ -458,6 +605,12 @@ async def update_task(
 
     db.commit()
     db.refresh(task)
+
+    # PRD-180 S1 (F090): push the mutation to subscribed Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="task_updated",
+    )
 
     if trigger_execution:
         _launch_task_execution(
@@ -468,12 +621,21 @@ async def update_task(
             review_mode=task.review_mode or "auto",
             attachment_ids=task.attachment_ids,  # PRD-127
         )
+    elif (
+        "assigned_agent_id" in body
+        and task.status == "assigned"
+        and task.assigned_agent_id
+        and task.source_type != "recipe"
+    ):
+        # PRD-161: assigning notifies the dispatch loop (single spine); the loop
+        # claims 'assigned' tasks only, so re-assigning a running task is a no-op.
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Updated task %d", task.id)
     return task.to_dict()
 
 
-@router.delete("/{task_id}")
+@router.delete("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def delete_task(
     task_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -496,7 +658,7 @@ async def delete_task(
 
 # ── Status shortcut (drag-and-drop) ─────────────────────────────────
 
-@router.post("/{task_id}/approve")
+@router.post("/{task_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def approve_task(
     task_id: int,
     request: Request,
@@ -545,6 +707,38 @@ async def approve_task(
                     "url": f"/api/widgets/blog/posts/{post.slug}?workspace_id={ctx.workspace_id}",
                 }
                 logger.info("[BoardTasks] Approved: published blog post %s (%s)", post.id, post.title)
+            elif action_type == "create_blog":
+                # Used by VECTOR (and any agent) to suggest a blog topic for
+                # founder approval. On approve, fire the standard blog mission.
+                from modules.tools.discovery.handlers_blog import (
+                    create_blog_post_from_topic,
+                )
+                topic = approval_action.get("topic")
+                category = approval_action.get("category") or "AI & Automation"
+                if not topic:
+                    raise HTTPException(status_code=422, detail="approval_action missing topic")
+                user_id = ctx.user.clerk_user_id if ctx.user else None
+                result = await create_blog_post_from_topic(
+                    db,
+                    ctx.workspace_id,
+                    {"topic": topic, "category": category, "_user_id": user_id},
+                )
+                if not result.get("success"):
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Blog mission start failed: {result.get('error', 'unknown')}",
+                    )
+                action_result = {
+                    "type": "create_blog",
+                    "mission_id": result.get("mission_id"),
+                    "topic": topic,
+                    "category": category,
+                    "task_count": result.get("task_count", 0),
+                }
+                logger.info(
+                    "[BoardTasks] Approved: created blog mission %s for topic '%s'",
+                    result.get("mission_id"), topic,
+                )
             else:
                 logger.warning("[BoardTasks] Unknown approval_action type: %s", action_type)
                 action_result = {"type": action_type, "warning": "Unknown action type, task approved without side-effect"}
@@ -576,7 +770,7 @@ async def approve_task(
     }
 
 
-@router.post("/{task_id}/reject")
+@router.post("/{task_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def reject_task(
     task_id: int,
     request: Request,
@@ -584,8 +778,12 @@ async def reject_task(
     db: Session = Depends(get_db),
 ):
     """
-    Reject a board task in review status with optional feedback.
-    Moves task back to inbox with feedback stored in error_message.
+    Reject a board task in review status with reviewer feedback (PRD-161 Q44).
+
+    Returns the task to the SAME agent as 'assigned' — not dumped back to inbox —
+    with the feedback carried into the next execution's context (review_feedback),
+    so the agent redoes the work with the correction. The dispatch loop picks the
+    re-assigned task up immediately.
     """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
@@ -596,29 +794,79 @@ async def reject_task(
 
     if task.status != "review":
         raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
+    if not task.assigned_agent_id:
+        raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
 
     body = await request.json()
     feedback = (body.get("feedback") or "").strip()
 
-    task.status = "inbox"
+    # Q44: back to the same agent for another attempt, feedback in context.
+    task.status = "assigned"
     task.started_at = None
     task.completed_at = None
-    if feedback:
-        task.error_message = f"Rejected: {feedback}"
-
+    task.result = None
+    task.lease_until = None
+    task.attempts = 0  # a human-driven redo is a fresh attempt cycle
+    task.review_feedback = feedback or None
     db.commit()
     db.refresh(task)
 
-    logger.info("[BoardTasks] Task %d rejected%s", task.id, f" with feedback: {feedback}" if feedback else "")
+    # Wake the dispatch loop so the redo starts immediately (single spine).
+    if task.source_type != "recipe":
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+
+    logger.info("[BoardTasks] Task %d rejected → re-assigned to agent %s%s",
+                task.id, task.assigned_agent_id,
+                f" with feedback: {feedback}" if feedback else "")
     return {
         "success": True,
         "task_id": task.id,
         "status": task.status,
+        "assigned_agent_id": task.assigned_agent_id,
         "feedback": feedback or None,
     }
 
 
-@router.patch("/{task_id}/status")
+@router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
+async def run_task_now(
+    task_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-161 S5: dispatch a task immediately.
+
+    Resets the task to a fresh ``assigned`` claim (clears lease + attempts) and
+    notifies the dispatch loop, so a failed, idle, or just-created task can be
+    re-run on demand from the board. A task already in_progress is left alone.
+    """
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not task.assigned_agent_id:
+        raise HTTPException(status_code=422, detail="Assign an agent before running the task")
+    if task.status == "in_progress":
+        raise HTTPException(status_code=409, detail="Task is already running")
+
+    task.status = "assigned"
+    task.lease_until = None
+    task.attempts = 0
+    task.completed_at = None
+    task.started_at = None
+    db.commit()
+    db.refresh(task)
+
+    if task.source_type != "recipe":
+        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+
+    logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s",
+                task.id, task.assigned_agent_id)
+    return {"success": True, "task_id": task.id, "status": task.status}
+
+
+@router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
     request: Request,
@@ -660,8 +908,20 @@ async def update_task_status(
     db.commit()
     db.refresh(task)
 
-    # Fire-and-forget: trigger agent execution when moved to in_progress
-    if new_status == "in_progress" and task.assigned_agent_id and task.source_type != 'recipe':
+    # PRD-180 S1 (F090): push the drag-and-drop status change to Command Centres.
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status=task.status,
+        event="status_changed",
+    )
+
+    # Fire-and-forget: trigger agent execution when moved to in_progress.
+    # PRD-171 F025: exclude recipe + mission-mirror rows — dragging a mission
+    # mirror to in_progress must not re-run work the mission engine owns.
+    if (
+        new_status == "in_progress"
+        and task.assigned_agent_id
+        and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
+    ):
         _launch_task_execution(
             task_id=task.id,
             agent_id=task.assigned_agent_id,
@@ -676,6 +936,193 @@ async def update_task_status(
 
 # ── Immediate execution (fire-and-forget) ────────────────────────────
 
+async def _lease_heartbeat(task_id: int) -> None:
+    """PRD-171 F024: keep a long-running task's dispatch lease alive.
+
+    Runs concurrently with the execution and renews ``lease_until`` every half
+    the lease window on its OWN short-lived session, so a legitimately long run
+    (> ``BOARD_DISPATCH_LEASE_SECONDS``) is never swept back to ``assigned`` and
+    re-claimed. Cancelled the moment the run finishes; if the process crashes the
+    heartbeat dies with it, the lease truly lapses, and the sweeper requeues the
+    dead run — exactly the intended behaviour. Best-effort throughout: a failed
+    renewal is logged and retried, never propagated into the run.
+    """
+    from core.database.database import SessionLocal
+    from services.board_dispatcher import renew_lease
+
+    lease_seconds = config.BOARD_DISPATCH_LEASE_SECONDS
+    # Renew well within the window so a slow tick never lets the lease lapse.
+    interval = max(1.0, lease_seconds / 2)
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            hb = SessionLocal()
+            try:
+                if not renew_lease(hb, task_id, lease_seconds=lease_seconds):
+                    # Row is no longer in_progress (finished/failed/requeued) —
+                    # nothing more to renew.
+                    break
+            except Exception:
+                logger.warning(
+                    "[BoardTasks] lease heartbeat failed for task %d", task_id,
+                    exc_info=True,
+                )
+                hb.rollback()
+            finally:
+                hb.close()
+    except asyncio.CancelledError:
+        raise
+
+
+def _estimate_board_task_cost_usd(db, task_id: int, agent_id: int) -> float:
+    """PRD-192 S3: a REAL dollar estimate for the pending board task.
+
+    Before this the approval gate always received the ``estimated_cost_usd=0.0``
+    default, so an ``auto_below_budget`` policy auto-approved every task (C.5 —
+    the ceiling could never bind). Estimator: prompt tokens of the task's text
+    (``raw_prompt`` else title+description) + the agent's configured output cap
+    (``model_config.max_tokens``, else the model registry's own ceiling),
+    priced by ``modules.policy.pricing`` against the task agent's model — the
+    flat rate applies only inside pricing as the registry-miss last resort.
+
+    Never raises: 0.0 when nothing is resolvable (the gate then behaves as
+    before for that task).
+    """
+    try:
+        from core.context_guard import count_tokens
+        from modules.policy import pricing as _pricing
+
+        task = db.query(BoardTask).get(task_id)
+        if task is None:
+            return 0.0
+        prompt_text = task.raw_prompt or " ".join(
+            p for p in (task.title, task.description) if p
+        )
+        est_in = count_tokens(prompt_text or "")
+
+        model_id = None
+        est_out = 0
+        agent = db.query(Agent).get(agent_id) if agent_id else None
+        mc = getattr(agent, "model_config", None) or {}
+        if isinstance(mc, dict):
+            model_id = mc.get("model_id")
+            try:
+                est_out = int(mc.get("max_tokens") or 0)
+            except (TypeError, ValueError):
+                est_out = 0
+        if model_id and not est_out:
+            try:
+                from core.models import LLMModel
+
+                m = db.query(LLMModel).filter_by(model_id=model_id).first()
+                est_out = int(m.max_output_tokens or 0) if m else 0
+            except Exception:
+                est_out = 0
+
+        if model_id:
+            priced = _pricing.estimate_cost_usd(db, model_id, est_in, est_out)
+            if priced is not None:
+                return float(priced)
+        # No model / registry miss ⇒ the ONE flat last-resort, inside pricing.
+        return _pricing.price_total_tokens_usd(db, model_id, est_in + est_out)
+    except Exception:
+        logger.warning(
+            "[BoardTasks] cost estimate failed for task %s — passing 0.0",
+            task_id, exc_info=True,
+        )
+        return 0.0
+
+
+def _board_task_blocked_pending_approval(
+    db, task_id: int, agent_id: int, workspace_id: str
+) -> bool:
+    """PRD-181 S2: return True if the board task must wait for human approval.
+
+    - An active (granted, unexpired) grant for this task ⇒ proceed (False).
+    - Otherwise evaluate the workspace approval policy. If it asks, block the
+      task (status → ``blocked``, ``blocked_reason`` referencing the grant) and
+      return True so the caller does NOT execute it.
+
+    Fail posture (PRD-192 S1, locked #4): under the policy plane's ENFORCE
+    stages (``destructive`` | ``on``) an approval-gate ERROR blocks the task
+    pending approval — an errored governance gate must never launch autonomous
+    work. In ``off``/``shadow`` the historical fail-open stands (the per-tool
+    PolicyGate still applies to every tool the task's agent invokes).
+    """
+    try:
+        from core.services.approval_grants import find_active_grant
+        from core.models.approval_grants import SUBJECT_BOARD_TASK
+        from services.board_approval import evaluate_board_task_approval
+
+        # Already authorised? Proceed.
+        if find_active_grant(
+            db, workspace_id, subject_type=SUBJECT_BOARD_TASK, subject_id=str(task_id)
+        ) is not None:
+            return False
+
+        outcome = evaluate_board_task_approval(
+            db, workspace_id=workspace_id, task_id=task_id, agent_id=agent_id,
+            # PRD-192 S3: a real priced figure — auto_below_budget can bind (C.5).
+            estimated_cost_usd=_estimate_board_task_cost_usd(db, task_id, agent_id),
+        )
+        if not outcome.requires_approval:
+            return False
+
+        # Block the task until a human grants the pending grant.
+        task = db.query(BoardTask).get(task_id)
+        if task is not None and task.status == "in_progress":
+            task.status = "blocked"
+            task.blocked_at = datetime.now(timezone.utc)
+            grant_id = getattr(outcome.grant, "id", None)
+            task.blocked_reason = (
+                f"Awaiting human approval (grant #{grant_id}): {outcome.reason}"
+            )
+            db.commit()
+            logger.info(
+                "[BoardTasks] task %s blocked pending approval grant #%s",
+                task_id, grant_id,
+            )
+        return True
+    except Exception:
+        try:
+            from modules.policy.flag import enforcement_active
+
+            _fail_closed = enforcement_active()
+        except Exception:
+            _fail_closed = False
+
+        if not _fail_closed:
+            logger.warning(
+                "[BoardTasks] approval gate errored for task %s — proceeding "
+                "(per-tool PolicyGate still applies)", task_id, exc_info=True,
+            )
+            return False
+
+        # Enforce stage: BLOCK pending approval, never launch on a gate error.
+        logger.error(
+            "[BoardTasks] approval gate errored for task %s — BLOCKED pending "
+            "approval (policy plane enforce stage fails closed)", task_id,
+            exc_info=True,
+        )
+        try:
+            db.rollback()  # the failed gate may have poisoned the transaction
+            task = db.query(BoardTask).get(task_id)
+            if task is not None and task.status == "in_progress":
+                task.status = "blocked"
+                task.blocked_at = datetime.now(timezone.utc)
+                task.blocked_reason = (
+                    "Approval gate errored — blocked pending approval "
+                    "(policy plane enforce stage fails closed)"
+                )
+                db.commit()
+        except Exception:
+            logger.warning(
+                "[BoardTasks] could not mark task %s blocked after gate error "
+                "— task still NOT launched", task_id, exc_info=True,
+            )
+        return True
+
+
 def _launch_task_execution(
     task_id: int,
     agent_id: int,
@@ -689,7 +1136,20 @@ def _launch_task_execution(
     async def _run():
         from core.database.database import SessionLocal
         db = SessionLocal()
+        # PRD-171 F024: heartbeat the dispatch lease for the life of the run.
+        heartbeat = asyncio.ensure_future(_lease_heartbeat(task_id))
         try:
+            # PRD-181 S2 (F060): board-task approval gate. Before an autonomous
+            # board task executes, run it through the SAME approval primitive
+            # missions use. If the workspace policy asks (always_ask / over the
+            # dollar ceiling), a durable, revocable, expiring approval-grant is
+            # created and the task is BLOCKED until a human grants it — not run,
+            # not auto-allowed. On grant, the grant API re-queues the task.
+            if _board_task_blocked_pending_approval(db, task_id, agent_id, workspace_id):
+                heartbeat.cancel()
+                db.close()
+                return
+
             from modules.agents.factory.agent_factory import AgentFactory
 
             factory = AgentFactory(db_session=db)
@@ -705,6 +1165,12 @@ def _launch_task_execution(
                 attachment_ids=attachment_ids,  # PRD-127
             )
 
+            # PRD-171 F023: the executor reports its true terminal status. A
+            # run that failed (e.g. the loop raised) returns {"status":"error"}
+            # — closing that as 'done' masks the failure. Fail honestly, exactly
+            # as the crash-handler below and the mission path already do.
+            exec_status = (exec_result or {}).get("status")
+
             # Extract response text
             llm_text = (
                 exec_result.get("result")
@@ -716,16 +1182,31 @@ def _launch_task_execution(
 
             task = db.query(BoardTask).get(task_id)
             if task and task.status == "in_progress":
-                task.result = str(llm_text) if llm_text else None
-                task.status = "done" if review_mode == "auto" else "review"
-                task.completed_at = datetime.now(timezone.utc)
-                # PRD-128: dispatch task_complete only on terminal 'done'
-                if task.status == "done":
-                    await _dispatch_task_complete(db, workspace_id, task)
-                # Persist a report row for every completed task so it surfaces
-                # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
-                await _auto_create_task_report(db, workspace_id, task, exec_result)
-                db.commit()
+                if exec_status == "error":
+                    task.status = "failed"
+                    task.error_message = str(
+                        exec_result.get("error") or "Agent execution failed"
+                    )[:500]
+                    task.completed_at = datetime.now(timezone.utc)
+                    db.commit()
+                    await _dispatch_task_failed(db, workspace_id, task)
+                    # Surface failures the same way successes are surfaced.
+                    await _auto_create_task_report(
+                        db, workspace_id, task,
+                        {"result": "", "tokens_used": 0},
+                    )
+                    db.commit()
+                else:
+                    task.result = str(llm_text) if llm_text else None
+                    task.status = "done" if review_mode == "auto" else "review"
+                    task.completed_at = datetime.now(timezone.utc)
+                    # PRD-128: dispatch task_complete only on terminal 'done'
+                    if task.status == "done":
+                        await _dispatch_task_complete(db, workspace_id, task)
+                    # Persist a report row for every completed task so it surfaces
+                    # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
+                    await _auto_create_task_report(db, workspace_id, task, exec_result)
+                    db.commit()
 
             logger.info(
                 "[BoardTasks] Agent %d completed task %d → %s",
@@ -735,13 +1216,24 @@ def _launch_task_execution(
             logger.error(
                 "[BoardTasks] Task %d execution failed: %s", task_id, e, exc_info=True,
             )
+            record_error(
+                subsystem="board",
+                operation="execute_task",
+                error=e,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                extra={"task_id": task_id},
+            )
             try:
                 task = db.query(BoardTask).get(task_id)
                 if task and task.status == "in_progress":
-                    task.status = "done"
+                    # PRD-161 S3: fail honestly — a crashed execution becomes
+                    # terminal 'failed', not a silent 'done' with an error blob.
+                    task.status = "failed"
                     task.error_message = str(e)[:500]
                     task.completed_at = datetime.now(timezone.utc)
                     db.commit()
+                    await _dispatch_task_failed(db, workspace_id, task)
                     # Surface failures the same way successes are surfaced.
                     await _auto_create_task_report(
                         db, workspace_id, task,
@@ -751,14 +1243,61 @@ def _launch_task_execution(
             except Exception:
                 db.rollback()
         finally:
+            # PRD-171 F024: stop heartbeating the moment the run ends — the task
+            # has reached its terminal state, so the lease should now be allowed
+            # to lapse for any genuinely-abandoned row.
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except (asyncio.CancelledError, Exception):
+                pass
             db.close()
 
-    asyncio.create_task(_run())
+    # Guarded launch: a strong ref prevents GC-cancellation mid-run and an
+    # uncaught crash is recorded. _run() already records its own caught
+    # failures; the boot reaper (W1-S6) recovers any row stranded by a restart.
+    launch_guarded(
+        _run(),
+        subsystem="board",
+        operation="execute_task",
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        extra={"task_id": task_id},
+    )
 
 
 # ── Planning mode ────────────────────────────────────────────────────
 
-@router.post("/plan")
+# Tight pack budget for board planning: enough to ground questions in workspace
+# knowledge + prior failures without dominating a question-generation prompt.
+_BOARD_PLANNING_PACK_TOKENS = 4000
+
+
+async def _board_planning_context(db: Session, workspace_id, goal: str) -> str:
+    """The ONE platform planning pack (PRD-164 S1, Q61) for board planning.
+
+    Same assembler as MissionPlanner and AutoBrain —
+    ``ContextService.build_planning_context``. Empty string on any failure so
+    planning never breaks because context assembly did.
+    """
+    try:
+        from modules.context.service import ContextService
+
+        pack = await ContextService(db).build_planning_context(
+            goal=goal,
+            workspace_id=str(workspace_id),
+            max_tokens=_BOARD_PLANNING_PACK_TOKENS,
+        )
+        return pack.content if not pack.is_empty else ""
+    except Exception:
+        logger.warning(
+            "[BoardTasks] planning context pack unavailable — continuing without it",
+            exc_info=True,
+        )
+        return ""
+
+
+@router.post("/plan", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def plan_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -799,12 +1338,24 @@ async def plan_task(
         "}"
     )
 
-    response = await llm.generate_response(
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"Plan this task: {raw_prompt}"},
-        ]
-    )
+    # PRD-164 S1 (Q61): ground the questions in what the platform knows —
+    # workspace knowledge, prior mission failures, roster.
+    messages = [{"role": "system", "content": system}]
+    planning_context = await _board_planning_context(db, ctx.workspace_id, raw_prompt)
+    if planning_context:
+        messages.append({
+            "role": "system",
+            "content": (
+                f"{planning_context}\n\n"
+                "Use this platform context: ground your questions in the "
+                "workspace's actual documents and agents, and if similar work "
+                "previously failed, ask questions that steer the task away "
+                "from the failed approach."
+            ),
+        })
+    messages.append({"role": "user", "content": f"Plan this task: {raw_prompt}"})
+
+    response = await llm.generate_response(messages=messages)
 
     # Extract text from response
     text = _extract_llm_text(response)
@@ -824,7 +1375,7 @@ async def plan_task(
     return {"planning": parsed, "raw_prompt": raw_prompt}
 
 
-@router.post("/plan/refine")
+@router.post("/plan/refine", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def refine_task(
     request: Request,
     ctx: RequestContext = Depends(get_request_context_hybrid),

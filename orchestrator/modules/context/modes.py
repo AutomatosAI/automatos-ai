@@ -20,6 +20,7 @@ class ContextMode(str, Enum):
     ORCHESTRATOR_STAGE = "orchestrator_stage"
     NL2SQL = "nl2sql"
     COORDINATOR = "coordinator"
+    PLANNING = "planning"
 
 
 @dataclass(frozen=True)
@@ -72,14 +73,14 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         max_tokens=8000,
     ),
     # personality=False: heartbeat agents execute scheduled tasks autonomously.
-    # NOTE: memory intentionally excluded to keep context lean. No memory
-    # section also means no daily logs. Heartbeat agents are stateless by
-    # design — add "memory" here if agents need cross-run learning.
-    # See PRD-81 Task 3.5 / Task 5.5.
+    # PRD-179 S1 (F021 read-half): the workspace-scoped "field_memory" digest
+    # gives recurring agents the cross-run learning they were previously blind to
+    # (patterns earlier missions accumulated). User-memory / daily logs stay out
+    # to keep the tick lean — this is the durable-field slice, not chat memory.
     ContextMode.HEARTBEAT_AGENT: ModeConfig(
         sections=[
             "identity", "skills", "composio", "plugins",
-            "platform_actions", "task_context", "datetime_context",
+            "platform_actions", "task_context", "field_memory", "datetime_context",
         ],
         tool_loading="full",
         personality=False,
@@ -130,5 +131,30 @@ MODE_CONFIGS: dict[ContextMode, ModeConfig] = {
         tool_loading="full",
         personality=False,
         max_tokens=131072,
+    ),
+    # personality=False: the planning pack (PRD-164 S1, Q61) is injected into
+    # ANOTHER prompt, never sent to an LLM on its own. One section list for
+    # every planner — MissionPlanner, board plan_task, AutoBrain — assembled
+    # exclusively by ContextService.build_planning_context (the one assembler).
+    # planning_history has priority 2 so recorded failures survive budget
+    # pressure (the learning demo). PRD-179 S1 (F021 read-half): "field_memory"
+    # adds the workspace-scoped field digest so a completed mission's promoted
+    # distillation reaches the next mission's plan — the compounding arm PRD-164
+    # left open (documents + KG but never the field).
+    ContextMode.PLANNING: ModeConfig(
+        sections=[
+            # The full planner pack. Consumed ONLY by the real planners now —
+            # MissionPlanner + board plan_task (they build execution plans and
+            # want doc grounding). The hot-path AutoBrain classifier no longer
+            # uses this pack (it takes a cheap roster instead), so its ~80-113s
+            # cost is off the per-message path. (Restored planning_knowledge that
+            # PR #517 had stripped from the shared pack, which had also removed
+            # the planners' doc grounding as an unintended side effect.)
+            "planning_knowledge", "planning_history",
+            "business_graph", "field_memory", "agent_roster",
+        ],
+        tool_loading="none",
+        personality=False,
+        max_tokens=None,
     ),
 }

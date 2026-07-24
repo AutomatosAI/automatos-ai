@@ -9,42 +9,100 @@ import pytest
 import tempfile
 import shutil
 from pathlib import Path
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from typing import Generator
 
 from modules.codegraph import CodeGraphService
 
-
-# Test database URL (use in-memory SQLite for fast tests)
-TEST_DB_URL = "postgresql://postgres:secure_password_123@127.0.0.1:5432/orchestrator_db"
-
-
-@pytest.fixture(scope="session")
-def test_engine():
-    """Create test database engine"""
-    engine = create_engine(TEST_DB_URL)
-    yield engine
-    engine.dispose()
+# ``test_engine`` and the transactional ``db_session`` fixture come from the
+# root orchestrator/conftest.py (PRD-142 W2-S4) — no per-module DB URL here.
 
 
-@pytest.fixture(scope="function")
-def db_session(test_engine) -> Generator[Session, None, None]:
+# ---------------------------------------------------------------------------
+# Environment capability guard (F056)
+# ---------------------------------------------------------------------------
+#
+# The F056 orchestrator-module-tests job stands up stock ``postgres:15`` and
+# configures no embedding provider. codegraph_service.index_github_project()
+# calls _ensure_embedding_dimension(), which runs
+# ``ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector(N)`` — that
+# needs the pgvector extension — and then generate_embeddings_batch(), which
+# needs a live embedder. Those tests therefore CANNOT pass in this job; they are
+# real tests gated on a service the job doesn't provide, so we SKIP them
+# cleanly (never xfail/delete/weaken) with an honest reason. The table-only
+# tests (list/delete-nothing) still run against the schema init_test_db.py now
+# creates.
+#
+# The skip is decided by probing pgvector availability once per session against
+# the real test engine. When pgvector IS present (e.g. a local pgvector DB or a
+# future job upgrade to the pgvector image + an embedder), the guard is inert and
+# every test runs.
+
+# Tests whose body reaches the pgvector/embedder indexing path. Keyed by node
+# name (class-qualified where needed) so the guard targets exactly these.
+_PGVECTOR_DEPENDENT = frozenset({
+    # test_codegraph_integration.py — every test indexes then searches.
+    "test_index_and_verify",
+    "test_symbol_search_finds_functions",
+    "test_semantic_search_finds_relevant_code",
+    "test_reindex_updates_data",
+    "test_generate_call_graph",
+    # test_codegraph_service.py — these index before asserting.
+    "test_delete_project",
+    "test_indexing_speed_small_repo",  # also needs the pytest-benchmark plugin
+})
+
+
+def _pgvector_available() -> bool:
+    """True iff the test database can enable the pgvector extension.
+
+    Probed against the same engine the DB fixtures use. Any failure (extension
+    missing, insufficient privilege, DB unreachable) is treated as unavailable
+    so the dependent tests skip rather than error.
     """
-    Provide a transactional database session for each test.
-    Rolls back after test completes.
+    try:
+        # Import here so collecting this tree never forces a DB config resolution
+        # or a sqlalchemy import that the environment might not have.
+        from core.database.database import engine
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+            ).first()
+            return row is not None
+    except Exception:
+        return False
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip codegraph tests the running environment cannot support.
+
+    * pgvector/embedder indexing tests skip when pgvector is unavailable.
+    * ``test_indexing_speed_small_repo`` additionally needs the pytest-benchmark
+      ``benchmark`` fixture; skip it if that plugin isn't installed (it is not in
+      requirements.txt, so the F056 job lacks it).
     """
-    connection = test_engine.connect()
-    transaction = connection.begin()
-    
-    SessionLocal = sessionmaker(bind=connection)
-    session = SessionLocal()
-    
-    yield session
-    
-    session.close()
-    transaction.rollback()
-    connection.close()
+    has_pgvector = _pgvector_available()
+    has_benchmark = config.pluginmanager.hasplugin("benchmark")
+
+    pgvector_skip = pytest.mark.skip(
+        reason="requires pgvector extension + an embedding provider (not stood "
+        "up by the F056 orchestrator-module-tests job on stock postgres:15)"
+    )
+    benchmark_skip = pytest.mark.skip(
+        reason="requires the pytest-benchmark 'benchmark' fixture (plugin not "
+        "installed in the F056 job — absent from requirements.txt)"
+    )
+
+    for item in items:
+        # Only touch this module's tests; leave every other tree alone.
+        if "modules/codegraph/tests/" not in item.nodeid.replace("\\", "/"):
+            continue
+        if item.name == "test_indexing_speed_small_repo" and not has_benchmark:
+            item.add_marker(benchmark_skip)
+        elif item.name in _PGVECTOR_DEPENDENT and not has_pgvector:
+            item.add_marker(pgvector_skip)
 
 
 @pytest.fixture

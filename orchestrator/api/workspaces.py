@@ -20,6 +20,7 @@ from core.models.workspaces import Workspace
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
 from config import config
 
@@ -84,12 +85,26 @@ async def get_current_workspace(
             masked[k] = v
     settings["integrations"] = masked
 
+    # PRD-195 S8 (C.1): this used to return the SYSTEM-role twin
+    # (ctx.user.role) while the frontend typed it as a workspace role — the
+    # exact twin confusion the dossier flagged. Return the real per-tenant
+    # role: member row (owner fallback) via the S2 resolver; the trusted
+    # single-user lanes (local/anonymous) and the super-admin operator render
+    # owner affordances; every other non-member renders read-only — matching
+    # what the write gates now enforce (G5 UI honesty).
+    if ctx.auth_type == "anonymous" or getattr(ctx.user, "system_role", None) == "super_admin":
+        member_role = "owner"
+    else:
+        from core.auth.workspace_permission import resolve_workspace_role
+
+        member_role = resolve_workspace_role(db, ctx) or "viewer"
+
     return {
         "id": str(workspace.id),
         "name": workspace.name,
         "slug": workspace.slug,
         "plan": workspace.plan,
-        "role": ctx.user.role,
+        "role": member_role,
         "plan_limits": workspace.plan_limits or {},
         "is_new_workspace": agent_count == 0,
         "webhook_url": webhook_url,
@@ -120,7 +135,7 @@ async def get_integrations(
     return result
 
 
-@router.put("/current/integrations")
+@router.put("/current/integrations", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_integrations(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -180,7 +195,7 @@ async def get_byok_preferences(
     return {"byok_overrides": byok_overrides}
 
 
-@router.put("/current/byok-preferences")
+@router.put("/current/byok-preferences", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_byok_preferences(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -216,6 +231,43 @@ async def save_byok_preferences(
 
     logger.info("Updated BYOK preferences for workspace %s: %s", workspace.id, overrides)
     return {"status": "saved", "byok_overrides": overrides}
+
+
+@router.put("/current/voice-live", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+async def save_voice_live_settings(
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-207 S4/S7: the workspace's own Auto Live gate.
+
+    Body: ``{"voice_live": {"enabled": bool, "monthly_cap_minutes"?: int,
+    "retell_voice_id"?: str}}`` — validated by the SAME fail-closed rules as
+    the platform tool (one whitelist, two doors), merged never replace-blind.
+    """
+    from modules.voice.live_settings import validate_voice_live_update
+
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    try:
+        normalized = validate_voice_live_update(payload.get("voice_live"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    settings = dict(workspace.settings or {})
+    merged = dict(settings.get("voice_live", {}))
+    merged.update(normalized)
+    settings["voice_live"] = merged
+    workspace.settings = settings
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(workspace, "settings")
+    db.commit()
+
+    logger.info("Updated voice_live settings for workspace %s: %s", workspace.id, merged)
+    return {"status": "saved", "voice_live": merged}
 
 
 # ── Orchestrator Soul & Personality ──────────────────────────────────
@@ -384,7 +436,7 @@ async def get_orchestrator_settings(
     return result
 
 
-@router.put("/current/orchestrator")
+@router.put("/current/orchestrator", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def save_orchestrator_settings(
     payload: Dict[str, Any] = Body(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -610,51 +662,60 @@ async def get_memory_stats(
     Return memory statistics for the current workspace.
 
     Used by the "What Automatos Knows" section in the Orchestrator tab.
-    Queries the memory_items table scoped to this workspace.
+    Queries the memory_short_term table scoped to this workspace.
     """
     from datetime import datetime, timedelta
 
     workspace_id = ctx.workspace_id
 
     try:
-        from modules.memory.storage.knowledge_system import MemoryItem
+        from modules.memory.models import MemoryShortTerm
     except ImportError:
         # Graceful fallback if the model isn't available
         return {"total_memories": 0, "by_type": {}, "by_level": {}, "recent": []}
 
     try:
-        base = db.query(MemoryItem).filter(MemoryItem.workspace_id == workspace_id)
+        # PRD-187 S5: reads the REAL L2 store (the relic memory_items table
+        # this used to read held 0 rows, lifetime — the section always showed
+        # zeros by construction).
+        base = db.query(MemoryShortTerm).filter(MemoryShortTerm.workspace_id == workspace_id)
 
         total = base.count()
 
         by_type = dict(
-            db.query(MemoryItem.memory_type, func.count(MemoryItem.id))
-            .filter(MemoryItem.workspace_id == workspace_id)
-            .group_by(MemoryItem.memory_type)
+            db.query(MemoryShortTerm.content_type, func.count(MemoryShortTerm.id))
+            .filter(MemoryShortTerm.workspace_id == workspace_id)
+            .group_by(MemoryShortTerm.content_type)
             .all()
         )
 
-        by_level = dict(
-            db.query(MemoryItem.memory_level, func.count(MemoryItem.id))
-            .filter(MemoryItem.workspace_id == workspace_id)
-            .group_by(MemoryItem.memory_level)
-            .all()
+        promoted = (
+            db.query(func.count(MemoryShortTerm.id))
+            .filter(
+                MemoryShortTerm.workspace_id == workspace_id,
+                MemoryShortTerm.promoted_to_l3.is_(True),
+            )
+            .scalar() or 0
         )
+        by_level = {"short_term": total - promoted, "promoted_to_durable": promoted}
 
         agents_with_memories = (
-            db.query(func.count(func.distinct(MemoryItem.agent_id)))
-            .filter(MemoryItem.workspace_id == workspace_id)
+            db.query(func.count(func.distinct(MemoryShortTerm.agent_id)))
+            .filter(
+                MemoryShortTerm.workspace_id == workspace_id,
+                MemoryShortTerm.agent_id.isnot(None),
+            )
             .scalar() or 0
         )
 
         yesterday = datetime.utcnow() - timedelta(hours=24)
         recent_24h = (
-            base.filter(MemoryItem.created_at >= yesterday).count()
+            base.filter(MemoryShortTerm.created_at >= yesterday).count()
         )
 
         # 5 most recent memories (content preview only)
         recent_rows = (
-            base.order_by(desc(MemoryItem.created_at))
+            base.order_by(desc(MemoryShortTerm.created_at))
             .limit(5)
             .all()
         )
@@ -663,8 +724,8 @@ async def get_memory_stats(
             content_preview = str(m.content)[:120] if m.content else ""
             recent.append({
                 "id": str(m.id),
-                "type": m.memory_type,
-                "level": m.memory_level,
+                "type": m.content_type,
+                "level": "promoted_to_durable" if m.promoted_to_l3 else "short_term",
                 "preview": content_preview,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             })

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,9 @@ _WARNING_SEVERITIES = {"high"}
 
 def _is_admin(ctx: RequestContext) -> bool:
     """System admins can operate on any workspace (mirrors admin_plugins.py)."""
-    return getattr(ctx.user, "system_role", "user") == "admin"
+    # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
+    from core.auth.roles import caller_is_admin
+    return caller_is_admin(ctx.user)
 
 
 def _assert_workspace_access(ctx: RequestContext, workspace_id: UUID) -> None:
@@ -311,7 +314,7 @@ async def list_available_skills(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{workspace_id}/skills", status_code=201)
+@router.post("/{workspace_id}/skills", status_code=201, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def enable_skill(
     workspace_id: UUID,
     body: EnableSkillBody,
@@ -379,7 +382,7 @@ async def enable_skill(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{workspace_id}/skills/{skill_id}")
+@router.delete("/{workspace_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def disable_skill(
     workspace_id: UUID,
     skill_id: int,
@@ -612,7 +615,7 @@ async def get_workspace_skill_content(
     }
 
 
-@router.post("/{workspace_id}/skills/create", status_code=201)
+@router.post("/{workspace_id}/skills/create", status_code=201, dependencies=[Depends(require_workspace_permission("agents:create"))])
 async def create_workspace_skill(
     workspace_id: UUID,
     body: CreateSkillBody,
@@ -678,7 +681,7 @@ async def create_workspace_skill(
     }
 
 
-@router.patch("/{workspace_id}/skills/{skill_id}")
+@router.patch("/{workspace_id}/skills/{skill_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_workspace_skill(
     workspace_id: UUID,
     skill_id: int,
@@ -807,7 +810,7 @@ async def update_workspace_skill(
     }
 
 
-@router.delete("/{workspace_id}/skills/{skill_id}/owned")
+@router.delete("/{workspace_id}/skills/{skill_id}/owned", dependencies=[Depends(require_workspace_permission("agents:delete"))])
 async def delete_workspace_owned_skill(
     workspace_id: UUID,
     skill_id: int,

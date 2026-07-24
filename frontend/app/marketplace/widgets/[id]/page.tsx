@@ -28,7 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
 import { apiClient } from '@/lib/api-client'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 
 // ===================================================================
 // Types
@@ -240,15 +240,14 @@ function ReviewForm({ widgetId, onSubmitted }: { widgetId: string; onSubmitted: 
   const [hoverRating, setHoverRating] = useState(0)
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const { toast } = useToast()
 
   const handleSubmit = async () => {
     if (rating === 0) {
-      toast({ title: 'Please select a rating', variant: 'destructive' })
+      toast.error('Please select a rating')
       return
     }
     if (!comment.trim()) {
-      toast({ title: 'Please write a review', variant: 'destructive' })
+      toast.error('Please write a review')
       return
     }
 
@@ -258,12 +257,12 @@ function ReviewForm({ widgetId, onSubmitted }: { widgetId: string; onSubmitted: 
         rating,
         comment: comment.trim(),
       })
-      toast({ title: 'Review submitted' })
+      toast('Review submitted')
       setRating(0)
       setComment('')
       onSubmitted()
     } catch {
-      toast({ title: 'Failed to submit review', variant: 'destructive' })
+      toast.error('Failed to submit review')
     } finally {
       setSubmitting(false)
     }
@@ -329,7 +328,6 @@ function ReviewForm({ widgetId, onSubmitted }: { widgetId: string; onSubmitted: 
 export default function WidgetDetailPage() {
   const params = useParams()
   const router = useRouter()
-  const { toast } = useToast()
   const widgetId = params.id as string
 
   const [widget, setWidget] = useState<WidgetDetail | null>(null)
@@ -349,7 +347,7 @@ export default function WidgetDetailPage() {
       )
       setWidget(data)
     } catch {
-      toast({ title: 'Failed to load widget details', variant: 'destructive' })
+      toast.error('Failed to load widget details')
     } finally {
       setLoading(false)
     }
@@ -395,18 +393,15 @@ export default function WidgetDetailPage() {
       setInstalling(true)
       if (installed) {
         await apiClient.delete(`/api/widget-marketplace/widgets/${widgetId}/install`)
-        toast({ title: `${widget.display_name} uninstalled` })
+        toast(`${widget.display_name} uninstalled`)
         setInstalled(false)
       } else {
         await apiClient.post(`/api/widget-marketplace/widgets/${widgetId}/install`)
-        toast({ title: `${widget.display_name} installed` })
+        toast(`${widget.display_name} installed`)
         setInstalled(true)
       }
     } catch {
-      toast({
-        title: `Failed to ${installed ? 'uninstall' : 'install'} widget`,
-        variant: 'destructive',
-      })
+      toast.error(`Failed to ${installed ? 'uninstall' : 'install'} widget`)
     } finally {
       setInstalling(false)
     }

@@ -12,11 +12,14 @@ from modules.context.sections.composio import ComposioSection
 from modules.context.sections.conversation import ConversationSection
 from modules.context.sections.custom import CustomSection
 from modules.context.sections.datetime_context import DatetimeContextSection
+from modules.context.sections.field_memory import FieldMemorySection
 from modules.context.sections.graph_context import GraphSection
 from modules.context.sections.identity import IdentitySection
 from modules.context.sections.memory import MemorySection
 from modules.context.sections.mission_context import MissionContextSection
 from modules.context.sections.onboarding import OnboardingSection
+from modules.context.sections.planning_history import PlanningHistorySection
+from modules.context.sections.planning_knowledge import PlanningKnowledgeSection
 from modules.context.sections.platform_actions import PlatformActionsSection
 from modules.context.sections.plugins import PluginsSection
 from modules.context.sections.playbook_context import PlaybookContextSection
@@ -34,12 +37,15 @@ SECTION_REGISTRY: dict[str, type[BaseSection]] = {
     "memory": MemorySection,
     "mission_context": MissionContextSection,
     "onboarding": OnboardingSection,
+    "planning_knowledge": PlanningKnowledgeSection,
+    "planning_history": PlanningHistorySection,
     "agent_roster": AgentRosterSection,
     "tools": ToolsSection,
     "task_context": TaskContextSection,
     "playbook_context": PlaybookContextSection,
     "datetime_context": DatetimeContextSection,
     "business_graph": GraphSection,
+    "field_memory": FieldMemorySection,
     "conversation": ConversationSection,
     "custom": CustomSection,
 }
@@ -52,11 +58,14 @@ __all__ = [
     "ConversationSection",
     "CustomSection",
     "DatetimeContextSection",
+    "FieldMemorySection",
     "GraphSection",
     "IdentitySection",
     "MemorySection",
     "MissionContextSection",
     "OnboardingSection",
+    "PlanningHistorySection",
+    "PlanningKnowledgeSection",
     "PlatformActionsSection",
     "PluginsSection",
     "PlaybookContextSection",

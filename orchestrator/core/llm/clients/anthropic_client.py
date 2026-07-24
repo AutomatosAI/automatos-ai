@@ -147,7 +147,19 @@ class AnthropicProvider(BaseLLMProvider):
                         "input_schema": tool.get("parameters") or tool.get("input_schema", {})
                     })
         return anthropic_tools
-    
+
+    @staticmethod
+    def _extract_cache_prefix(messages: List[Dict[str, Any]]) -> Optional[str]:
+        """PRD-201 S4: the cache-stable prefix hint the assembler stamped on the
+        system message (``cache_prefix`` key). Non-Anthropic providers ignore the
+        key; this is the only reader. Returns the last non-empty one (there is one
+        system message)."""
+        prefix: Optional[str] = None
+        for msg in messages or []:
+            if isinstance(msg, dict) and msg.get("role") == "system" and msg.get("cache_prefix"):
+                prefix = msg["cache_prefix"]
+        return prefix
+
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response using Anthropic API without blocking the event loop"""
         if self.client is None:
@@ -157,24 +169,54 @@ class AnthropicProvider(BaseLLMProvider):
             )
         
         import asyncio
+        from core.llm.prompt_cache import build_cached_system
+        from core.llm.request_scope import is_headless_run
+        from modules.memory.memory_tool import memory_tool_definition
+
         loop = asyncio.get_running_loop()
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
+            # PRD-201 S4: the assembler's cache-stable prefix, if the caller
+            # stamped it on the system message. PRD-201 S5: is this a headless
+            # agent run? Both are read once, before the executor hop.
+            cache_prefix = self._extract_cache_prefix(messages)
+            headless = is_headless_run()
+
             def _call():
                 kwargs = {
                     "model": self.config.model,
                     "max_tokens": self.config.max_tokens,
                     "temperature": self.config.temperature,
-                    "system": system_message,
-                    "messages": user_messages
+                    # PRD-201 S4: emit cache_control on the stable prefix. This IS
+                    # the Anthropic client, so the marker is inherently on the
+                    # Anthropic route only (gate-by-provider, §8-Q1). Render order
+                    # tools → system → messages caches tools+system together.
+                    "system": build_cached_system(system_message, cache_prefix),
+                    "messages": user_messages,
                 }
                 # PRD-17: Add tools if provided (convert to Anthropic format)
-                if tools:
-                    anthropic_tools = self._convert_tools_to_anthropic_format(tools)
+                anthropic_tools = self._convert_tools_to_anthropic_format(tools) if tools else []
+
+                if headless:
+                    # PRD-201 S5: context editing (clear stale tool results,
+                    # cache-preservingly) + the memory tool on the Anthropic-routed
+                    # headless loop only. Beta strings confirmed via the claude-api
+                    # skill; flag for build-time re-confirm (§8-Q2). Chat never
+                    # sets the headless scope, so it is unaffected.
+                    anthropic_tools.append(memory_tool_definition())
+                    kwargs["context_management"] = {
+                        "edits": [{"type": "clear_tool_uses_20250919"}]
+                    }
                     if anthropic_tools:
                         kwargs["tools"] = anthropic_tools
+                    return self.client.beta.messages.create(
+                        betas=["context-management-2025-06-27"], **kwargs
+                    )
+
+                if anthropic_tools:
+                    kwargs["tools"] = anthropic_tools
                 return self.client.messages.create(**kwargs)
-            
+
             response = await loop.run_in_executor(None, _call)
             
             # PRD-17: Extract tool calls if present

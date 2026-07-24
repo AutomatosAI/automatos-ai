@@ -97,6 +97,7 @@ class _StubAffinity:
 
     action_name = _Col("action_name")
     agent_id = _Col("agent_id")
+    workspace_id = _Col("workspace_id")
     affinity_type = _Col("affinity_type")
 
     def __init__(self, **kw):
@@ -234,6 +235,11 @@ _ar_spec = importlib.util.spec_from_file_location(
 )
 _ar_mod = importlib.util.module_from_spec(_ar_spec)
 _ar_spec.loader.exec_module(_ar_mod)
+# PRD-143: pre-initialize this module's registry singleton (empty) so the
+# su chain filter's fallback lookup (_drop_super_admin_chains) never triggers
+# the live platform_actions registrar — no su actions in these fixtures.
+_ar_mod._registry_instance = _ar_mod.ActionRegistry()
+_ar_mod._registry_instance._initialized = True
 
 # Create fake package for the relative import chain
 _pkg_name = "gr_test_pkg"
@@ -330,7 +336,7 @@ def _rank(router, edges=None, affinities=None, agent_id=None,
 
     try:
         return _run(router.rank_chains(
-            query="test query", agent_id=agent_id, top_k=top_k,
+            query="test query", workspace_id=None, agent_id=agent_id, top_k=top_k,
         ))
     finally:
         GraphRouter._min_confidence = orig_min
@@ -585,7 +591,7 @@ class TestDBErrorFallback:
 
         _gr_mod.get_db_session = exploding_db
 
-        result = _run(router.rank_chains(query="test", top_k=15))
+        result = _run(router.rank_chains(query="test", workspace_id=None, top_k=15))
 
         assert len(result) == 2
         for _, _, actions in result:

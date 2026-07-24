@@ -1,0 +1,57 @@
+# =============================================================================
+# Automatos AI — Observability profile defaults · env-file syntax · NO SECRETS
+# =============================================================================
+# Settings for the OPTIONAL local observability stack:
+#   docker compose --profile observability up
+# (Prometheus, Grafana, Loki, Alertmanager, postgres/redis exporters —
+#  folded from infrastructure/docker-compose.monitoring.yml by PRD-153 US-005.)
+#
+# Secrets live ONLY in the root .env — required when this profile is enabled:
+#   GF_SECURITY_ADMIN_PASSWORD   (Grafana admin)
+#   LOG_RELAY_SECRET             (only if you enable log-relay)
+#   ALERT_INGEST_TOKEN           (Alertmanager ingest)
+#
+# CAVEAT [PRD-152 Q1]: monitoring images currently BUILD from the sibling repo
+# ../automatos-monitoring — clone it alongside this repo, or wait for
+# published images.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Backend wiring when the profile is ON
+# -----------------------------------------------------------------------------
+# These override the empty defaults in envs/api.defaults (list this file
+# AFTER api.defaults in the backend's `env_file:` when using the profile).
+LOKI_URL=http://loki:3100
+PROMETHEUS_URL=http://prometheus:9090
+
+# log-relay is the Railway log-drain -> Loki bridge; not needed locally.
+# Local container logs reach Loki via promtail (promtail-config.yml).
+LOG_RELAY_ENABLED=false
+
+# -----------------------------------------------------------------------------
+# Stack settings (host ports + service config)
+# -----------------------------------------------------------------------------
+PROMETHEUS_PORT=9090
+
+LOKI_PORT=3100
+LOKI_PUSH_URL=http://loki:3100/loki/api/v1/push
+
+GRAFANA_PORT=3030
+GF_SERVER_ROOT_URL=http://localhost:3030
+GF_SECURITY_ADMIN_USER=admin
+GF_USERS_ALLOW_SIGN_UP=false
+GF_AUTH_ANONYMOUS_ENABLED=false
+# GF_SECURITY_ADMIN_PASSWORD -> root .env
+
+LOG_RELAY_PORT=3200
+# LOG_RELAY_SECRET -> root .env
+
+ALERTMANAGER_PORT=9093
+# ALERT_INGEST_TOKEN -> root .env
+
+PG_EXPORTER_PORT=9187
+REDIS_EXPORTER_PORT=9121
+# NOTE [PRD-153 US-005 fold-time fix]: the orphan monitoring compose defaulted
+# postgres-exporter's DATA_SOURCE_NAME host to `pgvector:5432`; the canonical
+# compose service is `postgres:5432`. Compose composes the DSN from
+# POSTGRES_USER/POSTGRES_PASSWORD in the root .env — do not put a DSN here.

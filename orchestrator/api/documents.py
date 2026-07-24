@@ -33,6 +33,7 @@ from config import config
 from core.credentials.resolver import get_credential_resolver
 from urllib.parse import urlparse
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 
 def parse_database_url(url: str) -> dict:
@@ -103,7 +104,11 @@ ALLOWED_MIME_TYPES = {
     "application/octet-stream": [".pdf", ".docx", ".xlsx"],  # fallback for binary
 }
 
-@router.post("/upload", response_model=DocumentUploadResponse)
+# Shared by POST /upload and the platform_upload_document tool (PRD-143 S10).
+UPLOAD_DIR = Path("/tmp/automotas_uploads")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
+
+@router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
 async def handle_request(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     
@@ -124,7 +129,7 @@ async def handle_request(
         content = await file.read()
         file_size = len(content)
         
-        if file_size > 50 * 1024 * 1024:  # 50MB limit
+        if file_size > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail="File too large (max 50MB)")
 
         # MIME type validation using python-magic (detect actual content type)
@@ -165,11 +170,10 @@ async def handle_request(
             )
 
         # Save file temporarily with random filename (never use original filename)
-        upload_dir = Path("/tmp/automotas_uploads")
-        upload_dir.mkdir(exist_ok=True)
+        UPLOAD_DIR.mkdir(exist_ok=True)
 
         safe_filename = f"{uuid.uuid4().hex}{file_extension}"
-        file_path = upload_dir / safe_filename
+        file_path = UPLOAD_DIR / safe_filename
         
         with open(file_path, "wb") as f:
             f.write(content)
@@ -187,10 +191,18 @@ async def handle_request(
         elif file_extension in ['.json']:
             file_type = "json"
         
-        # Parse tags
-        tag_list = []
+        # Parse tags: comma-separated form field → stripped, de-duplicated
+        # (order-preserving) list[str]. Persisted to documents.tags (PostgreSQL
+        # text[]). The Academy corpus sync tags each doc 'academy,<vendor>,<track>,
+        # <domain>' so the tutor's knowledge graph can map chunks back to a course.
+        tag_list: list[str] = []
         if tags:
-            tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+            _seen: set[str] = set()
+            for _raw_tag in tags.split(","):
+                _tag = _raw_tag.strip()
+                if _tag and _tag not in _seen:
+                    _seen.add(_tag)
+                    tag_list.append(_tag)
 
         # PRD-124: Parse team_access (comma-separated → list, empty = all teams)
         from core.team_access import normalize_teams
@@ -198,12 +210,14 @@ async def handle_request(
         if team_access:
             team_access_list = normalize_teams(team_access.split(","))
 
-        # Create document record
-        # TEMPORARY FIX: Tags field commented out to unblock critical vector DB testing
-        # Tags are cosmetic metadata - not needed for embeddings, RAG, or semantic search
-        # Will add back with proper fix after core functionality is validated
+        # Create document record. tags persist to documents.tags — a real PostgreSQL
+        # text[] column (see migration 208275450a15: ARRAY(TEXT), default ARRAY[]::text[]).
+        # The prior "SQLAlchemy array bug" was a mis-diagnosis: team_access below uses the
+        # identical PG_ARRAY(String) column and writes a Python list on every upload without
+        # issue. Assigning a fresh list[str] to a new row is tracked correctly (no
+        # flag_modified needed — that only matters for in-place mutation of a loaded array).
         document = Document(
-        workspace_id=ctx.workspace_id,
+            workspace_id=ctx.workspace_id,
             filename=file.filename,
             original_filename=file.filename,
             file_type=file_type,
@@ -211,10 +225,10 @@ async def handle_request(
             file_path=str(file_path),
             content_hash=content_hash,
             status="uploaded",
-            # tags=tag_list if tag_list else None,  # TEMPORARILY DISABLED - SQLAlchemy array bug
+            tags=tag_list,
             description=description,
             team_access=team_access_list,
-            created_by="system"  # TODO: Get from auth context
+            created_by=ctx.clerk_user_id or "system",  # PRD-168 S4: real actor
         )
         
         db.add(document)
@@ -409,7 +423,10 @@ async def download_document(path: str = Query(..., description="Full path to doc
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/content")
-async def get_document_content_by_path(path: str = Query(..., description="Full path to document")):
+async def get_document_content_by_path(
+    path: str = Query(..., description="Full path to document"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
     """
     Get document content as text for artifact viewer.
     
@@ -543,17 +560,33 @@ async def list_documents(
     status: Optional[str] = None,
     file_type: Optional[str] = None,
     search: Optional[str] = None,
+    team: Optional[str] = Query(None, description="PRD-158: team scope; normalized server-side"),
+    # PRD-164: provenance scope, e.g. 'agent_output' for flywheel-ingested agent
+    # outputs. Plain `= None` (like status/file_type/search) so direct-call
+    # callers/tests that omit it get None, not a truthy Query() sentinel that
+    # would make `if source_type:` fire and filter on a Query object.
+    source_type: Optional[str] = None,
+    # Exact-match lookup by SHA-256 of the file bytes. Lets a caller resolve a
+    # document by content (e.g. Academy's --replace) instead of by filename.
+    # Plain `= None` (like status/file_type/search) so direct-call callers/tests
+    # that omit it get None, not a truthy Query() sentinel.
+    content_hash: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """List documents with filtering and pagination"""
     try:
         query = db.query(Document).filter(Document.workspace_id == ctx.workspace_id)
-        
+
         # Apply filters
         if status:
             query = query.filter(Document.status == status)
         if file_type:
             query = query.filter(Document.file_type == file_type)
+        if content_hash:
+            query = query.filter(Document.content_hash == content_hash)
+        if source_type:
+            # PRD-164 S3 (Q58): agent outputs are a filterable team-like scope
+            query = query.filter(Document.source_type == source_type)
         if search:
             query = query.filter(
                 or_(
@@ -561,7 +594,21 @@ async def list_documents(
                     Document.description.ilike(f"%{search}%")
                 )
             )
-        
+
+        # PRD-158 S3: server-side team scope through the centralized builder.
+        # Case-insensitive overlap so legacy mixed-case team_access still matches
+        # (new writes are normalized in S2); public docs (empty team_access) always show.
+        from modules.rag.retrieval_filters import build_retrieval_filters
+        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
+        if _scope.has_team_restriction:
+            query = query.filter(
+                text(
+                    "(team_access = '{}' OR EXISTS ("
+                    "SELECT 1 FROM unnest(team_access) ta "
+                    "WHERE LOWER(TRIM(ta)) = ANY(CAST(:team_terms AS text[]))))"
+                )
+            ).params(team_terms=_scope.team_terms)
+
         documents = query.order_by(Document.upload_date.desc()).offset(skip).limit(limit).all()
         
         return [
@@ -571,6 +618,7 @@ async def list_documents(
                 original_filename=doc.original_filename,
                 file_type=doc.file_type,
                 file_size=doc.file_size,
+                content_hash=doc.content_hash,
                 status=doc.status,
                 chunk_count=doc.chunk_count,
                 tags=doc.tags or [],
@@ -581,12 +629,114 @@ async def list_documents(
                 created_by=doc.created_by,
                 last_accessed=doc.last_accessed,
                 rag_query_count=doc.rag_query_count or 0,
+                source_type=doc.source_type,
             ) for doc in documents
         ]
         
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRD-157 S5: document pinning (pin a document to a chat/conversation)
+# Registered before GET /{document_id} so the literal /pins path isn't captured.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/pins")
+async def list_pinned_documents(
+    chat_id: str = Query(..., description="Chat/conversation id"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List the documents pinned to a chat."""
+    from modules.rag.pinned_context import list_pinned
+
+    return {"pinned": list_pinned(db, chat_id=chat_id, workspace_id=ctx.workspace_id)}
+
+
+@router.post("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
+async def pin_document_to_chat(
+    document_id: int,
+    chat_id: str = Query(..., description="Chat/conversation id to pin the document to"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Pin a document to a chat so its content is always in that conversation's context."""
+    from modules.rag.pinned_context import pin_document
+
+    _uid = getattr(getattr(ctx, "user", None), "id", None)
+    res = pin_document(
+        db,
+        chat_id=chat_id,
+        document_id=document_id,
+        workspace_id=ctx.workspace_id,
+        user_id=_uid if isinstance(_uid, int) else None,
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=404, detail=res.get("error", "Could not pin document"))
+    return res
+
+
+@router.delete("/{document_id}/pin", dependencies=[Depends(require_workspace_permission("documents:update"))])
+async def unpin_document_from_chat(
+    document_id: int,
+    chat_id: str = Query(..., description="Chat/conversation id to unpin the document from"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Unpin a document from a chat."""
+    from modules.rag.pinned_context import unpin_document
+
+    return unpin_document(db, chat_id=chat_id, document_id=document_id, workspace_id=ctx.workspace_id)
+
+
+@router.get("/team-counts")
+async def document_team_counts(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-158 S3: per-team document counts, aggregated server-side over ALL docs
+    in the workspace (not the paginated ≤100 page). Teams are normalized
+    (lowercased) so mixed-case team_access collapses into one count.
+
+    Registered before GET /{document_id} so the literal path isn't captured.
+    """
+    rows = db.execute(
+        text(
+            "SELECT LOWER(TRIM(ta)) AS team, COUNT(DISTINCT d.id) AS cnt "
+            "FROM documents d, unnest(d.team_access) ta "
+            "WHERE d.workspace_id = CAST(:ws AS uuid) AND TRIM(ta) <> '' "
+            "GROUP BY LOWER(TRIM(ta)) ORDER BY team"
+        ),
+        {"ws": str(ctx.workspace_id)},
+    ).fetchall()
+    counts = {r.team: int(r.cnt) for r in rows}
+
+    untagged = db.execute(
+        text("SELECT COUNT(*) FROM documents WHERE workspace_id = CAST(:ws AS uuid) AND team_access = '{}'"),
+        {"ws": str(ctx.workspace_id)},
+    ).scalar()
+    total = db.execute(
+        text("SELECT COUNT(*) FROM documents WHERE workspace_id = CAST(:ws AS uuid)"),
+        {"ws": str(ctx.workspace_id)},
+    ).scalar()
+    # PRD-164 S3 (Q58): agent outputs surface as a team-like scope in the
+    # knowledge filter tree — same response, one extra count.
+    agent_outputs = db.execute(
+        text(
+            "SELECT COUNT(*) FROM documents "
+            "WHERE workspace_id = CAST(:ws AS uuid) AND source_type = 'agent_output'"
+        ),
+        {"ws": str(ctx.workspace_id)},
+    ).scalar()
+    return {
+        "counts": counts,
+        "untagged": int(untagged or 0),
+        "total": int(total or 0),
+        "agent_outputs": int(agent_outputs or 0),
+    }
+
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
@@ -606,13 +756,15 @@ async def get_document(
             original_filename=document.original_filename,
             file_type=document.file_type,
             file_size=document.file_size,
+            content_hash=document.content_hash,
             status=document.status,
             chunk_count=document.chunk_count,
             tags=document.tags or [],
             description=document.description,
             upload_date=document.upload_date,
             processed_date=document.processed_date,
-            created_by=document.created_by
+            created_by=document.created_by,
+            source_type=document.source_type,
         )
         
     except HTTPException:
@@ -687,7 +839,7 @@ async def get_delete_impact(
         logger.error(f"Error getting delete impact for document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{document_id}")
+@router.delete("/{document_id}", dependencies=[Depends(require_workspace_permission("documents:delete"))])
 async def delete_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -719,7 +871,7 @@ async def delete_document(
         logger.error(f"Error deleting document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{document_id}/reprocess")
+@router.post("/{document_id}/reprocess", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def reprocess_document(
     document_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -871,12 +1023,13 @@ PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
 PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
 
 
-@router.post("/search")
+@router.post("/search", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def semantic_search(
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
     min_similarity: float = Query(0.70, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
+    team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
@@ -968,6 +1121,16 @@ async def semantic_search(
                     existing["best_similarity"] = similarity
                     existing["best_excerpt"] = chunk_text
                     existing["best_chunk_index"] = chunk_index
+
+        # PRD-157 S1: route surfaced documents through the centralized fail-closed
+        # scope choke point. Workspace is already enforced per-hit above; this adds
+        # team scoping (no-op when no team is supplied, preserving prior behaviour).
+        from modules.rag.retrieval_filters import build_retrieval_filters, allowed_document_ids
+        _scope = build_retrieval_filters(workspace_id=ctx.workspace_id, team=team)
+        if _scope.has_team_restriction and doc_order:
+            _allowed = allowed_document_ids(db, doc_order, _scope)
+            doc_order = [d for d in doc_order if str(d) in _allowed]
+            grouped_results = {d: v for d, v in grouped_results.items() if str(d) in _allowed}
 
         # Fetch limited previews + stats for surfaced docs
         # Collect doc_ids and calculate preview ranges upfront
@@ -1086,7 +1249,10 @@ async def semantic_search(
                     "query": query,
                     "results_count": len(aggregated_results),
                     "execution_time_ms": execution_time_ms,
-                    "metadata": json.dumps({"min_similarity": min_similarity}),
+                    # PRD-156 S5: attribute each usage row to its workspace (the
+                    # table has no workspace_id column; metadata JSONB carries it so
+                    # analytics can filter by metadata->>'workspace_id' without a migration).
+                    "metadata": json.dumps({"min_similarity": min_similarity, "workspace_id": str(ctx.workspace_id)}),
                     "timestamp": datetime.now()
                 }
             )
@@ -1264,7 +1430,7 @@ async def get_queue_status(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/rag/retrieve")
+@router.post("/rag/retrieve", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def rag_retrieve(
     query: str = Query(..., description="Query string for RAG context retrieval"),
     max_chunks: int = Query(5, ge=1, le=20, description="Maximum number of chunks to retrieve"),
@@ -1318,9 +1484,7 @@ async def rag_retrieve(
             config_kwargs['min_similarity'] = min_similarity
         
         config = RAGConfig(
-            enable_query_enhancement=True,
             enable_rrf_fusion=True,
-            enable_reranking=False,  # Disabled by default for speed
             **config_kwargs
         )
         
@@ -1369,6 +1533,7 @@ async def rag_retrieve(
                     "results_count": len(formatted_chunks),
                     "execution_time_ms": execution_time_ms,
                     "metadata": json.dumps({
+                        "workspace_id": str(ctx.workspace_id),  # PRD-156 S5: attribute usage to workspace
                         "max_chunks": max_chunks,
                         "max_tokens": max_tokens,
                         "diversity": diversity,
@@ -1408,7 +1573,7 @@ async def rag_retrieve(
 
 # Usage Analytics Endpoints
 
-@router.post("/analytics/track")
+@router.post("/analytics/track", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def track_usage_event(
     event_type: str = Query(..., description="Event type (document_viewed, document_searched, chunk_retrieved, rag_query)"),
     document_id: Optional[int] = Query(None, description="Document ID (if applicable)"),
@@ -1435,7 +1600,7 @@ async def track_usage_event(
         if metadata:
             try:
                 metadata_dict = json.loads(metadata)
-            except:
+            except Exception:
                 pass
         
         # Create usage event record in document_usage table
@@ -1570,9 +1735,10 @@ async def get_usage_analytics(
                 SELECT event_type, COUNT(*) as count
                 FROM document_usage
                 WHERE timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                 GROUP BY event_type
             """)
-            event_counts_result = db.execute(event_counts_query, {"start_time": start_time}).fetchall()
+            event_counts_result = db.execute(event_counts_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             for row in event_counts_result:
                 usage_event_counts[row.event_type] = row.count
                 usage_total_events += row.count
@@ -1585,13 +1751,14 @@ async def get_usage_analytics(
                 FROM document_usage
                 WHERE event_type IN ('document_searched', 'rag_query')
                     AND timestamp >= :start_time
+                    AND metadata->>'workspace_id' = :workspace_id
                     AND metadata->>'query' IS NOT NULL
                 GROUP BY metadata->>'query'
                 ORDER BY count DESC
                 LIMIT 10
             """)
 
-            search_terms_result = db.execute(search_terms_query, {"start_time": start_time}).fetchall()
+            search_terms_result = db.execute(search_terms_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchall()
             popular_search_terms = [
                 {"query": row.query, "count": row.count}
                 for row in search_terms_result
@@ -1654,7 +1821,7 @@ async def get_usage_analytics(
 # Note: Single document reprocessing is already defined above (line 571)
 
 
-@router.post("/reprocess-all")
+@router.post("/reprocess-all", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def reprocess_all_documents(
     background_tasks: BackgroundTasks,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1849,7 +2016,7 @@ class _BulkTeamAccessUpdate(_BaseModel):
     team_access: List[str] = _Field(..., description="List of team names")
 
 
-@router.patch("/{document_id}/team-access")
+@router.patch("/{document_id}/team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_document_team_access(
     document_id: int,
     body: _TeamAccessUpdate,
@@ -1870,9 +2037,9 @@ async def update_document_team_access(
 
     result = db.execute(
         text(
-            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "UPDATE documents SET team_access = :teams "
             "WHERE id = :doc_id AND workspace_id = :ws "
-            "RETURNING id, title, team_access"
+            "RETURNING id, filename, team_access"
         ),
         {"teams": clean_teams, "doc_id": document_id, "ws": str(ctx.workspace_id)},
     ).fetchone()
@@ -1883,12 +2050,12 @@ async def update_document_team_access(
 
     return {
         "id": result.id,
-        "title": result.title,
+        "filename": result.filename,
         "team_access": result.team_access,
     }
 
 
-@router.post("/bulk-team-access")
+@router.post("/bulk-team-access", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def bulk_update_team_access(
     body: _BulkTeamAccessUpdate,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1907,9 +2074,9 @@ async def bulk_update_team_access(
 
     rows = db.execute(
         text(
-            "UPDATE documents SET team_access = :teams, updated_at = NOW() "
+            "UPDATE documents SET team_access = :teams "
             "WHERE id = ANY(:ids) AND workspace_id = :ws "
-            "RETURNING id, title, team_access"
+            "RETURNING id, filename, team_access"
         ),
         {"teams": clean_teams, "ids": body.document_ids, "ws": str(ctx.workspace_id)},
     ).fetchall()
@@ -1918,7 +2085,7 @@ async def bulk_update_team_access(
     return {
         "updated": len(rows),
         "documents": [
-            {"id": r.id, "title": r.title, "team_access": r.team_access}
+            {"id": r.id, "filename": r.filename, "team_access": r.team_access}
             for r in rows
         ],
     }

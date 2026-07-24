@@ -40,7 +40,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { apiClient } from '@/lib/api-client'
-import KnowledgeGraphVisualizer from './KnowledgeGraphVisualizer'
 
 // Knowledge type icons
 const knowledgeTypeIcons = {
@@ -58,7 +57,7 @@ const knowledgeTypeColors = {
   document: 'text-info bg-info/10 border-info/20',
   codegraph: 'text-agent bg-agent/10 border-agent/20',
   table: 'text-success bg-success/10 border-success/20',
-  image: 'text-orange-400 bg-orange-500/10 border-orange-500/20',
+  image: 'text-warning bg-warning/10 border-warning/20',
   formula: 'text-pink-400 bg-pink-500/10 border-pink-500/20',
   diagram: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
   knowledge_graph: 'text-violet-400 bg-violet-500/10 border-violet-500/20',
@@ -262,7 +261,7 @@ export function MultimodalKnowledgePanel() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                     <Database className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
@@ -281,7 +280,7 @@ export function MultimodalKnowledgePanel() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                     <Table2 className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
@@ -300,7 +299,7 @@ export function MultimodalKnowledgePanel() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                     <ImageIcon className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
@@ -319,7 +318,7 @@ export function MultimodalKnowledgePanel() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-warning/10 flex items-center justify-center shrink-0">
                     <Calculator className="w-5 h-5 text-foreground/90" />
                   </div>
                   <div className="min-w-0">
@@ -393,10 +392,6 @@ export function MultimodalKnowledgePanel() {
             <Network className="w-4 h-4" />
             <span className="hidden sm:inline">Diagrams</span>
           </TabsTrigger>
-          <TabsTrigger value="graph" className="flex items-center space-x-2">
-            <Brain className="w-4 h-4" />
-            <span className="hidden sm:inline">Graph</span>
-          </TabsTrigger>
         </TabsList>
 
         {/* Content Grid */}
@@ -408,7 +403,7 @@ export function MultimodalKnowledgePanel() {
                 <p className="text-muted-foreground">Loading knowledge items...</p>
               </div>
             </div>
-          ) : knowledgeItems.length === 0 && activeType !== 'graph' ? (
+          ) : knowledgeItems.length === 0 ? (
             <Card className="glass-card">
               <CardContent className="p-12 text-center">
                 <Database className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
@@ -423,10 +418,6 @@ export function MultimodalKnowledgePanel() {
                 </p>
               </CardContent>
             </Card>
-          ) : activeType === 'graph' ? (
-            <div className="h-[800px]">
-              <KnowledgeGraphVisualizer />
-            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {knowledgeItems.map((item, index) => {
@@ -576,7 +567,7 @@ export function MultimodalKnowledgePanel() {
                 <CardTitle className="flex items-center space-x-2">
                   {selectedItem.kb_type === 'formula' && <Calculator className="w-5 h-5 text-pink-400" />}
                   {selectedItem.kb_type === 'table' && <Table2 className="w-5 h-5 text-success" />}
-                  {selectedItem.kb_type === 'image' && <ImageIcon className="w-5 h-5 text-orange-400" />}
+                  {selectedItem.kb_type === 'image' && <ImageIcon className="w-5 h-5 text-warning" />}
                   <span>{selectedItem.kb_type === 'formula' ? 'Formula' : selectedItem.kb_type === 'table' ? 'Table' : 'Image'} Details</span>
                 </CardTitle>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedItem(null)}>

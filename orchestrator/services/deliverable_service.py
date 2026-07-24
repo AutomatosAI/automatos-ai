@@ -312,6 +312,7 @@ class DeliverableService:
         artifact_type: Optional[str] = None,
         source_type: Optional[str] = None,
         source_type_exclude: Optional[str] = None,
+        source_id: Optional[str] = None,
         agent_id: Optional[int] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
@@ -324,6 +325,10 @@ class DeliverableService:
         ``source_type_exclude`` is a comma-separated list of source_types to
         exclude (e.g. ``"heartbeat"``). Used by the redesigned Deliverables
         feed to keep agent self-status noise out of the main grid.
+
+        ``source_id`` (PRD-164 S3) scopes to one originating mission/task/
+        heartbeat — the mission-page Deliverables tab and the
+        platform_list_deliverables tool filter on it.
         """
         limit = max(1, min(int(limit or 24), 100))
         offset = max(0, int(offset or 0))
@@ -344,6 +349,9 @@ class DeliverableService:
                 conditions.append(f"o.source_type NOT IN ({placeholders})")
                 for i, s in enumerate(excluded):
                     params[f"excl_src_{i}"] = s
+        if source_id:
+            conditions.append("o.source_id = :source_id")
+            params["source_id"] = str(source_id)
         if agent_id is not None:
             conditions.append("o.agent_id = :agent_id")
             params["agent_id"] = agent_id
@@ -500,7 +508,15 @@ class DeliverableService:
     # ------------------------------------------------------------------
 
     def get_stats(self) -> Dict[str, Any]:
-        """Aggregate counts for the workspace: total, by_type, by_agent."""
+        """Aggregate counts for the workspace: total, by_type, by_agent — plus the
+        clean-render rate over rendered documents (P2-09 S4).
+
+        ``extra.render`` is written at registration by the document generation
+        service (``unresolved_count`` / ``unknown_count`` / ``template_lane``);
+        rows without it (blog posts, reports, pre-P2-09 documents) are excluded
+        from the render aggregate. Honest empty: no rendered documents →
+        ``clean_render_rate`` is ``None``, never a fabricated 100%.
+        """
         try:
             total = self.db.execute(
                 text("""
@@ -540,6 +556,36 @@ class DeliverableService:
                 {"workspace_id": str(self.workspace_id)},
             ).fetchall()
 
+            # P2-09 S4 — clean-render rate + template-lane coverage over the
+            # rendered Deliverables (rows carrying `extra.render`).
+            render_row = self.db.execute(
+                text("""
+                    SELECT
+                        COUNT(*) AS rendered_total,
+                        COUNT(*) FILTER (
+                            WHERE COALESCE((extra->'render'->>'unresolved_count')::int, 0) = 0
+                              AND COALESCE((extra->'render'->>'unknown_count')::int, 0) = 0
+                        ) AS rendered_clean,
+                        COUNT(*) FILTER (
+                            WHERE extra->'render'->>'template_lane' = 'block'
+                        ) AS lane_block,
+                        COUNT(*) FILTER (
+                            WHERE extra->'render'->>'template_lane' = 'legacy'
+                        ) AS lane_legacy
+                    FROM v_workspace_outputs
+                    WHERE workspace_id = :workspace_id
+                      AND deleted_at IS NULL
+                      AND (extra -> 'render') IS NOT NULL
+                """),
+                {"workspace_id": str(self.workspace_id)},
+            ).fetchone()
+
+            rendered_total = int(render_row.rendered_total or 0) if render_row else 0
+            rendered_clean = int(render_row.rendered_clean or 0) if render_row else 0
+            clean_render_rate = (
+                rendered_clean / rendered_total if rendered_total else None
+            )
+
             return {
                 "success": True,
                 "total": total,
@@ -552,6 +598,15 @@ class DeliverableService:
                     }
                     for r in by_agent_rows
                 ],
+                "clean_render_rate": clean_render_rate,
+                "render": {
+                    "total": rendered_total,
+                    "clean": rendered_clean,
+                    "by_lane": {
+                        "block": int(render_row.lane_block or 0) if render_row else 0,
+                        "legacy": int(render_row.lane_legacy or 0) if render_row else 0,
+                    },
+                },
             }
         except Exception as exc:
             logger.error(
@@ -564,6 +619,8 @@ class DeliverableService:
                 "total": 0,
                 "by_type": {},
                 "by_agent": [],
+                "clean_render_rate": None,
+                "render": {"total": 0, "clean": 0, "by_lane": {"block": 0, "legacy": 0}},
             }
 
     # ------------------------------------------------------------------

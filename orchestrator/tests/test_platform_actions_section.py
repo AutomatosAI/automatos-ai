@@ -10,6 +10,15 @@ registrars. Each scenario exercises one branch of the decision tree:
 - no ``query`` key in kwargs    → full dump
 - empty ``query`` string        → full dump
 - filtered output is shorter    → token-count surrogate for the prod-index AC
+
+Collection-pollution discipline (PRD-142 W2-S2b): pytest imports every test
+module during collection, before any test runs, so import-time ``sys.modules``
+fakes leak into sibling collection. We therefore install import-time stubs
+(estimator / base / section) only long enough to bind the classes and then
+restore sys.modules; the runtime stubs (config / action_registry /
+action_semantic_index) that the section imports lazily inside ``render()`` are
+(re)installed by an autouse fixture during the test phase and torn down after
+each test. Importing this module leaves sys.modules exactly as it found it.
 """
 from __future__ import annotations
 
@@ -23,19 +32,56 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Boot the section module under a fake package tree so its lazy imports
-# resolve to in-test stubs instead of the real config / registry / index.
-# ---------------------------------------------------------------------------
-
 _THIS = Path(__file__).resolve()
 _ORCH = _THIS.parents[1]
 _SECTIONS = _ORCH / "modules" / "context" / "sections"
 _DISCOVERY = _ORCH / "modules" / "tools" / "discovery"
 
 
-# Pre-load the real ActionRegistry so we get a working build_*_prompt_summary
-# without triggering the live `register_all_actions` lazy-init.
+# ---------------------------------------------------------------------------
+# Watched sys.modules keys. Snapshot BEFORE we touch anything, restore after
+# the import-time block so collection of sibling modules sees no fakes.
+# ---------------------------------------------------------------------------
+_IMPORT_KEYS = (
+    "core.context_guard",
+    "modules.context.sections",
+    "modules.context.sections.base",
+    "modules.context.sections.platform_actions",
+)
+# Read by the section's LAZY imports at render() time — must be live during the
+# test phase, installed per-test by the autouse fixture (never at collection).
+_RUNTIME_KEYS = (
+    "config",
+    "modules.tools.discovery.action_registry",
+    "modules.tools.discovery.action_semantic_index",
+)
+# Parent packages we never intend to create; snapshot+restore as a guard so a
+# stray real/fake parent can't survive import either.
+_GUARD_KEYS = (
+    "modules",
+    "modules.context",
+    "modules.tools",
+    "modules.tools.discovery",
+)
+_PRE_IMPORT_SNAPSHOT = {
+    k: sys.modules.get(k) for k in (_IMPORT_KEYS + _RUNTIME_KEYS + _GUARD_KEYS)
+}
+
+
+def _restore(snapshot: dict) -> None:
+    """Restore sys.modules to a captured snapshot (None ⇒ delete the key)."""
+    for key, original in snapshot.items():
+        if original is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = original
+
+
+# ---------------------------------------------------------------------------
+# Pre-load the real ActionRegistry under a private name (does not pollute the
+# watched ``modules.*`` namespace) so build_*_prompt_summary works without the
+# live ``register_all_actions`` lazy-init.
+# ---------------------------------------------------------------------------
 _ar_spec = importlib.util.spec_from_file_location(
     "action_registry_under_test", _DISCOVERY / "action_registry.py"
 )
@@ -47,12 +93,10 @@ ActionRegistry = _ar_mod.ActionRegistry
 
 
 # ---------------------------------------------------------------------------
-# Stub modules: config, base, action_registry, action_semantic_index
-# Section's lazy imports look up these dotted paths at call time, so we only
-# need to populate sys.modules; we can mutate stubs per-test.
+# Build stub module objects. Kept as module-level references; installed into
+# sys.modules only transiently for the import below, then per-test by the
+# autouse fixture.
 # ---------------------------------------------------------------------------
-
-
 class _StubConfig:
     """Mutable config stand-in for the canonical ``config.config`` singleton."""
 
@@ -61,80 +105,31 @@ class _StubConfig:
     PLATFORM_ACTIONS_MAX_TOKENS: int = 4000
 
 
-if "config" not in sys.modules:
-    _stub_config_module = ModuleType("config")
-    _stub_config_module.config = _StubConfig()
-    sys.modules["config"] = _stub_config_module
-else:
-    # Ensure required attrs exist on whatever config is already loaded
-    _existing_cfg = sys.modules["config"].config
-    if not hasattr(_existing_cfg, "SEMANTIC_TOOL_ROUTING"):
-        _existing_cfg.SEMANTIC_TOOL_ROUTING = True
-    if not hasattr(_existing_cfg, "SEMANTIC_TOOL_ROUTING_TOP_K"):
-        _existing_cfg.SEMANTIC_TOOL_ROUTING_TOP_K = 3
-    if not hasattr(_existing_cfg, "PLATFORM_ACTIONS_MAX_TOKENS"):
-        _existing_cfg.PLATFORM_ACTIONS_MAX_TOKENS = 4000
+_stub_config_module = ModuleType("config")
+_stub_config_module.config = _StubConfig()
 
 
-# Provide a minimal ``modules.context.estimator.TokenEstimator`` so base.py
-# imports cleanly without the broader package.
-_estimator_pkg_modules: dict[str, ModuleType] = {}
-for pkg_name in ("modules", "modules.context", "modules.tools", "modules.tools.discovery"):
-    if pkg_name not in sys.modules:
-        mod = ModuleType(pkg_name)
-        mod.__path__ = []  # mark as namespace pkg
-        sys.modules[pkg_name] = mod
-        _estimator_pkg_modules[pkg_name] = mod
-
-_estimator_mod = ModuleType("modules.context.estimator")
+# PRD-201 S2: base.py counts + truncates via core.context_guard (the char/4
+# TokenEstimator was deleted). Stub it (cheap, no tiktoken) for isolated load.
+_cg_mod = ModuleType("core.context_guard")
+_cg_mod.count_tokens = lambda content: len(content or "") // 4 + 1
 
 
-class _NoopEstimator:
-    def estimate(self, content: str) -> int:
-        # Cheap surrogate so we don't depend on tiktoken here.
-        return len(content) // 4 + 1
+def _cg_truncate(text, max_tokens, *, suffix=""):
+    if not text or max_tokens <= 0:
+        return text
+    limit = max_tokens * 4
+    return text if len(text) <= limit else text[:limit] + suffix
 
 
-_estimator_mod.TokenEstimator = _NoopEstimator
-sys.modules["modules.context.estimator"] = _estimator_mod
+_cg_mod.truncate_to_token_budget = _cg_truncate
 
 
-# Now load the real BaseSection / SectionContext from disk so type checks
-# against `BaseSection` still work.
-_base_spec = importlib.util.spec_from_file_location(
-    "modules.context.sections.base", _SECTIONS / "base.py"
-)
-_base_mod = importlib.util.module_from_spec(_base_spec)
-# Register parent package first.
-_sections_pkg = ModuleType("modules.context.sections")
-_sections_pkg.__path__ = [str(_SECTIONS)]
-sys.modules.setdefault("modules.context.sections", _sections_pkg)
-sys.modules["modules.context.sections.base"] = _base_mod
-_base_spec.loader.exec_module(_base_mod)
-BaseSection = _base_mod.BaseSection
-SectionContext = _base_mod.SectionContext
-
-
-# Stub ``modules.tools.discovery.action_registry`` with the real registry
-# class so build_(filtered_)prompt_summary actually works.
-# Use setdefault so graph tests (which may load first) keep their module.
-if "modules.tools.discovery.action_registry" not in sys.modules:
-    _ar_module = ModuleType("modules.tools.discovery.action_registry")
-    sys.modules["modules.tools.discovery.action_registry"] = _ar_module
-else:
-    _ar_module = sys.modules["modules.tools.discovery.action_registry"]
+# Real ActionRegistry classes exposed under the dotted name the section imports.
+_ar_module = ModuleType("modules.tools.discovery.action_registry")
 _ar_module.ActionDefinition = ActionDefinition
 _ar_module.ActionRegistry = ActionRegistry
-# get_action_registry will be assigned per-test via _install_registry().
-
-
-# Stub ``modules.tools.discovery.action_semantic_index`` with a controllable
-# fake. The section calls ``get_action_semantic_index().rank_actions(...)``.
-if "modules.tools.discovery.action_semantic_index" not in sys.modules:
-    _asi_module = ModuleType("modules.tools.discovery.action_semantic_index")
-    sys.modules["modules.tools.discovery.action_semantic_index"] = _asi_module
-else:
-    _asi_module = sys.modules["modules.tools.discovery.action_semantic_index"]
+# get_action_registry assigned per-test via _install_registry().
 
 
 class _FakeSemanticIndex:
@@ -152,32 +147,78 @@ class _FakeSemanticIndex:
         top_k: int = 15,
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
+        include_super_admin: bool = False,
     ) -> List[Tuple[str, float]]:
         self.calls.append({
             "query": query,
             "top_k": top_k,
             "exclude_admin": exclude_admin,
             "exclude_promoted": exclude_promoted,
+            "include_super_admin": include_super_admin,
         })
         if self.exception is not None:
             raise self.exception
         return list(self.next_result)
 
 
+_asi_module = ModuleType("modules.tools.discovery.action_semantic_index")
 _asi_module._fake_singleton = _FakeSemanticIndex()
 _asi_module.get_action_semantic_index = lambda: _asi_module._fake_singleton  # type: ignore[attr-defined]
 
 
-# Finally load the section itself (or reuse if graph tests loaded it first).
-if "modules.context.sections.platform_actions" not in sys.modules:
-    _sec_spec = importlib.util.spec_from_file_location(
-        "modules.context.sections.platform_actions", _SECTIONS / "platform_actions.py"
-    )
-    _sec_mod = importlib.util.module_from_spec(_sec_spec)
-    sys.modules["modules.context.sections.platform_actions"] = _sec_mod
-    _sec_spec.loader.exec_module(_sec_mod)
+# Runtime stubs the section's lazy imports resolve at render() time.
+_RUNTIME_STUBS = {
+    "config": _stub_config_module,
+    "modules.tools.discovery.action_registry": _ar_module,
+    "modules.tools.discovery.action_semantic_index": _asi_module,
+}
+_runtime_live_snapshot: dict = {}
 
-PlatformActionsSection = sys.modules["modules.context.sections.platform_actions"].PlatformActionsSection
+
+def _install_runtime_stubs() -> None:
+    """Install runtime stubs, remembering whatever was there to restore later."""
+    global _runtime_live_snapshot
+    _runtime_live_snapshot = {k: sys.modules.get(k) for k in _RUNTIME_STUBS}
+    sys.modules.update(_RUNTIME_STUBS)
+
+
+def _restore_runtime_stubs() -> None:
+    _restore(_runtime_live_snapshot)
+
+
+# ---------------------------------------------------------------------------
+# Import-time block: install just enough to bind BaseSection / SectionContext /
+# PlatformActionsSection from disk, then restore sys.modules. The section's
+# top-level import is ``from modules.context.sections.base import ...``; base's
+# is ``from core.context_guard import count_tokens, truncate_to_token_budget``
+# — both resolve from the stubs we install here. config / registry / index are
+# only touched at render() time, so they stay out of the import entirely.
+# ---------------------------------------------------------------------------
+sys.modules["core.context_guard"] = _cg_mod
+
+_sections_pkg = ModuleType("modules.context.sections")
+_sections_pkg.__path__ = [str(_SECTIONS)]
+sys.modules["modules.context.sections"] = _sections_pkg
+
+_base_spec = importlib.util.spec_from_file_location(
+    "modules.context.sections.base", _SECTIONS / "base.py"
+)
+_base_mod = importlib.util.module_from_spec(_base_spec)
+sys.modules["modules.context.sections.base"] = _base_mod
+_base_spec.loader.exec_module(_base_mod)
+BaseSection = _base_mod.BaseSection
+SectionContext = _base_mod.SectionContext
+
+_sec_spec = importlib.util.spec_from_file_location(
+    "modules.context.sections.platform_actions", _SECTIONS / "platform_actions.py"
+)
+_sec_mod = importlib.util.module_from_spec(_sec_spec)
+sys.modules["modules.context.sections.platform_actions"] = _sec_mod
+_sec_spec.loader.exec_module(_sec_mod)
+PlatformActionsSection = _sec_mod.PlatformActionsSection
+
+# Collection-safe: undo every sys.modules mutation made during import.
+_restore(_PRE_IMPORT_SNAPSHOT)
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +277,7 @@ def _ctx(query: str | None = "__unset__") -> SectionContext:
 
 
 def _set_flag(enabled: bool, top_k: int = 3) -> None:
-    cfg = sys.modules["config"].config
+    cfg = _stub_config_module.config
     cfg.SEMANTIC_TOOL_ROUTING = enabled
     cfg.SEMANTIC_TOOL_ROUTING_TOP_K = top_k
 
@@ -247,12 +288,15 @@ def _run(coro):
 
 @pytest.fixture(autouse=True)
 def _reset_state():
-    """Reset stub state between tests."""
+    """Install runtime stubs + reset stub state around each test."""
+    _install_runtime_stubs()
     _set_flag(True, top_k=3)
     _install_index_result(result=[])
-    yield
-    _set_flag(True, top_k=3)
-    _install_index_result(result=[])
+    try:
+        yield
+    finally:
+        _install_index_result(result=[])
+        _restore_runtime_stubs()
 
 
 # ---------------------------------------------------------------------------

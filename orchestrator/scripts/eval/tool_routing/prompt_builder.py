@@ -287,6 +287,9 @@ class PromptBuilder:
             chains = asyncio.run(
                 router.rank_chains(
                     query,
+                    # PRD-177 S5: offline eval harness reads the unscoped graph
+                    # (no tenant context); production callers pass a real id.
+                    workspace_id=None,
                     top_k=top_k,
                     exclude_admin=False,
                     exclude_promoted=False,

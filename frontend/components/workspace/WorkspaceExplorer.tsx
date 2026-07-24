@@ -14,9 +14,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { GitBranch, Save, Terminal } from 'lucide-react'
+import { FolderOpen, GitBranch, Save, Terminal } from 'lucide-react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
 
@@ -269,14 +269,20 @@ export function WorkspaceExplorer({
             </div>
             <div className="flex-1 overflow-y-auto">
               {isWorkspaceEmpty ? (
-                <div className="flex flex-col items-center justify-center h-full gap-3 p-4 text-center">
-                  <GitBranch className="h-8 w-8 text-muted-foreground/50" />
-                  <p className="text-xs text-muted-foreground">No files in workspace</p>
+                <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
+                  <FolderOpen className="h-8 w-8 text-muted-foreground/50" />
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-foreground">Workspace is ready</p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Reports, deliverables, and any files your agents write will appear here as missions run.
+                    </p>
+                  </div>
                   <button
                     onClick={() => setRepoSelectorOpen(true)}
-                    className="px-3 py-1.5 text-xs font-medium rounded-md border border-border hover:bg-secondary transition-colors text-foreground"
+                    className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline"
                   >
-                    Connect Repo
+                    <GitBranch className="h-3 w-3" />
+                    Have code? Connect a repo
                   </button>
                 </div>
               ) : (

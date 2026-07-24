@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 from core.models.core import Agent, BoardTask, WorkflowTemplate
 from core.models.orchestration import (
@@ -87,13 +88,13 @@ class MissionCreateRequest(BaseModel):
         max_length=100,
         description="Template ID hint — bypass LLM matching and use this template directly",
     )
-
-
-ALLOWED_MODIFICATION_KEYS = {"task_overrides", "notes", "agent_overrides"}
+    plan_only: bool = Field(
+        False,
+        description="PRD-163 S2: plan only — produce the plan and await approval, never auto-execute",
+    )
 
 
 class MissionApproveRequest(BaseModel):
-    modifications: Optional[Dict[str, Any]] = Field(None, description="Optional plan modifications")
     max_concurrent_override: Optional[int] = Field(
         None, ge=1, le=10, description="Override max_concurrent for this mission"
     )
@@ -104,51 +105,30 @@ class MissionApproveRequest(BaseModel):
         None, description="Skip task verification (for benchmarks/testing)",
     )
 
-    @validator("modifications")
-    def validate_modifications(cls, v):
-        if v is None:
-            return v
-        unknown = set(v.keys()) - ALLOWED_MODIFICATION_KEYS
-        if unknown:
-            raise ValueError(f"Unknown modification keys: {unknown}")
-        # Cap total serialised size to prevent memory abuse
-        import json
-        if len(json.dumps(v)) > 10_000:
-            raise ValueError("Modifications payload too large (max 10KB)")
-        return v
+
+# PRD-163 S4/Q57: approval-time plan editing. The old `modifications`-on-approve
+# stub never applied — edits now PATCH the plan (task rows) before approval.
+class MissionTaskEdit(BaseModel):
+    task_id: Optional[str] = Field(None, description="Task row UUID")
+    temp_id: Optional[str] = Field(None, description="Planner temp id")
+    sequence_number: Optional[int] = Field(None, ge=1, description="1-based task sequence")
+    agent_role: Optional[str] = Field(None, max_length=200)
+    title: Optional[str] = Field(None, max_length=500)
+    description: Optional[str] = Field(None, max_length=5000)
+
+
+class MissionPlanEditRequest(BaseModel):
+    task_edits: List[MissionTaskEdit] = Field(
+        ..., min_items=1, max_items=200,
+        description="Per-task field edits to apply before approval",
+    )
 
 
 class MissionRejectRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000, description="Rejection reason")
 
 
-class MissionReviewRequest(BaseModel):
-    verdict: str = Field(..., pattern="^(accept|reject)$", description="'accept' or 'reject'")
-    task_feedback: Optional[Dict[str, str]] = Field(
-        None,
-        description="Map of task_id → feedback string. On reject, tasks with feedback get re-queued.",
-    )
-    feedback: Optional[str] = Field(
-        None,
-        max_length=5000,
-        description="General rejection feedback (when rejecting without flagging specific tasks).",
-    )
-
-    @validator("task_feedback")
-    def validate_task_feedback(cls, v):
-        if v is None:
-            return v
-        if len(v) > 50:
-            raise ValueError("Too many task feedback entries (max 50)")
-        from uuid import UUID as UUIDType
-        validated = {}
-        for k, val in v.items():
-            try:
-                UUIDType(k)
-            except ValueError:
-                raise ValueError(f"Invalid task ID (not a UUID): {k}")
-            validated[k] = val[:2000]  # cap feedback length
-        return validated
+# PRD-163 S5/Q53: MissionReviewRequest removed with the retired human-review surface.
 
 
 class TaskResponse(BaseModel):
@@ -161,6 +141,7 @@ class TaskResponse(BaseModel):
     state: str
     state_type: str
     assigned_agent_id: Optional[int] = None
+    depends_on: List[str] = Field(default_factory=list)  # PRD-163 S5: real DAG edges
     attempt_number: int = 0
     tokens_used: int = 0
     estimated_tokens: int = 4000
@@ -339,8 +320,12 @@ def _run_to_response(run: OrchestrationRun) -> dict:
     }
 
 
-def _task_to_response(task: OrchestrationTask) -> dict:
-    """Convert an OrchestrationTask ORM object to a TaskResponse dict."""
+def _task_to_response(task: OrchestrationTask, depends_on: Optional[List[str]] = None) -> dict:
+    """Convert an OrchestrationTask ORM object to a TaskResponse dict.
+
+    ``depends_on`` (PRD-163 S5) carries the task's real dependency edges so the
+    DAG canvas can render them.
+    """
     return {
         "id": str(task.id),
         "title": task.title,
@@ -351,6 +336,7 @@ def _task_to_response(task: OrchestrationTask) -> dict:
         "state": task.state,
         "state_type": task.state_type,
         "assigned_agent_id": task.assigned_agent_id,
+        "depends_on": depends_on or [],
         "attempt_number": task.attempt_number or 0,
         "tokens_used": task.tokens_used or 0,
         "estimated_tokens": getattr(task, "estimated_tokens", None) or 4000,
@@ -406,7 +392,7 @@ def _get_run_for_workspace(
 # ---------------------------------------------------------------------------
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_mission(
     body: MissionCreateRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -419,6 +405,8 @@ async def create_mission(
     mission_config = dict(body.config) if body.config else {}
     if body.template_id:
         mission_config["template_id"] = body.template_id
+    if body.plan_only:
+        mission_config["plan_only"] = True
 
     try:
         run = await coordinator.create_mission(
@@ -443,6 +431,85 @@ async def create_mission(
         db.rollback()
         logger.error("Failed to create mission: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class PlanImportRequest(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=10000, description="Mission goal")
+    plan: Dict[str, Any] = Field(..., description="Pre-built plan: {tasks:[...], dependencies:[...]}")
+    config: Optional[Dict[str, Any]] = Field(None, description="Optional mission config overrides")
+
+
+@router.post("/import-plan", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
+async def import_mission_plan(
+    body: PlanImportRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S2: create a mission from a pre-built (possibly chat-edited) plan and
+    execute it verbatim — the planner is NOT re-run, so the executed DAG matches the
+    given plan exactly (Q54). The mission lands in awaiting_approval."""
+    coordinator = get_coordinator_service()
+    try:
+        run = coordinator.import_plan(
+            db=db,
+            workspace_id=ctx.workspace_id,
+            goal=body.goal,
+            plan=body.plan,
+            created_by=ctx.user.id or "unknown",
+            config=body.config,
+        )
+        db.commit()
+        return _run_to_response(run)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to import plan: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class ApprovalPolicyRequest(BaseModel):
+    policy: Optional[str] = Field(None, description="always_ask | auto_below_budget | full_auto")
+    approval_dollar_ceiling: Optional[float] = Field(None, ge=0)
+    auto_proceed_after_seconds: Optional[int] = Field(None, ge=1)
+
+
+@router.get("/approval-policy")
+async def get_mission_approval_policy(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S3: the workspace's mission approval policy."""
+    from core.services.approval_policy import load_approval_policy
+
+    return load_approval_policy(db, ctx.workspace_id)
+
+
+@router.put("/approval-policy", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
+async def set_mission_approval_policy(
+    body: ApprovalPolicyRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S3: update the workspace's mission approval policy."""
+    from core.services.approval_policy import set_approval_policy
+
+    try:
+        result = set_approval_policy(
+            db,
+            ctx.workspace_id,
+            policy=body.policy,
+            approval_dollar_ceiling=body.approval_dollar_ceiling,
+            auto_proceed_after_seconds=body.auto_proceed_after_seconds,
+        )
+        db.commit()
+        return result
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("")
@@ -765,7 +832,7 @@ _UPLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MB
 _UPLOAD_ALLOWED_EXTS = {".pdf", ".md", ".txt", ".doc", ".docx", ".json", ".csv", ".xlsx"}
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def upload_mission_file(
     file: UploadFile = File(...),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -873,8 +940,20 @@ async def get_mission(
             if e.event_type == "permission_denied"
         ]
 
+        # PRD-163 S5: real dependency edges for the DAG canvas.
+        _deps_map: Dict[str, List[str]] = {}
+        if tasks:
+            from core.models.orchestration import OrchestrationTaskDependency
+            _dep_rows = (
+                db.query(OrchestrationTaskDependency)
+                .filter(OrchestrationTaskDependency.task_id.in_([t.id for t in tasks]))
+                .all()
+            )
+            for d in _dep_rows:
+                _deps_map.setdefault(str(d.task_id), []).append(str(d.depends_on_task_id))
+
         result = _run_to_response(run)
-        result["tasks"] = [_task_to_response(t) for t in tasks]
+        result["tasks"] = [_task_to_response(t, _deps_map.get(str(t.id), [])) for t in tasks]
         result["recent_events"] = [_event_to_response(e) for e in events]
         result["permission_denials"] = permission_denials
         return result
@@ -965,8 +1044,14 @@ async def get_mission_cost(
         ]
 
         total_tokens = sum(tb.tokens_used for tb in task_breakdowns)
-        cost_rate = config.COORDINATOR_COST_PER_1K_TOKENS
-        estimated_cost = round((total_tokens / 1000.0) * cost_rate, 6)
+        # PRD-192 S3 (F059 finish): priced through modules.policy.pricing — the
+        # ONE pricing source. A mission's tasks span models, so the read-out
+        # uses pricing's documented flat last-resort rate (same number the
+        # ceiling/admission math uses; llm_usage stays the ledger of record).
+        from modules.policy import pricing as _pricing
+
+        cost_rate = _pricing.flat_rate_per_1k()
+        estimated_cost = _pricing.price_total_tokens_usd(db, None, total_tokens)
 
         return MissionCostResponse(
             mission_id=str(run.id),
@@ -983,9 +1068,62 @@ async def get_mission_cost(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+class MissionFieldQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=2000, description="Trace query")
+    top_k: int = Field(0, ge=0, le=50, description="0 → config default")
+
+
+@router.post("/{mission_id}/field/query", dependencies=[Depends(require_workspace_permission("missions:read"))])
+async def query_mission_field(
+    mission_id: UUID,
+    body: MissionFieldQueryRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-166 S4: retrieval-trace inspector data source — run a query against
+    the mission's field and return which patterns *fired*, with their resonance
+    + similarity/strength breakdown, so the UI can show why each surfaced."""
+    run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+    field_id = (run.config or {}).get("field_id")
+    if not field_id:
+        return {"field_id": None, "query": body.query, "results": []}
+
+    from modules.context.factory import get_shared_context
+
+    field = get_shared_context()
+    if not field:
+        raise HTTPException(status_code=503, detail="Field backend unavailable")
+    try:
+        # PRD-178 S2 (F062): read-only trace — the inspector must observe the
+        # field without reinforcing (mutating) the patterns it reports on.
+        hits = await field.query(
+            context_id=field_id, query=body.query, agent_id=0, top_k=body.top_k,
+            record_access=False,
+        )
+    except Exception as exc:
+        logger.error("Field trace query failed for %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Field query failed")
+
+    return {
+        "field_id": field_id,
+        "query": body.query,
+        "results": [{
+            "id": str(h["id"]),
+            "key": h["key"],
+            "value": str(h["value"])[:500],
+            "score": round(h["score"], 4),
+            "cosine_similarity": round(h.get("cosine_similarity", 0.0), 4),
+            "decayed_strength": round(h.get("decayed_strength", 0.0), 4),
+            "agent_id": h.get("agent_id", 0),
+            "mission_id": h.get("mission_id"),
+        } for h in hits],
+    }
+
+
 @router.get("/{mission_id}/field")
 async def get_mission_field(
     mission_id: UUID,
+    scope: str = "mission",
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
@@ -1041,12 +1179,16 @@ async def get_mission_field(
             except Exception:
                 pass
 
-        # Get patterns and stability from the inner (unwrapped) backend
+        # Get patterns and stability from the inner (unwrapped) backend.
+        # PRD-166 S1/S4: scope='workspace' shows the workspace-persistent field
+        # (every mission's patterns), 'mission' (default) shows just this run's.
         inner = field._inner
         patterns = []
         stability = {"stability": 0.0, "pattern_count": 0}
 
-        if hasattr(inner, "get_patterns"):
+        if scope == "workspace" and hasattr(inner, "get_workspace_patterns"):
+            patterns = await inner.get_workspace_patterns(str(run.workspace_id))
+        elif hasattr(inner, "get_patterns"):
             patterns = await inner.get_patterns(field_id)
         if hasattr(inner, "measure_stability"):
             stability = await inner.measure_stability(field_id)
@@ -1084,7 +1226,48 @@ async def get_mission_field(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/approve")
+@router.patch("/{mission_id}/plan", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def update_mission_plan(
+    mission_id: UUID,
+    body: MissionPlanEditRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-163 S4/Q57: apply approval-time task/agent edits before approval.
+
+    Edits the OrchestrationTask rows the dispatcher will execute (so an edited
+    agent_role persists into execution) and mirrors them into the plan snapshot.
+    Valid only while the mission is awaiting approval.
+    """
+    try:
+        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
+        if RunState(run.state) != RunState.AWAITING_APPROVAL:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Mission is in '{run.state}' state, expected 'awaiting_approval'",
+            )
+        task_edits = [e.dict(exclude_none=True) for e in body.task_edits]
+        coordinator = get_coordinator_service()
+        run = coordinator.update_mission_plan(
+            db=db,
+            run_id=run.id,
+            actor_id=ctx.user.id or "unknown",
+            task_edits=task_edits,
+        )
+        db.commit()
+        return _run_to_response(run)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        db.rollback()
+        logger.error("Failed to edit mission plan %s: %s", mission_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/{mission_id}/approve", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def approve_plan(
     mission_id: UUID,
     body: MissionApproveRequest = MissionApproveRequest(),
@@ -1114,7 +1297,6 @@ async def approve_plan(
             db=db,
             run_id=run.id,
             actor_id=ctx.user.id or "unknown",
-            modifications=body.modifications,
         )
         db.commit()
         return _run_to_response(run)
@@ -1130,7 +1312,7 @@ async def approve_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/reject")
+@router.post("/{mission_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def reject_plan(
     mission_id: UUID,
     body: MissionRejectRequest,
@@ -1168,44 +1350,9 @@ async def reject_plan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/review")
-async def review_mission(
-    mission_id: UUID,
-    body: MissionReviewRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Submit human review: accept or reject with per-task feedback."""
-    try:
-        run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
-
-        if RunState(run.state) != RunState.AWAITING_HUMAN:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Mission is in '{run.state}' state, expected 'awaiting_human'",
-            )
-
-        coordinator = get_coordinator_service()
-        run = coordinator.review_mission(
-            db=db,
-            run_id=run.id,
-            actor_id=ctx.user.id or "unknown",
-            verdict=body.verdict,
-            task_feedback=body.task_feedback,
-            feedback=body.feedback,
-        )
-        db.commit()
-        return _run_to_response(run)
-
-    except HTTPException:
-        raise
-    except (ConflictError, InvalidTransitionError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc))
-    except Exception as exc:
-        db.rollback()
-        logger.error("Failed to review mission %s: %s", mission_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+# PRD-163 S5/Q53: the human-review (AWAITING_HUMAN) final-review surface is
+# retired — verified missions auto-complete. The POST /{id}/review endpoint and
+# MissionReviewRequest model were removed with it.
 
 
 class MissionReplanRequest(BaseModel):
@@ -1216,7 +1363,7 @@ class MissionReplanRequest(BaseModel):
     )
 
 
-@router.post("/{mission_id}/replan")
+@router.post("/{mission_id}/replan", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def replan_mission(
     mission_id: UUID,
     body: MissionReplanRequest = MissionReplanRequest(),
@@ -1366,7 +1513,7 @@ def _extract_routine_template(
     }
 
 
-@router.post("/{mission_id}/save-as-routine", status_code=201)
+@router.post("/{mission_id}/save-as-routine", status_code=201, dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def save_as_routine(
     mission_id: UUID,
     body: SaveAsRoutineRequest,
@@ -1493,7 +1640,7 @@ async def save_as_routine(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/pause")
+@router.post("/{mission_id}/pause", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def pause_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1529,7 +1676,7 @@ async def pause_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/resume")
+@router.post("/{mission_id}/resume", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def resume_mission(
     mission_id: UUID,
     request: Request,
@@ -1590,7 +1737,7 @@ async def resume_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{mission_id}/cancel")
+@router.post("/{mission_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def cancel_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1627,7 +1774,7 @@ async def cancel_mission(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{mission_id}", status_code=204)
+@router.delete("/{mission_id}", status_code=204, dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def delete_mission(
     mission_id: UUID,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1792,92 +1939,3 @@ async def get_agent_mission_history(
     except Exception as exc:
         logger.error("Failed to get mission history for agent %s: %s", agent_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# ---------------------------------------------------------------------------
-# PRD-123 Pattern #8: Session Checkpoints
-# ---------------------------------------------------------------------------
-
-
-@router.get("/{mission_id}/checkpoints")
-async def list_mission_checkpoints(
-    mission_id: str,
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-):
-    """List available checkpoints for a mission."""
-    from services.checkpoint_service import list_checkpoints
-
-    run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
-    checkpoints = await list_checkpoints(run.id)
-    return {
-        "mission_id": str(run.id),
-        "checkpoint_count": run.checkpoint_count,
-        "checkpoints": checkpoints,
-    }
-
-
-@router.post("/{mission_id}/resume")
-async def resume_mission(
-    mission_id: str,
-    from_checkpoint: Optional[str] = Query(default="latest"),
-    db: Session = Depends(get_db),
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-):
-    """
-    Resume a failed/cancelled mission from a checkpoint.
-
-    Args:
-        from_checkpoint: Checkpoint number or 'latest' (default).
-    """
-    from services.checkpoint_service import read_checkpoint
-
-    run = _get_run_for_workspace(db, mission_id, ctx.workspace_id)
-
-    # Only resume from terminal states
-    from core.models.orchestration_enums import TERMINAL_RUN_STATES, RunState
-    if RunState(run.state) not in TERMINAL_RUN_STATES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mission is in state '{run.state}' — can only resume from terminal states",
-        )
-
-    # Read checkpoint
-    try:
-        cp_number = None if from_checkpoint == "latest" else int(from_checkpoint)
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid checkpoint number: {from_checkpoint!r} — must be an integer or 'latest'",
-        )
-    checkpoint = await read_checkpoint(run.id, cp_number)
-    if not checkpoint:
-        raise HTTPException(status_code=404, detail="No checkpoint found for this mission")
-
-    # Transition back to running
-    from services.orchestration_state import transition_run
-    from core.models.orchestration_enums import ActorType
-    try:
-        transition_run(
-            db=db,
-            run=run,
-            new_state=RunState.RUNNING,
-            actor_type=ActorType.USER,
-            actor_id=str(ctx.user.id) if ctx.user and ctx.user.id else None,
-            reason=f"Resumed from checkpoint {checkpoint.get('checkpoint_number')}",
-        )
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        # InvalidTransitionError, ConflictError (stale version), or DB errors
-        raise HTTPException(
-            status_code=409,
-            detail=f"Failed to resume mission: {exc}",
-        )
-
-    return {
-        "mission_id": str(run.id),
-        "state": run.state,
-        "resumed_from_checkpoint": checkpoint.get("checkpoint_number"),
-        "message": "Mission resumed — coordinator will pick up on next tick",
-    }

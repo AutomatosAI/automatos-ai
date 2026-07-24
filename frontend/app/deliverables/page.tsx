@@ -16,7 +16,7 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
 import { Button } from '@/components/ui/button'
 import { OutputsFeed } from '@/components/deliverables/outputs-feed'
 import { DeliverablesBlog } from '@/components/deliverables/deliverables-blogs'
-import { TemplateManager } from '@/components/documents/template-manager'
+import { TemplateStudio } from '@/components/documents/blocks/TemplateStudio'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
@@ -169,7 +169,7 @@ export default function DeliverablesPage() {
 
             <TabsContent value="templates">
               <div className="mx-auto max-w-[1600px]">
-                <TemplateManager />
+                <TemplateStudio />
               </div>
             </TabsContent>
           </FilterTabs>

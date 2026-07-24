@@ -149,27 +149,28 @@ export function DocumentWidget({
         {children}
       </a>
     ),
-    // Inline code
-    code: ({ inline, className, children, ...props }: any) => {
-      if (inline) {
+    // react-markdown v9 has no `inline` prop: inline code is any code node
+    // NOT wrapped in a pre, so the pre wrapper below re-styles its child and
+    // this renderer only ever handles inline spans.
+    code: ({ className, children, ...props }: any) => {
+      if (/language-/.test(className || '')) {
+        // Fenced block child (rendered inside the pre wrapper below)
         return (
-          <code className="rounded-md bg-[#343942] px-1.5 py-0.5 text-[13px] font-mono text-[#e6edf3]" {...props}>
+          <code className={cn("text-[13px] font-mono text-[#e6edf3]", className)} {...props}>
             {children}
           </code>
         )
       }
-      // Code blocks (inside pre)
-      const match = /language-(\w+)/.exec(className || '')
-      const lang = match?.[1] || ''
       return (
-        <code className={cn("text-[13px] font-mono text-[#e6edf3]", className)} {...props}>
+        <code className="rounded-md bg-[#343942] px-1.5 py-0.5 text-[13px] font-mono text-[#e6edf3]" {...props}>
           {children}
         </code>
       )
     },
-    // Code blocks wrapper
+    // Code blocks wrapper — normalizes the child so even untagged fenced
+    // blocks lose the inline pill styling.
     pre: ({ children }: any) => (
-      <pre className="rounded-md bg-[#161b22] border border-[#30363d] p-4 overflow-x-auto my-4">
+      <pre className="rounded-md bg-[#161b22] border border-[#30363d] p-4 overflow-x-auto my-4 [&_code]:rounded-none [&_code]:bg-transparent [&_code]:p-0 [&_code]:border-0">
         {children}
       </pre>
     ),

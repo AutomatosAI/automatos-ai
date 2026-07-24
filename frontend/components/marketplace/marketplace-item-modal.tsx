@@ -12,7 +12,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { useToast } from '@/components/ui/use-toast'
 import type { MarketplaceItem } from './marketplace-homepage'
 import { apiClient } from '@/lib/api-client'
 import { toast as sonnerToast } from 'sonner'
@@ -32,7 +31,6 @@ export function MarketplaceItemModal({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [installing, setInstalling] = useState(false)
-  const { toast } = useToast()
 
   // Fetch available Composio apps for tool descriptions
   const { data: availableApps = [] } = useAvailableApps()
@@ -50,11 +48,7 @@ export function MarketplaceItemModal({
       const message = err?.message || 'Failed to load item details'
       console.error('Failed to fetch item details:', err)
       setError(message)
-      toast({
-        title: 'Error',
-        description: message,
-        variant: 'destructive'
-      })
+      sonnerToast.error('Error', { description: message })
     } finally {
       setLoading(false)
     }

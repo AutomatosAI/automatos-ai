@@ -18,158 +18,18 @@ from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.auto import AutoBrain, Action
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
 from core.session_queue import get_session_queue
+from services.page_context import inject_page_preamble, sanitize_page_context
 
 logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/chat", tags=["💬 Chat"])
-
-
-# ---------------------------------------------------------------------------
-# PRD-68 Phase 2: Workflow Bridge — ORGAN/ORGANISM chat → workflow engine
-# ---------------------------------------------------------------------------
-
-async def _stream_workflow_bridge(
-    db: Session,
-    chat_id: str,
-    message_text: str,
-    workspace_id,
-    agent_id: int,
-    user_id: int,
-    streaming_service,
-    complexity_assessment=None,
-):
-    """
-    Bridge chat messages to the PRD-59 workflow engine for ORGAN/ORGANISM tasks.
-
-    Creates a transient workflow from the user's message, executes it through
-    the full pipeline (PLAN → PREPARE → EXECUTE → EVALUATE → LEARN), and
-    streams stage events back as AI SDK format into the chat response.
-
-    The workflow is tagged 'chat_generated' so users can find/re-run it.
-    """
-    import asyncio
-    import json
-
-    # 1. Send chat_id to frontend (same as normal chat flow)
-    yield streaming_service.streaming_handler.format_aisdk_chat_id(chat_id)
-    await asyncio.sleep(0)
-
-    try:
-        from core.models.core import Workflow, WorkflowExecution
-        from consumers.workflows.streaming import stream_workflow_as_aisdk, get_stream_manager
-
-        # 2. Create transient workflow from the user's message
-        workflow = Workflow(
-            name=f"Chat workflow: {message_text[:60]}{'...' if len(message_text) > 60 else ''}",
-            description=message_text,
-            goal=message_text,
-            context=f"Generated from chat {chat_id} by AutoBrain (complexity={complexity_assessment.complexity.value})" if complexity_assessment else "",
-            workflow_definition={
-                "steps": [{
-                    "name": "Execute task",
-                    "description": message_text,
-                    "agent_id": agent_id,
-                }],
-                "source": "chat_generated",
-            },
-            status="active",
-            workspace_id=workspace_id,
-            tags=["chat_generated", "auto"],
-        )
-        db.add(workflow)
-        db.commit()
-        db.refresh(workflow)
-
-        logger.info(f"[PRD-68] Created transient workflow id={workflow.id} from chat")
-
-        # 3. Create execution record
-        execution = WorkflowExecution(
-            workflow_id=workflow.id,
-            agent_id=agent_id,
-            workspace_id=workspace_id,
-            input_data={
-                "message": message_text,
-                "chat_id": chat_id,
-                "user_id": user_id,
-            },
-            status="pending",
-        )
-        db.add(execution)
-        db.commit()
-        db.refresh(execution)
-
-        logger.info(f"[PRD-68] Created workflow execution id={execution.id}")
-
-        # 4. Send workflow-started event to frontend
-        yield streaming_service.streaming_handler.format_aisdk_data({
-            "type": "workflow-update",
-            "status": "started",
-            "workflow_id": workflow.id,
-            "execution_id": execution.id,
-            "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
-        })
-        await asyncio.sleep(0)
-
-        # 5. Execute workflow with timeout (PRD-125: safety net — no more fire-and-forget)
-        from api.workflows import execute_workflow_with_progress
-
-        try:
-            await asyncio.wait_for(
-                execute_workflow_with_progress(execution.id, {}),
-                timeout=120,
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"[PRD-68] Workflow execution timed out after 120s for execution_id={execution.id}")
-            yield streaming_service.streaming_handler.format_aisdk_data({
-                "type": "workflow-update",
-                "status": "error",
-                "error": "Workflow execution timed out after 2 minutes",
-            })
-            yield f'e:{json.dumps({"message": "Workflow execution timed out"})}\n'
-            return
-        except Exception as exec_err:
-            logger.error(f"[PRD-68] Workflow execution failed: {exec_err}", exc_info=True)
-            yield streaming_service.streaming_handler.format_aisdk_data({
-                "type": "workflow-update",
-                "status": "error",
-                "error": str(exec_err)[:500],
-            })
-            yield f'e:{json.dumps({"message": str(exec_err)[:200]})}\n'
-            return
-
-        # 7. Save the workflow result as an assistant message in the chat
-        db.refresh(execution)
-        if execution.output_data:
-            final_text = execution.output_data.get("final_response", "")
-            if final_text:
-                streaming_service.chat_service.save_message(
-                    chat_id=chat_id,
-                    role="assistant",
-                    parts=[{"type": "text", "text": final_text}],
-                    workspace_id=workspace_id,
-                )
-
-        # 8. Emit finish event
-        yield streaming_service.streaming_handler.format_aisdk_data({
-            "type": "workflow-update",
-            "status": "completed",
-            "workflow_id": workflow.id,
-            "execution_id": execution.id,
-        })
-        yield 'd:{"finishReason":"stop","usage":{"promptTokens":0,"completionTokens":0}}\n'
-
-    except Exception as e:
-        logger.error(f"[PRD-68] Workflow bridge failed: {e}", exc_info=True)
-        # Fall back to normal chat response
-        error_text = f"Workflow execution failed. Falling back to direct response.\n\nError: {e}"
-        yield f'0:{json.dumps(error_text)}\n'
-        yield f'e:{json.dumps({"message": str(e)})}\n'
 
 
 # Request/Response Models
@@ -197,8 +57,9 @@ class ChatRequest(BaseModel):
     message: ChatMessageRequest
     # Compatibility with AI SDK "messages" payloads
     messages: Optional[List[ChatMessageRequest]] = None
-    # PRD-136: no hardcoded default — None means "resolve via Auto tier".
-    selectedChatModel: Optional[str] = None
+    # PRD-180 S3 (F035): the per-message model selector was a placebo — nothing
+    # ever read the chosen model. Field removed; the model resolves via the Auto
+    # tier / the selected agent's own config, never a client-picked override.
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
     # PRD: Unified Agent-Chat System
@@ -220,8 +81,49 @@ class VoteRequest(BaseModel):
 
 
 # Helper function to get user ID from database
-def get_user_id(db: Session) -> int:
-    """Get default user ID (id=1) for MVP"""
+def get_user_id(db: Session, ctx=None) -> int:
+    """Resolve the authenticated principal to the integer ``users.id`` PK (PRD-185 S6).
+
+    Prefer the real principal from the request context; fall back to a default
+    user only for genuinely principal-less (system/anonymous) paths — never
+    hardcode id=1 for a logged-in caller. The old id=1 default mis-attributed
+    every chat, message save, vote-ownership check, and mid-chat mission approval
+    (_driving_clerk derives from this) to user 1.
+
+    IMPORTANT: ``UserContext.id`` carries the *Clerk subject string* (or email)
+    for SaaS auth — NOT the integer ``users.id``. But ``chats.user_id`` and the
+    ``messages`` / ``votes`` FKs are INTEGER references to ``users.id``. Returning
+    the raw Clerk string wrote ``'user_xxx'`` into an INTEGER column and 500'd
+    every chat request. So resolve the principal to the integer PK via
+    ``users.clerk_user_id`` — the same pattern team.py, harness.py, marketplace.py
+    and hybrid.py's own provisioning already use.
+    """
+    if ctx is not None and getattr(ctx, "user", None) is not None:
+        uid = getattr(ctx.user, "id", None)
+        # Fast path: an auth lane that already carries the integer PK.
+        if isinstance(uid, int):
+            return uid
+        # SaaS/Clerk lane: ``uid`` is the Clerk subject string (or email).
+        # Resolve to the integer users.id. The row is guaranteed present —
+        # hybrid auth provisions it on first sign-in (INSERT ... ON CONFLICT).
+        clerk_uid = getattr(ctx.user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
+        if clerk_uid:
+            row = db.execute(
+                text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+                {"cid": clerk_uid},
+            ).fetchone()
+            if row:
+                return int(row[0])
+        email = getattr(ctx.user, "email", None)
+        if email:
+            row = db.execute(
+                text("SELECT id FROM users WHERE email = :em LIMIT 1"),
+                {"em": email},
+            ).fetchone()
+            if row:
+                return int(row[0])
+        # Authenticated but unresolvable (should not happen post-provisioning) —
+        # fall through to the default below rather than 500-ing the chat.
     result = db.execute(text("SELECT id FROM users WHERE id = 1 LIMIT 1")).fetchone()
     if not result:
         result = db.execute(text("SELECT id FROM users LIMIT 1")).fetchone()
@@ -271,8 +173,42 @@ def get_default_agent_id(db: Session, workspace_id) -> int:
     )
 
 
+def _parts_text(parts) -> str:
+    """Flatten a message's ``parts`` JSONB into plain text."""
+    if not isinstance(parts, list):
+        return ""
+    return " ".join(
+        p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+    ).strip()
+
+
+_PREVIEW_MAX_CHARS = 80
+
+
+def _last_message_previews(db: Session, chat_ids: List[str]) -> dict:
+    """Latest message text per chat, truncated — one query for the whole page (PRD-220 S2)."""
+    if not chat_ids:
+        return {}
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT ON (m.chat_id) m.chat_id, m.parts
+            FROM messages m
+            WHERE m.chat_id = ANY(CAST(:ids AS uuid[]))
+            ORDER BY m.chat_id, m.created_at DESC
+        """),
+        {"ids": chat_ids},
+    ).fetchall()
+    previews = {}
+    for r in rows:
+        content = _parts_text(r.parts)
+        if len(content) > _PREVIEW_MAX_CHARS:
+            content = content[: _PREVIEW_MAX_CHARS - 1] + "…"
+        previews[str(r.chat_id)] = content
+    return previews
+
+
 # Endpoints
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def stream_chat(
     request: ChatRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -286,7 +222,7 @@ async def stream_chat(
     # _workspace_has_admin_owner() which checks if the workspace has an
     # admin/owner member.  Admin workspace → all tools; user workspace → restricted.
     streaming_service = StreamingChatService(db, workspace_id=ctx.workspace_id)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:
         if msg.parts:
@@ -408,9 +344,18 @@ async def stream_chat(
                     f"into message_history[{_i}]"
                 )
                 break
-    
+
+    # PRD-221 S2 (extends PRD-220): request.context is the structured reference
+    # set {page, route, tab, selected, filters, visible_ids} — or the legacy
+    # {"page": <label>} form; one renderer serves both. Sanitized against the
+    # allow-list (authz-looking fields never survive; the server derives roles
+    # itself) and injected prompt-side only — the user message was already saved
+    # clean above, so chat titles and reloaded history never show the hint.
+    _page_ctx = sanitize_page_context(request.context)
+    message_history = inject_page_preamble(message_history, _page_ctx)
+
     # DEBUG: Log incoming request
-    logger.info(f"Chat request - agentId: {request.agentId}, model: {request.selectedChatModel}")
+    logger.info(f"Chat request - agentId: {request.agentId}")
 
     # --- PRD-50: Universal Router Integration ---
     # Extract message text for the ingestor
@@ -424,7 +369,6 @@ async def stream_chat(
     # (system_settings.orchestrator_llm.*) instead of the agent's model_config.
     use_orchestrator_llm = False
     complexity_assessment = None
-    _use_workflow_bridge = False  # PRD-68: DEPRECATED — kept for safety net only
     _suggest_mission = False     # PRD-125: True when ORGAN/ORGANISM → suggest mission
 
     # Every workspace has its own Auto agent — the model, persona, and tools
@@ -432,6 +376,9 @@ async def stream_chat(
     # No hardcoded agent IDs. Admins get elevated tool access on the Auto agent.
     _user_role = getattr(ctx.user, "system_role", "user") if ctx.user else "user"
     _is_admin = _user_role in ("admin", "super_admin")
+    # PRD-143: the su surface is derived from system_role ONLY — never from
+    # workspace role, is_admin, or autonomy level (fail-closed boundary).
+    _is_super_admin = _user_role == "super_admin"
     logger.info(f"[PRD-67] user_role={_user_role!r}, is_admin={_is_admin}, user_id={getattr(ctx.user, 'id', '?')}")
 
     _fallback_agent_id = get_default_agent_id(db, ctx.workspace_id)
@@ -583,6 +530,10 @@ async def stream_chat(
                 mission_mode=bool(request.missionMode),
                 plan_mode=bool(request.planMode),
                 suggest_mission=_suggest_mission,
+                is_super_admin=_is_super_admin,
+                # PRD-221 S3/S4: the sanitized reference set rides into the
+                # turn's context_trace and the page-prior action exposure.
+                page_context=_page_ctx,
             ):
                 yield chunk
 
@@ -601,10 +552,11 @@ async def get_chat_history(
 ):
     """Get chat history for the current user within their workspace"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     chats = chat_service.get_chat_history(user_id=user_id, limit=limit, workspace_id=ctx.workspace_id)
-    
+    previews = _last_message_previews(db, [str(chat.id) for chat in chats])
+
     return [
         {
             "id": str(chat.id),
@@ -613,69 +565,12 @@ async def get_chat_history(
             "createdAt": chat.created_at.isoformat(),
             "updatedAt": chat.updated_at.isoformat(),
             "visibility": chat.visibility,
-            "lastContext": chat.last_context
+            "lastContext": chat.last_context,
+            "lastMessagePreview": previews.get(str(chat.id)),
+            # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
+            "kind": chat.kind,
         }
         for chat in chats
-    ]
-
-
-@router.get("/{chat_id}")
-async def get_chat(
-    chat_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Get a specific chat (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db)
-
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    return {
-        "id": str(chat.id),
-        "userId": chat.user_id,
-        "title": chat.title,
-        "createdAt": chat.created_at.isoformat(),
-        "updatedAt": chat.updated_at.isoformat(),
-        "visibility": chat.visibility,
-        "lastContext": chat.last_context
-    }
-
-
-@router.get("/{chat_id}/messages")
-async def get_chat_messages(
-    chat_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Get all messages for a chat (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db)
-
-    # Verify chat access within workspace
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    messages = chat_service.get_messages_by_chat_id(chat_id)
-    
-    return [
-        {
-            "id": str(msg.id),
-            "role": msg.role,
-            "parts": msg.parts,
-            "attachments": msg.attachments,
-            "createdAt": msg.created_at.isoformat()
-        }
-        for msg in messages
     ]
 
 
@@ -687,10 +582,15 @@ async def search_chat_history(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Search across chat messages by keyword (workspace-scoped)."""
+    """Search across chat messages by keyword (workspace-scoped).
+
+    MUST be registered before ``GET /{chat_id}`` — routes match in declaration
+    order, so with this below the param route ``/api/chat/search`` resolved as
+    ``chat_id="search"`` and 404'd (PRD-220 drive-by fix).
+    """
     from datetime import datetime, timedelta
 
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
     since = datetime.utcnow() - timedelta(days=min(days, 365))
     search_term = f"%{q}%"
 
@@ -732,50 +632,11 @@ async def search_chat_history(
     return {"query": q, "total": len(results), "results": results}
 
 
-@router.delete("/{chat_id}")
-async def delete_chat(
-    chat_id: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Delete a chat (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db)
-
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    success = chat_service.delete_chat(chat_id)
-    return {"success": success}
-
-
-@router.patch("/{chat_id}")
-async def update_chat(
-    chat_id: str,
-    request: UpdateTitleRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Update chat title (workspace-scoped)"""
-    chat_service = ChatService(db)
-    user_id = get_user_id(db)
-
-    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
-    if not chat:
-        raise HTTPException(status_code=404, detail="Chat not found")
-
-    if chat.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    success = chat_service.update_chat_title(chat_id, request.title)
-    return {"success": success}
-
-
-@router.patch("/vote")
+# PRD-205 S8: /vote and /agents MUST be declared before the /{chat_id}
+# routes below — declared after, FastAPI matched chat_id="vote"/"agents"
+# and both endpoints were dead (the exact PRD-220 /search failure mode).
+# Locked by route-order regression tests.
+@router.patch("/vote", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def vote_message(
     request: VoteRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -783,7 +644,7 @@ async def vote_message(
 ):
     """Vote on a message (workspace-scoped)"""
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
 
     chat = chat_service.get_chat(request.chatId, workspace_id=ctx.workspace_id)
     if not chat:
@@ -797,7 +658,33 @@ async def vote_message(
         request.messageId,
         request.isUpvoted
     )
-    
+
+    # PRD-185 S7: feed the RAG feedback loop. Write a rag_feedback row from the
+    # voted assistant message's retrieved doc ids so the PRD-179 live ranker can
+    # learn from thumbs. Best-effort — never fail the vote — but log loudly if it
+    # breaks (this wave exists because of silent swallows).
+    if success:
+        try:
+            from modules.rag.feedback_writer import feedback_from_retrieval_context
+            message = chat_service.get_message(request.chatId, request.messageId)
+            if message is not None:
+                feedback_from_retrieval_context(
+                    db,
+                    retrieval_context=message.retrieval_context,
+                    is_upvoted=request.isUpvoted,
+                    workspace_id=ctx.workspace_id,
+                    user_id=user_id,
+                )
+        except Exception:
+            # The vote itself is already committed; roll back only the failed
+            # feedback partial so the per-request session isn't left poisoned.
+            db.rollback()
+            logger.warning(
+                "[PRD-185 S7] rag_feedback write from chat vote failed "
+                "(chat=%s message=%s)",
+                request.chatId, request.messageId, exc_info=True,
+            )
+
     return {"success": success}
 
 
@@ -837,7 +724,116 @@ class SwitchAgentRequest(BaseModel):
     reason: Optional[str] = None
 
 
-@router.post("/{chat_id}/switch-agent")
+@router.get("/{chat_id}")
+async def get_chat(
+    chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get a specific chat (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "id": str(chat.id),
+        "userId": chat.user_id,
+        "title": chat.title,
+        "createdAt": chat.created_at.isoformat(),
+        "updatedAt": chat.updated_at.isoformat(),
+        "visibility": chat.visibility,
+        "lastContext": chat.last_context,
+        # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
+        "kind": chat.kind,
+    }
+
+
+@router.get("/{chat_id}/messages")
+async def get_chat_messages(
+    chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Get all messages for a chat (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    # Verify chat access within workspace
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    messages = chat_service.get_messages_by_chat_id(chat_id)
+    
+    return [
+        {
+            "id": str(msg.id),
+            "role": msg.role,
+            "parts": msg.parts,
+            "attachments": msg.attachments,
+            # PRD-205 S3: background-author provenance — the frontend maps it
+            # into the message badge slot ("Auto · background"). null for
+            # every in-turn message, incl. all rows predating the column.
+            "source": msg.source,
+            "createdAt": msg.created_at.isoformat()
+        }
+        for msg in messages
+    ]
+
+
+@router.delete("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+async def delete_chat(
+    chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Delete a chat (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    success = chat_service.delete_chat(chat_id)
+    return {"success": success}
+
+
+@router.patch("/{chat_id}", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+async def update_chat(
+    chat_id: str,
+    request: UpdateTitleRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Update chat title (workspace-scoped)"""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    success = chat_service.update_chat_title(chat_id, request.title)
+    return {"success": success}
+
+
+@router.post("/{chat_id}/switch-agent", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def switch_agent(
     chat_id: str,
     request: SwitchAgentRequest,
@@ -850,7 +846,7 @@ async def switch_agent(
     import json
     
     chat_service = ChatService(db)
-    user_id = get_user_id(db)
+    user_id = get_user_id(db, ctx)
     
     chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
     if not chat:

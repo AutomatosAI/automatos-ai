@@ -3,23 +3,23 @@
 <head>
 <style>
   @page { size: A4; margin: 2cm; }
-  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: #1a1a2e; line-height: 1.5; }
+  body { font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; color: {{ brand.primary_color }}; line-height: 1.5; }
   .invoice-header { display: flex; justify-content: space-between; margin-bottom: 2rem; }
-  .invoice-header .company { font-size: 20pt; font-weight: 700; color: #1a1a2e; }
+  .invoice-header .company { font-size: 20pt; font-weight: 700; color: {{ brand.primary_color }}; }
   .invoice-header .invoice-badge {
-    background: #ff6b35; color: white; font-size: 14pt; font-weight: 700;
+    background: {{ brand.accent_color }}; color: white; font-size: 14pt; font-weight: 700;
     padding: 0.5rem 1.5rem; border-radius: 4px;
   }
   .info-grid { display: flex; justify-content: space-between; margin-bottom: 2rem; }
   .info-block h3 { margin: 0 0 0.5rem 0; font-size: 9pt; text-transform: uppercase; color: #999; letter-spacing: 0.5px; }
   .info-block p { margin: 0.2rem 0; }
   table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; }
-  th { background: #1a1a2e; color: white; padding: 0.75rem; text-align: left; font-size: 9pt; text-transform: uppercase; }
+  th { background: {{ brand.primary_color }}; color: white; padding: 0.75rem; text-align: left; font-size: 9pt; text-transform: uppercase; }
   th:last-child, td:last-child { text-align: right; }
   td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #eee; }
   .totals { margin-left: auto; width: 300px; margin-top: 1rem; }
   .totals .row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid #eee; }
-  .totals .row.total { font-weight: 700; font-size: 14pt; border-top: 2px solid #1a1a2e; border-bottom: none; padding-top: 0.75rem; }
+  .totals .row.total { font-weight: 700; font-size: 14pt; border-top: 2px solid {{ brand.primary_color }}; border-bottom: none; padding-top: 0.75rem; }
   .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #eee; font-size: 9pt; color: #999; }
 </style>
 </head>

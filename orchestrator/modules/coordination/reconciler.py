@@ -26,6 +26,7 @@ from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from config import Config
+from core.database.database import end_open_transaction
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationRun, OrchestrationTask
 from core.models.orchestration_enums import (
@@ -206,7 +207,7 @@ class MissionReconciler:
 
             # --- Advance run state if appropriate ---
             if all_terminal:
-                return MissionReconciler._advance_run_on_completion(
+                advance_result = MissionReconciler._advance_run_on_completion(
                     db=db,
                     run=run,
                     all_tasks=all_tasks,
@@ -217,6 +218,14 @@ class MissionReconciler:
                     tasks_verified=tasks_verified,
                     tasks_verification_failed=tasks_verification_failed,
                 )
+                # PRD-204 S4: run failed on task outcomes -- tell the user.
+                # (_advance_run_on_completion is sync; this is its async seam.)
+                if (
+                    advance_result.run_advanced
+                    and advance_result.run_new_state == RunState.FAILED.value
+                ):
+                    await MissionReconciler._notify_run_failed(db, run)
+                return advance_result
 
             # --- Check for fatal failure (task failed, retries exhausted) ---
             if failed_tasks:
@@ -226,6 +235,9 @@ class MissionReconciler:
                     failed_tasks=failed_tasks,
                 )
                 if fatal:
+                    # PRD-204 S4: fatal task failure failed the run -- tell
+                    # the user.
+                    await MissionReconciler._notify_run_failed(db, run)
                     return ReconcileResult(
                         run_id=run_id,
                         stalls_detected=stalls_detected,
@@ -372,16 +384,34 @@ class MissionReconciler:
                 if not criteria:
                     criteria = None
 
+            # Capture every scalar verify_task needs BEFORE committing. After
+            # end_open_transaction() the session is expired (expire_on_commit
+            # default), so touching task.title/description/output/id would
+            # re-SELECT and re-open a transaction — exactly what we must avoid
+            # across the long LLM await below.
+            t_title = task.title
+            t_desc = task.description or ""
+            t_output = task.output or ""
+            t_id = task.id
+
+            # End the read transaction so the connection sits idle (not
+            # idle-in-transaction) for the whole verify LLM call. PRD-135 /
+            # W1-S9: the agents SELECT in _get_executor_model held across this
+            # await was the documented 9-hour idle-in-transaction leak. The
+            # pending VERIFYING transition is committed here, so verification
+            # becomes durable per task rather than at end-of-tick.
+            end_open_transaction(db)
+
             # Run verification
             try:
                 result: VerificationResult = await verification_service.verify_task(
-                    task_title=task.title,
-                    task_description=task.description or "",
-                    output=task.output or "",
+                    task_title=t_title,
+                    task_description=t_desc,
+                    output=t_output,
                     verification_criteria=criteria,
                     executor_model=executor_model,
                     run_id=run_id,
-                    task_id=task.id,
+                    task_id=t_id,
                 )
             except Exception:
                 logger.error(
@@ -435,34 +465,67 @@ class MissionReconciler:
                         },
                     )
 
-            # Apply verdict — ALWAYS pass through to VERIFIED.
-            # Verification is advisory: feedback is stored in task metadata
-            # for downstream agents to incorporate, but tasks are NEVER
-            # rejected or retried based on verification alone.
-            if result.verdict != VERDICT_PASS:
-                # Store review feedback on the task so downstream consumers
-                # (synthesis tasks, reports, humans) can see it
-                task.output_metadata = {
-                    **(task.output_metadata or {}),
-                    "review_feedback": {
-                        "verdict": result.verdict,
-                        "reasoning": result.reasoning,
-                        "scores": result.scores,
-                        "suggestions": result.suggestions or result.deterministic_failures,
-                    },
-                }
-                logger.info(
-                    "Task %s verification %s — feedback stored, proceeding (no retry)",
-                    task.id,
-                    result.verdict.upper(),
-                )
-
-            await MissionReconciler._apply_verdict_pass(db, task)
-            tasks_verified += 1
+            # Apply the verdict (PRD-200 S1 — the judge now gates once).
+            # A FAIL verdict requeues the task once with the verifier's
+            # feedback so the agent can revise instead of the empty/wrong
+            # output flowing straight into synthesis; PARTIAL stays advisory
+            # (the retry-storm scar tissue). The routing lives in the pure,
+            # unit-tested _apply_verdict.
+            requeued = await MissionReconciler._apply_verdict(db, task, result)
+            if requeued:
+                tasks_verification_failed += 1
+            else:
+                tasks_verified += 1
 
             db.flush()
 
         return (tasks_verified, tasks_verification_failed)
+
+    @staticmethod
+    async def _apply_verdict(
+        db: Session,
+        task: OrchestrationTask,
+        result: VerificationResult,
+    ) -> bool:
+        """Route a verification verdict (PRD-200 S1).
+
+        Returns True if the task was requeued (RETRYING — awaiting another
+        execution), False if it was passed through to VERIFIED.
+
+        - FAIL, with verification-requeue budget remaining → requeue once
+          with the verifier's feedback (via _apply_verdict_fail) so the agent
+          revises. Empty output (the judge's hard FAIL) is the highest-value
+          catch — it now gets one revision instead of flowing into synthesis.
+        - FAIL at the requeue cap, PARTIAL, or PASS → VERIFIED. A non-PASS
+          verdict has its feedback annotated in output_metadata for downstream
+          consumers (advisory — the retreat deliberately kept for PARTIAL and
+          for a FAIL that has already had its one revision).
+        """
+        if result.verdict == VERDICT_FAIL and MissionReconciler._apply_verdict_fail(
+            db, task, result
+        ):
+            return True
+
+        if result.verdict != VERDICT_PASS:
+            # Store review feedback on the task so downstream consumers
+            # (synthesis tasks, reports, humans) can see it.
+            task.output_metadata = {
+                **(task.output_metadata or {}),
+                "review_feedback": {
+                    "verdict": result.verdict,
+                    "reasoning": result.reasoning,
+                    "scores": result.scores,
+                    "suggestions": result.suggestions or result.deterministic_failures,
+                },
+            }
+            logger.info(
+                "Task %s verification %s — feedback stored, proceeding (advisory)",
+                task.id,
+                result.verdict.upper(),
+            )
+
+        await MissionReconciler._apply_verdict_pass(db, task)
+        return False
 
     @staticmethod
     def _get_executor_model(db: Session, task: OrchestrationTask) -> Optional[str]:
@@ -504,180 +567,73 @@ class MissionReconciler:
         task: OrchestrationTask,
         result: VerificationResult,
     ) -> bool:
-        """
-        Handle FAIL verdict: retry with feedback or fail permanently.
+        """Requeue a task once on a FAIL verdict with the verifier's feedback
+        (PRD-200 S1; Mission Zero P3).
 
-        Returns True if the task was permanently failed, False if retrying.
+        The task is re-queued for revision (→ RETRYING) with ``previous_output``
+        and ``verification_feedback`` stashed into ``input_context`` — the keys
+        ``MissionDispatcher.build_task_prompt`` reads back to build a revision
+        prompt so the agent fixes the specific failure instead of repeating it.
+
+        Capped at ``COORDINATOR_MAX_VERIFICATION_REQUEUES`` verification-driven
+        requeues — a budget SEPARATE from agent-error retries (``attempt_number``
+        / ``COORDINATOR_MAX_TASK_RETRIES``) and from the LLM-judge's own
+        malformed-response retry count. Tracked in ``input_context`` (no new
+        column). The counter is deliberately independent of ``attempt_number``
+        so an agent-retried task still gets its one verification revision.
+
+        Returns True if the task was requeued; False if the requeue budget is
+        spent or the transition conflicts. On False the caller falls back to
+        advisory VERIFIED — a FAIL verdict never fails the mission on its own,
+        which is the retreat this gate re-opens only one notch.
         """
-        max_retries = task.max_retries or Config.COORDINATOR_MAX_TASK_RETRIES
+        requeues = (task.input_context or {}).get("verification_requeues", 0)
+        if requeues >= Config.COORDINATOR_MAX_VERIFICATION_REQUEUES:
+            return False
+
         attempt = task.attempt_number or 0
+        # Stash previous output so the retry revises instead of rewriting from
+        # scratch — saves ~80% of tokens per retry.
+        previous_output = task.output or ""
+        task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
+        task.attempt_number = attempt + 1
 
-        if attempt < max_retries:
-            # Retry with verifier feedback injected into task context
-            task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
-            task.attempt_number = attempt + 1
-
-            # Stash previous output so the retry can revise instead of
-            # rewriting from scratch — saves ~80% of tokens per retry
-            previous_output = task.output or ""
-
-            # Inject verification feedback — immutable replace for JSONB detection
-            task.input_context = {
-                **(task.input_context or {}),
-                "previous_output": previous_output,
-                "verification_feedback": {
-                    "attempt": attempt + 1,
-                    "reasoning": result.reasoning,
-                    "scores": result.scores,
-                    "failures": result.deterministic_failures,
-                },
-            }
-
-            try:
-                transition_task(
-                    db=db,
-                    task=task,
-                    new_state=TaskState.RETRYING,
-                    actor_type=ActorType.COORDINATOR,
-                    actor_id="reconciler",
-                    reason=f"Verification failed, retrying (attempt {attempt + 1}/{max_retries}): {result.reasoning}",
-                )
-                sync_board_status(db, task)
-                logger.info(
-                    "Task %s verification failed → retrying (attempt %d/%d): %s",
-                    task.id, attempt + 1, max_retries, result.reasoning,
-                )
-                return False
-            except ConflictError:
-                logger.warning("Conflict transitioning task %s to retrying", task.id)
-                return False
-        else:
-            # Max retries exhausted → fail permanently
-            task.failure_reason_code = FailureReasonCode.MAX_RETRIES_EXHAUSTED.value
-            task.failure_detail = (
-                f"Verification failed after {attempt} attempts. "
-                f"Last reasoning: {result.reasoning}"
-            )
-            try:
-                transition_task(
-                    db=db,
-                    task=task,
-                    new_state=TaskState.FAILED,
-                    actor_type=ActorType.COORDINATOR,
-                    actor_id="reconciler",
-                    reason=f"Verification failed, max retries exhausted: {result.reasoning}",
-                )
-                sync_board_status(db, task)
-                logger.info(
-                    "Task %s verification failed permanently (retries exhausted)",
-                    task.id,
-                )
-                return True
-            except ConflictError:
-                logger.warning("Conflict transitioning task %s to failed", task.id)
-                return False
-
-    @staticmethod
-    def _apply_verdict_partial(
-        db: Session,
-        run_id: UUID,
-        task: OrchestrationTask,
-        result: VerificationResult,
-    ) -> bool:
-        """
-        Handle PARTIAL verdict: retry with feedback if retries remain,
-        otherwise fail with escalation for human review.
-
-        PARTIAL means low confidence — give the agent another shot with
-        the verifier's feedback before escalating.
-
-        Returns True if permanently failed, False if retrying.
-        """
-        max_retries = task.max_retries or Config.COORDINATOR_MAX_TASK_RETRIES
-        attempt = task.attempt_number or 0
-
-        # Emit escalation event regardless (for visibility in UI)
-        emit_event(
-            db=db,
-            run_id=run_id,
-            event_type=EventType.TASK_VERIFICATION_FAILED,
-            actor_type=ActorType.COORDINATOR,
-            actor_id="reconciler",
-            task_id=task.id,
-            payload={
-                "verdict": VERDICT_PARTIAL,
-                "confidence": result.confidence,
+        # Immutable replace so SQLAlchemy detects the JSONB mutation.
+        task.input_context = {
+            **(task.input_context or {}),
+            "previous_output": previous_output,
+            "verification_requeues": requeues + 1,
+            "verification_feedback": {
+                "attempt": attempt + 1,
                 "reasoning": result.reasoning,
                 "scores": result.scores,
-                "escalation": attempt >= max_retries,
+                "failures": result.deterministic_failures,
             },
-        )
+        }
 
-        if attempt < max_retries:
-            # Retry with verifier feedback (same pattern as _apply_verdict_fail)
-            task.failure_reason_code = FailureReasonCode.VERIFICATION_FAIL.value
-            task.attempt_number = attempt + 1
-
-            # Stash previous output for revision-based retry
-            previous_output = task.output or ""
-
-            task.input_context = {
-                **(task.input_context or {}),
-                "previous_output": previous_output,
-                "verification_feedback": {
-                    "attempt": attempt + 1,
-                    "verdict": "partial",
-                    "confidence": result.confidence,
-                    "reasoning": result.reasoning,
-                    "scores": result.scores,
-                },
-            }
-            try:
-                transition_task(
-                    db=db,
-                    task=task,
-                    new_state=TaskState.RETRYING,
-                    actor_type=ActorType.COORDINATOR,
-                    actor_id="reconciler",
-                    reason=(
-                        f"Verification partial (confidence={result.confidence:.2f}), "
-                        f"retrying (attempt {attempt + 1}/{max_retries}): {result.reasoning}"
-                    ),
-                )
-                sync_board_status(db, task)
-                logger.info(
-                    "Task %s verification partial (confidence=%.2f) → retrying (attempt %d/%d)",
-                    task.id, result.confidence, attempt + 1, max_retries,
-                )
-                return False
-            except ConflictError:
-                logger.warning("Conflict transitioning task %s to retrying (partial)", task.id)
-                return False
-        else:
-            # Retries exhausted — fail permanently with escalation
-            task.failure_reason_code = FailureReasonCode.MAX_RETRIES_EXHAUSTED.value
-            task.failure_detail = (
-                f"Verification partial (low confidence {result.confidence:.2f}) "
-                f"after {attempt} attempts: {result.reasoning}"
+        try:
+            transition_task(
+                db=db,
+                task=task,
+                new_state=TaskState.RETRYING,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="reconciler",
+                reason=f"Verification failed, requeuing once for revision: {result.reasoning}",
             )
-            try:
-                transition_task(
-                    db=db,
-                    task=task,
-                    new_state=TaskState.FAILED,
-                    actor_type=ActorType.COORDINATOR,
-                    actor_id="reconciler",
-                    reason=f"Verification partial, retries exhausted — escalating: {result.reasoning}",
-                )
-                sync_board_status(db, task)
-                logger.info(
-                    "Task %s verification partial (confidence=%.2f) → failed with escalation (retries exhausted)",
-                    task.id, result.confidence,
-                )
-                return True
-            except ConflictError:
-                logger.warning("Conflict transitioning task %s to failed (partial)", task.id)
-                return True
+            sync_board_status(db, task)
+            logger.info(
+                "Task %s verification FAIL → requeued for revision (requeue %d/%d): %s",
+                task.id,
+                requeues + 1,
+                Config.COORDINATOR_MAX_VERIFICATION_REQUEUES,
+                result.reasoning,
+            )
+            return True
+        except ConflictError:
+            logger.warning(
+                "Conflict requeuing task %s after verification fail", task.id
+            )
+            return False
 
     # -----------------------------------------------------------------------
     # Stall detection and recovery
@@ -1045,6 +1001,25 @@ class MissionReconciler:
                     return False
 
         return False
+
+    @staticmethod
+    async def _notify_run_failed(db: Session, run: OrchestrationRun) -> None:
+        """PRD-204 S4: mission_failed notification for reconciler-driven
+        failures (task cascades). Delegates to the single owner of the
+        failure message in coordinator_service; lazy import avoids the
+        module cycle (coordinator_service imports this module). Never
+        raises into reconciliation.
+        """
+        try:
+            from services.coordinator_service import notify_mission_failed
+
+            await notify_mission_failed(db, run)
+        except Exception:
+            logger.error(
+                "mission_failed dispatch failed for run %s (non-fatal)",
+                getattr(run, "id", "?"),
+                exc_info=True,
+            )
 
     @staticmethod
     def _skip_remaining_tasks(

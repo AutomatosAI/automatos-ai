@@ -1,20 +1,36 @@
 """
-Agent Matcher — PRD-82A
-========================
+Agent Matcher — PRD-82A, extended by PRD-164 S2 (Q21 semantic blend)
+=====================================================================
 
 Deterministic scoring to select the best roster agent for a mission task.
 
-Scoring weights (from PRD-102 Section 6.2, rebalanced for 82A):
+Legacy scoring weights (from PRD-102 Section 6.2, rebalanced for 82A) sum
+to 1.0 and are preserved verbatim so behavior is unchanged when semantic
+signals are unavailable:
   - skill_match:    0.40  — agent's skill/description matches task's agent_role
   - tool_coverage:  0.25  — fraction of task's required tools the agent has
   - model_fit:      0.15  — agent's model context + capability for the task
   - availability:   0.10  — agent has no running tasks in current missions
   - history:        0.10  — avg verification score from past tasks (82B US-003)
 
-Threshold: 0.4 minimum score to be considered a match.
-Returns the single best-scoring agent, or None.
+PRD-164 S2 (Q21) adds two ADDITIVE components, blended by renormalizing the
+weighted mean over the components actually present:
+  - semantic:       0.35  — cosine similarity between the task text and the
+                            agent's capability card (PRD-64
+                            ``agents.semantic_embedding``, JSONB + python
+                            cosine; one embedding call per dispatch)
+  - field_signal:   0.15  — live field signal (PRD-166): agents that recently
+                            contributed resonant knowledge to the workspace
+                            field rank higher for related tasks
 
-Source: PRD-82A Section 12 (US-010), PRD-102 Section 6.2
+Every ranked agent carries a human-readable ``reason`` string, persisted on
+the task row and surfaced to the PRD-163 approval card. Explicit agent
+overrides (PRD-163 S4 — an approval-edited ``agent_role`` that names a roster
+agent exactly) ALWAYS win, regardless of score and threshold.
+
+Threshold: 0.4 minimum score to be considered a match (overrides bypass it).
+
+Source: PRD-82A Section 12 (US-010), PRD-102 Section 6.2, PRD-164 S2 (Q21)
 """
 
 import logging
@@ -32,12 +48,18 @@ from core.models.composio_cache import AgentAppAssignment
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationEvent, OrchestrationTask
 from core.models.orchestration_enums import EventType, TaskState
+from modules.coordination.match_signals import (
+    SemanticSignals,
+    compute_semantic_signals_sync,
+    compute_signals_for_tasks,
+)
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Scoring weights — must sum to 1.0
-# Rebalanced: skill_match is the primary differentiator for roster selection.
+# Scoring weights — the legacy five sum to 1.0; the Q21 components are
+# additive and renormalized, so absent signals reproduce legacy scores
+# exactly (missing embeddings never change dispatch behavior).
 # ---------------------------------------------------------------------------
 
 WEIGHT_SKILL_MATCH: float = 0.40
@@ -46,7 +68,14 @@ WEIGHT_MODEL_FIT: float = 0.15
 WEIGHT_AVAILABILITY: float = 0.10
 WEIGHT_HISTORY: float = 0.10
 
+# PRD-164 S2 (Q21): capability-card embedding + live field signal.
+WEIGHT_SEMANTIC: float = 0.35
+WEIGHT_FIELD_SIGNAL: float = 0.15
+
 MATCH_THRESHOLD: float = 0.4
+
+# How many ranked agents the persisted match annotation keeps.
+_ANNOTATION_RANKED_LIMIT: int = 3
 
 # Known large-context models (128k+) — prefer these for later-sequence tasks
 # that carry upstream outputs in their prompt.
@@ -74,9 +103,16 @@ _ROLE_SYNONYMS: Dict[str, List[str]] = {
     "admin": ["admin", "operations", "ops", "configure", "setup", "workspace"],
 }
 
+# Canonical capability vocabulary the mission planner assigns from. Tasks bind
+# to one of these CAPABILITIES (not a specific agent name); the matcher then
+# scores every active agent for the capability and dispatches the best fit.
+# An agent_role that instead names a roster agent EXACTLY is treated as an
+# explicit override (PRD-163 S4 approval edit) and always wins.
+CANONICAL_ROLES: frozenset = frozenset(_ROLE_SYNONYMS)
+
 
 # ---------------------------------------------------------------------------
-# Result dataclass
+# Result dataclasses
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -91,6 +127,12 @@ class MatchResult:
     model_fit: float
     availability: float
     history: float
+    # PRD-164 S2 — Q21 blend components (None = signal absent from the blend)
+    semantic: Optional[float] = None
+    field_signal: Optional[float] = None
+    # PRD-164 S2 — human-readable reason + explicit-override flag (PRD-163 S4)
+    reason: str = ""
+    is_override: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +153,7 @@ class AgentMatcher:
         task: OrchestrationTask,
         agents: Sequence[Agent],
         task_spec: Optional[Dict[str, Any]] = None,
+        semantic: Optional[SemanticSignals] = None,
     ) -> Optional[MatchResult]:
         """
         Find the best roster agent for *task*.
@@ -123,28 +166,93 @@ class AgentMatcher:
                 - required_tools (list[str])
                 - agent_role (str)
                 - preferred_model (str)
+            semantic: Optional pre-computed Q21 signals (PRD-164 S2) — see
+                :meth:`compute_semantic_signals_sync`. None = lexical-only,
+                identical to pre-164 behavior.
 
         Returns:
             MatchResult for the highest-scoring agent, or None if no agent
-            meets the threshold.
+            meets the threshold. An explicit agent override (PRD-163 S4)
+            is returned regardless of score and threshold.
         """
-        if not agents:
-            logger.warning(
-                "AgentMatcher.match: no candidate agents for task %s", task.id
-            )
+        ranked = AgentMatcher.rank(
+            db=db, task=task, agents=agents, task_spec=task_spec, semantic=semantic,
+        )
+        if not ranked:
             return None
 
         spec = task_spec or {}
-        required_tools: List[str] = spec.get(
-            "required_tools", []
+        agent_role = spec.get("agent_role") or task.agent_role
+
+        # Debug: log all candidates ranked by score
+        top_5 = ranked[:5]
+        candidates_str = ", ".join(
+            f"{s.agent_name}(id={s.agent_id} skill={s.skill_match:.2f} "
+            f"tool={s.tool_coverage:.2f} model={s.model_fit:.2f} "
+            f"hist={s.history:.2f} total={s.total_score:.3f}"
+            f"{' OVERRIDE' if s.is_override else ''})"
+            for s in top_5
         )
+        logger.info(
+            "AgentMatcher candidates for task %s (role=%s): %s",
+            task.id,
+            agent_role,
+            candidates_str,
+        )
+
+        best = ranked[0]
+        if not best.is_override and best.total_score < MATCH_THRESHOLD:
+            logger.warning(
+                "AgentMatcher: no agent met threshold %.2f for task %s (role=%s, tools=%s)",
+                MATCH_THRESHOLD,
+                task.id,
+                agent_role,
+                spec.get("required_tools", []),
+            )
+            return None
+
+        logger.info(
+            "AgentMatcher: matched agent %s (id=%d, score=%.3f, override=%s) for task %s — %s",
+            best.agent_name,
+            best.agent_id,
+            best.total_score,
+            best.is_override,
+            task.id,
+            best.reason,
+        )
+        return best
+
+    @staticmethod
+    def rank(
+        db: Session,
+        task: OrchestrationTask,
+        agents: Sequence[Agent],
+        task_spec: Optional[Dict[str, Any]] = None,
+        semantic: Optional[SemanticSignals] = None,
+    ) -> List[MatchResult]:
+        """PRD-164 S2: score every active candidate and return them ranked
+        (override first, then total score desc, agent id asc), EACH with a
+        human-readable reason string. Prefetches the DB-backed maps and
+        delegates to the pure :meth:`_rank_with_context`.
+        """
+        if not agents:
+            logger.warning(
+                "AgentMatcher.rank: no candidate agents for task %s", task.id
+            )
+            return []
+
+        spec = task_spec or {}
+        required_tools: List[str] = spec.get("required_tools", [])
         agent_role: Optional[str] = spec.get("agent_role") or task.agent_role
         preferred_model: Optional[str] = spec.get("preferred_model")
 
-        # Determine if task has upstream context (later tasks need larger models)
+        # Determine if task carries upstream context (later tasks need larger
+        # models). PRD-164 S4 (Q22): dispatch context is the budgeted field
+        # digest pinned by _prepare_task — present on re-matches after a first
+        # dispatch, exactly when the raw stuffing used to be.
         has_upstream = bool(
             isinstance(task.input_context, dict)
-            and task.input_context.get("upstream_outputs")
+            and task.input_context.get("field_digest")
         )
 
         # Pre-fetch tool assignments for all candidate agents in one query
@@ -163,14 +271,57 @@ class AgentMatcher:
             min_datapoints=Config.COORDINATOR_HISTORY_MIN_DATAPOINTS,
         )
 
-        best: Optional[MatchResult] = None
-        all_scores: List[MatchResult] = []
+        return AgentMatcher._rank_with_context(
+            agents=agents,
+            agent_role=agent_role,
+            required_tools=required_tools,
+            preferred_model=preferred_model,
+            has_upstream=has_upstream,
+            tool_map=tool_map,
+            busy_agent_ids=busy_agent_ids,
+            history_map=history_map,
+            semantic=semantic,
+        )
 
+    @staticmethod
+    def _rank_with_context(
+        *,
+        agents: Sequence[Agent],
+        agent_role: Optional[str],
+        required_tools: List[str],
+        preferred_model: Optional[str],
+        has_upstream: bool,
+        tool_map: Dict[int, set],
+        busy_agent_ids: frozenset,
+        history_map: Dict[int, float],
+        semantic: Optional[SemanticSignals] = None,
+    ) -> List[MatchResult]:
+        """Pure ranking core (no DB) — unit-tested by the golden matrix.
+
+        Explicit overrides (PRD-163 S4): when ``agent_role`` names an active
+        candidate agent exactly (name or slug, case-insensitive), that agent
+        is ranked first regardless of its blended score.
+        """
+        override_agent_id = _find_override_agent_id(agent_role, agents)
+
+        similarity_map = semantic.similarity_by_agent if semantic else {}
+        field_map = semantic.field_by_agent if semantic else {}
+
+        results: List[MatchResult] = []
         for agent in agents:
             if agent.status != "active":
                 continue
 
-            scores = _score_agent(
+            # Component present iff the map is non-empty; a card-less agent in
+            # a carded roster scores neutral 0.5 (no card is not a bad card).
+            semantic_score: Optional[float] = None
+            if similarity_map:
+                semantic_score = similarity_map.get(agent.id, 0.5)
+            field_score: Optional[float] = None
+            if field_map:
+                field_score = field_map.get(agent.id, 0.0)
+
+            results.append(_score_agent(
                 agent=agent,
                 required_tools=required_tools,
                 agent_role=agent_role,
@@ -179,49 +330,96 @@ class AgentMatcher:
                 is_busy=agent.id in busy_agent_ids,
                 has_upstream=has_upstream,
                 history_score=history_map.get(agent.id, 0.5),
-            )
-            all_scores.append(scores)
+                semantic_score=semantic_score,
+                field_score=field_score,
+                is_override=(agent.id == override_agent_id),
+            ))
 
-            if scores.total_score >= MATCH_THRESHOLD and (
-                best is None or scores.total_score > best.total_score
-            ):
-                best = scores
+        # Override first, then score desc; agent_id asc keeps ties stable.
+        results.sort(key=lambda r: (not r.is_override, -r.total_score, r.agent_id))
+        return results
 
-        # Debug: log all candidates ranked by score
-        if all_scores:
-            ranked = sorted(all_scores, key=lambda s: s.total_score, reverse=True)
-            top_5 = ranked[:5]
-            candidates_str = ", ".join(
-                f"{s.agent_name}(id={s.agent_id} skill={s.skill_match:.2f} "
-                f"tool={s.tool_coverage:.2f} model={s.model_fit:.2f} "
-                f"hist={s.history:.2f} total={s.total_score:.3f})"
-                for s in top_5
-            )
-            logger.info(
-                "AgentMatcher candidates for task %s (role=%s): %s",
-                task.id,
-                agent_role,
-                candidates_str,
-            )
+    # ------------------------------------------------------------------
+    # PRD-164 S2 — Q21 semantic signal computation (one embedding call per
+    # dispatch), implemented in modules.coordination.match_signals and
+    # exposed here so dispatcher/coordinator keep a single matcher seam.
+    # ------------------------------------------------------------------
 
-        if best is not None:
-            logger.info(
-                "AgentMatcher: matched agent %s (id=%d, score=%.3f) for task %s",
-                best.agent_name,
-                best.agent_id,
-                best.total_score,
-                task.id,
-            )
-        else:
-            logger.warning(
-                "AgentMatcher: no agent met threshold %.2f for task %s (role=%s, tools=%s)",
-                MATCH_THRESHOLD,
-                task.id,
-                agent_role,
-                required_tools,
-            )
+    @staticmethod
+    async def compute_signals_for_tasks(
+        tasks: Sequence[OrchestrationTask],
+        agents: Sequence[Agent],
+        workspace_id: Optional[UUID],
+    ) -> Dict[Any, SemanticSignals]:
+        """See :func:`modules.coordination.match_signals.compute_signals_for_tasks`."""
+        return await compute_signals_for_tasks(tasks, agents, workspace_id)
 
-        return best
+    @staticmethod
+    def compute_semantic_signals_sync(
+        *,
+        task: OrchestrationTask,
+        agents: Sequence[Agent],
+        workspace_id: Optional[UUID],
+    ) -> Optional[SemanticSignals]:
+        """See :func:`modules.coordination.match_signals.compute_semantic_signals_sync`."""
+        return compute_semantic_signals_sync(
+            task=task, agents=agents, workspace_id=workspace_id,
+        )
+
+
+# ---------------------------------------------------------------------------
+# PRD-164 S2 — pure helpers (annotation, override, signals)
+# ---------------------------------------------------------------------------
+
+
+def build_match_annotation(ranked: Sequence[MatchResult]) -> Dict[str, Any]:
+    """The persisted match annotation: stored on the task row
+    (``input_context['agent_match']``) and mirrored into the ``run.plan``
+    snapshot so the PRD-163 approval card can show WHY each agent was picked.
+    """
+    top = ranked[0]
+    return {
+        "agent_id": top.agent_id,
+        "agent_name": top.agent_name,
+        "score": top.total_score,
+        "reason": top.reason,
+        "is_override": top.is_override,
+        "ranked": [
+            {
+                "agent_id": r.agent_id,
+                "agent_name": r.agent_name,
+                "score": r.total_score,
+                "reason": r.reason,
+            }
+            for r in ranked[:_ANNOTATION_RANKED_LIMIT]
+        ],
+    }
+
+
+def _find_override_agent_id(
+    agent_role: Optional[str], agents: Sequence[Agent]
+) -> Optional[int]:
+    """PRD-163 S4 explicit override: an ``agent_role`` that names an ACTIVE
+    candidate agent exactly (name or slug, case-insensitive). The planner only
+    emits capability roles (CANONICAL_ROLES — see
+    test_planner_capability_routing), so a name here is deliberate human
+    intent from the approval-edit path and must always win.
+    """
+    role = (agent_role or "").strip().lower()
+    if not role:
+        return None
+
+    matches = [
+        a for a in agents
+        if a.status == "active" and (
+            (a.name or "").strip().lower() == role
+            or (getattr(a, "slug", None) or "").strip().lower() == role
+        )
+    ]
+    if not matches:
+        return None
+    # Deterministic when duplicated names exist: lowest id wins.
+    return min(matches, key=lambda a: a.id).id
 
 
 # ---------------------------------------------------------------------------
@@ -387,22 +585,28 @@ def _score_agent(
     is_busy: bool,
     has_upstream: bool = False,
     history_score: float = 0.5,
+    semantic_score: Optional[float] = None,
+    field_score: Optional[float] = None,
+    is_override: bool = False,
 ) -> MatchResult:
     """
-    Compute weighted score for a single agent.
+    Compute weighted score for a single agent (PRD-164 S2: Q21 blend with
+    renormalization over the components present, plus a reason string).
 
     Returns an immutable MatchResult.
     """
     # --- tool_coverage (0.25) ---
+    matched_tool_count = 0
     if required_tools:
         required_lower = {t.lower() for t in required_tools}
         matched = required_lower & agent_tools
-        tool_score = len(matched) / len(required_lower)
+        matched_tool_count = len(matched)
+        tool_score = matched_tool_count / len(required_lower)
     else:
         # No tool requirement — neutral score (not a freebie)
         tool_score = 0.5
 
-    # --- skill_match (0.40) — primary differentiator ---
+    # --- skill_match (0.40) — primary lexical differentiator ---
     if agent_role:
         role_lower = agent_role.lower()
         skill_score = _compute_skill_match(agent, role_lower)
@@ -429,6 +633,29 @@ def _score_agent(
         + WEIGHT_AVAILABILITY * availability_score
         + WEIGHT_HISTORY * history_score
     )
+    weight_sum = 1.0
+
+    # --- PRD-164 S2 (Q21): additive semantic + field components ---
+    if semantic_score is not None:
+        total += WEIGHT_SEMANTIC * semantic_score
+        weight_sum += WEIGHT_SEMANTIC
+    if field_score is not None:
+        total += WEIGHT_FIELD_SIGNAL * field_score
+        weight_sum += WEIGHT_FIELD_SIGNAL
+    total /= weight_sum
+
+    reason = _compose_reason(
+        agent_name=agent.name,
+        agent_role=agent_role,
+        required_tools=required_tools,
+        matched_tool_count=matched_tool_count,
+        skill_score=skill_score,
+        semantic_score=semantic_score,
+        field_score=field_score,
+        history_score=history_score,
+        availability_score=availability_score,
+        is_override=is_override,
+    )
 
     return MatchResult(
         agent_id=agent.id,
@@ -439,7 +666,80 @@ def _score_agent(
         model_fit=round(model_score, 4),
         availability=round(availability_score, 4),
         history=round(history_score, 4),
+        semantic=round(semantic_score, 4) if semantic_score is not None else None,
+        field_signal=round(field_score, 4) if field_score is not None else None,
+        reason=reason,
+        is_override=is_override,
     )
+
+
+def _compose_reason(
+    *,
+    agent_name: str,
+    agent_role: Optional[str],
+    required_tools: List[str],
+    matched_tool_count: int,
+    skill_score: float,
+    semantic_score: Optional[float],
+    field_score: Optional[float],
+    history_score: float,
+    availability_score: float,
+    is_override: bool,
+) -> str:
+    """Deterministic, human-readable reason for the approval card and the
+    TASK_ASSIGNED audit trail."""
+    if is_override:
+        return (
+            f"Explicitly assigned: the plan names agent '{agent_name}' for this "
+            f"task (PRD-163 approval override) — selection bypasses scoring."
+        )
+
+    clauses: List[str] = []
+    if agent_role:
+        if skill_score >= 0.75:
+            clauses.append(f"strong role match for '{agent_role}'")
+        elif skill_score >= 0.5:
+            clauses.append(f"partial role match for '{agent_role}'")
+        else:
+            clauses.append(f"no direct role match for '{agent_role}'")
+
+    if semantic_score is not None:
+        if semantic_score >= 0.75:
+            clauses.append(
+                f"capability profile closely matches the task "
+                f"(similarity {semantic_score:.2f})"
+            )
+        elif semantic_score >= 0.45:
+            clauses.append(
+                f"capability profile relates to the task "
+                f"(similarity {semantic_score:.2f})"
+            )
+        else:
+            clauses.append(
+                f"weak capability-profile similarity ({semantic_score:.2f})"
+            )
+
+    if required_tools:
+        clauses.append(
+            f"covers {matched_tool_count}/{len(required_tools)} required tools"
+        )
+
+    if history_score > 0.7:
+        clauses.append(f"strong verified-task history ({history_score:.2f})")
+    elif history_score < 0.3:
+        clauses.append(f"weak verified-task history ({history_score:.2f})")
+
+    if field_score is not None and field_score > 0:
+        clauses.append("recently contributed relevant knowledge to the mission field")
+
+    if availability_score < 1.0:
+        clauses.append("currently busy with another task")
+
+    if not clauses:
+        clauses.append("neutral fit on all signals")
+
+    text = "; ".join(clauses)
+    return text[0].upper() + text[1:]
 
 
 def _compute_skill_match(agent: Agent, role_lower: str) -> float:
@@ -529,8 +829,8 @@ def _compute_model_fit(
     Score model suitability.
 
     When a preferred_model is specified, exact match = 1.0, else 0.3.
-    When no preference but task has upstream outputs, prefer agents
-    with large-context models (128k+).
+    When no preference but the task carries upstream dispatch context
+    (the Q22 field digest), prefer agents with large-context models (128k+).
     """
     agent_model = _get_agent_model(agent)
     agent_model_lower = agent_model.lower()
@@ -539,7 +839,7 @@ def _compute_model_fit(
         return 1.0 if preferred_model.lower() in agent_model_lower else 0.3
 
     if has_upstream:
-        # Prefer large-context models for tasks carrying upstream outputs
+        # Prefer large-context models for tasks carrying upstream context
         is_large = any(m in agent_model_lower for m in _LARGE_CONTEXT_MODELS)
         return 0.9 if is_large else 0.3
 

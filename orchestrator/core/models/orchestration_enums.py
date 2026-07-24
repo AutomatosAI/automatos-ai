@@ -69,7 +69,9 @@ class EventType(str, Enum):
     RUN_CREATED = "run_created"
     RUN_PLANNING_STARTED = "run_planning_started"
     RUN_PLAN_READY = "run_plan_ready"
+    RUN_PLAN_EDITED = "run_plan_edited"  # PRD-163 S4/Q57: approval-time task/agent edit (audit)
     RUN_APPROVED = "run_approved"
+    RUN_AUTO_APPROVED = "run_auto_approved"  # PRD-163 S3: policy auto-approval (distinct audit)
     RUN_REJECTED = "run_rejected"
     RUN_STARTED = "run_started"
     RUN_PAUSED = "run_paused"
@@ -79,6 +81,7 @@ class EventType(str, Enum):
     RUN_BUDGET_WARNING = "run_budget_warning"
     RUN_BUDGET_EXCEEDED = "run_budget_exceeded"
     RUN_BUDGET_INCREASED = "run_budget_increased"
+    RUN_FIELD_CONTEXT_DROPPED = "run_field_context_dropped"  # PRD-166 S3: field digest dropped for budget
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
     RUN_CANCELLED = "run_cancelled"
@@ -109,6 +112,9 @@ class EventType(str, Enum):
 
     # System
     STALL_DETECTED = "stall_detected"
+    # PRD-164 S4: joiner verdict from the run-level progress ledger
+    # (replan-or-halt on a mission looping without forward progress).
+    RUN_STALL_LEDGER = "run_stall_ledger"
     MODEL_FALLBACK = "model_fallback"
     COST_SNAPSHOT = "cost_snapshot"
     BUDGET_WARNING = "budget_warning"
@@ -183,6 +189,7 @@ class StopReason(str, Enum):
     COORDINATOR_ERROR = "coordinator_error"    # Internal coordinator failure
     NO_CAPABLE_AGENT = "no_capable_agent"      # No agent matched task requirements
     DEPENDENCY_FAILED = "dependency_failed"    # Upstream task failed, downstream can't run
+    STALLED = "stalled"                        # PRD-164 S4: joiner halt — loop without progress, replans exhausted
 
 
 # ---------------------------------------------------------------------------

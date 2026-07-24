@@ -1,28 +1,31 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
+import type { PageContext } from '@/lib/page-context'
 import { toast } from 'sonner'
 
 export function useChat({
   id,
   initialMessages = [],
-  selectedModelId = LLM_DEFAULTS.model_id,
   selectedAgentId,
   missionMode = false,
   planMode = false,
+  pageContext,
   onData,
   onChatIdUpdate,
   onRoutingDecision,
 }: {
   id: string
   initialMessages?: ChatMessage[]
-  selectedModelId?: string
   selectedAgentId?: number | null
   missionMode?: boolean
   planMode?: boolean
+  // PRD-221 S5 (extends PRD-220): structured page context — where the user is
+  // plus what they're looking at (references only). Sent as request context,
+  // injected prompt-side by the backend — never stored in the message or title.
+  pageContext?: PageContext
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
   onRoutingDecision?: (info: RoutingInfo) => void
@@ -35,6 +38,13 @@ export function useChat({
   const [chatId, setChatId] = useState(id)
   const abortControllerRef = useRef<AbortController | null>(null)
 
+  // PRD-207: the id prop can move mid-mount (a live call binds the screen to
+  // its thread) — follow it so the chat_changed merge listener and sends
+  // target the conversation actually on screen.
+  useEffect(() => {
+    setChatId(id)
+  }, [id])
+
   const stop = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
@@ -42,6 +52,34 @@ export function useChat({
       setStatus('idle')
     }
   }, [])
+
+  // PRD-205 S7: a background producer posted into a chat (watcher verdict,
+  // scheduled-task output). The SSE lane fans it out as a window event; when
+  // it targets THIS conversation, refetch and merge missing messages by id.
+  // Append-only: an in-flight streaming placeholder has an id the server
+  // doesn't know, so it is never clobbered.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onChatChanged = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { chat_id?: string } | undefined
+      if (!detail?.chat_id || !chatId || detail.chat_id !== chatId) return
+      void (async () => {
+        try {
+          const { getChatMessages } = await import('@/lib/chat/api')
+          const serverMessages = await getChatMessages(chatId)
+          setMessages((prev) => {
+            const known = new Set(prev.map((m) => m.id))
+            const missing = serverMessages.filter((m) => !known.has(m.id))
+            return missing.length > 0 ? [...prev, ...missing] : prev
+          })
+        } catch {
+          // Best-effort: the message still appears on next open/reload.
+        }
+      })()
+    }
+    window.addEventListener('automatos:chat-changed', onChatChanged)
+    return () => window.removeEventListener('automatos:chat-changed', onChatChanged)
+  }, [chatId])
 
   const reload = useCallback(() => {
     const lastUserMessageIndex = messages.findLastIndex(m => m.role === 'user')
@@ -113,13 +151,18 @@ export function useChat({
               role: 'user',
               parts: outgoingParts,
             },
-            // PRD: Unified Agent-Chat System - Send agentId if selected
-            ...(selectedAgentId ? { agentId: selectedAgentId } : { selectedChatModel: selectedModelId }),
+            // PRD: Unified Agent-Chat System — send agentId when one is selected.
+            // PRD-180 S3 (F035): the no-agent branch no longer sends a client
+            // model override (the backend never read it). With no agent, the
+            // model resolves via the Auto tier server-side.
+            ...(selectedAgentId ? { agentId: selectedAgentId } : {}),
             selectedVisibilityType: 'private',
             // PRD-82A: Mission mode — conversational mission planning
             ...(missionMode ? { missionMode: true } : {}),
             // Plan mode — research and strategy, no execution
             ...(planMode ? { planMode: true } : {}),
+            // PRD-220: page context for the widget (prompt-only server-side)
+            ...(pageContext ? { context: pageContext } : {}),
           }),
           signal: abortControllerRef.current.signal,
         })
@@ -377,7 +420,7 @@ export function useChat({
         setIsLoading(false)
       }
     },
-    [chatId, isLoading, selectedModelId, onData, onChatIdUpdate, onRoutingDecision]
+    [chatId, isLoading, selectedAgentId, missionMode, planMode, pageContext, onData, onChatIdUpdate, onRoutingDecision]
   )
 
   return {

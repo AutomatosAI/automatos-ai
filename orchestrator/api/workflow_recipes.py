@@ -27,7 +27,9 @@ from core.models import Agent
 from core.models.core import RecipeExecution
 from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from services import webhook_dedup
 from config import config
 
 
@@ -366,7 +368,7 @@ async def get_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def create_workflow_recipe(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -510,7 +512,7 @@ async def create_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.put("/{recipe_id}")
+@router.put("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def update_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -638,7 +640,7 @@ async def update_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{recipe_id}")
+@router.delete("/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:delete"))])
 async def delete_workflow_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -716,7 +718,7 @@ async def delete_workflow_recipe(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/use")
+@router.post("/{recipe_id}/use", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def record_recipe_usage(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -813,7 +815,7 @@ async def list_featured_recipes(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/execute")
+@router.post("/{recipe_id}/execute", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
 async def execute_recipe(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -900,9 +902,12 @@ async def execute_recipe(
 
         logger.info(f"[execute_recipe] Created execution {recipe_execution_id}, launching direct executor")
 
-        # Launch direct executor as async task (crash-safe)
-        from api.recipe_executor import launch_recipe_task
-        launch_recipe_task(
+        # PRD-142 W3-S12: launches go via the consolidated PlaybookEngine
+        # seam (services/playbook_engine.py). Crash-safety still lives in
+        # launch_recipe_task; the engine is the strangler-fig — see
+        # services/playbook_engine.py docstring + tests/test_playbook_launch_parity.py.
+        from services.playbook_engine import get_playbook_engine
+        get_playbook_engine().launch(
             recipe_execution_id=recipe_execution_id,
             recipe_id=recipe.id,
             workspace_id=ctx.workspace_id,
@@ -922,6 +927,123 @@ async def execute_recipe(
         raise
     except Exception as e:
         logger.error(f"[execute_recipe] Unhandled error: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post(
+    "/{recipe_id}/executions/{execution_id}/rerun",
+    dependencies=[Depends(require_workspace_permission("playbooks:execute"))],
+)
+async def rerun_recipe_execution(
+    recipe_id: str,
+    execution_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+):
+    """PRD-204 S7: rerun a prior execution -- the platform's rerun primitive.
+
+    Creates a NEW RecipeExecution copying the original's input_data
+    (retry_of lineage, attempt_count+1) with optional per-execution
+    step_overrides; the shared playbook definition is never mutated.
+
+    Routed through the workspace approval policy with the ORIGINAL run's
+    llm_usage dollar sum as the estimate: auto path launches immediately;
+    ask path parks a durable ApprovalGrant (approvals inbox) and returns
+    202-shaped JSON. A live watch on the original execution follows the
+    rerun (same watch, one verdict).
+
+    Body (optional):
+    - step_overrides: {step_id: {"prompt_template": "..."}}
+    """
+    try:
+        from services.watch_rerun import (
+            TRIGGERED_BY_HUMAN,
+            request_rerun,
+            validate_step_overrides,
+        )
+
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        original = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.workspace_id == ctx.workspace_id,
+            RecipeExecution.recipe_id == recipe.id,
+        ).first()
+        if not original:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for this playbook",
+            )
+
+        step_overrides, err = validate_step_overrides(recipe, body.get("step_overrides"))
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+
+        # Same admission guard as a fresh execute.
+        from services.concurrency_guard import check_concurrency
+        concurrency = await check_concurrency(ctx.workspace_id, db)
+        if not concurrency.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "concurrency_limit",
+                    "detail": concurrency.reason,
+                    "limits": concurrency.limits,
+                },
+            )
+
+        # A live watch on the original execution follows the rerun.
+        from services.watch_service import WatchService
+        watch = WatchService.find_live_watch(
+            db,
+            workspace_id=ctx.workspace_id,
+            target_type="playbook_execution",
+            target_id=execution_id,
+        )
+
+        outcome = await request_rerun(
+            db,
+            workspace_id=ctx.workspace_id,
+            recipe=recipe,
+            original=original,
+            step_overrides=step_overrides,
+            triggered_by=TRIGGERED_BY_HUMAN,
+            watch=watch,
+        )
+        db.commit()  # ask-path rows (grant / watch park) are flush-only
+
+        if outcome.launched:
+            return {
+                "recipe_execution_id": outcome.execution_id,
+                "rerun_of": execution_id,
+                "recipe_id": recipe_id,
+                "status": "started",
+                "step_overrides_applied": bool(step_overrides),
+                "approval": outcome.decision.audit_snapshot(),
+                "message": outcome.message,
+            }
+        return {
+            "recipe_execution_id": None,
+            "rerun_of": execution_id,
+            "recipe_id": recipe_id,
+            "status": "awaiting_approval",
+            "grant_id": outcome.grant_id,
+            "approval": outcome.decision.audit_snapshot(),
+            "message": outcome.message,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[rerun_recipe_execution] Unhandled error: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -1010,7 +1132,7 @@ async def get_recipe_execution_detail(
 # CANCEL EXECUTION
 # ===================================================================
 
-@router.post("/{recipe_id}/executions/{execution_id}/cancel")
+@router.post("/{recipe_id}/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("playbooks:execute"))])
 async def cancel_execution(
     recipe_id: str,
     execution_id: str,
@@ -1177,7 +1299,7 @@ async def get_step_full_logs(
 # SELF-LEARNING ENDPOINTS (Learn, Quality, Suggestions, Executions)
 # ===================================================================
 
-@router.post("/{recipe_id}/learn")
+@router.post("/{recipe_id}/learn", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def analyze_execution_learning(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1225,8 +1347,8 @@ async def analyze_execution_learning(
                 detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
             )
 
-        from core.services.recipe_learning_service import RecipeLearningService
-        service = RecipeLearningService(db=db)
+        from core.services.playbook_learning_service import PlaybookLearningService
+        service = PlaybookLearningService(db=db)
         result = service.analyze_execution(execution_id)
 
         return result
@@ -1241,7 +1363,7 @@ async def analyze_execution_learning(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{recipe_id}/assess-quality")
+@router.post("/{recipe_id}/assess-quality", dependencies=[Depends(require_workspace_permission("playbooks:update"))])
 async def assess_execution_quality(
     recipe_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1292,8 +1414,8 @@ async def assess_execution_quality(
 
         learnings = body.get('learnings')
 
-        from core.services.recipe_quality_service import RecipeQualityService
-        service = RecipeQualityService(db=db)
+        from core.services.playbook_quality_service import PlaybookQualityService
+        service = PlaybookQualityService(db=db)
         result = service.assess_quality(execution_id, learnings=learnings)
 
         return result
@@ -1413,7 +1535,7 @@ async def list_recipe_executions(
 # MARKETPLACE ENDPOINTS
 # ===================================================================
 
-@router.post("/submit")
+@router.post("/submit", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def submit_recipe_to_marketplace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     recipe_data: Dict[str, Any] = Body(...),
@@ -1554,7 +1676,7 @@ async def submit_recipe_to_marketplace(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/install/{recipe_id}")
+@router.post("/install/{recipe_id}", dependencies=[Depends(require_workspace_permission("playbooks:create"))])
 async def install_recipe_from_marketplace(
     recipe_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -1756,8 +1878,8 @@ async def recipe_webhook(
     Trigger a recipe execution via webhook.
 
     The webhook_id is a persistent secret stored in the recipe's
-    schedule_config.webhook_id. No authentication required — the
-    URL itself is the credential.
+    schedule_config.webhook_id — the URL is the credential floor. When a
+    webhook secret is configured, a valid HMAC signature is also mandatory.
 
     Body (optional):
     - Any JSON payload — passed as input_data to the recipe executor.
@@ -1794,7 +1916,8 @@ async def recipe_webhook(
     if not recipe:
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
-    # Verify HMAC signature if a webhook secret is configured
+    # Verify HMAC signature — mandatory when a webhook secret is configured:
+    # missing header or mismatch ⇒ 401 (P2-13).
     webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or config.WEBHOOK_SECRET
     if webhook_secret:
         sig_header = (
@@ -1802,17 +1925,39 @@ async def recipe_webhook(
             or request.headers.get("x-composio-signature")
             or request.headers.get("x-webhook-signature")
         )
-        if sig_header:
-            raw_body = await request.body()
-            expected_sig = sig_header.removeprefix("sha256=")
-            computed = hmac.new(
-                webhook_secret.encode("utf-8"),
-                raw_body,
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(computed, expected_sig):
-                logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
-                raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        if not sig_header:
+            logger.warning("[webhook] Rejected recipe webhook %s: secret configured but no signature header", webhook_id)
+            raise HTTPException(status_code=401, detail="Missing webhook signature")
+        raw_body = await request.body()
+        expected_sig = sig_header.removeprefix("sha256=")
+        computed = hmac.new(
+            webhook_secret.encode("utf-8"),
+            raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(computed, expected_sig):
+            logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    # Replay guard + event dedup (PRD-194 S2, P2-13): a redelivered event
+    # (same webhook-id header / body event_id) must not create a second
+    # RecipeExecution. A stale provider timestamp is a replay ⇒ 401. No
+    # event id ⇒ nothing to dedup on ⇒ process normally (URL-as-secret
+    # callers that send no id keep working).
+    if webhook_dedup.timestamp_is_stale(request.headers.get("webhook-timestamp")):
+        logger.warning(
+            "[webhook] Rejected recipe webhook %s: stale webhook-timestamp (replay guard)",
+            webhook_id,
+        )
+        raise HTTPException(status_code=401, detail="Stale webhook timestamp")
+    dedup_event_id = request.headers.get("webhook-id") or (
+        body.get("event_id") if isinstance(body, dict) else None
+    )
+    if await webhook_dedup.seen_before(f"recipe:{webhook_id}", dedup_event_id):
+        logger.info(
+            "[webhook] Duplicate recipe webhook event %s — no-op ack", dedup_event_id
+        )
+        return {"status": "duplicate", "event_id": str(dedup_event_id)}
 
     if not recipe.steps:
         raise HTTPException(status_code=400, detail="Recipe has no steps")
@@ -1856,8 +2001,9 @@ async def recipe_webhook(
     logger.info("[webhook] Recipe %d (%s) triggered via webhook %s, execution=%s",
                 recipe.id, recipe.name, webhook_id, execution_id)
 
-    from api.recipe_executor import launch_recipe_task
-    launch_recipe_task(
+    # PRD-142 W3-S12: webhook door launches via the consolidated engine seam.
+    from services.playbook_engine import get_playbook_engine
+    get_playbook_engine().launch(
         recipe_execution_id=execution_id,
         recipe_id=recipe.id,
         workspace_id=recipe.workspace_id,

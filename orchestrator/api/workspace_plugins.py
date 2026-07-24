@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,9 @@ router = APIRouter(prefix="/api/workspaces", tags=["Workspace Plugins"])
 
 def _is_admin(ctx: RequestContext) -> bool:
     """System admins can operate on any workspace (mirrors admin_plugins.py)."""
-    return getattr(ctx.user, "system_role", "user") == "admin"
+    # PRD-174 F043: shared admin check — super_admin ⊇ admin when the plane is on.
+    from core.auth.roles import caller_is_admin
+    return caller_is_admin(ctx.user)
 
 
 def _assert_workspace_access(ctx: RequestContext, workspace_id: UUID) -> None:
@@ -130,7 +133,7 @@ async def list_workspace_plugins(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{workspace_id}/plugins", status_code=201)
+@router.post("/{workspace_id}/plugins", status_code=201, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def enable_plugin(
     workspace_id: UUID,
     body: EnablePluginBody,
@@ -206,7 +209,7 @@ async def enable_plugin(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.delete("/{workspace_id}/plugins/{plugin_id}")
+@router.delete("/{workspace_id}/plugins/{plugin_id}", dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def disable_plugin(
     workspace_id: UUID,
     plugin_id: UUID,

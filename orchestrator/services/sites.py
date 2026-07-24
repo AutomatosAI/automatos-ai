@@ -1,0 +1,323 @@
+"""
+Sites service layer (PRD-008-A Phase 2).
+
+Thin wrappers around the ``Site`` ORM model for the dashboard API.
+
+Authorization invariant: every function takes ``workspace_id`` and
+scopes the query to it. A Site that belongs to a different workspace
+is treated as not-found (no existence leak).
+"""
+
+from __future__ import annotations
+
+import copy
+import logging
+from typing import Optional
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from core.models.sites import Site, SITE_TYPES, derive_default_capabilities
+
+logger = logging.getLogger(__name__)
+
+
+# Mutable status values a merchant can set via PATCH. Backend-managed
+# transitions (e.g. ``error``) are NOT in this list.
+USER_SETTABLE_STATUSES: tuple[str, ...] = ("active", "paused", "disconnected")
+
+
+def list_sites(db: Session, workspace_id: UUID) -> list[Site]:
+    """List all Sites owned by a workspace, newest first."""
+    return (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace_id)
+        .order_by(Site.created_at.desc())
+        .all()
+    )
+
+
+def get_default_site(db: Session, workspace_id: UUID) -> Optional[Site]:
+    """Resolve the default Site for a workspace — the oldest one.
+
+    Widget endpoints authenticate via API key → workspace_id, but settings
+    live on Sites. For PRD-008-A v1 we assume 1 workspace = 1 Site (the
+    common case); multi-Site agencies will get explicit site_id pinning on
+    public keys in a follow-up.
+
+    Returns None if the workspace has no Sites — i.e. backfill migration
+    has not run yet. Callers should treat that as a 503 condition.
+    """
+    return (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace_id)
+        .order_by(Site.created_at.asc())
+        .first()
+    )
+
+
+def get_site(db: Session, workspace_id: UUID, site_id: UUID) -> Optional[Site]:
+    """Fetch a single Site iff it belongs to the given workspace.
+
+    Returns None if not found or owned by another workspace — callers
+    map that to 404. Don't leak existence with 403.
+    """
+    return (
+        db.query(Site)
+        .filter(Site.id == site_id, Site.workspace_id == workspace_id)
+        .one_or_none()
+    )
+
+
+def create_site(
+    db: Session,
+    workspace_id: UUID,
+    type: str,
+    display_name: str,
+    external_id: Optional[str] = None,
+    settings: Optional[dict] = None,
+) -> Site:
+    """Create a Site with capability defaults derived from its type.
+
+    Raises ``ValueError`` for an unknown type.
+    """
+    if type not in SITE_TYPES:
+        raise ValueError(f"unknown site type: {type!r}")
+
+    site = Site(
+        workspace_id=workspace_id,
+        type=type,
+        external_id=external_id,
+        display_name=display_name,
+        settings=copy.deepcopy(settings) if settings else {},
+        capabilities=derive_default_capabilities(type),
+    )
+    db.add(site)
+    db.commit()
+    db.refresh(site)
+    return site
+
+
+def update_site_meta(
+    db: Session,
+    workspace_id: UUID,
+    site_id: UUID,
+    *,
+    display_name: Optional[str] = None,
+    status: Optional[str] = None,
+) -> Optional[Site]:
+    """Update the surface-level metadata of a Site.
+
+    Does not touch settings, capabilities, secrets, type, or external_id —
+    those changes have different blast radius and go through dedicated
+    endpoints (or are immutable).
+    """
+    site = get_site(db, workspace_id, site_id)
+    if site is None:
+        return None
+
+    if display_name is not None:
+        site.display_name = display_name
+
+    if status is not None:
+        if status not in USER_SETTABLE_STATUSES:
+            raise ValueError(
+                f"status must be one of {USER_SETTABLE_STATUSES!r}, got {status!r}"
+            )
+        site.status = status
+
+    db.commit()
+    db.refresh(site)
+    return site
+
+
+def update_site_settings(
+    db: Session,
+    workspace_id: UUID,
+    site_id: UUID,
+    settings_patch: dict,
+) -> Optional[Site]:
+    """Shallow-merge a partial settings update into ``site.settings``.
+
+    Top-level keys in ``settings_patch`` overwrite the same keys in
+    ``site.settings``; other top-level keys are preserved. Nested keys
+    inside a top-level block are replaced wholesale — callers wanting
+    deeper merges should fetch, mutate, and PATCH the full block.
+
+    Why shallow: PRD-008-A's settings are organised by feature
+    (``widget_proactive``, ``callback``, ``cart_idle``). The dashboard
+    sends one block at a time; the merchant edits the whole block.
+    Shallow merge is the natural unit.
+    """
+    if not isinstance(settings_patch, dict):
+        raise ValueError("settings_patch must be a dict")
+
+    site = get_site(db, workspace_id, site_id)
+    if site is None:
+        return None
+
+    current = dict(site.settings or {})
+    current.update(copy.deepcopy(settings_patch))
+    site.settings = current
+
+    db.commit()
+    db.refresh(site)
+    return site
+
+
+def public_site_dict(site: Site) -> dict:
+    """Project a Site row into the public dict shape returned by the API.
+
+    Excludes ``secrets`` — those are server-side credentials and must
+    never leave the orchestrator.
+    """
+    return {
+        "id": str(site.id),
+        "workspace_id": str(site.workspace_id),
+        "type": site.type,
+        "external_id": site.external_id,
+        "display_name": site.display_name,
+        "status": site.status,
+        "settings": site.settings or {},
+        "capabilities": site.effective_capabilities,
+        "created_at": site.created_at.isoformat() if site.created_at else None,
+        "updated_at": site.updated_at.isoformat() if site.updated_at else None,
+    }
+
+
+def _workspace_is_shopify_connected(db: Session, workspace) -> tuple[bool, Optional[str]]:
+    """Detect Shopify connectivity from either install path.
+
+    Returns ``(is_shopify, domain)``. Domain is the fully-qualified
+    ``*.myshopify.com`` when we can resolve it.
+
+    Two signals are checked, in order:
+
+    1. ``workspace.settings.shopify_domain`` — set by the Shopify-app
+       install path (``/api/shopify/provision`` + ``/api/shopify/connect``).
+    2. An active ``shopifyAccessTokenApi`` Credential row for the
+       workspace — set by the Composio onboarding path that the
+       dashboard uses for the merchant self-serve flow. We decrypt
+       the credential's ``shopSubdomain`` field to backfill the domain.
+
+    Either signal is sufficient. The decrypt is best-effort: failure
+    falls back to ``(True, None)`` so the Site still gets tagged as
+    Shopify, even though dashboard panels that require ``external_id``
+    (like ShopifyTab) may stay degraded until the merchant edits it.
+    """
+    settings = workspace.settings or {}
+    domain = settings.get("shopify_domain")
+    if domain:
+        return True, domain
+
+    # Composio onboarding path: probe for an active Shopify credential
+    # and pull the shop subdomain out so we can build the full domain.
+    try:
+        from core.credentials.encryption import get_encryption_service
+        from core.models.credentials import Credential, CredentialType
+        cred = (
+            db.query(Credential)
+            .join(CredentialType, Credential.credential_type_id == CredentialType.id)
+            .filter(
+                Credential.workspace_id == workspace.id,
+                Credential.is_active.is_(True),
+                CredentialType.name == "shopifyAccessTokenApi",
+            )
+            .order_by(Credential.created_at.desc())
+            .first()
+        )
+        if cred is None:
+            return False, None
+
+        # Best-effort decrypt: we only need shopSubdomain, not the token.
+        try:
+            decrypted = get_encryption_service().decrypt_dict(cred.encrypted_data) or {}
+            subdomain = (decrypted.get("shopSubdomain") or "").strip().lower()
+            if subdomain.endswith(".myshopify.com"):
+                subdomain = subdomain[: -len(".myshopify.com")]
+            if subdomain:
+                return True, f"{subdomain}.myshopify.com"
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Shopify cred decrypt for domain backfill failed: %s", e)
+        return True, None
+    except Exception as e:  # noqa: BLE001 — never fail callers on heal probe
+        logger.debug("Shopify credential probe failed: %s", e)
+    return False, None
+
+
+def ensure_shopify_site_for_workspace(db: Session, workspace) -> Optional[Site]:
+    """Heal Sites that don't reflect the workspace's connected platform.
+
+    The Shopify install path historically didn't create a Site row, so
+    early workspaces ended up with a stub `type=custom` Site (or none).
+    That hides cart-aware features like cart-idle from the dashboard
+    even though the workspace IS connected to Shopify.
+
+    Single-tenant invariant: each workspace has at most ONE Site, and
+    its type must match the connected platform. This helper:
+
+    * No-op if the workspace isn't Shopify-connected.
+    * Creates a Site if none exist.
+    * Upgrades the existing Site's type + capabilities + external_id
+      if it's mis-typed (e.g. `custom` → `shopify`).
+
+    Idempotent: returning early when the Site is already correct keeps
+    the dashboard's list-sites endpoint fast on the happy path.
+    """
+    is_shopify, shopify_domain = _workspace_is_shopify_connected(db, workspace)
+    if not is_shopify:
+        return None  # Not a Shopify workspace — leave alone.
+
+    # Backfill the workspace.settings shortcut so future probes (and other
+    # parts of the codebase that key off shopify_domain — e.g. provision
+    # lookups) don't have to re-decrypt the credential each call.
+    settings = dict(workspace.settings or {})
+    if shopify_domain and settings.get("shopify_domain") != shopify_domain:
+        settings["shopify_domain"] = shopify_domain
+        workspace.settings = settings
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(workspace, "settings")
+        db.commit()
+        logger.info(
+            "ensure_shopify_site: backfilled workspace %s settings.shopify_domain=%s",
+            workspace.id, shopify_domain,
+        )
+
+    sites = (
+        db.query(Site)
+        .filter(Site.workspace_id == workspace.id)
+        .order_by(Site.created_at.asc())
+        .all()
+    )
+
+    if not sites:
+        site = create_site(
+            db,
+            workspace_id=workspace.id,
+            type="shopify",
+            display_name=workspace.name or shopify_domain or "Shopify",
+            external_id=shopify_domain,  # May be None for Composio onboarding path
+        )
+        logger.info(
+            "ensure_shopify_site: created shopify Site %s for workspace %s (domain=%s)",
+            site.id, workspace.id, shopify_domain or "<unknown>",
+        )
+        return site
+
+    site = sites[0]
+    desired_external = shopify_domain or site.external_id
+    if site.type == "shopify" and site.external_id == desired_external:
+        return site  # Already correct.
+
+    prev_type = site.type
+    site.type = "shopify"
+    if shopify_domain:
+        site.external_id = shopify_domain
+    site.capabilities = derive_default_capabilities("shopify")
+    db.commit()
+    db.refresh(site)
+    logger.info(
+        "ensure_shopify_site: upgraded Site %s from %s → shopify for workspace %s (domain=%s)",
+        site.id, prev_type, workspace.id, shopify_domain or "<unknown>",
+    )
+    return site

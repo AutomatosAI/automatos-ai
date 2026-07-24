@@ -19,7 +19,6 @@ background so Railway's edge proxy cannot kill long-running intake jobs
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import tempfile
@@ -34,10 +33,13 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.auth.dependencies import RequestContext
+from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from core.models.business_profiles import BusinessProfile
 from core.models.core import Agent
+from core.utils.exception_telemetry import record_error
+from core.utils.background_tasks import launch_guarded
 
 from modules.intake.archetypes import (
     ARCHETYPES,
@@ -179,7 +181,7 @@ def _slug_from_url(url: str) -> str:
 # Endpoints
 # ===========================================================================
 
-@router.post("/start", response_model=StartResponse, status_code=201)
+@router.post("/start", response_model=StartResponse, status_code=201, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def start_wizard(
     body: StartBody,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -223,7 +225,7 @@ async def start_wizard(
     )
 
 
-@router.post("/scan/{profile_id}", response_model=ScanResponse)
+@router.post("/scan/{profile_id}", response_model=ScanResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def scan_domain(
     profile_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -299,6 +301,8 @@ async def scan_domain(
     "/scrape/{profile_id}",
     response_model=ScrapeAcceptedResponse,
     status_code=202,
+
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
 )
 async def scrape_selected(
     profile_id: str,
@@ -335,8 +339,10 @@ async def scrape_selected(
         meta={"total": len(selected)},
     )
 
-    # Fire-and-forget; the task handles all its own errors and progress emits
-    asyncio.create_task(
+    # Fire-and-forget; the pipeline handles its own errors and progress emits.
+    # Guarded so a GC'd loop can't silently cancel it and an uncaught crash is
+    # recorded; the boot reaper (W1-S6) fails any profile stranded by a restart.
+    launch_guarded(
         _run_scrape_pipeline(
             profile_id=profile_id,
             workspace_id=workspace_id,
@@ -344,7 +350,11 @@ async def scrape_selected(
             archetype_slug=archetype,
             selected_urls=selected,
             user_goals=user_goals,
-        )
+        ),
+        subsystem="wizard",
+        operation="scrape_pipeline",
+        workspace_id=workspace_id,
+        extra={"profile_id": profile_id, "domain": domain},
     )
 
     logger.info(
@@ -385,7 +395,7 @@ async def progress_feed(
     )
 
 
-@router.patch("/profile/{profile_id}")
+@router.patch("/profile/{profile_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def patch_profile(
     profile_id: str,
     body: ProfilePatch,
@@ -433,7 +443,7 @@ async def get_profile(
     }
 
 
-@router.post("/plan/{profile_id}", response_model=PlanResponse)
+@router.post("/plan/{profile_id}", response_model=PlanResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def generate_plan(
     profile_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -586,12 +596,6 @@ async def _run_scrape_pipeline(
     Any exception is caught and turned into a ``stage=failed`` event so
     the frontend always gets a terminal signal.
     """
-    # TEMP: WIZARD_SKIP_GRAPHIFY=1 bypasses the slow knowledge-graph build
-    # so we can iterate on Step 6 / Mission Zero without waiting for the
-    # graph on every test run. The existing graph from a previous run is
-    # reused. Remove before E2E testing.
-    skip_graphify = os.getenv("WIZARD_SKIP_GRAPHIFY", "").lower() in ("1", "true", "yes")
-
     try:
         client = _firecrawl_client()
 
@@ -669,38 +673,30 @@ async def _run_scrape_pipeline(
         )
 
         # --- Graphify ---------------------------------------------------
-        if skip_graphify:
+        await progress_emit(
+            profile_id, STAGE_GRAPHIFY,
+            "Building knowledge graph (entity extraction)…",
+        )
+        try:
+            from modules.knowledge.graph_service import GraphifyService
+            graphify = GraphifyService()
+            meta = await graphify.build_graph(workspace_id)
             await progress_emit(
                 profile_id, STAGE_GRAPHIFY,
-                "Skipping graphify (WIZARD_SKIP_GRAPHIFY=1) — reusing existing graph",
+                f"Graph built — {meta.get('node_count', 0)} nodes, "
+                f"{meta.get('edge_count', 0)} edges, "
+                f"{meta.get('community_count', 0)} communities",
+                meta=meta,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "wizard pipeline graphify failed: %s", exc, exc_info=True
+            )
+            await progress_emit(
+                profile_id, STAGE_GRAPHIFY,
+                f"Graph build failed (non-fatal): {exc}",
                 level="warn",
-                meta={"skipped": True},
             )
-        else:
-            await progress_emit(
-                profile_id, STAGE_GRAPHIFY,
-                "Building knowledge graph (entity extraction)…",
-            )
-            try:
-                from modules.knowledge.graph_service import GraphifyService
-                graphify = GraphifyService()
-                meta = await graphify.build_graph(workspace_id)
-                await progress_emit(
-                    profile_id, STAGE_GRAPHIFY,
-                    f"Graph built — {meta.get('node_count', 0)} nodes, "
-                    f"{meta.get('edge_count', 0)} edges, "
-                    f"{meta.get('community_count', 0)} communities",
-                    meta=meta,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "wizard pipeline graphify failed: %s", exc, exc_info=True
-                )
-                await progress_emit(
-                    profile_id, STAGE_GRAPHIFY,
-                    f"Graph build failed (non-fatal): {exc}",
-                    level="warn",
-                )
 
         # --- Profile build ----------------------------------------------
         await progress_emit(
@@ -777,6 +773,13 @@ async def _run_scrape_pipeline(
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("wizard pipeline failed profile=%s: %s", profile_id, exc)
+        record_error(
+            subsystem="wizard",
+            operation="scrape_pipeline",
+            error=exc,
+            workspace_id=workspace_id,
+            extra={"profile_id": profile_id, "domain": domain},
+        )
         # Mark the profile row failed so the UI can reflect it on reload
         try:
             with get_db_session() as db:

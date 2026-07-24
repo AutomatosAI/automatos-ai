@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.database.database import get_db
-from api.workflows import execute_workflow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/github", tags=["github"])
@@ -127,28 +126,27 @@ async def github_webhook(
                 }
             }
             
-            try:
-                # Execute workflow asynchronously
-                execution = await execute_workflow(
-                    pr_workflow.id,
-                    execution_data,
-                    background_tasks,
-                    db
-                )
-                
-                logger.info(f"✅ Triggered PR review workflow for PR #{pr_number}")
-                
-                return {
-                    "status": "success",
-                    "message": f"PR review workflow triggered for PR #{pr_number}",
-                    "execution_id": execution.get("id"),
-                    "pr": pr_number,
-                    "workflow": pr_workflow.name
-                }
-                
-            except Exception as e:
-                logger.error(f"Failed to trigger PR review: {e}")
-                raise HTTPException(status_code=500, detail="Internal server error")
+            # PRD-172 F006 / PRD-125: the legacy workflow-execute path this
+            # webhook called was a disabled no-op stub reached via a broken
+            # argument list — it never actually ran a PR review. That dead
+            # trigger was removed with the legacy execute routes. Migrating the
+            # PR-review trigger onto the mission system is execution-spine work
+            # (out of this tenancy-closure PRD's scope). Acknowledge the webhook
+            # honestly instead of pretending to have started a run.
+            logger.info(
+                "PR #%s matched workflow %r, but legacy workflow execution is "
+                "disabled (PRD-125). PR-review auto-trigger awaits mission "
+                "migration.", pr_number, pr_workflow.name,
+            )
+            return {
+                "status": "workflow_execution_disabled",
+                "message": (
+                    "Legacy workflow execution is disabled (PRD-125). "
+                    "PR-review auto-trigger will move to the mission system."
+                ),
+                "pr": pr_number,
+                "workflow": pr_workflow.name,
+            }
     
     # Health check / ping event
     elif x_github_event == "ping":

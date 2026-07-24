@@ -42,6 +42,112 @@ def _make_id(*parts: str) -> str:
     return _NON_ALNUM.sub("_", raw).strip("_")
 
 
+# ---------------------------------------------------------------------------
+# Controlled relation vocabulary
+# ---------------------------------------------------------------------------
+# LLM extraction (documents + agent reports) used to emit a free-text relation
+# per edge, so a workspace graph accrued thousands of singleton relation strings:
+# the legend flooded and the graph-neighbors ``relation_filter`` tool was
+# unusable (no caller could guess the exact phrase). We snap every LLM-extracted
+# relation to this bounded set — the node-type and hyperedge vocabularies in the
+# prompts already set the precedent — and keep the model's original phrase on the
+# edge as ``relation_label`` for display. Deterministic mappers (shopify / agents
+# / blueprints) own their own clean relations and build edges without passing
+# through here, so they are unaffected.
+
+CANONICAL_RELATIONS: tuple[str, ...] = (
+    "uses", "part_of", "member_of", "depends_on", "produces", "causes",
+    "enables", "blocks", "mitigates", "measures", "governed_by", "precedes",
+    "triggers", "has_property", "references", "related_to",
+)
+_CANONICAL_SET = frozenset(CANONICAL_RELATIONS)
+_ALLOWED_RELATIONS_STR = ", ".join(CANONICAL_RELATIONS)
+_FALLBACK_RELATION = "related_to"
+
+# Exact slugified phrase -> canonical. Deterministic, no LLM cost.
+_RELATION_SYNONYMS: dict[str, str] = {
+    "used_as": "uses", "used_by": "uses", "using": "uses", "used": "uses",
+    "utilizes": "uses", "consumes": "uses", "leverages": "uses",
+    "belongs_to": "part_of", "is_part_of": "part_of", "contained_in": "part_of",
+    "has_part": "part_of", "includes": "part_of", "component_of": "part_of",
+    "is_a": "part_of", "type_of": "part_of", "located_in": "part_of",
+    "instance_of": "member_of", "member": "member_of", "part_of_team": "member_of",
+    "assigned_to": "member_of", "reassigns": "member_of",
+    "requires": "depends_on", "needs": "depends_on", "needing": "depends_on",
+    "depends": "depends_on", "contingent_on": "depends_on", "backed_by": "depends_on",
+    "is_blind_without": "depends_on",
+    "produced": "produces", "produced_output": "produces", "generates": "produces",
+    "creates": "produces", "outputs": "produces", "returns": "produces",
+    "returned_agent": "produces",
+    "caused_by": "causes", "is_caused_by": "causes", "results_from": "causes",
+    "resulted_from": "causes", "due_to": "causes", "leads_to": "causes",
+    "resulting_in": "causes", "results_in": "causes", "resulted_in_issue": "causes",
+    "enabled_by": "enables", "allows": "enables", "supports": "enables",
+    "aims_to_achieve": "enables",
+    "prevents": "blocks", "prevents_all": "blocks", "blocked_by": "blocks",
+    "stops": "blocks", "restricts": "blocks", "restricted_to": "blocks",
+    "mitigated_by": "mitigates", "reduces": "mitigates", "resolves": "mitigates",
+    "fixes": "mitigates", "to_fix": "mitigates", "addresses": "mitigates",
+    "measured_by": "measures", "tracks": "measures", "tracks_metric": "measures",
+    "quantifies": "measures", "has_impact": "measures",
+    "constrained_by": "governed_by", "governs": "governed_by",
+    "regulated_by": "governed_by", "controlled_by": "governed_by",
+    "determines": "governed_by",
+    "before": "precedes", "after": "precedes", "followed_by": "precedes",
+    "stopped_after": "precedes", "then": "precedes", "next": "precedes",
+    "at_step": "precedes",
+    "triggered_by": "triggers", "invokes": "triggers", "calls": "triggers",
+    "fires": "triggers", "feed": "triggers", "feeds": "triggers",
+    "has": "has_property", "is": "has_property", "has_status": "has_property",
+    "is_unavailable": "has_property", "is_rated_as": "has_property",
+    "described_as": "has_property", "is_described_as": "has_property",
+    "has_description": "has_property", "is_a_value_of": "has_property",
+    "has_tags": "has_property", "has_summary": "has_property",
+    "mentions": "references", "refers_to": "references", "about": "references",
+    "is_about": "references", "contrasts_with": "references",
+    "referencing": "references", "relates_to": "related_to",
+}
+
+# Ordered substring heuristics for phrases not matched exactly (first hit wins).
+# Broad stems ("use") come last so specific ones ("caus" -> causes) win first.
+_RELATION_KEYWORDS: tuple[tuple[str, str], ...] = (
+    ("depend", "depends_on"), ("requir", "depends_on"),
+    ("caus", "causes"),
+    ("produc", "produces"), ("generat", "produces"), ("creat", "produces"),
+    ("trigger", "triggers"), ("invok", "triggers"),
+    ("enabl", "enables"),
+    ("prevent", "blocks"), ("block", "blocks"),
+    ("mitigat", "mitigates"), ("resolv", "mitigates"),
+    ("measur", "measures"), ("metric", "measures"),
+    ("govern", "governed_by"), ("constrain", "governed_by"), ("regulat", "governed_by"),
+    ("member", "member_of"),
+    ("belong", "part_of"), ("includ", "part_of"), ("contain", "part_of"), ("part", "part_of"),
+    ("precede", "precedes"), ("before", "precedes"), ("after", "precedes"),
+    ("mention", "references"), ("referenc", "references"), ("contrast", "references"),
+    ("propert", "has_property"), ("status", "has_property"), ("attribut", "has_property"),
+    ("utili", "uses"), ("use", "uses"),
+)
+
+
+def canonicalize_relation(raw: str | None) -> tuple[str, str]:
+    """Map a free-text relation to ``(canonical, original_label)``.
+
+    Deterministic and LLM-free: exact canonical -> slug synonym -> substring
+    heuristic -> ``related_to``. The original phrase is always preserved as the
+    label so the UI keeps its readable wording.
+    """
+    original = (raw or "").strip() or _FALLBACK_RELATION
+    slug = _NON_ALNUM.sub("_", original.lower()).strip("_")
+    if slug in _CANONICAL_SET:
+        return slug, original
+    if slug in _RELATION_SYNONYMS:
+        return _RELATION_SYNONYMS[slug], original
+    for needle, canon in _RELATION_KEYWORDS:
+        if needle in slug:
+            return canon, original
+    return _FALLBACK_RELATION, original
+
+
 def _empty_graph() -> dict[str, list]:
     return {"nodes": [], "edges": [], "hyperedges": []}
 
@@ -75,6 +181,7 @@ def _edge(
     relation: str,
     source_file: str,
     *,
+    relation_label: str | None = None,
     confidence: str = "EXTRACTED",
     confidence_score: float = 1.0,
     source_location: str | None = None,
@@ -84,6 +191,9 @@ def _edge(
         "source": source,
         "target": target,
         "relation": relation,
+        # Human-readable phrasing as extracted; falls back to the (already
+        # clean) relation for deterministic mappers that pass none.
+        "relation_label": relation_label or relation,
         "confidence": confidence,
         "confidence_score": confidence_score,
         "source_file": source_file,
@@ -115,7 +225,7 @@ Output JSON:
     {{"id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule", "source_file": "<doc_path>"}}
   ],
   "edges": [
-    {{"source": "node_id_a", "target": "node_id_b", "relation": "<relation_type>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
+    {{"source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the document>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
   ],
   "hyperedges": [
     {{"id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<doc_path>"}}
@@ -133,6 +243,7 @@ Rules:
 - Mark uncertain relationships as AMBIGUOUS (confidence_score: 0.1–0.3)
 - Do not hallucinate entities not present in the document
 - Prefer specific labels over generic ones ("30-Day Refund Window" not "Time Limit")
+- RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS: {allowed_relations}. Never invent a new relation type. Keep the exact wording from the document in "relation_label" (e.g. relation "produces", relation_label "ships with every order").
 - Add hyperedges when 3+ nodes participate in a shared concept/flow/pattern. Maximum 3 per document.
 
 DOCUMENT PATH: {doc_path}
@@ -160,7 +271,7 @@ Output JSON:
     {{"id": "snake_case_id", "label": "Human Name", "file_type": "entity|action|outcome|issue", "source_file": "<report_path>"}}
   ],
   "edges": [
-    {{"source": "node_id_a", "target": "node_id_b", "relation": "<relation_type>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
+    {{"source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the report>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
   ],
   "hyperedges": [
     {{"id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<report_path>"}}
@@ -174,6 +285,7 @@ Rules:
 - Mark implied relationships as INFERRED with a per-edge confidence_score
 - Mark uncertain relationships as AMBIGUOUS (confidence_score: 0.1–0.3)
 - Do not hallucinate entities not present in the report
+- RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS: {allowed_relations}. Never invent a new relation type. Keep the exact wording from the report in "relation_label" (e.g. relation "causes", relation_label "timed out because of").
 - Add hyperedges when 3+ nodes participate in a shared concept/flow/pattern. Maximum 3 per report.
 
 REPORT PATH: {report_path}
@@ -234,10 +346,15 @@ def _normalise_extraction(
     for e in raw.get("edges", []):
         src = e.get("source", "")
         tgt = e.get("target", "")
+        # Snap the free-text relation to the controlled vocabulary; keep the
+        # model's own phrasing (explicit relation_label if given, else the raw
+        # relation) for display.
+        canonical, raw_label = canonicalize_relation(e.get("relation"))
         result["edges"].append(_edge(
             source=src,
             target=tgt,
-            relation=e.get("relation", "related_to"),
+            relation=canonical,
+            relation_label=e.get("relation_label") or raw_label,
             source_file=e.get("source_file", source_file),
             confidence=e.get("confidence", "INFERRED"),
             confidence_score=float(e.get("confidence_score", 0.5)),
@@ -286,7 +403,9 @@ async def extract_from_document(
         logger.warning("extract_from_document called with empty text for %s", doc_path)
         return _empty_graph()
 
-    prompt = _DOCUMENT_EXTRACTION_PROMPT.format(doc_path=doc_path, doc_text=doc_text)
+    prompt = _DOCUMENT_EXTRACTION_PROMPT.format(
+        doc_path=doc_path, doc_text=doc_text, allowed_relations=_ALLOWED_RELATIONS_STR,
+    )
 
     try:
         if llm is None:
@@ -341,6 +460,7 @@ async def extract_from_report(
         report_path=report_path,
         report_text=report_text,
         agent_name=agent_name,
+        allowed_relations=_ALLOWED_RELATIONS_STR,
     )
 
     try:
@@ -477,4 +597,331 @@ def map_connected_apps(apps: list[dict]) -> dict[str, list]:
             file_type="integration",
             source_file=_APPS_SOURCE,
         ))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# PRD-009 Layer 2 — Shopify catalog → knowledge graph
+# ---------------------------------------------------------------------------
+# Input is the JSONL stream Shopify Bulk Operations writes (one object per
+# line, nested children carry __parentId). We deterministically translate it
+# into the same {nodes, edges} shape every other mapper here uses, then hand
+# off to GraphifyService.import_graph for clustering/persistence/embeddings.
+
+# Provenance prefix for every node/edge the catalog bulk-op carries (the
+# actual source_file is "<prefix>#<bulk_op_id>"). Public because the catalog
+# re-sync (api/shopify.py, PRD-189 S1) uses it to tell catalog content apart
+# from graph content the catalog does NOT carry — frequently_bought_with
+# edges from the orders sync, flywheel/document/roster nodes — so a rebuild
+# replaces the former and preserves the latter.
+SHOPIFY_CATALOG_SOURCE = "shopify://catalog"
+
+
+def _shopify_gid_tail(gid: str) -> str:
+    """gid://shopify/Product/12345 → '12345'."""
+    return (gid or "").rsplit("/", 1)[-1] if gid else ""
+
+
+def _shopify_type(gid: str) -> str:
+    """gid://shopify/Product/12345 → 'Product'."""
+    m = re.match(r"gid://shopify/([A-Za-z]+)/", gid or "")
+    return m.group(1) if m else ""
+
+
+def map_shopify_catalog(jsonl_iter, *, bulk_op_id: str | None = None) -> dict[str, list]:
+    """Map a Shopify Bulk Operation JSONL stream into a knowledge graph.
+
+    Args:
+        jsonl_iter: Iterable yielding decoded dicts (one per Bulk Op line) OR
+                    an iterable of raw JSON strings. We auto-detect.
+        bulk_op_id: Optional Bulk Operation id for the ``source_file`` tag.
+
+    Output node ``file_type`` values:
+      - ``shopify_product`` / ``shopify_variant`` / ``shopify_collection``
+      - ``shopify_vendor``  (derived — one node per unique vendor)
+      - ``shopify_metafield``
+
+    Output edge ``relation`` values:
+      - ``variant_of``  (Variant → Product)
+      - ``in_collection``  (Product → Collection)
+      - ``by_vendor``  (Product → Vendor)
+      - ``has_metafield``  (Product → Metafield)
+
+    Pure function — no IO, no embeddings, deterministic.
+    """
+    result = _empty_graph()
+    source_tag = f"{SHOPIFY_CATALOG_SOURCE}#{bulk_op_id}" if bulk_op_id else SHOPIFY_CATALOG_SOURCE
+    seen_vendor: set[str] = set()
+    seen_collection: set[str] = set()
+
+    def _ingest(obj: dict) -> None:
+        gid = obj.get("id") or ""
+        kind = _shopify_type(gid)
+        tail = _shopify_gid_tail(gid)
+        if not tail:
+            return
+
+        if kind == "Product":
+            pid = _make_id("shopify_product", tail)
+            label = obj.get("title") or pid
+            description = obj.get("descriptionHtml") or ""
+            price_range = obj.get("priceRangeV2") or {}
+            min_price = (price_range.get("minVariantPrice") or {}).get("amount")
+            currency = (price_range.get("minVariantPrice") or {}).get("currencyCode")
+            attrs = {
+                "handle": obj.get("handle"),
+                "product_type": obj.get("productType"),
+                "vendor": obj.get("vendor"),
+                "status": obj.get("status"),
+                "tags": obj.get("tags") or [],
+                "description": _strip_html(description),
+                "price_min": min_price,
+                "currency": currency,
+                "total_inventory": obj.get("totalInventory"),
+                "tracks_inventory": obj.get("tracksInventory"),
+                "image_url": (obj.get("featuredImage") or {}).get("url"),
+                "product_url": obj.get("onlineStoreUrl"),
+                "shopify_gid": gid,
+                "updated_at": obj.get("updatedAt"),
+            }
+            result["nodes"].append({
+                **_node(node_id=pid, label=label, file_type="shopify_product", source_file=source_tag),
+                "attrs": {k: v for k, v in attrs.items() if v not in (None, "", [])},
+            })
+            # Derive a Vendor node + by_vendor edge (deduped)
+            vendor = (obj.get("vendor") or "").strip()
+            if vendor:
+                vid = _make_id("shopify_vendor", vendor)
+                if vendor not in seen_vendor:
+                    result["nodes"].append(_node(
+                        node_id=vid, label=vendor, file_type="shopify_vendor",
+                        source_file=source_tag,
+                    ))
+                    seen_vendor.add(vendor)
+                result["edges"].append(_edge(
+                    source=pid, target=vid, relation="by_vendor", source_file=source_tag,
+                ))
+            return
+
+        if kind == "ProductVariant":
+            parent_pid_tail = _shopify_gid_tail(obj.get("__parentId", ""))
+            if not parent_pid_tail:
+                return
+            vid = _make_id("shopify_variant", tail)
+            label = obj.get("title") or obj.get("sku") or vid
+            attrs = {
+                "sku": obj.get("sku"),
+                "price": obj.get("price"),
+                "compare_at_price": obj.get("compareAtPrice"),
+                "inventory_quantity": obj.get("inventoryQuantity"),
+                "available_for_sale": obj.get("availableForSale"),
+                "options": obj.get("selectedOptions") or [],
+                "barcode": obj.get("barcode"),
+                "shopify_gid": gid,
+            }
+            result["nodes"].append({
+                **_node(node_id=vid, label=label, file_type="shopify_variant", source_file=source_tag),
+                "attrs": {k: v for k, v in attrs.items() if v not in (None, "", [])},
+            })
+            result["edges"].append(_edge(
+                source=vid,
+                target=_make_id("shopify_product", parent_pid_tail),
+                relation="variant_of",
+                source_file=source_tag,
+            ))
+            return
+
+        if kind == "Collection":
+            parent_pid_tail = _shopify_gid_tail(obj.get("__parentId", ""))
+            cid = _make_id("shopify_collection", tail)
+            if tail not in seen_collection:
+                result["nodes"].append(_node(
+                    node_id=cid,
+                    label=obj.get("title") or cid,
+                    file_type="shopify_collection",
+                    source_file=source_tag,
+                ))
+                seen_collection.add(tail)
+            if parent_pid_tail:
+                result["edges"].append(_edge(
+                    source=_make_id("shopify_product", parent_pid_tail),
+                    target=cid,
+                    relation="in_collection",
+                    source_file=source_tag,
+                ))
+            return
+
+        if kind == "Metafield":
+            parent_pid_tail = _shopify_gid_tail(obj.get("__parentId", ""))
+            if not parent_pid_tail:
+                return
+            mid = _make_id("shopify_metafield", tail)
+            label = f"{obj.get('namespace', '')}.{obj.get('key', '')}"
+            result["nodes"].append({
+                **_node(
+                    node_id=mid, label=label, file_type="shopify_metafield",
+                    source_file=source_tag,
+                ),
+                "attrs": {
+                    "namespace": obj.get("namespace"),
+                    "key": obj.get("key"),
+                    "value": obj.get("value"),
+                    "type": obj.get("type"),
+                    "shopify_gid": gid,
+                },
+            })
+            result["edges"].append(_edge(
+                source=_make_id("shopify_product", parent_pid_tail),
+                target=mid,
+                relation="has_metafield",
+                source_file=source_tag,
+            ))
+
+    # Stream-iterate either raw strings or pre-decoded dicts
+    for item in jsonl_iter:
+        if isinstance(item, (bytes, str)):
+            line = item.decode() if isinstance(item, bytes) else item
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning("Skipping malformed JSONL line: %s", line[:120])
+                continue
+        elif isinstance(item, dict):
+            obj = item
+        else:
+            continue
+        _ingest(obj)
+
+    return result
+
+
+def _strip_html(html: str | None) -> str:
+    """Minimal HTML-to-text for product description embedding. No deps."""
+    if not html:
+        return ""
+    # Drop tags, collapse whitespace. Good enough for embedding.
+    no_tags = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", no_tags).strip()
+
+
+# ---------------------------------------------------------------------------
+# PRD-009 Phase 2 — Shopify orders → FREQUENTLY_BOUGHT_WITH edges
+# ---------------------------------------------------------------------------
+# Privacy by design: this mapper accepts ONLY order id, createdAt, line items
+# with product references. Even if a customer-identifying field were
+# accidentally included in the JSONL we ignore it — no customer or order
+# nodes are created. Only aggregated Product↔Product co-occurrence edges.
+
+_ORDERS_SOURCE = "shopify://orders"
+
+
+def map_shopify_orders(
+    jsonl_iter,
+    *,
+    bulk_op_id: str | None = None,
+    min_support: int = 2,
+) -> dict[str, list]:
+    """Map a Shopify Orders Bulk Op JSONL stream into FBT edges.
+
+    Args:
+        jsonl_iter: Iterable of decoded dicts OR JSON strings (auto-detected).
+        bulk_op_id: Optional Bulk Operation id for the source_file tag.
+        min_support: Minimum number of orders a (Product A, Product B) pair
+                     must co-appear in before we emit an edge. Filters one-off
+                     coincidences. Default 2 = appeared in 2+ orders.
+
+    Output:
+        ``{nodes: [], edges: [...], hyperedges: []}`` — only edges; nodes are
+        assumed to already exist in the workspace graph (from the catalog
+        sync). Edge fields:
+          source = shopify_product_<id_A>  (canonical: lower id first)
+          target = shopify_product_<id_B>
+          relation = "frequently_bought_with"
+          confidence_score = co_count / total_orders   (0..1)
+          weight = co_count                            (raw)
+          attrs = {co_count, total_orders}
+    """
+    source_tag = f"{_ORDERS_SOURCE}#{bulk_op_id}" if bulk_op_id else _ORDERS_SOURCE
+
+    # Build: order_id → set(product_ids). We collect line items grouped by
+    # their parent order. The JSONL stream interleaves Orders + LineItems
+    # in arbitrary order; LineItems carry __parentId pointing at their Order.
+    order_products: dict[str, set[str]] = {}
+    cancelled_orders: set[str] = set()
+
+    for item in jsonl_iter:
+        if isinstance(item, (bytes, str)):
+            line = item.decode() if isinstance(item, bytes) else item
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+        elif isinstance(item, dict):
+            obj = item
+        else:
+            continue
+
+        gid = obj.get("id") or ""
+        kind_match = re.match(r"gid://shopify/([A-Za-z]+)/", gid)
+        if not kind_match:
+            continue
+        kind = kind_match.group(1)
+
+        if kind == "Order":
+            # Skip cancelled orders from co-occurrence math — they don't
+            # represent revealed customer preference.
+            if obj.get("cancelledAt"):
+                cancelled_orders.add(gid)
+            else:
+                order_products.setdefault(gid, set())
+            continue
+
+        if kind == "LineItem":
+            parent_order = obj.get("__parentId", "")
+            if not parent_order or parent_order in cancelled_orders:
+                continue
+            product_gid = (obj.get("variant") or {}).get("product", {}).get("id")
+            if not product_gid:
+                continue
+            product_tail = product_gid.rsplit("/", 1)[-1]
+            order_products.setdefault(parent_order, set()).add(product_tail)
+
+    # Filter out single-item orders — they contribute nothing to co-occurrence
+    valid_orders = {oid: pids for oid, pids in order_products.items() if len(pids) >= 2}
+    total_orders = len(valid_orders)
+
+    # Pair counts: (sorted_tuple_of_product_ids) → co_occurrence_count
+    from itertools import combinations
+    pair_counts: dict[tuple[str, str], int] = {}
+    for pids in valid_orders.values():
+        for a, b in combinations(sorted(pids), 2):
+            pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
+
+    result = _empty_graph()
+    if total_orders == 0:
+        return result
+
+    for (a, b), count in pair_counts.items():
+        if count < min_support:
+            continue
+        src = _make_id("shopify_product", a)
+        tgt = _make_id("shopify_product", b)
+        confidence = count / total_orders
+        edge = _edge(
+            source=src,
+            target=tgt,
+            relation="frequently_bought_with",
+            source_file=source_tag,
+            confidence_score=confidence,
+            weight=float(count),
+        )
+        edge["attrs"] = {"co_count": count, "total_orders": total_orders}
+        result["edges"].append(edge)
+
     return result

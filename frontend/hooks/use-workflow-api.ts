@@ -4,7 +4,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'react-hot-toast'
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 
 // Query keys for React Query
@@ -17,7 +17,6 @@ export const workflowQueryKeys = {
   liveProgress: (id: string) => ['workflows', id, 'live-progress'] as const,
   executions: ['workflows', 'executions'] as const,
   execution: (id: string) => ['workflows', 'executions', id] as const,
-  executionResults: (id: string) => ['workflows', 'executions', id, 'results'] as const,
   templates: ['workflows', 'templates'] as const,
   analytics: ['workflows', 'analytics'] as const,
 }
@@ -96,16 +95,6 @@ export function useWorkflowExecution(executionId: string | null) {
   return useQuery({
     queryKey: workflowQueryKeys.execution(executionId!),
     queryFn: () => apiClient.getWorkflowExecution(executionId!),
-    enabled: !!executionId,
-    staleTime: 30000,
-  })
-}
-
-// Get workflow execution results
-export function useWorkflowExecutionResults(executionId: string | null) {
-  return useQuery({
-    queryKey: workflowQueryKeys.executionResults(executionId!),
-    queryFn: () => apiClient.getWorkflowExecutionResults(executionId!),
     enabled: !!executionId,
     staleTime: 30000,
   })

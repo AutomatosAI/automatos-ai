@@ -102,14 +102,16 @@ def main() -> int:
                 file=sys.stderr,
             )
 
-        # key_type="server" (private/admin); permissions=None grants all
-        # — see ApiKeyService.check_permissions: empty perms = unrestricted
+        # key_type="server" (private/admin). PRD-195 S1: empty/None permissions
+        # now grant NOTHING (least privilege, one semantic on every plane) — a
+        # test key that should reach everything must carry the explicit "*"
+        # full grant (honoured by modules.policy.roles.has_permission).
         key_result = ApiKeyService.create_api_key(
             db=db,
             workspace_id=workspace.id,
             name=KEY_NAME,
             key_type="server",
-            permissions=None,
+            permissions=["*"],
         )
         db.commit()
 

@@ -12,12 +12,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, attributes
 from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
-import asyncio
 import logging
 import json
 
 from config import config
 from core.database.database import get_db
+from core.utils.background_tasks import launch_guarded
 from core.models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
     WorkflowCreate, WorkflowUpdate, WorkflowResponse,
@@ -27,6 +27,7 @@ from core.models import (
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 # websocket_manager removed - using AI SDK SSE streaming
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.workspace_permission import require_workspace_permission
 from core.task_runner import get_task_runner, AgentTask, TaskType, TaskPriority
 from core.auth.dependencies import RequestContext
 
@@ -404,7 +405,7 @@ async def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_reque
         logger.error(f"Error getting workflow {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.put("/{workflow_id}")
+@router.put("/{workflow_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_workflow(
     workflow_id: int,
     workflow_data: Dict[str, Any] = Body(...),
@@ -460,7 +461,7 @@ async def update_workflow(
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/{workflow_id}")
+@router.delete("/{workflow_id}", dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete workflow"""
     try:
@@ -502,7 +503,7 @@ async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_re
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/cleanup/old")
+@router.delete("/cleanup/old", dependencies=[Depends(require_workspace_permission("missions:delete"))])
 async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
     """Delete workflows older than specified days"""
     from datetime import datetime, timedelta
@@ -554,7 +555,7 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_workspace_permission("missions:create"))])
 async def create_workflow(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     workflow_data: Dict[str, Any] = Body(...),
@@ -662,7 +663,7 @@ async def create_workflow(
         db.rollback()
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{workflow_id}/duplicate")
+@router.post("/{workflow_id}/duplicate", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def duplicate_workflow(
     workflow_id: int,
     duplicate_data: Dict[str, Any] = Body(None),
@@ -952,7 +953,7 @@ async def get_workflow_live_progress(workflow_id: int, ctx: RequestContext = Dep
         logger.error(f"Error getting live progress for workflow {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/{workflow_id}/execute-advanced")
+@router.post("/{workflow_id}/execute-advanced", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def execute_workflow_advanced(
     workflow_id: int,
     execution_data: Dict[str, Any],
@@ -1015,12 +1016,17 @@ async def execute_workflow_advanced(
             handle = await runner.submit_task(task)
             logger.info(f"Workflow {workflow_id} execution {execution.id} queued (task={handle.task_id[:8]})")
         else:
-            # Phase 1 / Local: Run in-process (existing behavior)
-            asyncio.create_task(
+            # Phase 1 / Local: Run in-process (existing behavior), guarded so a
+            # GC'd loop can't silently cancel it and an uncaught crash is recorded.
+            launch_guarded(
                 execute_workflow_with_progress(
                     execution.id,
                     execution_data.get('options', {})
-                )
+                ),
+                subsystem="workflow",
+                operation="execute",
+                workspace_id=ctx.workspace_id,
+                extra={"execution_id": execution.id, "workflow_id": workflow_id},
             )
 
         return {
@@ -1040,131 +1046,17 @@ async def execute_workflow_advanced(
         logger.error(f"Error executing workflow {workflow_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Additional endpoints for user journey tests
-@router.post("/{workflow_id}/execute")
-async def execute_workflow(
-    workflow_id: int,
-    execution_data: Dict[str, Any],
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db)
-):
-    """Execute workflow (simplified version for journey tests)"""
-    try:
-        # Validate workflow exists with proper loading
-        workflow = db.query(Workflow).options(
-            joinedload(Workflow.agents)
-        ).filter(Workflow.id == workflow_id).first()
-
-        if not workflow:
-            raise HTTPException(status_code=404, detail="Workflow not found")
-
-        if not workflow.id:
-            raise HTTPException(status_code=400, detail="Invalid workflow data")
-
-        # Get agent with skills loaded
-        agent = db.query(Agent).options(
-            joinedload(Agent.skills)
-        ).filter(Agent.status == 'active').first()
-
-        if not agent:
-            raise HTTPException(status_code=400, detail="No active agents available")
-
-        if not agent.id:
-            logger.error(f"❌ Agent object missing ID: {agent}")
-            raise HTTPException(status_code=500, detail="Agent data corruption - missing ID")
-
-        # Validate input_data
-        input_data = execution_data.get('input_data')
-        if not input_data:
-            logger.warning("⚠️  No input_data provided, using empty dict")
-            input_data = {}
-
-        if not isinstance(input_data, dict):
-            raise HTTPException(
-                status_code=400,
-                detail=f"input_data must be a dictionary, got {type(input_data).__name__}"
-            )
-
-        logger.info(f"🚀 Creating execution for workflow {workflow_id} with agent {agent.id}")
-        logger.info(f"   Agent skills: {len(agent.skills) if agent.skills else 0}")
-
-        # Create execution record
-        execution = WorkflowExecution(
-            workflow_id=workflow_id,
-            agent_id=agent.id,
-            workspace_id=ctx.workspace_id,
-            input_data=input_data,
-            status=ExecutionStatus.PENDING.value
-        )
-        
-        db.add(execution)
-        db.commit()
-        db.refresh(execution)
-        
-        # PRD-56: Dispatch through TaskRunner abstraction
-        runner = get_task_runner()
-
-        if runner.backend_name == "queued":
-            # Phase 2: Enqueue to workspace worker
-            task = AgentTask(
-                task_type=TaskType.WORKFLOW_SUBTASK,
-                workspace_id=ctx.workspace_id,
-                agent_id=agent.id,
-                prompt=json.dumps(input_data),
-                context={
-                    "execution_id": execution.id,
-                    "workflow_id": workflow_id,
-                    "options": execution_data.get('options', {}),
-                },
-                priority=TaskPriority.NORMAL,
-                timeout_seconds=600,
-            )
-            handle = await runner.submit_task(task)
-            logger.info(f"Workflow {workflow_id} execution {execution.id} queued (task={handle.task_id[:8]})")
-        else:
-            # Phase 1 / Local: Run in-process (existing behavior)
-            import asyncio
-
-            async def _run_with_error_handling():
-                try:
-                    await execute_workflow_with_progress(
-                        execution.id,
-                        execution_data.get('options', {})
-                    )
-                except Exception as e:
-                    logger.error(f"❌ FATAL: Workflow execution task crashed: {e}", exc_info=True)
-
-            asyncio.create_task(_run_with_error_handling())
-
-        logger.info(f"Workflow {workflow_id} execution {execution.id} started")
-        
-        return {
-            "id": execution.id,
-            "execution_id": execution.id,
-            "workflow_id": workflow_id,
-            "status": "started",
-            "message": "Workflow execution started"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error executing workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.post("/execute")
-async def execute_workflow_general(execution_data: Dict[str, Any], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
-    """General workflow execution endpoint"""
-    try:
-        workflow_id = execution_data.get('workflow_id')
-        if not workflow_id:
-            raise HTTPException(status_code=400, detail="workflow_id required")
-
-        return await execute_workflow(workflow_id, execution_data, ctx, db)
-        
-    except Exception as e:
-        logger.error(f"Error in general workflow execution: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+# PRD-172 F006: the legacy PRD-125 workflow-execute surface was DELETED here.
+#
+# `POST /{workflow_id}/execute` (execute_workflow), `POST /execute`
+# (execute_workflow_general) and `POST /executions/` (create_execution) formed
+# a cross-tenant existence oracle: they fetched the Workflow with NO workspace
+# filter and selected "the first active agent from ANY workspace", then handed
+# off to `execute_workflow_with_progress` — a disabled no-op stub (PRD-125).
+# Both surviving callers (github_webhooks, create_execution) already passed a
+# broken argument list, so nothing functional was lost. Missions are the
+# canonical execution path (CLAUDE.md §5/§10). The workspace-scoped
+# `POST /{workflow_id}/execute-advanced` (execute_workflow_advanced) remains.
 
 @router.get("/executions/")
 async def list_executions(
@@ -1209,15 +1101,9 @@ async def list_executions(
         logger.error(f"Error listing executions: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/executions/")
-async def create_execution(execution_data: Dict[str, Any], db: Session = Depends(get_db)):
-    """Create workflow execution"""
-    try:
-        workflow_id = execution_data.get('workflow_id')
-        return await execute_workflow(workflow_id, execution_data, db)
-    except Exception as e:
-        logger.error(f"Error creating execution: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+# PRD-172 F006: `POST /executions/` (create_execution) deleted — it delegated
+# to the removed legacy execute_workflow with a broken argument list (see the
+# deletion note above). Executions are created inside execute_workflow_advanced.
 
 @router.get("/executions/{execution_id}")
 async def get_execution_status(execution_id: int, db: Session = Depends(get_db)):
@@ -1243,7 +1129,7 @@ async def get_execution_status(execution_id: int, db: Session = Depends(get_db))
         logger.error(f"Error getting execution status {execution_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/executions/{execution_id}/cancel")
+@router.post("/executions/{execution_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
     """Cancel a running workflow execution"""
     try:
@@ -1395,7 +1281,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
     """
     AI SDK compatible streaming endpoint for useChat hook.
@@ -1477,21 +1363,6 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                    "legacy pipeline disabled (PRD-125). Use missions instead.")
     return
 
-
-@router.get("/executions/{execution_id}/results")
-async def get_execution_results_files(execution_id: int, db: Session = Depends(get_db)):
-    """Legacy endpoint — filesystem workspaces removed (PRD-125)."""
-    raise HTTPException(status_code=410, detail="Workflow filesystem results removed. Use mission outputs instead.")
-
-@router.get("/executions/{execution_id}/results/{file_path:path}")
-async def download_execution_result_file(execution_id: int, file_path: str, db: Session = Depends(get_db)):
-    """Legacy endpoint — filesystem workspaces removed (PRD-125)."""
-    raise HTTPException(status_code=410, detail="Workflow filesystem results removed. Use mission outputs instead.")
-
-# PRD-125: Kept endpoint stubs returning 410 Gone so existing frontend
-# links don't 404 silently. Safe to fully remove once Phase 3c (frontend
-# cleanup) drops the execution result UI components.
-_LEGACY_RESULT_ENDPOINTS_REMOVED = True  # grep marker for Phase 3c
 
 @router.get("/templates/recommended")
 async def get_recommended_workflow_templates(db: Session = Depends(get_db)):

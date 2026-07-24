@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
-import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
+import { usePageContext } from '@/lib/page-context'
 import { Message } from './message'
 import { MultimodalInput } from './multimodal-input'
 import { ArtifactViewer } from './artifact-viewer'
@@ -44,10 +44,21 @@ import { MissionCreatedCard } from '@/components/chatbot/mission-created-card'
 import { MissionSuggestionCard } from '@/components/chatbot/mission-suggestion-card'
 import { CreateMissionModal } from '@/components/missions/create-mission-modal'
 
+// PRD-207 S5: Auto Live — the wave renders as the chat's ambient BACKGROUND
+// (alive only while someone speaks); LiveVoiceMode owns the call and feeds
+// presence up. The SSE lane also mounts here so voice/background messages
+// land live (chat_changed → the useChat merge listener).
+import { LiveVoiceMode } from '@/components/voice/LiveVoiceMode'
+import { VoiceErrorBoundary } from '@/components/voice/VoiceErrorBoundary'
+import { PresenceOrb } from '@/components/voice/PresenceOrb'
+import type { VoiceLevels } from '@/hooks/use-retell-call'
+import type { OrbState } from '@/lib/voice/orb-state'
+import type { MutableRefObject } from 'react'
+import { useBoardEventStream } from '@/hooks/use-board-event-stream'
+
 export interface ChatProps {
   id: string
   initialMessages?: ChatMessage[]
-  initialChatModel?: string
   initialVisibilityType?: VisibilityType
   isReadonly?: boolean
   autoResume?: boolean
@@ -57,7 +68,6 @@ export interface ChatProps {
 export function Chat({
   id,
   initialMessages = [],
-  initialChatModel = LLM_DEFAULTS.model_id,
   initialVisibilityType = 'private',
   isReadonly = false,
   autoResume = false,
@@ -65,7 +75,6 @@ export function Chat({
 }: ChatProps) {
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
-  const [currentModelId, setCurrentModelId] = useState(initialChatModel)
 
   // Widget Architecture (PRD-38.1) - workspace store
   const widgetIds = useWorkspaceStore((s) => s.widgetIds)
@@ -185,10 +194,26 @@ export function Chat({
 
   const [activeChatId, setActiveChatId] = useState(id)
 
+  // PRD-207 S5: live voice mode — the orb mounts, content drops lower.
+  const [isLiveMode, setIsLiveMode] = useState(false)
+  // PRD-207: presence feed from the call → the ambient background wave.
+  const [voicePresence, setVoicePresence] = useState<OrbState>('idle')
+  const [voiceLevels, setVoiceLevels] = useState<MutableRefObject<VoiceLevels> | null>(null)
+  // PRD-207 S6 (closing a PRD-205 gap): the chat page subscribes to the SSE
+  // lane so chat_changed reaches the useChat merge listener HERE — not only
+  // while Command Center happens to be open.
+  useBoardEventStream(true)
+
+  // PRD-221 S5: the main chat page sends its own page context too (page 'chat').
+  const pageContext = usePageContext()
+
   const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
     id: activeChatId,
     initialMessages,
-    selectedModelId: currentModelId,
+    pageContext,
+    // PRD-180 S3 (F035): no client model override. The model is no longer a
+    // user-facing control (the backend ignored the selection), so routing is by
+    // agent; with no agent the model resolves via the Auto tier server-side.
     selectedAgentId,
     missionMode: isMissionMode,
     planMode: isPlanMode,
@@ -201,6 +226,51 @@ export function Chat({
       if (dataPart.type === 'tool-data' && dataPart.data) {
         const toolData = dataPart.data
         console.log('[WIDGET-DEBUG] tool-data keys:', Object.keys(toolData), 'has generated_document:', !!toolData.generated_document)
+
+        // PRD-163 S4: mission plan approval card (auto-created mission awaiting approval)
+        if (toolData.mission_approval && toolData.mission_approval.mission_id) {
+          const ma = toolData.mission_approval
+          addWidget({
+            type: 'mission_approval',
+            title: 'Mission plan — approval needed',
+            data: {
+              mission_id: ma.mission_id,
+              goal: ma.goal || '',
+              state: ma.state,
+              task_count: ma.task_count ?? (ma.tasks?.length || 0),
+              tasks: ma.tasks || [],
+              cost_estimate_usd: ma.cost_estimate_usd,
+              cost_ceiling_usd: ma.cost_ceiling_usd,
+              approval_deadline_at: ma.approval_deadline_at,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'platform_create_mission' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
+        // PRD-193 S3 (P2-12): tool approval card — a confirmation-gated
+        // action asked, the S1 gate attached a grant; the human approves or
+        // denies right here (Approve resumes the execution server-side, S4).
+        if (toolData.tool_approval && toolData.tool_approval.grant_id != null) {
+          const ta = toolData.tool_approval
+          addWidget({
+            type: 'tool_approval',
+            title: 'Action approval needed',
+            data: { ...ta },
+            metadata: {
+              source: { type: 'tool', name: ta.action || 'platform_action' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
 
         // Create widgets for database results
         if (toolData.database_results && Array.isArray(toolData.database_results)) {
@@ -473,6 +543,44 @@ export function Chat({
       }
     },
   })
+
+  // PRD-207 (Gerard: "same as old, she just talks it"): spoken words are
+  // upserted as REAL entries in the messages array — the identical render
+  // path as typed streaming. When chat_changed lands the persisted copies,
+  // the ephemeral voice-live entries are dropped and the server rows follow.
+  // MUST live below the useChat call: the dependency arrays read setMessages
+  // during render, so hoisting this above useChat is a first-render
+  // ReferenceError (TDZ) that takes down the whole chat page.
+  const handleLiveTurn = useCallback(
+    (turn: { userText: string; agentText: string }) => {
+      setMessages((prev) => {
+        const next = [...prev]
+        const upsert = (mid: string, role: 'user' | 'assistant', text: string) => {
+          if (!text) return
+          const idx = next.findIndex((m) => m.id === mid)
+          const entry = {
+            id: mid,
+            role,
+            content: text,
+            parts: [{ type: 'text', text }],
+          } as ChatMessage
+          if (idx >= 0) next[idx] = { ...next[idx], ...entry }
+          else next.push(entry)
+        }
+        upsert('voice-live-user', 'user', turn.userText)
+        upsert('voice-live-assistant', 'assistant', turn.agentText)
+        return next
+      })
+    },
+    [setMessages]
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onPersisted = () =>
+      setMessages((prev) => prev.filter((m) => !String(m.id).startsWith('voice-live-')))
+    window.addEventListener('automatos:chat-changed', onPersisted)
+    return () => window.removeEventListener('automatos:chat-changed', onPersisted)
+  }, [setMessages])
 
   const regenerate = () => reload()
 
@@ -867,7 +975,7 @@ export function Chat({
                             complexity={missionSuggestion.complexity}
                             agentId={missionSuggestion.agentId}
                             chatId={id}
-                            recentMessages={messages.slice(-5).map(m => ({ role: m.role, content: m.content }))}
+                            recentMessages={messages.slice(-5).map(m => { const textPart = m.parts?.find(p => p.type === 'text'); return { role: m.role, content: textPart && 'text' in textPart ? textPart.text : '' } })}
                           />
                         </motion.div>
                       )}
@@ -928,8 +1036,6 @@ export function Chat({
                         status={status}
                         stop={stop}
                         sendMessage={handleSendMessage}
-                        selectedModelId={currentModelId}
-                        onModelChange={setCurrentModelId}
                         selectedAgentId={selectedAgentId}
                         onAgentChange={handleAgentChange}
                         selectedVisibilityType={visibilityType}
@@ -1009,14 +1115,14 @@ export function Chat({
                               initial={{ opacity: 0, height: 0 }}
                               animate={{ opacity: 1, height: 'auto' }}
                               exit={{ opacity: 0, height: 0 }}
-                              className="flex items-center gap-2 rounded-lg bg-orange-500/10 border border-orange-500/30 px-3 py-2 text-sm text-orange-400"
+                              className="flex items-center gap-2 rounded-lg bg-warning/10 border border-warning/30 px-3 py-2 text-sm text-warning"
                             >
                               <Target className="h-4 w-4 shrink-0" />
                               <span className="flex-1">Mission Mode — Describe your goal and an AI team will execute it</span>
                               <button
                                 type="button"
                                 onClick={() => setMissionMode(false)}
-                                className="shrink-0 rounded p-0.5 hover:bg-orange-500/20 transition-colors"
+                                className="shrink-0 rounded p-0.5 hover:bg-warning/20 transition-colors"
                               >
                                 <X className="h-3.5 w-3.5" />
                               </button>
@@ -1028,8 +1134,6 @@ export function Chat({
                           status={status}
                           stop={stop}
                           sendMessage={handleSendMessage}
-                          selectedModelId={currentModelId}
-                          onModelChange={setCurrentModelId}
                           selectedAgentId={selectedAgentId}
                           onAgentChange={handleAgentChange}
                           selectedVisibilityType={visibilityType}
@@ -1063,9 +1167,35 @@ export function Chat({
       {/* Normal chat view - NO widgets */}
       {!hasWidgets && !isArtifactViewerVisible && (
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
+          {/* PRD-207/208: the room itself — the wave is the chat's living
+              full-bleed background (Gerard's reference set, brand gold).
+              State intensity, envelopes, and the text-protecting vignette
+              live INSIDE PresenceOrb; the wave sinks lower when the thread
+              is on screen so words own the upper field. */}
+          <AnimatePresence>
+            {isLiveMode && voiceLevels && (
+              <motion.div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5 }}
+              >
+                <VoiceErrorBoundary>
+                  <PresenceOrb
+                    state={voicePresence}
+                    levelsRef={voiceLevels}
+                    horizon={showWelcomeCard ? 0.56 : 0.74}
+                  />
+                </VoiceErrorBoundary>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
-            <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
+            <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
               {/* Personal greeting */}
               <motion.div
                 className="w-full max-w-3xl md:max-w-4xl text-center mb-8"
@@ -1078,8 +1208,45 @@ export function Chat({
                 </h1>
               </motion.div>
 
+              {/* PRD-206 S3: one tap to pick up where you left off — answered
+                  in-chat by the platform_resume_context tool */}
+              <motion.div
+                className="mb-6 flex justify-center"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage('Where did we leave off?')}
+                  className="rounded-full border border-border bg-muted/40 px-4 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  Where did we leave off?
+                </button>
+              </motion.div>
+
               {/* Chat input + quick links — no outer box */}
               <div className="w-full max-w-3xl md:max-w-4xl space-y-3">
+                {/* PRD-207: the voice wave docks ON the message box — one
+                    conversation surface, spoken or typed. */}
+                <AnimatePresence>
+                  {isLiveMode && (
+                    <VoiceErrorBoundary>
+                    <LiveVoiceMode
+                      chatId={hasSentMessage ? activeChatId : undefined}
+                      agentId={selectedAgentId}
+                      onChatId={(cid) => setActiveChatId(cid)}
+                      onLiveTurn={handleLiveTurn}
+                      onPresence={setVoicePresence}
+                      onLevelsRef={setVoiceLevels}
+                      onExit={() => {
+                        setIsLiveMode(false)
+                        setVoicePresence('ended')
+                      }}
+                    />
+                    </VoiceErrorBoundary>
+                  )}
+                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}
@@ -1118,8 +1285,6 @@ export function Chat({
                   stop={stop}
                   sendMessage={handleSendMessage}
                   setMessages={setMessages}
-                  selectedModelId={currentModelId}
-                  onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
                   onAgentChange={handleAgentChange}
                   selectedVisibilityType={visibilityType}
@@ -1134,6 +1299,8 @@ export function Chat({
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/assignments?tab=missions')}
+                    isLiveActive={isLiveMode}
+                    onLiveClick={() => setIsLiveMode((v) => !v)}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}
@@ -1154,10 +1321,13 @@ export function Chat({
           {!showWelcomeCard && (
             <div
               ref={messagesContainerRef}
-              className="flex-1 overflow-y-scroll overscroll-contain"
+              className="relative z-10 flex-1 overflow-y-scroll overscroll-contain"
               style={{ overflowAnchor: 'none' }}
             >
-              <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 px-4 py-4 md:gap-6 md:px-8">
+              {/* min-h-full + justify-end: a young thread grows upward from
+                  the composer (no lone bubble stranded at the top of an
+                  empty viewport); once content overflows, normal scroll. */}
+              <div className="mx-auto flex min-h-full min-w-0 max-w-4xl flex-col justify-end gap-4 px-4 py-4 md:gap-6 md:px-8">
 
                 {/* Messages */}
                 <AnimatePresence>
@@ -1192,7 +1362,7 @@ export function Chat({
                       complexity={missionSuggestion.complexity}
                       agentId={missionSuggestion.agentId}
                       chatId={id}
-                      recentMessages={messages.slice(-5).map(m => ({ role: m.role, content: m.content }))}
+                      recentMessages={messages.slice(-5).map(m => { const textPart = m.parts?.find(p => p.type === 'text'); return { role: m.role, content: textPart && 'text' in textPart ? textPart.text : '' } })}
                     />
                   </motion.div>
                 )}
@@ -1241,6 +1411,26 @@ export function Chat({
           {!isReadonly && !showWelcomeCard && (
             <div className="sticky bottom-0 z-10 bg-transparent backdrop-blur-none supports-[backdrop-filter]:bg-transparent border-0">
               <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
+                {/* PRD-207: the voice wave docks ON the message box — one
+                    conversation surface, spoken or typed. */}
+                <AnimatePresence>
+                  {isLiveMode && (
+                    <VoiceErrorBoundary>
+                    <LiveVoiceMode
+                      chatId={hasSentMessage ? activeChatId : undefined}
+                      agentId={selectedAgentId}
+                      onChatId={(cid) => setActiveChatId(cid)}
+                      onLiveTurn={handleLiveTurn}
+                      onPresence={setVoicePresence}
+                      onLevelsRef={setVoiceLevels}
+                      onExit={() => {
+                        setIsLiveMode(false)
+                        setVoicePresence('ended')
+                      }}
+                    />
+                    </VoiceErrorBoundary>
+                  )}
+                </AnimatePresence>
                 {/* PRD-40: Tool Suggestion Bar */}
                 <ToolSuggestionBar
                   suggestions={toolSuggestions}
@@ -1281,8 +1471,6 @@ export function Chat({
                   stop={stop}
                   sendMessage={handleSendMessage}
                   setMessages={setMessages}
-                  selectedModelId={currentModelId}
-                  onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
                   onAgentChange={handleAgentChange}
                   selectedVisibilityType={visibilityType}
@@ -1297,6 +1485,8 @@ export function Chat({
                     onCodeClick={handleOpenCodeCanvas}
                     onPlanClick={() => setPlanMode(!isPlanMode)}
                     onMissionClick={() => router.push('/assignments?tab=missions')}
+                    isLiveActive={isLiveMode}
+                    onLiveClick={() => setIsLiveMode((v) => !v)}
                     pinnedAgentIds={pinnedIds}
                     agents={agents}
                     selectedAgentId={selectedAgentId}

@@ -123,6 +123,11 @@ class BaseChannelAdapter(ABC):
         they are forwarded to execute_with_prompt for multimodal resolution.
         Subclass adapters should call upload_attachment() for inbound media
         and populate this field before calling handle_message().
+
+        PRD-142 W3-S13: Emits the ``channels`` primitive heartbeat finding
+        at the terminal boundary of the turn — green on a clean pipeline
+        traversal, down on a caught exception. The emit is best-effort
+        and NEVER raises (heartbeat must not break message handling).
         """
         try:
             envelope = self._to_envelope(platform_message)
@@ -157,6 +162,7 @@ class BaseChannelAdapter(ABC):
                             reply_channel,
                             "I'm not sure how to handle that request. Please try rephrasing.",
                         )
+                    self._emit_channel_heartbeat(success=True, detail="no_route_fallback")
                     return
 
                 # ── Execute ──
@@ -185,6 +191,8 @@ class BaseChannelAdapter(ABC):
                 # ── Update activity stats ──
                 await self._update_activity_stats(db)
 
+                self._emit_channel_heartbeat(success=True, detail="ok")
+
             finally:
                 db.close()
 
@@ -193,6 +201,24 @@ class BaseChannelAdapter(ABC):
                 "[Channel:%s] Failed to handle message: %s",
                 self.connection_id,
                 e,
+            )
+            self._emit_channel_heartbeat(success=False, detail=f"{type(e).__name__}: {e}")
+
+    def _emit_channel_heartbeat(self, *, success: bool, detail: str = "") -> None:
+        """Emit the ``channels`` primitive finding for this adapter's
+        workspace (PRD-142 W3-S13). Lazy import keeps the heartbeat
+        wiring opt-in at module load and avoids a circular import."""
+        try:
+            from channels.primitive_heartbeat import _emit_channels_primitive
+
+            _emit_channels_primitive(
+                self.workspace_id,
+                success=success,
+                detail=detail,
+            )
+        except Exception:  # noqa: BLE001 — best-effort; never break handle_message
+            logger.error(
+                "[Channel:%s] heartbeat emit failed", self.connection_id, exc_info=True,
             )
 
     async def _update_activity_stats(self, db) -> None:

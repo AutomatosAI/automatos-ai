@@ -16,7 +16,7 @@ modules/tools/execution/exec_*.py for maintainability.
 
 import logging
 import time as _time
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -33,24 +33,13 @@ from modules.tools.execution import exec_composio
 from modules.tools.execution import exec_document
 from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
-from modules.tools.execution import exec_planning
 from modules.tools.execution.telemetry import fire_telemetry
+from modules.memory.tool_outcome_capture import capture_tool_outcome
+from core.observability.tracer import fire_tool_trace
 
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
 
-# PRD-37: Capability-based validation (lazy import)
-_capability_filter = None
-
-
-def _get_capability_filter(db):
-    """Lazy import of capability filter for execution-time validation."""
-    global _capability_filter
-    try:
-        from modules.tools.services.action_capability_filter import ActionCapabilityFilter
-        return ActionCapabilityFilter(db)
-    except ImportError:
-        return None
 
 def _get_composio_executor(db):
     """Lazy import of Composio executor."""
@@ -150,19 +139,8 @@ class UnifiedToolExecutor:
             'create_xlsx': self._execute_document_tool,
             'create_pptx': self._execute_document_tool,
 
-            # PRD-22 Expansion: Writing & Planning tools
-            'create_implementation_plan': self._execute_planning_tool,
-            'write_technical_content': self._execute_writing_tool,
-            'refine_content': self._execute_writing_tool,
-
-            # PRD-22 Expansion: Analysis tools
-            'review_code': self._execute_analysis_tool,
-            'security_scan': self._execute_analysis_tool,
-            'generate_tests': self._execute_analysis_tool,
-            'run_tests': self._execute_analysis_tool,
-            'research_topic': self._execute_analysis_tool,
-            'analyze_data': self._execute_analysis_tool,
-            'write_document': self._execute_writing_tool,
+            # PRD-008-A.2: widget UI affordances
+            'widget_open_callback_form': self._execute_widget_callback,
 
             # PRD-36: Composio tools routed dynamically by prefix
         }
@@ -180,13 +158,6 @@ class UnifiedToolExecutor:
             logger.debug("  Initializing Composio executor...")
             self._composio_executor = _get_composio_executor(self.db)
         return self._composio_executor
-
-    @property
-    def capability_filter(self):
-        """Lazy-load capability filter (PRD-37) for execution-time validation."""
-        if not hasattr(self, '_capability_filter') or self._capability_filter is None:
-            self._capability_filter = _get_capability_filter(self.db)
-        return self._capability_filter
 
     @property
     def platform_tools(self):
@@ -213,97 +184,414 @@ class UnifiedToolExecutor:
         return self._tool_registry
 
     # ------------------------------------------------------------------
-    # Validation
+    # Policy plane chokepoint (PRD-174 W4)
     # ------------------------------------------------------------------
 
-    def validate_composio_action(
+    def _policy_gate_check(
         self,
-        action_id: str,
-        original_intent: Optional[str] = None,
-        allow_destructive: bool = False
-    ) -> Tuple[bool, str]:
+        tool_name: str,
+        parameters: Dict[str, Any],
+        *,
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        caller_context: Optional[Dict[str, Any]],
+        trace: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Evaluate one tool call through the unified PolicyGate (PRD-192 S1).
+
+        Returns ``None`` when execution may proceed and an errors-as-data result
+        dict when the plane BLOCKS the call — the caller returns it directly, so
+        the tool never runs.
+
+        Stage semantics (the ``AUTOMATOS_POLICY_PLANE`` mode dial, ops-flipped):
+
+        - ``off``         — byte-for-byte legacy: no evaluation, no bus fire.
+        - ``shadow``      — evaluate + audit EVERY verdict; never block.
+        - ``destructive`` — enforce deny/ask only for the fail-closed risk
+          classes (destructive / external_side_effect / publish); shadow-log
+          blocking verdicts on the open classes.
+        - ``on``          — enforce every blocking verdict.
+
+        Fail posture on a plane fault (locked, PRD-192): under enforce modes the
+        closed classes ⇒ **deny** errors-as-data (``policy_plane_error``);
+        read/internal_write ⇒ proceed with the greppable ``[policy-fail-open]``
+        marker; shadow never blocks; an unclassifiable call is treated
+        destructive (closed). One classification, computed once, is reused for
+        the mode branch, the bus fire, and the fault branch.
+
+        Never raises — every branch resolves to "block with a readable denial"
+        or "proceed" (the downstream per-tool gates in ``platform_executor``
+        remain in force for platform actions at every stage).
         """
-        PRD-37: Validate that a Composio action is eligible for execution.
+        try:
+            from modules.policy import policy_plane_mode
 
-        This is the EXECUTION-TIME validation gate (per GPT-5.2 recommendation).
-        Called before executing any Composio action to ensure the action
-        matches the original intent's capabilities.
+            mode = policy_plane_mode()
+        except Exception:
+            logger.warning(
+                "[tool-trace %s] policy mode read failed for '%s' — plane "
+                "treated off", trace, tool_name, exc_info=True,
+            )
+            return None
+        if mode == "off":
+            return None  # byte-for-byte the legacy per-router gates
 
-        Args:
-            action_id: The Composio action ID to validate
-            original_intent: The original user intent (optional)
-            allow_destructive: Whether destructive actions are allowed
-
-        Returns:
-            (eligible, reason) tuple
-        """
-        if not self.capability_filter:
-            # Fail open if capability filter not available
-            logger.debug("Capability filter not available, skipping validation")
-            return True, "Capability filter not available (fail open)"
-
-        if not original_intent:
-            # If no intent provided, can't validate - allow by default
-            return True, "No intent provided for validation"
+        effective_name, effective_params, is_composio = self._resolve_effective_call(
+            tool_name, parameters
+        )
+        # Computed ONCE (best-effort): reused for the mode branch, the bus fire,
+        # and the fault branch. None ⇒ unclassifiable ⇒ treated destructive.
+        risk = self._classify_risk(effective_name, is_composio)
 
         try:
-            eligible, reason = self.capability_filter.check_action_eligibility(
-                action_id=action_id,
-                intent=original_intent,
-                allow_destructive=allow_destructive
+            from modules.policy import PolicyGate, ToolCall, Decision
+            from modules.policy.errors import verdict_to_result
+
+            # PRD-192 S3: lift the caller's turn-level estimate (driving model +
+            # prompt tokens + output cap) into the ToolCall so budget admission
+            # prices THIS call instead of a structural $0. Callers that don't
+            # know their model pass nothing — spend-to-date still binds.
+            cc = caller_context if isinstance(caller_context, dict) else {}
+            try:
+                est_in = int(cc.get("est_input_tokens") or 0)
+                est_out = int(cc.get("est_output_tokens") or 0)
+            except (TypeError, ValueError):
+                est_in = est_out = 0
+
+            verdict = PolicyGate(self.db).check(
+                ToolCall(
+                    tool_name=effective_name,
+                    parameters=effective_params,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    caller_context=caller_context,
+                    model_id=cc.get("model_id"),
+                    est_input_tokens=est_in,
+                    est_output_tokens=est_out,
+                    is_composio=is_composio,
+                )
             )
 
-            if not eligible:
-                logger.warning(
-                    f"Action validation failed: action={action_id} "
-                    f"intent='{original_intent[:30]}...' reason={reason}"
+            # PRD-181 S1 (Art.12): fire the policy bus for EVERY verdict — allow,
+            # ask, and deny — so the attached audit handler records every tool
+            # call + policy decision per tenant. The bus is the single audit
+            # write point (bus.py:18). A handler fault is swallowed inside the
+            # bus, so audit never wedges or slows the call.
+            self._fire_policy_bus(
+                effective_name, effective_params, verdict,
+                agent_id=agent_id, workspace_id=workspace_id,
+                caller_context=caller_context, trace=trace,
+                risk=risk, mode=mode, est_tokens=est_in + est_out,
+            )
+
+            if verdict.decision is Decision.ALLOW:
+                return None
+
+            if mode == "shadow":
+                logger.info(
+                    "[tool-trace %s] policy plane (shadow) would-%s '%s' "
+                    "(risk=%s): %s — proceeding, never blocks",
+                    trace, verdict.decision.value, effective_name, risk,
+                    verdict.reason,
                 )
+                return None
 
-            return eligible, reason
+            if mode == "destructive" and not self._risk_fails_closed(risk):
+                logger.info(
+                    "[tool-trace %s] policy plane (destructive stage) shadow-"
+                    "logged %s '%s' (risk=%s): %s — open class, proceeding",
+                    trace, verdict.decision.value, effective_name, risk,
+                    verdict.reason,
+                )
+                return None
 
-        except Exception as e:
-            logger.error(f"Action validation error: {e}")
-            # Fail open on errors to avoid blocking legitimate actions
-            return True, f"Validation error (fail open): {e}"
+            logger.info(
+                "[tool-trace %s] policy plane %s '%s': %s",
+                trace, verdict.decision.value, effective_name, verdict.reason,
+            )
+            return verdict_to_result(verdict, tool_name)
+        except Exception:
+            return self._policy_fault_result(
+                tool_name, effective_name, effective_params, risk, mode,
+                agent_id=agent_id, workspace_id=workspace_id,
+                caller_context=caller_context, trace=trace,
+            )
 
-    def _check_agent_permission(self, agent_id: int, tool_name: str) -> bool:
+    def _resolve_effective_call(
+        self, tool_name: str, parameters: Any
+    ) -> tuple:
+        """Resolve ``(effective_name, effective_params, is_composio)`` for the gate.
+
+        - ``platform_execute`` nests the real action under ``"action"`` (params
+          may be flat or wrapped) — the gate must judge the ACTION, not the
+          dispatcher.
+        - ``composio_execute`` nests the real Composio action the same way; the
+          resolved per-action name (``GMAIL_SEND_EMAIL``) is what the audit row
+          and risk classification carry.
+        - Per-action SDK names route via ``self.composio_actions`` / registry
+          ``integration_type`` metadata — the executor's own routing knowledge,
+          threaded to the gate so external sends never classify internal
+          (PRD-192 S1, the honest-classification fix).
+
+        Never raises.
         """
-        PRD-17: Check if agent has permission to use this tool.
+        params = parameters if isinstance(parameters, dict) else {}
+        try:
+            if tool_name == "platform_execute" and isinstance(parameters, dict):
+                action_name = (parameters.get("action") or "").strip()
+                if not action_name:
+                    return tool_name, params, False
+                effective_params = parameters.get("params") or {
+                    k: v for k, v in parameters.items() if k not in ("action", "params")
+                }
+                return action_name, effective_params, False
 
-        Args:
-            agent_id: Agent ID
-            tool_name: Tool name
+            if tool_name == "composio_execute" and isinstance(parameters, dict):
+                raw_action = parameters.get("action") or parameters.get("action_name")
+                effective_name = (
+                    str(raw_action).upper().strip() if raw_action else tool_name
+                )
+                inner = parameters.get("params")
+                effective_params = inner if isinstance(inner, dict) else params
+                return effective_name, effective_params, True
 
-        Returns:
-            True if allowed, False otherwise
+            return tool_name, params, self._tool_is_composio(tool_name)
+        except Exception:
+            return tool_name, params, False
+
+    def _tool_is_composio(self, tool_name: str) -> bool:
+        """The executor's OWN routing knowledge of "is this a Composio call".
+
+        Mirrors ``execute_tool``'s dispatch order: the ``composio_`` prefix /
+        meta-tool, the per-action ``composio_actions`` dict (SDK schema names
+        like ``GMAIL_SEND_EMAIL``), and registry ``integration_type`` metadata.
+        Builtin-routed tools short-circuit False so the registry is never
+        touched for them. Never raises.
         """
-        # For now, research tools are always allowed
-        # File ops and shell require explicit permission via AgentToolPermission table
-        research_tools = ['search_knowledge', 'semantic_search', 'search_codebase']
-        if tool_name in research_tools:
+        name = tool_name or ""
+        if name == "composio_execute" or name.startswith("composio_"):
+            return True
+        if name in self.composio_actions:
+            return True
+        if name.startswith(("platform_", "workspace_")) or name in self.tool_routes:
+            return False
+        try:
+            tool_spec = self.tool_registry.get_tool(name)
+            return bool(
+                tool_spec
+                and tool_spec.metadata
+                and tool_spec.metadata.get("integration_type") == "composio"
+            )
+        except Exception:
+            return False
+
+    def _classify_risk(self, effective_name: str, is_composio: bool) -> Optional[str]:
+        """Best-effort risk class for the call (pure classifier + registry
+        permission level). ``None`` ⇒ unclassifiable — the caller treats that
+        as destructive (fail closed, locked PRD-192 decision)."""
+        try:
+            from modules.policy import classify_action
+
+            action_def = self._policy_action_def(effective_name)
+            permission_level = getattr(action_def, "permission_level", None)
+            return classify_action(
+                effective_name,
+                permission_level=permission_level,
+                is_composio=is_composio,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _risk_fails_closed(risk: Optional[str]) -> bool:
+        """True when this risk class fails CLOSED on a plane fault under the
+        enforce modes — also the exact set the ``destructive`` stage enforces
+        (one frozenset, ``modules.policy.FAIL_CLOSED_RISK_CLASSES``).
+        Unclassifiable (``None``) is closed; if even the class set can't be
+        read, closed."""
+        if risk is None:
+            return True
+        try:
+            from modules.policy import FAIL_CLOSED_RISK_CLASSES
+
+            return risk in FAIL_CLOSED_RISK_CLASSES
+        except Exception:
             return True
 
-        # Check AgentToolPermission table for other tools
-        from core.models.tools import AgentToolPermission, Tool
+    def _policy_fault_result(
+        self,
+        tool_name: str,
+        effective_name: str,
+        effective_params: Dict[str, Any],
+        risk: Optional[str],
+        mode: str,
+        *,
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        caller_context: Optional[Dict[str, Any]],
+        trace: str,
+    ) -> Optional[Dict[str, Any]]:
+        """The ONE place that decides the plane's fail posture on a fault
+        (PRD-192 S1, locked matrix).
 
+        Called from ``_policy_gate_check``'s except while the original
+        exception is being handled (``exc_info=True`` captures it). shadow ⇒
+        proceed; enforce modes: open classes (read / internal_write) ⇒ proceed
+        with the greppable ``[policy-fail-open]`` marker (the G.5 rate the
+        shadow report counts); closed classes / unclassifiable ⇒ deny
+        errors-as-data, audited via the bus. Never raises.
+        """
+        if mode == "shadow" or not self._risk_fails_closed(risk):
+            logger.warning(
+                "[policy-fail-open] [tool-trace %s] policy gate errored for "
+                "'%s' (risk=%s, mode=%s) — proceeding (downstream gates still "
+                "apply)", trace, effective_name, risk, mode, exc_info=True,
+            )
+            # PRD-192 S2: fail-opens are COUNTED, not just logged — fire the
+            # bus with the marker so the audit row exists and the shadow
+            # report can compute the G.5 fail-open rate from data.
+            try:
+                from modules.policy import Verdict
+
+                self._fire_policy_bus(
+                    effective_name, effective_params,
+                    Verdict.allow(
+                        f"[policy-fail-open] plane fault — proceeded "
+                        f"(risk={risk or 'unknown'}, mode={mode})"
+                    ),
+                    agent_id=agent_id, workspace_id=workspace_id,
+                    caller_context=caller_context, trace=trace,
+                    risk=risk, mode=mode,
+                )
+            except Exception:
+                logger.debug(
+                    "[tool-trace %s] fail-open audit fire skipped", trace,
+                    exc_info=True,
+                )
+            return None
+
+        logger.error(
+            "[tool-trace %s] policy gate errored for '%s' (risk=%s, mode=%s) "
+            "— FAILING CLOSED, call blocked", trace, effective_name, risk, mode,
+            exc_info=True,
+        )
         try:
-            # Find tool in tools table
-            tool = self.db.query(Tool).filter_by(name=tool_name).first()
-            if not tool:
-                logger.warning(f"Tool '{tool_name}' not found in tools table")
-                return False  # Unknown tools not allowed
+            from modules.policy import PolicyError, Verdict
+            from modules.policy.errors import verdict_to_result
 
-            # Check if agent has permission
-            permission = self.db.query(AgentToolPermission).filter_by(
+            deny = Verdict.deny(
+                PolicyError(
+                    code="policy_plane_error",
+                    message_for_model=(
+                        f"The policy plane could not evaluate '{effective_name}' "
+                        f"(risk class: {risk or 'unknown'}). High-risk actions "
+                        "fail closed on a plane fault, so it was NOT executed."
+                    ),
+                    remediation=(
+                        "Retry shortly. If this persists, a workspace admin "
+                        "should check the policy plane or approve the action "
+                        "explicitly."
+                    ),
+                    retryable=True,
+                ),
+                reason=f"policy plane fault — {risk or 'unclassifiable'} fails closed",
+            )
+            self._fire_policy_bus(
+                effective_name, effective_params, deny,
+                agent_id=agent_id, workspace_id=workspace_id,
+                caller_context=caller_context, trace=trace,
+                risk=risk, mode=mode,
+            )
+            return verdict_to_result(deny, tool_name)
+        except Exception:
+            # Even the typed denial failed to build — still block: a closed
+            # class must never run on a plane fault. Hand-rolled envelope with
+            # the same errors-as-data shape.
+            logger.error(
+                "[tool-trace %s] policy fault denial construction failed for "
+                "'%s' — returning minimal closed block", trace, effective_name,
+                exc_info=True,
+            )
+            message = (
+                f"The policy plane could not evaluate '{effective_name}'. "
+                "High-risk actions fail closed, so it was NOT executed."
+            )
+            return {
+                "success": False,
+                "tool": tool_name,
+                "error": message,
+                "llm_context": message,
+                "permission_denied": True,
+                "requires_approval": False,
+                "policy_error": {
+                    "code": "policy_plane_error",
+                    "message_for_model": message,
+                    "remediation": "Retry shortly or ask a workspace admin.",
+                    "retryable": True,
+                },
+                "policy_decision": "deny",
+                "fatal_error": False,
+                "error_type": "policy_plane_error",
+            }
+
+    def _fire_policy_bus(
+        self,
+        effective_name: str,
+        effective_params: Dict[str, Any],
+        verdict: Any,
+        *,
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        caller_context: Optional[Dict[str, Any]],
+        trace: str,
+        risk: Optional[str] = None,
+        mode: Optional[str] = None,
+        est_tokens: Optional[int] = None,
+    ) -> None:
+        """Fire ``PRE_TOOL_USE`` on the policy bus with the verdict (PRD-181 S1).
+
+        The attached audit handler reads ``ctx.data['verdict']`` and writes the
+        per-tenant Art.12 record; ``risk``, ``mode`` and ``est_tokens`` ride
+        along so the audit row (and the PRD-192 S2 shadow report) carry the
+        classification, the stage that produced the decision, and the G.2
+        priced-call signal. Never raises: audit is a side-effect of the
+        chokepoint, so a bus/handler fault must not block or slow the call.
+        """
+        try:
+            from modules.policy import (
+                Event,
+                EventContext,
+                get_policy_bus,
+            )
+
+            ctx = EventContext(
+                workspace_id=workspace_id,
                 agent_id=agent_id,
-                tool_id=tool.id,
-                is_active=True
-            ).first()
+                tool_name=effective_name,
+                tool_input=effective_params,
+                caller_context=caller_context,
+            )
+            ctx.data["verdict"] = verdict
+            ctx.data["risk"] = risk
+            ctx.data["mode"] = mode
+            ctx.data["est_tokens"] = est_tokens
+            ctx.data["trace_id"] = trace
+            get_policy_bus().fire(Event.PRE_TOOL_USE, ctx)
+        except Exception:
+            logger.warning(
+                "[tool-trace %s] policy bus fire failed for '%s' — verdict "
+                "still enforced, audit skipped for this call", trace, effective_name,
+                exc_info=True,
+            )
 
-            return permission is not None
-        except Exception as e:
-            logger.warning(f"Error checking permissions for tool '{tool_name}': {e}")
-            return True  # Default to allow (fail open for now)
+    def _policy_action_def(self, tool_name: str) -> Any:
+        """Resolve the ActionDefinition for a tool (or None). Lazy + fail-open."""
+        try:
+            from modules.tools.discovery import get_action_registry
+
+            return get_action_registry().get(tool_name)
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Main dispatch
@@ -347,6 +635,20 @@ class UnifiedToolExecutor:
             )
             logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
 
+            # PRD-174 W4 — the single policy chokepoint. When the plane is ON,
+            # EVERY tool call (platform, workspace, Composio, registry) is
+            # evaluated by one typed gate HERE, so Composio/workspace/registry
+            # stop routing around the platform gate stack (F085/F060). A deny/ask
+            # returns errors-as-data the model can read and never executes.
+            # Flag OFF ⇒ this block is a no-op and behaviour is byte-for-byte the
+            # per-router gates below.
+            _policy_block = self._policy_gate_check(
+                tool_name, parameters, agent_id=agent_id,
+                workspace_id=workspace_id, caller_context=caller_context, trace=trace,
+            )
+            if _policy_block is not None:
+                return _policy_block
+
             # PRD-64: Single dispatcher for platform actions
             if tool_name == "platform_execute":
                 action_name = (parameters.get("action") or "").strip()
@@ -362,6 +664,33 @@ class UnifiedToolExecutor:
                 if not action_name:
                     result = {"success": False, "error": "Missing required field: action", "tool": tool_name}
                     return result
+
+                # PRD-143 S14: attach the recorded selection outcome for this
+                # (workspace, agent) surface so the universal telemetry hook
+                # persists it (router_decision->'selection'). hit = the chosen
+                # action came from the narrowed enum; computed BEFORE registry
+                # validation so enum-escaping hallucinations count as misses.
+                # Best-effort: never blocks or fails the dispatch.
+                try:
+                    from modules.tools.discovery.signal_recorder import (
+                        get_tool_signal_recorder,
+                    )
+                    _sel = get_tool_signal_recorder().peek_selection(
+                        workspace_id=workspace_id, agent_id=agent_id
+                    )
+                    if _sel is not None:
+                        caller_context = {
+                            **(caller_context or {}),
+                            "selection_outcome": {
+                                "action": action_name,
+                                "narrowed": _sel["narrowed"],
+                                "hit": (action_name in _sel["allowed"]) if _sel["narrowed"] else None,
+                                "enum_size": _sel.get("enum_size"),
+                                "reason": _sel.get("reason"),
+                            },
+                        }
+                except Exception as _sel_exc:
+                    logger.debug(f"[tool-trace {trace}] selection telemetry skipped: {_sel_exc}")
 
                 # Validate action exists in registry
                 from modules.tools.discovery import get_action_registry
@@ -489,6 +818,7 @@ class UnifiedToolExecutor:
                         agent_id,
                         workspace_id=workspace_id,
                         trace_id=trace,
+                        caller_context=caller_context,
                     )
                 except TypeError:
                     result = await executor_func(tool_name, parameters, agent_id)
@@ -523,6 +853,29 @@ class UnifiedToolExecutor:
                 execution_time_ms=_exec_ms,
                 caller_context=caller_context,
             )
+            # PRD-159 S2: capture notable tool outcomes (failures + notable
+            # successes) as typed tool_outcome memories — fire-and-forget,
+            # content-hash deduped, noise-gated. Never fails the tool call.
+            capture_tool_outcome(
+                tool_name=tool_name,
+                parameters=parameters if isinstance(parameters, dict) else {},
+                result=result,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+            # PRD-185 S9: emit a vendor-neutral trace/score at the tool-dispatch
+            # chokepoint (beside telemetry) — "was the tool call good" as a live
+            # number over real traffic. Config-gated default-OFF (NoOp) + fully
+            # guarded, so it never fails the tool call.
+            _ok = bool(result.get("success", result.get("successful"))) if isinstance(result, dict) else False
+            fire_tool_trace(
+                tool_name=tool_name,
+                success=_ok,
+                duration_ms=_exec_ms,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                error=(result.get("error") if isinstance(result, dict) and not _ok else None),
+            )
 
     # ------------------------------------------------------------------
     # Delegate methods -- thin wrappers calling extracted modules
@@ -538,14 +891,20 @@ class UnifiedToolExecutor:
             agent_id=agent_id,
         )
 
-    async def _execute_database_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_research.execute_database_tool(self, tool_name, parameters, agent_id)
+    async def _execute_database_tool(self, tool_name, parameters, agent_id, workspace_id=None, caller_context=None, **kw):
+        return await exec_research.execute_database_tool(
+            self, tool_name, parameters, agent_id,
+            workspace_id=workspace_id, caller_context=caller_context,
+        )
 
-    async def _execute_smart_database_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_research.execute_smart_database_tool(self, tool_name, parameters, agent_id)
+    async def _execute_smart_database_tool(self, tool_name, parameters, agent_id, workspace_id=None, caller_context=None, **kw):
+        return await exec_research.execute_smart_database_tool(
+            self, tool_name, parameters, agent_id,
+            workspace_id=workspace_id, caller_context=caller_context,
+        )
 
-    async def _execute_multimodal_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_multimodal.execute_multimodal_tool(self, tool_name, parameters, agent_id)
+    async def _execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=None, **kw):
+        return await exec_multimodal.execute_multimodal_tool(self, tool_name, parameters, agent_id, workspace_id=workspace_id)
 
     async def _execute_file_op(self, tool_name, parameters, agent_id, workspace_id=None, trace_id=None, caller_context=None, **kw):
         return await exec_file_ops.execute_file_op(
@@ -584,14 +943,12 @@ class UnifiedToolExecutor:
             agent_id=agent_id, caller_context=caller_context,
         )
 
-    async def _execute_planning_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_planning.execute_planning_tool(self, tool_name, parameters, agent_id)
-
-    async def _execute_writing_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_planning.execute_writing_tool(self, tool_name, parameters, agent_id)
-
-    async def _execute_analysis_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_planning.execute_analysis_tool(self, tool_name, parameters, agent_id)
+    async def _execute_widget_callback(self, tool_name, parameters, agent_id, workspace_id=None, trace_id=None):
+        from modules.tools.widget_callback import handle_widget_open_callback_form
+        return await handle_widget_open_callback_form(
+            tool_name, parameters,
+            agent_id=agent_id, workspace_id=workspace_id, trace_id=trace_id,
+        )
 
     # ------------------------------------------------------------------
     # Tool discovery
