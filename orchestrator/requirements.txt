@@ -63,6 +63,11 @@ pytest-timeout==2.3.1  # per-test timeout net for CI (PRD-142 W2-S3); kills hang
 pytest-cov==4.1.0  # PRD-182 W12-S4 (F092): measured coverage + ratchet (compatible with pytest 7.4.x)
 black==23.11.0
 isort==5.12.0
+# PRD-211: in-repo topology discipline. `import-linter` (pulls grimp, pure
+# Python) runs the feature-module `independence` contract in orchestrator/
+# .importlinter — the CI lane .github/workflows/import-linter.yml fails loud on
+# a new feature->feature import edge. Zero runtime weight (dev/CI only).
+import-linter==2.1
 
 # Redis & SSH
 redis>=4.5.0
