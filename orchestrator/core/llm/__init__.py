@@ -8,10 +8,7 @@ Components:
 - manager.py           - LLM provider management (create_llm_manager)
 - embedding_manager.py - Embedding generation
 - clients/             - Provider-specific clients (OpenAI, Anthropic, HuggingFace)
-- function_registry.py - LLM function specifications
-- function_executor.py - Function execution
-- response_parser.py   - Response parsing
-- semantic_skill_matcher.py - Skill matching
+- rerank_manager.py    - Reranking
 
 Usage:
     from core.llm import create_llm_manager, get_embedding_manager
@@ -37,10 +34,6 @@ from core.llm.embedding_manager import (
 )
 
 # LLM utilities (original core/llm)
-from core.llm.function_registry import FunctionRegistry, FunctionSpec, FunctionParameter, FunctionCategory
-from core.llm.function_executor import FunctionExecutor, FunctionResult
-from core.llm.response_parser import ResponseParser, ParsedResponse
-from core.llm.semantic_skill_matcher import SemanticSkillMatcher, get_skill_matcher
 from core.llm.rerank_manager import RerankManager, get_rerank_manager
 
 __all__ = [
@@ -55,22 +48,6 @@ __all__ = [
     'EmbeddingManager',
     'create_embedding_manager',
     'get_embedding_manager',
-
-    # Function calling
-    'FunctionRegistry',
-    'FunctionSpec',
-    'FunctionParameter',
-    'FunctionCategory',
-    'FunctionExecutor',
-    'FunctionResult',
-    
-    # Response parsing
-    'ResponseParser',
-    'ParsedResponse',
-    
-    # Skill matching
-    'SemanticSkillMatcher',
-    'get_skill_matcher',
 
     # Reranking
     'RerankManager',

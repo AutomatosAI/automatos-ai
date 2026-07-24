@@ -27,7 +27,6 @@ const GROUP_ORDER: StudioMenuGroup[] = ['OPERATIONS', 'WORKFORCE', 'WORKSPACE'];
 
 export interface StudioSidebarProps {
   workspaceName?: string;
-  workspaceMeta?: string;
   workspaceMark?: string;
   alerts?: Record<string, string | number>;
   /** Collapse to icon-rail (60px). Defaults false. */
@@ -41,7 +40,6 @@ export interface StudioSidebarProps {
 // — kept as a static identity card showing the current workspace.
 export function StudioSidebar({
   workspaceName = 'Automatos AI',
-  workspaceMeta = 'pilot · 11 op',
   workspaceMark,
   alerts = {},
   collapsed = false,
@@ -93,7 +91,6 @@ export function StudioSidebar({
         {!collapsed && (
           <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
             <div className="sh-nm">{workspaceName}</div>
-            <div className="sh-meta">{workspaceMeta}</div>
           </div>
         )}
       </div>

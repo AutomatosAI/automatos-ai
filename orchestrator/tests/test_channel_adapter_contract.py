@@ -13,8 +13,8 @@ update the activity counter.
 
 What this proves (matching W3-S13 §AC):
 
-1. **Parametrized contract.** Every one of the 11 ``BaseChannelAdapter``
-   subclasses implements the same 5-method surface
+1. **Parametrized contract.** Every ``BaseChannelAdapter``
+   subclass implements the same 5-method surface
    (``start``, ``stop``, ``send_message``, ``test_connection``,
    ``_to_envelope``), all five are coroutines / methods of the
    expected shape, and the constructor accepts
@@ -77,20 +77,15 @@ BASE_PY = CHANNELS_DIR / "base.py"
 MANAGER_PY = CHANNELS_DIR / "manager.py"
 PRIMITIVE_HEARTBEAT_PY = CHANNELS_DIR / "primitive_heartbeat.py"
 
-# The 11 BaseChannelAdapter subclasses (verified 2026-06-06).
-# (module_filename, class_name) — derived from
-# channels/manager.py::_ADAPTER_MAP plus the imessage adapter.
+# The BaseChannelAdapter subclasses that back a live channels/drivers/ driver.
+# (module_filename, class_name) — one per channels/manager.py::_ADAPTER_MAP entry.
+# The 7 driverless legacy adapters (teams/google_chat/signal/imessage/irc/matrix/
+# line) were deleted in PRD-184 US-005; the contract still pins every adapter that
+# ships.
 ADAPTERS: list[tuple[str, str]] = [
     ("telegram_adapter", "TelegramAdapter"),
     ("slack_adapter", "SlackAdapter"),
     ("discord_adapter", "DiscordAdapter"),
-    ("teams_adapter", "TeamsAdapter"),
-    ("google_chat_adapter", "GoogleChatAdapter"),
-    ("signal_adapter", "SignalAdapter"),
-    ("imessage_adapter", "IMessageAdapter"),
-    ("irc_adapter", "IRCAdapter"),
-    ("matrix_adapter", "MatrixAdapter"),
-    ("line_adapter", "LINEAdapter"),
     ("whatsapp_adapter", "WhatsAppAdapter"),
 ]
 
@@ -119,7 +114,7 @@ for _k, _v in {
 
 @pytest.fixture(scope="module")
 def adapter_source_by_class() -> dict[str, str]:
-    """{class_name: source_text} for each of the 11 adapters."""
+    """{class_name: source_text} for each shipped adapter."""
     out: dict[str, str] = {}
     for module_file, class_name in ADAPTERS:
         path = CHANNELS_DIR / f"{module_file}.py"
@@ -130,7 +125,7 @@ def adapter_source_by_class() -> dict[str, str]:
 
 @pytest.fixture(scope="module")
 def adapter_ast_by_class(adapter_source_by_class) -> dict[str, ast.ClassDef]:
-    """{class_name: ClassDef AST node} for each of the 11 adapters."""
+    """{class_name: ClassDef AST node} for each shipped adapter."""
     out: dict[str, ast.ClassDef] = {}
     for class_name, src in adapter_source_by_class.items():
         tree = ast.parse(src)

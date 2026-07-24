@@ -33,7 +33,6 @@ from modules.tools.execution import exec_composio
 from modules.tools.execution import exec_document
 from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
-from modules.tools.execution import exec_planning
 from modules.tools.execution.telemetry import fire_telemetry
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
@@ -139,20 +138,6 @@ class UnifiedToolExecutor:
             'create_docx': self._execute_document_tool,
             'create_xlsx': self._execute_document_tool,
             'create_pptx': self._execute_document_tool,
-
-            # PRD-22 Expansion: Writing & Planning tools
-            'create_implementation_plan': self._execute_planning_tool,
-            'write_technical_content': self._execute_writing_tool,
-            'refine_content': self._execute_writing_tool,
-
-            # PRD-22 Expansion: Analysis tools
-            'review_code': self._execute_analysis_tool,
-            'security_scan': self._execute_analysis_tool,
-            'generate_tests': self._execute_analysis_tool,
-            'run_tests': self._execute_analysis_tool,
-            'research_topic': self._execute_analysis_tool,
-            'analyze_data': self._execute_analysis_tool,
-            'write_document': self._execute_writing_tool,
 
             # PRD-008-A.2: widget UI affordances
             'widget_open_callback_form': self._execute_widget_callback,
@@ -964,15 +949,6 @@ class UnifiedToolExecutor:
             tool_name, parameters,
             agent_id=agent_id, workspace_id=workspace_id, trace_id=trace_id,
         )
-
-    async def _execute_planning_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_planning.execute_planning_tool(self, tool_name, parameters, agent_id)
-
-    async def _execute_writing_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_planning.execute_writing_tool(self, tool_name, parameters, agent_id)
-
-    async def _execute_analysis_tool(self, tool_name, parameters, agent_id, **kw):
-        return await exec_planning.execute_analysis_tool(self, tool_name, parameters, agent_id)
 
     # ------------------------------------------------------------------
     # Tool discovery

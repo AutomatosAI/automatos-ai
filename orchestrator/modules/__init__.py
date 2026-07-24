@@ -12,15 +12,14 @@ Available Modules (Complete):
 - tools/       - Tool registry and execution ✅
 - nl2sql/     - Natural language to SQL ✅
 - codegraph/   - Code analysis and search ✅
-- learning/    - Self-improvement (patterns, playbooks, feedback) ✅
-- evaluation/  - Evaluation and benchmarking (structure ready)
+- learning/    - Playbook mining (PlaybookMiner) ✅
 
 Usage:
     from modules.search import ContextOptimizer
     from modules.rag import RAGService, SemanticChunker
     from modules.memory.unified_memory_service import get_unified_memory_service
     from modules.agents import AgentService, AgentFactory
-    from modules.tools import ToolService, ToolRegistry
+    from modules.tools import ToolRegistry, get_tools_for_agent
     from modules.learning import PlaybookMiner
 """
 
@@ -34,5 +33,4 @@ __all__ = [
     "nl2sql",
     "codegraph",
     "learning",
-    "evaluation",
 ]

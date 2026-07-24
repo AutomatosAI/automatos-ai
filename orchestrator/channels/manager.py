@@ -140,13 +140,6 @@ class ChannelManager:
             "telegram":    (".telegram_adapter",     "TelegramAdapter"),
             "slack":       (".slack_adapter",        "SlackAdapter"),
             "discord":     (".discord_adapter",      "DiscordAdapter"),
-            "teams":       (".teams_adapter",        "TeamsAdapter"),
-            "google_chat": (".google_chat_adapter",  "GoogleChatAdapter"),
-            "signal":      (".signal_adapter",       "SignalAdapter"),
-            "imessage":    (".imessage_adapter",     "IMessageAdapter"),
-            "irc":         (".irc_adapter",          "IRCAdapter"),
-            "matrix":      (".matrix_adapter",       "MatrixAdapter"),
-            "line":        (".line_adapter",         "LineAdapter"),
             "whatsapp":    (".whatsapp_adapter",     "WhatsAppAdapter"),
         }
 
