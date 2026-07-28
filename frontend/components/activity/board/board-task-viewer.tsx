@@ -9,9 +9,11 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import type { BoardTask } from '@/types/board'
 import { PRIORITY_CONFIG, STATUS_CONFIG } from '@/types/board'
-import { useUpdateTaskStatus, useApproveTask, useRejectTask, useRunTask } from '@/hooks/use-board-tasks'
+import { useUpdateTaskStatus, useApproveTask, useRejectTask } from '@/hooks/use-board-tasks'
+import { useApproveMission } from '@/hooks/use-missions-api'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/hooks/use-toast'
 
 interface BoardTaskViewerProps {
   task: BoardTask | null
@@ -425,7 +427,8 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
   const updateStatus = useUpdateTaskStatus()
   const approveTask = useApproveTask()
   const rejectTask = useRejectTask()
-  const runTask = useRunTask()
+  const approveMission = useApproveMission()
+  const { toast } = useToast()
 
   if (!task) return null
 
@@ -439,9 +442,40 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
     }
   }
 
+  /**
+   * Cascade approve: if this task is linked to a mission that's still
+   * sitting in awaiting_approval / awaiting_human, approving the kanban
+   * ticket also approves the mission plan — saves the user the extra
+   * trip to /missions/<id> to click Approve a second time.
+   *
+   * Implemented as a fire-and-forget secondary call so the kanban
+   * approve never blocks on the mission lookup. If the mission has
+   * already moved past the plan stage, the backend 4xx is swallowed.
+   */
   const handleApprove = () => {
     approveTask.mutate({ taskId: task.id }, {
-      onSuccess: () => onOpenChange(false),
+      onSuccess: async () => {
+        const missionId = task.mission_id
+        if (missionId) {
+          try {
+            const mission = await apiClient.request<{ state?: string }>(
+              `/api/missions/${missionId}`,
+            )
+            if (mission.state === 'awaiting_approval' || mission.state === 'awaiting_human') {
+              await approveMission.mutateAsync({ id: missionId })
+              toast({
+                title: 'Mission approved',
+                description: 'The owning mission plan was also approved — it’ll start running now.',
+              })
+            }
+          } catch {
+            // Mission lookup or approve failed — the task approval still
+            // succeeded, so don't block the user. They can manually
+            // approve the mission from /missions/<id> if needed.
+          }
+        }
+        onOpenChange(false)
+      },
     })
   }
 

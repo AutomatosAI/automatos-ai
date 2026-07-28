@@ -37,6 +37,10 @@ export interface BoardTask {
   report_id?: string
   source_id: string
   project_id?: number
+  /** Full mission run UUID — set when the task was spawned by a mission.
+   *  Used to cascade kanban approval back to the owning mission's
+   *  awaiting_approval gate so the user only approves once. */
+  mission_id?: string
   mission_name?: string
   parent_task_id?: string
   child_count?: number

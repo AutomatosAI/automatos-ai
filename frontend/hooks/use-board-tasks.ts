@@ -238,6 +238,8 @@ function mapTaskToBoardTask(item: any): BoardTask {
     project_id: item.orchestration_run_id
       ? item.orchestration_run_id.slice(0, 8)
       : undefined,
+    // Full mission UUID — feeds the kanban → mission cascade-approve.
+    mission_id: item.orchestration_run_id ?? undefined,
     step_progress: item.planning_data?.step_progress ?? undefined,
     planning_data: item.planning_data ? {
       // Normalize recipe_id (legacy) to playbook_id

@@ -117,35 +117,38 @@ export function StudioAssignmentsHub() {
         </button>
       </nav>
 
-      {/* Start something — EntryGrid */}
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <span
-            style={{
-              fontFamily: 'var(--serif)',
-              fontSize: 17,
-              fontWeight: 500,
-              color: 'var(--fg)',
-            }}
-          >
-            Start something
-          </span>
-          <span
-            style={{
-              fontFamily: 'var(--font-geist-mono, monospace)',
-              fontSize: 10,
-              color: 'var(--fg-3)',
-              letterSpacing: '0.06em',
-            }}
-          >
-            pick the kind of work · all share the same composer
-          </span>
-        </div>
-        <EntryGrid recommended="mission" onPick={handleEntry} />
-      </section>
+      {/* Body — scrolls. EntryGrid lives at the top of the body so it
+          scrolls away as the user moves into the library; the editorial
+          top + tabs above stay pinned. */}
+      <div className="cc-body">
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <span
+              style={{
+                fontFamily: 'var(--serif)',
+                fontSize: 17,
+                fontWeight: 500,
+                color: 'var(--fg)',
+              }}
+            >
+              Start something
+            </span>
+            <span
+              style={{
+                fontFamily: 'var(--font-geist-mono, monospace)',
+                fontSize: 10,
+                color: 'var(--fg-3)',
+                letterSpacing: '0.06em',
+              }}
+            >
+              pick the kind of work · all share the same composer
+            </span>
+          </div>
+          <EntryGrid recommended="mission" onPick={handleEntry} />
+        </section>
 
-      {/* Tab body */}
-      {tab === 'playbooks' ? <PlaybooksBody /> : <MissionsBody />}
+        {tab === 'playbooks' ? <PlaybooksBody /> : <MissionsBody />}
+      </div>
 
       <CreateMissionModal open={missionOpen} onOpenChange={setMissionOpen} />
       <CreatePlaybookModal

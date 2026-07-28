@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft,
@@ -20,6 +20,7 @@ import { TemplateStudio } from '@/components/documents/blocks/TemplateStudio'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 import {
   DEFAULT_FILTERS,
   FEED_DEFAULT_FILTERS,
@@ -41,6 +42,7 @@ export default function DeliverablesPage() {
   const { workspace, isLoading } = useWorkspace()
   const searchParams = useSearchParams()
   const router = useRouter()
+  const isStudio = useIsStudio()
 
   const activeTab = resolveTab(searchParams?.get('tab') ?? null)
   const artifactTypeParam = searchParams?.get('artifact_type') ?? null
@@ -75,11 +77,66 @@ export default function DeliverablesPage() {
     router.replace('/deliverables?tab=outputs')
   }, [router])
 
+  // Studio renders tabs in the global StudioPageTabs strip. If a user
+  // (or a stale link) lands here with ?tab=explorer, forward to the
+  // dedicated explorer route — no tab panel to render here.
+  useEffect(() => {
+    if (!isStudio) return
+    if (searchParams?.get('tab') === 'explorer') {
+      router.replace('/deliverables/explorer')
+    }
+  }, [isStudio, searchParams, router])
+
+  const drilldownPanel = workspace ? (
+    drilldownTitle ? (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={handleBackToFeed}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to feed
+          </Button>
+          <h2 className="text-sm font-medium text-muted-foreground">
+            Showing all <span className="text-foreground">{drilldownTitle}</span>
+          </h2>
+        </div>
+        <GalleryView
+          workspaceId={workspace.id}
+          initialFilters={drilldownFilters}
+        />
+      </div>
+    ) : (
+      <OutputsFeed />
+    )
+  ) : null
+
   return (
     <MainLayout>
       {isLoading || !workspace ? (
         <div className="flex items-center justify-center h-[calc(100vh-4rem)]">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : isStudio ? (
+        <div className="space-y-6">
+          <PageHeader
+            title="Your"
+            titleAccent="Deliverables"
+            eyebrow="Outputs · the work that landed"
+            lede="Every file, report, draft, and template your agents produced. Open, share, fork into a new mission, or post to the books."
+          />
+          <div className="mx-auto max-w-[1600px]">
+            {activeTab === 'blogs' ? (
+              <DeliverablesBlog />
+            ) : activeTab === 'templates' ? (
+              <TemplateManager />
+            ) : (
+              drilldownPanel
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
@@ -101,32 +158,7 @@ export default function DeliverablesPage() {
             dataTour="deliverables-tabs"
           >
             <TabsContent value="outputs">
-              <div className="mx-auto max-w-[1600px]">
-                {drilldownTitle ? (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1.5 text-muted-foreground hover:text-foreground"
-                        onClick={handleBackToFeed}
-                      >
-                        <ArrowLeft className="h-3.5 w-3.5" />
-                        Back to feed
-                      </Button>
-                      <h2 className="text-sm font-medium text-muted-foreground">
-                        Showing all <span className="text-foreground">{drilldownTitle}</span>
-                      </h2>
-                    </div>
-                    <GalleryView
-                      workspaceId={workspace.id}
-                      initialFilters={drilldownFilters}
-                    />
-                  </div>
-                ) : (
-                  <OutputsFeed />
-                )}
-              </div>
+              <div className="mx-auto max-w-[1600px]">{drilldownPanel}</div>
             </TabsContent>
 
             <TabsContent value="blogs">

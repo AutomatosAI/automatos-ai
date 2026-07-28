@@ -154,7 +154,9 @@ export function ActivityTab() {
   const totalShown = items.length
 
   // Unfiltered fetch just to power the filter-pill counts.
-  const { data: allData } = useActivityFeed({ limit: 200 })
+  // Backend caps limit at 100; sending 200 returns 422 and refetches
+  // on every window-focus event, which made the page flicker repeatedly.
+  const { data: allData } = useActivityFeed({ limit: 100 })
   const counts = useMemo(() => {
     const all = allData?.items ?? items
     const errs = all.filter((i) => i.status === 'failed').length

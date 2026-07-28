@@ -35,7 +35,8 @@ import { MissionFieldPanel } from './mission-field-panel'
 import { MissionDeliverablesPanel } from './mission-deliverables-panel'
 import { useMission, usePauseMission, useResumeMission, useCancelMission, useApproveMission, useRejectMission, useSaveAsRoutine, useReplanMission, useRerunMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
-import { computeMissionStats, TERMINAL_RUN_STATES } from '@/types/missions'
+import { computeMissionStats, TERMINAL_RUN_STATES, RUN_STATE_CONFIG } from '@/types/missions'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 import {
   Select,
   SelectContent,
@@ -50,8 +51,22 @@ interface MissionDetailPageProps {
   missionId: string
 }
 
+// Derive a single-line headline from a (possibly long) mission brief:
+// first sentence (.!?) or first line; hard cap at 100 chars with ellipsis.
+function deriveMissionHeadline(text: string): string {
+  const firstLine = text.split(/\r?\n/, 1)[0]?.trim() ?? text
+  const sentenceEnd = firstLine.search(/[.!?](\s|$)/)
+  let head = sentenceEnd > 0 ? firstLine.slice(0, sentenceEnd + 1) : firstLine
+  if (head.length > 100) head = head.slice(0, 97).trimEnd() + '…'
+  return head
+}
+
 export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const showReview = searchParams?.get('tab') === 'review'
+  const isStudio = useIsStudio()
+
   const { data: mission, isLoading } = useMission(missionId)
   const { selectedTaskId, setSelectedTaskId, planModifications, clearPlanModifications } = useMissionStore()
 
@@ -115,9 +130,174 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
 
   const isTerminal = (TERMINAL_RUN_STATES as readonly string[]).includes(mission.state)
 
+  // Strip a leading "Mission:" / "Mission " prefix, then derive a tight
+  // headline so a multi-paragraph brief doesn't become the H1. Full text
+  // remains available on hover (title attr) and in the brief panel below.
+  const cleanedGoal = mission.goal.replace(/^\s*mission\s*[:\-—]?\s*/i, '').trim() || mission.goal
+  const goalTitle = deriveMissionHeadline(cleanedGoal)
+  const goalIsTruncated = goalTitle !== cleanedGoal
+  const stateLabel = RUN_STATE_CONFIG[mission.state]?.label ?? mission.state
+
+  // ── Stats strip (Studio) ───────────────────────────────────────
+  const budgetPct =
+    mission.token_budget_estimate && mission.token_budget_estimate > 0
+      ? Math.round((mission.tokens_used / mission.token_budget_estimate) * 100)
+      : null
+  const budgetTone =
+    budgetPct == null ? 'muted'
+    : budgetPct >= 100 ? 'err'
+    : budgetPct >= 80 ? 'err'
+    : budgetPct >= 50 ? 'warn'
+    : 'ok'
+  // Spend mirrors MissionBudgetBar — $4/M tokens placeholder.
+  const spendUsd = (mission.tokens_used / 1_000_000) * 4
+  const fmtTokens = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+    return String(n)
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
+      {isStudio ? (
+        <div className="cc-page" style={{ height: 'auto', paddingBottom: 18, gap: 14 }}>
+          <Link
+            href="/assignments?tab=missions"
+            className="inline-flex items-center gap-1.5 text-xs"
+            style={{
+              color: 'hsl(var(--muted-foreground))',
+              fontFamily: 'var(--font-geist-mono, monospace)',
+              letterSpacing: '0.04em',
+              width: 'fit-content',
+            }}
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back to Missions
+          </Link>
+
+          <div className="cc-headrow">
+            <div className="cc-head">
+              <p className="cc-eyebrow">Operations · Mission {missionId.slice(0, 8)}</p>
+              <h1 className="cc-h1" style={{ maxWidth: '90ch' }} title={goalIsTruncated ? cleanedGoal : undefined}>{goalTitle}</h1>
+              <p className="cc-sub">
+                <b>{stateLabel}</b>
+                {stats ? ` · ${stats.tasksDone}/${stats.taskCount} tasks` : ''}
+                {stats && stats.tasksActive > 0 ? ` · ${stats.tasksActive} active` : ''}
+                {stats && stats.elapsedMs > 0 ? ` · ${formatElapsed(stats.elapsedMs)} elapsed` : ''}
+                {budgetPct != null ? ` · ${budgetPct}% budget` : ''}
+              </p>
+            </div>
+            <div className="cc-actions">
+              {mission.state === 'running' && (
+                <button
+                  type="button"
+                  className="cc-btn"
+                  onClick={() => pauseMutation.mutate(missionId, {
+                    onError: (err) => toast.error(err.message),
+                  })}
+                  disabled={pauseMutation.isLoading}
+                >
+                  <Pause style={{ width: 12, height: 12 }} />
+                  Pause
+                </button>
+              )}
+              {mission.state === 'paused' && (
+                <button
+                  type="button"
+                  className="cc-btn"
+                  onClick={() => resumeMutation.mutate(missionId, {
+                    onError: (err) => toast.error(err.message),
+                  })}
+                  disabled={resumeMutation.isLoading}
+                >
+                  <Play style={{ width: 12, height: 12 }} />
+                  Resume
+                </button>
+              )}
+              {!isTerminal && (
+                <button
+                  type="button"
+                  className="cc-btn"
+                  style={{ color: 'hsl(var(--accent))', borderColor: 'hsl(var(--accent) / 0.4)' }}
+                  onClick={() => cancelMutation.mutate(missionId, {
+                    onError: (err) => toast.error(err.message),
+                  })}
+                  disabled={cancelMutation.isLoading}
+                >
+                  <X style={{ width: 12, height: 12 }} />
+                  Cancel
+                </button>
+              )}
+              {isTerminal && (
+                <button
+                  type="button"
+                  className="cc-btn primary"
+                  disabled={rerunMutation.isLoading}
+                  onClick={() =>
+                    rerunMutation.mutate(
+                      { goal: mission.goal, config: mission.config ?? undefined },
+                      {
+                        onSuccess: (newMission) => {
+                          toast.success('New mission created from same goal')
+                          router.push(`/missions/${newMission.id}` as any)
+                        },
+                        onError: (err) => toast.error(err.message),
+                      },
+                    )
+                  }
+                >
+                  <RefreshCw style={{ width: 12, height: 12 }} />
+                  {rerunMutation.isLoading ? 'Creating…' : 'Re-run'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Editorial stats strip — 5 cells */}
+          <div className="cc-stats" style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
+            <div className="cell">
+              <div className="l">TASKS</div>
+              <div className="v">{stats ? `${stats.tasksDone}/${stats.taskCount}` : '—'}</div>
+              <div className="delta">{stats?.tasksFailed ? `${stats.tasksFailed} failed` : 'on track'}</div>
+            </div>
+            <div className="cell">
+              <div className="l">ACTIVE</div>
+              <div className={`v ${stats && stats.tasksActive > 0 ? 'info' : ''}`}>
+                {stats?.tasksActive ?? 0}
+              </div>
+              <div className="delta">running now</div>
+            </div>
+            <div className="cell">
+              <div className="l">TOKENS</div>
+              <div className="v">{fmtTokens(mission.tokens_used)}</div>
+              <div className="delta">
+                {mission.token_budget_estimate
+                  ? `of ${fmtTokens(mission.token_budget_estimate)}`
+                  : 'no budget set'}
+              </div>
+            </div>
+            <div className="cell">
+              <div className="l">BUDGET</div>
+              <div className={`v ${budgetTone === 'muted' ? '' : budgetTone}`}>
+                {budgetPct != null ? `${budgetPct}%` : '—'}
+              </div>
+              <div className="delta">
+                {budgetPct == null ? 'not capped'
+                 : budgetPct >= 100 ? 'over budget'
+                 : budgetPct >= 80 ? 'tight'
+                 : budgetPct >= 50 ? 'watching'
+                 : 'healthy'}
+              </div>
+            </div>
+            <div className="cell">
+              <div className="l">SPEND</div>
+              <div className="v">${spendUsd.toFixed(2)}</div>
+              <div className="delta">~$4 / M tok</div>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="p-4 md:p-6 border-b border-border space-y-4">
         {/* Back link */}
         <Link
@@ -387,6 +567,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
           />
         )}
       </div>
+      )}
 
       {/* Plan approval bar */}
       {mission.state === 'awaiting_approval' && (
@@ -518,8 +699,11 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         </div>
       )}
 
-      {/* Main content */}
-      <div className="flex-1 min-h-0">
+      {/* Main content — explicit min-height keeps the DAG/right-panel row
+          from collapsing when a tab renders a short empty state (e.g.
+          Field with no patterns yet). The parent chain has no concrete
+          height (MainLayout's <main> is auto), so we anchor on vh. */}
+      <div className="flex-1" style={{ minHeight: '60vh' }}>
         <ResizablePanelGroup direction="horizontal" className="h-full">
           {/* DAG panel */}
           <ResizablePanel defaultSize={60} minSize={30}>
