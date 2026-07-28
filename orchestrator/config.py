@@ -1373,6 +1373,14 @@ class Config:
     VOICE_LIVE_SPEECH_UNIT_MAX_CHARS: int = int(
         os.getenv("VOICE_LIVE_SPEECH_UNIT_MAX_CHARS", "180")
     )
+    # Time-to-first-audio guard (PRD-203's property: the caller hears something
+    # while the agent is still generating). The FIRST unit of a turn flushes at
+    # a much smaller ceiling than the rest, so an opening clause starts playing
+    # instead of waiting for the sentence to land. Later units use the full
+    # ceiling, where prosody matters more than milliseconds.
+    VOICE_LIVE_SPEECH_FIRST_UNIT_MAX_CHARS: int = int(
+        os.getenv("VOICE_LIVE_SPEECH_FIRST_UNIT_MAX_CHARS", "60")
+    )
     # Auto is told she is being HEARD on spoken turns (short sentences, no
     # markdown, no URLs read aloud). Same brain, different medium — false
     # restores the old behaviour of speaking her chat-formatted answer.
