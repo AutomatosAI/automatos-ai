@@ -529,6 +529,17 @@ class LLMManager:
         elif provider == LLMProvider.OPENROUTER:
             api_key = cred_data.get("api_key") or cred_data.get("api_token")
 
+        # Operator workspace key overrides a drifted credential-store copy —
+        # the stored platform slot held a provider-side-deleted key for months
+        # while every background LLM call 401'd (2026-07-30).
+        from core.llm.workspace_keys import get_platform_workspace_key
+        ws_key = get_platform_workspace_key(provider.value)
+        if ws_key:
+            api_key = ws_key
+            base_url = None
+            organization_id = None
+            secret_key = None
+
         # Fallback to environment variables if credentials not found (except HuggingFace)
         if not api_key and provider != LLMProvider.HUGGINGFACE:
             fallback_env_vars = {
