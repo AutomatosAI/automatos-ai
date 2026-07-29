@@ -454,6 +454,17 @@ class AgentFactory:
             except Exception as e:
                 self.logger.error(f"BYOK key lookup failed for {provider_name}: {e}")
 
+        # 1.5 Operator workspace key (PLATFORM_KEY_WORKSPACE_ID) — the pilot
+        # "platform key" lane, read live from user_api_keys instead of a
+        # duplicated credential-store copy that can drift (2026-07-30).
+        from core.llm.workspace_keys import get_platform_workspace_key
+        ws_key = get_platform_workspace_key(provider_name)
+        if ws_key:
+            self.logger.info(
+                f"Resolved platform key from operator workspace store for '{provider_name}' ({agent_name})"
+            )
+            return ResolvedKey(api_key=ws_key, source="platform_workspace", is_byok=False, provider=provider_name)
+
         # 2. Credential store (platform keys)
         cred_names = [
             f"development_{provider_name}_api",

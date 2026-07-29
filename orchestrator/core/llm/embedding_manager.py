@@ -96,10 +96,15 @@ class EmbeddingManager:
                 self.provider = DeterministicEmbeddingProvider(dimension=dimension)
                 return
             
-            # Get API key for provider (if needed)
+            # Get API key for provider (if needed).
+            # Operator workspace key first — the credential-store copy can
+            # drift (dead openrouter_api row served for months, 2026-07-30).
             api_key = None
             if provider_type != "huggingface_local":
-                api_key = get_credential_field(provider_type)
+                from core.llm.workspace_keys import get_platform_workspace_key
+                api_key = get_platform_workspace_key(provider_type)
+                if not api_key:
+                    api_key = get_credential_field(provider_type)
                 
                 # Fallback to environment variables
                 if not api_key:

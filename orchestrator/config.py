@@ -464,6 +464,10 @@ class Config:
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+    # Workspace whose stored user_api_keys rows act as the platform-level
+    # provider keys for background workers (embeddings, system LLM) and the
+    # pilot chat fallback. Empty = disabled (legacy credential-store-only).
+    PLATFORM_KEY_WORKSPACE_ID: str = os.getenv("PLATFORM_KEY_WORKSPACE_ID", "")
 
     # =============================================================================
     # URLS (Backend, Frontend, API)
