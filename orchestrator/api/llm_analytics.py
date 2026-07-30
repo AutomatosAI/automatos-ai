@@ -686,6 +686,10 @@ class OpenRouterKeyInfoResponse(BaseModel):
     "/openrouter/sync",
     response_model=OpenRouterSyncResponse,
     summary="Trigger OpenRouter activity sync",
+    # Mutating obs route: stays super-admin even though the router relaxed to
+    # workspace admins (2026-07-30) — enforced by
+    # test_p2w2_authz_boundary_sweep::test_obs_tier_mutating_routes_stay_super_admin_locked.
+    dependencies=[Depends(require_super_admin)],
 )
 async def sync_openrouter_activity(
     ctx: RequestContext = Depends(get_request_context_hybrid),

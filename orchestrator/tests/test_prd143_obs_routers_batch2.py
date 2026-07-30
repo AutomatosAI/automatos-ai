@@ -55,7 +55,12 @@ SUPER_ADMIN = UserContext(id="u-gerard", role="admin", system_role="super_admin"
 # (router module, router attribute, representative GET path) — one per locked
 # router. llm_analytics carries TWO routers; both are part of the obs surface.
 ROUTERS = [
-    pytest.param("api.llm_analytics", "router", "/api/analytics/llm/usage", id="llm_analytics"),
+    # api.llm_analytics "router" moved OFF the su-locked list 2026-07-30:
+    # workspace owners/admins may read their own workspace's LLM analytics
+    # (every endpoint filters by ctx.workspace_id). New contract lives in the
+    # TestLlmAnalyticsWorkspaceAccess block below. Its mutating POST
+    # (/openrouter/sync) keeps a route-level su lock, asserted there and by
+    # the authz boundary sweep.
     pytest.param("api.llm_analytics", "admin_router", "/api/admin/analytics/costs", id="llm_admin_analytics"),
     pytest.param("api.statistics", "router", "/api/system/agents/statistics", id="statistics"),
     pytest.param("api.composio_analytics", "router", "/api/analytics/composio/apps", id="composio_analytics"),
@@ -137,6 +142,81 @@ def test_not_403_for_super_admin(module_name, router_attr, path):
     assert resp.status_code not in (401, 403), (
         f"super admin must pass the gate; got {resp.status_code}: {resp.text}"
     )
+
+
+# ── 2026-07-30: llm_analytics workspace-scoped router — new contract ────────
+#
+# Workspace owners/admins read their OWN workspace's LLM analytics
+# (require_workspace_admin). Members and API-key principals still 403.
+# The mutating POST /openrouter/sync keeps a route-level super-admin lock.
+
+_USAGE = "/api/analytics/llm/usage"
+_SYNC = "/api/analytics/llm/openrouter/sync"
+
+
+def _member_db(is_admin_member: bool) -> MagicMock:
+    """Fake db whose raw-SQL membership probe answers the workspace-admin
+    check; query-chain terminals stay empty like _fake_db."""
+    db = _fake_db()
+    result = MagicMock()
+    result.fetchone.return_value = (1,) if is_admin_member else None
+    result.fetchall.return_value = []
+    result.scalar.return_value = 0
+    db.execute.return_value = result
+    return db
+
+
+def _ws_client(user: UserContext, is_admin_member: bool) -> TestClient:
+    import importlib
+
+    module = importlib.import_module("api.llm_analytics")
+    app = FastAPI()
+    app.include_router(module.router)
+
+    def _override_ctx():
+        return RequestContext(workspace_id=_WS, user=user, auth_type="clerk")
+
+    def _override_db():
+        yield _member_db(is_admin_member)
+
+    app.dependency_overrides[get_request_context_hybrid] = _override_ctx
+    app.dependency_overrides[get_db] = _override_db
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_llm_analytics_member_still_403():
+    resp = _ws_client(MEMBER, is_admin_member=False).get(_USAGE)
+    assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text}"
+    assert resp.json()["detail"] == "Workspace admin only"
+
+
+def test_llm_analytics_api_key_admin_still_403():
+    # API-key principals (system_role='admin') have no workspace membership —
+    # refused by require_workspace_admin.
+    resp = _ws_client(API_KEY_ADMIN, is_admin_member=False).get(_USAGE)
+    assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text}"
+
+
+def test_llm_analytics_workspace_admin_and_owner_pass():
+    for user in (WS_ADMIN, WS_OWNER):
+        resp = _ws_client(user, is_admin_member=True).get(_USAGE)
+        assert resp.status_code not in (401, 403), (
+            f"workspace admin/owner must read own analytics; got {resp.status_code}: {resp.text}"
+        )
+
+
+def test_llm_analytics_super_admin_passes_without_membership():
+    resp = _ws_client(SUPER_ADMIN, is_admin_member=False).get(_USAGE)
+    assert resp.status_code not in (401, 403), (
+        f"super admin must pass; got {resp.status_code}: {resp.text}"
+    )
+
+
+def test_llm_analytics_openrouter_sync_stays_super_admin_locked():
+    # Even a legitimate workspace admin must not trigger the mutating sync.
+    resp = _ws_client(WS_ADMIN, is_admin_member=True).post(_SYNC)
+    assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text}"
+    assert resp.json()["detail"] == "Super admin only"
 
 
 if __name__ == "__main__":
