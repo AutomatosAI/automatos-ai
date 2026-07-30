@@ -44,6 +44,15 @@ admin_router = APIRouter(
     tags=["Admin Analytics"],
     dependencies=[Depends(require_super_admin)],
 )
+# Mutating obs routes never relax (authz boundary sweep enforces exactly one
+# auth bucket per route) — the OpenRouter sync POST lives on its own
+# super-admin-only router at the SAME path prefix, outside the workspace-admin
+# relax above.
+sync_router = APIRouter(
+    prefix="/api/analytics/llm",
+    tags=["LLM Analytics"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────
@@ -682,14 +691,10 @@ class OpenRouterKeyInfoResponse(BaseModel):
     rate_limit: Dict[str, Any] = Field(default_factory=dict)
 
 
-@router.post(
+@sync_router.post(
     "/openrouter/sync",
     response_model=OpenRouterSyncResponse,
     summary="Trigger OpenRouter activity sync",
-    # Mutating obs route: stays super-admin even though the router relaxed to
-    # workspace admins (2026-07-30) — enforced by
-    # test_p2w2_authz_boundary_sweep::test_obs_tier_mutating_routes_stay_super_admin_locked.
-    dependencies=[Depends(require_super_admin)],
 )
 async def sync_openrouter_activity(
     ctx: RequestContext = Depends(get_request_context_hybrid),

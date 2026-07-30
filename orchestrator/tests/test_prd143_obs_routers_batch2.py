@@ -153,6 +153,12 @@ def test_not_403_for_super_admin(module_name, router_attr, path):
 _USAGE = "/api/analytics/llm/usage"
 _SYNC = "/api/analytics/llm/openrouter/sync"
 
+# require_workspace_admin resolves membership by ctx.user.clerk_user_id —
+# principals without one refuse before the DB probe (workspace_admin.py).
+CK_MEMBER = UserContext(id="u-member", role="member", system_role="user", clerk_user_id="ck_member")
+CK_WS_ADMIN = UserContext(id="u-ws-admin", role="admin", system_role="user", clerk_user_id="ck_admin")
+CK_WS_OWNER = UserContext(id="u-ws-owner", role="owner", system_role="user", clerk_user_id="ck_owner")
+
 
 def _member_db(is_admin_member: bool) -> MagicMock:
     """Fake db whose raw-SQL membership probe answers the workspace-admin
@@ -172,6 +178,7 @@ def _ws_client(user: UserContext, is_admin_member: bool) -> TestClient:
     module = importlib.import_module("api.llm_analytics")
     app = FastAPI()
     app.include_router(module.router)
+    app.include_router(module.sync_router)
 
     def _override_ctx():
         return RequestContext(workspace_id=_WS, user=user, auth_type="clerk")
@@ -185,20 +192,21 @@ def _ws_client(user: UserContext, is_admin_member: bool) -> TestClient:
 
 
 def test_llm_analytics_member_still_403():
-    resp = _ws_client(MEMBER, is_admin_member=False).get(_USAGE)
+    # Clerk id present, but the membership probe finds no owner/admin row.
+    resp = _ws_client(CK_MEMBER, is_admin_member=False).get(_USAGE)
     assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text}"
     assert resp.json()["detail"] == "Workspace admin only"
 
 
 def test_llm_analytics_api_key_admin_still_403():
-    # API-key principals (system_role='admin') have no workspace membership —
-    # refused by require_workspace_admin.
-    resp = _ws_client(API_KEY_ADMIN, is_admin_member=False).get(_USAGE)
+    # API-key principals (system_role='admin') carry no clerk_user_id —
+    # refused by require_workspace_admin before the DB probe.
+    resp = _ws_client(API_KEY_ADMIN, is_admin_member=True).get(_USAGE)
     assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text}"
 
 
 def test_llm_analytics_workspace_admin_and_owner_pass():
-    for user in (WS_ADMIN, WS_OWNER):
+    for user in (CK_WS_ADMIN, CK_WS_OWNER):
         resp = _ws_client(user, is_admin_member=True).get(_USAGE)
         assert resp.status_code not in (401, 403), (
             f"workspace admin/owner must read own analytics; got {resp.status_code}: {resp.text}"
@@ -213,10 +221,15 @@ def test_llm_analytics_super_admin_passes_without_membership():
 
 
 def test_llm_analytics_openrouter_sync_stays_super_admin_locked():
-    # Even a legitimate workspace admin must not trigger the mutating sync.
-    resp = _ws_client(WS_ADMIN, is_admin_member=True).post(_SYNC)
+    # Even a legitimate workspace admin must not trigger the mutating sync —
+    # it lives on sync_router, super-admin-only.
+    resp = _ws_client(CK_WS_ADMIN, is_admin_member=True).post(_SYNC)
     assert resp.status_code == 403, f"expected 403, got {resp.status_code}: {resp.text}"
     assert resp.json()["detail"] == "Super admin only"
+    ok = _ws_client(SUPER_ADMIN, is_admin_member=False).post(_SYNC)
+    assert ok.status_code not in (401, 403), (
+        f"super admin must reach the sync handler; got {ok.status_code}: {ok.text}"
+    )
 
 
 if __name__ == "__main__":
