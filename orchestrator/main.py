@@ -111,7 +111,7 @@ from api.agent_endpoints import router as agent_endpoints_router
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.llm_marketplace import router as llm_marketplace_router  # PRD-54: LLM Marketplace
 from api.openrouter_marketplace import router as openrouter_marketplace_router  # OpenRouter Model Cache
-from api.llm_analytics import router as llm_analytics_router, admin_router as llm_admin_analytics_router  # PRD-54: LLM Analytics
+from api.llm_analytics import router as llm_analytics_router, admin_router as llm_admin_analytics_router, sync_router as llm_sync_analytics_router  # PRD-54: LLM Analytics
 from api.composio_analytics import router as composio_analytics_router  # PRD-54: Composio Analytics
 from api.analytics_charts import router as analytics_charts_router  # PRD-54: PandasAI Charts
 from api.user_api_keys import router as user_api_keys_router  # PRD-54: BYOK API Keys
@@ -1024,6 +1024,7 @@ app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plu
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
 app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)
 app.include_router(llm_analytics_router)  # PRD-54: LLM Usage Analytics
+app.include_router(llm_sync_analytics_router)  # su-only mutating sync (same prefix)
 app.include_router(llm_admin_analytics_router)  # PRD-54: Admin Cost Analytics
 app.include_router(composio_analytics_router)  # PRD-54: Composio Analytics
 app.include_router(analytics_charts_router)  # PRD-54: PandasAI Charts
