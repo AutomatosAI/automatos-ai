@@ -18,6 +18,7 @@ from sqlalchemy import func, desc, and_
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.super_admin import require_super_admin
+from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
 from core.models.core import LLMUsage, LLMModel, UserApiKey, Agent, RecipeExecution
 from core.models import WorkflowTemplate as WorkflowRecipe
@@ -27,12 +28,16 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-# PRD-143 S7: observability tier — router-wide super-admin lock (fail-closed)
-# on BOTH routers in this module.
+# PRD-143 S7 locked BOTH routers to super-admin; 2026-07-30 (Gerard) relaxes
+# the workspace-scoped router to workspace owners/admins: every endpoint here
+# already filters LLMUsage by ctx.workspace_id (audited — no cross-workspace
+# reads), so an owner/admin sees exactly their own workspace's analytics.
+# require_workspace_admin passes super_admin unconditionally. The cross-
+# workspace aggregate surface below (admin_router) stays super-admin-only.
 router = APIRouter(
     prefix="/api/analytics/llm",
     tags=["LLM Analytics"],
-    dependencies=[Depends(require_super_admin)],
+    dependencies=[Depends(require_workspace_admin)],
 )
 admin_router = APIRouter(
     prefix="/api/admin/analytics",
