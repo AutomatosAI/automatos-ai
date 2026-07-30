@@ -614,6 +614,18 @@ async def _store_mission_memory_safe(
 # ---------------------------------------------------------------------------
 
 
+def pick_final_output_task(tasks):
+    """Last task in sequence order with a non-empty output — the mission's
+    final work product (e.g. a 'Finalize …' writer task). Ties within a
+    parallel group resolve to the later task in original order (sorted() is
+    stable). Returns None when no task produced output."""
+    final = None
+    for t in sorted(tasks or [], key=lambda t: (t.sequence_number or 0)):
+        if t.output and str(t.output).strip():
+            final = t
+    return final
+
+
 class CoordinatorService:
     """
     Stateless coordinator that orchestrates sequential missions.
@@ -925,7 +937,15 @@ class CoordinatorService:
                 logger.info("[Mission] Saved output document %s for mission %s", document_id, run.id)
 
             # --- PRD-167 wiring: emit a rendered document deliverable -------
-            await self._emit_mission_document(db, run, content)
+            emitted_deliverable = await self._emit_mission_document(db, run, content)
+
+            # 2026-07-30: emission was opt-in via the emit_document spec and
+            # nothing sets it by default — every mission's Deliverables tab was
+            # empty. When no spec produced a render, default-promote the FINAL
+            # task output as the mission deliverable (intermediates stay on the
+            # Reports surface).
+            if not emitted_deliverable:
+                await self._register_final_output_deliverable(db, run, tasks)
 
             # --- App builder: also save the zip bundle ---
             template_used = (run.config or {}).get("template_used")
@@ -955,6 +975,85 @@ class CoordinatorService:
                     "[Mission] Could not persist ingest-failure marker for run %s",
                     run.id, exc_info=True,
                 )
+            return None
+
+    async def _register_final_output_deliverable(
+        self,
+        db: Session,
+        run: OrchestrationRun,
+        tasks,
+    ) -> Optional[str]:
+        """Register the mission's final task output as a mission deliverable.
+
+        The mission Deliverables tab lists deliverables with
+        ``source_id == run.id``, but until 2026-07-30 nothing wrote
+        mission-sourced rows unless the run carried an explicit
+        ``emit_document`` spec — so the tab was empty for every mission ever
+        run. Promotes ONLY the final output (see ``pick_final_output_task``);
+        intermediate task outputs stay on the Reports surface. Fail-soft;
+        idempotent via ``config['emitted_deliverable_id']`` (shared with the
+        spec path so the two never double-emit).
+        """
+        if (run.config or {}).get("emitted_deliverable_id"):
+            return None
+        final_task = pick_final_output_task(tasks)
+        if final_task is None:
+            return None
+        try:
+            from core.workspace_client import WorkspaceClient
+            from services.deliverable_service import DeliverableService
+
+            slug = re.sub(
+                r"[^a-z0-9]+", "-", (final_task.title or run.goal or "")[:60].lower()
+            ).strip("-") or "final-output"
+            file_path = f"missions/{str(run.id)[:8]}-{slug}.md"
+            content = str(final_task.output)
+
+            ws_client = WorkspaceClient(str(run.workspace_id))
+            write_result = await ws_client.write_file(file_path, content)
+            if not write_result.get("success"):
+                logger.warning(
+                    "[Mission] Could not write final-output file for %s: %s",
+                    run.id, write_result.get("error", "unknown"),
+                )
+                return None
+
+            svc = DeliverableService(db, run.workspace_id)
+            registration = svc.register(
+                file_path=file_path,
+                title=final_task.title or f"Mission output: {run.goal[:80]}",
+                source_type="mission",
+                source_id=str(run.id),
+                # agent_name stays None — list_deliverables COALESCEs the
+                # agents join, so the real agent name renders from agent_id.
+                agent_id=final_task.assigned_agent_id,
+                # .md infers 'report', which register() refuses (native-service
+                # guard). This is the polished final document, not a filed
+                # report — classify it as such.
+                artifact_type="document",
+                summary=content[:280],
+                file_size_bytes=len(content.encode("utf-8")),
+            )
+            if not registration.get("success"):
+                logger.warning(
+                    "[Mission] Final-output deliverable registration failed for %s: %s",
+                    run.id, registration.get("error", "unknown"),
+                )
+                return None
+
+            deliverable_id = registration.get("deliverable_id")
+            run.config = {**(run.config or {}), "emitted_deliverable_id": str(deliverable_id)}
+            db.flush()
+            logger.info(
+                "[Mission] Registered final-output deliverable %s for mission %s",
+                deliverable_id, run.id,
+            )
+            return str(deliverable_id)
+        except Exception as e:
+            logger.warning(
+                "[Mission] Final-output deliverable promotion failed for %s: %s",
+                run.id, e, exc_info=True,
+            )
             return None
 
     async def _emit_mission_document(

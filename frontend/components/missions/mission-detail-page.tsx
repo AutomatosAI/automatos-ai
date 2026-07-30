@@ -50,6 +50,21 @@ interface MissionDetailPageProps {
   missionId: string
 }
 
+/**
+ * Short display title for the header: an explicit config name wins, else the
+ * goal's first sentence-ish clause, hard-capped at 90 chars so a full mission
+ * brief never becomes the page headline. The complete goal stays visible in
+ * the mission Overview.
+ */
+function missionDisplayTitle(goal: string, config?: Record<string, unknown>): string {
+  const configured = config?.name
+  if (typeof configured === 'string' && configured.trim()) return configured.trim()
+  const trimmed = (goal || '').trim()
+  const firstStop = trimmed.search(/[.:!?]\s/)
+  const clause = firstStop > 15 ? trimmed.slice(0, firstStop) : trimmed
+  return clause.length > 90 ? `${clause.slice(0, 90).trimEnd()}…` : clause
+}
+
 export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
   const router = useRouter()
   const { data: mission, isLoading } = useMission(missionId)
@@ -131,7 +146,7 @@ export function MissionDetailPage({ missionId }: MissionDetailPageProps) {
         {/* Title row */}
         <PageHeader
           title="Mission"
-          titleAccent={(mission.config as Record<string, unknown>)?.name as string || mission.goal.split(':')[0]}
+          titleAccent={missionDisplayTitle(mission.goal, mission.config as Record<string, unknown>)}
           eyebrow={`Operations · mission ${missionId.slice(0, 8)}`}
           lede={
             [
