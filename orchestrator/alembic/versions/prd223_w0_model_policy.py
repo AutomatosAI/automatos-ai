@@ -12,8 +12,10 @@ The model_policy settings rows themselves are created by the boot seed
 from alembic import op
 
 # revision identifiers, used by Alembic.
+# (reparented onto PRD-222 W1S1 after #613 merged to main mid-branch — the
+# merge ref briefly had two heads off prd207_su_capture)
 revision = "prd223_w0_model_policy"
-down_revision = "prd207_su_capture"
+down_revision = "prd222_w1s1_onboarding_jsonb"
 branch_labels = None
 depends_on = None
 
