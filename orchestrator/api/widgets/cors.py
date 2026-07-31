@@ -10,18 +10,31 @@ Path coverage (PRD-008-A):
 - ``/api/widgets/*``  — storefront widget calls (any storefront origin)
 - ``/api/sites/*``    — Automatos dashboard Sites CRUD (admin operations)
 
-Both surfaces share the ``WIDGET_ORIGIN_ALLOWLIST`` env var. An empty
-allowlist is permissive ONLY in the ``local`` edition (dev default); in the
-``saas`` edition the boot guard (``config.validate_security``, PRD-194 S4 /
-P2-13) aborts boot on an empty allowlist, and this module fails CLOSED if
-that state is ever reached anyway. The actual security boundary on
-/api/sites is the JWT in cookies, not CORS — CORS just lets the dashboard
-browser issue the request in the first place.
+There is NO global widget origin allowlist. Storefront origins are authorised
+from the per-key ``SdkApiKey.allowed_domains`` the merchant already maintains
+— the same list ``widget_auth`` enforces on the real request, and the only
+place an origin is named. ``WIDGET_ORIGIN_ALLOWLIST`` used to sit in front of
+that as a second source of truth; because it was OR'd with the key lookup it
+could only ever WIDEN access beyond what a key permitted, so it bought no
+defence in depth while adding a second place to forget. Forgetting it threw a
+403 that read as a key problem. It is gone.
 
-Origins named on an active public SDK key's ``allowed_domains`` are honoured
-too (PRD-TUTOR-LIVE S0): preflights carry no Authorization, so a key-scoped
-origin used to die at OPTIONS with 403 before ``widget_auth`` ever saw the
-request it would have approved. See ``_origin_allowed_dynamic``.
+Two origin classes, one source of truth each:
+
+- **Platform origins** (``config.CORS_ALLOW_ORIGINS``) — our own dashboard and
+  marketing site calling our own API. Already trusted by the app-wide
+  CORSMiddleware for every other route; ``/api/sites`` (dashboard Sites CRUD,
+  JWT-cookie auth, no SDK key in play) and the deprecated first-party blog
+  embed ride this.
+- **Merchant origins** (``SdkApiKey.allowed_domains``) — storefronts. Applies
+  to ``/api/widgets`` only.
+
+The actual security boundary on /api/sites is the JWT in cookies, not CORS —
+CORS just lets the dashboard browser issue the request in the first place.
+
+Preflights carry no Authorization header, so this middleware cannot know WHICH
+key the real request will present; it asks whether the origin is named on ANY
+active public key (PRD-TUTOR-LIVE S0). See ``_origin_allowed_dynamic``.
 """
 
 import logging
@@ -40,43 +53,30 @@ COVERED_PATH_PREFIXES: tuple[str, ...] = (
     "/api/sites",
 )
 
-# Explicit origin allowlist — comma-separated in env var.
-# Only these origins may make credentialed requests to widget endpoints.
-_RAW_ALLOWLIST = config.WIDGET_ORIGIN_ALLOWLIST or ""
-WIDGET_ORIGIN_ALLOWLIST: set[str] = {
-    o.strip().rstrip("/") for o in _RAW_ALLOWLIST.split(",") if o.strip()
+# Only /api/widgets consults merchant keys. /api/sites is first-party.
+_KEY_SCOPED_PATH_PREFIX = "/api/widgets"
+
+# Platform origins — our own dashboard and marketing site. Same list the
+# app-wide CORSMiddleware uses for every other route; not a widget-specific
+# allowlist, and never a place to name a merchant storefront.
+PLATFORM_ORIGINS: set[str] = {
+    o.strip().rstrip("/")
+    for o in (config.CORS_ALLOW_ORIGINS or "").split(",")
+    if o.strip()
 }
 
 
-def _origin_allowed(origin: str) -> bool:
-    """Return True if *origin* is in the configured allowlist.
-
-    Empty allowlist (P2-13, PRD-194 S4): permissive ONLY in the ``local``
-    edition — choosing ``AUTH_EDITION=local`` is the explicit dev opt-in. In
-    the ``saas`` edition the boot guard (``config.validate_security``)
-    guarantees a non-empty allowlist, so this branch is unreachable there;
-    if it is ever reached anyway (guard bypassed), the public plane fails
-    CLOSED, loudly — never allow-all in production.
-    """
-    if not WIDGET_ORIGIN_ALLOWLIST:
-        if config.IS_LOCAL_EDITION:
-            return True
-        logger.error(
-            "WIDGET_ORIGIN_ALLOWLIST is empty in the saas edition — denying "
-            "origin %s (fail closed; the boot guard should have prevented this)",
-            origin,
-        )
-        return False
-    return origin.rstrip("/") in WIDGET_ORIGIN_ALLOWLIST
+def _origin_is_platform(origin: str) -> bool:
+    """True when *origin* is one of our own first-party origins."""
+    return origin.rstrip("/") in PLATFORM_ORIGINS
 
 
 # ── Key-allowlist fallback (PRD-TUTOR-LIVE S0) ──────────────────────────
 # A browser preflight carries no Authorization header, so this middleware
 # cannot know WHICH ak_pub_ key the actual request will present — but it can
 # ask whether the origin is explicitly named on ANY active public key's
-# ``allowed_domains``. Without this, an origin that widget_auth would approve
-# (academy.automatos.app, a provisioned storefront) 403s at OPTIONS unless it
-# is duplicated into WIDGET_ORIGIN_ALLOWLIST. The lookup reuses the exact
+# ``allowed_domains``. This is the ONLY way a merchant origin is authorised —
+# there is no global widget allowlist to fall back on. The lookup reuses the exact
 # matcher widget_auth uses (``ApiKeyService.check_domain``) so the preflight
 # and the request can never disagree, and it is cached per origin: one DB
 # scan per origin per TTL, cache bounded so origin-scanning clients cannot
@@ -101,10 +101,18 @@ def _origin_allowed_by_key_sync(origin: str) -> bool:
         db.close()
 
 
-async def _origin_allowed_dynamic(origin: str) -> bool:
-    """Env allowlist fast path, then the cached key-allowlist fallback."""
-    if _origin_allowed(origin):
+async def _origin_allowed_dynamic(origin: str, path: str) -> bool:
+    """Platform origins, then — on /api/widgets only — the merchant key lookup.
+
+    ``/api/sites`` is first-party dashboard CRUD: no SDK key names the
+    dashboard origin, so it never reaches the key lookup. Letting it would
+    mean any merchant could open CORS on the admin surface by naming that
+    origin on their own key.
+    """
+    if _origin_is_platform(origin):
         return True
+    if not path.startswith(_KEY_SCOPED_PATH_PREFIX):
+        return False
     now = time.monotonic()
     cached = _dynamic_origin_cache.get(origin)
     if cached and cached[1] > now:
@@ -149,7 +157,7 @@ class WidgetCORSMiddleware:
 
         # Handle OPTIONS preflight
         if scope["method"] == "OPTIONS":
-            if not origin or not await _origin_allowed_dynamic(origin):
+            if not origin or not await _origin_allowed_dynamic(origin, path):
                 response_headers = [
                     (b"content-type", b"text/plain"),
                     (b"vary", b"Origin"),
@@ -183,7 +191,7 @@ class WidgetCORSMiddleware:
         # upstream middleware (e.g. FastAPI's CORSMiddleware) already added —
         # duplicate Access-Control-Allow-* headers cause Chrome to reject the
         # response with "Failed to fetch".
-        allowed = await _origin_allowed_dynamic(origin) if origin else False
+        allowed = await _origin_allowed_dynamic(origin, path) if origin else False
 
         _CORS_HEADERS_TO_OVERRIDE = (
             b"access-control-allow-origin",
