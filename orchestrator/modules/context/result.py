@@ -37,6 +37,12 @@ class ContextResult:
     sections: list[dict[str, Any]] = field(default_factory=list)
     injected_memory_ids: list[Any] = field(default_factory=list)
 
+    # PRD-223 S0.3: attachments that could NOT be loaded this turn —
+    # [{"attachment_id", "filename", "reason"}]. The model-facing marker is
+    # already injected into ``messages``; this field is for user-facing
+    # surfacing (SSE badge) by the chat layer.
+    attachment_failures: list[dict[str, Any]] = field(default_factory=list)
+
     # PRD-201 S4: the cache-stable prefix — the leading bytes of the system
     # prompt that are safe to mark with an Anthropic ``cache_control``
     # breakpoint (static identity/skills/catalog), assembled before the

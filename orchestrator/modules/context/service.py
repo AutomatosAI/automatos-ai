@@ -174,10 +174,11 @@ class ContextService:
         )
 
         # --- 10. PRD-127: Inject attachment parts into messages ---
+        attachment_failures: list[dict] = []
         if attachment_ids:
             try:
                 resolver = AttachmentResolver(db_session=self._db_session)
-                attachment_parts = await resolver.resolve(
+                attachment_parts, attachment_failures = await resolver.resolve(
                     attachment_ids=[UUID(aid) for aid in attachment_ids],
                     workspace_id=UUID(workspace_id),
                     model_id=resolved_model_id or "",
@@ -190,6 +191,12 @@ class ContextService:
                         "[ContextService] Injected %d attachment parts into messages",
                         len(attachment_parts),
                     )
+                if attachment_failures:
+                    logger.warning(
+                        "[ContextService] %d attachment(s) unavailable: %s",
+                        len(attachment_failures),
+                        [f.get("filename") or f.get("attachment_id") for f in attachment_failures],
+                    )
             except VisionNotSupportedError:
                 # Re-raise vision errors — caller should handle
                 raise
@@ -197,7 +204,17 @@ class ContextService:
                 logger.error(
                     "[ContextService] Attachment resolution failed: %s", e, exc_info=True
                 )
-                # Continue without attachments rather than failing the entire request
+                # PRD-223 S0.3: continue without the attachments, but NEVER
+                # silently — the model must be told the content did not
+                # arrive, or it will infer/fabricate from the filename.
+                from modules.attachments.resolver import build_unavailable_marker
+                attachment_failures = [
+                    {"attachment_id": str(aid), "filename": None, "reason": "resolution error"}
+                    for aid in attachment_ids
+                ]
+                formatted_messages = inject_parts_into_last_user_message(
+                    formatted_messages, [build_unavailable_marker(attachment_failures)]
+                )
 
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -249,6 +266,7 @@ class ContextService:
             sections=section_trace,
             injected_memory_ids=list(ctx.kwargs.get("_injected_memory_ids") or []),
             cacheable_prefix=cacheable_prefix,
+            attachment_failures=attachment_failures,
         )
 
         # PRD-201 S1: emit the assembly trace onto the observability seam. The

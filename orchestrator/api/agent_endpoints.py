@@ -583,6 +583,23 @@ async def update_agent_model_config(
             # The frontend may not know the correct provider for aggregated models
             model_config["provider"] = model.provider
 
+            # PRD-223 W1: policy gate. The Auto agent row is the orchestrator
+            # seat — quarantined/unapproved models are rejected at write time
+            # (the factory fail-closes at runtime as the last line).
+            from core.llm.model_policy import check_model_for_agent
+            _is_auto_seat = (
+                getattr(agent, "name", "") == "Auto"
+                and bool(getattr(agent, "is_system_agent", False))
+            )
+            _allowed, _reason = check_model_for_agent(
+                db, ctx.workspace_id, model_id, orchestrator_seat=_is_auto_seat,
+            )
+            if not _allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Model rejected: {_reason}",
+                )
+
         # Update model config
         agent.model_config = model_config
         

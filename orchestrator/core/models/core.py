@@ -115,6 +115,16 @@ class WorkspaceModel(Base):
     is_active = Column(Boolean, default=True)
     source = Column(String(50), default='marketplace')  # default, marketplace, admin
 
+    # PRD-223 W1: per-workspace model governance. approval_status quarantines a
+    # model workspace-wide ('approved' | 'quarantined' | 'unreviewed');
+    # approved_roles is the opt-in role grant list (see model_policy.MODEL_ROLES)
+    # — empty/None means "platform policy governs", a non-empty list restricts;
+    # approval_evidence records how the grant was earned
+    # ({checklist_row | harness_run, approved_by, approved_at, notes}).
+    approval_status = Column(String(20), nullable=False, default='unreviewed', server_default='unreviewed')
+    approved_roles = Column(JSON, nullable=True)
+    approval_evidence = Column(JSON, nullable=True)
+
     model = relationship("LLMModel", back_populates="workspace_installs")
 
     __table_args__ = (

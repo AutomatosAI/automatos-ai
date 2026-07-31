@@ -513,6 +513,32 @@ async def save_orchestrator_settings(
         if "mode" in harness and harness["mode"] not in _VALID_HARNESS_MODES:
             raise HTTPException(400, f"harness.mode must be one of {_VALID_HARNESS_MODES}")
 
+    # PRD-223 S0.1: validate the orchestrator model. This route was the
+    # platform's only model-write path with no validation at all — the door
+    # the 2026-07-31 quarantine incident walked through. Unknown model → 422;
+    # model quarantined for the orchestrator seat → 422 with the policy reason.
+    llm_payload = payload.get("llm")
+    if llm_payload and isinstance(llm_payload, dict) and llm_payload.get("model_id"):
+        requested_model = str(llm_payload["model_id"]).strip()
+        from api.llm_marketplace import _get_or_create_from_cache
+        from core.llm.model_policy import check_model_for_agent
+
+        if not requested_model or _get_or_create_from_cache(db, requested_model) is None:
+            raise HTTPException(
+                422,
+                f"Unknown model '{requested_model}' — not found in the model catalog. "
+                "Sync the OpenRouter catalog or pick a listed model.",
+            )
+        allowed, reason = check_model_for_agent(
+            db, ctx.workspace_id, requested_model, orchestrator_seat=True,
+        )
+        if not allowed:
+            raise HTTPException(
+                422,
+                f"Model rejected for the orchestrator (Auto) role: {reason}. "
+                "See Settings → System → model_policy.",
+            )
+
     # Merge into workspace settings
     settings = dict(workspace.settings or {})
     existing_orch = dict(settings.get("orchestrator", {}))

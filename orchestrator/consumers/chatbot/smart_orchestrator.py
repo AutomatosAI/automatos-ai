@@ -85,6 +85,11 @@ class OrchestratedRequest:
     # the build predates this or produced no trace.
     context_trace: Optional[Dict[str, Any]] = None
 
+    # PRD-223 S0.3: attachments that could not be loaded this turn (the
+    # model-facing marker is already in ``messages``; this is for the SSE
+    # badge). [{"attachment_id", "filename", "reason"}]
+    attachment_failures: List[Dict[str, Any]] = field(default_factory=list)
+
 
 @dataclass
 class ConversationState:
@@ -281,6 +286,7 @@ class SmartChatOrchestrator:
             requires_tools=bool(context.tools) or intent_result.requires_tools,
             requires_memory=intent_result.requires_memory,
             preparation_time_ms=preparation_time,
+            attachment_failures=list(getattr(context, "attachment_failures", []) or []),
         )
 
     def _should_fetch_memory(self, intent_result: IntentResult) -> bool:

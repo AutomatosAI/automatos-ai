@@ -1047,7 +1047,7 @@ class StreamingChatService:
                     inject_parts_into_last_user_message,
                 )
                 resolver = AttachmentResolver(db_session=self.db)
-                parts = await resolver.resolve(
+                parts, _att_failures = await resolver.resolve(
                     attachment_ids=[UUID(a) for a in attachment_ids],
                     workspace_id=UUID(str(self.workspace_id)),
                     model_id=model_id or "",
@@ -1057,6 +1057,12 @@ class StreamingChatService:
                     logger.info(
                         f"[PRD-127] ATOM path: resolved {len(parts)} attachment parts "
                         f"from {len(attachment_ids)} ids"
+                    )
+                if _att_failures:
+                    # PRD-223 S0.3: the unavailable-marker part is already in
+                    # `parts`, so the model will say what it cannot see.
+                    logger.warning(
+                        f"[PRD-223] ATOM path: {len(_att_failures)} attachment(s) unavailable"
                     )
             except VisionNotSupportedError as _vne:
                 logger.warning(f"[PRD-127] ATOM vision not supported: {_vne}")
@@ -1424,6 +1430,27 @@ class StreamingChatService:
         action_budget = config.CHATBOT_ACTION_RETRY_BUDGET
         param_budget = config.CHATBOT_PARAM_RETRY_BUDGET
 
+        # PRD-223 S0.4: turn cost governor — estimated USD across THIS turn's
+        # loop LLM calls; _on_round_end forces synthesis once the ceiling is
+        # crossed (the COST_ALERT log line becomes an act). Setting unreadable
+        # → governor off, never a crashed chat.
+        try:
+            turn_cost_ceiling = float(config.CHATBOT_TURN_COST_CEILING_USD)
+        except Exception:
+            turn_cost_ceiling = 0.0
+        turn_llm_cost_usd = 0.0
+
+        def _governor_track(resp):
+            nonlocal turn_llm_cost_usd
+            usage = getattr(resp, "usage", None) or {}
+            _in = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0
+            _out = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0
+            if _in or _out:
+                from core.llm.manager import estimate_cost_usd
+                _model = getattr(getattr(agent_runtime.llm_manager, "config", None), "model", None)
+                turn_llm_cost_usd += estimate_cost_usd(_model, _in, _out)
+            return resp
+
         # State shared by callbacks within this turn.
         last_tool_name: Optional[str] = None
         empty_streak = 0
@@ -1649,6 +1676,24 @@ class StreamingChatService:
                     ),
                 )
 
+            # PRD-223 S0.4: cost governor — past the per-turn ceiling, stop
+            # researching and answer with what we have.
+            if turn_cost_ceiling > 0 and turn_llm_cost_usd >= turn_cost_ceiling:
+                logger.warning(
+                    f"[tool-loop] Turn cost governor tripped: est ${turn_llm_cost_usd:.2f} "
+                    f">= ceiling ${turn_cost_ceiling:.2f} — forcing synthesis (PRD-223)"
+                )
+                await sse_queue.put(self.streaming_handler.format_aisdk_limit_reached(
+                    limit="turn_cost_ceiling_usd",
+                    value=turn_cost_ceiling,
+                    message=(
+                        "This answer was using a lot of model budget, so I'm wrapping "
+                        "up with what I've gathered so far. An admin can raise "
+                        "model_policy.turn_cost_ceiling_usd if I should dig deeper."
+                    ),
+                ))
+                return ToolPostResult(force_final=True)
+
             # Force synthesis on dedup skip OR per-tool exhaustion (>=8 attempts).
             any_exhausted = any(v >= 8 for v in cumulative_attempts.values())
             if state.had_skips or any_exhausted:
@@ -1662,9 +1707,9 @@ class StreamingChatService:
 
         async def _llm_callback(messages, tools):
             try:
-                return await agent_runtime.llm_manager.generate_response(
+                return _governor_track(await agent_runtime.llm_manager.generate_response(
                     messages=messages, tools=tools,
-                )
+                ))
             except Exception as llm_err:
                 logger.warning(
                     f"LLM call failed in tool loop, attempting recovery: {llm_err}"
@@ -1678,9 +1723,9 @@ class StreamingChatService:
                     )
                     if compacted:
                         logger.info("Recovery compaction succeeded, retrying LLM call")
-                        return await agent_runtime.llm_manager.generate_response(
+                        return _governor_track(await agent_runtime.llm_manager.generate_response(
                             messages=messages_new, tools=tools_new,
-                        )
+                        ))
                     raise
                 except Exception:
                     logger.error(
@@ -2211,6 +2256,17 @@ class StreamingChatService:
                 force_text_only=force_text_only,
                 spoken_mode=spoken_mode,
             )
+
+            # PRD-223 S0.3: badge any attachments that failed to load BEFORE
+            # the model starts answering — the user must learn the truth at
+            # the same moment the model does (the model-facing marker is
+            # already injected into llm_messages by the resolver).
+            _att_failures = list(getattr(orchestrated, "attachment_failures", []) or [])
+            if _att_failures:
+                yield self.streaming_handler.format_aisdk_data(
+                    "attachment_unavailable", {"attachments": _att_failures},
+                )
+                await asyncio.sleep(0)
 
             # PRD-157 S5: keep the chat's pinned documents always in context.
             self._inject_pinned_documents(llm_messages, chat_id)

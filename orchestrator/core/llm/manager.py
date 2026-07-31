@@ -732,39 +732,10 @@ class LLMManager:
     # Dedicated logger so cost lines can be grepped / forwarded to alerts.
     _cost_logger = logging.getLogger("llm.cost_audit")
 
-    # Approximate $/1K-token rates for common models (input, output).
-    # Used ONLY for this class's audit-LOG estimate — never billing. The
-    # authoritative, model-aware dollars are already written by
-    # ``UsageTracker.track`` from the ``llm_models`` DB registry (below), and
-    # PRD-174 F059's *enforcement* fix — the budget/approval primitive — prices
-    # off that same registry via ``modules.policy.pricing``. We deliberately do
-    # NOT open a DB session here: ``_estimate_cost`` runs on every LLM call, so a
-    # per-call price query would add a round-trip + pool checkout to the hottest
-    # path in the system just for a log line. Keep the log estimate in-memory.
-    _MODEL_COST_MAP: Dict[str, tuple] = {
-        "claude-3-opus":       (0.015, 0.075),
-        "claude-3.5-sonnet":   (0.003, 0.015),
-        "claude-sonnet-4":     (0.003, 0.015),
-        "claude-3-haiku":      (0.00025, 0.00125),
-        "claude-haiku-4":      (0.0008, 0.004),
-        "gpt-4o":              (0.0025, 0.010),
-        "gpt-4o-mini":         (0.00015, 0.0006),
-        "gpt-4.1":             (0.002, 0.008),
-        "gpt-4.1-mini":       (0.0004, 0.0016),
-        "gpt-4.1-nano":       (0.0001, 0.0004),
-        "gemini-2.0-flash":    (0.0001, 0.0004),
-        "glm-5.1":             (0.0005, 0.001),
-        "deepseek-chat":       (0.00014, 0.00028),
-    }
-
     def _estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        """Rough USD cost estimate for logging. Not for billing (see F059 note above)."""
-        model = (self.config.model or "").lower()
-        for key, (inp_rate, out_rate) in self._MODEL_COST_MAP.items():
-            if key in model:
-                return (input_tokens / 1000 * inp_rate) + (output_tokens / 1000 * out_rate)
-        # Unknown model — use a conservative middle estimate
-        return (input_tokens + output_tokens) / 1000 * 0.003
+        """Rough USD cost estimate for logging. Not for billing (see F059 note
+        on ``estimate_cost_usd``, which holds the shared price map)."""
+        return estimate_cost_usd(self.config.model, input_tokens, output_tokens)
 
     def _log_cost_audit(
         self,
@@ -856,3 +827,41 @@ def create_llm_manager(
         request_type=request_type,
     )
 
+
+
+# =============================================================================
+# Shared cost estimation (audit log + PRD-223 turn cost governor)
+# =============================================================================
+# Approximate $/1K-token rates for common models (input, output). Used ONLY
+# for log estimates and the chat turn governor — never billing. The
+# authoritative, model-aware dollars are written by ``UsageTracker.track``
+# from the ``llm_models`` DB registry, and PRD-174 F059's *enforcement* fix
+# prices off that same registry via ``modules.policy.pricing``. Deliberately
+# NO DB session here: this runs on every LLM call — a per-call price query
+# would add a round-trip + pool checkout to the hottest path in the system.
+MODEL_COST_MAP: Dict[str, tuple] = {
+    "claude-3-opus":       (0.015, 0.075),
+    "claude-3.5-sonnet":   (0.003, 0.015),
+    "claude-sonnet-4":     (0.003, 0.015),
+    "claude-3-haiku":      (0.00025, 0.00125),
+    "claude-haiku-4":      (0.0008, 0.004),
+    "gpt-4o":              (0.0025, 0.010),
+    "gpt-4o-mini":         (0.00015, 0.0006),
+    "gpt-4.1":             (0.002, 0.008),
+    "gpt-4.1-mini":       (0.0004, 0.0016),
+    "gpt-4.1-nano":       (0.0001, 0.0004),
+    "gemini-2.0-flash":    (0.0001, 0.0004),
+    "glm-5.1":             (0.0005, 0.001),
+    "deepseek-chat":       (0.00014, 0.00028),
+}
+
+
+def estimate_cost_usd(model: Optional[str], input_tokens: int, output_tokens: int) -> float:
+    """Rough USD estimate for one LLM call; conservative default for unknown models."""
+    model_lower = (model or "").lower()
+    for key, (inp_rate, out_rate) in MODEL_COST_MAP.items():
+        if key in model_lower:
+            return (input_tokens / 1000 * inp_rate) + (output_tokens / 1000 * out_rate)
+    # Unknown model — conservative middle estimate (matches the audit log's
+    # behaviour; how the 2026-07-31 gpt-5.6 turns were priced).
+    return (input_tokens + output_tokens) / 1000 * 0.003

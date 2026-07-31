@@ -803,6 +803,44 @@ class AgentFactory:
                 }
                 self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (no agent model_config)")
 
+            # PRD-223 W0: the orchestrator seat is policy-gated. This is the
+            # last-mile check — every writer path (settings route, per-agent
+            # route, chat tool, seeds) converges here, so a quarantined model
+            # cannot reach Auto's chair no matter how it was written. On a
+            # block, degrade to a trusted brain (orchestrator default, then
+            # platform default) — never a dead chat.
+            is_orchestrator_seat = (
+                use_orchestrator_llm
+                or force_llm_tier == "orchestrator_llm"
+                or (
+                    getattr(db_agent, "name", "") == "Auto"
+                    and bool(getattr(db_agent, "is_system_agent", False))
+                )
+            )
+            if is_orchestrator_seat:
+                from core.llm.model_policy import check_model_for_agent, check_orchestrator_model
+
+                allowed, reason = check_model_for_agent(
+                    self.db_session,
+                    getattr(db_agent, "workspace_id", None),
+                    llm_config_dict.get("model"),
+                    orchestrator_seat=True,
+                )
+                if not allowed:
+                    blocked_model = llm_config_dict.get("model")
+                    fallback = self._get_default_llm_config_from_settings()
+                    fb_ok, _ = check_orchestrator_model(fallback.get("model"))
+                    if not fb_ok:
+                        from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+                        fallback = {"provider": DEFAULT_LLM_PROVIDER, "model": DEFAULT_LLM_MODEL}
+                    llm_config_dict["provider"] = fallback.get("provider")
+                    llm_config_dict["model"] = fallback.get("model")
+                    self.logger.critical(
+                        f"[model-policy] Agent {agent_id} orchestrator-seat model "
+                        f"'{blocked_model}' BLOCKED ({reason}) — substituting "
+                        f"'{llm_config_dict['provider']}/{llm_config_dict['model']}' (PRD-223)"
+                    )
+
             from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
             provider_str = llm_config_dict.get("provider") or DEFAULT_LLM_PROVIDER
             model_id_str = llm_config_dict.get("model", DEFAULT_LLM_MODEL)
@@ -1062,7 +1100,7 @@ class AgentFactory:
                     _llm_cfg = getattr(agent_runtime.llm_manager, "config", None)
                     _model_id = getattr(_llm_cfg, "model", None) if _llm_cfg else None
                     _resolver = AttachmentResolver(db_session=self.db_session)
-                    _parts = await _resolver.resolve(
+                    _parts, _att_failures = await _resolver.resolve(
                         attachment_ids=[_UUID(a) for a in attachment_ids],
                         workspace_id=_UUID(str(agent_runtime.workspace_id)),
                         model_id=_model_id or "",
@@ -1072,6 +1110,12 @@ class AgentFactory:
                         self.logger.info(
                             f"[PRD-127] AgentFactory resolved {len(_parts)} attachment parts "
                             f"from {len(attachment_ids)} ids for agent {agent_id}"
+                        )
+                    if _att_failures:
+                        # PRD-223 S0.3: marker part already rides in _parts.
+                        self.logger.warning(
+                            f"[PRD-223] AgentFactory: {len(_att_failures)} attachment(s) "
+                            f"unavailable for agent {agent_id}"
                         )
                 except VisionNotSupportedError as _vne:
                     self.logger.warning(
