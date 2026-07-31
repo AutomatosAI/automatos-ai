@@ -47,6 +47,7 @@ from .actions_deliverables import register_deliverables_actions  # PRD-164 S3
 from .actions_watches import register_watch_actions  # PRD-204 S9
 from .actions_capabilities import register_capabilities_actions  # tool-surface PR-B
 from .actions_onboarding import register_onboarding_actions  # PRD-222 W1S3
+from .actions_intake import register_intake_actions  # PRD-222 W1S8
 
 
 def register_all_actions(registry: ActionRegistry) -> None:
@@ -87,6 +88,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_watch_actions(registry)  # PRD-204 S9: watch create/list/get/cancel
     register_capabilities_actions(registry)  # PR-B: platform_find_tools discovery seam
     register_onboarding_actions(registry)  # PRD-222 W1S3: platform_update_onboarding
+    register_intake_actions(registry)  # PRD-222 W1S8: platform_scan_business_site + status
 
     # Workspace tools (file I/O, grep, exec, git)
     from .workspace_actions import register_workspace_actions
