@@ -127,8 +127,14 @@ scripts/vendor/
 # Graphify knowledge graph outputs (ignore contents, but keep snapshots/)
 graphify-out/*
 !graphify-out/snapshots/
+!graphify-out/GRAPH_REPORT.md
 
 # E2E dev-browser auth fixtures — regenerated per run, NEVER commit (F012).
 # Holds live Clerk __session / __clerk_db_jwt material; must not be tracked.
 tests/e2e/.auth/
 **/tests/e2e/.auth/
+
+# Real-tenant eval gold sets — LOCAL ONLY, never commit (public repo).
+# live/ dirs hold real workspace UUIDs + client corpus data (e.g. InBuild UK).
+orchestrator/scripts/eval/**/live/
+*.gold.jsonl
