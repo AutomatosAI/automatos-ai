@@ -1032,7 +1032,8 @@ class StreamingChatService:
             f"{_memory_block}"
         )
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-            messages, system_prompt=_atom_prompt, available_tools=atom_tools
+            messages, system_prompt=_atom_prompt, available_tools=atom_tools,
+            resolved_attachment_ids=attachment_ids,
         )
 
         # PRD-127: Resolve ephemeral attachments for ATOM path.
@@ -1090,7 +1091,8 @@ class StreamingChatService:
         from consumers.chatbot.integration import apply_orchestration_to_messages
 
         llm_messages = self.prompt_analyzer.convert_to_llm_messages(
-            messages, system_prompt="", available_tools=all_tools
+            messages, system_prompt="", available_tools=all_tools,
+            resolved_attachment_ids=attachment_ids,
         )
 
         orchestrated = await smart_chat.prepare(

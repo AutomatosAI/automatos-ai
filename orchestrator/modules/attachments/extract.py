@@ -20,6 +20,25 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Sentinel prefixes returned by extract_text when it could not produce real
+# document text. Callers MUST test with is_extraction_failure() rather than
+# sniffing for a leading "[" — a markdown file legitimately opens with one
+# (a link, or a CI badge like "[![build](...)](...)"), and treating that as a
+# failure silently drops a document the user did attach.
+EXTRACTION_FAILURE_PREFIXES = (
+    "[Extraction failed for ",
+    "[PDF extraction requires ",
+    "[PDF contains no extractable text",
+    "[DOCX extraction requires ",
+    "[XLSX extraction requires ",
+    "[Binary file: ",
+)
+
+
+def is_extraction_failure(text: str) -> bool:
+    """True when *text* is an extract_text failure sentinel, not real content."""
+    return bool(text) and text.startswith(EXTRACTION_FAILURE_PREFIXES)
+
 
 def extract_text(
     content: bytes,

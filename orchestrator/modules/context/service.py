@@ -163,7 +163,7 @@ class ContextService:
 
         # --- 8. Format messages ---
         formatted_messages = self._format_messages(
-            config, ctx, budget, prompt_token_estimate
+            config, ctx, budget, prompt_token_estimate, attachment_ids
         )
 
         # --- 9. Compute final metadata ---
@@ -641,6 +641,7 @@ class ContextService:
         ctx: SectionContext,
         budget: TokenBudget,
         prompt_tokens: int,
+        attachment_ids: list[str] | None = None,
     ) -> list[dict[str, str]]:
         """Format conversation messages with budget-aware trimming."""
         if not ctx.messages:
@@ -662,4 +663,5 @@ class ContextService:
         return conversation.format_messages(
             messages=ctx.messages,
             budget_tokens=message_budget if message_budget > 0 else None,
+            resolved_attachment_ids=attachment_ids,
         )

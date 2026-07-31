@@ -14,6 +14,8 @@ import logging
 import re
 from typing import List, Dict, Any, Optional
 
+from core.attachment_refs import render_unresolved_file_part
+
 logger = logging.getLogger(__name__)
 
 # Simple message patterns that don't need tools
@@ -186,15 +188,20 @@ class PromptAnalyzer:
         self,
         messages: List[Dict[str, Any]],
         system_prompt: Optional[str] = None,
-        available_tools: Optional[List[Dict[str, Any]]] = None
+        available_tools: Optional[List[Dict[str, Any]]] = None,
+        resolved_attachment_ids: Optional[List[str]] = None
     ) -> List[Dict[str, str]]:
         """
         Convert chat messages to LLM format with system prompt.
-        
+
         Args:
             messages: List of message dicts with role and parts
             system_prompt: Optional custom system prompt
-            
+            resolved_attachment_ids: PRD-223 S0.4 — attachment ids the caller
+                will inject into this prompt via AttachmentResolver. Their
+                file parts are left for the resolver to render; every other
+                file part gets an explicit unavailable marker.
+
         Returns:
             List of LLM-formatted messages
         """
@@ -277,19 +284,25 @@ Let's get stuff done! What can I help you with?"""
         
         # Convert each message
         for msg in messages:
-            content = self._extract_message_content(msg)
+            content = self._extract_message_content(msg, resolved_attachment_ids)
             llm_messages.append({
                 'role': msg['role'],
                 'content': content
             })
-        
+
         return llm_messages
-    
-    def _extract_message_content(self, msg: Dict[str, Any]) -> str:
+
+    def _extract_message_content(
+        self,
+        msg: Dict[str, Any],
+        resolved_attachment_ids: Optional[List[str]] = None
+    ) -> str:
         """Extract text content from a message.
 
-        File parts should already be resolved to text by _resolve_file_parts
-        in the service layer, but we handle unresolved ones gracefully.
+        Legacy ``document://`` file parts are already resolved to text by
+        _resolve_file_parts in the service layer. Ephemeral attachments are
+        rendered by AttachmentResolver *after* this runs, so file parts it
+        owns are skipped here rather than described (PRD-223 S0.4).
         """
         if msg.get('parts'):
             text_parts = []
@@ -299,9 +312,9 @@ Let's get stuff done! What can I help you with?"""
                     if text_value is not None:
                         text_parts.append(str(text_value))
                 elif p.get('type') == 'file':
-                    # Fallback for unresolved file parts
-                    filename = p.get('filename', 'file')
-                    text_parts.append(f"[Attached file: {filename} — content not available]")
+                    marker = render_unresolved_file_part(p, resolved_attachment_ids)
+                    if marker:
+                        text_parts.append(marker)
             return '\n'.join(text_parts)
         return msg.get('content', '')
     
