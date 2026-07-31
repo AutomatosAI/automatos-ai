@@ -1299,6 +1299,25 @@ class Config:
     PREMIUM_TO_BUDGET_SAVINGS_RATIO: float = float(os.getenv("PREMIUM_TO_BUDGET_SAVINGS_RATIO", "0.85"))
 
     # =============================================================================
+    # TRIAL CREDIT (PRD-222 W1·S9: the $5 onboarding trial ledger)
+    # =============================================================================
+    # A one-time, platform-funded usage allowance that funds a new user's
+    # onboarding "first mile" on the platform key, so the value moment (BOOM)
+    # lands BEFORE the BYOK ask (D4). The ledger itself lives in
+    # workspaces.onboarding.trial JSONB — no new table; enforcement + spend
+    # accumulation live in services/trial_ledger.py. These are the only tunables.
+    # Kill switch — false disables all trial grants; provisioning otherwise unchanged.
+    TRIAL_ENABLED: bool = os.getenv("TRIAL_ENABLED", "true").lower() == "true"
+    # Dollars granted per new Clerk user (once — checked across all their workspaces).
+    TRIAL_CREDIT_USD: float = float(os.getenv("TRIAL_CREDIT_USD", "5.00"))
+    # Platform-wide daily ceiling on aggregate trial spend; new grants PAUSE once
+    # today's accumulated trial spend reaches this (US-005's daily counter feeds it).
+    TRIAL_GLOBAL_DAILY_USD: float = float(os.getenv("TRIAL_GLOBAL_DAILY_USD", "25.00"))
+    # Models a trial workspace may use on the platform key. Reuses the platform's
+    # existing economical model comma-list (BUDGET_MODELS, PRD-54) — no new id invented.
+    TRIAL_MODEL_ALLOWLIST: str = os.getenv("TRIAL_MODEL_ALLOWLIST", BUDGET_MODELS)
+
+    # =============================================================================
     # VOICE SERVICE (PRD-74)
     # =============================================================================
     # PRD-176 F068: local-safe default (SaaS sets the railway voice host via env).

@@ -178,6 +178,23 @@ class PlaybookSchedulerService:
                 logger.warning("[PlaybookScheduler] Playbook %d has no steps, skipping", playbook_id)
                 return
 
+            # PRD-222 US-005 — no background burn: a trial workspace gets no
+            # scheduled playbook execution until converted. Visible skip.
+            try:
+                from core.models.workspaces import Workspace
+                from services.trial_ledger import is_trial_active_workspace
+
+                _ws = db.query(Workspace).get(playbook.workspace_id)
+                if is_trial_active_workspace(_ws):
+                    logger.warning(
+                        "[PlaybookScheduler] Skipping playbook %d — trial workspace %s "
+                        "(no background burn until converted)",
+                        playbook_id, playbook.workspace_id,
+                    )
+                    return
+            except Exception as _e:
+                logger.debug("[PlaybookScheduler] trial-skip check failed for playbook %d: %s", playbook_id, _e)
+
             # PRD-185 S4: repeated-failure circuit breaker. A cron playbook that
             # fails on every run re-fires forever (the 2026-06 daily 402 spam).
             # Once the last N terminal runs are all failures, stop re-firing until

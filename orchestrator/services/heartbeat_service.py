@@ -555,6 +555,35 @@ class HeartbeatService:
     # Tick implementations
     # ------------------------------------------------------------------
 
+    def _trial_skip(self, workspace_id: str) -> Optional[Dict[str, Any]]:
+        """PRD-222 US-005 — no background burn.
+
+        Trial workspaces (onboarding.trial.state active/warned/exhausted) get NO
+        heartbeat execution until the trial converts — an idle trial workspace
+        must burn $0. Returns a VISIBLE skip result (never a silent no-op) or
+        ``None`` to proceed. Converted / never-granted workspaces proceed.
+        """
+        try:
+            from core.database.database import SessionLocal
+            from core.models.workspaces import Workspace
+            from services.trial_ledger import is_trial_active_workspace
+
+            db = SessionLocal()
+            try:
+                ws = db.query(Workspace).get(workspace_id)
+                if is_trial_active_workspace(ws):
+                    logger.info(
+                        "[Heartbeat] Skipping trial workspace %s — no background "
+                        "burn until converted",
+                        workspace_id,
+                    )
+                    return {"status": "skipped", "reason": "trial_workspace"}
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug("[Heartbeat] trial-skip check failed for ws=%s: %s", workspace_id, e)
+        return None
+
     async def _orchestrator_tick(self, workspace_id: str, hb_config: dict) -> Dict[str, Any]:
         """Execute an LLM-powered orchestrator heartbeat tick."""
         tick_key = f"orch_{workspace_id}"
@@ -564,6 +593,10 @@ class HeartbeatService:
                 workspace_id,
             )
             return {"status": "skipped", "reason": "already_running"}
+
+        _trial = self._trial_skip(workspace_id)
+        if _trial:
+            return _trial
 
         if not await self._is_within_active_hours(hb_config, workspace_id):
             logger.debug(
@@ -879,6 +912,10 @@ class HeartbeatService:
                 agent_id,
             )
             return {"status": "skipped", "reason": "already_running"}
+
+        _trial = self._trial_skip(workspace_id)
+        if _trial:
+            return _trial
 
         if not await self._is_within_active_hours(hb_config, workspace_id):
             logger.info(

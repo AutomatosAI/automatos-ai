@@ -257,6 +257,13 @@ from modules.tools.discovery.handlers_analytics_enhanced import (
     get_agent_ranking,
     get_sla_compliance,
 )
+from modules.tools.discovery.handlers_onboarding import (  # PRD-222 W1S3
+    update_onboarding,
+)
+from modules.tools.discovery.handlers_intake import (  # PRD-222 W1S8
+    get_intake_status,
+    scan_business_site,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +428,11 @@ class PlatformActionExecutor:
             # Full-autonomy dial (per-workspace setting)
             "platform_get_autonomy_level": handle_get_autonomy_level,
             "platform_set_autonomy_level": handle_set_autonomy_level,
+            # PRD-222 W1S3: Auto-led onboarding spine (the ONLY state writer)
+            "platform_update_onboarding": update_onboarding,
+            # PRD-222 W1S8: business-intake pipeline as Auto tools
+            "platform_scan_business_site": scan_business_site,
+            "platform_get_intake_status": get_intake_status,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
