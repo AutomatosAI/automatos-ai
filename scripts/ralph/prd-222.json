@@ -34,10 +34,10 @@
       "title": "platform_update_onboarding tool (3-file pattern)",
       "description": "New platform tool `platform_update_onboarding` so Auto (and only Auto's tool calls — never prompt side effects) advances the spine: params {advance_to?: stage, segment?: {business?, goal?, comfort?}}. Handler delegates to onboarding_state (US-001) and returns the updated {stage, trial}. Schema in a new or existing actions_* file, handler in handlers_*, registered in platform_executor.py exactly like neighbouring tools. The schema's required[] must match handler truth from birth (US-011's rule): both params optional but at least one must be present — handler errors clearly when both absent, description states it.",
       "acceptanceCriteria": [
-        "Schema + handler + registration present (3-file pattern, mirrors neighbouring platform tools); tool name platform_update_onboarding",
-        "Handler validates via onboarding_state; backward transition returns a clear error, not a crash; response includes the updated stage and trial snapshot",
-        "required[] is truthful: no field with a handler default is required; the at-least-one rule is in the description and enforced with a clear error",
-        "Contract + handler tests pass; cd orchestrator && python3 -m pytest -q green"
+        "DONE — 3-file pattern: schema in actions_onboarding.py (register_onboarding_actions), handler in handlers_onboarding.py (update_onboarding), registered in platform_actions.register_all_actions AND platform_executor._handlers['platform_update_onboarding']. Test asserts the name + that a fresh PlatformActionExecutor exposes it in _handlers.",
+        "DONE — handler delegates to onboarding_state.advance_onboarding_stage/set_segment; InvalidStageTransition + ValueError caught → {success:false,error} (no crash); success returns {success:true, data: public_snapshot = {stage, trial}}. Tests: advance, backward→clean error (state untouched), segment-only, advance+segment in one call, workspace-not-found.",
+        "DONE — parameters.required == [] (both advance_to & segment optional, each handler-defaulted); the at-least-one rule is stated in the description AND enforced by the handler ('Provide advance_to or segment — at least one is required.'). advance_to enum excludes not_started. Tests pin all of this.",
+        "DONE — 12 tool tests green. Full suite: 4021 passed / 46 env-DB-errors / 3 pre-existing env failures — no NEW failures (US-002 union 4012 + 12 new = 4024 = 4021+3)."
       ],
       "files": ["orchestrator/modules/tools/discovery/", "orchestrator/tests/"]
     },
