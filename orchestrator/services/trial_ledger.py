@@ -445,3 +445,37 @@ def record_trial_spend(
             except Exception:
                 pass
         return None
+
+
+# =========================================================================== #
+# US-006 — the CONVERT side: a validated BYOK key save flips the trial.
+# =========================================================================== #
+
+
+def mark_trial_converted(db: Any, workspace_id: Any) -> bool:
+    """Flip an on-trial workspace to ``converted`` after a validated key save.
+
+    Called from the BYOK key-save seam (``api.user_api_keys.add_api_key``, US-006)
+    once a LIVE provider test passes. Only an ON-trial workspace
+    (active/warned/exhausted) converts; a ``converted`` or never-granted workspace
+    is a no-op — so re-saving a key never rewrites history and a paying customer
+    is never dragged back onto the ledger. Rebuilds ``onboarding.trial`` with a
+    NEW dict via ``_write_trial`` (jsonb_set, server-side — PRD-220-safe) and does
+    NOT commit; the caller (the key-save handler) owns the transaction. Returns
+    ``True`` when a conversion was written, ``False`` otherwise.
+    """
+    if db is None or workspace_id is None:
+        return False
+    from core.models.workspaces import Workspace
+
+    ws = db.query(Workspace).get(workspace_id)
+    trial = _trial_of(ws)
+    if not trial or trial.get("state") not in _ON_TRIAL_STATES:
+        return False
+    new_trial = {**trial, "state": TRIAL_CONVERTED}
+    _write_trial(db, workspace_id, new_trial)
+    logger.info(
+        "Trial converted for workspace %s (%s -> converted, validated key saved)",
+        workspace_id, trial.get("state"),
+    )
+    return True
