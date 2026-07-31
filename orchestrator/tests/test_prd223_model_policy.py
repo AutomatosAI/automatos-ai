@@ -6,12 +6,12 @@ are the load-bearing pieces the route/factory checks compose.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from core.llm.model_policy import check_orchestrator_model
+from core.llm.model_policy import check_model_for_agent, check_orchestrator_model
 from core.llm.manager import estimate_cost_usd
 from modules.attachments.resolver import (
     AttachmentResolver,
@@ -82,6 +82,98 @@ class TestCheckOrchestratorModel:
     def test_whitespace_entries_ignored(self):
         with _policy(quarantine='["  ", ""]'):
             allowed, _ = check_orchestrator_model("openai/gpt-5.5")
+        assert allowed is True
+
+
+# ---------------------------------------------------------------------------
+# check_model_for_agent (W1: workspace approval row + platform policy)
+# ---------------------------------------------------------------------------
+
+def _db_with_row(row):
+    """MagicMock Session whose query().join().filter().first() returns row."""
+    db = MagicMock()
+    db.query.return_value.join.return_value.filter.return_value.first.return_value = row
+    return db
+
+
+def _row(status="unreviewed", roles=None):
+    return SimpleNamespace(approval_status=status, approved_roles=roles)
+
+
+class TestCheckModelForAgent:
+    def test_workspace_quarantine_blocks_regular_agent(self):
+        db = _db_with_row(_row(status="quarantined"))
+        with _policy():
+            allowed, reason = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.6-sol-pro", orchestrator_seat=False,
+            )
+        assert allowed is False
+        assert "quarantined in this workspace" in reason
+
+    def test_workspace_quarantine_blocks_orchestrator_seat(self):
+        db = _db_with_row(_row(status="quarantined"))
+        with _policy():
+            allowed, _ = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.5", orchestrator_seat=True,
+            )
+        assert allowed is False
+
+    def test_role_grants_restrict_orchestrator_seat(self):
+        db = _db_with_row(_row(status="approved", roles=["research", "drafting"]))
+        with _policy():
+            allowed, reason = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.6-sol-pro-lite", orchestrator_seat=True,
+            )
+        assert allowed is False
+        assert "orchestrator role" in reason
+
+    def test_role_grants_do_not_block_regular_agents(self):
+        db = _db_with_row(_row(status="approved", roles=["research"]))
+        with _policy():
+            allowed, _ = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.6-sol-pro-lite", orchestrator_seat=False,
+            )
+        assert allowed is True
+
+    def test_empty_roles_defer_to_platform_policy(self):
+        db = _db_with_row(_row(status="approved", roles=[]))
+        with _policy():
+            allowed, _ = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.5", orchestrator_seat=True,
+            )
+        assert allowed is True
+
+    def test_platform_quarantine_is_orchestrator_scoped(self):
+        # D2: platform quarantine bars the SEAT, not every agent — 5.6 may
+        # still serve narrow non-orchestrator roles.
+        db = _db_with_row(None)
+        with _policy(quarantine='["openai/gpt-5.6-sol-pro"]'):
+            seat_allowed, _ = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.6-sol-pro", orchestrator_seat=True,
+            )
+            agent_allowed, _ = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.6-sol-pro", orchestrator_seat=False,
+            )
+        assert seat_allowed is False
+        assert agent_allowed is True
+
+    def test_workspace_grant_cannot_override_platform_quarantine(self):
+        # Q5: a workspace may further restrict, never loosen.
+        db = _db_with_row(_row(status="approved", roles=["orchestrator"]))
+        with _policy(quarantine='["openai/gpt-5.6-sol-pro"]'):
+            allowed, reason = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.6-sol-pro", orchestrator_seat=True,
+            )
+        assert allowed is False
+        assert "quarantined" in reason
+
+    def test_approval_lookup_error_fails_open_to_platform(self):
+        db = MagicMock()
+        db.query.side_effect = RuntimeError("db down")
+        with _policy():
+            allowed, _ = check_model_for_agent(
+                db, uuid4(), "openai/gpt-5.5", orchestrator_seat=True,
+            )
         assert allowed is True
 
 

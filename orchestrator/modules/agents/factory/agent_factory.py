@@ -778,9 +778,14 @@ class AgentFactory:
                 )
             )
             if is_orchestrator_seat:
-                from core.llm.model_policy import check_orchestrator_model
+                from core.llm.model_policy import check_model_for_agent, check_orchestrator_model
 
-                allowed, reason = check_orchestrator_model(llm_config_dict.get("model"))
+                allowed, reason = check_model_for_agent(
+                    self.db_session,
+                    getattr(db_agent, "workspace_id", None),
+                    llm_config_dict.get("model"),
+                    orchestrator_seat=True,
+                )
                 if not allowed:
                     blocked_model = llm_config_dict.get("model")
                     fallback = self._get_default_llm_config_from_settings()

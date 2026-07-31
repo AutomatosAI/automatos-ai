@@ -516,7 +516,7 @@ async def save_orchestrator_settings(
     if llm_payload and isinstance(llm_payload, dict) and llm_payload.get("model_id"):
         requested_model = str(llm_payload["model_id"]).strip()
         from api.llm_marketplace import _get_or_create_from_cache
-        from core.llm.model_policy import check_orchestrator_model
+        from core.llm.model_policy import check_model_for_agent
 
         if not requested_model or _get_or_create_from_cache(db, requested_model) is None:
             raise HTTPException(
@@ -524,7 +524,9 @@ async def save_orchestrator_settings(
                 f"Unknown model '{requested_model}' — not found in the model catalog. "
                 "Sync the OpenRouter catalog or pick a listed model.",
             )
-        allowed, reason = check_orchestrator_model(requested_model)
+        allowed, reason = check_model_for_agent(
+            db, ctx.workspace_id, requested_model, orchestrator_seat=True,
+        )
         if not allowed:
             raise HTTPException(
                 422,

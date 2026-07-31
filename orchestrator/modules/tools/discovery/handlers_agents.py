@@ -210,16 +210,26 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     from core.llm.defaults import get_default_model_config
     model_config: Dict[str, Any] = get_default_model_config()
     if model_id:
+        # PRD-223 W1: this chat tool was an unvalidated model-write path —
+        # any string became an agent's brain, provider guessed by substring.
+        # The registry is now the authority for existence AND provider, and
+        # the policy gate runs like every other writer.
+        from api.llm_marketplace import _get_or_create_from_cache
+        from core.llm.model_policy import check_model_for_agent
+
+        resolved = _get_or_create_from_cache(db, model_id)
+        if resolved is None:
+            return {
+                "success": False,
+                "error": f"Unknown model '{model_id}' — not found in the model catalog",
+            }
+        allowed, reason = check_model_for_agent(
+            db, workspace_id, model_id, orchestrator_seat=False,
+        )
+        if not allowed:
+            return {"success": False, "error": f"Model rejected: {reason}"}
         model_config["model_id"] = model_id
-        # Infer provider from model name — slash-format = OpenRouter
-        if "/" in model_id:
-            model_config["provider"] = "openrouter"
-        elif "claude" in model_id.lower() or "anthropic" in model_id.lower():
-            model_config["provider"] = "anthropic"
-        elif "gemini" in model_id.lower():
-            model_config["provider"] = "google"
-        elif "llama" in model_id.lower() or "mixtral" in model_id.lower():
-            model_config["provider"] = "groq"
+        model_config["provider"] = resolved.provider
     if temperature is not None:
         model_config["temperature"] = max(0.0, min(2.0, float(temperature)))
 
