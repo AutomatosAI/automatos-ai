@@ -377,6 +377,7 @@ class LLMManager:
         execution_id: Optional[str] = None,
         request_type: Optional[str] = None,
         is_byok: bool = False,
+        trial: bool = False,
     ):
         """
         Initialize LLM Manager.
@@ -391,6 +392,8 @@ class LLMManager:
             execution_id: Execution ID for usage tracking
             request_type: Request type label (chat, recipe, orchestrator, etc.)
             is_byok: Whether this uses a BYOK key
+            trial: PRD-222 US-005 — this request is routed on the platform key
+                under a workspace trial; its cost accrues to the trial ledger.
         """
         self.service_name = service_name
         self._tracking_ctx: Dict[str, Any] = {
@@ -399,6 +402,7 @@ class LLMManager:
             "execution_id": execution_id,
             "request_type": request_type or service_name,
             "is_byok": is_byok,
+            "trial": trial,
         }
         
         if config is None:
@@ -705,6 +709,22 @@ class LLMManager:
             )
         except Exception as e:
             logger.debug(f"Usage tracking failed: {e}")
+
+        # PRD-222 US-005: accrue trial spend on the workspace trial + the daily
+        # counter — only for platform-trial requests (the flag is False on every
+        # BYOK / non-trial / system call, so this is a no-op for them).
+        if self._tracking_ctx.get("trial"):
+            try:
+                from services.trial_ledger import record_trial_spend
+
+                record_trial_spend(
+                    ws,
+                    model_id=self.config.model or "unknown",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            except Exception as e:
+                logger.debug(f"Trial spend accrual failed: {e}")
 
     # ------------------------------------------------------------------
     # Cost Audit Logger
