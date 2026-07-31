@@ -72,10 +72,14 @@ def test_exactly_one_alembic_head():
 
 
 def test_new_migration_chains_onto_prebranch_head():
+    # Asserts this migration's PARENT only. Do NOT assert get_heads() ==
+    # [NEW_REVISION] — that freezes the world at this migration and fails the
+    # moment any later revision chains on top (it broke PRD-223's chain the
+    # same day it merged). Single-head-ness is test_exactly_one_alembic_head's
+    # job.
     sd = _script_dir()
     rev = sd.get_revision(NEW_REVISION)
     assert rev.down_revision == PREBRANCH_HEAD
-    assert sd.get_heads() == [NEW_REVISION]
 
 
 # --------------------------------------------------------------------------- #
