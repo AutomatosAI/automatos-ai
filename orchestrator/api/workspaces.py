@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from core.database.database import get_db
 from core.models import Agent
 from core.models.workspaces import Workspace
+from services.onboarding_state import public_snapshot
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -107,6 +108,10 @@ async def get_current_workspace(
         "role": member_role,
         "plan_limits": workspace.plan_limits or {},
         "is_new_workspace": agent_count == 0,
+        # PRD-222 W1S2: server-side onboarding stage + trial snapshot ({stage,
+        # trial}). Field addition only — no new route (route-manifest unchanged).
+        # is_new_workspace stays until W2·S6 migrates its consumers.
+        "onboarding": public_snapshot(workspace),
         "webhook_url": webhook_url,
         "webhook_key": workspace.webhook_key,
         "settings": settings,

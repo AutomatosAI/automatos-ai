@@ -98,6 +98,26 @@ def is_onboarding_active(workspace: Any) -> bool:
     return current_stage(workspace) not in TERMINAL_STAGES
 
 
+def public_snapshot(workspace: Any) -> dict[str, Any]:
+    """The client-facing onboarding view: ``{stage, trial}``.
+
+    Shared by ``GET /api/workspaces/current`` (W1S2/US-002) and the
+    ``platform_update_onboarding`` tool (W1S3/US-003) so both speak one shape.
+    ``trial`` is ``None`` until W1S9 grants it; only the three client-safe trial
+    fields are exposed — never internal ledger bookkeeping.
+    """
+    doc = get_onboarding(workspace)
+    trial = doc.get("trial")
+    trial_out = None
+    if trial:
+        trial_out = {
+            "granted_usd": trial.get("granted_usd"),
+            "spent_usd": trial.get("spent_usd", 0),
+            "state": trial.get("state"),
+        }
+    return {"stage": doc.get("stage", INITIAL_STAGE), "trial": trial_out}
+
+
 def _stage_index(stage: str) -> int:
     try:
         return STAGE_ORDER.index(stage)
@@ -157,6 +177,18 @@ def advance_onboarding_stage(
     doc = get_onboarding(workspace)  # already a deep copy
     current = doc.get("stage", INITIAL_STAGE)
     _validate_transition(current, to_stage)
+
+    # W1S2/US-002 funnel decision — the JSONB per-stage timestamps below ARE the
+    # Wave-1 funnel record. There is no generic analytics/funnel event sink to
+    # emit an ``onboarding_stage_changed`` event into: grepping
+    # ``orchestrator/`` for record_event/emit_event/track_event/funnel_event
+    # turns up only ``services/orchestration_state.emit_event``, which is
+    # hard-bound to ``OrchestrationEvent`` and REQUIRES an OrchestrationRun
+    # ``run_id`` (mission audit trail, not onboarding); the other *_events tables
+    # (widget_event_log, substrate_metric_events, unrouted_events, watch_events,
+    # error_events) are each domain-specific. Per the PRD-222 US-002 contract
+    # ("do NOT invent a new table or plane"), the ``stages[<stage>]`` ISO stamps
+    # stand as the funnel record until a real analytics plane exists (W2+).
 
     now = _now_iso()
     doc["stage"] = to_stage
