@@ -316,6 +316,23 @@ class ScheduledTaskService:
                 logger.warning("[ScheduledTask] Task %d not found or not active", task_id)
                 return
 
+            # PRD-222 US-005 — no background burn: trial workspaces get no
+            # scheduled execution until converted. Visible skip, never silent.
+            try:
+                from core.models.workspaces import Workspace
+                from services.trial_ledger import is_trial_active_workspace
+
+                _ws = db.query(Workspace).get(task.workspace_id)
+                if is_trial_active_workspace(_ws):
+                    logger.warning(
+                        "[ScheduledTask] Skipping task %d — trial workspace %s "
+                        "(no background burn until converted)",
+                        task_id, task.workspace_id,
+                    )
+                    return
+            except Exception as _e:
+                logger.debug("[ScheduledTask] trial-skip check failed for task %d: %s", task_id, _e)
+
             logger.info(
                 "[ScheduledTask] Firing task %d: '%s' → agent %d",
                 task_id, task.description[:80], task.target_agent_id,

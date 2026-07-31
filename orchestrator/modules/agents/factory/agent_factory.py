@@ -535,6 +535,45 @@ class AgentFactory:
                 f"({effective_provider.upper()}_API_KEY env var on the API service)."
             )
 
+        # PRD-222 US-005 — trial routing gate at the LLM key-resolution choke point.
+        # BYOK provably bypasses it (resolved.is_byok short-circuits). For a non-BYOK
+        # call on a trial workspace: block an exhausted trial with the typed error,
+        # else route on the platform key and PIN the model to the trial allowlist.
+        # No-op for non-trial workspaces and system calls (workspace_id None).
+        trial_routed = False
+        if workspace_id and not resolved.is_byok:
+            from services.trial_ledger import (
+                resolve_trial_routing, TrialExhaustedError,
+                ACTION_BLOCKED, ACTION_PLATFORM_TRIAL,
+            )
+            from core.models.workspaces import Workspace
+
+            _ws = self.db_session.query(Workspace).get(workspace_id)
+            routing = resolve_trial_routing(_ws, effective_model_id, is_byok=False)
+            if routing.action == ACTION_BLOCKED:
+                self.logger.info(f"[Trial] Blocking exhausted trial workspace {workspace_id}")
+                raise TrialExhaustedError()
+            if routing.action == ACTION_PLATFORM_TRIAL:
+                trial_routed = True
+                if routing.model and routing.model != effective_model_id:
+                    self.logger.info(
+                        f"[Trial] Pinning off-allowlist model {effective_model_id} -> "
+                        f"{routing.model} for workspace {workspace_id}"
+                    )
+                    effective_provider, effective_model_id = self._resolve_provider_for_model(
+                        model_config.provider, routing.model
+                    )
+                    if effective_provider not in provider_map:
+                        raise ValueError(f"Unsupported trial provider: {effective_provider}")
+                    provider = provider_map[effective_provider]
+                    resolved = await self._resolve_api_key(
+                        effective_provider, agent_name, workspace_id=workspace_id
+                    )
+                    if not resolved:
+                        raise ValueError(
+                            f"No platform key available for trial model {effective_model_id}."
+                        )
+
         llm_config = LLMConfig(
             provider=provider,
             model=effective_model_id,
@@ -563,6 +602,7 @@ class AgentFactory:
             workspace_id=workspace_id,
             agent_id=None,
             is_byok=resolved.is_byok,
+            trial=trial_routed,
         )
         return manager, resolved
 

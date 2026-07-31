@@ -177,6 +177,87 @@ def _slug_from_url(url: str) -> str:
     return f"{parsed.netloc}_{path}"[:120]
 
 
+def _normalize_domain(domain: str) -> str:
+    """Strip scheme/path/www from a domain — same normalization as ``/start``."""
+    d = (domain or "").strip().lower()
+    d = d.removeprefix("https://").removeprefix("http://")
+    return d.split("/", 1)[0].removeprefix("www.")
+
+
+async def start_business_scan(
+    db: Session, workspace_id: Any, domain: str, *, goals: list[str] | None = None
+) -> dict[str, Any]:
+    """Autonomous intake start for the ``platform_scan_business_site`` tool (US-008).
+
+    Reuses the wizard's OWN primitives — profile row, Firecrawl map, archetype
+    detection/URL selection, and ``_run_scrape_pipeline`` — but with NO interactive
+    URL pick: Auto auto-selects the archetype's target URLs and launches the same
+    background pipeline the ``/scrape`` endpoint does. The interactive wizard
+    endpoints (``/start`` ``/scan`` ``/scrape``) are left EXACTLY as-is (W2 retires
+    them). The caller (the tool handler) gates on ``FIRECRAWL_API_KEY`` first, so
+    this never raises the 503 through the tool path.
+    """
+    norm = _normalize_domain(domain)
+    profile = BusinessProfile(
+        workspace_id=workspace_id,
+        domain=norm,
+        goals=list(goals or []),
+        status="started",
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    profile_id = str(profile.id)
+
+    # Scan: Firecrawl map + archetype detection (same helpers as scan_domain).
+    client = _firecrawl_client()
+    urls = await client.map(norm)
+    detection = detect_archetype(urls)
+    archetype = detection.archetype
+    archetype_slug = archetype.slug if archetype else None
+    bucketed = (
+        select_target_urls(archetype, urls)
+        if archetype
+        else {"must": [], "recommended": []}
+    )
+    selected = (bucketed["must"] + bucketed["recommended"])[
+        : config.FIRECRAWL_MAX_PAGES_PER_SCAN
+    ]
+
+    profile.raw_map_urls = urls
+    profile.archetype = archetype_slug
+    profile.selected_urls = selected
+    profile.status = "scraping"
+    db.commit()
+
+    # Launch the same background pipeline the interactive /scrape endpoint uses.
+    launch_guarded(
+        _run_scrape_pipeline(
+            profile_id=profile_id,
+            workspace_id=str(workspace_id),
+            domain=norm,
+            archetype_slug=archetype_slug,
+            selected_urls=selected,
+            user_goals=list(goals or []),
+        ),
+        subsystem="wizard",
+        operation="scan_business_site_tool",
+        workspace_id=str(workspace_id),
+        extra={"profile_id": profile_id, "domain": norm},
+    )
+
+    logger.info(
+        "wizard.tool.scan_started workspace=%s profile=%s domain=%s urls=%d archetype=%s",
+        workspace_id, profile_id, norm, len(selected), archetype_slug,
+    )
+    return {
+        "profile_id": profile_id,
+        "started": True,
+        "archetype": archetype_slug,
+        "selected_count": len(selected),
+    }
+
+
 # ===========================================================================
 # Endpoints
 # ===========================================================================

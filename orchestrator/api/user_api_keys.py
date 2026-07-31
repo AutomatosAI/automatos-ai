@@ -39,6 +39,18 @@ class ApiKeyCreate(BaseModel):
     display_name: Optional[str] = Field(None, description="Friendly label")
 
 
+class ApiKeyValidation(BaseModel):
+    """Live provider-test result carried on a key save (PRD-222 US-006).
+
+    The badge must never lie: a key is only trusted (``is_active`` / BYOK-enabled)
+    when ``valid`` is True. The save response embeds this so the power-up card
+    (US-013) renders the outcome in-flow, provider error text and all.
+    """
+    valid: bool
+    message: str
+    tested_at: Optional[datetime] = None
+
+
 class ApiKeyOut(BaseModel):
     id: int
     provider: str
@@ -48,6 +60,8 @@ class ApiKeyOut(BaseModel):
     last_used_at: Optional[datetime]
     usage_count: int
     created_at: datetime
+    # Populated only on the save response (US-006); None when listing keys.
+    validation: Optional[ApiKeyValidation] = None
 
     class Config:
         from_attributes = True
@@ -73,7 +87,9 @@ def _mask_key(raw: str) -> str:
     return raw[:5] + "..." + raw[-4:]
 
 
-def _row_to_out(row: UserApiKey, encryption) -> ApiKeyOut:
+def _row_to_out(
+    row: UserApiKey, encryption, validation: Optional[ApiKeyValidation] = None
+) -> ApiKeyOut:
     try:
         raw = encryption.decrypt(row.encrypted_key)
     except Exception:
@@ -87,7 +103,49 @@ def _row_to_out(row: UserApiKey, encryption) -> ApiKeyOut:
         last_used_at=row.last_used_at,
         usage_count=row.usage_count or 0,
         created_at=row.created_at,
+        validation=validation,
     )
+
+
+async def _validate_provider_key(provider: str, raw_key: str) -> ApiKeyValidation:
+    """Make a real, minimal provider call to prove a BYOK key works (PRD-222 US-006).
+
+    Shared by ``add_api_key`` (validate-on-save — the fix for the 2026-07-29
+    dead-key incident where a provider-deleted key showed a healthy badge) and the
+    manual ``test_api_key`` endpoint, so both speak one truth. A provider we have
+    no live check for returns ``valid=True`` with an honest "not available"
+    message — we never CLAIM a validation we did not run. Never raises: a failed
+    call becomes ``valid=False`` carrying the provider's own error text.
+    """
+    provider = (provider or "").lower()
+    tested_at = datetime.utcnow()
+    try:
+        if provider == "openai":
+            from openai import OpenAI
+            OpenAI(api_key=raw_key).models.list()
+        elif provider == "anthropic":
+            import anthropic
+            anthropic.Anthropic(api_key=raw_key).models.list()
+        elif provider == "google":
+            import google.generativeai as genai
+            genai.configure(api_key=raw_key)
+            genai.list_models()
+        elif provider == "openrouter":
+            from openai import OpenAI
+            OpenAI(
+                api_key=raw_key,
+                base_url=config.OPENROUTER_BASE_URL,
+                default_headers={"HTTP-Referer": config.OPENROUTER_SITE_URL, "X-Title": "Automatos AI"},
+            ).models.list()
+        else:
+            return ApiKeyValidation(
+                valid=True,
+                message="Key saved (live validation not available for this provider)",
+                tested_at=tested_at,
+            )
+        return ApiKeyValidation(valid=True, message="API key is valid", tested_at=tested_at)
+    except Exception as e:
+        return ApiKeyValidation(valid=False, message=f"Invalid key: {str(e)[:200]}", tested_at=tested_at)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -102,40 +160,61 @@ async def add_api_key(
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
-    if body.provider.lower() not in SUPPORTED_PROVIDERS:
+    provider = body.provider.lower()
+    if provider not in SUPPORTED_PROVIDERS:
         raise HTTPException(400, f"Unsupported provider. Supported: {SUPPORTED_PROVIDERS}")
 
     encryption = get_encryption_service()
     encrypted = encryption.encrypt(body.api_key)
 
+    # PRD-222 US-006 — validate BEFORE the key is trusted (the badge must never
+    # lie). user_api_keys has no test_status/tested_at column and this branch
+    # spends the ONE migration elsewhere, so the resolver-visible truth is
+    # persisted where _resolve_api_key filters (is_active) and where the frontend
+    # BYOK badge reads (is_active); tested_at rides on last_used_at. A dead key is
+    # stored is_active=False → it never resolves and never wears a "BYOK" badge.
+    validation = await _validate_provider_key(provider, body.api_key)
+
     row = UserApiKey(
         workspace_id=ctx.workspace_id,
-        provider=body.provider.lower(),
+        provider=provider,
         encrypted_key=encrypted,
         display_name=body.display_name or f"My {body.provider.title()} Key",
-        is_active=True,
+        is_active=validation.valid,
         usage_count=0,
+        last_used_at=validation.tested_at if validation.valid else None,
     )
     db.add(row)
 
-    # Auto-enable BYOK for this provider on the workspace
-    from core.models.workspaces import Workspace
-    from sqlalchemy.orm.attributes import flag_modified
+    if validation.valid:
+        # Only a proven key auto-enables BYOK for this provider …
+        from core.models.workspaces import Workspace
+        from sqlalchemy.orm.attributes import flag_modified
 
-    workspace = db.query(Workspace).get(ctx.workspace_id)
-    if workspace:
-        settings = dict(workspace.settings or {})
-        overrides = dict(settings.get("byok_overrides", {}))
-        overrides[body.provider.lower()] = True
-        settings["byok_overrides"] = overrides
-        workspace.settings = settings
-        flag_modified(workspace, "settings")
+        workspace = db.query(Workspace).get(ctx.workspace_id)
+        if workspace:
+            settings = dict(workspace.settings or {})
+            overrides = dict(settings.get("byok_overrides", {}))
+            overrides[provider] = True
+            settings["byok_overrides"] = overrides
+            workspace.settings = settings
+            flag_modified(workspace, "settings")
+
+        # … and only a proven key converts the trial (US-006 hook into the
+        # US-005 ledger). No-op for a converted / never-granted workspace.
+        from services.trial_ledger import mark_trial_converted
+
+        if mark_trial_converted(db, ctx.workspace_id):
+            logger.info(f"Trial converted on validated key save workspace={ctx.workspace_id}")
 
     db.commit()
     db.refresh(row)
 
-    logger.info(f"API key added for provider={body.provider} workspace={ctx.workspace_id} (BYOK auto-enabled)")
-    return _row_to_out(row, encryption)
+    logger.info(
+        f"API key saved for provider={provider} workspace={ctx.workspace_id} "
+        f"(valid={validation.valid}, BYOK {'enabled' if validation.valid else 'NOT enabled — failed validation'})"
+    )
+    return _row_to_out(row, encryption, validation=validation)
 
 
 @router.get("", response_model=List[ApiKeyOut])
@@ -195,38 +274,13 @@ async def test_api_key(
     encryption = get_encryption_service()
     raw_key = encryption.decrypt(row.encrypted_key)
 
-    try:
-        if row.provider == "openai":
-            from openai import OpenAI
-            client = OpenAI(api_key=raw_key)
-            client.models.list()
-        elif row.provider == "anthropic":
-            import anthropic
-            client = anthropic.Anthropic(api_key=raw_key)
-            client.models.list()
-        elif row.provider == "google":
-            import google.generativeai as genai
-            genai.configure(api_key=raw_key)
-            genai.list_models()
-        elif row.provider == "openrouter":
-            from openai import OpenAI
-            client = OpenAI(
-                api_key=raw_key,
-                base_url=config.OPENROUTER_BASE_URL,
-                default_headers={"HTTP-Referer": config.OPENROUTER_SITE_URL, "X-Title": "Automatos AI"},
-            )
-            client.models.list()
-        else:
-            return ApiKeyTestResult(valid=True, message="Key saved (validation not available for this provider)", provider=row.provider)
-
-        # Mark last used
-        row.last_used_at = datetime.utcnow()
+    # Reuse the single validate-on-save path (PRD-222 US-006) so the manual test
+    # and the save-time check can never diverge.
+    result = await _validate_provider_key(row.provider, raw_key)
+    if result.valid:
+        row.last_used_at = result.tested_at or datetime.utcnow()
         db.commit()
-
-        return ApiKeyTestResult(valid=True, message="API key is valid", provider=row.provider)
-
-    except Exception as e:
-        return ApiKeyTestResult(valid=False, message=f"Invalid key: {str(e)[:200]}", provider=row.provider)
+    return ApiKeyTestResult(valid=result.valid, message=result.message, provider=row.provider)
 
 
 @router.get("/platform-status")

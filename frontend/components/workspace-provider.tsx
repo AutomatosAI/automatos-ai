@@ -11,7 +11,38 @@ const ACCEPT_INVITATION_ROUTE = /^\/accept-invitation(\/|$|\?)/
  * Provides workspace information throughout the app
  */
 
-interface Workspace {
+/**
+ * PRD-222 W1S2: server-side Auto-led onboarding state, surfaced on
+ * `GET /api/workspaces/current`. The stage machine + trial ledger live in the
+ * `workspaces.onboarding` JSONB; the frontend reads this snapshot (never
+ * localStorage — D8). Consumed by the onboarding surfaces (US-012..US-015).
+ */
+export type OnboardingStage =
+    | 'not_started'
+    | 'questions'
+    | 'teach'
+    | 'proposal'
+    | 'building'
+    | 'boom'
+    | 'powerup'
+    | 'completed'
+    | 'skipped'
+
+export type TrialState = 'active' | 'warned' | 'exhausted' | 'converted'
+
+export interface WorkspaceTrial {
+    granted_usd: number
+    spent_usd: number
+    state: TrialState
+}
+
+export interface WorkspaceOnboarding {
+    stage: OnboardingStage
+    /** null until the W1S9 trial is granted at provisioning. */
+    trial: WorkspaceTrial | null
+}
+
+export interface Workspace {
     id: string
     name: string
     slug: string
@@ -24,6 +55,7 @@ interface Workspace {
         max_documents: number
         max_members: number
     }
+    onboarding?: WorkspaceOnboarding
     webhookUrl?: string
     webhookKey?: string
     settings?: {
@@ -120,6 +152,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 role: data.role,
                 isNewWorkspace: data.is_new_workspace ?? false,
                 planLimits: data.plan_limits,
+                onboarding: data.onboarding ?? undefined,
                 webhookUrl: data.webhook_url,
                 webhookKey: data.webhook_key,
                 settings: data.settings || {},
