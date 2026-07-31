@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from core.attachment_refs import render_unresolved_file_part
 from core.context_guard import count_tokens
 from modules.context.sections.base import BaseSection, SectionContext
 
@@ -49,6 +50,7 @@ class ConversationSection(BaseSection):
         self,
         messages: list[dict] | None,
         budget_tokens: int | None = None,
+        resolved_attachment_ids: list[str] | None = None,
     ) -> list[dict[str, str]]:
         """Format, filter, and trim messages for the LLM call.
 
@@ -57,6 +59,11 @@ class ConversationSection(BaseSection):
             2. Convert ``parts`` format to plain text.
             3. Trim oldest messages if *budget_tokens* is exceeded.
 
+        Args:
+            resolved_attachment_ids: PRD-223 S0.4 — attachment ids the
+                ContextService will inject via AttachmentResolver after this
+                runs. Their file parts are left for the resolver to render.
+
         Returns:
             A new list of ``{"role": ..., "content": ...}`` dicts.
         """
@@ -64,7 +71,7 @@ class ConversationSection(BaseSection):
             return []
 
         try:
-            formatted = self._convert(messages)
+            formatted = self._convert(messages, resolved_attachment_ids)
             if budget_tokens and budget_tokens > 0:
                 formatted = self._trim(formatted, budget_tokens)
             return formatted
@@ -83,7 +90,10 @@ class ConversationSection(BaseSection):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _convert(messages: list[dict]) -> list[dict[str, str]]:
+    def _convert(
+        messages: list[dict],
+        resolved_attachment_ids: list[str] | None = None,
+    ) -> list[dict[str, str]]:
         """Strip system messages and normalise content to plain text."""
         result: list[dict[str, str]] = []
         for msg in messages:
@@ -98,7 +108,7 @@ class ConversationSection(BaseSection):
 
             # Handle "parts" format (list of typed content blocks)
             if isinstance(content, list):
-                content = _parts_to_text(content)
+                content = _parts_to_text(content, resolved_attachment_ids)
             elif not isinstance(content, str):
                 content = str(content) if content else ""
 
@@ -139,12 +149,17 @@ class ConversationSection(BaseSection):
 # ------------------------------------------------------------------
 
 
-def _parts_to_text(parts: list) -> str:
+def _parts_to_text(
+    parts: list,
+    resolved_attachment_ids: list[str] | None = None,
+) -> str:
     """Convert a list of content parts to plain text.
 
     Handles:
     - ``{"type": "text", "text": "..."}``  → extract text
-    - ``{"type": "file", "name": "..."}``  → placeholder
+    - ``{"type": "file", "name": "..."}``  → marker, unless the
+      AttachmentResolver is rendering that attachment into this prompt
+      (PRD-223 S0.4 — see ``core.attachment_refs``)
     - Unknown types                        → skip
     """
     texts: list[str] = []
@@ -160,7 +175,8 @@ def _parts_to_text(parts: list) -> str:
             if text:
                 texts.append(text)
         elif part_type == "file":
-            name = part.get("name", part.get("filename", "unknown"))
-            texts.append(f"[Attached file: {name} — content not available]")
+            marker = render_unresolved_file_part(part, resolved_attachment_ids)
+            if marker:
+                texts.append(marker)
         # Skip image_url and other non-text parts
     return "\n".join(texts)

@@ -21,7 +21,7 @@ from modules.attachments.store import (
     MediaType,
     get_attachment_store,
 )
-from modules.attachments.extract import extract_text
+from modules.attachments.extract import extract_text, is_extraction_failure
 
 logger = logging.getLogger(__name__)
 
@@ -295,8 +295,9 @@ class AttachmentResolver:
                 content, ref.mime, ref.filename, max_chars=budget_chars
             )
 
-            if not text or text.startswith("["):
-                # Extraction failed or empty
+            if not text or is_extraction_failure(text):
+                # Extraction failed or empty — the caller records this as a
+                # failure and the model is told via build_unavailable_marker.
                 return None, 0
 
             formatted = f"### {ref.filename}\n\n{text}"
