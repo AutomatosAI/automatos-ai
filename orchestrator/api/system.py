@@ -537,13 +537,19 @@ async def get_system_health(ctx: RequestContext = Depends(get_request_context_hy
             "disk_free": f"{disk.free / (1024**3):.1f}GB"
         }
         
+        # PRD-222 US-007 — booleans-only capability report (honest-degrade signal),
+        # workspace-scoped for the llm_key_valid check. No secret values surfaced.
+        from services.capability_report import onboarding_capabilities
+        capabilities = onboarding_capabilities(db, workspace_id=ctx.workspace_id)
+
         return SystemHealthResponse(
             overall_status=overall_status,
             components=components,
             system_metrics=system_metrics,
             uptime="N/A",  # TODO: Track actual uptime
             version="1.0.0",  # TODO: Get from actual version
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
+            capabilities=capabilities,
         )
         
     except Exception as e:

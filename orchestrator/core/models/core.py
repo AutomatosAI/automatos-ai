@@ -927,6 +927,8 @@ class SystemHealthResponse(BaseModel):
     uptime: str
     version: str
     timestamp: datetime
+    # PRD-222 US-007 — booleans-only capability report (no secret values).
+    capabilities: Optional[Dict[str, bool]] = None
 
 class AgentStatistics(BaseModel):
     """Agent statistics for dashboard"""
