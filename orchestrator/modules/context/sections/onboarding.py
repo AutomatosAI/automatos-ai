@@ -1,27 +1,43 @@
 """
-Onboarding Section — PRD-123 Pattern #I (Mission Zero)
-======================================================
+Onboarding Section — PRD-222 W1S2 / US-009: the stage-aware conversational spine.
+================================================================================
 
-Injects Mission Zero onboarding prompt when:
-1. Workspace has no agents (new user, first conversation), OR
-2. User explicitly triggers with phrases like "set up my workspace"
+Auto runs the whole onboarding journey in chat, resumable at any point. This
+section injects the guidance for *exactly one* stage — the workspace's current
+``onboarding.stage`` — so Auto always knows where the user is and what happens
+next.
 
-The prompt instructs Auto to:
-- Ask discovery questions about the user's business
-- Research available tools/agents in the marketplace dynamically
-- Propose a workspace setup in plan mode
-- Let the user iterate ("I don't use Dropbox, I use Google Drive")
-- Execute the approved plan as a mission
+Trigger (replaces the old ``agent_count == 0`` heuristic):
+1. The workspace's ``onboarding.stage`` is NOT terminal (not ``completed`` /
+   ``skipped``) — the server-side state machine (US-001) is the single source of
+   truth, so the flow survives reloads and resumes from the recorded stage; OR
+2. the user explicitly re-triggers with a phrase like "set up my workspace".
+
+Otherwise the section renders ``""``.
+
+The spine (each stage below maps to one guidance block):
+    questions → teach → proposal → building → boom → powerup → (completed)
+
+Hard rules baked into every rendered variant:
+- Auto records each advance via the ``platform_update_onboarding`` tool (US-003)
+  — the section NEVER advances state itself, and Auto must never assume a stage
+  moved without that tool call succeeding.
+- Auto adapts its register to ``segment.comfort``.
+- Auto consults the capability report (US-007) and degrades honestly — e.g. it
+  does not offer a site scan when Firecrawl is not configured.
+- Onboarding must NEVER set ``skip_verification`` or ``auto_approve`` (the trust
+  rule locked by US-010) — every build is verified and user-approved.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from modules.context.sections.base import BaseSection, SectionContext
+from services import onboarding_state
 
 logger = logging.getLogger(__name__)
 
-# Trigger phrases that activate Mission Zero for existing workspaces
+# Trigger phrases that re-activate onboarding for an already-onboarded workspace.
 _TRIGGER_PHRASES = frozenset({
     "set up my workspace",
     "help me get started",
@@ -30,17 +46,133 @@ _TRIGGER_PHRASES = frozenset({
     "setup my workspace",
 })
 
+# Stages whose guidance is "ask the three questions". ``not_started`` also lands
+# here (the user's first message) with a greeting prefix.
+_QUESTION_STAGES = frozenset({onboarding_state.INITIAL_STAGE, "questions"})
+
+
+# --------------------------------------------------------------------------- #
+# Content — the COMMON rules (every active stage) + one per-stage block.
+# The section renders COMMON + exactly ONE stage block, never all of them, so
+# the largest rendered variant is COMMON + the biggest single block.
+# --------------------------------------------------------------------------- #
+
+_HEADER = "## Onboarding — you are guiding this workspace through setup ({stage}{comfort})\n"
+
+_COMMON_RULES = """\
+Guide the user one step at a time, conversationally — never a form, never a wall of text.
+
+Rules at every stage:
+- Record progress with the `platform_update_onboarding` tool: pass `advance_to` \
+when the user finishes a step, and `segment` ({business, goal, comfort}) as you \
+learn it. A stage only advances when that tool call succeeds — never assume it did.
+- Match the user's AI comfort: plain-language and benefits-first for newcomers; \
+precise and technical, with "or do it yourself" shortcuts, for technical users.
+- NEVER create a mission or run a tool with `skip_verification` or `auto_approve` \
+set — every build is verified and the user approves it before anything runs.
+- Size the build: 3 or fewer agents AND 2 or fewer Playbooks → make the changes \
+with direct tool calls right after the user's explicit yes; anything larger → \
+create a normal mission (it defaults to awaiting_approval; the user approves it \
+on the mission surface).
+"""
+
+_FIRST_MESSAGE_PREFIX = (
+    "This is the user's first message. Greet them warmly as Auto in one line, "
+    "then begin.\n\n"
+)
+
+_STAGE_QUESTIONS = """\
+### Now: the three questions
+Ask these one at a time, in your own words, waiting for each answer:
+1. What's your business? (what you do, who you serve)
+2. What's the first thing you'd want handled for you?
+3. How comfortable are you with AI — brand new, or very technical?
+Save each answer with `platform_update_onboarding` (segment.business / .goal / \
+.comfort). When you have all three, advance_to `teach`.
+"""
+
+_STAGE_TEACH = """\
+### Now: teach Auto their business
+Offer three ways — their choice:
+- Scan their website: call `platform_scan_business_site` with their domain.{firecrawl_note}
+- Upload documents.
+- Just tell you in chat.
+When the reading finishes, play back what you learned in plain words and ask them \
+to correct you — corrections matter. Then advance_to `proposal`.
+"""
+
+_NO_SCAN_NOTE = (
+    " (Site scanning is NOT available in this deployment — do not offer the scan; "
+    "steer to document upload or just talking it through.)"
+)
+
+_STAGE_PROPOSAL = """\
+### Now: propose the setup — this is the approval gate
+Present ONE clear proposal: the starter team sized to their business (a barber \
+gets Auto + 1–2 helpers and ~2 Playbooks; a larger company gets more), what each \
+piece does for THEM, the 1–2 apps to connect, and the estimated cost ("this build \
+is covered by your trial credit"). Nothing is built before they say yes. Let them \
+edit conversationally. On an explicit yes, advance_to `building` and start.
+"""
+
+_STAGE_BUILDING = """\
+### Now: build it — narrate every step
+Create the agents, skills and Playbooks and request the 1–2 app connections \
+inline. Narrate as you go ("Created your Marketing helper — it's on your Agents \
+page"). When the build is complete and verified, advance_to `boom`.
+"""
+
+_STAGE_BOOM = """\
+### Now: the payoff moment
+Invite the user to ask you something about THEIR business, and answer it grounded \
+in what you just learned — this is the value moment, still on their trial credit. \
+Once they've seen it, advance_to `powerup`.
+"""
+
+_STAGE_POWERUP = """\
+### Now: keep Auto running — connect a key
+Frame this as continuation, not a paywall: "Auto just read your business and built \
+your team — keep him running." {trial_line}
+Recommend ONE option first: **OpenRouter — one key, pay-as-you-go, access to 400+ \
+models.** Offer the masked in-chat key entry. List other providers \
+(OpenAI, Anthropic, …) collapsed beneath, for users who already have one.
+A saved key is validated live and unlocks the full model catalogue. Declining is \
+fine — the remaining trial credit keeps working.
+Then present the run-and-learn checklist (connect a second app · invite a teammate \
+· run your first mission · take the 10-minute course) and advance_to `completed`.
+"""
+
+_RETRIGGER_NOTE = (
+    "> The user asked to set up / reconfigure a workspace that has already "
+    "onboarded. Offer to adjust the existing setup or start fresh — their call — "
+    "then proceed from the three questions.\n"
+)
+
+
+def _trial_line(onboarding: dict[str, Any]) -> str:
+    """A concrete trial-balance sentence for the power-up copy, when known."""
+    trial = onboarding.get("trial") or {}
+    granted = trial.get("granted_usd")
+    if granted is None:
+        return "Mention their remaining trial credit."
+    spent = trial.get("spent_usd") or 0
+    remaining = max(0.0, float(granted) - float(spent))
+    return f"They have ${remaining:.2f} of ${float(granted):.2f} trial credit left."
+
 
 class OnboardingSection(BaseSection):
-    """
-    PRD-123 Pattern #I: Mission Zero onboarding prompt injection.
+    """PRD-222 US-009: stage-aware Mission Zero v2 prompt injection.
 
-    Priority 2 (high — after identity, before skills/tools).
-    Only emits content when the workspace is empty or user triggers it.
+    Priority 2 (high — after identity, before skills/tools). Emits the guidance
+    for the workspace's current onboarding stage, or ``""`` once the workspace
+    has completed / skipped (unless the user manually re-triggers).
     """
 
     name: str = "onboarding"
     priority: int = 2
+    # Budget: the section renders COMMON rules + one stage block. Largest measured
+    # variant (powerup, with the dynamic trial line) is well under this cap — see
+    # tests/test_prd222_onboarding_section.py::test_largest_variant_within_budget.
     max_tokens: Optional[int] = 800
 
     async def render(self, ctx: SectionContext) -> str:
@@ -51,100 +183,113 @@ class OnboardingSection(BaseSection):
             return ""
 
     async def _build(self, ctx: SectionContext) -> str:
-        is_empty_workspace = self._check_empty_workspace(ctx)
-        is_manual_trigger = self._check_trigger_phrases(ctx)
+        workspace = self._load_workspace(ctx)
+        stage = (
+            onboarding_state.current_stage(workspace)
+            if workspace is not None
+            else None
+        )
+        is_active = stage is not None and stage not in onboarding_state.TERMINAL_STAGES
+        is_manual = self._check_trigger_phrases(ctx)
 
-        if not is_empty_workspace and not is_manual_trigger:
+        if not is_active and not is_manual:
             return ""
 
-        existing_note = ""
-        if is_manual_trigger and not is_empty_workspace:
-            existing_note = (
-                "\n> **Note:** This workspace already has agents. "
-                "I can add to the existing setup or start fresh — your call.\n"
+        onboarding = (
+            onboarding_state.get_onboarding(workspace) if workspace is not None else {}
+        )
+        comfort = (onboarding.get("segment") or {}).get("comfort")
+
+        # Re-trigger on a terminal (or unloadable) workspace restarts from the
+        # questions; a re-trigger mid-flow just resumes the current stage.
+        manual_note = ""
+        render_stage = stage
+        if is_manual and not is_active:
+            render_stage = onboarding_state.INITIAL_STAGE
+            manual_note = _RETRIGGER_NOTE
+
+        return self._compose(ctx, render_stage, comfort, onboarding, manual_note)
+
+    def _compose(
+        self,
+        ctx: SectionContext,
+        stage: str,
+        comfort: Optional[str],
+        onboarding: dict[str, Any],
+        manual_note: str,
+    ) -> str:
+        comfort_str = f" · comfort: {comfort}" if comfort else ""
+        parts = [_HEADER.format(stage=stage, comfort=comfort_str)]
+        if manual_note:
+            parts.append(manual_note)
+        parts.append(_COMMON_RULES)
+        parts.append(self._stage_block(ctx, stage, onboarding))
+        return "\n".join(p.strip() for p in parts if p and p.strip()) + "\n"
+
+    def _stage_block(
+        self, ctx: SectionContext, stage: str, onboarding: dict[str, Any]
+    ) -> str:
+        if stage in _QUESTION_STAGES:
+            prefix = (
+                _FIRST_MESSAGE_PREFIX
+                if stage == onboarding_state.INITIAL_STAGE
+                else ""
             )
+            return prefix + _STAGE_QUESTIONS
+        if stage == "teach":
+            return _STAGE_TEACH.format(firecrawl_note=self._firecrawl_note(ctx))
+        if stage == "proposal":
+            return _STAGE_PROPOSAL
+        if stage == "building":
+            return _STAGE_BUILDING
+        if stage == "boom":
+            return _STAGE_BOOM
+        if stage == "powerup":
+            return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding))
+        return ""  # defensive — terminal stages never reach here
 
-        return _MISSION_ZERO_PROMPT.format(existing_note=existing_note)
+    def _firecrawl_note(self, ctx: SectionContext) -> str:
+        """Honest-degrade: suppress the scan offer when Firecrawl is unconfigured.
 
-    def _check_empty_workspace(self, ctx: SectionContext) -> bool:
-        """Check if workspace has zero agents (new user signal)."""
-        if not ctx.db_session or not ctx.workspace_id:
-            return False
+        Reads the US-007 capability report. On any failure it defaults to
+        offering the scan — ``platform_scan_business_site`` itself degrades
+        honestly (US-008), so a report error never blocks the offer.
+        """
         try:
-            from core.models.core import Agent
-            count = (
-                ctx.db_session.query(Agent)
-                .filter(
-                    Agent.workspace_id == ctx.workspace_id,
-                    Agent.status == "active",
-                )
-                .count()
+            from services.capability_report import onboarding_capabilities
+
+            caps = onboarding_capabilities(
+                ctx.db_session, workspace_id=ctx.workspace_id
             )
-            return count == 0
+            if not caps.get("firecrawl_configured", True):
+                return _NO_SCAN_NOTE
+        except Exception:
+            logger.debug("OnboardingSection: capability check failed", exc_info=True)
+        return ""
+
+    def _load_workspace(self, ctx: SectionContext) -> Any:
+        """Load the Workspace record (defensive; returns None on any miss)."""
+        if not ctx.db_session or not ctx.workspace_id:
+            return None
+        try:
+            from core.models.workspaces import Workspace
+
+            return (
+                ctx.db_session.query(Workspace)
+                .filter(Workspace.id == ctx.workspace_id)
+                .first()
+            )
         except Exception as exc:
-            logger.debug("OnboardingSection: agent count check failed: %s", exc)
-            return False
+            logger.debug("OnboardingSection: workspace load failed: %s", exc)
+            return None
 
     def _check_trigger_phrases(self, ctx: SectionContext) -> bool:
-        """Check if the last user message contains a Mission Zero trigger phrase."""
+        """True if the last user message contains a manual re-trigger phrase."""
         messages = ctx.messages
         if not messages:
             return False
-
-        # Find the last user message
         for msg in reversed(messages):
             if msg.get("role") == "user":
                 content = (msg.get("content") or "").lower().strip()
                 return any(phrase in content for phrase in _TRIGGER_PHRASES)
-
         return False
-
-
-_MISSION_ZERO_PROMPT = """\
-## Mission Zero — Workspace Setup
-
-You are about to help a user set up their workspace from scratch. This is a \
-guided onboarding flow. Follow these steps:
-{existing_note}
-### Step 1: Discovery
-Ask the user about their business and goals. Key questions:
-1. What does your business do? (industry, size, stage)
-2. How large is your team? Who will use Automatos?
-3. What tools do you currently use? (CRM, email, project management, etc.)
-4. What tasks take the most time that you'd like to automate?
-5. Are you budget-sensitive or priority-is-speed?
-6. Do you have existing content/data to import?
-
-Ask 2-3 questions at a time, not all at once.
-
-### Step 2: Research
-Based on their answers, use these tools to find the best setup:
-- `platform_browse_marketplace_agents` — find agents that match their needs
-- `platform_browse_marketplace_skills` — find skills for their workflows
-- `platform_browse_marketplace_plugins` — find integrations they need
-- `platform_list_connected_apps` — check what's already connected
-- `platform_list_llms` — check available AI models
-
-### Step 3: Propose (Plan Mode)
-Present a structured setup proposal:
-```
-Proposed Workspace Setup:
-- Agents: [list with roles and why each is needed]
-- Skills: [list mapped to their workflow needs]
-- Integrations: [tools to connect, e.g., Gmail, Slack, GitHub]
-- AI Model: [recommended model and why]
-- Estimated setup time: [X minutes]
-```
-
-Let the user iterate: "I don't use Dropbox, I use Google Drive" → adjust the plan.
-
-### Step 4: Execute
-Once the user approves, use `platform_create_mission` to execute the setup as a \
-mission. The mission will create agents, assign skills, and configure integrations.
-
-### Guidelines
-- Be conversational, not robotic
-- Research the marketplace dynamically — don't assume what's available
-- If the user wants to skip ahead, let them
-- Confirm before executing the mission
-"""
