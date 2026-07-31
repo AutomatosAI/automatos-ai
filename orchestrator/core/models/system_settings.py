@@ -52,6 +52,9 @@ class SettingCategory(str, Enum):
     # PRD-207: Auto Live — the live-voice master switch + Retell credentials.
     VOICE = "voice"
 
+    # PRD-223: which models may hold the orchestrator (Auto) seat + turn cost governor.
+    MODEL_POLICY = "model_policy"
+
 
 class SystemSetting(Base):
     """System-wide configuration settings"""

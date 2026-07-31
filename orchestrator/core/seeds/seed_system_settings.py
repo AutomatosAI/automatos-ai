@@ -566,13 +566,13 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.CHATBOT.value,
             "key": "max_tool_iterations",
-            "default_value": "25",
+            "default_value": "8",
             "value_type": "number",
             "description": (
                 "How many tool-call turns Auto gets per user message before it "
-                "is forced to wrap up. Higher = Auto can chain more steps in "
-                "one reply but bigger conversations cost more. Per-agent "
-                "override: set agent.configuration.max_iterations."
+                "is forced to wrap up. Chat-scale budget (PRD-223) — mission "
+                "work uses coordinator.task_max_tool_iterations instead. "
+                "Per-agent override: set agent.configuration.max_iterations."
             ),
             "is_required": True,
             "validation_rules": {"min": 5, "max": 100},
@@ -603,6 +603,54 @@ def seed_system_settings(db: Session):
             ),
             "is_required": True,
             "validation_rules": {"min": 0, "max": 5},
+        },
+    ])
+
+    # =========================================================================
+    # MODEL POLICY (PRD-223 — orchestrator-seat gating + turn cost governor)
+    # =========================================================================
+    settings_to_create.extend([
+        {
+            "category": SettingCategory.MODEL_POLICY.value,
+            "key": "orchestrator_quarantine",
+            "default_value": '["openai/gpt-5.6-sol-pro"]',
+            "value_type": "string",
+            "description": (
+                "JSON list of model ids BLOCKED from the orchestrator (Auto) "
+                "seat. A quarantined model is rejected at the settings route "
+                "and, fail-closed, at agent activation (falls back to the "
+                "orchestrator default). Seeded with the model from the "
+                "2026-07-31 incident (PRD-223 D2)."
+            ),
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.MODEL_POLICY.value,
+            "key": "orchestrator_allowlist",
+            "default_value": "[]",
+            "value_type": "string",
+            "description": (
+                "JSON list of model ids permitted in the orchestrator (Auto) "
+                "seat. Empty = quarantine-only mode (any non-quarantined model "
+                "passes). Non-empty = strict mode: ONLY listed models pass. "
+                "Populate this to hard-lock Auto's chair (PRD-223)."
+            ),
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.MODEL_POLICY.value,
+            "key": "turn_cost_ceiling_usd",
+            "default_value": "1.50",
+            "value_type": "number",
+            "description": (
+                "Estimated USD spend allowed for a single chat turn's LLM "
+                "calls before the tool loop is forced to synthesize an answer "
+                "with what it has. 0 disables the governor. Estimates use the "
+                "cost-audit price map — same numbers as the LLM_CALL log lines "
+                "(PRD-223)."
+            ),
+            "is_required": True,
+            "validation_rules": {"min": 0, "max": 25},
         },
     ])
 

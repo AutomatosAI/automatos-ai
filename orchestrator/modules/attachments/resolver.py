@@ -68,7 +68,7 @@ class AttachmentResolver:
         workspace_id: UUID,
         model_id: str,
         text_budget_tokens: int = 20_000,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], list[dict]]:
         """
         Convert attachment_ids into LLM content parts.
 
@@ -79,31 +79,41 @@ class AttachmentResolver:
             text_budget_tokens: Token budget for document text extraction
 
         Returns:
-            List of content part dicts ready to append to a user message:
-            - Images: {"type": "image_url", "image_url": {"url": "..."}}
-            - Documents: {"type": "text", "text": "### filename\n..."}
+            (parts, failures):
+            - parts: content part dicts ready to append to a user message —
+              images as ``image_url`` parts, documents as text parts. When any
+              attachment could not be loaded, the LAST part is an explicit
+              ``[ATTACHMENT UNAVAILABLE]`` text marker (PRD-223 S0.3) so the
+              model knows — and says — what it cannot see, instead of
+              inferring content from a filename.
+            - failures: ``[{"attachment_id", "filename", "reason"}]`` for the
+              caller to surface to the user (SSE badge / log).
 
         Raises:
             VisionNotSupportedError: If images attached to non-vision model
-            AttachmentNotFoundError: If an attachment is expired or missing
         """
         if not attachment_ids:
-            return []
+            return [], []
 
-        # Fetch attachment metadata
+        # Fetch attachment metadata. A missing/expired attachment is a
+        # FAILURE the model and user must both learn about — never a silent
+        # skip (PRD-223 S0.3: silence here was the fabrication opportunity).
+        failures: list[dict] = []
         refs = []
         for aid in attachment_ids:
             try:
                 ref = await self._store.get(aid, workspace_id)
                 refs.append(ref)
             except AttachmentNotFoundError:
-                logger.warning(
-                    "Attachment %s not found or expired — skipping", aid
-                )
-                continue
+                logger.warning("Attachment %s not found or expired", aid)
+                failures.append({
+                    "attachment_id": str(aid),
+                    "filename": None,
+                    "reason": "not found or expired",
+                })
 
-        if not refs:
-            return []
+        if not refs and not failures:
+            return [], []
 
         # Vision capability check
         has_images = any(r.media_type == MediaType.IMAGE for r in refs)
@@ -120,12 +130,19 @@ class AttachmentResolver:
                 len(image_refs),
                 MAX_IMAGES_PER_REQUEST,
             )
+            for dropped in image_refs[MAX_IMAGES_PER_REQUEST:]:
+                failures.append({
+                    "attachment_id": str(dropped.attachment_id),
+                    "filename": dropped.filename,
+                    "reason": f"over the {MAX_IMAGES_PER_REQUEST}-image limit",
+                })
             # Keep first N images, all documents
             refs = image_refs[:MAX_IMAGES_PER_REQUEST] + [
                 r for r in refs if r.media_type != MediaType.IMAGE
             ]
 
-        # Build content parts
+        # Build content parts. A part that fails to build is a failure the
+        # model must be told about — not a silent drop.
         parts: list[dict] = []
         budget_chars = text_budget_tokens * 4  # ~4 chars/token estimate
 
@@ -134,6 +151,12 @@ class AttachmentResolver:
                 part = await self._resolve_image(ref, workspace_id)
                 if part:
                     parts.append(part)
+                else:
+                    failures.append({
+                        "attachment_id": str(ref.attachment_id),
+                        "filename": ref.filename,
+                        "reason": "image could not be loaded",
+                    })
             else:
                 part, chars_used = await self._resolve_document(
                     ref, workspace_id, budget_chars
@@ -141,8 +164,17 @@ class AttachmentResolver:
                 if part:
                     parts.append(part)
                     budget_chars -= chars_used
+                else:
+                    failures.append({
+                        "attachment_id": str(ref.attachment_id),
+                        "filename": ref.filename,
+                        "reason": "text could not be extracted",
+                    })
 
-        return parts
+        if failures:
+            parts.append(build_unavailable_marker(failures))
+
+        return parts, failures
 
     async def _check_vision_support(self, model_id: str) -> bool:
         """
@@ -278,6 +310,32 @@ class AttachmentResolver:
 
 # Type hint forward reference
 from modules.attachments.store import AttachmentRef  # noqa: E402
+
+
+def build_unavailable_marker(failures: list[dict]) -> dict:
+    """Text part telling the model exactly which attachments it does NOT have.
+
+    PRD-223 S0.3: a message that references a file whose content never
+    arrived reads, to the model, like a file it should know — the engineered
+    fabrication opportunity from the 2026-07-31 incident. State the gap
+    explicitly and instruct honesty.
+    """
+    lines = []
+    for failure in failures:
+        name = failure.get("filename") or f"attachment {failure.get('attachment_id', 'unknown')}"
+        lines.append(f"- {name}: {failure.get('reason', 'could not be loaded')}")
+    return {
+        "type": "text",
+        "text": (
+            "[ATTACHMENT UNAVAILABLE]\n"
+            "The following attached file(s) could NOT be loaded into this conversation:\n"
+            + "\n".join(lines)
+            + "\nYou do NOT have the contents of these files. Do not infer their "
+            "contents from filenames, and do not claim to have read them. If the "
+            "user asks about them, say you can see the reference but do not have "
+            "the contents."
+        ),
+    }
 
 
 def inject_parts_into_last_user_message(

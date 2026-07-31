@@ -384,10 +384,32 @@ class Config:
                 f"Invalid system_setting {category}.{key}={val!r}: must be an integer."
             )
 
+    def _required_float_setting(self, category: str, key: str) -> float:
+        from core.llm.manager import get_system_setting
+        val = get_system_setting(category, key, None)
+        if val is None or str(val).strip() == "":
+            raise RuntimeError(
+                f"Missing required system_setting {category}.{key}. "
+                f"Run `python -m core.seeds.seed_system_settings` to seed defaults, "
+                f"or set the value via the System Settings UI."
+            )
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            raise RuntimeError(
+                f"Invalid system_setting {category}.{key}={val!r}: must be a number."
+            )
+
     @property
     def CHATBOT_MAX_TOOL_ITERATIONS(self) -> int:
         """Max tool-call turns per chatbot user message (Auto's mid-convo budget)."""
         return self._required_int_setting("chatbot", "max_tool_iterations")
+
+    @property
+    def CHATBOT_TURN_COST_CEILING_USD(self) -> float:
+        """Estimated USD a single chat turn may spend on LLM calls before the
+        tool loop is forced to synthesize (PRD-223 cost governor). 0 disables."""
+        return self._required_float_setting("model_policy", "turn_cost_ceiling_usd")
 
     @property
     def CHATBOT_ACTION_RETRY_BUDGET(self) -> int:
