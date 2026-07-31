@@ -1,0 +1,192 @@
+{
+  "project": "Automatos AI Platform — PRD-222 Auto-Led Onboarding (Mission Zero v2) — Wave 1: pilot-ready spine",
+  "branchName": "ralph/prd-222-auto-led-onboarding",
+  "description": "Cut from origin/main at launch (anchors below verified @ c1cce09ab — RE-VERIFY every path/line by grep before relying on it, they drift). SCOPE = Wave 1 ONLY of docs/PRDS/PRD-222-AUTO-LED-ONBOARDING.md (seeded onto this branch): 15 stories building the Auto-led conversational onboarding spine — server-side onboarding state + funnel timestamps, the platform_update_onboarding tool, the $5 trial-credit ledger with hard enforcement, credential-validation truth, capability report, intake-pipeline-as-tools, OnboardingSection v2, trust guards + summary Deliverable, the tool-schema truth pass, and 4 frontend surfaces (kill the modal / power-up card / trial pill + exhausted banner / intake progress card). OUT OF SCOPE — DO NOT TOUCH: deleting Shepherd (frontend/lib/shepherd/**, welcome-modal/first-login-guard FILES stay — only the MOUNT changes), retiring the wizard UI (frontend/components/wizard/** stays; orchestrator/api/wizard.py endpoints keep their behavior), the 4-agent Mission Zero machinery (orchestrator/core/seeds/seed_onboarding_agents.py, _clone_onboarding_agents, source=='mission_zero' branches in coordinator_service.py — all W2 retirement targets, leave them exactly as-is), plans/tiers/exposure profiles (W2, blocked on Gerard's Q1), academy bridge/voice/invitee (W3), waitlist/sign-up changes. BINDING RULES: exactly ONE new alembic revision on this branch (US-001; every later schema need goes inside the workspaces.onboarding JSONB — never a second migration, never a new table); JSONB is REBUILD-DON'T-MUTATE (assign a NEW dict to the column; in-place dict mutation is the PRD-220 silent-loss bug class); no os.getenv outside orchestrator/config.py; platform tools follow the 3-file pattern (schema in actions_*.py, handler in handlers_*.py, registration in platform_executor.py); no onboarding code path may ever set skip_verification or auto_approve; PURE tests (@integration DB-bound tests must skip cleanly without a local Postgres — real-Postgres coverage is CI test.yml on each per-story push); test fixtures use obviously-fake key formats (gitleaks); canonical terms (Playbook not recipe, Mission, Deliverable, Auto is a proper noun); NEVER 'git add -A'/'git add .'/'-u' (node_modules is untracked and NOT gitignored — stage explicit paths only); never 'git stash -u'. Frontend gate: cd frontend && npm run -s test green after every frontend story.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "workspaces.onboarding JSONB + state machine (the ONE migration)",
+      "description": "Add an `onboarding` JSONB column (server_default '{}') to the workspaces table via ONE new alembic revision chained onto the CURRENT single head (verify with a static chain-walk — down_revision of the new file must be today's head; exactly one head after). Model mapping on the Workspace ORM class. New service `orchestrator/services/onboarding_state.py` with `def get_onboarding(` and `def advance_onboarding_stage(`: stage enum (app-level, not a PG enum) not_started|questions|teach|proposal|building|boom|powerup|completed|skipped; transitions are monotonic-forward through that order, `skipped` reachable from any non-terminal stage, completed/skipped terminal; every transition stamps ISO timestamps into onboarding['stages'][<stage>] — these per-stage timestamps ARE the Wave-1 funnel record. Segment answers {business, goal, comfort} stored under onboarding['segment']. CRITICAL: all writes rebuild the whole dict and assign it to the column (SQLAlchemy JSONB change-detection — never mutate in place).",
+      "acceptanceCriteria": [
+        "One new alembic revision under orchestrator/alembic/versions/ adding workspaces.onboarding JSONB server_default '{}'; its down_revision equals the pre-branch head; a pure test statically walks the versions dir and asserts exactly one head",
+        "orchestrator/services/onboarding_state.py exists with get_onboarding + advance_onboarding_stage; invalid/backward transitions raise; skipped allowed from any non-terminal stage; completed and skipped are terminal",
+        "Every advance stamps onboarding['stages'][stage] with an ISO timestamp and persists via whole-dict reassignment (test asserts a NEW dict object is assigned, not mutated in place)",
+        "Segment answers persist under onboarding['segment'] with keys business/goal/comfort",
+        "Pure tests pass without a local DB (session-level logic tested with the house SQLAlchemy test fixtures; @integration paths skip cleanly)",
+        "cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/alembic/versions/", "orchestrator/core/models/", "orchestrator/services/onboarding_state.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-002",
+      "title": "Onboarding stage + trial surfaced on GET /api/workspaces/current",
+      "description": "Extend the existing current-workspace response (orchestrator/api/workspaces.py — is_new_workspace computed ~:63-109, re-verify) with an `onboarding` object: {stage, trial: {granted_usd, spent_usd, state} | null}. No new route (route-manifest untouched — this is a field addition). Frontend workspace-provider (frontend/components/workspace-provider.tsx) maps it to workspace.onboarding. If an existing analytics/event recording plane fits (grep orchestrator/modules/analytics and services for an event-write path), also emit an onboarding_stage_changed event from advance_onboarding_stage; if none fits cleanly, the per-stage timestamps from US-001 are the funnel record — do NOT invent a new table or plane.",
+      "acceptanceCriteria": [
+        "GET /api/workspaces/current response includes onboarding.stage and onboarding.trial (null-safe when absent); existing fields unchanged; no new route added (route-manifest diff is empty)",
+        "frontend workspace-provider exposes workspace.onboarding; frontend types updated",
+        "If an existing analytics event sink was found: onboarding_stage_changed emitted per transition with workspace_id+stage (test); otherwise a code comment in onboarding_state.py records the grep-proof that none fit and the JSONB timestamps stand as the funnel record",
+        "Backend + frontend tests green (cd orchestrator && python3 -m pytest -q; cd frontend && npm run -s test)"
+      ],
+      "files": ["orchestrator/api/workspaces.py", "orchestrator/services/onboarding_state.py", "frontend/components/workspace-provider.tsx", "orchestrator/tests/", "frontend/"]
+    },
+    {
+      "id": "US-003",
+      "title": "platform_update_onboarding tool (3-file pattern)",
+      "description": "New platform tool `platform_update_onboarding` so Auto (and only Auto's tool calls — never prompt side effects) advances the spine: params {advance_to?: stage, segment?: {business?, goal?, comfort?}}. Handler delegates to onboarding_state (US-001) and returns the updated {stage, trial}. Schema in a new or existing actions_* file, handler in handlers_*, registered in platform_executor.py exactly like neighbouring tools. The schema's required[] must match handler truth from birth (US-011's rule): both params optional but at least one must be present — handler errors clearly when both absent, description states it.",
+      "acceptanceCriteria": [
+        "Schema + handler + registration present (3-file pattern, mirrors neighbouring platform tools); tool name platform_update_onboarding",
+        "Handler validates via onboarding_state; backward transition returns a clear error, not a crash; response includes the updated stage and trial snapshot",
+        "required[] is truthful: no field with a handler default is required; the at-least-one rule is in the description and enforced with a clear error",
+        "Contract + handler tests pass; cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/modules/tools/discovery/", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-004",
+      "title": "Trial config + grant at provisioning (one per Clerk user)",
+      "description": "Config keys in orchestrator/config.py ONLY: TRIAL_CREDIT_USD (float, default 5.00), TRIAL_GLOBAL_DAILY_USD (float, default 25.00), TRIAL_MODEL_ALLOWLIST (comma-list; default = the existing economical planner-model default already in config.py — reuse the platform's cheap-model choice, do not invent a new model id), TRIAL_ENABLED (bool, default true). In _provision_new_user_workspace (orchestrator/core/auth/hybrid.py ~:257-387, re-verify): when TRIAL_ENABLED and this Clerk user has never held a trial (check other workspaces owned by the same users row for onboarding.trial), set onboarding.trial = {granted_usd: TRIAL_CREDIT_USD, spent_usd: 0, state: 'active'}. When the global daily cap has been reached (see US-005's daily counter), grant is PAUSED: onboarding.trial = null and a log line records the pause reason.",
+      "acceptanceCriteria": [
+        "All four TRIAL_* keys read via config.py with the stated defaults; grep proves no os.getenv outside config.py",
+        "New-workspace provisioning grants the trial exactly once per Clerk user (second workspace for the same user gets no trial — test)",
+        "TRIAL_ENABLED=false and daily-cap-reached both result in no grant, logged; provisioning otherwise unchanged (Auto seed, templates, notification prefs untouched)",
+        "Pure tests green; cd orchestrator && python3 -m pytest -q"
+      ],
+      "files": ["orchestrator/config.py", "orchestrator/core/auth/hybrid.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-005",
+      "title": "Trial enforcement at the LLM key-resolution choke point",
+      "description": "FIRST, document ground truth in the commit body: grep the credential-resolution seam (search PLATFORM_KEY_WORKSPACE_ID — the #610 workspace-key-first resolver) and record how a keyless workspace resolves TODAY (unbounded platform-key fallback vs error). THEN add `def resolve_trial_routing(` (new orchestrator/services/trial_ledger.py, called from that single seam): (1) workspace has its own working key → use it, zero trial involvement; (2) else trial state active/warned → route to the platform key, force/validate the requested model against TRIAL_MODEL_ALLOWLIST (off-list request → allowlisted model substituted or clear typed error — pick ONE behavior and test it), and accumulate spent_usd per request using the platform's EXISTING per-request cost/usage computation (grep the usage-tracking write path; reuse its pricing, do not build a second pricing table); at spent>=80% flip state to warned; at >=100% flip to exhausted; (3) else → the existing no-key error path unchanged. Exhausted requests return a TYPED error (stable error code, e.g. trial_exhausted) the frontend can render deterministically. Daily global counter: accumulate today's trial spend in the existing system_settings plane (key like trial_spend_YYYY-MM-DD); US-004's grant reads it. No-background-burn: the heartbeat/scheduled execution path (grep scheduled_task_service + heartbeat runner) SKIPS workspaces whose onboarding.trial.state is active/warned/exhausted, recording a visible skip reason — never a silent no-op. A validated key save flips state to converted (hook in US-006).",
+      "acceptanceCriteria": [
+        "Commit body contains the grep-proof of today's keyless resolution behavior (the PRD's open verify item), and prd-222.json notes it",
+        "resolve_trial_routing exists in orchestrator/services/trial_ledger.py and is called from the single key-resolution seam — BYOK workspaces provably bypass it (test)",
+        "Trial requests pin to TRIAL_MODEL_ALLOWLIST (test covers the off-list case with the chosen behavior); spend accumulates via the existing cost computation; 80% → warned, 100% → exhausted with the typed trial_exhausted error (tests)",
+        "Daily counter in system_settings increments with trial spend; US-004 grant pauses when >= TRIAL_GLOBAL_DAILY_USD (test)",
+        "Heartbeat/scheduled execution skips non-converted trial workspaces with a logged+visible reason (test); converted workspaces unaffected",
+        "cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/services/trial_ledger.py", "orchestrator/config.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-006",
+      "title": "Credential validation truth (the badge must never lie) + converted hook",
+      "description": "On LLM credential save (grep the credentials API + the test_status field — the 2026-07-29 dead-key incident: a provider-deleted key showed a healthy badge), perform a LIVE provider test call; persist test_status + tested_at from the ACTUAL result; the save response carries the result so the UI can render it in-flow (provider error text included on failure). A successful validated save on a workspace whose onboarding.trial.state is active/warned/exhausted flips it to converted (via onboarding_state, whole-dict reassignment). Fixtures: obviously-fake key formats only.",
+      "acceptanceCriteria": [
+        "Credential save triggers a live validation call (mocked in tests); test_status/tested_at persisted equal to the real outcome; failure response includes the provider error",
+        "Valid save on a trial workspace flips trial state to converted (test); non-trial workspaces unaffected",
+        "No existing credential flows broken (existing credential tests still green)",
+        "Fixtures use fake-format keys (gitleaks-safe); cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-007",
+      "title": "Capability report (honest-degrade signal)",
+      "description": "A callable `def onboarding_capabilities(` (extend an existing health/system module if one fits — grep for health/readiness surfaces first — else new orchestrator/services/capability_report.py) returning {llm_key_valid (workspace-scoped, from US-006 truth), firecrawl_configured, composio_configured, redis_configured} — all read via config.py, no secret values ever surfaced (booleans only). Exposed to the OnboardingSection context (US-009 consumes) and on the existing admin/system health surface.",
+      "acceptanceCriteria": [
+        "onboarding_capabilities exists and returns the four booleans; secrets never appear in any response (test asserts booleans only)",
+        "Admin/system health surface includes the capability booleans (extend existing surface — grep-proof in commit if a new module was genuinely needed)",
+        "Unset FIRECRAWL_API_KEY yields firecrawl_configured=false without raising (test)",
+        "cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/services/", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-008",
+      "title": "Intake pipeline as Auto tools (scan + status)",
+      "description": "Two platform tools (3-file pattern): `platform_scan_business_site` {domain} — starts the existing PRD-130 scan/scrape pipeline for the caller's workspace by REUSING orchestrator/api/wizard.py internals (extract the pipeline start into a callable service function if needed; endpoint behavior must NOT change — the wizard UI still works and its retirement is W2); returns {profile_id, started: true} or, when FIRECRAWL_API_KEY is unset, {configured: false, alternatives: 'doc upload / conversation'} — an honest result, never a raised 503 through the tool. `platform_get_intake_status` {profile_id} — stage + summary from business_profiles (+ progress if cheaply available). Donor fixtures: orchestrator/tests/test_prd203_os2_intake_pipeline.py.",
+      "acceptanceCriteria": [
+        "Both tools registered (3-file pattern); platform_scan_business_site starts the real pipeline (mocked-firecrawl test reusing O·S2 donors) scoped to the caller's workspace",
+        "Unconfigured Firecrawl returns the honest {configured:false} tool result (test); no 503 raised through the tool path",
+        "Wizard endpoints' existing behavior unchanged (existing wizard/intake tests still green; any extraction is behavior-preserving)",
+        "platform_get_intake_status returns stage + profile summary for a workspace-owned profile_id; cross-workspace profile_id is refused (test)",
+        "cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/modules/tools/discovery/", "orchestrator/api/wizard.py", "orchestrator/modules/intake/", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-009",
+      "title": "OnboardingSection v2 — the stage-aware conversational spine",
+      "description": "Rework orchestrator/modules/context/sections/onboarding.py (~:25-150, re-verify): trigger = the workspace's onboarding.stage NOT IN (completed, skipped) — replacing the agent_count==0 heuristic — plus the existing manual re-trigger phrases; returns '' otherwise. Stage-aware content tells Auto exactly where the user is and what happens next: questions (the 3 questions, one at a time, conversational) → teach (offer platform_scan_business_site / doc upload / just talk; play back and correct) → proposal (plan + starter team card, explicit yes required) → building → boom (invite a question about THEIR business) → powerup (the OpenRouter recommendation copy: one key, pay-as-you-go, 400+ models; other providers collapsed; trial balance mentioned) → checklist framing. Section content must direct Auto to record every advance via platform_update_onboarding (never assume), to adapt register to segment.comfort, to consult the capability report (skip scan gracefully when firecrawl_configured=false), and must NEVER instruct mission creation with auto_approve or skip_verification. Include the direct-vs-mission threshold: <=3 agents and <=2 Playbooks → direct tool calls after the explicit yes; larger → a normal mission (default awaiting_approval). Budget: measure the largest rendered stage variant; if it exceeds the registered 800 tokens, raise the registration explicitly to at most 1200 in modules/context/sections/__init__.py with the measurement in the commit body.",
+      "acceptanceCriteria": [
+        "Trigger is stage-based (completed/skipped → '' — test); manual trigger phrases still work (test); agent_count heuristic gone from this section",
+        "Per-stage content tests: each stage yields its variant; powerup contains the OpenRouter copy; proposal contains the explicit-approval instruction; the strings auto_approve and skip_verification appear NOWHERE in the section source except a prohibition line (grep test)",
+        "Section instructs platform_update_onboarding for every advance and names the direct-vs-mission threshold (content tests)",
+        "Rendered size of the largest variant measured and within the registered budget (raised to <=1200 only if measured necessary, in the same commit)",
+        "cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/modules/context/sections/onboarding.py", "orchestrator/modules/context/sections/__init__.py", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-010",
+      "title": "Trust guards + onboarding summary Deliverable",
+      "description": "Lock the trust defaults with tests: (1) a static guard test greps every onboarding-owned source file (the section, onboarding_state, trial_ledger, the new tools) proving none sets skip_verification or auto_approve; (2) a behavior test locks that platform_create_mission-created missions default to awaiting_approval (existing behavior — pin it so a regression fails loud). Summary: the section's completed-stage handoff instructs Auto to write the onboarding summary (what was built, why, what happens next) via platform_submit_report with report_type 'onboarding' so it lands on the workspace outputs surface (#611 map: v_workspace_outputs ∪ reports), then advance to completed. Content-contract tests assert the instruction; do not attempt to test live LLM behavior.",
+      "acceptanceCriteria": [
+        "Static guard test over the onboarding-owned file list: zero occurrences of skip_verification/auto_approve as set values (prohibition comments allowed)",
+        "Mission-default test pins awaiting_approval for tool-created missions",
+        "Section completed-handoff instructs platform_submit_report(report_type='onboarding') + advance to completed (content test)",
+        "cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/tests/", "orchestrator/modules/context/sections/onboarding.py"]
+    },
+    {
+      "id": "US-011",
+      "title": "Tool-schema truth pass (5 fixes + the walker guard)",
+      "description": "Fix the five verified schema/handler mismatches (re-verify each anchor): (1) actions_reports.py (~:99) platform_submit_report required[] shrinks to ['title','content'] — the handler defaults report_type='standup' and status='ok' (handlers_reports.py ~:18-24); removing from required is backward-compatible. (2) actions_assignments.py (~:41) platform_assign_tool_to_agent: the agent identifier (agent_id|agent_name either-of, enforced at handlers_assignments.py ~:19-20) must be stated in the description with the exact error copy. (3) Same either-of documentation for platform_assign_skill_to_agent, platform_assign_plugin_to_agent (actions_assignments.py ~:72,110) and platform_configure_agent_heartbeat (actions_agents.py ~:322). (4) platform_install_plugin / platform_install_skill (actions_marketplace.py ~:222,254): document the id|slug either-of their handlers enforce (handlers_marketplace.py ~:355,495). (5) Do NOT add 'source' to platform_create_mission's schema — the special-casing is a W2 deletion target; leave it. THEN add the recurrence guard: a walker test iterating every registered platform tool asserting (a) no field with a handler default sits in required[], (b) every field a handler hard-fails on is either in required[] or covered by an either-of note in the description. Encode the either-of convention the walker recognizes (e.g. the literal 'Provide X or Y' phrasing already used by handlers).",
+      "acceptanceCriteria": [
+        "platform_submit_report required[] == ['title','content']; handler behavior unchanged; existing callers/tests green",
+        "The four assignment/heartbeat/install schema descriptions carry the either-of requirement matching their handlers' exact error copy",
+        "platform_create_mission schema untouched (grep: no 'source' added)",
+        "Walker test present, passes on the fixed tree, and demonstrably FAILS if the actions_reports over-require is reintroduced (include a self-check in the test file proving the walker bites, e.g. via a fixture schema)",
+        "cd orchestrator && python3 -m pytest -q green"
+      ],
+      "files": ["orchestrator/modules/tools/discovery/", "orchestrator/tests/"]
+    },
+    {
+      "id": "US-012",
+      "title": "Frontend: kill the modal mount, land in the conversation",
+      "description": "Stop mounting FirstLoginGuard/WelcomeModal for the new flow: remove the FirstLoginGuard mount from frontend/components/providers.tsx (~:103, re-verify) — DO NOT delete the component files (W2 does the deletion). New frontend/components/onboarding/onboarding-opener.tsx: when workspace.onboarding.stage === 'not_started', the empty chat renders Auto's opener (a short canned greeting that asks the first question and invites 'or just start typing'), so Auto makes the first move; any user message then flows through OnboardingSection v2. Auto-tours: use-auto-tour keys off isNewWorkspace and welcome-seen localStorage — with the modal unmounted they will not fire for new-flow users; verify and note, change nothing else in shepherd land.",
+      "acceptanceCriteria": [
+        "FirstLoginGuard no longer mounted (grep providers.tsx); component files untouched otherwise (git diff shows no frontend/lib/shepherd/** and no deletion of frontend/components/onboarding/{first-login-guard,welcome-modal}.tsx)",
+        "onboarding-opener.tsx exists and renders in the empty chat state only when stage==='not_started' (component test with workspace-provider mock)",
+        "A new-workspace render shows the opener and NO welcome modal (component test)",
+        "cd frontend && npm run -s test green"
+      ],
+      "files": ["frontend/components/providers.tsx", "frontend/components/onboarding/onboarding-opener.tsx", "frontend/components/chatbot/", "frontend/"]
+    },
+    {
+      "id": "US-013",
+      "title": "Frontend: power-up card (key entry, live result, decline path)",
+      "description": "frontend/components/onboarding/power-up-card.tsx — rendered in chat at the powerup stage (and reusable by US-014's exhausted banner): 'keep Auto running on your business' framing, masked key input posting to the existing credentials endpoint, the OpenRouter recommendation with how-to link on top, 'I already use OpenAI/Anthropic/…' collapsed beneath, live validation result rendered in-flow (provider error text on failure), trial balance line, deep link to Settings → Credentials as the skip-ahead, and an explicit dismiss ('later') that leaves the flow intact. Follow the existing chat-card visual pattern (grep the chatbot components for card donors — do not invent a new visual language). Key value handling: posted to the API, never logged, never stored client-side.",
+      "acceptanceCriteria": [
+        "power-up-card.tsx exists, imported by the chat surface, rendered for stage==='powerup' (component test)",
+        "Success path shows the validated result and the full-catalog line; failure path renders the provider error in the card; dismiss keeps chat usable (tests)",
+        "Key input is masked; the raw key value appears in no log statement and no client-side store (grep + test)",
+        "cd frontend && npm run -s test green"
+      ],
+      "files": ["frontend/components/onboarding/power-up-card.tsx", "frontend/components/chatbot/", "frontend/"]
+    },
+    {
+      "id": "US-014",
+      "title": "Frontend: trial balance pill + deterministic exhausted state",
+      "description": "frontend/components/onboarding/trial-balance-pill.tsx — small balance pill ('$3.40 of $5.00 trial') visible on the chat surface and Command Center while trial state is active/warned, amber at warned, hidden once converted; reads workspace.onboarding.trial (US-002). frontend/components/onboarding/trial-exhausted-banner.tsx — rendered when trial state is exhausted OR a request returns the typed trial_exhausted error: a static banner (no LLM dependency) embedding the US-013 power-up card. The exhausted path must render fully deterministically — a broke workspace can still take a key.",
+      "acceptanceCriteria": [
+        "Pill renders balance from workspace.onboarding.trial on chat + Command Center; amber at warned; absent when converted or no trial (component tests)",
+        "Exhausted banner renders on state==='exhausted' and on the typed trial_exhausted error, embedding the power-up card, with zero LLM/network dependency beyond the credentials POST (tests)",
+        "cd frontend && npm run -s test green"
+      ],
+      "files": ["frontend/components/onboarding/trial-balance-pill.tsx", "frontend/components/onboarding/trial-exhausted-banner.tsx", "frontend/components/command-center/", "frontend/"]
+    },
+    {
+      "id": "US-015",
+      "title": "Frontend: intake progress card in chat",
+      "description": "frontend/components/onboarding/intake-progress-card.tsx — a chat status card streaming the intake pipeline's progress (scan → scrape → ingest → graph → profile) for the profile started by platform_scan_business_site. Reuse the SSE logic from frontend/hooks/use-wizard-progress.ts (extract/share the hook logic — do NOT modify the wizard's own usage; both surfaces consume it) and the PRD-205 live-receive bridge pattern for appearing in the conversation. Terminal states: profile-ready (with a 'here's what I learned' handoff line) and failed (honest error + 'upload docs instead' fallback line).",
+      "acceptanceCriteria": [
+        "intake-progress-card.tsx exists; renders pipeline stages from the shared progress hook; wizard's existing progress consumption untouched (its tests still green)",
+        "Terminal success and failure states render as specified (component tests with mocked stream)",
+        "cd frontend && npm run -s test green"
+      ],
+      "files": ["frontend/components/onboarding/intake-progress-card.tsx", "frontend/hooks/", "frontend/"]
+    }
+  ]
+}
