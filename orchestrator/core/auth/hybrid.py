@@ -380,6 +380,21 @@ def _provision_new_user_workspace(
     except Exception:
         logger.exception("Failed to seed document templates for workspace %s — non-fatal", ws_id)
 
+    # 6) PRD-222 US-004 (W1·S9): grant the one-time $5 onboarding trial credit so
+    # the value moment lands before the BYOK ask. One per Clerk user; paused by
+    # the global daily cap or the TRIAL_ENABLED kill switch (all config-driven).
+    # Non-fatal — a workspace must provision even if the grant hiccups.
+    try:
+        from services.trial_ledger import grant_trial_at_provisioning
+        if grant_trial_at_provisioning(db, ws_id, owner_id=uid) is not None:
+            db.commit()
+    except Exception:
+        logger.exception("Trial grant failed for workspace %s — non-fatal", ws_id)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
     logger.info(
         "Provisioned personal workspace %s (%s) for user %s (clerk=%s)",
         ws_id, ws_name, uid, clerk_user_id,
