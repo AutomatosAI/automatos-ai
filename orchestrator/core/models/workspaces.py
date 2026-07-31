@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.sql import func
 
@@ -32,6 +32,14 @@ class Workspace(Base):
     plan = Column(String(50), default="starter")
     plan_limits = Column(JSONB, default=dict)
     settings = Column(JSONB, default=dict)
+
+    # PRD-222 W1S1: server-side Auto-led onboarding state machine + funnel record.
+    # The ONE new column for the whole PRD-222 Wave-1 branch — trial ledger,
+    # segment answers, and per-stage timestamps all live inside this JSONB doc.
+    # Owned/written exclusively by services/onboarding_state.py (rebuild-don't-mutate).
+    onboarding = Column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"), default=dict
+    )
 
     is_personal = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
