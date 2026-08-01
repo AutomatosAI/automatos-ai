@@ -336,7 +336,7 @@ async def test_audit_row_written_for_autonomous_action(real_registry):
     # (b) the universal telemetry hook persists the marker on the row.
     db = MagicMock()
     await write_telemetry(
-        db,
+        session_factory=lambda: db,
         tool_name=_DESTRUCTIVE,
         parameters={"agent_id": 42},
         agent_id=9,
@@ -355,7 +355,7 @@ async def test_audit_row_written_for_autonomous_action(real_registry):
     # Control row: a non-autonomous result writes NO autonomous marker.
     db2 = MagicMock()
     await write_telemetry(
-        db2,
+        session_factory=lambda: db2,
         tool_name=_READ,
         parameters={},
         agent_id=9,

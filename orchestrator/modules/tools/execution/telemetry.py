@@ -9,7 +9,7 @@ composio, MCP).  Failure to write telemetry MUST NOT fail the tool call.
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -87,7 +87,6 @@ def _coerce_user_id(db: Session, raw: Any) -> Optional[int]:
 
 
 async def write_telemetry(
-    db: Session,
     *,
     tool_name: str,
     parameters: Dict[str, Any],
@@ -96,14 +95,36 @@ async def write_telemetry(
     result: Dict[str, Any],
     execution_time_ms: int,
     caller_context: Optional[Dict[str, Any]] = None,
+    session_factory: Optional[Callable[[], Session]] = None,
 ) -> None:
     """Write a single telemetry row to tool_execution_logs.
 
     This function is designed to be fired-and-forgotten via asyncio.create_task.
     It catches all exceptions internally so it never propagates failures.
+
+    It OWNS its session. It used to take the caller's ``db`` and commit or
+    roll it back from a detached task at an arbitrary later moment — a
+    fire-and-forget writer sharing a live session it doesn't own. On paths
+    with a long-lived session, a failed telemetry flush left the caller's
+    transaction in pending-rollback and every subsequent flush on it died
+    (2026-08-01 Inbuild incident: board-task creation failed on a session
+    poisoned by a telemetry NotNullViolation). The write now opens, commits,
+    rolls back, and closes its own session; the caller's transaction is
+    untouchable from here.
+
+    ``session_factory`` exists for tests to inject a session; production
+    callers must not pass one built from a live request session.
     """
+    db: Optional[Session] = None
     try:
         from core.models.composio_cache import ToolExecutionLog
+
+        if session_factory is None:
+            # Lazy: telemetry loads in contexts where the DB layer isn't up
+            # yet, and unit tests load this module with stubbed models.
+            from core.database.database import SessionLocal
+            session_factory = SessionLocal
+        db = session_factory()
 
         ctx = caller_context or {}
 
@@ -152,10 +173,17 @@ async def write_telemetry(
         # Loud on purpose (PRD-185 S1): a DEBUG swallow here hid a 2-month,
         # 0-organic-rows telemetry outage. Failures must be visible.
         logger.warning(f"[telemetry] Failed to write tool execution log: {exc}")
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _build_router_decision(
@@ -191,7 +219,6 @@ def _build_router_decision(
 
 
 def fire_telemetry(
-    db: Session,
     *,
     tool_name: str,
     parameters: Dict[str, Any],
@@ -200,17 +227,22 @@ def fire_telemetry(
     result: Dict[str, Any],
     execution_time_ms: int,
     caller_context: Optional[Dict[str, Any]] = None,
+    session_factory: Optional[Callable[[], Session]] = None,
 ) -> None:
     """Fire-and-forget telemetry write as a background task.
 
     Safe to call from sync or async context -- schedules the write on the
     running event loop.  If no loop is running, logs a warning and skips.
+
+    Takes NO session on purpose: the write runs after this call returns, on
+    a session write_telemetry opens and owns. Handing it a live request
+    session is how a background flush failure rolled back foreground work.
+    ``session_factory`` is a test-injection point only.
     """
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(
             write_telemetry(
-                db,
                 tool_name=tool_name,
                 parameters=parameters,
                 agent_id=agent_id,
@@ -218,6 +250,7 @@ def fire_telemetry(
                 result=result,
                 execution_time_ms=execution_time_ms,
                 caller_context=caller_context,
+                session_factory=session_factory,
             )
         )
     except RuntimeError:

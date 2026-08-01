@@ -376,7 +376,7 @@ async def _audit_rows(telemetry: List[Dict[str, Any]]) -> list:
     rows = []
     for kw in telemetry:
         db = MagicMock()
-        await write_telemetry(db, **kw)
+        await write_telemetry(session_factory=lambda: db, **kw)
         assert db.add.call_count == 1, f"telemetry write failed for {kw['tool_name']}"
         rows.append(db.add.call_args[0][0])
         db.commit.assert_called_once()

@@ -137,7 +137,7 @@ async def test_logged_in_clerk_user_row_is_written(mock_db):
     telemetry_mod._CLERK_ID_CACHE.clear()
     mock_db.query.return_value.filter.return_value.first.return_value = (123,)
     await write_telemetry(
-        mock_db,
+        session_factory=lambda: mock_db,
         tool_name="platform_list_agents",
         parameters={"workspace_id": "x"},
         agent_id=None,
@@ -159,7 +159,7 @@ async def test_unresolved_user_still_writes_row(mock_db):
     telemetry_mod._CLERK_ID_CACHE.clear()
     mock_db.query.return_value.filter.return_value.first.return_value = None
     await write_telemetry(
-        mock_db,
+        session_factory=lambda: mock_db,
         tool_name="platform_list_agents",
         parameters={},
         agent_id=None,
@@ -179,7 +179,7 @@ async def test_write_failure_is_loud(mock_db, caplog):
     mock_db.commit.side_effect = RuntimeError("boom")
     with caplog.at_level(logging.WARNING):
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="platform_list_agents",
             parameters={},
             agent_id=None,

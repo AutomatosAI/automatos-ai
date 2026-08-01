@@ -232,7 +232,7 @@ def test_selection_outcome_recorded_on_narrowed_dispatch(fresh_recorder):
     db = MagicMock()
     asyncio.run(
         write_telemetry(
-            db,
+            session_factory=lambda: db,
             tool_name="platform_execute",
             parameters={"action": _OP_LIST},
             agent_id=_AGENT,
@@ -281,7 +281,7 @@ def test_fallback_recorded_when_rank_fails(fresh_recorder):
     db = MagicMock()
     asyncio.run(
         write_telemetry(
-            db,
+            session_factory=lambda: db,
             tool_name="platform_execute",
             parameters={"action": _OP_LIST},
             agent_id=_AGENT,
