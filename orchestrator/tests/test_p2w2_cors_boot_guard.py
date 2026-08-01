@@ -103,7 +103,6 @@ def test_run_stage_still_swallows_which_is_why_placement_matters():
 @pytest.fixture()
 def _security_baseline(monkeypatch):
     """Satisfy every other validate_security check so one is isolated."""
-    monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "test-internal-key")
     monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", False)
     monkeypatch.setattr(cfg, "CLERK_JWKS_URL", "https://x/.well-known/jwks.json")
     monkeypatch.setattr(cfg, "CLERK_SECRET_KEY", "sk_test")
@@ -111,13 +110,16 @@ def _security_baseline(monkeypatch):
     return monkeypatch
 
 
-def test_shopify_fail_open_still_aborts(_security_baseline):
-    """F004 is untouched by the widget-allowlist removal."""
+def test_saas_boot_requires_no_shopify_key(_security_baseline):
+    """There is no Automatos-owned Shopify app in this deployment model —
+    clients connect their own stores and merchants authenticate with widget
+    keys, so SHOPIFY_INTERNAL_API_KEY is intentionally absent. The machine
+    lanes it guards fail CLOSED at the endpoint (_verify_internal_key → 503);
+    a boot-abort demanding the key made every saas boot fail (the #616
+    outage). A bare-env saas boot must pass this guard."""
     mp = _security_baseline
     mp.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "")
-    with pytest.raises(RuntimeError) as ei:
-        cfg.validate_security()
-    assert "SHOPIFY_INTERNAL_API_KEY" in str(ei.value)
+    cfg.validate_security()  # must not raise
 
 
 def test_widget_cors_is_no_longer_a_boot_concern(_security_baseline):

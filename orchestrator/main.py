@@ -510,12 +510,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Automotas AI API Server...")
     app.state.ready = False
 
-    # PRD-172 F004/F005 + PRD-186 S3: fail-closed on tenant-isolation secrets
-    # and vector-plane config integrity BEFORE any traffic is served. Raises
-    # RuntimeError (aborting boot) if the Shopify internal key is unset, or
+    # PRD-172 F005 + PRD-186 S3: fail-closed on vector-plane config integrity
+    # BEFORE any traffic is served. Raises RuntimeError (aborting boot) if
     # S3 Vectors is enabled without a bucket or with an incoherent dimension.
     # (A shared bucket with no {workspace_id} placeholder is valid — isolation
-    # is enforced per-query, fail-closed, by S3VectorsBackend.search().)
+    # is enforced per-query, fail-closed, by S3VectorsBackend.search(). The
+    # Shopify/GDPR machine-lane key is NOT a boot concern: those endpoints
+    # fail closed on their own — _verify_internal_key → 503 when unset — and
+    # the key is intentionally absent while there is no Automatos-owned
+    # Shopify app. Demanding it at boot was the #616 outage.)
     #
     # This MUST stay outside run_stage. It used to live in _boot_phase_1_core,
     # which run_stage wraps in `except Exception` — recording the stage as

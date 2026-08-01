@@ -85,18 +85,19 @@ def _resolve_sync_workspace(ctx: RequestContext, requested: Optional[str]) -> st
 
 
 def _verify_internal_key(authorization: str = Header(...)) -> None:
-    """Verify the internal API key from the Shopify app server.
+    """Verify the machine-lane shared secret (Shopify app server, GDPR routes).
 
-    PRD-172 F004: fail-closed. There is NO "no key configured → accept all"
-    branch — an unset key is caught at boot by ``config.validate_security()``,
-    so by the time a request lands the key is guaranteed present and this only
-    ever compares against a real secret. A falsy configured key can no longer
-    wave through an arbitrary ``Authorization: Bearer x``.
+    PRD-172 F004: fail-closed, and THIS check is the whole guard — there is no
+    boot-abort behind it. An unset key means the machine lanes are deliberately
+    dark (503), which is the correct resting state of the current deployment
+    model: there is no Automatos-owned Shopify app; clients connect their own
+    stores and merchant traffic authenticates with per-workspace widget keys
+    (``SdkApiKey``). If the app-store wedge ever revives, one shared secret is
+    set on both sides and these lanes light up. A falsy configured key can
+    never wave through an arbitrary ``Authorization: Bearer x``.
     """
     expected = (config.SHOPIFY_INTERNAL_API_KEY or "").strip()
     if not expected:
-        # Defence in depth: boot should already have failed. Refuse rather than
-        # fall open if this is somehow reached (e.g. key blanked at runtime).
         raise HTTPException(status_code=503, detail="Shopify provisioning not configured")
     token = authorization.replace("Bearer ", "").strip()
     if not hmac.compare_digest(token, expected):
