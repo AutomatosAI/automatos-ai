@@ -58,19 +58,39 @@ def test_path_is_covered_excludes_unrelated_paths():
     assert _path_is_covered("/api/some-other-resource/sites") is False
 
 
-def test_platform_origins_are_our_own_domains_only(monkeypatch):
-    """First-party origins come from config.CORS_ALLOW_ORIGINS — the same list
-    the app-wide CORSMiddleware uses. A merchant storefront is NOT in it; it is
-    authorised from its key instead."""
+def test_origin_allowed_when_no_allowlist_configured(monkeypatch):
+    """Empty allowlist → permissive ONLY in the local edition (PRD-194 S4 /
+    P2-13). In saas the boot guard forbids the state; if reached anyway the
+    public plane fails CLOSED."""
+    from api.widgets.cors import _origin_allowed
     import api.widgets.cors as cors_mod
 
-    monkeypatch.setattr(
-        cors_mod, "PLATFORM_ORIGINS", {"https://app.automatos.app", "https://automatos.app"}
-    )
-    assert cors_mod._origin_is_platform("https://app.automatos.app") is True
-    assert cors_mod._origin_is_platform("https://automatos.app/") is True  # trailing slash
-    assert cors_mod._origin_is_platform("https://besafe-ltd.myshopify.com") is False
-    assert cors_mod._origin_is_platform("https://malicious.example.com") is False
+    monkeypatch.setattr(cors_mod, "WIDGET_ORIGIN_ALLOWLIST", set())
+
+    monkeypatch.setattr(cors_mod.config, "AUTH_EDITION", "local")
+    assert _origin_allowed("https://random-store.myshopify.com") is True
+    assert _origin_allowed("https://app.automatos.app") is True
+
+    monkeypatch.setattr(cors_mod.config, "AUTH_EDITION", "saas")
+    assert _origin_allowed("https://random-store.myshopify.com") is False
+    assert _origin_allowed("https://app.automatos.app") is False
+
+
+def test_origin_allowed_with_explicit_allowlist():
+    from api.widgets.cors import _origin_allowed
+    import api.widgets.cors as cors_mod
+
+    original = cors_mod.WIDGET_ORIGIN_ALLOWLIST
+    cors_mod.WIDGET_ORIGIN_ALLOWLIST = {
+        "https://app.automatos.app",
+        "https://besafe-ltd.myshopify.com",
+    }
+    try:
+        assert _origin_allowed("https://app.automatos.app") is True
+        assert _origin_allowed("https://besafe-ltd.myshopify.com") is True
+        assert _origin_allowed("https://malicious.example.com") is False
+    finally:
+        cors_mod.WIDGET_ORIGIN_ALLOWLIST = original
 
 
 # ---------------------------------------------------------------------------
@@ -81,70 +101,41 @@ import asyncio  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
 
-WIDGET_PATH = "/api/widgets/config"
-SITES_PATH = "/api/sites/123/settings"
-
-
 def _isolated_dynamic(monkeypatch):
-    """Fresh cache + a platform-origin set that misses the storefront, so every
-    test exercises the merchant-key path deliberately."""
+    """Fresh cache + saas edition + an env allowlist that misses the origin,
+    so every test exercises the fallback path deliberately."""
     import api.widgets.cors as cors_mod
 
     monkeypatch.setattr(cors_mod, "_dynamic_origin_cache", {})
-    monkeypatch.setattr(cors_mod, "PLATFORM_ORIGINS", {"https://app.automatos.app"})
+    monkeypatch.setattr(cors_mod, "WIDGET_ORIGIN_ALLOWLIST", {"https://app.automatos.app"})
+    monkeypatch.setattr(cors_mod.config, "AUTH_EDITION", "saas")
     return cors_mod
 
 
-def test_preflight_resolves_from_key_allowlist(monkeypatch):
-    """A storefront origin named on an active public key's allowed_domains
-    passes — this is the ONLY way a merchant origin is authorised."""
+def test_preflight_falls_back_to_key_allowlist(monkeypatch):
+    """An origin absent from the env allowlist but named on an active public
+    key's allowed_domains passes the dynamic check (the academy case)."""
     cors_mod = _isolated_dynamic(monkeypatch)
     monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", lambda origin: True)
 
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://academy.automatos.app", WIDGET_PATH)
-    ) is True
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
 
 
 def test_key_fallback_denies_unknown_origin(monkeypatch):
     cors_mod = _isolated_dynamic(monkeypatch)
     monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", lambda origin: False)
 
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://malicious.example.com", WIDGET_PATH)
-    ) is False
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://malicious.example.com")) is False
 
 
-def test_platform_fast_path_skips_the_db(monkeypatch):
+def test_env_fast_path_skips_the_db(monkeypatch):
     cors_mod = _isolated_dynamic(monkeypatch)
 
     def _boom(origin):
-        raise AssertionError("DB lookup must not run for platform origins")
+        raise AssertionError("DB lookup must not run for env-allowlisted origins")
 
     monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", _boom)
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://app.automatos.app", WIDGET_PATH)
-    ) is True
-
-
-def test_sites_never_consults_merchant_keys(monkeypatch):
-    """/api/sites is first-party dashboard CRUD. If a merchant could authorise
-    that origin by naming it on their own key, any merchant could open CORS on
-    the admin surface."""
-    cors_mod = _isolated_dynamic(monkeypatch)
-
-    def _boom(origin):
-        raise AssertionError("/api/sites must never reach the key lookup")
-
-    monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", _boom)
-
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://besafe-ltd.myshopify.com", SITES_PATH)
-    ) is False
-    # ...but our own dashboard still gets through.
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://app.automatos.app", SITES_PATH)
-    ) is True
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://app.automatos.app")) is True
 
 
 def test_key_fallback_verdict_is_cached(monkeypatch):
@@ -157,12 +148,8 @@ def test_key_fallback_verdict_is_cached(monkeypatch):
         return True
 
     monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", _count)
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://academy.automatos.app", WIDGET_PATH)
-    ) is True
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://academy.automatos.app", WIDGET_PATH)
-    ) is True
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
     assert len(calls) == 1
 
 
@@ -175,14 +162,10 @@ def test_key_fallback_fails_closed_and_does_not_cache_failures(monkeypatch):
         raise RuntimeError("db unavailable")
 
     monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", _down)
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://academy.automatos.app", WIDGET_PATH)
-    ) is False
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is False
 
     monkeypatch.setattr(cors_mod, "_origin_allowed_by_key_sync", lambda origin: True)
-    assert asyncio.run(
-        cors_mod._origin_allowed_dynamic("https://academy.automatos.app", WIDGET_PATH)
-    ) is True
+    assert asyncio.run(cors_mod._origin_allowed_dynamic("https://academy.automatos.app")) is True
 
 
 def test_origin_allowed_by_any_key_uses_check_domain_matcher():

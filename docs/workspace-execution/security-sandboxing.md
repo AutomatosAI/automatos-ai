@@ -96,8 +96,7 @@ The widget subsystem includes rate limiting using a thread-safe in-memory slidin
 
 ### CORS Policy
 Widget endpoints (`/api/widgets/*`) use a dedicated `WidgetCORSMiddleware`. This middleware is ASGI-native to avoid buffering `StreamingResponse` (SSE) data, ensuring real-time performance for chat streams [orchestrator/api/widgets/cors.py:5-8]().
-*   **Origin Allowlist:** There is no global widget origin env var. A merchant storefront is authorised from the per-key `SdkApiKey.allowed_domains` the merchant maintains — the same list `widget_auth` enforces on the real request. Preflights carry no `Authorization` header, so the middleware asks whether the origin is named on *any* active public key [orchestrator/api/widgets/cors.py]().
-*   **First-party Origins:** Our own dashboard and marketing site come from `config.CORS_ALLOW_ORIGINS`, the same list the app-wide `CORSMiddleware` uses. `/api/sites/*` (dashboard Sites CRUD, JWT-cookie auth) resolves from this list only and never consults merchant keys — otherwise any merchant could open CORS on the admin surface by naming that origin on their own key.
+*   **Origin Allowlist:** Origins are validated against `WIDGET_ORIGIN_ALLOWLIST` configured via environment variables [orchestrator/api/widgets/cors.py:18-21]().
 *   **Preflight Handling:** The middleware handles `OPTIONS` requests by validating the `Origin` and returning appropriate `Access-Control-Allow-*` headers [orchestrator/api/widgets/cors.py:57-77]().
 *   **Credentials:** If the origin is allowed, `access-control-allow-credentials: true` is set to support authenticated widget interactions [orchestrator/api/widgets/cors.py:88]().
 

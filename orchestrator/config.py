@@ -552,6 +552,7 @@ class Config:
     # this from now (mirrors Slack's documented v0 5-minute window).
     WEBHOOK_TIMESTAMP_SKEW_SECONDS: int = int(os.getenv("WEBHOOK_TIMESTAMP_SKEW_SECONDS", "300"))
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
+    WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
     # PRD-194 S5 (P2-13): Redis-backed shared widget rate limiter (replaces
     # the per-process in-memory window). One window length; per-key limits by
     # key type; and a per-IP ceiling on the two money-spending endpoints
@@ -1466,10 +1467,10 @@ class Config:
           shared bucket with no ``{workspace_id}`` placeholder is allowed —
           tenant isolation is enforced per-query by ``S3VectorsBackend.search()``
           (fail-closed on ``workspace_id``), not by the bucket layout.)
-        Widget CORS is deliberately NOT checked here. Storefront origins are
-        authorised from the per-key ``SdkApiKey.allowed_domains`` the merchant
-        already maintains — there is no global widget allowlist to validate.
-        See ``api/widgets/cors.py``.
+        - PRD-194 S4 (P2-13): ``WIDGET_ORIGIN_ALLOWLIST`` is empty in the
+          ``saas`` edition — widget CORS would rest at allow-all on the
+          internet-facing plane. Boot-abort in saas (same posture as F004 /
+          the Clerk edition guard); ``local`` keeps the permissive dev default.
         """
         errors: list[str] = []
 
@@ -1488,6 +1489,21 @@ class Config:
             self.assert_vector_config_integrity()
         except RuntimeError as e:
             errors.append(str(e))
+
+        # PRD-194 S4 (P2-13) — the internet-facing widget plane must not rest
+        # at allow-all CORS in production. In the saas edition an empty
+        # WIDGET_ORIGIN_ALLOWLIST is a boot error (locked decision: boot-abort,
+        # matching the F004 and Clerk edition guards). The local edition keeps
+        # the permissive dev default — choosing AUTH_EDITION=local IS the
+        # explicit opt-in.
+        if self.IS_SAAS_EDITION and not (self.WIDGET_ORIGIN_ALLOWLIST or "").strip():
+            errors.append(
+                "WIDGET_ORIGIN_ALLOWLIST is unset in the saas edition — widget "
+                "CORS (/api/widgets, /api/sites) would allow ALL origins on the "
+                "internet-facing plane (fail-open). Set WIDGET_ORIGIN_ALLOWLIST "
+                "to the comma-separated allowed storefront/dashboard origins, or "
+                "run AUTH_EDITION=local for a dev instance."
+            )
 
         if errors:
             raise RuntimeError(
