@@ -220,7 +220,6 @@ def test_boot_aborts_on_bad_vector_config(monkeypatch):
     swallowing run_stage) carries the vector-integrity failure."""
     _vector_config(monkeypatch, enabled=True, bucket="")
     monkeypatch.setattr(app_config, "SHOPIFY_INTERNAL_API_KEY", "k", raising=False)
-    monkeypatch.setattr(app_config, "WIDGET_ORIGIN_ALLOWLIST", "https://x.example", raising=False)
     with pytest.raises(RuntimeError, match="S3_VECTORS_BUCKET"):
         app_config.validate_security()
 
