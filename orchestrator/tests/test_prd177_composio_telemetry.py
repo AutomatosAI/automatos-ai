@@ -119,7 +119,7 @@ async def test_composio_action_telemetry(mock_db):
     the real action node. Secret param values are never logged (keys only)."""
     ws = uuid4()
     await write_telemetry(
-        mock_db,
+        session_factory=lambda: mock_db,
         tool_name="composio_execute",
         parameters={"action": "SLACK_SEND_MESSAGE", "params": {"text": "secret-body"}},
         agent_id=7,

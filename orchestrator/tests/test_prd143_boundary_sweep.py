@@ -652,7 +652,7 @@ def test_audit_distinguishes_autonomous_actions():
 
     async def _write(tool: str, result: Dict[str, Any]):
         await write_telemetry(
-            db,
+            session_factory=lambda: db,
             tool_name=tool,
             parameters={},
             agent_id=9,

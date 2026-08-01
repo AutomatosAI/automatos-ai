@@ -86,7 +86,7 @@ class TestTelemetryWrite:
     async def test_writes_one_row_with_correct_fields(self, mock_db, sample_workspace_id):
         """AC-9: Mocked tool execution writes one row with correct fields."""
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="platform_list_agents",
             parameters={"workspace_id": str(sample_workspace_id)},
             agent_id=42,
@@ -130,7 +130,7 @@ class TestTelemetryWrite:
     async def test_agent_id_none_for_zero(self, mock_db, sample_workspace_id):
         """agent_id=0 should be stored as None (nullable FK)."""
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="workspace_read_file",
             parameters={"path": "/tmp/test.txt"},
             agent_id=0,
@@ -146,7 +146,7 @@ class TestTelemetryWrite:
     async def test_error_result_captured(self, mock_db, sample_workspace_id):
         """Error results should capture error_message and status='error'."""
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="platform_execute",
             parameters={"action": "unknown"},
             agent_id=5,
@@ -163,7 +163,7 @@ class TestTelemetryWrite:
     async def test_composio_app_name_detection(self, mock_db, sample_workspace_id):
         """Composio tools should derive app_name correctly."""
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="COMPOSIO_SEARCH_WEB",
             parameters={"query": "test"},
             agent_id=10,
@@ -179,7 +179,7 @@ class TestTelemetryWrite:
     async def test_workspace_app_name_detection(self, mock_db, sample_workspace_id):
         """Workspace tools should derive app_name as WORKSPACE."""
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="workspace_read_file",
             parameters={"path": "/tmp/test.txt"},
             agent_id=3,
@@ -202,7 +202,7 @@ class TestTelemetryFailureIsolation:
 
         # Should NOT raise
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="platform_list_agents",
             parameters={},
             agent_id=1,
@@ -221,7 +221,7 @@ class TestTelemetryFailureIsolation:
 
         # Should NOT raise
         await write_telemetry(
-            mock_db,
+            session_factory=lambda: mock_db,
             tool_name="test_tool",
             parameters={},
             agent_id=1,
@@ -238,13 +238,13 @@ class TestTelemetryFailureIsolation:
         """fire_telemetry uses create_task and does not block."""
         # fire_telemetry should schedule a task without blocking
         fire_telemetry(
-            mock_db,
             tool_name="platform_list_agents",
             parameters={},
             agent_id=1,
             workspace_id=sample_workspace_id,
             result={"success": True},
             execution_time_ms=100,
+            session_factory=lambda: mock_db,
         )
 
         # Allow the event loop to process the task

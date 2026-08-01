@@ -844,7 +844,6 @@ class UnifiedToolExecutor:
             # PRD-139: Universal telemetry — fire-and-forget, never fails the tool call
             _exec_ms = int((_time.monotonic() - _exec_start) * 1000)
             fire_telemetry(
-                self.db,
                 tool_name=tool_name,
                 parameters=parameters if isinstance(parameters, dict) else {},
                 agent_id=agent_id,

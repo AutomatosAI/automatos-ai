@@ -331,7 +331,12 @@ def _arc(real_registry: ActionRegistry, *, full_autonomy: bool):
         ))
         stack.enter_context(patch.object(
             ue_mod, "fire_telemetry",
-            side_effect=lambda db, **kw: telemetry.append(kw),
+            # Keyword-only since the session-ownership fix: fire_telemetry
+            # takes NO session (PR #618) — a db-first capture here raises
+            # inside execute_tool's finally and fails every journey step.
+            side_effect=lambda **kw: telemetry.append(
+                {k: v for k, v in kw.items() if k != "session_factory"}
+            ),
         ))
         stack.enter_context(patch.object(
             pe.PlatformActionExecutor, "_full_autonomy",
@@ -376,7 +381,7 @@ async def _audit_rows(telemetry: List[Dict[str, Any]]) -> list:
     rows = []
     for kw in telemetry:
         db = MagicMock()
-        await write_telemetry(db, **kw)
+        await write_telemetry(session_factory=lambda: db, **kw)
         assert db.add.call_count == 1, f"telemetry write failed for {kw['tool_name']}"
         rows.append(db.add.call_args[0][0])
         db.commit.assert_called_once()
