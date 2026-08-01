@@ -331,7 +331,12 @@ def _arc(real_registry: ActionRegistry, *, full_autonomy: bool):
         ))
         stack.enter_context(patch.object(
             ue_mod, "fire_telemetry",
-            side_effect=lambda db, **kw: telemetry.append(kw),
+            # Keyword-only since the session-ownership fix: fire_telemetry
+            # takes NO session (PR #618) — a db-first capture here raises
+            # inside execute_tool's finally and fails every journey step.
+            side_effect=lambda **kw: telemetry.append(
+                {k: v for k, v in kw.items() if k != "session_factory"}
+            ),
         ))
         stack.enter_context(patch.object(
             pe.PlatformActionExecutor, "_full_autonomy",
