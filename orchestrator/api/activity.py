@@ -110,7 +110,7 @@ async def submit_digest_feedback(
         raise HTTPException(status_code=422, detail="rating must be -1 or 1")
     row = DigestFeedback(
         workspace_id=ctx.workspace_id,
-        user_id=ctx.clerk_user_id,
+        user_id=ctx.user.clerk_user_id if ctx.user else None,
         state_hash=body.state_hash,
         rating=body.rating,
     )

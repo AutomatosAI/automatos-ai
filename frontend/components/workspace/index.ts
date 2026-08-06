@@ -16,6 +16,19 @@ import '@/components/widgets/MemoryWidget'
 import '@/components/widgets/FileWidget'
 // PRD-66: Coding Canvas Widget (workspace file browser + Monaco editor)
 import '@/components/widgets/CodingCanvasWidget'
+// PRD-163 S4: Mission plan approval card
+// PRD-193 S3: Tool-call approval card (confirmation-gated actions)
+//
+// Both cards self-register on import like every widget above — but neither
+// was ever added to this manifest, so neither had EVER rendered in
+// production: chat.tsx addWidget({type: 'tool_approval'}) hit the registry
+// with nothing registered and the user saw "Unknown widget type" instead of
+// Approve/Deny. First surfaced 2026-08-06 by the first confirmation-gated
+// destructive action a client pushed through chat (delete agent).
+// registration-manifest.test.ts now sweeps the widgets directory so a new
+// widget cannot be built-but-unregistered again.
+import '@/components/widgets/MissionApprovalWidget'
+import '@/components/widgets/ToolApprovalWidget'
 
 export { Canvas } from './Canvas'
 export { WidgetTray } from './WidgetTray'
