@@ -860,11 +860,17 @@ async def delete_document(
                 os.remove(document.file_path)
             except Exception as e:
                 logger.warning(f"Could not delete file {document.file_path}: {e}")
-        
-        # Delete from database
-        db.delete(document)
-        db.commit()
-        
+
+        # Delegate the delete to the ingestion manager — it owns the §H
+        # contract "delete removes the vector": chunks + document row +
+        # the doc's S3 chunk-vectors (best-effort after commit). The bare
+        # ORM delete this replaced left the vectors in the per-workspace
+        # index, so a "deleted" document kept surfacing in RAG search.
+        # Workspace scoping stays HERE (the ownership check above) — the
+        # manager deletes by bare id and must never be reachable without it.
+        doc_manager = get_document_manager(str(ctx.workspace_id))
+        doc_manager.delete_document(document_id)
+
         return {"message": "Document deleted successfully"}
         
     except HTTPException:
