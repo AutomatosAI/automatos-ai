@@ -114,8 +114,16 @@ async def grant_approval(
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
     grant_grant(grant, granted_by=_actor_ref(ctx))
+    # COMMIT THE YES BEFORE RESUMING (2026-08-06 incident, grant 77).
+    # SessionLocal runs autoflush=False, and the resume re-enters the
+    # confirmation gate, whose consume_tool_grant() runs real SQL — an
+    # uncommitted GRANTED row is still 'pending' to that query, so the gate
+    # re-asked and the human's approval executed nothing. Committing first
+    # makes the recorded yes visible to the gate AND durable even if the
+    # resume itself crashes; the follow-up commit persists executed_result.
+    db.commit()
     # PRD-193 S4: for tool_call subjects this re-dispatches the stored call
-    # (consume-then-execute inside this one transaction boundary).
+    # (consume-then-execute against the now-committed grant).
     await _requeue_subject(db, grant)
     db.commit()
     _audit(db, ctx, "approval_grant:granted", grant)

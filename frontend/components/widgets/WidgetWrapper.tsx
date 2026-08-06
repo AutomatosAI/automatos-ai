@@ -63,7 +63,7 @@ export function WidgetWrapper({ widget, isActive }: WidgetWrapperProps) {
           title="Unknown Widget"
           icon={<AlertCircle className="h-4 w-4 text-destructive" />}
           isActive={isActive}
-          error={{ message: `Unknown widget type: ${widget.type}` }}
+          error={{ message: `This panel type isn't available in this build: ${widget.type}` }}
           onClose={handleClose}
           showDragHandle
         >
