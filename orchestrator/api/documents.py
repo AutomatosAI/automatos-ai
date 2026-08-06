@@ -228,7 +228,10 @@ async def handle_request(
             tags=tag_list,
             description=description,
             team_access=team_access_list,
-            created_by=ctx.clerk_user_id or "system",  # PRD-168 S4: real actor
+            # PRD-168 S4: real actor. The principal lives on ctx.user —
+            # RequestContext itself has no clerk_user_id; reading it there
+            # raised AttributeError and 500'd every upload (2026-08-06).
+            created_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
         )
         
         db.add(document)

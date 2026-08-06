@@ -217,7 +217,9 @@ async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Dep
             top_k=rag_data.top_k,
             similarity_threshold=rag_data.similarity_threshold,
             configuration=rag_data.configuration or {},
-            created_by=ctx.clerk_user_id or "system",  # PRD-168 S4: real actor
+            # PRD-168 S4: real actor — on ctx.user, not ctx (same 500 as the
+            # documents upload, fixed together).
+            created_by=(ctx.user.clerk_user_id if ctx.user else None) or "system",
         )
         
         db.add(rag_config)
