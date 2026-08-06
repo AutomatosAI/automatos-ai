@@ -229,26 +229,28 @@ class TestF003ShopifySyncScope:
 # ===========================================================================
 
 class TestF004ShopifyFailClosed:
-    """Unset SHOPIFY_INTERNAL_API_KEY must fail at boot; a falsy key can no
-    longer wave through an arbitrary Authorization header."""
+    """F004's property — no fail-open machine lane — lives at the ENDPOINT:
+    ``_verify_internal_key`` 503s when the key is unset and 401s a wrong
+    bearer. It is deliberately NOT a boot concern: the key is intentionally
+    absent in the no-Shopify-app deployment model (clients connect their own
+    stores; merchants use widget keys), and a boot-abort demanding it took
+    production down (#616, 2026-08-01)."""
 
-    def test_boot_fails_when_shopify_key_unset(self, monkeypatch):
+    def test_boot_passes_when_shopify_key_unset(self, monkeypatch):
         from config import Config
         cfg = Config()
         monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", False, raising=False)
-        with pytest.raises(RuntimeError, match="SHOPIFY_INTERNAL_API_KEY"):
-            cfg.validate_security()
+        cfg.validate_security()  # no raise — the endpoint 503 is the guard
 
-    def test_boot_passes_when_shopify_key_set(self, monkeypatch):
-        from config import Config
-        cfg = Config()
-        monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "real-secret", raising=False)
-        monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", False, raising=False)
-        # PRD-194 S4: saas boots also require a widget CORS allowlist —
-        # satisfied here so this test stays scoped to the Shopify guard.
-        monkeypatch.setattr(cfg, "WIDGET_ORIGIN_ALLOWLIST", "https://app.automatos.app", raising=False)
-        cfg.validate_security()  # no raise
+    def test_verify_internal_key_503s_when_unset(self, monkeypatch):
+        """Unset key ⇒ the machine lane is dark, not open."""
+        import api.shopify as sh
+        from fastapi import HTTPException
+        monkeypatch.setattr(sh.config, "SHOPIFY_INTERNAL_API_KEY", "", raising=False)
+        with pytest.raises(HTTPException) as ei:
+            sh._verify_internal_key("Bearer anything-at-all")
+        assert ei.value.status_code == 503
 
     def test_verify_internal_key_rejects_arbitrary_header(self, monkeypatch):
         import api.shopify as sh
@@ -341,12 +343,8 @@ class TestF005VectorIsolation:
         # working shared-bucket deployment on 2026-07-02.
         from config import Config
         cfg = Config()
-        monkeypatch.setattr(cfg, "SHOPIFY_INTERNAL_API_KEY", "x", raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_ENABLED", True, raising=False)
         monkeypatch.setattr(cfg, "S3_VECTORS_BUCKET", "shared-no-placeholder", raising=False)
-        # PRD-194 S4: saas boots also require a widget CORS allowlist —
-        # satisfied here so this test stays scoped to the bucket layout.
-        monkeypatch.setattr(cfg, "WIDGET_ORIGIN_ALLOWLIST", "https://app.automatos.app", raising=False)
         monkeypatch.setattr(cfg, "validate_auth_edition", lambda: None, raising=False)
         cfg.validate_security()  # must not raise on the bucket layout
 

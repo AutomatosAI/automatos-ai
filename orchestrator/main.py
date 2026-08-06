@@ -173,15 +173,6 @@ async def _boot_phase_1_core():
     from core.database.database import create_tables, get_db_session, engine
     from core.database.boot_lock import boot_leader_lock
 
-    # PRD-172 F004/F005 + PRD-186 S3: fail-closed on tenant-isolation secrets
-    # and vector-plane config integrity BEFORE any traffic is served — outside
-    # any swallowing run_stage. Raises RuntimeError (aborting boot) if the
-    # Shopify internal key is unset, S3 Vectors is enabled without a bucket or
-    # with an incoherent dimension, or saas widget CORS would rest allow-all.
-    # (A shared bucket with no {workspace_id} placeholder is valid — isolation
-    # is enforced per-query, fail-closed, by S3VectorsBackend.search().)
-    config.validate_security()
-
     # DDL — safe for all workers (idempotent, fast no-op when tables exist)
     create_tables()
 
@@ -518,6 +509,26 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Automotas AI API Server...")
     app.state.ready = False
+
+    # PRD-172 F005 + PRD-186 S3: fail-closed on vector-plane config integrity
+    # BEFORE any traffic is served. Raises RuntimeError (aborting boot) if
+    # S3 Vectors is enabled without a bucket or with an incoherent dimension.
+    # (A shared bucket with no {workspace_id} placeholder is valid — isolation
+    # is enforced per-query, fail-closed, by S3VectorsBackend.search(). The
+    # Shopify/GDPR machine-lane key is NOT a boot concern: those endpoints
+    # fail closed on their own — _verify_internal_key → 503 when unset — and
+    # the key is intentionally absent while there is no Automatos-owned
+    # Shopify app. Demanding it at boot was the #616 outage.)
+    #
+    # This MUST stay outside run_stage. It used to live in _boot_phase_1_core,
+    # which run_stage wraps in `except Exception` — recording the stage as
+    # failed, logging a warning, and letting boot continue. The guard landed
+    # 2026-07-11; that wrapper predates it by two months, so it had never once
+    # aborted a boot. Production served traffic with the exact config it was
+    # written to reject, and everything after the raise in _boot_phase_1_core
+    # (create_tables, the idempotent column migrations) was skipped on every
+    # boot. A fail-closed guard that serves traffic anyway is not a guard.
+    config.validate_security()
 
     try:
         # ── Phase 1: Core Infrastructure ──

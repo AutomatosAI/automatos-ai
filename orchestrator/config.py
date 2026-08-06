@@ -552,7 +552,6 @@ class Config:
     # this from now (mirrors Slack's documented v0 5-minute window).
     WEBHOOK_TIMESTAMP_SKEW_SECONDS: int = int(os.getenv("WEBHOOK_TIMESTAMP_SKEW_SECONDS", "300"))
     WIDGET_TOKEN_SECRET: str = os.getenv("WIDGET_TOKEN_SECRET", "")
-    WIDGET_ORIGIN_ALLOWLIST: str = os.getenv("WIDGET_ORIGIN_ALLOWLIST", "")
     # PRD-194 S5 (P2-13): Redis-backed shared widget rate limiter (replaces
     # the per-process in-memory window). One window length; per-key limits by
     # key type; and a per-IP ceiling on the two money-spending endpoints
@@ -1454,33 +1453,33 @@ class Config:
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.
 
-        Called from the hard-fail boot phase (``main._boot_phase_1_core``) so a
+        Called from ``lifespan`` — outside any swallowing ``run_stage`` — so a
         misconfigured multi-tenant secret turns a silent cross-tenant leak into a
         loud boot failure rather than shipping fail-open.
 
         Raises ``RuntimeError`` (which aborts boot) when:
 
-        - F004: ``SHOPIFY_INTERNAL_API_KEY`` is unset while the Shopify
-          provisioning surface is reachable — an empty key previously made
-          ``_verify_internal_key`` accept any ``Authorization`` header.
         - F005: S3 Vectors is enabled but ``S3_VECTORS_BUCKET`` is unset. (A
           shared bucket with no ``{workspace_id}`` placeholder is allowed —
           tenant isolation is enforced per-query by ``S3VectorsBackend.search()``
           (fail-closed on ``workspace_id``), not by the bucket layout.)
-        - PRD-194 S4 (P2-13): ``WIDGET_ORIGIN_ALLOWLIST`` is empty in the
-          ``saas`` edition — widget CORS would rest at allow-all on the
-          internet-facing plane. Boot-abort in saas (same posture as F004 /
-          the Clerk edition guard); ``local`` keeps the permissive dev default.
+
+        Deliberately NOT checked here:
+
+        - Widget CORS. Storefront origins are authorised from the per-key
+          ``SdkApiKey.allowed_domains`` the merchant already maintains — there
+          is no global widget allowlist to validate. See ``api/widgets/cors.py``.
+        - ``SHOPIFY_INTERNAL_API_KEY`` (F004). The machine lanes it guards
+          (Shopify app-install provisioning, GDPR verticals) fail CLOSED at the
+          endpoint — ``_verify_internal_key`` returns 503 when the key is unset,
+          with no fail-open branch. In the current deployment model there IS no
+          Automatos-owned Shopify app: clients connect their own stores and all
+          merchant traffic authenticates with per-workspace widget keys, so the
+          key is intentionally absent and a boot-abort here would make every
+          saas boot fail for a surface that is correctly dark (2026-08-01
+          incident: exactly that, via #616).
         """
         errors: list[str] = []
-
-        # F004 — Shopify provisioning must not be fail-open.
-        if not (self.SHOPIFY_INTERNAL_API_KEY or "").strip():
-            errors.append(
-                "SHOPIFY_INTERNAL_API_KEY is unset — the Shopify provisioning "
-                "surface (/api/shopify/provision|connect|deactivate) would accept "
-                "any Authorization header (fail-open). Set SHOPIFY_INTERNAL_API_KEY."
-            )
 
         # F005 / PRD-186 S3 — vector-plane config integrity, extracted so CI
         # can pin the same rules the boot phase enforces (one assertion, no
@@ -1489,21 +1488,6 @@ class Config:
             self.assert_vector_config_integrity()
         except RuntimeError as e:
             errors.append(str(e))
-
-        # PRD-194 S4 (P2-13) — the internet-facing widget plane must not rest
-        # at allow-all CORS in production. In the saas edition an empty
-        # WIDGET_ORIGIN_ALLOWLIST is a boot error (locked decision: boot-abort,
-        # matching the F004 and Clerk edition guards). The local edition keeps
-        # the permissive dev default — choosing AUTH_EDITION=local IS the
-        # explicit opt-in.
-        if self.IS_SAAS_EDITION and not (self.WIDGET_ORIGIN_ALLOWLIST or "").strip():
-            errors.append(
-                "WIDGET_ORIGIN_ALLOWLIST is unset in the saas edition — widget "
-                "CORS (/api/widgets, /api/sites) would allow ALL origins on the "
-                "internet-facing plane (fail-open). Set WIDGET_ORIGIN_ALLOWLIST "
-                "to the comma-separated allowed storefront/dashboard origins, or "
-                "run AUTH_EDITION=local for a dev instance."
-            )
 
         if errors:
             raise RuntimeError(
