@@ -27,7 +27,10 @@ import { isWidgetRegistered, getRegisteredTypes } from '../registry'
 
 const WIDGETS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** Scan components/widgets/*/index.tsx for self-registering definitions. */
+// Scan each widget folder's index.tsx for self-registering definitions.
+// (Line comment on purpose: the glob "star-slash" sequence inside a block
+// comment terminates it early — esbuild read the rest as code and the whole
+// suite failed at transform. See PR #621.)
 function scanSelfRegisteringTypes(): { type: string; module: string }[] {
   const found: { type: string; module: string }[] = []
   for (const entry of readdirSync(WIDGETS_DIR)) {

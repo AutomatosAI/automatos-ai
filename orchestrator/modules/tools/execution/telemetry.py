@@ -161,6 +161,7 @@ async def write_telemetry(
                 ctx,
                 autonomous=result.get("autonomous") is True,
                 approved_via_grant_id=result.get("approved_via_grant_id"),
+                human_directed=result.get("human_directed") is True,
             ),
             intent_cluster_id=ctx.get("intent_cluster_id"),
             routing_source=ctx.get("routing_source"),
@@ -190,6 +191,7 @@ def _build_router_decision(
     ctx: Dict[str, Any],
     autonomous: bool = False,
     approved_via_grant_id: Optional[Any] = None,
+    human_directed: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Extract routing metadata from caller_context into router_decision JSONB."""
     decision = {}
@@ -202,6 +204,12 @@ def _build_router_decision(
         # approval grant — queryable and DISTINCT from the dial-skip marker
         # (router_decision->>'approved_via_grant_id').
         decision["approved_via_grant_id"] = approved_via_grant_id
+    if human_directed:
+        # 2026-08-06: executed because the instructing workspace admin's
+        # interactive request IS the approval — distinct from the dial-skip
+        # (autonomous) and from a card-approved grant
+        # (router_decision->>'human_directed').
+        decision["human_directed"] = True
     sel = ctx.get("selection_outcome")
     if isinstance(sel, dict) and sel:
         # PRD-143 S14: per-dispatch selection outcome (narrowed/hit/fallback)
