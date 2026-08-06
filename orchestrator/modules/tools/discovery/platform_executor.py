@@ -324,6 +324,62 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 }
 
 
+def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
+    """Resolve the driving user's workspace role, fresh, at the gate.
+
+    Keyed by the server-threaded clerk principal (``caller_context.user_id``)
+    — never by anything the model can write. Any failure returns ``None`` and
+    the caller falls closed to the ask.
+    """
+    try:
+        from core.models.core import User
+        from core.workspaces.models import WorkspaceMember
+
+        row = (
+            db.query(WorkspaceMember.role)
+            .join(User, User.id == WorkspaceMember.user_id)
+            .filter(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.is_active.is_(True),
+                User.clerk_user_id == str(clerk_user_id),
+            )
+            .first()
+        )
+        return str(row[0]).strip().lower() if row and row[0] else None
+    except Exception:
+        logger.warning(
+            "[PlatformExecutor] workspace-role resolve failed — falling closed to the ask",
+            exc_info=True,
+        )
+        return None
+
+
+def _human_directed_admin(db, workspace_id, caller_context) -> bool:
+    """The instruction IS the approval (Gerard, 2026-08-06).
+
+    The confirmation gate exists to stop the AGENT deciding to do something
+    destructive on its own — not to make a human repeat an instruction they
+    just gave. When the call originates from an interactive chat turn
+    (``conversation_id`` is server-threaded by build_tool_caller_context —
+    heartbeat/cadence/board/mission lanes never carry it) AND the driving
+    user holds owner/admin in this workspace (resolved fresh from
+    workspace_members, not from anything model-writable), the gate lets the
+    instructed action run and stamps ``human_directed`` for the audit trail.
+
+    Everything else — agent-initiated lanes, editors/viewers, a missing or
+    unresolvable principal, any lookup error — keeps the ask. The su tier is
+    untouched (its gate runs earlier and never consults this).
+    """
+    ctx = caller_context if isinstance(caller_context, dict) else {}
+    if not ctx.get("conversation_id"):
+        return False
+    clerk_id = ctx.get("user_id")
+    if not clerk_id or not isinstance(clerk_id, str):
+        return False
+    role = _workspace_role_for_clerk(db, workspace_id, clerk_id)
+    return role in ("owner", "admin")
+
+
 class PlatformActionExecutor:
     """
     Executes platform actions using direct database queries.
@@ -681,6 +737,7 @@ class PlatformActionExecutor:
         # grant-authorised — distinct from the full-autonomy dial skipping
         # the gate.
         approved_via_grant_id: Optional[int] = None
+        human_directed: bool = False
 
         # Permission check for write/destructive actions (fail-closed)
         try:
@@ -752,7 +809,29 @@ class PlatformActionExecutor:
                         ),
                     }
 
-            if action_def and action_def.requires_confirmation and not full_autonomy:
+            # 2026-08-06 (Gerard): a destructive/write action INSTRUCTED by a
+            # workspace owner/admin in an interactive chat turn does not ask
+            # again — the instruction is the approval. Agent-initiated lanes
+            # (heartbeat / cadence / board / mission) still get the card.
+            human_directed = bool(
+                action_def
+                and action_def.requires_confirmation
+                and not full_autonomy
+                and _human_directed_admin(self.db, self.workspace_id, caller_context)
+            )
+            if human_directed:
+                logger.info(
+                    "[PlatformExecutor] '%s' human-directed — instructing "
+                    "workspace admin's request is the approval (workspace=%s)",
+                    action_name, self.workspace_id,
+                )
+
+            if (
+                action_def
+                and action_def.requires_confirmation
+                and not full_autonomy
+                and not human_directed
+            ):
                 # PRD-193 S1/S2 (P2-12): the ask is no longer a dead end.
                 # S2 — consult FIRST: an authorising grant on this exact
                 # subject key (GRANTED + unexpired + params-hash equality)
@@ -1093,6 +1172,11 @@ class PlatformActionExecutor:
             # autonomous.
             if approved_via_grant_id is not None and isinstance(result, dict):
                 result = {**result, "approved_via_grant_id": approved_via_grant_id}
+            # 2026-08-06: executed because the instructing human admin's
+            # interactive request IS the approval — distinct from both the
+            # dial-skip (autonomous) and a card-approved grant.
+            if human_directed and isinstance(result, dict):
+                result = {**result, "human_directed": True}
             return result
         except Exception as e:
             logger.error(f"[PlatformExecutor] {action_name} failed: {e}", exc_info=True)
