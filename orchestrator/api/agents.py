@@ -302,7 +302,6 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         slug=getattr(agent, 'slug', None),
         required_role=getattr(agent, 'required_role', None),
         marketplace_category=getattr(agent, 'marketplace_category', None),
-        voice_profile_id=str(agent.voice_profile_id) if getattr(agent, 'voice_profile_id', None) else None,
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
@@ -915,14 +914,6 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
                         )
                     )
         
-        # PRD-74: Voice profile assignment
-        if agent_update.voice_profile_id is not None:
-            from uuid import UUID as _UUID
-            try:
-                agent.voice_profile_id = _UUID(agent_update.voice_profile_id) if agent_update.voice_profile_id else None
-            except (ValueError, AttributeError):
-                agent.voice_profile_id = None
-
         db.commit()
         db.refresh(agent)
 

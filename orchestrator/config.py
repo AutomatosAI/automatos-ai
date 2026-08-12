@@ -1316,19 +1316,6 @@ class Config:
     # existing economical model comma-list (BUDGET_MODELS, PRD-54) — no new id invented.
     TRIAL_MODEL_ALLOWLIST: str = os.getenv("TRIAL_MODEL_ALLOWLIST", BUDGET_MODELS)
 
-    # =============================================================================
-    # VOICE SERVICE (PRD-74)
-    # =============================================================================
-    # PRD-176 F068: local-safe default (SaaS sets the railway voice host via env).
-    VOICE_SERVICE_URL: str = os.getenv("VOICE_SERVICE_URL", "http://localhost:8300")
-    VOICE_SERVICE_TIMEOUT: int = int(os.getenv("VOICE_SERVICE_TIMEOUT", "90"))
-    VOICE_STT_MODEL: str = os.getenv("VOICE_STT_MODEL", "Systran/faster-whisper-large-v3")
-    VOICE_TTS_MODEL: str = os.getenv("VOICE_TTS_MODEL", "kokoro")
-    VOICE_TTS_DEFAULT_VOICE: str = os.getenv("VOICE_TTS_DEFAULT_VOICE", "af_heart")
-    VOICE_ENABLED: bool = os.getenv("VOICE_ENABLED", "true").lower() == "true"
-    VOICE_MAX_AUDIO_SIZE_MB: int = int(os.getenv("VOICE_MAX_AUDIO_SIZE_MB", "25"))
-    AUTO_VOICE_PROVIDER: str = os.getenv("AUTO_VOICE_PROVIDER", "chatterbox")
-
     # PRD-207 S4: Auto Live tuning constants. These are NUMERIC dials only —
     # the ON-switch (`voice.live_enabled`) and the Retell credentials live in
     # DB system_settings (category 'voice', masked; see

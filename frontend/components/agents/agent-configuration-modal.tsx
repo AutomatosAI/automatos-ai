@@ -29,7 +29,6 @@ import {
   Activity,
   Loader2,
   Play,
-  Volume2,
 } from 'lucide-react'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Button } from '@/components/ui/button'
@@ -150,11 +149,6 @@ export function AgentConfigurationModal({
   const [expandedPersonaId, setExpandedPersonaId] = useState<string | null>(null)
   const [personaSaving, setPersonaSaving] = useState(false)
   const [personaLoaded, setPersonaLoaded] = useState(false)
-
-  // PRD-74: Voice profile state
-  const [voiceProfiles, setVoiceProfiles] = useState<any[]>([])
-  const [selectedVoiceProfileId, setSelectedVoiceProfileId] = useState<string | null>(null)
-  const [voiceProfilesLoading, setVoiceProfilesLoading] = useState(false)
 
   // PRD-55: Heartbeat configuration state
   const [heartbeatConfig, setHeartbeatConfig] = useState({
@@ -320,31 +314,6 @@ export function AgentConfigurationModal({
 
     return () => { mounted = false }
   }, [open, agentId])
-
-  // PRD-74: Load voice profiles and agent's current voice profile
-  useEffect(() => {
-    if (!open || !agentId) return
-    let mounted = true
-    setVoiceProfilesLoading(true)
-
-    apiClient.request<any>('/api/voice/profiles')
-      .then((data) => {
-        if (!mounted) return
-        setVoiceProfiles(data?.items || [])
-      })
-      .catch(() => { if (mounted) setVoiceProfiles([]) })
-      .finally(() => { if (mounted) setVoiceProfilesLoading(false) })
-
-    // Get agent's current voice_profile_id from the agent data
-    const vpId = (agent as any)?.voice_profile_id
-    if (vpId) {
-      setSelectedVoiceProfileId(vpId)
-    } else {
-      setSelectedVoiceProfileId(null)
-    }
-
-    return () => { mounted = false }
-  }, [open, agentId, (agent as any)?.voice_profile_id])
 
   // PRD-55: Load heartbeat config + connected channels when modal opens
   useEffect(() => {
@@ -685,7 +654,6 @@ export function AgentConfigurationModal({
         },
         skill_assignments: formData.assigned_skills,
         tool_ids: (formData.assigned_tools || []).filter((id: any) => id != null),
-        voice_profile_id: selectedVoiceProfileId || null,
       }
 
       toast.loading('Saving configuration...', { id: 'agent-config-save' })
@@ -813,10 +781,6 @@ export function AgentConfigurationModal({
                   <TabsTrigger value="heartbeat" className="flex items-center space-x-1">
                     <Activity className="w-3 h-3" />
                     <span>Heartbeat</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="voice" className="flex items-center space-x-1">
-                    <Volume2 className="w-3 h-3" />
-                    <span>Voice</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -1897,63 +1861,6 @@ export function AgentConfigurationModal({
                   </Card>
                 </TabsContent>
 
-                {/* PRD-74: Voice Profile Tab */}
-                <TabsContent value="voice" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
-                  <Card className="bg-secondary/30 border-border/30">
-                    <CardHeader>
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Volume2 className="w-4 h-4" />
-                        Agent Voice
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <p className="text-sm text-muted-foreground">
-                        Assign a voice profile to this agent for TTS responses. Manage voices in Settings → Voices.
-                      </p>
-
-                      {voiceProfilesLoading ? (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Loading voice profiles...
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <Label>Voice Profile</Label>
-                          <Select
-                            value={selectedVoiceProfileId || 'none'}
-                            onValueChange={(val) => {
-                              const newId = val === 'none' ? null : val
-                              setSelectedVoiceProfileId(newId)
-                              setHasChanges(true)
-                            }}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="No voice assigned" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">No voice (text only)</SelectItem>
-                              {voiceProfiles.map((vp: any) => (
-                                <SelectItem key={vp.id} value={vp.id}>
-                                  {vp.name} ({vp.provider} / {vp.voice_id})
-                                  {vp.is_default ? ' ★' : ''}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-
-                          <p className="text-xs text-muted-foreground">
-                            Voice profile will be saved when you click Save at the top.
-                          </p>
-
-                          {voiceProfiles.length === 0 && (
-                            <p className="text-xs text-muted-foreground">
-                              No voice profiles found. Create one in Settings → Voices first.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
               </Tabs>
             )}
           </CardContent>

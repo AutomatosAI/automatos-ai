@@ -7,10 +7,10 @@ barge-in at sub-600ms and calls Auto's OWN agent loop for the words via a
 **custom-LLM webhook**. The deep Automatos agent — the one real differentiator —
 stays ours; only the voice-native hard parts move to the vendor.
 
-This adapter sits at the same architectural seam as ``VoiceServiceClient``
-(the self-hosted transport, ``client.py``): a swappable voice transport behind
-``modules/voice``. It is pure + streaming, so the "first audio before the full
-agent stream completes" property is unit-testable with no vendor, pod, or GPU.
+This adapter is a swappable voice transport behind ``modules/voice`` (the seam
+the retired self-hosted ``VoiceServiceClient`` once occupied). It is pure +
+streaming, so the "first audio before the full agent stream completes" property
+is unit-testable with no vendor, pod, or GPU.
 
 Three concerns, all pure:
   * ``parse_llm_request``  — read Retell's ``response_required`` webhook payload;
@@ -18,9 +18,8 @@ Three concerns, all pure:
     custom-LLM frames, yielding each the moment its text arrives (streaming);
   * ``verify_webhook_signature`` — HMAC auth on the inbound webhook (fail-closed).
 
-The self-hosted pod path (``VoiceServiceClient``) stays as the fallback; retiring
-the Pipecat/GPU pod is a cross-repo automatos-voice coordination (§8-Qa), NOT done
-here.
+The self-hosted pod path (``VoiceServiceClient``) was decommissioned with the
+automatos-voice service (2026-08): Retell is the only voice transport.
 """
 
 from __future__ import annotations
@@ -112,7 +111,7 @@ def extract_agent_text(chunk: str) -> str:
     """Pull the text out of one AI-SDK stream line (``0:"escaped text"``).
 
     Non-text frames (tool/data/finish lines: ``2:``/``d:``/…) yield ``""`` so the
-    caller skips them. Mirrors the extraction in ``chat_voice._collect_streaming_response``.
+    caller skips them.
     """
     if not chunk.startswith("0:"):
         return ""

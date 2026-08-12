@@ -722,7 +722,6 @@ class AgentUpdate(BaseModel):
     skill_ids: Optional[List[int]] = None
     tool_ids: Optional[List[int]] = None  # NEW: Allow updating tool assignments
     tags: Optional[List[str]] = None
-    voice_profile_id: Optional[str] = None  # PRD-74: Voice profile UUID or null
 
 class AgentResponse(BaseModel):
     id: int
@@ -751,7 +750,6 @@ class AgentResponse(BaseModel):
     slug: Optional[str] = None
     required_role: Optional[str] = None
     marketplace_category: Optional[str] = None  # UI category for icon mapping
-    voice_profile_id: Optional[str] = None  # PRD-74
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

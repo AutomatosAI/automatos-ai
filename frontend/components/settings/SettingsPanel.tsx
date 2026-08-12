@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Volume2, Bell } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -10,7 +10,6 @@ import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
 import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { WidgetSdkTab } from './WidgetSdkTab'
-import { VoiceProfilesSettingsTab } from './VoiceProfilesSettingsTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { useSystemRole } from '@/contexts/role-context'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
@@ -27,7 +26,6 @@ export function SettingsPanel() {
     { value: 'credentials', label: 'Credentials', icon: Key },
     { value: 'channels', label: 'Channels', icon: Radio },
     { value: 'notifications', label: 'Notifications', icon: Bell },
-    { value: 'voice-profiles', label: 'Voices', icon: Volume2 },
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
 
@@ -83,11 +81,6 @@ export function SettingsPanel() {
         {/* PRD-128: Notification Preferences */}
         <TabsContent value="notifications" data-tour="settings-notifications-tab">
           <NotificationsSettingsTab />
-        </TabsContent>
-
-        {/* PRD-74: Voice Profiles */}
-        <TabsContent value="voice-profiles">
-          <VoiceProfilesSettingsTab />
         </TabsContent>
 
         {/* PRD-008-A: Widget SDK — sites, behaviour, callback, API keys */}

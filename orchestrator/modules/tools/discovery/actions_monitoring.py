@@ -25,7 +25,7 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
                     "type": "string",
                     "description": (
                         "Service to query logs from: 'automatos-backend', 'agent-opt-worker', "
-                        "'workspace-worker', 'mem0-server', 'voice-service'. "
+                        "'workspace-worker', 'mem0-server'. "
                         "Defaults to 'automatos-backend' if omitted."
                     ),
                 },

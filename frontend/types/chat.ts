@@ -168,20 +168,6 @@ export type MessagePart =
   | { type: 'file'; filename: string; mediaType: string; url: string }
   | { type: 'tool-result'; toolName: string; result: any }
   | { type: 'artifact'; artifact: Artifact }
-  | { type: 'voice'; transcript: string; audioUrl?: string; audioBase64?: string; durationMs?: number }
-
-/**
- * Voice message metadata from STT/TTS pipeline
- */
-export interface VoiceMetadata {
-  transcript: string
-  audioUrl?: string | null
-  sttModel?: string
-  ttsModel?: string
-  ttsVoice?: string
-  sttLatencyMs?: number
-  ttsLatencyMs?: number
-}
 
 /**
  * App usage/token tracking

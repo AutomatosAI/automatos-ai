@@ -10,7 +10,6 @@ import remarkGfm from 'remark-gfm'
 import { chatMarkdownComponents } from './markdown-components'
 import { ImageGallery, type ChatImage } from './image-gallery'
 import { MessageActions } from './message-actions'
-import { VoiceMessage } from '@/components/voice/VoiceMessage'
 
 export interface MessageProps {
   chatId: string
@@ -125,18 +124,6 @@ export function Message({
             )
           }
 
-          if (part.type === 'voice' && 'transcript' in part) {
-            return (
-              <VoiceMessage
-                key={index}
-                transcript={part.transcript}
-                audioUrl={'audioUrl' in part ? part.audioUrl : undefined}
-                audioBase64={'audioBase64' in part ? part.audioBase64 : undefined}
-                isUser={isUser}
-                durationMs={'durationMs' in part ? part.durationMs : undefined}
-              />
-            )
-          }
 
           return null
         })}
