@@ -15,10 +15,6 @@ import { render, screen } from '@testing-library/react'
 vi.mock('../message-actions', () => ({
   MessageActions: () => null,
 }))
-vi.mock('@/components/voice/VoiceMessage', () => ({
-  VoiceMessage: () => null,
-}))
-
 import { Message } from '../message'
 
 function assistantWithTool(tool: Record<string, unknown>) {

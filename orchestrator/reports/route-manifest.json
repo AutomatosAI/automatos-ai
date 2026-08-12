@@ -1,5 +1,5 @@
 {
-  "route_count": 776,
+  "route_count": 766,
   "routes": [
     {
       "method": "GET",
@@ -656,14 +656,6 @@
     {
       "method": "GET",
       "path": "/api/chat/search"
-    },
-    {
-      "method": "POST",
-      "path": "/api/chat/voice"
-    },
-    {
-      "method": "GET",
-      "path": "/api/chat/voice/audio/{message_id}"
     },
     {
       "method": "PATCH",
@@ -2443,39 +2435,7 @@
     },
     {
       "method": "GET",
-      "path": "/api/voice/health"
-    },
-    {
-      "method": "GET",
       "path": "/api/voice/live-status"
-    },
-    {
-      "method": "GET",
-      "path": "/api/voice/profiles"
-    },
-    {
-      "method": "POST",
-      "path": "/api/voice/profiles"
-    },
-    {
-      "method": "POST",
-      "path": "/api/voice/profiles/clone"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/voice/profiles/{profile_id}"
-    },
-    {
-      "method": "GET",
-      "path": "/api/voice/profiles/{profile_id}"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/voice/profiles/{profile_id}"
-    },
-    {
-      "method": "POST",
-      "path": "/api/voice/profiles/{profile_id}/preview"
     },
     {
       "method": "POST",

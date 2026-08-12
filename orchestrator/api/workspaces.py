@@ -420,9 +420,6 @@ async def get_orchestrator_settings(
             if agent_cfg.get("thinking_level"):
                 result["thinking_level"] = agent_cfg["thinking_level"]
 
-            # Voice profile
-            result["voice_profile_id"] = str(auto_agent.voice_profile_id) if auto_agent.voice_profile_id else None
-
             logger.info(
                 "Orchestrator GET for ws=%s: personality_mode=%s, llm_model=%s, auto_agent_id=%s, "
                 "stored_config_keys=%s, persona_len=%s",
@@ -640,12 +637,6 @@ async def save_orchestrator_settings(
             new_cfg.update(config_fields)
             auto_agent.configuration = new_cfg
             flag_modified(auto_agent, "configuration")
-
-        # Voice profile → Auto agent voice_profile_id
-        if "voice_profile_id" in payload:
-            from uuid import UUID
-            vp_id = payload["voice_profile_id"]
-            auto_agent.voice_profile_id = UUID(vp_id) if vp_id else None
 
     except Exception:
         logger.exception("Failed to sync orchestrator settings to Auto agent for workspace %s", ctx.workspace_id)

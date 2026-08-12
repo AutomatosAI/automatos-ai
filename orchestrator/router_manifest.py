@@ -65,9 +65,7 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.activity"),
     RouterSpec("api.heartbeat"),
     RouterSpec("api.channels"),
-    RouterSpec("api.chat_voice"),
     RouterSpec("api.voice_retell"),  # PRD-203 V·S4 — Retell streaming custom-LLM webhook
-    RouterSpec("api.voice_profiles"),
     RouterSpec("api.reports"),
     RouterSpec("api.deliverables"),
     RouterSpec("api.board_tasks"),
