@@ -39,7 +39,12 @@ function scanSelfRegisteringTypes(): { type: string; module: string }[] {
       if (!statSync(join(WIDGETS_DIR, entry)).isDirectory()) continue
       const src = readFileSync(indexPath, 'utf-8')
       if (!src.includes('registerWidget(')) continue
-      const m = src.match(/type:\s*['"]([a-z0-9_]+)['"]/)
+      // Anchor to the top-level def property (≤2-space indent): a widget's
+      // body can contain other `type: '...'` literals first (MemoryWidget's
+      // `type: 'fact'` item default, CodingCanvasWidget's `type: 'file_write'`
+      // tree event) and an unanchored first-match scans those instead of the
+      // registered type.
+      const m = src.match(/^ {0,2}type:\s*['"]([a-z0-9_]+)['"]/m)
       if (m) found.push({ type: m[1], module: entry })
     } catch {
       continue // no index.tsx — not a widget module
