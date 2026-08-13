@@ -90,6 +90,7 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/verticals/{vertical}/gdpr/erase"),
     ("POST", "/api/verticals/{vertical}/gdpr/erase-subject"),
     ("POST", "/api/verticals/{vertical}/provision"),
+    ("PATCH", "/api/verticals/{vertical}/provision/domains"),
     ("POST", "/api/shopify/connect"),
     ("POST", "/api/shopify/deactivate"),
     ("POST", "/api/shopify/events"),
