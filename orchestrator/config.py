@@ -563,6 +563,9 @@ class Config:
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
+    # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
+    # the budstacks provision surface answers 503, never open.
+    BUDSTACKS_INTERNAL_API_KEY: str = os.getenv("BUDSTACKS_INTERNAL_API_KEY", "")
     # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
     # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
     # /events coalesces the burst into ONE full Bulk-Op re-sync once it has

@@ -34,6 +34,7 @@ from core.database.database import init_database, get_db, SessionLocal
 from core.models import Base
 
 # Import API routers
+import integrations.budstacks  # noqa: F401 — self-registers the budstacks VerticalProvisioner
 from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router

@@ -2430,6 +2430,10 @@
       "path": "/api/verticals/{vertical}/provision"
     },
     {
+      "method": "PATCH",
+      "path": "/api/verticals/{vertical}/provision/domains"
+    },
+    {
       "method": "POST",
       "path": "/api/voice/arm"
     },

@@ -8,27 +8,56 @@ forking ``api/shopify.py``. The Shopify Remix app targets
 ``/api/verticals/shopify/provision``; ``api/shopify.py`` retains only its thin
 compat wrapper that delegates here.
 
-Authenticated with the same fail-closed internal API key as the Shopify routes
-(the integration/app server is the caller, not a browser).
+Authenticated with a fail-closed PER-VERTICAL internal API key (the
+integration/app server is the caller, not a browser): each vertical's secret is
+declared in ``config.py`` and resolved from the path's ``{vertical}`` — so the
+BudStacks app cannot provision Shopify workspaces with its own key, and an
+unconfigured vertical answers 503 (dark), mirroring ``_verify_internal_key``'s
+posture (see the 2026-08-01 boot-guard outage note in config.py for why this is
+a request-time check, never a boot-fatal one).
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from config import config
 from core.database.database import get_db
 from core.models.workspaces import Workspace
-from api.shopify import _verify_internal_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/verticals", tags=["Verticals"])
+
+
+# Vertical → the config attribute holding its server-to-server secret. A
+# vertical absent here (or with an empty secret) is dark: 503, never open.
+_VERTICAL_INTERNAL_KEYS: Dict[str, str] = {
+    "shopify": "SHOPIFY_INTERNAL_API_KEY",
+    "budstacks": "BUDSTACKS_INTERNAL_API_KEY",
+}
+
+
+def _verify_vertical_internal_key(
+    vertical: str, authorization: str = Header(...)
+) -> None:
+    """Fail-closed per-vertical twin of ``api.shopify._verify_internal_key``."""
+    attr = _VERTICAL_INTERNAL_KEYS.get(vertical)
+    expected = (getattr(config, attr, "") or "").strip() if attr else ""
+    if not expected:
+        raise HTTPException(
+            status_code=503, detail=f"{vertical} provisioning not configured"
+        )
+    token = authorization.replace("Bearer ", "").strip()
+    if not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
 def _resolve_workspace_by_external_id(db: Session, vertical: str, external_id: str) -> Workspace:
@@ -87,7 +116,17 @@ class VerticalProvisionResponse(BaseModel):
     id: str
     public_id: str
     name: str
-    api_key: str = Field(..., description="Public widget API key — shown once.")
+    api_key: Optional[str] = Field(
+        None,
+        description=(
+            "Public widget API key — shown once when minted. Null when the "
+            "vertical declares reuse_existing_key and an active key already "
+            "exists (the caller keeps its stored copy)."
+        ),
+    )
+    key_minted: bool = Field(
+        True, description="Whether this call minted a new key."
+    )
     agents_installed: int
     is_new: bool
 
@@ -97,7 +136,7 @@ async def provision_vertical_workspace(
     vertical: str,
     request: VerticalProvisionRequest,
     db: Session = Depends(get_db),
-    _auth: None = Depends(_verify_internal_key),
+    _auth: None = Depends(_verify_vertical_internal_key),
 ):
     """Provision a workspace for ``vertical`` via the generic provisioner.
 
@@ -105,7 +144,7 @@ async def provision_vertical_workspace(
     without re-seeding). Returns 404 for a vertical with no registered
     provisioner.
     """
-    from integrations.provisioning import provision_vertical
+    from integrations.provisioning import VerticalConfigError, provision_vertical
 
     try:
         result = provision_vertical(
@@ -115,6 +154,9 @@ async def provision_vertical_workspace(
             name=request.name,
             metadata=request.metadata,
         )
+    except VerticalConfigError as e:
+        # Malformed by the vertical's own rules (e.g. missing origin allowlist).
+        raise HTTPException(status_code=422, detail=str(e))
     except ValueError as e:
         # Unknown vertical → 404 (no provisioner registered).
         raise HTTPException(status_code=404, detail=str(e))
@@ -124,6 +166,70 @@ async def provision_vertical_workspace(
         vertical, result["id"], request.external_id, result["agents_installed"],
     )
     return VerticalProvisionResponse(**result)
+
+
+class VerticalDomainsRequest(BaseModel):
+    external_id: str = Field(..., description="Vertical-scoped external id.")
+    domains: List[str] = Field(
+        ..., min_length=1, description="Replacement origin allowlist (hostnames or origins)."
+    )
+
+
+@router.patch("/{vertical}/provision/domains")
+async def update_vertical_key_domains(
+    vertical: str,
+    request: VerticalDomainsRequest,
+    db: Session = Depends(get_db),
+    _auth: None = Depends(_verify_vertical_internal_key),
+) -> Dict[str, Any]:
+    """Re-sync the origin allowlist on the workspace's active public widget keys.
+
+    Public keys are origin-locked; when a tenant's storefront hostname changes
+    (e.g. a BudStacks custom-domain move) the allowlist must follow or the
+    widget 403s on the new host. Replaces ``allowed_domains`` on every ACTIVE
+    public key of the workspace resolved from ``external_id`` — inactive and
+    server keys are untouched. Domains are normalized through the vertical's
+    own ``allowed_domains`` rule so the same validation applies as at
+    provision time. 404 when no workspace matches; 422 when the vertical's
+    rules reject the list.
+    """
+    from core.models.sdk_api_keys import SdkApiKey
+    from integrations.provisioning import (
+        PROVISIONER_REGISTRY,
+        VerticalConfigError,
+    )
+
+    workspace = _resolve_workspace_by_external_id(db, vertical, request.external_id)
+
+    provisioner = PROVISIONER_REGISTRY.get(vertical)
+    if provisioner is None:
+        raise HTTPException(status_code=404, detail=f"Unknown vertical '{vertical}'")
+
+    try:
+        domains = provisioner.allowed_domains(
+            request.external_id, {"domains": request.domains}
+        )
+    except VerticalConfigError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    keys = (
+        db.query(SdkApiKey)
+        .filter(
+            SdkApiKey.workspace_id == workspace.id,
+            SdkApiKey.key_type == "public",
+            SdkApiKey.is_active.is_(True),
+        )
+        .all()
+    )
+    for key in keys:
+        key.allowed_domains = list(domains)
+    db.commit()
+
+    logger.info(
+        "[verticals] domains re-sync vertical=%s external_id=%s workspace=%s keys=%d domains=%d",
+        vertical, request.external_id, workspace.id, len(keys), len(domains),
+    )
+    return {"updated_keys": len(keys), "domains": domains}
 
 
 # ===================================================================
@@ -160,7 +266,7 @@ async def gdpr_erase_subject(
     vertical: str,
     request: VerticalGdprEraseSubjectRequest,
     db: Session = Depends(get_db),
-    _auth: None = Depends(_verify_internal_key),
+    _auth: None = Depends(_verify_vertical_internal_key),
 ) -> Dict[str, Any]:
     """Erase a single data subject within the workspace resolved from ``external_id``.
 
@@ -190,7 +296,7 @@ async def gdpr_erase_workspace(
     vertical: str,
     request: VerticalGdprEraseRequest,
     db: Session = Depends(get_db),
-    _auth: None = Depends(_verify_internal_key),
+    _auth: None = Depends(_verify_vertical_internal_key),
 ) -> Dict[str, Any]:
     """Erase the whole workspace resolved from ``external_id`` (irreversible cascade).
 
@@ -222,7 +328,7 @@ async def gdpr_export_workspace(
     external_id: str,
     customer_id: Optional[str] = None,
     db: Session = Depends(get_db),
-    _auth: None = Depends(_verify_internal_key),
+    _auth: None = Depends(_verify_vertical_internal_key),
 ) -> JSONResponse:
     """Export the workspace resolved from ``external_id`` as a portable JSON bundle.
 
