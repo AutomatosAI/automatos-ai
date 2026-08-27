@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from core.models.approval_grants import ApprovalGrant, GrantStatus
+from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_APPROVAL
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +53,19 @@ def create_grant(
     estimated_cost_usd: Optional[float] = None,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
     now: Optional[datetime] = None,
+    # PRD-225: question-kind asks. Defaulting ``kind`` to 'approval' and the ask
+    # fields to None keeps every existing approval caller byte-for-byte the same.
+    kind: str = KIND_APPROVAL,
+    question_md: Optional[str] = None,
+    options: Optional[list] = None,
+    channel_refs: Optional[dict] = None,
+    asked_by_agent_id: Optional[int] = None,
 ) -> ApprovalGrant:
-    """Stage a new PENDING, expiring grant for a subject. Caller owns the txn."""
+    """Stage a new PENDING, expiring grant for a subject. Caller owns the txn.
+
+    PRD-225: pass ``kind='question'`` with ``question_md`` to stage a free-text
+    ask (``pending`` = open, ``granted`` = answered, ``denied`` = dismissed).
+    """
     ts = _now(now)
     grant = ApprovalGrant(
         workspace_id=workspace_id,
@@ -68,6 +79,11 @@ def create_grant(
         estimated_cost_usd=(f"{float(estimated_cost_usd):.6f}" if estimated_cost_usd is not None else None),
         requested_at=ts,
         expires_at=ts + timedelta(seconds=max(1, int(ttl_seconds))),
+        kind=kind,
+        question_md=question_md,
+        options=options,
+        channel_refs=channel_refs,
+        asked_by_agent_id=asked_by_agent_id,
     )
     db.add(grant)
     try:

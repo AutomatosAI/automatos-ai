@@ -49,6 +49,10 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset(
         "task_failed",
         "task_sla_breach",
         "approval_pending",
+        # PRD-225: an agent raised a free-text question that parks its subject
+        # until a human answers. Respects quiet hours unless the ask blocks a
+        # large downstream cascade (the caller passes severity='urgent').
+        "question_pending",
         "mission_plan_ready",
         "mission_step_complete",
         "mission_complete",
