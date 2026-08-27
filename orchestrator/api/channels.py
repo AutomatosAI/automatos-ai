@@ -34,6 +34,12 @@ from channels.drivers import (
     get_driver,
     list_platforms,
 )
+from services.ingress_gate import (  # PRD-225 US-006: per-channel trust gate
+    TRIGGER_MODES,
+    normalize_trigger_mode,
+    trigger_mode_of,
+    with_trigger_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +192,7 @@ async def list_channels(
     rows = db.execute(
         text("""
             SELECT id, platform, status, mode, webhook_url, last_verified, last_error,
-                   metadata, default_agent_id, message_count, last_activity_at, created_at
+                   metadata, config, default_agent_id, message_count, last_activity_at, created_at
             FROM channel_connections
             WHERE workspace_id = :ws_id
             ORDER BY created_at DESC
@@ -218,6 +224,9 @@ async def list_channels(
                 "last_verified": r.last_verified.isoformat() if r.last_verified else None,
                 "last_error": r.last_error,
                 "metadata": r.metadata or {},
+                # PRD-225 US-006: the ingress trust gate mode. Surface only this
+                # one config key — never the whole config (it holds credentials).
+                "trigger_mode": trigger_mode_of(r.config),
                 "default_agent_id": r.default_agent_id,
                 "message_count": r.message_count or 0,
                 "last_activity_at": r.last_activity_at.isoformat() if r.last_activity_at else None,
@@ -440,9 +449,28 @@ async def update_channel(
     updates = []
     params: Dict[str, Any] = {"id": channel_id}
 
+    # PRD-225 US-006: trigger_mode rides the config JSONB (no new column). Merge
+    # it into the config being written — rebuild-don't-mutate — so a mode update
+    # never clobbers credentials and a config update never drops the mode.
+    new_config: Optional[Dict[str, Any]] = None
     if "config" in payload:
+        new_config = dict(payload["config"]) if isinstance(payload["config"], dict) else {}
+    if "trigger_mode" in payload:
+        mode = normalize_trigger_mode(payload["trigger_mode"])
+        if mode is None:
+            raise HTTPException(400, f"trigger_mode must be one of {list(TRIGGER_MODES)}")
+        if new_config is None:
+            existing = db.execute(
+                text("SELECT config FROM channel_connections WHERE id = :id"),
+                {"id": channel_id},
+            ).fetchone()
+            base = existing.config if existing and isinstance(existing.config, dict) else {}
+            new_config = with_trigger_mode(base, mode)
+        else:
+            new_config = with_trigger_mode(new_config, mode)
+    if new_config is not None:
         updates.append("config = :config")
-        params["config"] = __import__('json').dumps(payload["config"])
+        params["config"] = _json.dumps(new_config)
     if "default_agent_id" in payload:
         updates.append("default_agent_id = :agent_id")
         params["agent_id"] = payload["default_agent_id"]

@@ -334,6 +334,108 @@ async def _apply_telegram_answer(
 
 
 # =============================================================================
+# PRD-225 US-006 — the per-channel ingress trust gate
+# =============================================================================
+
+def _channel_for_platform(db: Session, workspace_id: Any, platform: str):
+    """The workspace's channel connection for this platform (None if none)."""
+    from core.models.channels import ChannelConnection
+
+    return (
+        db.query(ChannelConnection)
+        .filter(
+            ChannelConnection.workspace_id == workspace_id,
+            ChannelConnection.platform == platform,
+        )
+        .first()
+    )
+
+
+def _inbound_text(body: Dict[str, Any]) -> str:
+    """Best-effort inbound message text across platforms, for classification."""
+    if not isinstance(body, dict):
+        return ""
+    msg = body.get("message")
+    if isinstance(msg, dict) and isinstance(msg.get("text"), str):
+        return msg["text"]
+    event = body.get("event")
+    if isinstance(event, dict) and isinstance(event.get("text"), str):
+        return event["text"]
+    for key in ("text", "content", "Body"):
+        v = body.get(key)
+        if isinstance(v, str):
+            return v
+    return ""
+
+
+async def _apply_trust_gate(
+    db: Session,
+    workspace: Any,
+    platform: str,
+    body: Dict[str, Any],
+    reply_ctx: Dict[str, Any],
+    integrations: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Hold inbound directives per the channel's ``trigger_mode``.
+
+    Returns a response dict when the message is HELD (short-circuits ALL routing),
+    or None to let it route. No channel row ⇒ no gate (legacy-integration inbound
+    is unchanged). Correlated answers already returned upstream, so they bypass
+    the gate in every mode.
+    """
+    from services.ingress_gate import (
+        should_hold, trigger_mode_of, TRIGGER_MODE_ALLOW_ALL,
+    )
+
+    channel = _channel_for_platform(db, workspace.id, platform)
+    if channel is None:
+        return None  # no connected channel → the gate does not apply
+    mode = trigger_mode_of(channel.config)
+    if mode == TRIGGER_MODE_ALLOW_ALL:
+        return None
+
+    text_in = _inbound_text(body)
+    if not text_in.strip():
+        return None  # nothing to hold (non-text update)
+    if not should_hold(mode, text_in):
+        # NOTE: never log the message body — only the gate decision.
+        logger.info(
+            "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=route",
+            workspace.id, channel.id, platform, mode,
+        )
+        return None
+
+    # HELD — record a question-kind row against the channel; nothing executes.
+    from core.models.approval_grants import KIND_QUESTION
+    from core.services.approval_grants import create_grant
+
+    grant = create_grant(
+        db, workspace.id,
+        subject_type="channel", subject_id=str(channel.id),
+        kind=KIND_QUESTION,
+        question_md=(
+            "**Inbound directive awaiting approval**\n\n"
+            f"{text_in.strip()}\n\n"
+            '_Answer "route it" to let it proceed, or dismiss to keep it held._'
+        ),
+        reason="Inbound directive held by the channel trust gate",
+    )
+    db.commit()
+    logger.info(
+        "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=hold ask=%s",
+        workspace.id, channel.id, platform, mode, grant.id,
+    )
+    try:
+        await _deliver_reply(
+            "Received — this needs an operator's approval before I act on it.",
+            reply_ctx, integrations, workspace_id=workspace.id,
+        )
+    except Exception:  # noqa: BLE001 — the ack is best-effort
+        logger.debug("[trust-gate] ack reply failed", exc_info=True)
+    return {"status": "held", "routed": False, "reason": "trust_gate_hold", "ask_id": grant.id}
+
+
+# =============================================================================
 # Platform Reply — single entry point
 #
 # All outbound platform messages flow through ``channels.sender.send_to_channel``
@@ -617,6 +719,22 @@ async def general_workspace_webhook(
             logger.exception(
                 "[webhook/ws] question-answer correlation failed for ws=%s — "
                 "falling through to routing", workspace.id,
+            )
+
+    # 2d. PRD-225 US-006: the ingress trust gate. Per the channel's trigger_mode,
+    # hold inbound directives as pending questions instead of routing them.
+    # Runs AFTER correlation (answers already returned) and BEFORE any routing or
+    # platform-tool interception. Fail-open on gate error — an errored gate must
+    # not silently swallow inbound traffic.
+    if platform:
+        try:
+            held = await _apply_trust_gate(db, workspace, platform, body, reply_ctx, integrations)
+            if held is not None:
+                return held
+        except Exception:
+            logger.exception(
+                "[webhook/ws] trust gate errored for ws=%s — routing normally",
+                workspace.id,
             )
 
     # 3. Build RequestEnvelope via WebhookIngestor
