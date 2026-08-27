@@ -73,9 +73,9 @@
    "title": "Frontend: intake progress card in chat",
    "description": "frontend/components/onboarding/intake-progress-card.tsx — a chat status card streaming the intake pipeline's progress (scan → scrape → ingest → graph → profile) for the profile started by platform_scan_business_site. Reuse the SSE logic from frontend/hooks/use-wizard-progress.ts (extract/share the hook logic — do NOT modify the wizard's own usage; both surfaces consume it) and the PRD-205 live-receive bridge pattern for appearing in the conversation. Terminal states: profile-ready (with a 'here's what I learned' handoff line) and failed (honest error + 'upload docs instead' fallback line).",
    "acceptanceCriteria": [
-    "intake-progress-card.tsx exists; renders pipeline stages from the shared progress hook; wizard's existing progress consumption untouched (its tests still green)",
-    "Terminal success and failure states render as specified (component tests with mocked stream)",
-    "cd frontend && npm run -s test green"
+    "DONE — components/onboarding/intake-progress-card.tsx REUSES useWizardProgress (@/hooks/use-wizard-progress) verbatim — the same fetch+ReadableStream SSE feed / auth headers / dedupe / auto-reconnect the wizard consumes; renders the 5 stages scan→scrape→ingest→graph(graphify)→profile with per-stage active/done/reached/pending status derived from the hook's events+state. git status proves hooks/use-wizard-progress.ts + components/wizard/ = 0 changes: wizard-shell / wizard-progress-feed / step-5-intake keep consuming the SAME unmodified hook (its consumption provably untouched)",
+    "DONE — intake-progress-card.test.tsx (6 cases, hook mocked to drive the stream): 5-stage render (graphify labelled 'Graph' per PRD), current-stage active + latest status line while streaming, complete→'here's what I learned' handoff with all stages done, failed→honest error text + 'upload your docs instead' fallback (onUploadDocs fires on click), state=error dropped-stream→same fallback, null profileId→renders nothing",
+    "DONE — cd frontend && npm run -s test: 52 files / 307 tests pass (intake-progress-card 6 new; every wizard + prior onboarding test still green)"
    ],
    "files": [
     "frontend/components/onboarding/intake-progress-card.tsx",
