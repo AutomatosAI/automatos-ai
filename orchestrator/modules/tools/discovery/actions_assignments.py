@@ -12,7 +12,7 @@ def register_assignments_actions(registry: ActionRegistry) -> None:
             "Assign a Composio tool/app to an agent. The agent will then be able to "
             "use this tool when processing requests. Accepts agent_id or agent_name, "
             "and app_name (Composio app identifier). Idempotent — re-activates if "
-            "previously deactivated."
+            "previously deactivated. Provide agent_id or agent_name."
         ),
         category="agents",
         parameters={
@@ -47,7 +47,8 @@ def register_assignments_actions(registry: ActionRegistry) -> None:
         description=(
             "Assign a skill to an agent. The skill must be enabled in the workspace "
             "or be a global marketplace skill. Accepts agent_id or agent_name, and "
-            "skill_id or skill_name. Idempotent."
+            "skill_id or skill_name. Idempotent. Provide agent_id or agent_name. "
+            "Provide skill_id or skill_name."
         ),
         category="agents",
         parameters={
@@ -86,7 +87,8 @@ def register_assignments_actions(registry: ActionRegistry) -> None:
         description=(
             "Assign a marketplace plugin to an agent. The plugin must be enabled in "
             "the workspace first. Accepts agent_id or agent_name, and plugin_id or "
-            "plugin_slug. Idempotent."
+            "plugin_slug. Idempotent. Provide agent_id or agent_name. "
+            "Provide plugin_id or plugin_slug."
         ),
         category="agents",
         parameters={
@@ -126,7 +128,8 @@ def register_assignments_actions(registry: ActionRegistry) -> None:
             "Remove a skill from an agent. Idempotent — no-op if the skill "
             "wasn't assigned. Drops the row from agent_skills only; the skill "
             "itself stays in the workspace and can be re-assigned later. Use "
-            "this when triaging agents that have stale or wrong skill picks."
+            "this when triaging agents that have stale or wrong skill picks. "
+            "Provide agent_id or agent_name. Provide skill_id or skill_name."
         ),
         category="agents",
         parameters={
@@ -154,7 +157,8 @@ def register_assignments_actions(registry: ActionRegistry) -> None:
             "Remove a tool/app from an agent. Defaults to deactivating the "
             "assignment (is_active=False) so the audit trail stays intact; "
             "pass hard_delete=true to drop the row entirely. Use this to "
-            "tidy up agents with broad tool access they don't need."
+            "tidy up agents with broad tool access they don't need. "
+            "Provide agent_id or agent_name. Provide app_name or assignment_id."
         ),
         category="agents",
         parameters={

@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 import boto3
@@ -48,11 +48,16 @@ logger = logging.getLogger(__name__)
 _PURGE_SKIP_TABLES: frozenset[str] = frozenset()
 
 
-def _discover_scoped_tables(db: Session) -> list[str]:
+def _discover_scoped_tables(db: Session, *, skip: frozenset[str] = frozenset()) -> list[str]:
     """Return every base table (not view) in `public` with a `workspace_id` column.
 
     Self-maintaining: when a new workspace-scoped table is added to a
     migration, it is purged automatically without code changes here.
+
+    ``skip`` is an EXTRA per-call exclusion (unioned with the module-level
+    ``_PURGE_SKIP_TABLES``): the PRD-222 onboarding-reset path passes the
+    identity/access/credential survivor tables here so a dev reset spares them
+    while still deriving the list dynamically (never a hand-maintained copy).
     """
     rows = db.execute(text(
         """
@@ -67,7 +72,7 @@ def _discover_scoped_tables(db: Session) -> list[str]:
          ORDER BY c.table_name
         """
     )).fetchall()
-    return [r[0] for r in rows if r[0] not in _PURGE_SKIP_TABLES]
+    return [r[0] for r in rows if r[0] not in _PURGE_SKIP_TABLES and r[0] not in skip]
 
 
 @dataclass
@@ -164,7 +169,13 @@ async def _delete_clerk_user(clerk_user_id: str) -> bool:
         return False
 
 
-def _pre_cascade_external_refs(db: Session, workspace_id: UUID) -> Dict[str, int]:
+def _pre_cascade_external_refs(
+    db: Session,
+    workspace_id: UUID,
+    *,
+    ref_predicates: Optional[Dict[str, str]] = None,
+    skip_ref_tables: frozenset[str] = frozenset(),
+) -> Dict[str, int]:
     """Delete rows from non-workspace-scoped tables that reference
     workspace-scoped tables via NO ACTION / RESTRICT FKs.
 
@@ -178,7 +189,20 @@ def _pre_cascade_external_refs(db: Session, workspace_id: UUID) -> Dict[str, int
     added by future migrations are handled automatically — no hardcoded
     table list. CASCADE / SET NULL FKs are intentionally excluded because
     Postgres handles them on its own.
+
+    Two optional knobs, used by the PRD-222 onboarding-reset path (defaults keep
+    the full-purge behavior byte-identical):
+      * ``ref_predicates`` — extra SQL appended to a ref table's
+        ``SELECT id … WHERE workspace_id = :wid`` subquery, so only the parents
+        actually being deleted have their dependents cleared (e.g. spare the
+        system/onboarding agents' skills by cascading dependents of the
+        *non-survivor* agents only).
+      * ``skip_ref_tables`` — ref tables to leave entirely alone (the survivor
+        tables the reset keeps, so their dependents are never touched).
+    Predicate strings are hardcoded constants at the call site (never user
+    input), consistent with the identifier interpolation already used below.
     """
+    ref_predicates = ref_predicates or {}
     refs = db.execute(text(
         """
         WITH ws_tables AS (
@@ -209,12 +233,15 @@ def _pre_cascade_external_refs(db: Session, workspace_id: UUID) -> Dict[str, int
 
     counts: Dict[str, int] = {}
     for r in refs:
+        if r.ref_table in skip_ref_tables:
+            continue
         sp = db.begin_nested()  # SAVEPOINT — isolate per-FK failure
         try:
+            ref_pred = ref_predicates.get(r.ref_table, "")
             sql = text(
                 f'DELETE FROM "{r.dep_table}" '
                 f'WHERE "{r.dep_column}" IN '
-                f'(SELECT id FROM "{r.ref_table}" WHERE workspace_id::text = :wid)'
+                f'(SELECT id FROM "{r.ref_table}" WHERE workspace_id::text = :wid {ref_pred})'
             )
             result = db.execute(sql, {"wid": str(workspace_id)})
             sp.commit()
@@ -230,7 +257,16 @@ def _pre_cascade_external_refs(db: Session, workspace_id: UUID) -> Dict[str, int
     return counts
 
 
-def _delete_rows(db: Session, workspace_id: UUID) -> Dict[str, int]:
+def _delete_rows(
+    db: Session,
+    workspace_id: UUID,
+    *,
+    skip_tables: frozenset[str] = frozenset(),
+    only_tables: Optional[frozenset[str]] = None,
+    row_predicates: Optional[Dict[str, str]] = None,
+    ref_predicates: Optional[Dict[str, str]] = None,
+    pre_cascade: bool = True,
+) -> Dict[str, int]:
     """Delete from every workspace-scoped table; return per-table row counts.
 
     Tables are discovered dynamically from `information_schema` so new
@@ -246,9 +282,33 @@ def _delete_rows(db: Session, workspace_id: UUID) -> Dict[str, int]:
          even though `chats.current_agent_id` references agents). Retry
          failed tables across passes; each pass removes more dependents,
          eventually unblocking the rest. Bounded at 4 passes.
+
+    All keyword knobs default to the full-purge behavior (byte-identical to the
+    original) and exist so the PRD-222 onboarding-reset path can REUSE this exact
+    discovery + FK-safe ordering instead of maintaining a second table list:
+      * ``skip_tables`` — tables excluded from discovery AND from pre-cascade
+        (the reset's identity/access/credential survivors).
+      * ``only_tables`` — restrict the scoped delete to this set ∩ discovery
+        (the credential-only wipe).
+      * ``row_predicates`` — extra SQL appended to a table's DELETE ``WHERE``
+        (spare the system/onboarding agents row-level).
+      * ``ref_predicates`` — same, forwarded to the pre-cascade subqueries.
+      * ``pre_cascade`` — skip stage 1 when the target set has no blocking
+        non-scoped dependents (the credential-only wipe).
     """
-    counts: Dict[str, int] = _pre_cascade_external_refs(db, workspace_id)
-    pending: set[str] = set(_discover_scoped_tables(db))
+    row_predicates = row_predicates or {}
+    counts: Dict[str, int] = (
+        _pre_cascade_external_refs(
+            db, workspace_id,
+            ref_predicates=ref_predicates,
+            skip_ref_tables=skip_tables,
+        )
+        if pre_cascade else {}
+    )
+    discovered: set[str] = set(_discover_scoped_tables(db, skip=skip_tables))
+    if only_tables is not None:
+        discovered &= set(only_tables)
+    pending: set[str] = discovered
     last_errors: Dict[str, Exception] = {}
 
     for _ in range(4):
@@ -258,8 +318,9 @@ def _delete_rows(db: Session, workspace_id: UUID) -> Dict[str, int]:
         for tbl in sorted(pending):
             sp = db.begin_nested()  # SAVEPOINT — isolates per-table failures
             try:
+                pred = row_predicates.get(tbl, "")
                 result = db.execute(
-                    text(f'DELETE FROM "{tbl}" WHERE workspace_id::text = :wid'),
+                    text(f'DELETE FROM "{tbl}" WHERE workspace_id::text = :wid {pred}'),
                     {"wid": str(workspace_id)},
                 )
                 sp.commit()
@@ -368,3 +429,98 @@ def purge_workspace_sync(workspace_id: UUID) -> PurgeResult:
         return result
     finally:
         db.close()
+
+
+# =========================================================================== #
+# PRD-222 W1·S10 (D9) — scoped reuse for the dev onboarding-reset path.
+#
+# These REUSE the discovery + FK-safe ordering + S3 machinery above, restricted
+# to ONE surviving workspace. They deliberately do NOT run the soft-delete
+# precondition, the workspace-row DELETE, the users DELETE, or the Clerk-user
+# delete that ``purge_workspace_sync`` performs — a reset keeps the workspace,
+# its owner, its membership, and (unless asked) its credentials. No second table
+# list is maintained anywhere: the survivors below are the only hardcoded names,
+# and they are EXCLUSIONS from the dynamic discovery, not a copy of it.
+# =========================================================================== #
+
+# Identity/access rows that keep the workspace a valid, owned, reachable
+# workspace after a reset. ``workspace_members`` gates auth (a member row with
+# ``is_active`` is what lets the operator back in) — wiping it would lock them
+# out of the very workspace they are trying to re-onboard.
+_RESET_ACCESS_SURVIVOR_TABLES: frozenset[str] = frozenset({"workspace_members"})
+
+# The workspace's credential stores. Onboarding does NOT "build" these, so the
+# built-artifact wipe always spares them; ``wipe_credentials`` deletes them on
+# its own, separate path. ``credential_audit_logs`` is NOT listed: it has no
+# ``workspace_id`` and CASCADEs from ``credentials`` automatically.
+_CREDENTIAL_TABLES: frozenset[str] = frozenset({"user_api_keys", "credentials"})
+
+# Row-level survivor filter for the ``agents`` table: onboarding builds the
+# workspace's ordinary agents, but the platform's system agents and the hidden
+# onboarding-role agents (VOYAGER/BLUEPRINT/SCRIBE/FORGE) are seeded, not built —
+# they must survive. Applied to BOTH the DELETE and the pre-cascade subquery so
+# a spared agent keeps its dependent rows (skills, tool routes, …) too.
+#
+# MUST be NULL-safe. A built agent has ``required_role IS NULL``; the naive form
+# ``AND NOT (is_system_agent IS TRUE OR required_role = 'onboarding')`` evaluates
+# to ``NOT (FALSE OR NULL)`` = ``NOT NULL`` = NULL for those rows, and a NULL
+# WHERE-clause matches NOTHING — so ordinary built agents would silently survive
+# ``wipe_built`` (the common case). Written as two positive, NULL-safe predicates
+# instead: ``IS NOT TRUE`` keeps NULL/false system flags out of the survivor set,
+# and ``IS DISTINCT FROM 'onboarding'`` treats a NULL role as "not onboarding".
+_AGENT_SURVIVOR_SQL: str = "AND is_system_agent IS NOT TRUE AND required_role IS DISTINCT FROM 'onboarding'"
+
+
+def _wipe_workspace_s3(workspace_id: UUID) -> Dict[str, Any]:
+    """Delete the workspace's S3 document prefix, REUSING the purge S3 helpers.
+
+    No AWS creds / bucket → a clean skip (the local + test path), never an error.
+    """
+    client = _build_s3_client()
+    bucket = getattr(config, "S3_DOCUMENTS_BUCKET", None) or "automatos-ai"
+    if not client or not bucket:
+        return {"s3_objects_deleted": 0, "s3_errors": 0, "skipped": "no_client_or_bucket"}
+    prefix = f"workspaces/{workspace_id}/"
+    deleted, errors = _purge_s3_prefix(client, bucket, prefix)
+    logger.info(
+        "Onboarding-reset S3 wipe ws=%s: deleted=%d errors=%d (s3://%s/%s)",
+        workspace_id, deleted, errors, bucket, prefix,
+    )
+    return {"s3_objects_deleted": deleted, "s3_errors": errors}
+
+
+def purge_built_artifacts(db: Session, workspace_id: UUID, *, wipe_s3: bool = True) -> Dict[str, Any]:
+    """Delete what onboarding BUILT in one workspace, sparing survivors.
+
+    Reuses :func:`_delete_rows` (dynamic discovery + FK-safe multi-pass) with:
+      * the identity/access + credential tables excluded (survivors), and
+      * the ``agents`` table filtered to non-system, non-onboarding rows.
+    Then wipes the workspace's S3 document prefix via :func:`_purge_s3_prefix`.
+    Never touches the workspace row, users, membership, or Clerk. Does NOT commit
+    — the caller (``reset_onboarding``) owns the transaction.
+    """
+    rows = _delete_rows(
+        db,
+        workspace_id,
+        skip_tables=_RESET_ACCESS_SURVIVOR_TABLES | _CREDENTIAL_TABLES,
+        row_predicates={"agents": _AGENT_SURVIVOR_SQL},
+        ref_predicates={"agents": _AGENT_SURVIVOR_SQL},
+    )
+    s3 = _wipe_workspace_s3(workspace_id) if wipe_s3 else {"skipped": "wipe_s3=False"}
+    return {"rows_deleted": rows, "s3": s3}
+
+
+def purge_workspace_credentials(db: Session, workspace_id: UUID) -> Dict[str, int]:
+    """Delete ONLY this workspace's credential rows (BYOK keys + generic
+    credentials), REUSING the scoped-delete machinery restricted to the credential
+    tables. ``credential_audit_logs`` CASCADEs from ``credentials`` on its own, so
+    no pre-cascade is needed. Scoped to ``workspace_id`` — another workspace's
+    rows (including the platform-key workspace) are never in range. Does NOT
+    commit — the caller owns the transaction.
+    """
+    return _delete_rows(
+        db,
+        workspace_id,
+        only_tables=_CREDENTIAL_TABLES,
+        pre_cascade=False,
+    )

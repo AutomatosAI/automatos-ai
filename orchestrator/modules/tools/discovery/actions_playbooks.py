@@ -42,7 +42,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         description=(
             "Get full details of ONE playbook — steps, trigger config, execution "
             "history. Use when the user asks about a specific playbook's details. "
-            "For listing all playbooks, use platform_list_playbooks instead."
+            "For listing all playbooks, use platform_list_playbooks instead. "
+            "Provide playbook_name or playbook_id."
         ),
         category="playbooks",
         parameters={
@@ -289,7 +290,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         description=(
             "Schedule a playbook to run automatically on a cron schedule. "
             "Sets the playbook's schedule_config so it fires at the specified "
-            "times. Use platform_execute_playbook for immediate one-off runs."
+            "times. Use platform_execute_playbook for immediate one-off runs. "
+            "Provide playbook_id or playbook_name."
         ),
         category="playbooks",
         parameters={
@@ -336,7 +338,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         description=(
             "Trigger a playbook run asynchronously. Returns an execution_id "
             "immediately — check status later with platform_get_playbook_execution. "
-            "For one-off agent tasks, use platform_create_task instead."
+            "For one-off agent tasks, use platform_create_task instead. "
+            "Provide playbook_id or playbook_name."
         ),
         category="playbooks",
         parameters={
@@ -371,7 +374,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         name="platform_get_playbook_execution",
         description=(
             "Check status and results of a running or completed playbook execution. "
-            "Returns step-by-step results and timing."
+            "Returns step-by-step results and timing. "
+            "Provide execution_id or playbook_id."
         ),
         category="playbooks",
         parameters={
@@ -403,7 +407,8 @@ def register_playbooks_actions(registry: ActionRegistry) -> None:
         name="platform_delete_playbook",
         description=(
             "Permanently delete a playbook with full cleanup (triggers, scheduler, "
-            "memory). System playbooks cannot be deleted. Only use when explicitly asked."
+            "memory). System playbooks cannot be deleted. Only use when explicitly asked. "
+            "Provide playbook_id or playbook_name."
         ),
         category="playbooks",
         parameters={

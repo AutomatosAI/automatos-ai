@@ -1319,6 +1319,14 @@ class Config:
     # existing economical model comma-list (BUDGET_MODELS, PRD-54) — no new id invented.
     TRIAL_MODEL_ALLOWLIST: str = os.getenv("TRIAL_MODEL_ALLOWLIST", BUDGET_MODELS)
 
+    # PRD-222 W1·S10 (D9) — DEV/OPS ONLY, TEMPORARY. Arms
+    # POST /api/workspaces/current/onboarding/reset so the operator can re-run
+    # onboarding in ONE workspace with a single alias account, instead of
+    # provisioning and hard-deleting a workspace per attempt. Default OFF: when
+    # false the endpoint 404s (unadvertised — never 403). This flag is
+    # TEMPORARY: remove once onboarding QA moves to a seeded fixture flow (W2+).
+    ONBOARDING_RESET_ENABLED: bool = os.getenv("ONBOARDING_RESET_ENABLED", "false").lower() == "true"
+
     # PRD-207 S4: Auto Live tuning constants. These are NUMERIC dials only —
     # the ON-switch (`voice.live_enabled`) and the Retell credentials live in
     # DB system_settings (category 'voice', masked; see

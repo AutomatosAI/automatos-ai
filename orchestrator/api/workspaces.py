@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
@@ -116,6 +117,62 @@ async def get_current_workspace(
         "webhook_key": workspace.webhook_key,
         "settings": settings,
     }
+
+
+# ── Onboarding reset (PRD-222 W1·S10 / D9) — DEV/OPS ONLY, TEMPORARY ──────────
+
+
+def _require_admin(ctx: RequestContext) -> None:
+    """Workspace-admin gate — same bucket as ``api/onboarding_agents._require_admin``."""
+    if not ctx.user or ctx.user.system_role not in ("admin", "super_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+class OnboardingResetRequest(BaseModel):
+    reset_trial: bool = False
+    wipe_built: bool = False
+    wipe_credentials: bool = False
+
+
+@router.post("/current/onboarding/reset")
+async def reset_current_onboarding(
+    payload: OnboardingResetRequest = Body(default_factory=OnboardingResetRequest),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Rewind the current workspace's onboarding so it can be re-run in place.
+
+    DEV/OPS ONLY (PRD-222 W1·S10, decision D9). Gated on
+    ``config.ONBOARDING_RESET_ENABLED``: when off the route 404s — it is not
+    advertised (deliberately NOT 403, which would confirm it exists). When on,
+    it is workspace-admin only (403 otherwise). Returns counts of everything
+    reset/wiped. The reset itself lives in ``services.onboarding_state`` — the
+    one sanctioned backward writer of the onboarding document.
+    """
+    if not config.ONBOARDING_RESET_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+    _require_admin(ctx)
+
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    from services.onboarding_state import reset_onboarding
+
+    report = reset_onboarding(
+        db,
+        workspace,
+        reset_trial=payload.reset_trial,
+        wipe_built=payload.wipe_built,
+        wipe_credentials=payload.wipe_credentials,
+    )
+    logger.warning(
+        "Onboarding reset: workspace=%s admin=%s flags=reset_trial:%s/wipe_built:%s/wipe_credentials:%s resets=%s",
+        ctx.workspace_id, getattr(ctx.user, "id", None),
+        payload.reset_trial, payload.wipe_built, payload.wipe_credentials,
+        report.get("resets"),
+    )
+    return report
 
 
 @router.get("/current/integrations")

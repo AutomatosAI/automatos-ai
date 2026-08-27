@@ -1,5 +1,5 @@
 {
-  "route_count": 767,
+  "route_count": 768,
   "routes": [
     {
       "method": "GET",
@@ -2868,6 +2868,10 @@
     {
       "method": "GET",
       "path": "/api/workspaces/current/memory-stats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/current/onboarding/reset"
     },
     {
       "method": "GET",

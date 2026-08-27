@@ -22,6 +22,11 @@ import { useWorkspaceStore } from '@/stores/workspace-store'
 import { Canvas } from '@/components/workspace'
 import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, CodingCanvasWidgetData } from '@/components/widgets/types'
 import { useWorkspace } from '@/components/workspace-provider'
+import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
+import { PowerUpCard } from '@/components/onboarding/power-up-card'
+import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
+import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
+import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 
 // Resizable panels for chat + widget split
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -207,7 +212,7 @@ export function Chat({
   // PRD-221 S5: the main chat page sends its own page context too (page 'chat').
   const pageContext = usePageContext()
 
-  const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
+  const { messages, setMessages, sendMessage, status, stop, reload, errorCode } = useChat({
     id: activeChatId,
     initialMessages,
     pageContext,
@@ -928,9 +933,42 @@ export function Chat({
   const hasSentMessage = messages.length > 0
 
   const showWelcomeCard = !hasSentMessage && !isTyping
+  // PRD-222 US-012: for a brand-new workspace Auto makes the first move — the
+  // onboarding opener replaces the generic greeting (and the "where did we
+  // leave off?" resume, which has nothing to resume) in the empty chat state.
+  const isOnboardingOpener = workspace?.onboarding?.stage === 'not_started'
+
+  // PRD-222 US-014: the exhausted state is reachable two ways — the US-002
+  // snapshot flipping to 'exhausted', or the typed 'trial_exhausted' code the
+  // last send returned. Either owns the callout slot; the standalone power-up
+  // card steps aside so the workspace never sees two credential cards at once.
+  const trialExhausted =
+    workspace?.onboarding?.trial?.state === 'exhausted' ||
+    errorCode === TRIAL_EXHAUSTED_CODE
 
   return (
     <>
+      {/* PRD-222 US-014: the trial balance pill — visible on the chat surface
+          while a trial is active/warned/exhausted, hidden once converted. */}
+      <TrialBalancePill className="absolute top-3 right-4 z-30" />
+      {/* PRD-222 US-014: deterministic exhausted banner (embeds the power-up
+          card, no model call). Renders on the exhausted snapshot OR the typed
+          trial_exhausted error from the last send. */}
+      {trialExhausted && (
+        <div className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4">
+          <TrialExhaustedBanner errorCode={errorCode} />
+        </div>
+      )}
+      {/* PRD-222 US-013: the power-up card appears once the workspace reaches
+          the powerup stage (post-BOOM) — a floating chat callout above the
+          input. Mounted once here so it survives every layout branch; the card
+          self-guards on the stage too. Yields to the exhausted banner, which
+          embeds the same card. */}
+      {workspace?.onboarding?.stage === 'powerup' && !trialExhausted && (
+        <div className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4">
+          <PowerUpCard />
+        </div>
+      )}
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
       {hasWidgets && (
         <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">
@@ -1196,7 +1234,13 @@ export function Chat({
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
             <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
+              {/* PRD-222 US-012: on a brand-new workspace Auto makes the first
+                  move — the opener self-hides once onboarding has moved past
+                  not_started, so the generic greeting takes over. */}
+              <OnboardingOpener />
+
               {/* Personal greeting */}
+              {!isOnboardingOpener && (
               <motion.div
                 className="w-full max-w-3xl md:max-w-4xl text-center mb-8"
                 initial={{ opacity: 0, y: 12 }}
@@ -1207,9 +1251,12 @@ export function Chat({
                   Hey{user?.firstName ? <> <span className="gradient-text">{user.firstName}</span></> : ''}, what can I do for you today?
                 </h1>
               </motion.div>
+              )}
 
               {/* PRD-206 S3: one tap to pick up where you left off — answered
-                  in-chat by the platform_resume_context tool */}
+                  in-chat by the platform_resume_context tool. Hidden during the
+                  onboarding opener: a brand-new workspace has nothing to resume. */}
+              {!isOnboardingOpener && (
               <motion.div
                 className="mb-6 flex justify-center"
                 initial={{ opacity: 0, y: 8 }}
@@ -1224,6 +1271,7 @@ export function Chat({
                   Where did we leave off?
                 </button>
               </motion.div>
+              )}
 
               {/* Chat input + quick links — no outer box */}
               <div className="w-full max-w-3xl md:max-w-4xl space-y-3">

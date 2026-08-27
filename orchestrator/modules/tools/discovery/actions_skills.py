@@ -128,7 +128,8 @@ def register_skills_actions(registry: ActionRegistry) -> None:
             "template. Works on marketplace skills enabled for the workspace "
             "and on workspace-owned skills (forked or user-created). "
             "Returns name, description, category, tags, version, raw content, "
-            "origin (marketplace|workspace), and editable flag."
+            "origin (marketplace|workspace), and editable flag. "
+            "Provide skill_id or skill_name."
         ),
         category="skills",
         parameters={

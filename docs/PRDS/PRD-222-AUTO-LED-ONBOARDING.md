@@ -32,6 +32,7 @@ This PRD replaces all of it with **one conversational spine led by Auto** — wh
 | D6 | **The intake pipeline survives, the wizard UI does not.** Firecrawl scan → RAG → Knowledge Graph → profile becomes a set of Auto-callable tools; doc upload already exists. |
 | D7 | **Trust defaults:** verification ON for onboarding builds; approval is an explicit user "yes" on Auto's proposal; every build is narrated; the result persists as a Deliverable; secrets live in Railway and missing config degrades honestly and visibly. |
 | D8 | **Instrument everything** server-side from day one. localStorage is never the system of record for onboarding state again. |
+| D9 | **Test loop over workspace churn (added 2026-08-27).** Onboarding must be re-runnable in a single account/workspace via a dev-gated reset (default-off env flag + workspace-admin auth) so the flow can be tested, fixed, and re-tested without provisioning and deleting workspaces per attempt. A pilot/dev tool, not a product surface: unlinked, removable after the pilot. |
 
 ---
 
@@ -203,6 +204,19 @@ Stages 1–5 run on the platform-funded trial allowance (W1·S9): the balance is
 - [ ] Funnel events: `trial_granted / trial_warned / trial_exhausted / trial_converted`.
 - [ ] Tests: cap enforcement, model pinning, resolution order, one-per-user, global-cap pause, kill switch, exhaustion UI, no-background-spend.
 
+#### W1·S10: Dev reset — re-runnable onboarding (single-account test loop) *(added 2026-08-27, D9)*
+**Description:** As the operator testing the flow with an alias account, I reset onboarding in my test workspace and run it again — same account, same workspace — instead of creating and deleting workspaces per attempt.
+
+**Acceptance criteria:**
+- [ ] `reset_onboarding(db, workspace, *, reset_trial, wipe_built, wipe_credentials)` in `services/onboarding_state.py`: rewrites `workspaces.onboarding` to the initial doc via full JSONB reassignment (PRD-220-safe). It is the ONLY writer allowed to move the doc backward — `advance_onboarding_stage`'s monotonic/terminal validator stays exactly as strict as today. Preserves the `trial` object unless `reset_trial`; stamps `resets` (incrementing int) + `last_reset_at` inside the doc so test runs are distinguishable in funnel data.
+- [ ] `reset_trial=true`: strip the trial, then re-grant through `grant_trial_at_provisioning` (reuse — never a second grant implementation). Result: a fresh `active` trial at $0 spent when eligible; a kill-switch/daily-cap decline is reported in the response as a pause, not an error (honest degrade).
+- [ ] `wipe_built=true`: workspace-scoped deletion of what onboarding built — non-system agents (`is_system_agent=False` AND `required_role != 'onboarding'`) with their dependent rows, missions + their orchestration tasks, agent reports/Deliverables (incl. the onboarding summary), intake documents + workspace graphs, and the workspace's S3 document prefix — **reusing `services/workspace_purge.py` machinery** (scoped-table discovery, FK-safe ordering, S3 prefix purge) parameterized to spare survivors; never a hand-maintained duplicate table list. The purge service's soft-deleted-workspace precondition and its workspace-row/Clerk-user deletion steps must NOT apply here.
+- [ ] Survivors proven by test after a full-flag reset: the workspace row, `users` rows, the Clerk user, system agents (Auto), `required_role='onboarding'` template agents, workspace credentials (unless `wipe_credentials`), and the freshly-written onboarding doc.
+- [ ] `wipe_credentials=true`: this workspace's credential rows deleted; the operator workspace (`PLATFORM_KEY_WORKSPACE_ID`) provably untouched (scoping test).
+- [ ] Endpoint `POST /api/workspaces/current/onboarding/reset` on the existing workspaces router (no new router file): gated on `config.ONBOARDING_RESET_ENABLED` (default false, read via `config.py` only, documented in `.env.example` as temporary) → **404 when off**; workspace-admin auth in the same bucket as the settings/onboarding-agents admin check; response reports counts of everything reset/wiped. Committed route manifest updated (route-manifest CI test green).
+- [ ] Frontend dev URL `frontend/app/dev/reset-onboarding/page.tsx` — unlinked from all nav: shows current stage + trial state, three switches (reset trial / wipe built / wipe credentials), a RESET button that calls the endpoint, clears tour/onboarding localStorage via the existing `frontend/lib/shepherd/tour-storage.ts` helpers (imported, never modified), then redirects to chat. Renders a plain "reset disabled" state on 404. Warns when `wipe_credentials` is on while `reset_trial` is off (a converted workspace with no key falls through to unmetered platform resolution).
+- [ ] Tests: reset from every stage incl. terminal ones; trial preserved vs re-granted vs declined; wipe survivor set; cross-workspace scoping (a second workspace's rows untouched); disabled→404; page component test.
+
 ### Wave 2 — right-size + retire
 
 #### W2·S1: Exposure profiles (progressive disclosure) — *blocked on §12 Q1 tier definitions*
@@ -304,6 +318,7 @@ Stages 1–5 run on the platform-funded trial allowance (W1·S9): the balance is
 - FR-16: One trial per Clerk user; a global daily trial-spend cap pauses new grants when reached; `TRIAL_ENABLED` kill switch; all trial values config-driven, none hardcoded.
 - FR-17: Trial workspaces accrue no background/scheduled spend; at exhaustion, scheduled work pauses with a visible notification and the UI renders a deterministic non-LLM state offering the key step.
 - FR-18: `trial_granted / trial_warned / trial_exhausted / trial_converted` are first-class funnel events; trial→BYOK conversion is a headline metric.
+- FR-19: A dev-gated reset (`ONBOARDING_RESET_ENABLED`, default off; workspace-admin only) returns a workspace's onboarding to `not_started` — optionally re-granting the trial and wiping built artifacts/credentials — without deleting the workspace, its users, or the Clerk user; every reset stamps an incrementing `resets` counter in the onboarding doc.
 
 ---
 
@@ -334,6 +349,9 @@ Stages 1–5 run on the platform-funded trial allowance (W1·S9): the balance is
 - **gitleaks:** any test fixture resembling a key must be an obviously-fake format.
 - **`react-shepherd` is already zero-import** — deletable immediately with W2·S5.
 - **Public repo:** no gold sets, no real domains beyond public ones, no customer names in fixtures (InbuildUK references stay only in historical PRDs).
+- **Reset bypass (W1·S10):** `reset_onboarding` is the single sanctioned backward writer of the onboarding doc — never loosen `advance_onboarding_stage`'s validator to enable resets; the forward spine stays strict.
+- **Wipe reuse (W1·S10):** parameterize `workspace_purge`'s internals rather than duplicating its scoped-table list — two deletion lists WILL drift. The purge service validates soft-deletion and deletes the workspace row + Clerk user; the reset path must inherit none of those steps.
+- **New backend route (W1·S10):** the reset endpoint needs the committed route-manifest hand-add + count bump — same CI trap as W2·S5's wizard-route deletion.
 
 ---
 

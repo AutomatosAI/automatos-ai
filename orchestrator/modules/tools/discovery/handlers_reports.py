@@ -23,7 +23,7 @@ async def submit_report(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not title or not content:
         return {"success": False, "error": "title and content are required"}
 
-    valid_types = {"standup", "research", "incident", "summary", "delivery", "audit"}
+    valid_types = {"standup", "research", "incident", "summary", "delivery", "audit", "onboarding"}
     if report_type not in valid_types:
         return {"success": False, "error": f"report_type must be one of: {', '.join(sorted(valid_types))}"}
 

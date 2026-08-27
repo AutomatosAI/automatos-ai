@@ -204,7 +204,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "Enable a marketplace plugin for this workspace. "
             "The plugin must be approved and active. Idempotent — re-enabling is safe. "
             "Browse available plugins with platform_browse_marketplace_plugins first. "
-            "Accepts plugin_id (UUID) or plugin_slug."
+            "Accepts plugin_id (UUID) or plugin_slug. Provide plugin_id or plugin_slug."
         ),
         category="marketplace",
         parameters={
@@ -237,7 +237,7 @@ def register_marketplace_actions(registry: ActionRegistry) -> None:
             "Enable a marketplace skill for this workspace. "
             "Must be a global marketplace skill. Idempotent — re-enabling is safe. "
             "Browse available skills with platform_browse_marketplace_skills first. "
-            "Accepts skill_id (int) or skill_name."
+            "Accepts skill_id (int) or skill_name. Provide skill_id or skill_name."
         ),
         category="marketplace",
         parameters={

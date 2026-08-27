@@ -1,0 +1,145 @@
+{
+ "project": "Automatos AI Platform — PRD-222 Auto-Led Onboarding (Mission Zero v2) — Wave 1b: finish the spine (US-011..016)",
+ "branchName": "ralph/prd-222-wave1b",
+ "description": "Cut from origin/main at launch. CONTEXT (CORRECTED 2026-08-27): PR #613 (2026-07-31 03:51) squash-merged the July branch AT US-008 — US-009 and US-010 were pushed AFTER the merge and never reached main. On main: onboarding_state.py, trial_ledger.py, platform_update_onboarding + intake tools, credential truth, capability report (US-001..008) — build ON them, never re-create or fork them. NOT on main: the v2 onboarding section (main still carries the PRD-123-era v1), the trust-guard test, and the summary-Deliverable handoff — US-017/US-018 re-land them from the old branch commits 60a11c936 / 82421cb5f. The PRD's §3 'current reality' predates that merge — trust main, not §3. SCOPE = the 6 remaining Wave-1 stories of docs/PRDS/PRD-222-AUTO-LED-ONBOARDING.md (seeded onto this branch, incl. the 2026-08-27 W1·S10/D9 amendment): the tool-schema truth pass (US-011), four frontend surfaces (US-012 kill the modal mount / US-013 power-up card / US-014 trial pill + exhausted banner / US-015 intake progress card), and the dev onboarding reset (US-016). Anchors re-verified 2026-08-27 — RE-VERIFY again by grep before relying on them. OUT OF SCOPE — DO NOT TOUCH: deleting Shepherd (frontend/lib/shepherd/** — US-016 IMPORTS tour-storage helpers, modifying the lib is still a violation; welcome-modal/first-login-guard FILES stay — only the MOUNT changes), retiring the wizard UI (frontend/components/wizard/** stays; use-wizard-progress.ts is SHARED not moved — US-015 extracts/reuses without breaking the wizard's own consumption), the 4-agent Mission Zero machinery (seed_onboarding_agents.py, _clone_onboarding_agents, source=='mission_zero' branches), plans/tiers/exposure (W2, Q1-blocked), academy/voice/invitee (W3), waitlist/sign-up. BINDING RULES: ZERO new alembic revisions on this branch (US-001 shipped the one migration; every schema need lives inside workspaces.onboarding JSONB — a new alembic file is a hard acceptance failure); JSONB is REBUILD-DON'T-MUTATE (PRD-220 class); no os.getenv outside orchestrator/config.py; no onboarding code path may ever set skip_verification or auto_approve; reset_onboarding is the ONLY backward writer (advance_onboarding_stage's validator stays strict); wipe reuses workspace_purge internals (no duplicate table list; no soft-delete precondition; never deletes workspace/users/Clerk); new route ⇒ committed route-manifest hand-add + count bump; PURE tests (@integration skips cleanly without local Postgres; real-Postgres coverage is CI test.yml per-story push); fixtures use obviously-fake key formats (gitleaks); the raw key value in US-013 is never logged and never stored client-side; canonical terms (Playbook, Mission, Deliverable, Auto is a proper noun); NEVER 'git add -A'/'git add .'/'-u' (node_modules untracked and NOT gitignored — stage explicit paths only); never 'git stash -u'. Frontend gate: cd frontend && npm run -s test green after every frontend story.",
+ "userStories": [
+  {
+   "id": "US-011",
+   "title": "Tool-schema truth pass (5 fixes + the walker guard)",
+   "description": "Fix the five verified schema/handler mismatches (anchors RE-VERIFIED 2026-08-27 on current main: actions_reports.py:99 still over-requires; all either-of error copies unchanged — re-verify again at build time): (1) actions_reports.py (~:99) platform_submit_report required[] shrinks to ['title','content'] — the handler defaults report_type='standup' and status='ok' (handlers_reports.py ~:18-24); removing from required is backward-compatible. (2) actions_assignments.py (~:41) platform_assign_tool_to_agent: the agent identifier (agent_id|agent_name either-of, enforced at handlers_assignments.py ~:19-20) must be stated in the description with the exact error copy. (3) Same either-of documentation for platform_assign_skill_to_agent, platform_assign_plugin_to_agent (actions_assignments.py ~:72,110) and platform_configure_agent_heartbeat (actions_agents.py ~:322). (4) platform_install_plugin / platform_install_skill (actions_marketplace.py ~:222,254): document the id|slug either-of their handlers enforce (handlers_marketplace.py ~:355,495). (5) Do NOT add 'source' to platform_create_mission's schema — the special-casing is a W2 deletion target; leave it. THEN add the recurrence guard: a walker test iterating every registered platform tool asserting (a) no field with a handler default sits in required[], (b) every field a handler hard-fails on is either in required[] or covered by an either-of note in the description. Encode the either-of convention the walker recognizes (e.g. the literal 'Provide X or Y' phrasing already used by handlers).",
+   "acceptanceCriteria": [
+    "DONE (dec502b81) — actions_reports.py:102 required[]==['title','content']; handler still defaults report_type='standup'/status='ok' (handlers_reports.py); walker + full suite green",
+    "DONE — either-of copies match handler error strings: actions_assignments.py:15/50-51/90-91/132 + actions_marketplace.py:207/240 + actions_agents.py heartbeat:275/350 carry 'Provide X or Y' == handlers_assignments.py:20/112/174; walker asserts every hard-fail field is required or documented",
+    "DONE — grep: no 'source' in actions_missions.py create_mission schema; only handlers_missions.py:113 runtime default source='chat' (the W2 special-casing target) — left untouched",
+    "DONE — tests/test_prd222_tool_schema_walker.py: 18 passed; fixture self-check proves the walker BITES when report_type/status are re-added to required[], clears once removed; live sweep of all registered tools = 0 violations",
+    "DONE — full orchestrator suite 4274 passed / 166 skipped / 46 @integration errors (no local PG) / 3 FAILED all documented env baseline (prd172 boot-key, dr_restore pg_dump, composio v3)"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-012",
+   "title": "Frontend: kill the modal mount, land in the conversation",
+   "description": "Stop mounting FirstLoginGuard/WelcomeModal for the new flow: remove the FirstLoginGuard mount from frontend/components/providers.tsx (~:103, re-verify) — DO NOT delete the component files (W2 does the deletion). New frontend/components/onboarding/onboarding-opener.tsx: when workspace.onboarding.stage === 'not_started', the empty chat renders Auto's opener (a short canned greeting that asks the first question and invites 'or just start typing'), so Auto makes the first move; any user message then flows through OnboardingSection v2. Auto-tours: use-auto-tour keys off isNewWorkspace and welcome-seen localStorage — with the modal unmounted they will not fire for new-flow users; verify and note, change nothing else in shepherd land.",
+   "acceptanceCriteria": [
+    "DONE (7c327b460) — grep providers.tsx: no FirstLoginGuard mount (8-ins/2-del mount swap); git diff origin/main..HEAD: no frontend/lib/shepherd/** touched and welcome-modal.tsx/first-login-guard.tsx byte-identical to main (empty diff-stat), not deleted",
+    "DONE — onboarding-opener.tsx exists, imported by frontend/components/chatbot/chat.tsx; onboarding-opener.test.tsx 4 tests green — renders in empty chat only when stage==='not_started'",
+    "DONE — opener test + welcome-modal.test.tsx (2 tests) assert a new-workspace render shows the opener and NO welcome modal",
+    "DONE — cd frontend && npm run -s test: 53 files / 311 tests passed"
+   ],
+   "files": [
+    "frontend/components/providers.tsx",
+    "frontend/components/onboarding/onboarding-opener.tsx",
+    "frontend/components/chatbot/",
+    "frontend/"
+   ]
+  },
+  {
+   "id": "US-013",
+   "title": "Frontend: power-up card (key entry, live result, decline path)",
+   "description": "frontend/components/onboarding/power-up-card.tsx — rendered in chat at the powerup stage (and reusable by US-014's exhausted banner): 'keep Auto running on your business' framing, masked key input posting to the existing credentials endpoint, the OpenRouter recommendation with how-to link on top, 'I already use OpenAI/Anthropic/…' collapsed beneath, live validation result rendered in-flow (provider error text on failure), trial balance line, deep link to Settings → Credentials as the skip-ahead, and an explicit dismiss ('later') that leaves the flow intact. Follow the existing chat-card visual pattern (grep the chatbot components for card donors — do not invent a new visual language). Key value handling: posted to the API, never logged, never stored client-side.",
+   "acceptanceCriteria": [
+    "DONE (246358970) — power-up-card.tsx exists, imported by frontend/components/chatbot/chat.tsx + trial-exhausted-banner.tsx; power-up-card.test.tsx 8 tests, rendered for stage==='powerup'",
+    "DONE — the 8 tests cover success (validated result + full-catalog line), failure (provider error rendered in-card), and dismiss ('later' leaves chat usable)",
+    "DONE — input type='password' (power-up-card.tsx:163); no console.* anywhere in the file (grep); the only 'localStorage' token is a comment documenting non-storage; raw key posts to POST /api/keys only, never stored client-side",
+    "DONE — cd frontend && npm run -s test: 311 tests passed"
+   ],
+   "files": [
+    "frontend/components/onboarding/power-up-card.tsx",
+    "frontend/components/chatbot/",
+    "frontend/"
+   ]
+  },
+  {
+   "id": "US-014",
+   "title": "Frontend: trial balance pill + deterministic exhausted state",
+   "description": "frontend/components/onboarding/trial-balance-pill.tsx — small balance pill ('$3.40 of $5.00 trial') visible on the chat surface and Command Center while trial state is active/warned, amber at warned, hidden once converted; reads workspace.onboarding.trial (US-002). frontend/components/onboarding/trial-exhausted-banner.tsx — rendered when trial state is exhausted OR a request returns the typed trial_exhausted error: a static banner (no LLM dependency) embedding the US-013 power-up card. The exhausted path must render fully deterministically — a broke workspace can still take a key.",
+   "acceptanceCriteria": [
+    "DONE (bb912be92) — trial-balance-pill.tsx reads workspace.onboarding.trial, renders on chat + Command Center, amber at warned, absent when converted / no trial; trial-balance-pill.test.tsx 6 tests",
+    "DONE — trial-exhausted-banner.tsx renders on state==='exhausted' and on the typed trial_exhausted error, embeds the US-013 power-up card, zero LLM/network beyond the credentials POST (broke workspace can still take a key); trial-exhausted-banner.test.tsx 5 tests",
+    "DONE — cd frontend && npm run -s test: 311 tests passed"
+   ],
+   "files": [
+    "frontend/components/onboarding/trial-balance-pill.tsx",
+    "frontend/components/onboarding/trial-exhausted-banner.tsx",
+    "frontend/components/command-center/",
+    "frontend/"
+   ]
+  },
+  {
+   "id": "US-015",
+   "title": "Frontend: intake progress card in chat",
+   "description": "frontend/components/onboarding/intake-progress-card.tsx — a chat status card streaming the intake pipeline's progress (scan → scrape → ingest → graph → profile) for the profile started by platform_scan_business_site. Reuse the SSE logic from frontend/hooks/use-wizard-progress.ts (extract/share the hook logic — do NOT modify the wizard's own usage; both surfaces consume it) and the PRD-205 live-receive bridge pattern for appearing in the conversation. Terminal states: profile-ready (with a 'here's what I learned' handoff line) and failed (honest error + 'upload docs instead' fallback line).",
+   "acceptanceCriteria": [
+    "DONE (d920ee5b7) — intake-progress-card.tsx renders scan→scrape→ingest→graph→profile from the shared use-wizard-progress hook logic; git diff origin/main..HEAD shows no frontend/components/wizard/** changes (wizard's own consumption untouched, its tests green); intake-progress-card.test.tsx 6 tests",
+    "DONE — terminal profile-ready ('here's what I learned' handoff) and failed (honest error + 'upload docs instead' fallback) covered by the 6 tests with a mocked stream",
+    "DONE — cd frontend && npm run -s test: 311 tests passed"
+   ],
+   "files": [
+    "frontend/components/onboarding/intake-progress-card.tsx",
+    "frontend/hooks/",
+    "frontend/"
+   ]
+  },
+  {
+   "id": "US-016",
+   "title": "Dev reset — re-runnable onboarding (single-account test loop)",
+   "description": "PRD W1·S10 (decision D9). Make onboarding re-runnable in ONE workspace so the operator tests with a single alias account instead of provisioning/deleting workspaces per attempt. (1) reset_onboarding(db, workspace, *, reset_trial=False, wipe_built=False, wipe_credentials=False) in orchestrator/services/onboarding_state.py: rewrite workspaces.onboarding to the initial doc via FULL JSONB reassignment (PRD-220-safe; match _write_trial's jsonb_set/whole-value style). This function is the ONLY sanctioned backward writer — do NOT loosen advance_onboarding_stage's monotonic/terminal validator. Preserve the trial object unless reset_trial; always stamp resets (incrementing int) + last_reset_at inside the doc. (2) reset_trial=True: strip the trial key, then re-grant via grant_trial_at_provisioning(db, workspace_id, owner_id=...) — REUSE, never a second grant implementation; a kill-switch/daily-cap decline is a reported pause in the response, not an error. (3) wipe_built=True: workspace-scoped deletion of what onboarding built — non-system agents (is_system_agent=False AND required_role != 'onboarding') + dependent rows, missions + orchestration tasks, agent reports/Deliverables, intake documents + workspace graphs, and the workspace's S3 document prefix — by REUSING services/workspace_purge.py machinery (_discover_scoped_tables / FK-safe ordering / _purge_s3_prefix) parameterized to spare survivors; NEVER a hand-maintained duplicate table list (two lists drift). The purge service's soft-deleted precondition, its workspace-row DELETE, its users DELETE, and its Clerk-user deletion must NOT apply on this path. (4) wipe_credentials=True: this workspace's credential rows only; the operator workspace (PLATFORM_KEY_WORKSPACE_ID) provably untouched. (5) Endpoint POST /api/workspaces/current/onboarding/reset on the EXISTING workspaces router (no new router file): gated on config.ONBOARDING_RESET_ENABLED (new config.py flag beside the TRIAL_* block ~:1309, default False, documented as TEMPORARY in .env.example) -> 404 when off (not 403 — don't advertise); workspace-admin auth in the same bucket as api/onboarding_agents.py's _require_admin; response returns counts of everything reset/wiped. Update the COMMITTED route manifest (orchestrator/reports/route-manifest.json — hand-add + count bump; test_route_manifest is the CI trap). (6) Frontend dev URL frontend/app/dev/reset-onboarding/page.tsx — unlinked from all nav: shows current stage + trial state (workspace provider), three switches (reset trial / wipe built / wipe credentials), RESET button -> endpoint, then clears tour/onboarding localStorage via the existing frontend/lib/shepherd/tour-storage.ts helpers (IMPORT them — modifying frontend/lib/shepherd/** violates the W2 scope guard), then redirects to chat. Renders a plain 'reset disabled' state on 404. Warns when wipe_credentials is on while reset_trial is off (converted workspace + no key falls through to unmetered platform resolution).",
+   "acceptanceCriteria": [
+    "DONE (e7f36044a) — reset_onboarding (onboarding_state.py:260) takes reset_trial/wipe_built/wipe_credentials; full-doc JSONB reassignment, no in-place mutation (test_reset_rebuilds_document_never_mutates_original); resets int increments across two resets + last_reset_at stamped (test_resets_counter_increments_and_stamps_last_reset_at); advance_onboarding_stage byte-identical to origin/main (ast-extract diff == IDENTICAL)",
+    "DONE — test_reset_from_every_stage_including_terminal parametrized over ALL_STAGES (incl. completed/skipped); trial preserved by default (test_trial_preserved_by_default); reset_trial re-grants a fresh $0 active trial via grant_trial_at_provisioning — call-site reuse proven by test_reset_trial_regrants_via_provisioning_grant; TRIAL_ENABLED=false decline reports a pause without raising (test_reset_trial_decline_is_a_reported_pause_not_an_error)",
+    "DONE — wipe_built reuses workspace_purge internals (onboarding_state.py imports workspace_purge; test_wipe_built_reuses_purge_machinery_no_hand_list proves no duplicated table list); survivor + SECOND-workspace scoping via @integration test_reset_wipes_built_spares_survivors_and_other_workspace (real-PG on CI test.yml; skips cleanly locally). NULL-safe survivor predicate: test_wipe_built_agents_survivor_predicate_is_null_safe",
+    "DONE — wipe_credentials scoped to this workspace's credential rows; @integration test_wipe_credentials_spares_platform_key_workspace proves PLATFORM_KEY_WORKSPACE_ID rows survive (CI)",
+    "DONE — test_endpoint_404_when_reset_disabled + test_endpoint_403_for_non_admin_when_enabled; ONBOARDING_RESET_ENABLED read only via config.py:1328 (test_reset_flag_lives_only_in_config_py; workspaces.py uses config.ONBOARDING_RESET_ENABLED, no os.getenv elsewhere); config.py comment marks it TEMPORARY within the gate's grep window (.env.example edits are hook-blocked in loops — gate accepts config.py docs)",
+    "DONE (84fdea724) — route-manifest.json carries /api/workspaces/current/onboarding/reset; git diff-filter=A origin/main..HEAD under orchestrator/api/*.py = none (endpoint on the existing workspaces router); test_route_manifest green",
+    "DONE — frontend/app/dev/reset-onboarding/page.tsx exists, unlinked (no dev/reset-onboarding ref in frontend/components); page.test.tsx 4 tests (renders stage+trial, disabled state on 404, wipe_credentials-without-reset_trial warning); localStorage cleared via imported tour-storage helpers (page.tsx:12 resetAllTours/resetOnboarding); frontend/lib/shepherd/** untouched in the diff",
+    "DONE — orchestrator reset suite 75 passed / 3 @integration skipped (no local PG); full suite baseline-only reds; cd frontend && npm run -s test: 311 passed"
+   ],
+   "files": [
+    "orchestrator/services/onboarding_state.py",
+    "orchestrator/services/workspace_purge.py",
+    "orchestrator/api/workspaces.py",
+    "orchestrator/config.py",
+    "orchestrator/reports/route-manifest.json",
+    ".env.example",
+    "frontend/app/dev/reset-onboarding/page.tsx",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-017",
+   "title": "Re-land US-009 — OnboardingSection v2 (lost by the early #613 squash)",
+   "description": "ARCHAEOLOGY (verified 2026-08-27 16:3x): PR #613 was squash-merged 2026-07-31 03:51:55 while the July run was still building — the squash cut the branch at US-008 (03:45); US-009 (04:09) and US-010 (04:23) NEVER reached main. Main's orchestrator/modules/context/sections/onboarding.py is the PRD-123-era v1 section (from PR #303), NOT the stage-aware v2 spine — which is why stages would never advance in practice. The complete v2 EXISTS on the old branch commit 60a11c936 (still on origin). Re-land it: `git cherry-pick -x 60a11c936`; the commit also touches scripts/ralph/prd-222.json (old kit bookkeeping) — do NOT land that path: resolve any conflict there by keeping HEAD, else `git restore --staged scripts/ralph/prd-222.json && git checkout HEAD -- scripts/ralph/prd-222.json` before committing. sections/onboarding.py: take the cherry-picked v2 WHOLESALE (v1 is retired by design D1/D2 — a conflict vs main's v1 resolves to v2). Then RE-VERIFY v2's section registration + token budget against today's registry (it may have drifted since July — check the registration site, budget 800, priority). Keep its test file test_prd222_onboarding_section.py intact.",
+   "acceptanceCriteria": [
+    "DONE (provenance recorded here) — 60a11c936 content is on the branch: `git show HEAD:.../onboarding.py` shows the stage-aware v2, test_prd222_onboarding_section.py present. Applied via `git cherry-pick -x -n 60a11c936`; the staged result was folded into commit 9f0052c8d (a concurrent kit-maintenance commit by the branch owner) rather than a standalone US-017 commit — SHA cited here. scripts/ralph/prd-222.json dropped (`git restore --staged` + `git checkout HEAD --`) — NOT reintroduced on the branch",
+    "DONE — v2 landed: grep -c powerup|OpenRouter|TERMINAL_STAGES|platform_update_onboarding = 11 hits; class OnboardingSection priority=2 max_tokens=800 (:163/:172/:176); test_terminal_stage_renders_empty asserts completed/skipped → '' ",
+    "DONE — tests/test_prd222_onboarding_section.py: 43 passed in 0.43s; full local suite unchanged vs baseline (only the documented pre-existing env trio prd172/dr_restore/p2w2 + 46 no-local-DB @integration errors; CI test.yml is the authoritative gate)",
+    "DONE — git diff --cached staged ONLY onboarding.py + test file; onboarding.py taken WHOLESALE from 60a11c936 (clean 3-way apply — branch v1 == July base — then `git checkout 60a11c936 --` to guarantee exact v2). Registry (__init__.py) unchanged: name='onboarding' preserved. Resolution notes in commit body"
+   ],
+   "files": [
+    "orchestrator/modules/context/sections/onboarding.py",
+    "orchestrator/tests/test_prd222_onboarding_section.py"
+   ]
+  },
+  {
+   "id": "US-018",
+   "title": "Re-land US-010 — trust guards + summary Deliverable, reconciled with US-011",
+   "description": "Second commit lost to the early #613 squash (see US-017): 82421cb5f. `git cherry-pick -x 82421cb5f`, again dropping the scripts/ralph/prd-222.json path (keep HEAD). EXPECT CONFLICTS in actions_reports.py / handlers_reports.py: wave-1b US-011 already shrank platform_submit_report required[] to ['title','content'] — the correct merged result keeps THAT shrink AND adds US-010's 'onboarding' report_type to the schema enum AND the handler valid_types (schema <-> handler in sync; agent_reports.report_type is VARCHAR(30), prd76 — no DDL needed). sections/onboarding.py: US-010's powerup-tail applies on top of US-017's v2 (the completed handoff instructs Auto to submit the onboarding summary via platform_submit_report(report_type='onboarding') BEFORE advance_to 'completed'). test_prd222_trust_guards.py: lands the 154-line static guard scanning the onboarding-owned file list — EXTEND that list with wave-1b's onboarding-owned additions (the reset/wipe code: confirm services/onboarding_state.py additions are covered; if reset/wipe helpers live in workspace_purge.py or api/workspaces.py, add those paths) and keep test_trust_guard_self_check_bites biting (it must still prove the guard catches the 3 violation forms).",
+   "acceptanceCriteria": [
+    "DONE — `git cherry-pick -x -n 82421cb5f` (clean apply; git auto-merged actions_reports.py — US-011 required[] and US-010 enum are different hunks). Committed by me with the -x provenance line in the body. scripts/ralph/prd-222.json dropped (`git restore --staged` + `git checkout HEAD --`) — NOT reintroduced",
+    "DONE — actions_reports.py:102 required[]==['title','content'] (US-011 shrink preserved) AND :31 submit_report enum now carries 'onboarding'; handlers_reports.py:26 valid_types carries 'onboarding'; US-011 walker green (18 tests). VARCHAR(30) column — no DDL",
+    "DONE — tests/test_prd222_trust_guards.py: 8 tests green incl. test_trust_guard_self_check_bites (matches skip_verification=True / \"auto_approve\":True / config[\"auto_approve\"]=True, ignores NEVER-prohibitions). _ONBOARDING_OWNED extended with services/workspace_purge.py + api/workspaces.py (US-016 reset/wipe surface; both grep-verified trust-token-free) — test_all_owned_files_exist + the static scan pass",
+    "DONE — onboarding.py:143-144 powerup tail: write the onboarding summary via `platform_submit_report` (report_type `onboarding`) THEN advance_to `completed`; test_powerup_handoff_instructs_summary_report_then_completed asserts submit-index < completed-index; test_onboarding_is_a_valid_report_type_so_the_handoff_does_not_dead_end green",
+    "DONE — targeted suite 69 passed (trust-guards 8 + section 43 + walker 18) in 0.97s; full orchestrator suite = pre-existing env baseline only (no NEW reds); US-018 is backend + tests only, frontend untouched (git diff shows no frontend/ paths)"
+   ],
+   "files": [
+    "orchestrator/modules/context/sections/onboarding.py",
+    "orchestrator/modules/tools/discovery/actions_reports.py",
+    "orchestrator/modules/tools/discovery/handlers_reports.py",
+    "orchestrator/tests/test_prd222_trust_guards.py"
+   ]
+  }
+ ]
+}

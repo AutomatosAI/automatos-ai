@@ -42,7 +42,8 @@ def register_agents_actions(registry: ActionRegistry) -> None:
         description=(
             "Get detailed config for ONE specific agent by name or ID — model, tools, prompt, activity. "
             "Use when asked about a specific agent's setup. "
-            "For listing ALL agents, use platform_list_agents instead."
+            "For listing ALL agents, use platform_list_agents instead. "
+            "Provide agent_name or agent_id."
         ),
         category="agents",
         parameters={
@@ -154,7 +155,8 @@ def register_agents_actions(registry: ActionRegistry) -> None:
         description=(
             "Update an existing agent's configuration. Can change name, description, "
             "status, model, system prompt, temperature, tags, team, job_title, or reports_to_id. "
-            "Use when the user asks to modify, update, or reconfigure an agent."
+            "Use when the user asks to modify, update, or reconfigure an agent. "
+            "Provide agent_name or agent_id."
         ),
         category="agents",
         parameters={
@@ -235,7 +237,8 @@ def register_agents_actions(registry: ActionRegistry) -> None:
         name="platform_delete_agent",
         description=(
             "Delete an agent from the workspace. This is permanent and cannot be undone. "
-            "Use only when the user explicitly asks to delete or remove an agent."
+            "Use only when the user explicitly asks to delete or remove an agent. "
+            "Provide agent_name or agent_id."
         ),
         category="agents",
         parameters={
@@ -268,7 +271,8 @@ def register_agents_actions(registry: ActionRegistry) -> None:
         description=(
             "Configure or update the heartbeat schedule for an agent. Controls how often "
             "the agent runs periodic checks, what it checks, active hours, and proactive "
-            "behavior. Set enabled=false to disable the heartbeat entirely."
+            "behavior. Set enabled=false to disable the heartbeat entirely. "
+            "Provide agent_id or agent_name."
         ),
         category="agents",
         parameters={
@@ -342,7 +346,8 @@ def register_agents_actions(registry: ActionRegistry) -> None:
             "notification_channel) plus an is_configured flag. Use this before "
             "editing a heartbeat so the diff is informed — read current state, "
             "decide what changes, then call platform_configure_agent_heartbeat "
-            "with only the fields you actually want to change."
+            "with only the fields you actually want to change. "
+            "Provide agent_id or agent_name."
         ),
         category="agents",
         parameters={
