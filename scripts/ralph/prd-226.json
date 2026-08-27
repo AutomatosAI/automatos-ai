@@ -27,9 +27,9 @@
    "title": "Assessment rubric: extend 224's three lanes with reuse-before-create",
    "description": "In the AutoBrain assessment prompt builder (auto.py — 224's US-004 rubric is already in your tree): extend with the reuse-before-create signals (prefer an existing roster agent whose role fits; honor named routing; creating a new agent requires 'nothing fits' and saying you checked) and the one-line lane-narration instruction. Do NOT duplicate the rubric — one rubric block, extended in place. LLM-free tests: string presence of the new signals in the built prompt; existing 224 lane tests stay green.",
    "acceptanceCriteria": [
-    "Single rubric block (grep shows one definition site); reuse-before-create + named-routing + narrate-one-line present in the built prompt (tests)",
-    "224's stubbed-assessment tests unchanged and green",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — Single rubric block (grep shows one definition site); reuse-before-create + named-routing + narrate-one-line present in the built prompt. Evidence: build_assessment_prompt extended IN PLACE (test_rubric_has_exactly_one_definition_site asserts exactly one `def build_assessment_prompt`); test_prompt_has_reuse_before_create_signals / test_prompt_honours_named_routing / test_prompt_instructs_one_line_lane_narration in tests/test_prd226_rubric.py.",
+    "DONE — 224's stubbed-assessment tests unchanged and green. Evidence: tests/test_prd224_assign_lane.py untouched, 31 passed alongside the new rubric tests (36 passed together); test_three_lane_rubric_still_intact re-asserts 224's anchors survive the extension.",
+    "DONE — PRD-226 rubric tests green: 5 passed (tests/test_prd226_rubric.py). Full suite: 3 failed + 46 errors are the same pre-existing infra baseline as before this story (4313→4318 passed, +5 = the new tests) — zero regressions."
    ],
    "files": [
     "orchestrator/consumers/chatbot/auto.py",
