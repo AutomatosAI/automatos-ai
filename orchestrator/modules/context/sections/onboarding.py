@@ -139,7 +139,10 @@ models.** Offer the masked in-chat key entry. List other providers \
 A saved key is validated live and unlocks the full model catalogue. Declining is \
 fine — the remaining trial credit keeps working.
 Then present the run-and-learn checklist (connect a second app · invite a teammate \
-· run your first mission · take the 10-minute course) and advance_to `completed`.
+· run your first mission · take the 10-minute course).
+To finish, write the onboarding summary — what you built, why, and what happens \
+next — with `platform_submit_report` (report_type `onboarding`, plus a title and \
+content) so it lands as a Deliverable on their workspace; then advance_to `completed`.
 """
 
 _RETRIGGER_NOTE = (

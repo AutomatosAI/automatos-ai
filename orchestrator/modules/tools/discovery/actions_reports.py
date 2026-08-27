@@ -28,8 +28,8 @@ def register_report_actions(registry: ActionRegistry) -> None:
                 },
                 "report_type": {
                     "type": "string",
-                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit"],
-                    "description": "Category: standup (routine check), research (deep-dive), incident (problem), summary (rollup), delivery (completed work), audit (compliance).",
+                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "onboarding"],
+                    "description": "Category: standup (routine check), research (deep-dive), incident (problem), summary (rollup), delivery (completed work), audit (compliance), onboarding (Mission Zero founding-document summary).",
                 },
                 "status": {
                     "type": "string",
