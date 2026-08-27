@@ -151,7 +151,7 @@ export default function ResetOnboardingPage() {
           />
         </div>
         <div className="flex items-center justify-between">
-          <Label htmlFor="wipe-credentials-toggle">Wipe this workspace's credentials</Label>
+          <Label htmlFor="wipe-credentials-toggle">Wipe this workspace&apos;s credentials</Label>
           <Switch
             id="wipe-credentials-toggle"
             data-testid="toggle-wipe-credentials"

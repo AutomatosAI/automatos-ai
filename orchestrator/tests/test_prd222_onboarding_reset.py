@@ -293,6 +293,31 @@ def test_wipe_built_spares_survivors_and_scopes_to_workspace():
     assert db.committed and ws.onboarding["stage"] == INITIAL_STAGE
 
 
+def test_wipe_built_agents_survivor_predicate_is_null_safe():
+    """The agents survivor filter MUST be NULL-safe.
+
+    A built agent carries ``required_role IS NULL``. The naive
+    ``AND NOT (is_system_agent IS TRUE OR required_role = 'onboarding')`` evaluates
+    to ``NOT (FALSE OR NULL)`` = NULL for those rows, and a NULL WHERE-clause
+    matches nothing — so ordinary built agents would silently survive
+    ``wipe_built`` (Postgres three-valued logic; a FakeDB that returns rowcount=1
+    for every DELETE cannot see it, which is why only the @integration test on
+    real Postgres caught the regression). Pin the NULL-safe form here so it fails
+    loud at the pure-test tier too.
+    """
+    ws = _FakeWorkspace(onboarding={"stage": "boom"})
+    db = _FakeDB(_CANNED_SCOPED)
+
+    reset_onboarding(db, ws, wipe_built=True)
+
+    agents_sql = next(d[1] for d in db.deletes if d[0] == "agents")
+    # NULL-safe constructs present …
+    assert "is_system_agent IS NOT TRUE" in agents_sql
+    assert "required_role IS DISTINCT FROM 'onboarding'" in agents_sql
+    # … and the NULL-unsafe OR-under-NOT form is gone.
+    assert "NOT (is_system_agent IS TRUE OR" not in agents_sql
+
+
 def test_wipe_credentials_only_touches_credential_tables_scoped():
     ws = _FakeWorkspace(onboarding={"stage": "boom"})
     other_ws = uuid.uuid4()
@@ -563,9 +588,10 @@ def test_reset_trial_regrants_fresh_active_trial(engine, new_session, monkeypatc
     monkeypatch.setattr(config, "TRIAL_GLOBAL_DAILY_USD", 1_000_000.0)  # cap never blocks the test
 
     s = new_session()
+    uniq = uuid.uuid4().hex
     uid = s.execute(
-        text("INSERT INTO users (email) VALUES (:e) RETURNING id"),
-        {"e": f"reset-{uuid.uuid4()}@example.test"},
+        text("INSERT INTO users (username, email) VALUES (:u, :e) RETURNING id"),
+        {"u": f"reset-{uniq}", "e": f"reset-{uniq}@example.test"},
     ).fetchone()[0]
     ws1 = str(uuid.uuid4())
     _mk_ws(

@@ -460,7 +460,15 @@ _CREDENTIAL_TABLES: frozenset[str] = frozenset({"user_api_keys", "credentials"})
 # onboarding-role agents (VOYAGER/BLUEPRINT/SCRIBE/FORGE) are seeded, not built —
 # they must survive. Applied to BOTH the DELETE and the pre-cascade subquery so
 # a spared agent keeps its dependent rows (skills, tool routes, …) too.
-_AGENT_SURVIVOR_SQL: str = "AND NOT (is_system_agent IS TRUE OR required_role = 'onboarding')"
+#
+# MUST be NULL-safe. A built agent has ``required_role IS NULL``; the naive form
+# ``AND NOT (is_system_agent IS TRUE OR required_role = 'onboarding')`` evaluates
+# to ``NOT (FALSE OR NULL)`` = ``NOT NULL`` = NULL for those rows, and a NULL
+# WHERE-clause matches NOTHING — so ordinary built agents would silently survive
+# ``wipe_built`` (the common case). Written as two positive, NULL-safe predicates
+# instead: ``IS NOT TRUE`` keeps NULL/false system flags out of the survivor set,
+# and ``IS DISTINCT FROM 'onboarding'`` treats a NULL role as "not onboarding".
+_AGENT_SURVIVOR_SQL: str = "AND is_system_agent IS NOT TRUE AND required_role IS DISTINCT FROM 'onboarding'"
 
 
 def _wipe_workspace_s3(workspace_id: UUID) -> Dict[str, Any]:
