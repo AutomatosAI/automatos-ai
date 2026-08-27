@@ -261,12 +261,28 @@ async def answer_question(
                 status_code=422, detail="option is not one of the offered choices"
             )
 
+    await apply_question_answer(db, grant, answer_text=answer, answered_by=_actor_ref(ctx))
+    _audit(db, ctx, "question:answered", grant)
+    return {"grant": grant.to_dict()}
+
+
+async def apply_question_answer(
+    db: Session, grant: ApprovalGrant, *, answer_text: str, answered_by: str
+) -> ApprovalGrant:
+    """Record an answer and resume the parked subject — the shared service the
+    HTTP endpoint AND the Telegram bridge both call (PRD-225 US-005; the bridge
+    is NOT an HTTP self-call). Assumes the caller validated kind='question' +
+    status pending.
+
+    ``pending → granted``; the Q&A is appended to the subject's execution context
+    and the work resumes through the EXISTING ``_requeue_subject``.
+    """
     now = datetime.now(timezone.utc)
-    grant.answer_text = answer
-    grant.answered_by = _actor_ref(ctx)
+    grant.answer_text = answer_text
+    grant.answered_by = answered_by
     grant.answered_at = now
     grant.status = GrantStatus.GRANTED.value
-    _record_answer_on_subject(db, grant, answer, now)
+    _record_answer_on_subject(db, grant, answer_text, now)
 
     # Commit the answer BEFORE resuming — mirror grant_approval's 2026-08-06
     # ordering so the resume path sees a committed, non-pending row.
@@ -275,8 +291,7 @@ async def answer_question(
     db.commit()
 
     _confirm_answer_into_chat(db, grant)
-    _audit(db, ctx, "question:answered", grant)
-    return {"grant": grant.to_dict()}
+    return grant
 
 
 def _record_answer_on_subject(

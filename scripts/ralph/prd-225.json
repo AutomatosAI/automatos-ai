@@ -78,12 +78,12 @@
    "title": "Telegram answer bridge — reply correlation + /answer fallback",
    "description": "Outbound: when question_pending dispatches to telegram, capture the sent message_id from the driver's SendResult (channels/drivers/telegram.py:105-154 — re-verify SendResult carries it; if not, extend the driver's return, all drivers unaffected) and write {telegram: {chat_id, message_id}} into the row's channel_refs (rebuild-don't-mutate; post-send, fail-soft — a capture failure leaves a working in-app question). Inbound (api/webhooks.py, BEFORE UniversalRouter routing): if the Telegram payload's reply_to_message_id matches a pending question's channel_refs → treat the text as the answer via US-003's internals (shared service function, not an HTTP self-call); else if the text matches '^/answer <id> <text>' → same path by id (workspace-scoped lookup; wrong-workspace or non-pending → polite reply, no info leak); else → existing routing untouched. Confirm back into the same Telegram thread via the existing _deliver_reply path. Replay/dedup guards (:450-470) apply unchanged.",
    "acceptanceCriteria": [
-    "Outbound telegram dispatch stores channel_refs with message_id (test, driver mocked); capture failure degrades to in-app-only without error (test)",
-    "Webhook fixture with matching reply_to_message_id answers the question and resumes the subject; /answer <id> works; unmatched messages route exactly as before (regression test on the existing webhook tests)",
-    "Wrong-workspace /answer target and already-answered target get a safe reply and change nothing (tests)",
-    "Telegram confirmation delivered via the existing reply path (test)",
-    "Fixtures use obviously-fake tokens/ids (gitleaks-safe)",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — SendResult gains message_id+target (base.py); telegram driver populates message_id from the sendMessage result; handlers_asks._capture_question_telegram sends to the workspace default chat via send_to_channel and writes channel_refs.telegram={chat_id,message_id} rebuild-don't-mutate (test_outbound_captures_channel_refs); ok=False or a raise leaves channel_refs untouched, no error (test_outbound_capture_failure_degrades / _swallows_raise)",
+    "DONE — webhooks._maybe_answer_question runs BEFORE UniversalRouter: a reply whose reply_to_message_id matches a pending question's channel_refs answers it via the SHARED apply_question_answer (not an HTTP self-call), resuming the subject (test_reply_to_correlated_message_answers); /answer <id> <text> works (test_slash_answer_command); unmatched + reply-to-unknown fall through to routing returning None (test_unmatched_message_falls_through / _reply_to_unknown_message_falls_through); 46 existing webhook regression tests green",
+    "DONE — wrong-workspace /answer (test_wrong_workspace_answer_is_safe) and already-answered target (test_already_answered_target_is_safe) get a safe 'isn't open' reply and change nothing (only pending question-kind rows in-workspace are findable — no info leak)",
+    "DONE — confirmation 'Answered #N — the agent is resuming.' delivered via the existing _deliver_reply path (test_reply_to_correlated_message_answers asserts one reply)",
+    "DONE — fixtures use obviously-fake ids (chat 'c1', message_id '777', 'chat-9'); no bot tokens in tests (gitleaks-safe)",
+    "DONE — cd orchestrator && python3 -m pytest -q tests/test_prd225_telegram_bridge.py green (9 passed); all 43 PRD-225 backend tests green together"
    ],
    "files": [
     "orchestrator/api/webhooks.py",

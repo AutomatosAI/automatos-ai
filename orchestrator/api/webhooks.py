@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import re
 import time
 from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
@@ -191,6 +192,10 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
         msg = body.get("message", {})
         ctx["chat_id"] = msg.get("chat", {}).get("id")
         ctx["from_user"] = msg.get("from", {}).get("first_name", "")
+        # PRD-225: reply correlation — the id of THIS message and the id of the
+        # message it replies to (a reply to a correlated question answers it).
+        ctx["message_id"] = msg.get("message_id")
+        ctx["reply_to_message_id"] = (msg.get("reply_to_message") or {}).get("message_id")
 
     elif platform == "slack":
         event = body.get("event", {})
@@ -211,6 +216,121 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
         ctx["to_phone"] = body.get("To")
 
     return ctx
+
+
+# =============================================================================
+# PRD-225 US-005 — Telegram answer bridge (reply / /answer correlation)
+# =============================================================================
+
+_ANSWER_CMD = re.compile(r"^/answer\s+(\d+)\s+(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _pending_questions(db: Session, workspace_id: Any) -> list:
+    """The workspace's open (pending) question-kind grants."""
+    from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_QUESTION
+
+    return (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.workspace_id == workspace_id,
+            ApprovalGrant.kind == KIND_QUESTION,
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+        )
+        .all()
+    )
+
+
+def _find_pending_question(db: Session, workspace_id: Any, ask_id: int):
+    """A pending question by id, scoped to the workspace. None if absent —
+    wrong-workspace / already-answered targets simply aren't found (no leak)."""
+    for g in _pending_questions(db, workspace_id):
+        if g.id == ask_id:
+            return g
+    return None
+
+
+def _find_question_by_telegram_message(db: Session, workspace_id: Any, message_id: str):
+    """The pending question whose stored Telegram message_id matches a reply's
+    target. Python-side filter over the few open asks (JSONB-portable)."""
+    for g in _pending_questions(db, workspace_id):
+        refs = g.channel_refs if isinstance(g.channel_refs, dict) else {}
+        tg = refs.get("telegram") if isinstance(refs, dict) else None
+        if isinstance(tg, dict) and str(tg.get("message_id")) == str(message_id):
+            return g
+    return None
+
+
+async def _maybe_answer_question(
+    db: Session,
+    workspace: Any,
+    body: Dict[str, Any],
+    reply_ctx: Dict[str, Any],
+    integrations: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """If this inbound Telegram message answers a pending question — a reply to a
+    correlated message, or ``/answer <id> <text>`` — apply it through the SHARED
+    answer service (never an HTTP self-call) and confirm into the same thread.
+
+    Returns a response dict when handled (short-circuits routing AND the trust
+    gate — an answer is a response, not a directive), or None to fall through.
+    A wrong-workspace / already-answered target gets a safe reply and changes
+    nothing (no information leak).
+    """
+    if reply_ctx.get("platform") != "telegram":
+        return None
+    msg = body.get("message") if isinstance(body, dict) else None
+    text = (msg.get("text") or "").strip() if isinstance(msg, dict) else ""
+    if not text:
+        return None
+
+    # 1. Explicit fallback: /answer <id> <text>
+    m = _ANSWER_CMD.match(text)
+    if m:
+        ask_id = int(m.group(1))
+        answer_text = m.group(2).strip()
+        grant = _find_pending_question(db, workspace.id, ask_id)
+        if grant is None:
+            await _deliver_reply(
+                f"Question #{ask_id} isn't open in this workspace.",
+                reply_ctx, integrations, workspace_id=workspace.id,
+            )
+            return {"status": "received", "routed": False, "reason": "answer_target_not_found"}
+        return await _apply_telegram_answer(db, workspace, grant, answer_text, reply_ctx, integrations)
+
+    # 2. A reply to a correlated question message answers it.
+    reply_to = reply_ctx.get("reply_to_message_id")
+    if reply_to is not None:
+        grant = _find_question_by_telegram_message(db, workspace.id, str(reply_to))
+        if grant is not None:
+            return await _apply_telegram_answer(db, workspace, grant, text, reply_ctx, integrations)
+
+    return None
+
+
+async def _apply_telegram_answer(
+    db: Session,
+    workspace: Any,
+    grant: Any,
+    answer_text: str,
+    reply_ctx: Dict[str, Any],
+    integrations: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply a Telegram-sourced answer via the shared service, then confirm back
+    into the same thread through the existing ``_deliver_reply`` path."""
+    from api.approval_grants import apply_question_answer
+
+    answered_by = f"telegram:{reply_ctx.get('from_user') or reply_ctx.get('chat_id') or 'user'}"
+    await apply_question_answer(db, grant, answer_text=answer_text, answered_by=answered_by)
+    await _deliver_reply(
+        f"Answered #{grant.id} — the agent is resuming.",
+        reply_ctx, integrations, workspace_id=workspace.id,
+    )
+    return {
+        "status": "completed",
+        "routed": True,
+        "route_type": "question_answer",
+        "ask_id": grant.id,
+    }
 
 
 # =============================================================================
@@ -484,6 +604,20 @@ async def general_workspace_webhook(
         _persist_integration_default(db, workspace, "telegram_default_chat_id", str(reply_ctx["chat_id"]))
     elif platform == "slack" and reply_ctx.get("channel"):
         _persist_integration_default(db, workspace, "slack_default_channel", reply_ctx["channel"])
+
+    # 2c. PRD-225 US-005: a reply / `/answer` to a pending question is a
+    # RESPONSE, not a directive — correlate it BEFORE any routing (this also
+    # bypasses the ingress trust gate, since answers are always allowed).
+    if platform == "telegram":
+        try:
+            answered = await _maybe_answer_question(db, workspace, body, reply_ctx, integrations)
+            if answered is not None:
+                return answered
+        except Exception:
+            logger.exception(
+                "[webhook/ws] question-answer correlation failed for ws=%s — "
+                "falling through to routing", workspace.id,
+            )
 
     # 3. Build RequestEnvelope via WebhookIngestor
     ingestor = WebhookIngestor()

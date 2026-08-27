@@ -106,6 +106,11 @@ async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
         agent_id=grant.asked_by_agent_id, agent_name=agent_name,
         urgent=is_urgent_cascade(downstream),
     )
+    # PRD-225 US-005: send the correlated Telegram message to the workspace
+    # default chat and record its message_id, so a reply answers the question.
+    await _capture_question_telegram(
+        db, workspace_id, grant, agent_name=agent_name, question=question,
+    )
     db.commit()
 
     return {
@@ -152,4 +157,51 @@ async def _dispatch_question_pending(
         logger.warning(
             "[handlers_asks] question_pending dispatch failed for ask %s",
             grant_id, exc_info=True,
+        )
+
+
+def _telegram_question_text(agent_name: Optional[str], question: str, ask_id: int) -> str:
+    """The Telegram body: the ask plus how to answer it from the phone."""
+    who = f"Question from {agent_name}" if agent_name else "A question needs your answer"
+    return (
+        f"❓ {who}\n\n{question}\n\n"
+        f"Reply to this message to answer — or send: /answer {ask_id} <your answer>"
+    )
+
+
+async def _capture_question_telegram(
+    db: Session,
+    workspace_id: UUID,
+    grant: Any,
+    *,
+    agent_name: Optional[str],
+    question: str,
+) -> None:
+    """Send the question to the workspace's default Telegram chat and record
+    ``channel_refs.telegram = {chat_id, message_id}`` so a reply correlates back.
+
+    Best-effort + rebuild-don't-mutate: no Telegram connected, or a send fault,
+    leaves a perfectly usable in-app question (fail-soft, matching sender.py)."""
+    try:
+        from channels.sender import send_to_channel
+
+        result = await send_to_channel(
+            db=db,
+            workspace_id=str(workspace_id),
+            platform="telegram",
+            text=_telegram_question_text(agent_name, question, grant.id),
+        )
+        if getattr(result, "ok", False) and getattr(result, "message_id", None):
+            refs = dict(grant.channel_refs or {})
+            grant.channel_refs = {
+                **refs,
+                "telegram": {
+                    "chat_id": result.target,
+                    "message_id": result.message_id,
+                },
+            }
+    except Exception:  # noqa: BLE001 — correlation is best-effort
+        logger.warning(
+            "[handlers_asks] telegram correlation capture failed for ask %s",
+            getattr(grant, "id", None), exc_info=True,
         )
