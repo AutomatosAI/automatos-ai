@@ -17,7 +17,9 @@ import userEvent from '@testing-library/user-event'
 const grantMutateAsync = vi.fn()
 const denyMutateAsync = vi.fn()
 
-vi.mock('@/hooks/use-approval-grants-api', () => ({
+// PRD-225: the duplicate use-approval-grants-api was merged into
+// use-approval-grants; the widget now imports the consolidated module.
+vi.mock('@/hooks/use-approval-grants', () => ({
   useGrantApproval: () => ({ isLoading: false, mutateAsync: grantMutateAsync }),
   useDenyApproval: () => ({ isLoading: false, mutateAsync: denyMutateAsync }),
 }))
@@ -84,7 +86,7 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
 
     await user.click(screen.getByRole('button', { name: /approve & run/i }))
 
-    expect(grantMutateAsync).toHaveBeenCalledWith({ id: 42 })
+    expect(grantMutateAsync).toHaveBeenCalledWith(42)
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(/the action ran/i),
     )
@@ -115,7 +117,7 @@ describe('ToolApprovalWidget — PRD-193 S3', () => {
 
     await user.click(screen.getByRole('button', { name: /deny/i }))
 
-    expect(denyMutateAsync).toHaveBeenCalledWith({ id: 42 })
+    expect(denyMutateAsync).toHaveBeenCalledWith(42)
     expect(grantMutateAsync).not.toHaveBeenCalled()
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(/will not run/i),

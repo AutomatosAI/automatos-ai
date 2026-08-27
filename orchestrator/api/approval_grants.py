@@ -53,6 +53,23 @@ def grant_with_oversight(grant: ApprovalGrant) -> Dict[str, Any]:
     return data
 
 
+def _grant_payload(db: Session, grant: ApprovalGrant) -> Dict[str, Any]:
+    """List payload for one grant. Question-kind rows carry their blocked
+    cascade (PRD-225) so the Questions tab renders the downstream work stuck
+    behind the ask without a second round-trip."""
+    data = grant_with_oversight(grant)
+    if getattr(grant, "kind", None) == KIND_QUESTION:
+        if grant.subject_type == SUBJECT_BOARD_TASK:
+            from services.ask_cascade import board_task_cascade_detail
+
+            data["cascade"] = board_task_cascade_detail(
+                db, grant.workspace_id, grant.subject_id
+            )
+        else:
+            data["cascade"] = {"total": 0, "tasks": []}
+    return data
+
+
 def _actor_ref(ctx: RequestContext) -> str:
     uid = getattr(ctx, "user_id", None) or getattr(ctx, "internal_user_id", None)
     return f"user:{uid}" if uid is not None else "user:unknown"
@@ -85,15 +102,23 @@ def _audit(db: Session, ctx: RequestContext, action: str, grant: ApprovalGrant) 
 @router.get("")
 async def list_grants(
     status: Optional[str] = None,
+    kind: Optional[str] = None,
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """List this workspace's approval grants, newest first. Filter by ``status``."""
+    """List this workspace's approval grants, newest first.
+
+    Filter by ``status`` and/or ``kind`` — the Questions tab reuses THIS route
+    with ``kind=question`` (PRD-225: no separate list endpoint). Question rows
+    are enriched with their blocked cascade.
+    """
     q = db.query(ApprovalGrant).filter(ApprovalGrant.workspace_id == ctx.workspace_id)
     if status:
         q = q.filter(ApprovalGrant.status == status)
+    if kind:
+        q = q.filter(ApprovalGrant.kind == kind)
     rows: List[ApprovalGrant] = q.order_by(ApprovalGrant.requested_at.desc()).limit(200).all()
-    return {"grants": [grant_with_oversight(g) for g in rows]}
+    return {"grants": [_grant_payload(db, g) for g in rows]}
 
 
 def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGrant:

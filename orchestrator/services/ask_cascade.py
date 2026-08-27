@@ -95,6 +95,41 @@ def board_task_cascade(db: Any, workspace_id: Any, task_id: int) -> list:
     return reachable_from(adjacency, str(root))
 
 
+def board_task_cascade_detail(
+    db: Any, workspace_id: Any, task_id: Any, cap: int = 6
+) -> dict:
+    """The cascade behind a board-task question, shaped for the Questions tab:
+    ``{"total": N, "tasks": [{id, title, status}, … up to ``cap``]}``.
+
+    Order is preserved from the cycle-safe BFS; the tab renders the first ``cap``
+    and shows "+N more". Never raises — a fault degrades to an empty cascade.
+    """
+    from core.models.core import BoardTask
+
+    try:
+        ids = board_task_cascade(db, workspace_id, task_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "[ask_cascade] cascade detail failed for board_task %s", task_id,
+            exc_info=True,
+        )
+        return {"total": 0, "tasks": []}
+
+    tasks: list = []
+    for tid in ids[: max(0, cap)]:
+        try:
+            t = (
+                db.query(BoardTask)
+                .filter(BoardTask.id == int(tid), BoardTask.workspace_id == workspace_id)
+                .first()
+            )
+        except (TypeError, ValueError):
+            t = None
+        if t is not None:
+            tasks.append({"id": t.id, "title": t.title, "status": t.status})
+    return {"total": len(ids), "tasks": tasks}
+
+
 def count_downstream_blocked(
     db: Any, workspace_id: Any, subject_type: str, subject_id: Any
 ) -> int:

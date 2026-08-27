@@ -34,6 +34,7 @@ const BACKEND_NOTIFICATION_LINK_TYPES = [
   'report', // services/report_service.py
   'approval_grant', // modules/tools/execution/tool_grants.py, services/board_approval.py, services/watch_rerun.py
   'watch', // services/watch_notifications.py
+  'question', // PRD-225: modules/tools/discovery/handlers_asks.py (question_pending)
 ] as const
 
 function row(link_type: string | null, link_id: string | null = null): NotificationRow {
@@ -70,6 +71,10 @@ describe('PRD-227 US-003 — bell deep-link drift guard', () => {
     expect(linkFor(row('watch'))).toBe('/command-center?tab=watchlist')
   })
 
+  it('routes question → the Questions tab (PRD-225)', () => {
+    expect(linkFor(row('question'))).toBe('/command-center?tab=questions')
+  })
+
   it('the new routes use tab params the Command Center shell actually reads', () => {
     // Cross-file guard: a tab rename in the shell must break this, not just
     // dead-link the bell. Extract each new route's ?tab= value and assert the
@@ -78,7 +83,7 @@ describe('PRD-227 US-003 — bell deep-link drift guard', () => {
       path.resolve(__dirname, '..', '..', 'command-center', 'command-center-shell.tsx'),
       'utf8',
     )
-    for (const lt of ['approval_grant', 'watch'] as const) {
+    for (const lt of ['approval_grant', 'watch', 'question'] as const) {
       const route = linkFor(row(lt))!
       const tab = new URLSearchParams(route.split('?')[1]).get('tab')!
       expect(shell).toContain(`'${tab}'`)

@@ -155,6 +155,17 @@ export interface ApprovalGrantOversight {
   requires_approval: boolean
 }
 
+// PRD-225: the cascade of downstream work parked behind a question.
+export interface QuestionCascadeTask {
+  id: number
+  title: string
+  status: string
+}
+export interface QuestionCascade {
+  total: number
+  tasks: QuestionCascadeTask[]
+}
+
 export interface ApprovalGrant {
   id: number
   workspace_id: string | null
@@ -173,6 +184,19 @@ export interface ApprovalGrant {
   revoked_at: string | null
   revoked_by: string | null
   oversight?: ApprovalGrantOversight
+  /** PRD-193 S4: params snapshot + executed_result land here on resume. */
+  details?: Record<string, unknown>
+  // PRD-225: a grant is a question when its decision is words, not a boolean.
+  kind?: 'approval' | 'question' | string
+  question_md?: string | null
+  options?: string[] | null
+  answer_text?: string | null
+  answered_by?: string | null
+  answered_at?: string | null
+  asked_by_agent_id?: number | null
+  channel_refs?: Record<string, unknown>
+  /** Downstream tasks blocked behind a question (question rows only). */
+  cascade?: QuestionCascade
 }
 
 export interface ApprovalGrantsResponse {
@@ -2178,9 +2202,15 @@ class ApiClient {
   }
 
   // ===== PRD-196 S1/S2 governance: approval grants (ws-admin gated) =====
-  async listApprovalGrants(status?: string): Promise<ApprovalGrantsResponse> {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-    return this.request<ApprovalGrantsResponse>(`/api/v1/approval-grants${qs}`)
+  async listApprovalGrants(status?: string, kind?: string): Promise<ApprovalGrantsResponse> {
+    // PRD-225: the Questions tab reuses this route with kind=question.
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (kind) params.set('kind', kind)
+    const qs = params.toString()
+    return this.request<ApprovalGrantsResponse>(
+      `/api/v1/approval-grants${qs ? `?${qs}` : ''}`,
+    )
   }
 
   async grantApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {

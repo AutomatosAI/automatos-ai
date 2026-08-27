@@ -70,6 +70,9 @@ export function linkFor(row: NotificationRow): string | null {
       return '/command-center?tab=governance'
     case 'watch':
       return '/command-center?tab=watchlist'
+    // PRD-225: an agent question → the Questions tab (answer resumes the work).
+    case 'question':
+      return '/command-center?tab=questions'
     default:
       return null
   }

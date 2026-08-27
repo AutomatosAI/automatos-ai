@@ -58,12 +58,12 @@
    "title": "The Questions tab — open asks + the blocked cascade",
    "description": "Command Center tab 'questions': one TABS entry + one tabCounts line (open question-kind count) + one component (command-center-shell.tsx:45-111 + render switch :191-196), following the ApprovalsInbox structure (governance/approvals-inbox.tsx + its test as the model). Card: question_md rendered as markdown (reuse the platform's existing markdown renderer — grep for the chat's), asker agent badge, subject link, answer textarea (⌘/Ctrl-Enter submits) + option buttons when options present, dismiss (tooltip notes 'answer \"use your judgment\" to unblock instead'), and THE CASCADE — downstream tasks transitively blocked behind this subject (parent_task_id + task dependency edges from the subject's mission where applicable; cycle-safe; show ≤6 with '+N more'). List reuses the EXISTING grants list endpoint filtered by kind=question — NO new list route. Data hooks: extend the EXISTING use-approval-grants hooks — and CONSOLIDATE the duplicate pair (use-approval-grants.ts vs use-approval-grants-api.ts, both live today — house rule no duplicate hooks: merge into one module, migrate both consumers ApprovalsInbox + ToolApprovalWidget, DELETE the loser in this same story). Bell: add case 'question' → /command-center?tab=questions (extends 227's linkFor cases + drift-guard fixture list).",
    "acceptanceCriteria": [
-    "Tab renders open asks newest-first with markdown + cascade (component tests incl. a cycle fixture and the +N overflow)",
-    "Answer posts to US-003's endpoint and the card leaves the list optimistically; dismiss keeps trail visible in the detail view (tests)",
-    "tabCounts badge = open question count (test)",
-    "ONE approval-grants hook module remains (the duplicate is deleted; both prior consumers migrated; grep proves no import of the deleted path)",
-    "Bell 'question' case present + drift-guard fixture updated (test)",
-    "cd frontend && npm run -s test green"
+    "DONE — questions-tab.tsx renders open asks (useQuestions=pending+kind=question) newest-first, question_md via the shared chatMarkdownComponents renderer, asker badge + subject link, and the cascade ≤6 + '+N more' (questions-tab.test.tsx: markdown, order, cascade cap/overflow, cycle-fixture flat-list). Backend list enriches question rows via board_task_cascade_detail (test_prd225_questions_list.py: cap=6, total, cycle-safe)",
+    "DONE — Answer posts to useAnswerQuestion→POST /answer and the card returns null (leaves list); ⌘/Ctrl-Enter + option buttons submit; Dismiss (useDenyApproval) flips the card to a trail note 'the asker may re-ask' with the question still visible (questions-tab.test.tsx: answer-leaves, keydown, option, dismiss-trail)",
+    "DONE — shell tabCounts.questions = questions?.grants?.length; command-center-shell-questions.test.tsx asserts the Questions tab badges '3' for 3 open and no digit when 0",
+    "DONE — use-approval-grants-api.ts git-rm'd; ONE use-approval-grants module remains; ToolApprovalWidget + its test migrated to it (mutateAsync(id) bare); grep: 0 real imports of the deleted path (only history comments)",
+    "DONE — notification-bell linkFor gains case 'question' → /command-center?tab=questions; notification-bell-links.test.ts fixture + assertions + shell-tab cross-check updated for 'question'",
+    "DONE — cd frontend && npm run -s test green (50 files, 294 tests); route-contract check exit 0 (0 new)"
    ],
    "files": [
     "frontend/components/command-center/command-center-shell.tsx",
