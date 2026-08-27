@@ -87,8 +87,12 @@ check "no os.getenv outside config.py (diff scope)" \
   "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- 'orchestrator/**/*.py' ':!orchestrator/config.py' | grep -E '^\\+' | grep -q 'os.getenv'"
 
 # --- Dead vocabulary stays dead ----------------------------------------------
+# Scoped to orchestrator source (like the os.getenv check above): a "writer"
+# lives in code. The unscoped diff also matches this PRD's own scaffolding — the
+# spec, the Ralph prompts, prd-224.json, and this check's own string all NAME the
+# token to forbid it — which is documentation of the rule, not a violation.
 check "no AWAITING_HUMAN writers introduced" \
-  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD | grep -E '^\\+' | grep -q 'AWAITING_HUMAN'"
+  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- 'orchestrator/**/*.py' | grep -E '^\\+' | grep -q 'AWAITING_HUMAN'"
 
 echo ""
 if [ "$FAIL" = "0" ]; then echo "ACCEPTANCE: PASS (PRD-224)"; exit 0; else echo "ACCEPTANCE: FAIL (PRD-224)"; exit 1; fi
