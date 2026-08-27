@@ -366,6 +366,96 @@ async def notify_mission_failed(db: Session, run: OrchestrationRun) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# PRD-227 US-002 — mission lifecycle narration into the launching chat thread
+# ---------------------------------------------------------------------------
+#
+# A mission launched from a chat narrates its lifecycle back INTO that thread
+# (approved/started → each task done/failed → completed/failed/cancelled),
+# reusing the PRD-205 background→chat seam (``deliver_background_message``) —
+# NEVER a parallel send path. Target = the run's originating chat (captured on
+# ``run.config['origin_chat_id']`` at create time, the same server-injected
+# origin watches use), else the creator's per-(workspace,user) Auto thread
+# (the messenger's ``find_or_create_auto_chat`` fallback, reached by passing
+# ``clerk_user_id=run.created_by`` with no chat_id). Task-level lines are
+# throttled: suppressed for runs with more than ``MISSION_NARRATION_TASK_CAP``
+# tasks; run-level lines always send. Source label ``"Auto · mission"`` +
+# ``link_type="mission"`` so the bell/badge deep-link the run. Distinct from
+# PRD-224 watch verdicts (judged outcomes): these are lifecycle events, worded
+# so the two never read alike. All sends are fail-soft.
+
+_MISSION_NARRATION_LABEL = "Auto · mission"
+
+
+def _mission_task_count(run: OrchestrationRun) -> int:
+    """Planned task count for a run, read from ``run.plan['tasks']``."""
+    plan = getattr(run, "plan", None) or {}
+    if isinstance(plan, dict):
+        return len(plan.get("tasks") or [])
+    return 0
+
+
+def _narrate_mission(
+    db: Session,
+    run: OrchestrationRun,
+    text: str,
+    *,
+    level: str,
+    event: str,
+) -> None:
+    """Post one mission-lifecycle line into the launching chat (or Auto thread).
+
+    ``level='task'`` lines are suppressed when the run has more than
+    ``Config.MISSION_NARRATION_TASK_CAP`` tasks; ``level='run'`` lines always
+    send. Routed through ``deliver_background_message`` (the only PRD-205
+    producer seam) and wrapped fail-soft, so a chat failure never breaks the
+    coordinator tick or lifecycle transition that produced the event.
+    """
+    try:
+        if level == "task" and _mission_task_count(run) > Config.MISSION_NARRATION_TASK_CAP:
+            return
+        cfg = getattr(run, "config", None) or {}
+        origin_chat = cfg.get("origin_chat_id") if isinstance(cfg, dict) else None
+
+        from services.chat_messenger import deliver_background_message
+
+        deliver_background_message(
+            db,
+            workspace_id=run.workspace_id,
+            text=text,
+            source={"origin": "mission", "label": _MISSION_NARRATION_LABEL, "event": event},
+            chat_id=str(origin_chat) if origin_chat else None,
+            clerk_user_id=getattr(run, "created_by", None),
+            link_type="mission",
+            link_id=str(run.id),
+        )
+    except Exception:  # noqa: BLE001 — narration is best-effort, never fatal
+        logger.error(
+            "[Coordinator] mission narration (%s) failed for run %s",
+            event, getattr(run, "id", "?"), exc_info=True,
+        )
+
+
+def _narrate_run_terminal(db: Session, run: OrchestrationRun) -> None:
+    """Narrate a run reaching a terminal state. Run-level → never throttled.
+
+    Reads ``run.state``; a non-terminal state produces nothing. Wording is
+    lifecycle-framed so it stays distinguishable from a PRD-224 watch verdict.
+    """
+    state = getattr(run, "state", None)
+    goal = getattr(run, "goal", None) or "Mission"
+    if state == RunState.COMPLETED.value:
+        text = f"Mission complete: {goal[:150]}"
+    elif state == RunState.FAILED.value:
+        detail = getattr(run, "stop_detail", None) or getattr(run, "stop_reason", None) or "failed"
+        text = f"Mission failed: {str(detail)[:200]}"
+    elif state == RunState.CANCELLED.value:
+        text = f"Mission cancelled: {goal[:150]}"
+    else:
+        return
+    _narrate_mission(db, run, text, level="run", event=f"run_{state}")
+
+
 async def notify_mission_budget_paused(db: Session, run: OrchestrationRun) -> None:
     """PRD-204 S4: dispatch ``mission_budget_paused`` at the budget-pause
     transition (the dispatcher blocked and moved the run to PAUSED --
@@ -1713,6 +1803,9 @@ class CoordinatorService:
                     f"stop_reason={run.stop_reason or 'unspecified'}"
                 ),
             )
+            # PRD-227 US-002: narrate the run's terminal outcome into the launching
+            # thread (run-level). Same once-per-run guarantee as the heartbeat above.
+            _narrate_run_terminal(db, run)
 
     # ------------------------------------------------------------------
     # Joiner checkpoint — bounded replanning (PRD-164 S4)
@@ -2312,6 +2405,15 @@ class CoordinatorService:
             status="ok" if result.get("status") == "success" else "error",
         )
 
+        # PRD-227 US-002: narrate the task's terminal outcome into the launching
+        # thread (task-level → throttled for large plans). Only fire on a settled
+        # terminal state — a re-queued retry stays QUEUED and must not narrate.
+        _tlabel = task.title or f"task {task.id}"
+        if task.state == TaskState.COMPLETED.value:
+            _narrate_mission(db, run, f"✓ Task complete: {_tlabel}", level="task", event="task_completed")
+        elif task.state == TaskState.FAILED.value:
+            _narrate_mission(db, run, f"✗ Task failed: {_tlabel}", level="task", event="task_failed")
+
         # PRD-108: Inject completed task output into shared field
         if result.get("status") == "success":
             db.refresh(task)
@@ -2768,6 +2870,9 @@ class CoordinatorService:
                             ),
                         )
                         acted += 1
+                        # PRD-227 US-002: narrate the approval-expiry cancel
+                        # (out-of-tick sweep — the tick observer never sees it).
+                        _narrate_run_terminal(db, run)
                         logger.info("Mission %s cancelled (approval expired)", run.id)
                     except ConflictError:
                         logger.warning(
@@ -3160,6 +3265,14 @@ class CoordinatorService:
 
         self._queue_initial_tasks(db, run)
 
+        # PRD-227 US-002: narrate the start into the launching thread (run-level).
+        _n = _mission_task_count(run)
+        _narrate_mission(
+            db, run,
+            f"Mission approved — starting {_n} task{'s' if _n != 1 else ''}: {(run.goal or '')[:120]}",
+            level="run", event="run_started",
+        )
+
         logger.info("Mission %s approved by %s → running", run_id, actor_id)
         return run
 
@@ -3324,6 +3437,10 @@ class CoordinatorService:
         )
 
         VerificationService.clear_cache(run.id)
+        # PRD-227 US-002: narrate the cancel into the launching thread (run-level).
+        # cancel_mission is an out-of-tick API path, so the tick observer never
+        # sees this run terminal — narrate here.
+        _narrate_run_terminal(db, run)
         logger.info("Mission %s cancelled by %s", run_id, actor_id)
         return run
 
