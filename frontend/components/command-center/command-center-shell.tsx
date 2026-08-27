@@ -25,6 +25,8 @@ import { useActivitySchedule } from '@/hooks/use-activity-api'
 import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
 import { useWatches } from '@/hooks/use-watches-api'
 
+import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
+
 import { StatsStrip } from './stats-strip'
 import { IsItWorkingStrip } from './is-it-working-strip'
 import { SummaryTab } from './summary-tab'
@@ -153,6 +155,9 @@ export function CommandCenterShell() {
           <p className="cc-sub">{lede}</p>
         </div>
         <div className="cc-actions">
+          {/* PRD-222 US-014: trial balance, honest on the Command Center too —
+              same snapshot the chat pill reads; self-hides once converted. */}
+          <TrialBalancePill />
           <button
             type="button"
             className="cc-btn"

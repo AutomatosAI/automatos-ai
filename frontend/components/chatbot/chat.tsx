@@ -24,6 +24,9 @@ import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, Coding
 import { useWorkspace } from '@/components/workspace-provider'
 import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
 import { PowerUpCard } from '@/components/onboarding/power-up-card'
+import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
+import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
+import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 
 // Resizable panels for chat + widget split
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -209,7 +212,7 @@ export function Chat({
   // PRD-221 S5: the main chat page sends its own page context too (page 'chat').
   const pageContext = usePageContext()
 
-  const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
+  const { messages, setMessages, sendMessage, status, stop, reload, errorCode } = useChat({
     id: activeChatId,
     initialMessages,
     pageContext,
@@ -935,13 +938,33 @@ export function Chat({
   // leave off?" resume, which has nothing to resume) in the empty chat state.
   const isOnboardingOpener = workspace?.onboarding?.stage === 'not_started'
 
+  // PRD-222 US-014: the exhausted state is reachable two ways — the US-002
+  // snapshot flipping to 'exhausted', or the typed 'trial_exhausted' code the
+  // last send returned. Either owns the callout slot; the standalone power-up
+  // card steps aside so the workspace never sees two credential cards at once.
+  const trialExhausted =
+    workspace?.onboarding?.trial?.state === 'exhausted' ||
+    errorCode === TRIAL_EXHAUSTED_CODE
+
   return (
     <>
+      {/* PRD-222 US-014: the trial balance pill — visible on the chat surface
+          while a trial is active/warned/exhausted, hidden once converted. */}
+      <TrialBalancePill className="absolute top-3 right-4 z-30" />
+      {/* PRD-222 US-014: deterministic exhausted banner (embeds the power-up
+          card, no model call). Renders on the exhausted snapshot OR the typed
+          trial_exhausted error from the last send. */}
+      {trialExhausted && (
+        <div className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4">
+          <TrialExhaustedBanner errorCode={errorCode} />
+        </div>
+      )}
       {/* PRD-222 US-013: the power-up card appears once the workspace reaches
           the powerup stage (post-BOOM) — a floating chat callout above the
           input. Mounted once here so it survives every layout branch; the card
-          self-guards on the stage too. */}
-      {workspace?.onboarding?.stage === 'powerup' && (
+          self-guards on the stage too. Yields to the exhausted banner, which
+          embeds the same card. */}
+      {workspace?.onboarding?.stage === 'powerup' && !trialExhausted && (
         <div className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4">
           <PowerUpCard />
         </div>
