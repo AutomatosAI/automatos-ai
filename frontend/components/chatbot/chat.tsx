@@ -23,6 +23,7 @@ import { Canvas } from '@/components/workspace'
 import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, CodingCanvasWidgetData } from '@/components/widgets/types'
 import { useWorkspace } from '@/components/workspace-provider'
 import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
+import { PowerUpCard } from '@/components/onboarding/power-up-card'
 
 // Resizable panels for chat + widget split
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -936,6 +937,15 @@ export function Chat({
 
   return (
     <>
+      {/* PRD-222 US-013: the power-up card appears once the workspace reaches
+          the powerup stage (post-BOOM) — a floating chat callout above the
+          input. Mounted once here so it survives every layout branch; the card
+          self-guards on the stage too. */}
+      {workspace?.onboarding?.stage === 'powerup' && (
+        <div className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4">
+          <PowerUpCard />
+        </div>
+      )}
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
       {hasWidgets && (
         <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">

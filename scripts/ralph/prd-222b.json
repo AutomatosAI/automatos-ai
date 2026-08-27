@@ -41,10 +41,10 @@
    "title": "Frontend: power-up card (key entry, live result, decline path)",
    "description": "frontend/components/onboarding/power-up-card.tsx — rendered in chat at the powerup stage (and reusable by US-014's exhausted banner): 'keep Auto running on your business' framing, masked key input posting to the existing credentials endpoint, the OpenRouter recommendation with how-to link on top, 'I already use OpenAI/Anthropic/…' collapsed beneath, live validation result rendered in-flow (provider error text on failure), trial balance line, deep link to Settings → Credentials as the skip-ahead, and an explicit dismiss ('later') that leaves the flow intact. Follow the existing chat-card visual pattern (grep the chatbot components for card donors — do not invent a new visual language). Key value handling: posted to the API, never logged, never stored client-side.",
    "acceptanceCriteria": [
-    "power-up-card.tsx exists, imported by the chat surface, rendered for stage==='powerup' (component test)",
-    "Success path shows the validated result and the full-catalog line; failure path renders the provider error in the card; dismiss keeps chat usable (tests)",
-    "Key input is masked; the raw key value appears in no log statement and no client-side store (grep + test)",
-    "cd frontend && npm run -s test green"
+    "DONE — components/onboarding/power-up-card.tsx: imported + rendered in chat.tsx as a fixed callout gated on stage==='powerup'; self-guards (renders null for 'questions'); `embedded` prop bypasses the gate for US-014 reuse. Card carries the continuation framing ('Keep Auto running on your business'), OpenRouter recommendation + how-to link on top, collapsed 'I already use OpenAI/Anthropic/Google', trial-balance line, and the Settings→Credentials deep link. Test asserts render-at-powerup / null-otherwise / embedded-renders",
+    "DONE — posts {provider:'openrouter', api_key} to POST /api/keys (BYOK add_api_key, US-006 live-validates); success → validation.valid → 'API key is valid' + 'full model catalog is unlocked' + refreshWorkspace(); failure → validation.message ('Invalid key: 401 Unauthorized') rendered in-card with no unlocked line; dismiss → card unmounts (chat usable). Covered in power-up-card.test.tsx",
+    "DONE — input type='password'; grep of power-up-card.tsx finds no console/localStorage/sessionStorage/setItem/store (only a doc comment); test spies console.{log,info,warn,error,debug} and scans localStorage+sessionStorage after submit, asserting the fake key never appears; key cleared from state on success. Fixture key sk-or-FAKEKEY-… is obviously fake (gitleaks-safe)",
+    "DONE — cd frontend && npm run -s test: 49 files / 290 tests pass (power-up-card 8 new)"
    ],
    "files": [
     "frontend/components/onboarding/power-up-card.tsx",
