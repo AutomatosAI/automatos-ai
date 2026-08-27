@@ -2426,10 +2426,6 @@
       "path": "/api/verticals/{vertical}/gdpr/erase-subject"
     },
     {
-      "method": "GET",
-      "path": "/api/verticals/{vertical}/gdpr/export"
-    },
-    {
       "method": "POST",
       "path": "/api/verticals/{vertical}/provision"
     },
@@ -2448,10 +2444,6 @@
     {
       "method": "POST",
       "path": "/api/voice/retell/events"
-    },
-    {
-      "method": "",
-      "path": "/api/voice/retell/llm-websocket/{call_id}"
     },
     {
       "method": "POST",
@@ -2770,7 +2762,15 @@
       "path": "/api/workflows/cleanup/old"
     },
     {
+      "method": "POST",
+      "path": "/api/workflows/execute"
+    },
+    {
       "method": "GET",
+      "path": "/api/workflows/executions/"
+    },
+    {
+      "method": "POST",
       "path": "/api/workflows/executions/"
     },
     {
@@ -2820,6 +2820,10 @@
     {
       "method": "POST",
       "path": "/api/workflows/{workflow_id}/duplicate"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflows/{workflow_id}/execute"
     },
     {
       "method": "POST",
@@ -2888,10 +2892,6 @@
     {
       "method": "POST",
       "path": "/api/workspaces/{workspace_id}/canvas/commit"
-    },
-    {
-      "method": "GET",
-      "path": "/api/workspaces/{workspace_id}/canvas/commit-preview"
     },
     {
       "method": "POST",
