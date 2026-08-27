@@ -1,0 +1,57 @@
+{
+ "project": "Automatos AI Platform — PRD-227 Board Light-Up (Auto-as-Manager wave, chain 1/6)",
+ "branchName": "ralph/prd-227-board-light-up",
+ "description": "Cut from origin/main — chain position 1/6 of the Auto-as-Manager wave (map: docs/PRDS/PRD-WAVE-AUTO-MANAGER.md, seeded on this branch with the spec docs/PRDS/PRD-227-BOARD-LIGHT-UP.md). SCOPE = three wiring diffs that make existing loops visible: (US-001) agent-side board handlers emit the same SSE events human moves already emit, and gain blocked/failed status parity; (US-002) mission lifecycle narrates into the launching chat thread via the existing PRD-205 background-message seam; (US-003) the notification bell can navigate approval_grant and watch link types plus a drift guard. BAKED DECISIONS (Gerard 2026-08-27, from PRD-227 §8 proposals): narration is ON for ALL missions — non-chat-launched runs narrate to the per-user Auto thread via the existing find_or_create_auto_chat fallback; MISSION_NARRATION_TASK_CAP default 8 (task-level lines suppressed above it; run-level lines always). ANCHORS (verified 2026-08-27 — RE-VERIFY by grep before relying): agent handler orchestrator/modules/tools/discovery/handlers_board_tasks.py:258-320 (allowed statuses ~:270, NO notify call); human path notifies at orchestrator/api/board_tasks.py:912-916, blocked handling :548-553 + :898-902; notify_board_event orchestrator/services/board_events.py:38-70 (fail-soft — a NOTIFY failure never fails the caller); coordinator seams orchestrator/services/coordinator_service.py:3129 (approve_plan) + :2272 (_record_task_result); messenger orchestrator/services/chat_messenger.py:96-202 (deliver_background_message is the fail-soft producer wrapper; today's ONLY producers are watch_notifications.py:87-100 and scheduled_task_service.py:446-465); bell frontend/components/notifications/notification-bell.tsx:42-64 linkFor; the two unlinked producers write link_type at orchestrator/modules/tools/execution/tool_grants.py:412 and orchestrator/services/watch_notifications.py:75. BINDING RULES: NO new alembic revisions (acceptance-enforced); NO new tables; NO new routes (route manifest untouched); NO new SSE event names (board_changed/chat_changed only — services/board_events.py:229-231); no os.getenv outside orchestrator/config.py (MISSION_NARRATION_TASK_CAP lives in config.py); NOTIFY/narration failures must be fail-soft (never fail the tool call or the coordinator tick); canonical terms (Mission, Task, Auto is a proper noun); PURE tests (@integration skips cleanly without local Postgres; real-Postgres is CI test.yml per-story push); NEVER 'git add -A'/'git add .'/'-u' (node_modules untracked and NOT gitignored — stage explicit paths only); never 'git stash -u'. Frontend gate: cd frontend && npm run -s test green after US-003.",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "Agent-side board moves push SSE + blocked/failed parity",
+   "description": "In orchestrator/modules/tools/discovery/handlers_board_tasks.py: after every successful board write in the create/assign/update-status handlers, call notify_board_event with the same payload shape the human path uses (api/board_tasks.py:912-916 — re-verify the exact payload). Extend update_board_task_status's allowed statuses (~:270) with 'blocked' (REQUIRES a blocked_reason argument, sets blocked_at — mirror api/board_tasks.py:548-553) and 'failed', keeping transition validation identical to the HTTP path (:898-902). Import/notify must be fail-soft exactly like board_events.py:38-70 — a NOTIFY failure logs and continues, never raises into the tool call. Do NOT change the SSE frame vocabulary.",
+   "acceptanceCriteria": [
+    "Agent-side create/assign/update-status handlers each call notify_board_event on success (grep call sites in handlers_board_tasks.py); payload shape matches the human path (test asserts the emitted payload keys)",
+    "platform_update_task_status accepts 'blocked' only with blocked_reason (sets blocked_at + blocked_reason; test) and 'failed'; invalid transitions rejected identically to the HTTP path (parametrized test)",
+    "A forced NOTIFY failure (monkeypatched) does not fail the tool call (test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_board_tasks.py",
+    "orchestrator/services/board_events.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "Mission lifecycle narrates into the launching thread",
+   "description": "Add mission narration producers on the EXISTING PRD-205 seam (services/chat_messenger.py deliver_background_message — reuse, never a parallel path): (a) plan approved → running (coordinator_service.py:3129 approve_plan), (b) each task terminal state — one line per task (:2272 _record_task_result), (c) run terminal states (completed/failed/cancelled — find the run-terminal transition sites in coordinator_service.py by grep). Target = the mission's originating chat; capture origin_chat_id for missions the same server-injected way watches do (platform_executor.py:1111 pattern — re-verify how handlers_missions.py can carry it; if platform_create_mission's executor context already exposes the chat id, persist it on the run's config JSONB, rebuild-don't-mutate) and fall back to the per-user Auto thread (find_or_create_auto_chat) for wizard/scheduled runs. Throttle: task-level lines are SUPPRESSED when the run has more than MISSION_NARRATION_TASK_CAP tasks (new config.py constant, default 8, no os.getenv elsewhere); run-level lines always send. Source label 'Auto · mission' with link_type='mission', link_id=run id (the bell + badge already deep-link missions). All sends via deliver_background_message (fail-soft).",
+   "acceptanceCriteria": [
+    "Chat-launched mission fixture: approve/start, task-done, and run-terminal narration messages produced with source label 'Auto · mission' + link_type='mission' (messenger monkeypatched; assert texts + targets)",
+    "A run with more tasks than MISSION_NARRATION_TASK_CAP produces run-level lines only (test at cap boundary)",
+    "A mission with no originating chat narrates to the Auto thread (find_or_create_auto_chat call asserted)",
+    "MISSION_NARRATION_TASK_CAP defined in orchestrator/config.py; grep proves no os.getenv outside config.py in the diff",
+    "Narration failure (monkeypatched raise) does not fail approve_plan or _record_task_result (test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/services/coordinator_service.py",
+    "orchestrator/services/chat_messenger.py",
+    "orchestrator/config.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "Bell deep-links approval_grant + watch, with a drift guard",
+   "description": "frontend/components/notifications/notification-bell.tsx linkFor (~:42-64): add case 'approval_grant' → the Command Center governance approvals surface (/command-center?tab=governance — re-verify the exact tab param the shell reads at command-center-shell.tsx:77-78) and case 'watch' → /command-center?tab=watchlist. Then the drift guard: a frontend test that enumerates the link_type literals the BACKEND writes (maintain a checked-in fixture list in the test, seeded from grep of link_type= producers: task, mission, playbook, heartbeat, report, trigger, agent, approval_grant, watch) and asserts linkFor returns a non-null route for every one — so a future producer without a bell case fails CI instead of navigating nowhere. Keep the fixture list commented with its regeneration grep.",
+   "acceptanceCriteria": [
+    "linkFor handles 'approval_grant' and 'watch' with routes that match real Command Center tab params (component test)",
+    "Drift-guard test exists, covers all nine current link_type literals, and fails when a literal is removed from linkFor (self-check included)",
+    "cd frontend && npm run -s test green"
+   ],
+   "files": [
+    "frontend/components/notifications/notification-bell.tsx",
+    "frontend/components/command-center/command-center-shell.tsx",
+    "frontend/"
+   ]
+  }
+ ]
+}
