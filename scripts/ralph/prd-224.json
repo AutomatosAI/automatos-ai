@@ -1,0 +1,91 @@
+{
+ "project": "Automatos AI Platform — PRD-224 The Ticket Lane: Auto as Line Manager (Auto-as-Manager wave, chain 2/6)",
+ "branchName": "ralph/prd-224-ticket-lane",
+ "description": "STACKED branch: ralph/prd-224-ticket-lane ← ralph/prd-227-board-light-up (chain 2/6; PRD-227's agent-move SSE + blocked/failed parity are IN your tree — build on them, never duplicate; diff scope for review = merge-base vs the 227 branch). Spec seeded at docs/PRDS/PRD-224-AUTO-TICKET-LANE.md; wave map docs/PRDS/PRD-WAVE-AUTO-MANAGER.md. SCOPE = the middle lane between DELEGATE and MISSION: a named single-agent request in chat becomes an assigned board ticket, started, supervised by a watch, with the verdict reported back into the originating thread. BAKED DECISIONS (Gerard 2026-08-27, from PRD-224 §8 proposals): ASSIGN tickets START IMMEDIATELY (in_progress) unless the user's phrasing defers ('queue it', 'later', 'when free' → assigned, heartbeat pickup); an ASSIGN-shaped request with NO resolvable agent name makes Auto ASK in-thread — never reflexive matcher auto-pick; AUTO_TICKET_WATCH default ON (config.py). ANCHORS (verified 2026-08-27 — RE-VERIFY by grep): ticket tools orchestrator/modules/tools/discovery/actions_board_tasks.py:10-235 (platform_create_task already takes assigned_agent_name; update→in_progress triggers _launch_task_execution via handlers_board_tasks.py:287-296); AutoBrain orchestrator/consumers/chatbot/auto.py:47-65 (Action enum RESPOND|DELEGATE|WORKFLOW-deprecated|MISSION; ComplexityAssessment.target_agent_id exists), consumed at orchestrator/api/chat.py:391-432; watch enums orchestrator/core/models/watch_enums.py (WatchTargetType) + orchestrator/core/models/watches.py:91 (target_type is a plain String(32) — NO migration needed) + :53 partial unique (workspace_id,target_type,target_id) + :145 lineage; create_watch schema orchestrator/modules/tools/discovery/actions_watches.py:16-110 (enum mission|playbook_execution|scheduled_playbook); decider orchestrator/services/watch_decider.py; actions orchestrator/services/watch_actions.py (ACTION_ESCALATE :65, escalate_watch_now :543-551); ticker claims due watches orchestrator/services/watch_ticker.py; verdict→chat narration orchestrator/services/watch_notifications.py:37-109; run-now path orchestrator/api/board_tasks.py:830; notify_task_available sites api/board_tasks.py:398,632,816,862 (NOT in the chat handlers — that gap is US-001). BINDING RULES: ZERO new alembic revisions (watch target_type is a string; board tasks unchanged — a new alembic file is a hard acceptance failure); NO new tables; NO new routes (route manifest untouched); NO new router files; reuse the 3-file platform-tool pattern for any schema change to existing actions; watches for tickets REUSE decider/actions/ticker/notifications — never a parallel supervision path; escalation on budget exhaustion uses the EXISTING escalation card path (services/escalation_service.py) — PRD-225's question-asks upgrade it later, do NOT build question constructs here; no os.getenv outside orchestrator/config.py; do NOT resurrect RunState.AWAITING_HUMAN / TASK_HUMAN_* (dead vocabulary, zero writers — tickets block via existing 'blocked' status only); canonical terms (Task = BoardTask, Mission, Playbook, Auto is a proper noun); PURE tests (@integration skips cleanly; real-Postgres is CI test.yml per-story push); NEVER 'git add -A'/'git add .'/'-u' (node_modules untracked, NOT gitignored); never 'git stash -u'. No frontend stories in this PRD.",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "Chat-created tickets wake the dispatcher (notify_task_available)",
+   "description": "orchestrator/modules/tools/discovery/handlers_board_tasks.py: the create/assign/update-status handlers call notify_task_available exactly as the HTTP layer does (re-verify the call shape at api/board_tasks.py:398,632,816,862) so an assigned ticket is claimed on the LISTEN wake instead of the fallback poll. Fail-soft like the PRD-227 notify calls already in these handlers (a NOTIFY failure never fails the tool call).",
+   "acceptanceCriteria": [
+    "notify_task_available called from the chat-side create/assign/update handlers on success (grep call sites; test asserts the emit for an assigned task)",
+    "Forced NOTIFY failure does not fail the tool call (monkeypatched test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_board_tasks.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "Watches learn target_type board_task (enum + schema + terminal detection + scoring)",
+   "description": "Extend WatchTargetType with board_task (core/models/watch_enums.py — enum-in-code; watches.target_type is String(32), NO migration). platform_create_watch's target_type enum gains 'board_task', target_id = the integer task id as a string (actions_watches.py:16-110; document it in the param description). watch_decider: terminal detection for board tasks — status done/failed terminal; 'review' with review_feedback counts as output to score; blocked past the watch deadline → escalate. Score the task's recorded result/output against success_criteria via the SAME scoring path mission outputs use (re-verify how the decider fetches mission output and mirror the fetch for BoardTask — reuse the scorer, never a second one). The partial unique (workspace_id,target_type,target_id) already prevents double-supervision — add a test proving a duplicate create is rejected/idempotent per existing semantics.",
+   "acceptanceCriteria": [
+    "WatchTargetType.BOARD_TASK exists; create accepts target_type='board_task' with an integer-id string; unknown task id rejected with a clear error (tests)",
+    "Decider fixtures: done→verdict scored; failed→failure verdict; review+review_feedback→scored; blocked past deadline→escalation path (parametrized test)",
+    "Scoring reuses the existing scorer (call-site grep proves no second scorer implementation)",
+    "Duplicate watch on the same task follows the existing uniqueness semantics (test)",
+    "ZERO new alembic files (git diff --diff-filter=A vs base empty for alembic/versions/)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/core/models/watch_enums.py",
+    "orchestrator/modules/tools/discovery/actions_watches.py",
+    "orchestrator/services/watch_decider.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "Bounded corrective action + escalation for ticket watches",
+   "description": "orchestrator/services/watch_actions.py: for board_task targets, the corrective action for a below-threshold/failed verdict is a re-run via the EXISTING run-now machinery (re-verify api/board_tasks.py:830 internals — call the shared function, not the HTTP route), respecting action_budget and appending to lineage exactly as mission reruns do (watches.py:145). Budget exhaustion or a blocked-past-deadline escalates via the EXISTING escalation service (escalate_watch_now :543-551 / the escalation card path in services/escalation_service.py) — no new escalation construct. Verdict/action/escalation narration to chat must flow through the EXISTING watch_notifications.py seam untouched (it already handles watch_verdict|watch_action|watch_escalation).",
+   "acceptanceCriteria": [
+    "Below-bar ticket verdict triggers one re-run through the shared run-now function (call-site grep; test with action_budget=1 shows exactly one corrective attempt then escalation)",
+    "Escalation goes through the existing escalation service (grep proves no new escalation path); watch_notifications narrates it (test asserts deliver_background_message called with watch_escalation)",
+    "Lineage appended on rerun (test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/services/watch_actions.py",
+    "orchestrator/services/watch_notifications.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-004",
+   "title": "Action.ASSIGN in AutoBrain — the middle lane",
+   "description": "consumers/chatbot/auto.py: add Action.ASSIGN to the enum (leave WORKFLOW deprecated — do not reuse it). Assessment prompt gains the three-lane rubric: DELEGATE = the specialist answers THIS conversation; ASSIGN = a named/single agent does work OFF-THREAD on the board (signals: explicit agent name or role possessive 'my accountant agent', a deliverable outliving the turn, no conversational answer needed); MISSION = multi-agent project. Populate ComplexityAssessment.target_agent_id from roster name-matching (re-verify how the roster reaches assess — _ROSTER_LIMIT at auto.py:40). At api/chat.py (~:391-432): ASSIGN biases the turn — tool_hints steer to platform_create_task/platform_assign_task/platform_update_task_status and a context directive instructs Auto to file the ticket (title + description; description follows the 4-part contract shape ONCE PRD-226 lands — here just require a self-contained description), START it immediately (in_progress) unless the user's phrasing defers ('queue it', 'later', 'when free' → assigned), and confirm in ONE line with the task id. NO resolvable agent name for an ASSIGN-shaped request → the directive tells Auto to ask in-thread (list candidate agents via platform_list_agents), never auto-pick. Tests are LLM-free: enum + parse round-trip, the rubric text present in the assessment prompt builder, directive assembly for ASSIGN (with and without target_agent_id), and chat.py's dispatch of the ASSIGN case (unit level, assessment stubbed).",
+   "acceptanceCriteria": [
+    "Action.ASSIGN exists; parser accepts it; WORKFLOW untouched (tests)",
+    "Assessment prompt contains the three-lane rubric incl. the named-agent and defer-phrasing signals (string-presence test on the prompt builder)",
+    "api/chat.py handles ASSIGN: tool_hints include the three ticket tools; directive present; stubbed-assessment unit test covers named-agent, no-name (ask path), and defer-phrasing variants",
+    "RESPOND/DELEGATE/MISSION behavior unchanged (existing tests green)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/consumers/chatbot/auto.py",
+    "orchestrator/api/chat.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-005",
+   "title": "Auto-supervision on assignment (AUTO_TICKET_WATCH)",
+   "description": "When a ticket is created via the ASSIGN lane (created_by_type='agent' + assigned agent + the ASSIGN directive context), auto-attach a run_and_report watch targeting it (US-002's board_task type), with success_criteria derived from the ticket description. Config dial AUTO_TICKET_WATCH in orchestrator/config.py, default True; when off, no watch is attached and the confirmation line says so. The confirmation line when ON names the supervision ('supervised — I'll report back here'). Implement at the handler level (handlers_board_tasks.py create path, gated on the ASSIGN context flag carried via the executor's caller context — re-verify build_tool_caller_context at consumers/chatbot/service.py:103 for where to carry it), so the LLM cannot forget to attach it.",
+   "acceptanceCriteria": [
+    "ASSIGN-lane ticket creation attaches a board_task watch (policy run_and_report) in the same transaction path (test); non-ASSIGN creations (heartbeat, recipes) attach nothing (test)",
+    "AUTO_TICKET_WATCH=False attaches nothing and the tool result notes it (test)",
+    "AUTO_TICKET_WATCH read in config.py only (grep: no os.getenv outside config.py in diff)",
+    "End-to-end fixture: create→launch→complete produces a watch verdict narration into the originating thread via the existing watch_notifications seam (messenger monkeypatched, test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_board_tasks.py",
+    "orchestrator/config.py",
+    "orchestrator/consumers/chatbot/service.py",
+    "orchestrator/tests/"
+   ]
+  }
+ ]
+}
