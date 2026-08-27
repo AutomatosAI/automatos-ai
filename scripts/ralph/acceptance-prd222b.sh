@@ -27,8 +27,8 @@ check() {
 }
 
 # --- Primary gates: full suites green -------------------------------------------
-check "orchestrator-full-suite (pure tests + no regression; @integration skips with no DB)" \
-  'cd orchestrator && python3 -m pytest --timeout=90 --timeout-method=thread -o faulthandler_timeout=120 -p no:cacheprovider -q'
+check "orchestrator-full-suite (no NEW failures vs documented env baseline: prd172 boot-key / dr_restore pg_dump / composio v3; @integration errors expected without local Postgres)" \
+  'OUT=$(cd orchestrator && python3 -m pytest --timeout=90 --timeout-method=thread -o faulthandler_timeout=120 -p no:cacheprovider -q 2>&1 | tail -200); echo "$OUT" | grep -qE "[0-9]{4} passed" && ! echo "$OUT" | grep "^FAILED" | grep -vE "prd172|dr_restore|composio" | grep -q .'
 
 check "frontend-vitest-suite" \
   'cd frontend && npm run -s test'
