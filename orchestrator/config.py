@@ -921,6 +921,12 @@ class Config:
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
+    # PRD-227 US-002: mission-narration throttle. A mission narrates its lifecycle
+    # back into the launching chat (approved → task done/failed → completed/failed/
+    # cancelled). Run-level lines always send; task-level lines are SUPPRESSED for
+    # runs with more than this many tasks, to keep large plans readable. Default 8
+    # (Gerard, 2026-08-27). Narration itself is on for all missions.
+    MISSION_NARRATION_TASK_CAP: int = int(os.getenv("MISSION_NARRATION_TASK_CAP", "8"))
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))

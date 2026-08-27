@@ -103,6 +103,19 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     config = dict(params.get("config") or {})
     created_by = _actor(params)
 
+    # PRD-227 US-002: persist the originating chat on the run config so the
+    # coordinator narrates the mission's lifecycle back into that thread. Prefer
+    # the server-injected origin (executor _WATCH_ORIGIN_ACTIONS — never an LLM
+    # arg, the same source watches use), else the UI suggestion-card's chat_id.
+    # Absent for wizard/scheduled runs, which narrate to the creator's Auto
+    # thread. Fresh-dict assignment (config becomes run.config at create) — no
+    # in-place JSONB mutation.
+    from modules.tools.discovery.handlers_watches import _origin_chat_id
+    _origin = _origin_chat_id(params)
+    _origin_str = str(_origin) if _origin else (str(config["chat_id"]) if config.get("chat_id") else None)
+    if _origin_str and not config.get("origin_chat_id"):
+        config["origin_chat_id"] = _origin_str
+
     # The UI suggestion-card sets context_messages on its API call; the executor
     # path did not. Attach recent conversation here too — never clobber a
     # caller-supplied context.
