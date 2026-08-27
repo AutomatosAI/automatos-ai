@@ -224,3 +224,127 @@ def set_segment(db: Any, workspace: Any, segment: dict) -> dict[str, Any]:
     doc["segment"] = merged
     doc["updated_at"] = _now_iso()
     return _persist(db, workspace, doc)
+
+
+# =========================================================================== #
+# PRD-222 W1·S10 (D9) — the dev onboarding RESET.
+#
+# This is the ONLY sanctioned BACKWARD writer of the onboarding document. It
+# rewinds ONE workspace to a fresh ``not_started`` so the operator can re-run
+# onboarding with a single alias account, instead of provisioning and hard-
+# deleting a workspace per attempt. It does so by REPLACING the whole document
+# (rebuild-don't-mutate), NOT by driving ``advance_onboarding_stage`` — the
+# monotonic/terminal validator above stays strict and untouched.
+# =========================================================================== #
+
+
+def _regrant_trial(db: Any, workspace: Any) -> tuple[Optional[dict[str, Any]], str]:
+    """Re-grant the one-time trial after ``reset_trial`` stripped it.
+
+    REUSES the provisioning grant (``grant_trial_at_provisioning``) — never a
+    second grant implementation. The workspace's onboarding doc must already be
+    trial-less AND flushed to the DB when this runs, so the grant's one-per-user
+    check sees the strip. A kill-switch / daily-cap / already-held decline is a
+    reported PAUSE, not an error: the grant returns ``None`` and we surface it.
+    """
+    from services.trial_ledger import grant_trial_at_provisioning
+
+    trial = grant_trial_at_provisioning(
+        db, getattr(workspace, "id", None), owner_id=getattr(workspace, "owner_id", None)
+    )
+    if trial is None:
+        return None, "paused (trial disabled, daily cap reached, or already held)"
+    return trial, "granted"
+
+
+def reset_onboarding(
+    db: Any,
+    workspace: Any,
+    *,
+    reset_trial: bool = False,
+    wipe_built: bool = False,
+    wipe_credentials: bool = False,
+) -> dict[str, Any]:
+    """Rewind ONE workspace's onboarding to a fresh ``not_started``.
+
+    Full-document JSONB REASSIGNMENT (a brand-new dict is assigned to
+    ``workspace.onboarding`` — never an in-place edit), matching ``_write_trial``'s
+    whole-value style so the PRD-220 silent-loss bug class cannot occur. Stamps an
+    incrementing ``resets`` counter and ``last_reset_at`` inside the doc.
+
+    Flags (all default off):
+      * ``reset_trial`` — strip the trial, then re-grant a fresh $0 active one via
+        the provisioning grant (a decline is a reported pause, not an error).
+      * ``wipe_built`` — delete what onboarding built (non-system agents + deps,
+        missions + orchestration tasks, reports/Deliverables, intake documents +
+        graphs, and the S3 document prefix), sparing identity/access/credential/
+        system-agent survivors — reusing ``services.workspace_purge`` machinery.
+      * ``wipe_credentials`` — delete THIS workspace's credential rows only.
+
+    Returns a report dict of everything reset/wiped. Commits when ``db`` is a real
+    session; ``db is None`` runs the pure document rebuild (logic tests).
+    """
+    prev = get_onboarding(workspace)  # deep copy
+    now = _now_iso()
+    resets = int(prev.get("resets") or 0) + 1
+    workspace_id = getattr(workspace, "id", None)
+
+    report: dict[str, Any] = {
+        "stage": INITIAL_STAGE,
+        "resets": resets,
+        "last_reset_at": now,
+        "reset_trial": reset_trial,
+        "wipe_built": wipe_built,
+        "wipe_credentials": wipe_credentials,
+        "built": None,
+        "credentials": None,
+        "trial": None,
+        "trial_note": None,
+    }
+
+    # 1) Destructive wipes first, inside the same transaction, so a failure
+    #    aborts before the document is rewritten (all-or-nothing).
+    if wipe_built and db is not None and workspace_id is not None:
+        from services.workspace_purge import purge_built_artifacts
+
+        report["built"] = purge_built_artifacts(db, workspace_id)
+    if wipe_credentials and db is not None and workspace_id is not None:
+        from services.workspace_purge import purge_workspace_credentials
+
+        report["credentials"] = purge_workspace_credentials(db, workspace_id)
+
+    # 2) Rebuild the onboarding document (full reassignment — never mutate).
+    preserved_trial = None if reset_trial else prev.get("trial")
+    new_doc: dict[str, Any] = {
+        "stage": INITIAL_STAGE,
+        "stages": {},
+        "segment": {},
+        "resets": resets,
+        "last_reset_at": now,
+        "updated_at": now,
+    }
+    if preserved_trial is not None:
+        new_doc["trial"] = copy.deepcopy(preserved_trial)
+        report["trial"] = preserved_trial
+        report["trial_note"] = "preserved"
+    workspace.onboarding = new_doc
+    if db is not None:
+        db.add(workspace)
+        # Flush the trial-less row so the raw-SQL re-grant below sees the strip
+        # (the grant's one-per-user check reads onboarding.trial from the DB).
+        db.flush()
+
+    # 3) Re-grant the trial AFTER the document is trial-less and flushed.
+    if reset_trial:
+        report["trial"], report["trial_note"] = _regrant_trial(db, workspace)
+
+    if db is not None:
+        db.commit()
+        # The re-grant wrote onboarding.trial straight to the row via jsonb_set;
+        # refresh so a caller reading workspace.onboarding sees committed truth.
+        try:
+            db.refresh(workspace)
+        except Exception:  # pragma: no cover - convenience refresh only
+            pass
+
+    return report
