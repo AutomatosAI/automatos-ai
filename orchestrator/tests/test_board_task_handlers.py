@@ -772,3 +772,141 @@ def test_agent_in_progress_reset_leaves_blocked_transition_unchanged(monkeypatch
     # The in_progress-only reset must not have fired on a blocked move.
     assert task.error_message == "mid-run detail"
     assert task.result == "draft"
+def _patch_dispatch(monkeypatch):
+    """Capture chat-side dispatch NOTIFYs. ``_notify_dispatch_safe`` re-imports
+    ``notify_task_available`` from services.board_dispatcher at call time, so
+    patching the module attribute (not the handler) intercepts it."""
+    import services.board_dispatcher as bd
+    calls = []
+    monkeypatch.setattr(bd, "notify_task_available", lambda db, **kw: calls.append(kw))
+    return calls
+
+
+def test_agent_create_assigned_notifies_dispatch(monkeypatch):
+    """A chat-created ticket with a resolvable agent lands 'assigned' and wakes the
+    dispatch loop (mirrors api/board_tasks.py:397-398)."""
+    _patch_notify(monkeypatch)  # silence the board-event NOTIFY
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))  # refresh() assigns id=4242
+
+    result = asyncio.run(
+        _HANDLER.create_board_task(
+            db, _WS_ID,
+            {"title": "chase invoices", "description": "d", "assigned_agent_name": "ATLAS"},
+        )
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert len(dispatch) == 1, "an assigned chat-created ticket must wake the dispatch loop"
+    assert dispatch[0]["task_id"] == 4242
+    assert dispatch[0]["workspace_id"] == _WS_ID
+
+
+def test_agent_create_unassigned_does_not_notify_dispatch(monkeypatch):
+    """No agent → the ticket lands 'inbox', which the dispatch loop never claims,
+    so no dispatch NOTIFY fires (only the board-event NOTIFY does)."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _FakeSession()  # no agent to resolve
+
+    result = asyncio.run(
+        _HANDLER.create_board_task(db, _WS_ID, {"title": "t", "description": "d"})
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "inbox"
+    assert dispatch == [], "an unassigned (inbox) ticket must not wake the dispatch loop"
+
+
+def test_agent_assign_notifies_dispatch(monkeypatch):
+    """platform_assign_task moves an inbox task to 'assigned' and wakes the dispatch
+    loop (mirrors api/board_tasks.py:624-632)."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _FakeSession(agent=_ns(id=9, name="ATLAS"), task=task)
+
+    result = asyncio.run(
+        _HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "ATLAS"})
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert len(dispatch) == 1, "assignment must wake the dispatch loop"
+    assert dispatch[0]["task_id"] == 5
+
+
+def test_agent_assign_on_recipe_task_does_not_notify_dispatch(monkeypatch):
+    """Recipe-mirror tasks are driven by the recipe executor, never the board
+    dispatch loop — assignment must not wake it (mirrors api/board_tasks.py:628)."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    task = BoardTask(id=8, workspace_id=_WS_ID, title="t", status="inbox", source_type="recipe")
+    db = _FakeSession(agent=_ns(id=3, name="ATLAS"), task=task)
+
+    asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 8, "agent_name": "ATLAS"}))
+
+    assert dispatch == [], "recipe-mirror tasks are not board-dispatched"
+
+
+def test_agent_update_status_to_assigned_notifies_dispatch(monkeypatch):
+    """Re-queuing a ticket to 'assigned' via platform_update_task_status wakes the
+    dispatch loop so it's re-claimed on the LISTEN wake, not the fallback poll."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _FakeSession(task=_fresh_task(id=3, status="blocked", assigned_agent_id=7,
+                                       blocked_at="2026-08-27T00:00:00Z", blocked_reason="x"))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "assigned"})
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert len(dispatch) == 1, "a re-queue to 'assigned' must wake the dispatch loop"
+    assert dispatch[0]["task_id"] == 3
+
+
+def test_agent_update_status_in_progress_does_not_notify_dispatch(monkeypatch):
+    """Moving to in_progress launches inline (existing path); the dispatch loop
+    claims only 'assigned' tasks, so in_progress must NOT wake it."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert result["success"] is True
+    assert len(launches) == 1, "in_progress launches inline"
+    assert dispatch == [], "in_progress must not wake the dispatch loop (it claims 'assigned' only)"
+
+
+def test_dispatch_notify_failure_is_fail_soft(monkeypatch):
+    """A forced dispatch NOTIFY failure must NOT fail the tool call — fail-soft
+    exactly like the board-event NOTIFY beside it (PRD-224 US-001)."""
+    import services.board_dispatcher as bd
+    _patch_notify(monkeypatch)
+
+    def _boom(db, **kw):
+        raise RuntimeError("pg_notify down")
+
+    monkeypatch.setattr(bd, "notify_task_available", _boom)
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(
+        _HANDLER.create_board_task(
+            db, _WS_ID,
+            {"title": "t", "description": "d", "assigned_agent_name": "ATLAS"},
+        )
+    )
+
+    assert result["success"] is True, "NOTIFY blew up but the create succeeded"
+    assert result["status"] == "assigned"
