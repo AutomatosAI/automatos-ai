@@ -1,0 +1,58 @@
+{
+ "project": "Automatos AI Platform — PRD-226 The Manager's Doctrine (Auto-as-Manager wave, chain 3/6)",
+ "branchName": "ralph/prd-226-manager-doctrine",
+ "description": "STACKED branch: ralph/prd-226-manager-doctrine ← ralph/prd-224-ticket-lane (chain 3/6; 227's wiring + 224's ASSIGN lane and ticket watches are IN your tree — the three-lane rubric you write must match how 224 actually behaves; diff scope = merge-base vs the 224 branch). Spec seeded at docs/PRDS/PRD-226-AUTO-MANAGER-DOCTRINE.md; wave map docs/PRDS/PRD-WAVE-AUTO-MANAGER.md. SCOPE = the management doctrine as content: (US-001) the 9-point doctrine into Auto's seeded soul + platform-management skill, with an idempotent hash-guarded backfill for existing workspace Auto rows; (US-002) the AutoBrain assessment prompt carries the three-lane rubric + reuse-before-create; (US-003) MissionPlanner emits 4-part dispatch contracts (OBJECTIVE·OUTPUT·TOOLS·BOUNDARIES + definition_of_done) and verification consumes the DoD when present; the ASSIGN lane's ticket-description directive shares the SAME contract fragment (single source). BAKED DECISIONS (Gerard 2026-08-27, from PRD-226 §8 proposals): Auto KEEPS the CTO voice — the doctrine is added as management sections, not a persona rewrite; narration doctrine is always-on (no per-workspace dial this wave); backfill replaces a workspace's soul ONLY when its current text hash-matches a previously shipped seed version — customized souls are SKIPPED and reported in the backfill output. THE DOCTRINE (write it from PRD-226 §4, adapted): 1 Awareness (ground answers in platform_board_summary/platform_list_missions/platform_list_agents until PRD-228's fleet tool lands) · 2 Three lanes chosen deliberately (DELEGATE=answer this conversation; ASSIGN=named single agent off-thread on the board, supervised; MISSION=multi-agent project) — say which lane and why in one line · 3 Delegate-don't-implement · 4 Reuse before creating (check the roster; honor named routing; 'one capable owner beats a duplicate'; say that you checked) · 5 Dispatch as a 4-part contract, references not pasted content · 6 Board as ledger (multi-step asks get a board card) · 7 Asks are decisions not reports (one bold sentence, options as bullets, ≤~700 chars, markdown; never idle-wait — park and move on) · 8 Recurring work becomes a playbook (propose platform_create_playbook + schedule on repetition) · 9 Narrate (one-line explanations of assignments/escalations/sign-offs). ANCHORS (verified 2026-08-27 — RE-VERIFY by grep): seeds orchestrator/core/seeds/auto-cto-custom-soul.txt + platform-management-skill.md, applied by orchestrator/core/seeds/seed_auto_agent.py:29-84 (per-workspace rows, slug auto-{workspace_id}; find its existing update/sync mechanism and follow it for the backfill); AutoBrain assessment prompt builder in orchestrator/consumers/chatbot/auto.py (rubric from 224's US-004 is already in the tree — EXTEND it, don't duplicate); planner prompt orchestrator/modules/coordination/planner.py:341,488, prompt ~:756, parse ~:1099; verification orchestrator/modules/coordination/verification.py. BINDING RULES: personas live in the DB, seed files are the source (house rule: no file hacks for DB data — the backfill writes rows); prompt fragments shared between the ASSIGN directive and the planner live in ONE place, never copy-pasted (grep must show a single definition); doctrine text changes are eval-gated — extend the LOCAL gold sets (fixtures NEVER committed: repo is public; write the eval harness additions so they load fixtures from the gitignored local path and SKIP cleanly when absent); token budget: the CHATBOT-context doctrine block stays ≤ ~350 tokens (assert a character ceiling in a test); ZERO new alembic revisions UNLESS seed_auto_agent's existing update mechanism requires a data migration — if it does, that is a hard STOP: reply RALPH_BLOCKED and say so (do not invent a migration path); NO new tables/routes; no os.getenv outside orchestrator/config.py; canonical terms; PURE tests; NEVER 'git add -A'/'git add .'/'-u'; never 'git stash -u'. No frontend stories.",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "Doctrine into the soul + skill seeds, with hash-guarded backfill",
+   "description": "Add the 9-point doctrine to core/seeds/auto-cto-custom-soul.txt (identity-level: lanes, delegate-don't-implement, reuse-before-create, narrate) and the procedural mechanics to core/seeds/platform-management-skill.md (contract shape, ask formatting, playbook habit, board-as-ledger) — keeping the CTO voice, replacing nothing of the existing identity. Then the backfill: follow seed_auto_agent.py's EXISTING update/sync mechanism (re-verify how it applies seed changes to existing per-workspace rows; if none exists, add an idempotent sync function invoked from the seed path) that updates a workspace's Auto row ONLY when its current soul text hash-matches any previously shipped seed version (keep a short list of known-version hashes beside the seed); customized souls are skipped and the skip is reported (log line with workspace id). A doctrine-block character-ceiling test enforces the ≤~350-token budget for the CHATBOT-context section.",
+   "acceptanceCriteria": [
+    "Both seed files carry the 9 doctrine points (string-presence test per point); CTO identity text retained (diff shows additions, not a rewrite)",
+    "Fresh-workspace seed applies the new soul (test via seed path); a row matching the OLD seed hash gets updated; a row with customized text is SKIPPED and reported (tests)",
+    "Backfill is idempotent (running twice changes nothing the second time — test)",
+    "Doctrine block character ceiling asserted (test)",
+    "ZERO new alembic files, or RALPH_BLOCKED was declared instead (see description)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/core/seeds/auto-cto-custom-soul.txt",
+    "orchestrator/core/seeds/platform-management-skill.md",
+    "orchestrator/core/seeds/seed_auto_agent.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "Assessment rubric: extend 224's three lanes with reuse-before-create",
+   "description": "In the AutoBrain assessment prompt builder (auto.py — 224's US-004 rubric is already in your tree): extend with the reuse-before-create signals (prefer an existing roster agent whose role fits; honor named routing; creating a new agent requires 'nothing fits' and saying you checked) and the one-line lane-narration instruction. Do NOT duplicate the rubric — one rubric block, extended in place. LLM-free tests: string presence of the new signals in the built prompt; existing 224 lane tests stay green.",
+   "acceptanceCriteria": [
+    "Single rubric block (grep shows one definition site); reuse-before-create + named-routing + narrate-one-line present in the built prompt (tests)",
+    "224's stubbed-assessment tests unchanged and green",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/consumers/chatbot/auto.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "4-part dispatch contracts: planner emits, verification consumes, ASSIGN shares",
+   "description": "One shared contract fragment (single definition — a constant/builder importable by both consumers): OBJECTIVE · OUTPUT · TOOLS (use/avoid + references to read instead of re-deriving) · BOUNDARIES (scope limits + definition of done), references not pasted content. (a) MissionPlanner.decompose's prompt (~planner.py:756) requires each task spec in that shape; the parser (~:1099) extracts definition_of_done into the task spec dict (store inside the EXISTING plan/task JSONB — rebuild-don't-mutate; NO schema change). (b) verification.py consumes definition_of_done when present (score against it; absent → today's inference path unchanged — no hard dependency). (c) The 224 ASSIGN directive's ticket-description instruction imports the SAME fragment. Tests: planner parse fixture with a 4-part spec extracts DoD; verification uses it when present and falls back cleanly when absent; grep proves one fragment definition with ≥2 importers.",
+   "acceptanceCriteria": [
+    "Shared fragment defined once, imported by planner prompt builder AND the ASSIGN directive (grep: 1 definition, ≥2 imports)",
+    "Planner parse stores definition_of_done inside the existing JSONB spec (no schema change; rebuild-don't-mutate; test)",
+    "Verification scores against DoD when present; absent-DoD path byte-identical behavior to before (regression test)",
+    "ZERO new alembic files",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/modules/coordination/planner.py",
+    "orchestrator/modules/coordination/verification.py",
+    "orchestrator/api/chat.py",
+    "orchestrator/tests/"
+   ]
+  }
+ ]
+}
