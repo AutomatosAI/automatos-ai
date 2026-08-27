@@ -624,6 +624,11 @@ class Config:
     # Sweep cadence. The S3 hooks are the fast path; the tick is the
     # fallback and the missed-run/trend brain, so 5 minutes is plenty.
     WATCHER_TICK_SECONDS: int = int(os.getenv("WATCHER_TICK_SECONDS", "300"))
+    # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
+    # board ticket Auto files, so an assigned ticket reports its verdict back
+    # into the originating thread. Default ON — an unsupervised assigned ticket
+    # is the current failure mode, not a feature (Gerard, 2026-08-27).
+    AUTO_TICKET_WATCH: bool = os.getenv("AUTO_TICKET_WATCH", "true").lower() in ("true", "1", "yes")
 
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")

@@ -164,12 +164,47 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if _is_dispatch_claimable(task):
         _notify_dispatch_safe(db, workspace_id, task.id)
 
-    return {
+    result: Dict[str, Any] = {
         "success": True,
         "task_id": task.id,
         "status": task.status,
         "title": task.title,
     }
+
+    # PRD-224 US-005: an ASSIGN-lane assigned ticket is auto-supervised — attach a
+    # run_and_report board_task watch here (in the create transaction path) so the
+    # LLM cannot forget it. Gated on the server-injected, unspoofable _assign_lane
+    # flag + an assigned agent; the AUTO_TICKET_WATCH dial is the actual switch.
+    # A non-ASSIGN creation (heartbeat, recipe mirror, plain agent task) carries no
+    # _assign_lane, so it attaches nothing.
+    if params.get("_assign_lane") and assigned_agent_id:
+        from config import config as _config
+
+        if not _config.AUTO_TICKET_WATCH:
+            result["supervised"] = False
+            result["supervision"] = "not supervised (AUTO_TICKET_WATCH is off)"
+        else:
+            from modules.tools.discovery.handlers_watches import (
+                _origin_chat_id,
+                auto_create_ticket_watch,
+            )
+
+            watch = auto_create_ticket_watch(
+                db,
+                workspace_id,
+                task_id=task.id,
+                title=f"Ticket: {title}",
+                success_criteria=description,
+                created_by=(str(params["_created_by"]) if params.get("_created_by") else None),
+                owner_agent_id=assigned_agent_id,
+                origin_chat_id=_origin_chat_id(params),
+            )
+            if watch is not None:
+                result["supervised"] = True
+                result["watch_id"] = str(watch.id)
+                result["supervision"] = "supervised — I'll report back here when it's done"
+
+    return result
 
 
 async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
