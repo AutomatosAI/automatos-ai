@@ -108,8 +108,10 @@ check "US-017 section v2 stage-aware (powerup + OpenRouter present)" \
 check "US-017 section v2 tests present" \
   "[ -f orchestrator/tests/test_prd222_onboarding_section.py ]"
 
+# handlers_reports.py's valid_types set uses double-quoted "onboarding" (file
+# style), so match the bareword rather than a single-quoted literal.
 check "US-018 report plumbing carries the onboarding type (schema + handler)" \
-  "grep -q \"'onboarding'\" orchestrator/modules/tools/discovery/handlers_reports.py && grep -q 'onboarding' orchestrator/modules/tools/discovery/actions_reports.py"
+  "grep -q 'onboarding' orchestrator/modules/tools/discovery/handlers_reports.py && grep -q 'onboarding' orchestrator/modules/tools/discovery/actions_reports.py"
 
 # --- Trust + convention guards -------------------------------------------------------
 check "trust-guard test still present (never weakened away)" \
