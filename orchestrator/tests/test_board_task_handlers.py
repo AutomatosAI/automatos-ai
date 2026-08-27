@@ -851,3 +851,221 @@ def test_dispatch_notify_failure_is_fail_soft(monkeypatch):
 
     assert result["success"] is True, "NOTIFY blew up but the create succeeded"
     assert result["status"] == "assigned"
+
+
+# ===========================================================================
+# PRD-224 US-005 — auto-supervision on assignment (AUTO_TICKET_WATCH)
+# ===========================================================================
+#
+# When a ticket is created via the ASSIGN lane (the server-injected, unspoofable
+# _assign_lane flag + an assigned agent), create_board_task auto-attaches a
+# run_and_report board_task watch in the create transaction path so the LLM
+# cannot forget it. Gated on the config dial AUTO_TICKET_WATCH (default ON, read
+# through config.py only). A non-ASSIGN creation (heartbeat, recipe, plain agent
+# task) carries no _assign_lane and attaches nothing. The verdict later narrates
+# back into the ORIGINATING thread via the existing PRD-205 seam because the
+# create captured origin_chat_id onto the watch. Pure — the watcher machinery is
+# stubbed; its behaviour is locked by the PRD-204 suites.
+
+_ORIGIN = UUID("00000000-0000-0000-0000-0000000000cc")
+
+
+def _assign_params(**over):
+    base = dict(
+        title="chase invoices", description="Chase the overdue Q3 invoices.",
+        assigned_agent_name="ATLAS", _assign_lane=True,
+        _origin_chat_id=str(_ORIGIN), _created_by="user_x",
+    )
+    base.update(over)
+    return base
+
+
+def test_assign_lane_attaches_ticket_watch(monkeypatch):
+    """An ASSIGN-lane assigned ticket attaches a board_task watch and confirms
+    supervision, passing the description as success_criteria and the origin."""
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    created = []
+
+    def _capture(db, ws, **kw):
+        created.append(kw)
+        return _ns(id=UUID("00000000-0000-0000-0000-0000000000dd"))
+
+    monkeypatch.setattr(hw, "auto_create_ticket_watch", _capture)
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))  # refresh() → task id 4242
+
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+
+    assert result["success"] is True and result["status"] == "assigned"
+    assert result["supervised"] is True
+    assert result["watch_id"] == "00000000-0000-0000-0000-0000000000dd"
+    assert "report back" in result["supervision"]
+    assert len(created) == 1
+    assert created[0]["task_id"] == 4242
+    assert created[0]["success_criteria"] == "Chase the overdue Q3 invoices."
+    assert created[0]["owner_agent_id"] == 7
+    assert str(created[0]["origin_chat_id"]) == str(_ORIGIN)
+
+
+def test_non_assign_creation_attaches_no_watch(monkeypatch):
+    """No _assign_lane (heartbeat, recipe, plain agent task) → no watch, no
+    supervision key on the result."""
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    calls = []
+    monkeypatch.setattr(hw, "auto_create_ticket_watch",
+                        lambda db, ws, **kw: calls.append(kw))
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "t", "description": "d", "assigned_agent_name": "ATLAS"},  # no _assign_lane
+    ))
+
+    assert result["success"] is True
+    assert calls == [], "a non-ASSIGN creation must not auto-supervise"
+    assert "supervised" not in result
+
+
+def test_assign_lane_without_agent_attaches_no_watch(monkeypatch):
+    """_assign_lane but no resolvable agent → the ticket lands 'inbox' and there
+    is nothing to supervise (the gate requires an assigned agent)."""
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    calls = []
+    monkeypatch.setattr(hw, "auto_create_ticket_watch",
+                        lambda db, ws, **kw: calls.append(kw))
+    db = _FakeSession()  # no agent resolves
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID, {"title": "t", "description": "d", "_assign_lane": True},
+    ))
+
+    assert result["status"] == "inbox"
+    assert calls == []
+    assert "supervised" not in result
+
+
+def test_auto_ticket_watch_off_attaches_nothing_and_notes_it(monkeypatch):
+    """AUTO_TICKET_WATCH=False → no watch attached, and the tool result says so."""
+    import config as config_module
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(config_module.config, "AUTO_TICKET_WATCH", False)
+    calls = []
+    monkeypatch.setattr(hw, "auto_create_ticket_watch",
+                        lambda db, ws, **kw: calls.append(kw))
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+
+    assert calls == [], "dial off must not attach a watch"
+    assert result["supervised"] is False
+    assert "AUTO_TICKET_WATCH is off" in result["supervision"]
+
+
+def test_auto_create_ticket_watch_is_run_and_report(monkeypatch):
+    """auto_create_ticket_watch creates a board_task watch and never overrides the
+    policy → WatchService.create_watch's default (run_and_report) applies."""
+    import modules.tools.discovery.handlers_watches as hw
+    import services.watch_service as ws_mod
+    monkeypatch.setattr(ws_mod.WatchService, "find_live_watch",
+                        staticmethod(lambda db, **kw: None))
+    captured = {}
+
+    def _create(db, **kw):
+        captured.update(kw)
+        return _ns(id=UUID("00000000-0000-0000-0000-0000000000ee"))
+
+    monkeypatch.setattr(ws_mod.WatchService, "create_watch", staticmethod(_create))
+
+    w = hw.auto_create_ticket_watch(None, _WS_ID, task_id=42, title="Ticket: t",
+                                    success_criteria="crit", owner_agent_id=7)
+
+    assert w is not None
+    assert captured["target_type"] == "board_task" and captured["watch_type"] == "board_task"
+    assert captured["target_id"] == "42"
+    assert captured["success_criteria"] == "crit"
+    assert "policy" not in captured, "no override → create_watch default run_and_report"
+
+
+def test_auto_create_ticket_watch_off_returns_none(monkeypatch):
+    import config as config_module
+    import modules.tools.discovery.handlers_watches as hw
+    monkeypatch.setattr(config_module.config, "AUTO_TICKET_WATCH", False)
+    assert hw.auto_create_ticket_watch(None, _WS_ID, task_id=1, title="t",
+                                       success_criteria="c") is None
+
+
+def test_assign_ticket_verdict_narrates_to_origin_thread(monkeypatch):
+    """AC4 end-to-end: the create captures the origin onto the watch; when the
+    ticket completes, notify_watch_verdict narrates into that ORIGINATING thread
+    via the existing watch_notifications → deliver_background_message seam."""
+    import modules.tools.discovery.handlers_watches as hw
+    import services.watch_service as ws_mod
+    import services.watch_notifications as wn
+    import core.services.notification_dispatcher as nd
+    import services.chat_messenger as cm
+
+    # -- create (ASSIGN lane): real auto_create_ticket_watch, create_watch stubbed
+    #    to build a watch carrying exactly what the handler passed.
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(ws_mod.WatchService, "find_live_watch",
+                        staticmethod(lambda db, **kw: None))
+    built = {}
+
+    def _create(db, **kw):
+        built.update(kw)
+        return _ns(id=UUID("00000000-0000-0000-0000-0000000000df"),
+                   origin_chat_id=kw.get("origin_chat_id"))
+
+    monkeypatch.setattr(ws_mod.WatchService, "create_watch", staticmethod(_create))
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+    assert result["supervised"] is True
+    assert built["target_type"] == "board_task"
+    assert str(built["origin_chat_id"]) == str(_ORIGIN), "origin captured onto the watch"
+
+    # -- complete: the verdict narrates into the originating thread.
+    class _FakeDispatcher:
+        def __init__(self, db, ws):
+            pass
+
+        async def dispatch(self, **kw):
+            return None
+
+    monkeypatch.setattr(nd, "NotificationDispatcher", _FakeDispatcher)
+    delivered = []
+    monkeypatch.setattr(cm, "deliver_background_message", lambda db, **kw: delivered.append(kw))
+
+    watch = _ns(id=UUID("00000000-0000-0000-0000-0000000000df"), workspace_id=_WS_ID,
+                title="Ticket: chase invoices", target_type="board_task",
+                target_id="4242", status="watching", created_by="user_x",
+                origin_chat_id=_ORIGIN, quality_threshold=0.8, final_score=0.9)
+    ok = asyncio.run(wn.notify_watch_verdict(
+        _FakeSession(), watch, score=0.9, explanation="Invoices chased.",
+        passed=True, terminal_state="completed"))
+
+    assert ok is True
+    assert len(delivered) == 1, "the completed ticket narrates its verdict once"
+    assert delivered[0]["chat_id"] == str(_ORIGIN), "into the ORIGINATING thread"
+    assert delivered[0]["source"]["event"] == "watch_verdict"
+
+
+def test_auto_ticket_watch_read_through_config_only():
+    """AC3: the dial is read via config.py — no os.getenv('AUTO_TICKET_WATCH')
+    in the handlers that consume it."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel in ("modules/tools/discovery/handlers_board_tasks.py",
+                "modules/tools/discovery/handlers_watches.py"):
+        with open(os.path.join(here, rel)) as f:
+            src = f.read()
+        assert 'os.getenv("AUTO_TICKET_WATCH"' not in src
+        assert "AUTO_TICKET_WATCH" in src  # it IS consumed here, via config
+    with open(os.path.join(here, "config.py")) as f:
+        assert 'os.getenv("AUTO_TICKET_WATCH"' in f.read(), "declared in config.py"

@@ -470,3 +470,66 @@ def auto_create_watch(
             exc_info=True,
         )
         return None
+
+
+def auto_create_ticket_watch(
+    db: Session,
+    workspace_id: UUID,
+    *,
+    task_id: int,
+    title: str,
+    success_criteria: str,
+    created_by: Optional[str] = None,
+    owner_agent_id: Optional[int] = None,
+    origin_chat_id: Optional[UUID] = None,
+):
+    """PRD-224 US-005: auto-attach a run_and_report watch to an ASSIGN-lane board
+    ticket so its verdict reports back into the originating thread.
+
+    Gated on ``config.AUTO_TICKET_WATCH`` (default ON) — its OWN dial, distinct
+    from the mission/playbook ``watch_auto_create`` setting. Idempotent (one live
+    watch per board_task, via the partial unique index) and fail-soft: NEVER
+    raises into the create handler — a broken watcher must not break a ticket.
+    Returns the Watch, or None when the dial is off / a live watch already
+    exists / creation failed.
+    """
+    try:
+        from config import config
+        from services.watch_service import WatchService
+
+        if not config.AUTO_TICKET_WATCH:
+            return None
+        if WatchService.find_live_watch(
+            db,
+            workspace_id=workspace_id,
+            target_type="board_task",
+            target_id=str(task_id),
+        ) is not None:
+            return None
+
+        watch = WatchService.create_watch(
+            db,
+            workspace_id=workspace_id,
+            watch_type="board_task",
+            target_type="board_task",
+            target_id=str(task_id),
+            title=(title or f"Ticket {task_id}")[:500],
+            created_by=created_by,
+            owner_agent_id=owner_agent_id,
+            success_criteria=success_criteria,
+            origin_chat_id=origin_chat_id,
+        )
+        logger.info(
+            "[Watches] auto-created ticket watch %s on board_task:%s",
+            watch.id,
+            task_id,
+        )
+        return watch
+    except Exception:
+        logger.warning(
+            "[Watches] ticket-watch auto-create failed for board_task:%s -- "
+            "ticket unaffected",
+            task_id,
+            exc_info=True,
+        )
+        return None
