@@ -2303,6 +2303,19 @@ class StreamingChatService:
                 else:
                     llm_messages.insert(0, {"role": "system", "content": _mission_directive})
 
+            # PRD-224 US-004: inject the ASSIGN-lane manager directive into the
+            # system prompt (same seam as the mission suggestion, set per-turn by
+            # api/chat.py) so Auto files the board ticket instead of answering inline.
+            _assign_directive = (
+                getattr(complexity_assessment, "context_directive", None)
+                if complexity_assessment else None
+            )
+            if _assign_directive and llm_messages:
+                if llm_messages[0].get("role") == "system":
+                    llm_messages[0]["content"] = llm_messages[0].get("content", "") + _assign_directive
+                else:
+                    llm_messages.insert(0, {"role": "system", "content": _assign_directive})
+
             # US-015: Emit memory-injected SSE event
             if orchestrated and orchestrated.memory_context:
                 smart_chat = getattr(self, '_smart_chat', None)
