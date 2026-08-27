@@ -22,6 +22,7 @@ import { useWorkspaceStore } from '@/stores/workspace-store'
 import { Canvas } from '@/components/workspace'
 import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, CodingCanvasWidgetData } from '@/components/widgets/types'
 import { useWorkspace } from '@/components/workspace-provider'
+import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
 
 // Resizable panels for chat + widget split
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -928,6 +929,10 @@ export function Chat({
   const hasSentMessage = messages.length > 0
 
   const showWelcomeCard = !hasSentMessage && !isTyping
+  // PRD-222 US-012: for a brand-new workspace Auto makes the first move — the
+  // onboarding opener replaces the generic greeting (and the "where did we
+  // leave off?" resume, which has nothing to resume) in the empty chat state.
+  const isOnboardingOpener = workspace?.onboarding?.stage === 'not_started'
 
   return (
     <>
@@ -1196,7 +1201,13 @@ export function Chat({
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
             <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
+              {/* PRD-222 US-012: on a brand-new workspace Auto makes the first
+                  move — the opener self-hides once onboarding has moved past
+                  not_started, so the generic greeting takes over. */}
+              <OnboardingOpener />
+
               {/* Personal greeting */}
+              {!isOnboardingOpener && (
               <motion.div
                 className="w-full max-w-3xl md:max-w-4xl text-center mb-8"
                 initial={{ opacity: 0, y: 12 }}
@@ -1207,9 +1218,12 @@ export function Chat({
                   Hey{user?.firstName ? <> <span className="gradient-text">{user.firstName}</span></> : ''}, what can I do for you today?
                 </h1>
               </motion.div>
+              )}
 
               {/* PRD-206 S3: one tap to pick up where you left off — answered
-                  in-chat by the platform_resume_context tool */}
+                  in-chat by the platform_resume_context tool. Hidden during the
+                  onboarding opener: a brand-new workspace has nothing to resume. */}
+              {!isOnboardingOpener && (
               <motion.div
                 className="mb-6 flex justify-center"
                 initial={{ opacity: 0, y: 8 }}
@@ -1224,6 +1238,7 @@ export function Chat({
                   Where did we leave off?
                 </button>
               </motion.div>
+              )}
 
               {/* Chat input + quick links — no outer box */}
               <div className="w-full max-w-3xl md:max-w-4xl space-y-3">

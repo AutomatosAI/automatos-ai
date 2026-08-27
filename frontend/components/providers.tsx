@@ -9,7 +9,6 @@ import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
-import { FirstLoginGuard } from './onboarding/first-login-guard'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { useStudioThemeFlag } from '../hooks/use-studio-theme'
@@ -100,7 +99,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
               <Suspense fallback={null}>
                 <StudioThemeFlag />
               </Suspense>
-              <FirstLoginGuard />
+              {/* PRD-222 US-012: the FirstLoginGuard/WelcomeModal mount is
+                  retired for the Auto-led flow — a new workspace lands directly
+                  in the conversation where Auto opens (OnboardingOpener). The
+                  component files stay until W2 deletes them; only the mount is
+                  removed here. use-auto-tour keys off isNewWorkspace + the
+                  welcome-seen localStorage, so with the modal unmounted the
+                  welcome tour no longer fires for new-flow users. */}
               {children}
               <GlobalSearch />
               <Toaster position="top-right" richColors closeButton />

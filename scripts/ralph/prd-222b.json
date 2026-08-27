@@ -24,10 +24,10 @@
    "title": "Frontend: kill the modal mount, land in the conversation",
    "description": "Stop mounting FirstLoginGuard/WelcomeModal for the new flow: remove the FirstLoginGuard mount from frontend/components/providers.tsx (~:103, re-verify) — DO NOT delete the component files (W2 does the deletion). New frontend/components/onboarding/onboarding-opener.tsx: when workspace.onboarding.stage === 'not_started', the empty chat renders Auto's opener (a short canned greeting that asks the first question and invites 'or just start typing'), so Auto makes the first move; any user message then flows through OnboardingSection v2. Auto-tours: use-auto-tour keys off isNewWorkspace and welcome-seen localStorage — with the modal unmounted they will not fire for new-flow users; verify and note, change nothing else in shepherd land.",
    "acceptanceCriteria": [
-    "FirstLoginGuard no longer mounted (grep providers.tsx); component files untouched otherwise (git diff shows no frontend/lib/shepherd/** and no deletion of frontend/components/onboarding/{first-login-guard,welcome-modal}.tsx)",
-    "onboarding-opener.tsx exists and renders in the empty chat state only when stage==='not_started' (component test with workspace-provider mock)",
-    "A new-workspace render shows the opener and NO welcome modal (component test)",
-    "cd frontend && npm run -s test green"
+    "DONE — providers.tsx: removed the <FirstLoginGuard/> mount + its import (only an explanatory comment names it now); git diff touches just providers.tsx (+9/-2) and chat.tsx (+17/-); frontend/lib/shepherd/** untouched; first-login-guard.tsx + welcome-modal.tsx still present (W2 deletes)",
+    "DONE — components/onboarding/onboarding-opener.tsx self-guards on useWorkspace().workspace.onboarding.stage==='not_started' and renders in chat.tsx's empty welcome state (gating the generic greeting + resume button); test onboarding-opener.test.tsx mocks workspace-provider and asserts it renders for not_started, renders nothing for 'questions' and for no snapshot",
+    "DONE — test 'shows the opener and NO welcome modal for a new workspace': opener testid present + welcome-modal CTA testids (business-intake-cta/start) absent. use-auto-tour verified unchanged — it gates on workspace.isNewWorkspace (:32) AND welcome-seen localStorage (:49 'if (!welcomeSeen) return'); with the modal unmounted welcomeSeen is never set, so the tour early-returns for new-flow users",
+    "DONE — cd frontend && npm run -s test: 48 files / 282 tests pass (incl. onboarding-opener 4 + welcome-modal 2 still green)"
    ],
    "files": [
     "frontend/components/providers.tsx",
