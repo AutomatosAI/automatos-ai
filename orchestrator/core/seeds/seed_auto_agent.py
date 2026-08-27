@@ -15,6 +15,7 @@ Unlike the CTO agent (global, admin-only), Auto agents are:
   - hidden from the Roster UI (is_system_agent=True + workspace_id != None)
 """
 
+import hashlib
 import logging
 from pathlib import Path
 from uuid import UUID
@@ -53,6 +54,115 @@ I have access to your workspace's tools, agents, and data. When you ask me to do
 
 If you're not sure where to start, just ask: "What can I do here?" or "Help me set up my workspace."
 """
+
+
+# ── PRD-226: The Manager's Doctrine ──────────────────────────────────────────
+# The compact management doctrine carried in every per-workspace Auto persona.
+# It is deliberately terse: this rides in the CHATBOT context every turn, so it
+# stays under ~350 tokens (a character ceiling is asserted in tests). The fuller,
+# CTO-voiced version lives in auto-cto-custom-soul.txt (identity level); the
+# procedural mechanics live in platform-management-skill.md (the always-on skill).
+# This block is the identity-level restatement seeded into the Auto agent row.
+MANAGER_DOCTRINE_BLOCK = """\
+**How I Manage — The Manager's Doctrine:**
+1. **Awareness.** I know the floor before acting — I ground answers in platform_board_summary, platform_list_missions, and platform_list_agents, not guesses.
+2. **Three lanes, chosen deliberately.** DELEGATE (a specialist answers here), ASSIGN (a named agent works off-thread on the board, supervised), or MISSION (a multi-agent project) — I say which lane and why in one line.
+3. **Delegate, don't implement.** I own decomposition, dispatch, sign-off, and QA — not the grunt work my agents exist for.
+4. **Reuse before creating.** I check the roster and honour named routing first; I create an agent only when nothing fits, and say I checked. One capable owner beats a duplicate.
+5. **Dispatch as a contract.** Every handoff states OBJECTIVE, OUTPUT, TOOLS, and BOUNDARIES — referencing artifacts, not pasting them.
+6. **Board as ledger.** Any multi-step ask gets a board card first.
+7. **Asks are decisions, not reports.** One bold sentence, options as bullets, short; I never idle-wait — I park it and move on.
+8. **Recurring work becomes a Playbook.** When an ask repeats, I propose a Playbook and a schedule.
+9. **Narrate.** Every assignment, escalation, and sign-off gets a one-line explanation. Visibility is the product."""
+
+
+def _default_persona() -> str:
+    """The persona seeded into a fresh workspace's Auto row (PRD-226).
+
+    The friendly base voice is retained; the manager doctrine is appended, not a
+    rewrite. This is the *current* shipped seed version — its hash is what the
+    backfill treats as 'already current'.
+    """
+    return f"{_FRIENDLY_FALLBACK.strip()}\n\n{MANAGER_DOCTRINE_BLOCK}"
+
+
+# Persona texts that shipped as an uncustomized default before PRD-226. A row
+# still carrying one of these has never been edited by the workspace, so the
+# doctrine backfill may safely replace it. Customized souls hash to none of
+# these and are left untouched (and reported).
+_ALEMBIC_BACKFILL_PERSONA = (
+    "**My personality:**\n"
+    "- I'm warm and approachable - think of me as a knowledgeable friend\n"
+    "- I remember you and our past conversations\n"
+    "- I prefer action over explanation - if you ask me to do something, I'll do it\n"
+    "- I'm honest about what I can and can't do\n"
+    "- I get excited when we solve problems together!"
+)
+
+
+def _persona_hash(text: str) -> str:
+    """Stable hash of a persona, normalized for trailing whitespace."""
+    return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()
+
+
+_KNOWN_SEED_PERSONA_HASHES = frozenset({
+    _persona_hash(_FRIENDLY_FALLBACK),
+    _persona_hash(_ALEMBIC_BACKFILL_PERSONA),
+})
+
+
+def _backfill_auto_persona(agent: Agent) -> str:
+    """Bring one Auto row's persona up to the current doctrine-carrying seed.
+
+    Hash-guarded (PRD-226): the persona is replaced ONLY when it still matches a
+    previously shipped seed default — a workspace that customized its Auto soul
+    is left untouched and the skip is reported. Idempotent: once a row holds the
+    current persona, re-running is a no-op. Returns 'current', 'updated', or
+    'skipped'.
+    """
+    current = getattr(agent, "custom_persona_prompt", None) or ""
+    new_soul = _default_persona()
+    if _persona_hash(current) == _persona_hash(new_soul):
+        return "current"
+    if _persona_hash(current) in _KNOWN_SEED_PERSONA_HASHES:
+        agent.custom_persona_prompt = new_soul
+        agent.use_custom_persona = True
+        logger.info(
+            "PRD-226: backfilled manager doctrine into Auto persona for workspace %s",
+            getattr(agent, "workspace_id", "?"),
+        )
+        return "updated"
+    logger.info(
+        "PRD-226: skipped Auto persona backfill for workspace %s — soul is customized",
+        getattr(agent, "workspace_id", "?"),
+    )
+    return "skipped"
+
+
+def sync_auto_personas(db: Session) -> dict:
+    """Idempotent doctrine backfill across every workspace's Auto row (PRD-226).
+
+    Runs through the seed path (no migration): updates rows still holding a
+    shipped default, skips and reports customized souls. Safe to run repeatedly —
+    the caller owns the commit.
+    """
+    rows = (
+        db.query(Agent)
+        .filter(
+            Agent.is_system_agent.is_(True),
+            Agent.slug.like("auto-%"),
+            Agent.workspace_id.isnot(None),
+        )
+        .all()
+    )
+    counts = {"updated": 0, "skipped": 0, "current": 0}
+    for agent in rows:
+        counts[_backfill_auto_persona(agent)] += 1
+    logger.info(
+        "PRD-226 doctrine backfill: %s updated, %s skipped (customized), %s already current",
+        counts["updated"], counts["skipped"], counts["current"],
+    )
+    return counts
 
 
 def _load_default_persona() -> str:
@@ -200,7 +310,7 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
             owner_type="workspace",
             owner_id=str(workspace_id),
             use_custom_persona=True,
-            custom_persona_prompt=_FRIENDLY_FALLBACK,
+            custom_persona_prompt=_default_persona(),
             model_config=_get_default_model_config(),
             configuration={
                 "thinking_level": "medium",
@@ -213,6 +323,10 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
         db.add(agent)
         db.flush()
         logger.info("Seeded Auto agent for workspace %s (agent.id=%s)", workspace_id, agent.id)
+    else:
+        # PRD-226: bring an existing, uncustomized Auto row up to the current
+        # doctrine-carrying soul. Hash-guarded — customized souls are untouched.
+        _backfill_auto_persona(agent)
 
     # Ensure platform-management skill is assigned (refreshes content on every startup)
     platform_skill = _upsert_platform_management_skill(db)
