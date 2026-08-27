@@ -62,7 +62,7 @@ check "US-001 seeder has hash-guarded backfill (skip customized)" \
   "grep -qiE 'hash|digest' $SEEDER"
 
 check "US-001 doctrine ceiling test exists" \
-  "grep -rlqiE 'ceiling|char.*(budget|limit)' orchestrator/tests --include='*.py' | grep -q . || grep -rlq 'doctrine' orchestrator/tests | grep -q ."
+  "grep -rliE 'ceiling|char.*(budget|limit)' orchestrator/tests --include='*.py' | grep -q . || grep -rl 'doctrine' orchestrator/tests --include='*.py' | grep -q ."
 
 # --- US-002: single rubric site ----------------------------------------------
 check "US-002 rubric extended in place (reuse-before-create present in auto.py)" \
