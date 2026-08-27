@@ -61,7 +61,7 @@ check "US-001 agent handler accepts blocked + failed" \
   "grep -q 'blocked' $HANDLERS && grep -q 'failed' $HANDLERS"
 
 check "US-001 fail-soft test exists (NOTIFY failure does not fail the tool call)" \
-  "grep -rlEq 'notify_board_event' orchestrator/tests | xargs grep -lE 'monkeypatch|patch' | grep -q ."
+  "grep -rlE 'notify_board_event' orchestrator/tests | xargs grep -lE 'monkeypatch|patch' | grep -q ."
 
 # --- US-002: mission narration ------------------------------------------------
 check "US-002 coordinator narrates via deliver_background_message" \
