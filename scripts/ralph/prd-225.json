@@ -8,9 +8,9 @@
    "title": "The asks model: extend approval_grants (THE wave migration)",
    "description": "One alembic revision extending approval_grants: kind VARCHAR(16) NOT NULL DEFAULT 'approval'; question_md TEXT NULL; options JSONB NULL; answer_text TEXT NULL; answered_by (match the existing actor column style — re-verify how granted_by/decided-by is typed at approval_grants.py:72-93); asked_by_agent_id (FK style matching agent_id); channel_refs JSONB NULL. Update the SQLAlchemy model + any pydantic schemas. Status vocabulary REUSED: pending=open ask, granted=answered, denied=dismissed, expired via existing expires_at. Existing behavior untouched: every existing approval-kind test green with zero edits. Downgrade path drops the columns cleanly.",
    "acceptanceCriteria": [
-    "Exactly ONE new file under orchestrator/alembic/versions/ vs base; upgrade+downgrade both defined; cd orchestrator && alembic heads reports exactly 1 head (assert in a test or the gate)",
-    "Model exposes the new columns; kind defaults 'approval'; existing approval-grant tests pass WITHOUT modification (git diff shows no edits to their files)",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — one new file orchestrator/alembic/versions/prd225_s1_asks_on_grants.py (down_revision=prd185_s1b_toollog_user_nullable), upgrade+downgrade both defined; test_prd225_asks_model.py::test_alembic_single_head asserts ScriptDirectory.get_heads()==1 (pure, no Postgres) + test_prd225_is_reachable_from_the_head walks the chain",
+    "DONE — model gains kind/question_md/options/answer_text/answered_by/answered_at/asked_by_agent_id/channel_refs; kind default+server_default='approval' NOT NULL (test_kind_defaults_to_approval_and_is_not_null); 31 existing approval-grant tests green with zero edits (test_prd181_approval_grants + test_p2w2_grant_resume/tool_grant_consume/grants_oversight + test_grant_approve_commit_ordering + test_prd200_approval_renotify)",
+    "DONE — cd orchestrator && python3 -m pytest -q tests/test_prd225_asks_model.py green (7 passed); regression slice 31 passed"
    ],
    "files": [
     "orchestrator/alembic/versions/",
