@@ -2195,6 +2195,18 @@ class ApiClient {
     return this.request(`/api/v1/approval-grants/${grantId}/revoke`, { method: 'POST' })
   }
 
+  // PRD-225: answer a pending question — records the answer and resumes the
+  // parked subject through the grant resume machinery.
+  async answerQuestion(
+    grantId: number,
+    body: { answer_text?: string; option?: string }
+  ): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/answer`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  }
+
   // ===== PRD-196 S3 governance: status + audit log (ws-admin gated) =====
   async getGovernanceStatus(): Promise<GovernanceStatus> {
     return this.request<GovernanceStatus>('/api/v1/governance/status')

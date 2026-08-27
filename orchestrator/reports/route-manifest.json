@@ -2203,6 +2203,10 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/answer"
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/deny"
     },
     {
