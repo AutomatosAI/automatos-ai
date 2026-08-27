@@ -65,6 +65,9 @@ ACTION_SPAWN_AGENT = "spawn_agent"
 ACTION_ESCALATE = "escalate"
 
 MISSION_ACTIONS = frozenset({ACTION_REPLAN, ACTION_REASSIGN, ACTION_SPAWN_AGENT})
+# PRD-224 US-003: a board ticket's only corrective action is a re-run through
+# the board's own run-now machinery (escalate stays the ungated escape hatch).
+BOARD_ACTIONS = frozenset({ACTION_RERUN})
 
 
 @dataclass(frozen=True)
@@ -194,6 +197,136 @@ async def run_mission_action(
         grant_id=grant.id,
         detail=f"awaiting approval grant {grant.id} ({decision.reason})",
     )
+
+
+async def run_board_task_action(
+    db: Session,
+    watch,
+    action: str,
+    *,
+    diagnosis: Optional[str] = None,
+) -> WatchActionOutcome:
+    """PRD-224 US-003: corrective action on a board-task watch.
+
+    ``rerun`` re-dispatches the ticket through the SAME run-now machinery the
+    board uses (``api/board_tasks._redispatch_task`` -- the shared function, not
+    the HTTP route), budget-railed exactly like ``run_mission_action``: the
+    action is recorded against the budget at initiation, so exhaustion hard-stops
+    to escalation. No approval gate and no diagnosis LLM -- a re-dispatch is a
+    plain replay of already-authorised work. ``escalate`` is the ungated escape
+    hatch. Never raises; failures come back as escalated outcomes.
+    """
+    from services.watch_service import WatchService
+
+    if action == ACTION_ESCALATE:
+        await escalate_watch_now(
+            db, watch, reason=diagnosis or "Watcher requested escalation"
+        )
+        return WatchActionOutcome(action=action, escalated=True, detail="escalated")
+
+    if action not in BOARD_ACTIONS:
+        return WatchActionOutcome(action=action, error=f"unknown board action {action!r}")
+
+    task = _resolve_board_task(db, watch)
+    if task is None:
+        await escalate_watch_now(
+            db, watch, reason=f"target task {watch.target_id} no longer exists"
+        )
+        return WatchActionOutcome(
+            action=action, escalated=True, error="target task missing"
+        )
+    if task.assigned_agent_id is None:
+        await escalate_watch_now(
+            db, watch, reason=f"task {watch.target_id} has no assigned agent to re-run"
+        )
+        return WatchActionOutcome(
+            action=action, escalated=True, error="no assigned agent"
+        )
+
+    # --- budget hard rail (record at initiation; see module docstring) ---
+    _, allowed = WatchService.record_action(
+        db,
+        watch,
+        action=action,
+        summary=diagnosis or f"Watcher corrective re-run of task {task.id}",
+        snapshot={"diagnosis": diagnosis, "board_task_id": task.id},
+    )
+    if not allowed:
+        await escalate_watch_now(
+            db,
+            watch,
+            reason=(
+                f"Action budget exhausted "
+                f"({watch.actions_taken}/{watch.action_budget}) -- refused '{action}'"
+            ),
+        )
+        return WatchActionOutcome(
+            action=action, escalated=True, detail="action budget exhausted"
+        )
+
+    try:
+        from api.board_tasks import _redispatch_task
+
+        _redispatch_task(db, task)
+    except Exception as exc:  # noqa: BLE001 -- outcome-shaped, we escalate
+        logger.error(
+            "[WatchActions] board re-run failed for task %s",
+            getattr(task, "id", "?"),
+            exc_info=True,
+        )
+        await escalate_watch_now(db, watch, reason=f"re-run failed: {str(exc)[:200]}")
+        return WatchActionOutcome(action=action, escalated=True, error=str(exc)[:300])
+
+    # The watch follows the re-run (same target; the lineage append records the
+    # corrective attempt and pulls the next check forward). Fail-soft: a lineage
+    # hiccup never undoes the re-dispatch.
+    try:
+        WatchService.follow(
+            db,
+            watch,
+            new_target_type="board_task",
+            new_target_id=str(task.id),
+            reason=(
+                f"Watch re-run of task {task.id}"
+                + (f": {diagnosis}" if diagnosis else "")
+            )[:300],
+        )
+    except Exception:  # noqa: BLE001 -- lineage is bookkeeping, not the action
+        logger.warning(
+            "[WatchActions] board rerun lineage follow failed (non-fatal)",
+            exc_info=True,
+        )
+
+    logger.info(
+        "[WatchActions] re-dispatched board task %s for watch %s", task.id, watch.id
+    )
+    return WatchActionOutcome(
+        action=action, executed=True, detail=f"task {task.id} re-dispatched"
+    )
+
+
+def _resolve_board_task(db: Session, watch):
+    from core.models.core import BoardTask
+
+    try:
+        task_id = int(watch.target_id)
+    except (TypeError, ValueError):
+        return None
+    try:
+        return (
+            db.query(BoardTask)
+            .filter(
+                BoardTask.id == task_id,
+                BoardTask.workspace_id == watch.workspace_id,
+            )
+            .first()
+        )
+    except Exception:
+        logger.warning(
+            "[WatchActions] board task resolve failed for %s", watch.target_id,
+            exc_info=True,
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
