@@ -88,6 +88,13 @@ check "US-003 route manifest carries the answer route" \
 check "US-003 route-manifest test green" \
   'cd orchestrator && python3 -m pytest -q tests/test_route_manifest.py'
 
+# test_route_manifest.py regenerates the manifest as a side effect; in a partial
+# local env (infra-gated routers like workflows/* fail to import) that DROPS
+# routes, corrupting the working-tree manifest. The COMMITTED manifest is the
+# source of truth CI regenerates in full — restore it before the route-contract
+# check reads it (a no-op in CI, where regeneration matches committed).
+git checkout -- "$MANIFEST" 2>/dev/null || true
+
 check "US-003 frontend route-contract green" \
   'node frontend/scripts/check-route-contract.js'
 
@@ -119,8 +126,11 @@ check "US-006 strict is the default (grep default literal)" \
 check "no os.getenv outside config.py (diff scope)" \
   "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- 'orchestrator/**/*.py' ':!orchestrator/config.py' | grep -E '^\\+' | grep -q 'os.getenv'"
 
+# Scope to CODE (like the os.getenv check above): the spec/prompt/json/sh docs on
+# this branch legitimately carry the prohibition text ("no AWAITING_HUMAN
+# writers"), so an unscoped diff grep is self-defeating. A real writer is Python.
 check "no AWAITING_HUMAN writers introduced" \
-  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD | grep -E '^\\+' | grep -q 'AWAITING_HUMAN'"
+  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- 'orchestrator/**/*.py' 'frontend/**/*.ts' 'frontend/**/*.tsx' | grep -E '^\\+' | grep -q 'AWAITING_HUMAN'"
 
 echo ""
 if [ "$FAIL" = "0" ]; then echo "ACCEPTANCE: PASS (PRD-225)"; exit 0; else echo "ACCEPTANCE: FAIL (PRD-225)"; exit 1; fi
