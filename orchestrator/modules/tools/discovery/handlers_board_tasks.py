@@ -33,6 +33,40 @@ def _notify_board_safe(db: Session, workspace_id: UUID, task_id: int, status: st
         )
 
 
+def _notify_dispatch_safe(db: Session, workspace_id: UUID, task_id: int) -> None:
+    """Wake the board dispatch loop for a chat-side assigned write, fail-soft.
+
+    PRD-224 US-001: a chat-created/assigned/re-queued ticket that lands in the
+    ``assigned`` state must be claimed on the dispatcher's LISTEN wake, not the
+    fallback poll — mirroring the HTTP layer's ``notify_task_available`` call
+    sites (``api/board_tasks.py`` create :398 / assign :632 / reject :816 /
+    run-now :862). Best-effort exactly like ``notify_task_available`` itself and
+    the PRD-227 ``_notify_board_safe`` beside it: a NOTIFY (or import) failure
+    logs and continues — it must NEVER raise into the tool call.
+    """
+    try:
+        from services.board_dispatcher import notify_task_available
+
+        notify_task_available(db, workspace_id=workspace_id, task_id=task_id)
+    except Exception:  # noqa: BLE001 — NOTIFY is an optimisation, not a guarantee
+        logger.debug(
+            "[BoardTasks] dispatch NOTIFY skipped for task %s", task_id, exc_info=True
+        )
+
+
+def _is_dispatch_claimable(task) -> bool:
+    """True when a task is in the state the board dispatch loop claims: ``assigned``
+    with an agent and not a recipe mirror (the recipe executor drives those). This
+    is the exact guard the HTTP layer notifies on (``api/board_tasks.py`` :397 and
+    :624-629), so a chat-filed ticket wakes the dispatcher on the same condition.
+    """
+    return (
+        task.status == "assigned"
+        and task.assigned_agent_id is not None
+        and getattr(task, "source_type", None) != "recipe"
+    )
+
+
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
@@ -123,6 +157,12 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
 
     # PRD-227 US-001: push the new card to Command Centres, same as api/board_tasks.py:389.
     _notify_board_safe(db, workspace_id, task.id, task.status, "task_created")
+
+    # PRD-224 US-001: a chat-created assigned ticket wakes the dispatch loop on the
+    # LISTEN channel (mirrors api/board_tasks.py:397-398) so it is claimed at wake
+    # latency, not on the next fallback poll.
+    if _is_dispatch_claimable(task):
+        _notify_dispatch_safe(db, workspace_id, task.id)
 
     return {
         "success": True,
@@ -279,6 +319,12 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     # assign path (api/board_tasks.py update_task notify_board_event, event="task_updated").
     _notify_board_safe(db, workspace_id, task.id, task.status, "task_updated")
 
+    # PRD-224 US-001: assignment wakes the dispatch loop (mirrors
+    # api/board_tasks.py:624-632); the loop claims 'assigned' tasks only, so
+    # re-assigning a running ticket is a no-op there.
+    if _is_dispatch_claimable(task):
+        _notify_dispatch_safe(db, workspace_id, task.id)
+
     return {
         "success": True,
         "task_id": task.id,
@@ -346,6 +392,11 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
             prompt=task.raw_prompt or task.description or task.title,
             review_mode=task.review_mode or "auto",
         )
+    # PRD-224 US-001: a move back to 'assigned' (re-queue) wakes the dispatch loop
+    # so the ticket is claimed on the LISTEN wake, not the fallback poll — the same
+    # claimable guard the HTTP layer notifies on. in_progress launches inline above.
+    elif _is_dispatch_claimable(task):
+        _notify_dispatch_safe(db, workspace_id, task.id)
 
     return {
         "success": True,
