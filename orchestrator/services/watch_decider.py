@@ -444,6 +444,16 @@ class WatchDecider:
             )
 
         # --- below threshold or failed ---
+        # PRD-224 US-003: a board ticket re-runs through the board's run-now
+        # machinery, budget-railed -- rerun while budget remains, escalate when
+        # exhausted. It is a plain re-dispatch: no diagnose LLM and no
+        # one-improve-cycle cap (the action_budget is the sole limiter).
+        if watch.target_type == "board_task":
+            return await self._act_board_task(
+                db, watch, terminal_state=terminal_state, verdict=verdict,
+                completed=completed,
+            )
+
         acts = flags["acts_on_failure"] if not completed else flags["acts_on_low_score"]
         improve_spent = (watch.actions_taken or 0) > 0
         budget_left = (watch.actions_taken or 0) < (watch.action_budget or 0)
@@ -867,6 +877,43 @@ class WatchDecider:
             await self._notify_action(db, watch, action, cause)
             return DECIDED_ACTED
         return DECIDED_PARKED
+
+    async def _act_board_task(
+        self, db: Session, watch, *, terminal_state: str, verdict, completed: bool
+    ) -> str:
+        """PRD-224 US-003: corrective flow for a board-ticket watch.
+
+        A policy that acts (score_and_improve) re-runs the ticket through the
+        run-now machinery (``watch_actions.run_board_task_action``) -- budget-
+        railed, escalating the moment the budget is exhausted. A non-acting
+        policy (run_and_report) reports the failure verdict and closes. No
+        diagnose LLM: a board re-run is a plain replay of authorised work, so
+        the deterministic failure explanation is the narration.
+        """
+        from services.watch_actions import escalate_watch_now, run_board_task_action
+
+        flags = self.policy_flags(watch.policy)
+        acts = flags["acts_on_failure"] if not completed else flags["acts_on_low_score"]
+        improve_spent = (watch.actions_taken or 0) > 0
+        explanation = self._failure_explanation(watch, terminal_state, verdict, improve_spent)
+
+        if not acts:
+            watch.final_verdict = explanation
+            return await self._close(
+                db, watch, passed=False, terminal_state=terminal_state,
+                explanation=explanation,
+            )
+
+        outcome = await run_board_task_action(db, watch, "rerun", diagnosis=explanation)
+        if outcome.escalated:
+            return DECIDED_ESCALATED
+        if outcome.executed:
+            await self._notify_action(db, watch, "rerun", explanation)
+            return DECIDED_ACTED
+        # run_board_task_action escalates on any failure; belt-and-braces for an
+        # unexpected non-escalated error outcome.
+        await escalate_watch_now(db, watch, reason=f"re-run unavailable: {outcome.error}")
+        return DECIDED_ESCALATED
 
     @staticmethod
     async def _notify_action(db: Session, watch, action: str, cause: str) -> None:
