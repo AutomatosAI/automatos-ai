@@ -32,6 +32,10 @@ from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
+# PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
+# descriptions share ONE dispatch-contract fragment (single source, never copied).
+from modules.coordination.dispatch_contract import DISPATCH_CONTRACT_FRAGMENT
+
 logger = logging.getLogger(__name__)
 
 # Tier-3 classification uses a cheap active-agent roster (not the planners'
@@ -112,15 +116,17 @@ def build_assign_directive(
             f"The user wants the agent '{target_agent_name}' to do this off-thread "
             "on the board, NOT an inline answer. Do this now; do not answer the "
             "request yourself:\n"
-            "1. platform_create_task with a clear title and a SELF-CONTAINED "
-            "description (everything the assigned agent needs to do the work "
-            "without reading this conversation), "
+            "1. platform_create_task with a clear title and a self-contained "
+            "description written as the 4-part dispatch contract below (the "
+            "assigned agent must do the work from it alone, without reading this "
+            "conversation), "
             f"assigned_agent_name=\"{target_agent_name}\".\n"
             f"2. {start}\n"
             f"3. Confirm in ONE line with the task id and that it is {confirm_word}, "
             "then state its supervision status by echoing the platform_create_task "
             "result's 'supervision' field (set honestly from the AUTO_TICKET_WATCH "
             "outcome). Do NOT claim it is supervised unless that field says so.\n"
+            f"\n{DISPATCH_CONTRACT_FRAGMENT}\n"
         )
     return (
         "\n\n## Manager directive — confirm the agent first\n"
@@ -128,8 +134,10 @@ def build_assign_directive(
         "resolved to your roster. Do NOT guess or auto-pick an agent. Call "
         "platform_list_agents, then ask the user which agent should own it — name "
         "2-3 plausible candidates from the roster. Once they choose, file the "
-        "ticket (platform_create_task with assigned_agent_name), start it unless "
-        "they deferred, and confirm in one line with the task id.\n"
+        "ticket (platform_create_task with assigned_agent_name), written as the "
+        "4-part dispatch contract below, start it unless they deferred, and "
+        "confirm in one line with the task id.\n"
+        f"\n{DISPATCH_CONTRACT_FRAGMENT}\n"
     )
 
 

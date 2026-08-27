@@ -28,6 +28,7 @@ from core.models.core import Agent
 from core.utils.exception_telemetry import record_error
 from core.models.orchestration_enums import ComplexityTier, TaskType
 from modules.coordination.agent_matcher import CANONICAL_ROLES, _compute_skill_match
+from modules.coordination.dispatch_contract import DISPATCH_CONTRACT_FRAGMENT
 from modules.coordination.templates import match_template, render_template
 from services.orchestration_deps import (
     CyclicDependencyError,
@@ -299,6 +300,10 @@ class PlannedTask:
     complexity: str = "moderate"
     parallel_group: Optional[str] = None
     attachment_ids: List[str] = field(default_factory=list)  # PRD-127: per-task attachments
+    # PRD-226 US-003: the task's definition of done, extracted from the 4-part
+    # dispatch contract. Verification scores against it when present; absent ⇒
+    # the inference path is unchanged (rides the existing input_context JSONB).
+    definition_of_done: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -839,7 +844,19 @@ def _build_decomposition_prompt(
     return "\n".join(parts)
 
 
-_OUTPUT_SCHEMA_INSTRUCTIONS = """\
+# PRD-226 US-003: the dispatch-contract preamble shares its 4-part shape with the
+# ASSIGN lane via the single DISPATCH_CONTRACT_FRAGMENT (no copy-paste).
+_TASK_CONTRACT_INSTRUCTIONS = (
+    "## Task descriptions — the dispatch contract\n\n"
+    "Write every task's `description` as a self-contained dispatch contract; the "
+    "assigned agent must be able to do the work from it alone, without reading this "
+    "plan or the originating conversation.\n\n"
+    f"{DISPATCH_CONTRACT_FRAGMENT}\n\n"
+    "Also give each task a `definition_of_done`: a short, checkable statement of "
+    "what 'finished' means. Verification scores the output against it.\n\n"
+)
+
+_OUTPUT_SCHEMA_INSTRUCTIONS = _TASK_CONTRACT_INSTRUCTIONS + """\
 ## Required JSON Output
 
 Return ONLY a JSON object with this exact structure:
@@ -850,7 +867,8 @@ Return ONLY a JSON object with this exact structure:
     {
       "temp_id": "task_1",
       "title": "Short descriptive title",
-      "description": "Detailed instructions for the agent",
+      "description": "OBJECTIVE: … one line. OUTPUT: … the Deliverable and its shape. TOOLS: use …, avoid …, read <ref> instead of re-deriving. BOUNDARIES: … scope limits + definition of done.",
+      "definition_of_done": "A short, checkable statement of what 'finished' means for this task",
       "agent_role": "researcher",
       "sequence_number": 1,
       "task_type": "llm_generation",
@@ -895,6 +913,7 @@ Return ONLY a JSON object with this exact structure:
 
 Valid task_type values: llm_generation, tool_execution, analysis, synthesis, review
 Valid complexity values: simple, moderate, complex
+definition_of_done: REQUIRED on every task — a short, checkable statement of what "finished" means. Verification scores the output against it.
 Dependencies reference temp_id values of upstream tasks that must complete first.
 parallel_group: string name grouping independent parallel tasks (null if sequential).
 Tasks in the same parallel_group MUST NOT depend on each other.
@@ -1172,6 +1191,11 @@ def _parse_plan(
         if not isinstance(task_attachment_ids, list):
             task_attachment_ids = []
 
+        # PRD-226 US-003: the 4-part contract's definition of done (optional —
+        # a plan without it verifies exactly as before via the inference path).
+        raw_dod = rt.get("definition_of_done")
+        definition_of_done = str(raw_dod).strip() if raw_dod and str(raw_dod).strip() else None
+
         tasks.append(
             PlannedTask(
                 temp_id=temp_id,
@@ -1186,6 +1210,7 @@ def _parse_plan(
                 complexity=complexity,
                 parallel_group=parallel_group,
                 attachment_ids=[str(a) for a in task_attachment_ids],
+                definition_of_done=definition_of_done,
             )
         )
 
@@ -1361,6 +1386,7 @@ def _ensure_synthesis_tasks(
                         dependencies=new_task_deps,
                         complexity=task.complexity,
                         parallel_group=task.parallel_group,
+                        definition_of_done=task.definition_of_done,  # PRD-226: survive repoint
                     )
                 )
             else:

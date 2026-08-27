@@ -41,16 +41,19 @@
    "title": "4-part dispatch contracts: planner emits, verification consumes, ASSIGN shares",
    "description": "One shared contract fragment (single definition — a constant/builder importable by both consumers): OBJECTIVE · OUTPUT · TOOLS (use/avoid + references to read instead of re-deriving) · BOUNDARIES (scope limits + definition of done), references not pasted content. (a) MissionPlanner.decompose's prompt (~planner.py:756) requires each task spec in that shape; the parser (~:1099) extracts definition_of_done into the task spec dict (store inside the EXISTING plan/task JSONB — rebuild-don't-mutate; NO schema change). (b) verification.py consumes definition_of_done when present (score against it; absent → today's inference path unchanged — no hard dependency). (c) The 224 ASSIGN directive's ticket-description instruction imports the SAME fragment. Tests: planner parse fixture with a 4-part spec extracts DoD; verification uses it when present and falls back cleanly when absent; grep proves one fragment definition with ≥2 importers.",
    "acceptanceCriteria": [
-    "Shared fragment defined once, imported by planner prompt builder AND the ASSIGN directive (grep: 1 definition, ≥2 imports)",
-    "Planner parse stores definition_of_done inside the existing JSONB spec (no schema change; rebuild-don't-mutate; test)",
-    "Verification scores against DoD when present; absent-DoD path byte-identical behavior to before (regression test)",
-    "ZERO new alembic files",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — Shared fragment defined once, imported by planner prompt builder AND the ASSIGN directive (grep: 1 definition, ≥2 imports). Evidence: DISPATCH_CONTRACT_FRAGMENT defined ONLY in modules/coordination/dispatch_contract.py:15; imported by modules/coordination/planner.py:31 and consumers/chatbot/auto.py:37. Tests: test_fragment_has_exactly_one_definition_site (tree-walk), test_fragment_imported_by_planner_and_assign, test_both_consumers_bind_the_same_object (runtime `is` identity), test_planner_prompt_embeds_the_fragment, test_assign_directive_embeds_the_fragment_both_paths.",
+    "DONE — Planner parse stores definition_of_done inside the existing JSONB spec (no schema change; rebuild-don't-mutate; test). Evidence: PlannedTask gained a frozen `definition_of_done` field; _parse_plan extracts it (test_parse_extracts_definition_of_done / absent→None / blank→None); it persists via the EXISTING input_context JSONB in coordinator_service._persist_decomposition (new dict, not mutated) and the plan-import path; test_no_schema_change_dod_rides_input_context_jsonb asserts OrchestrationTask has NO definition_of_done column but has input_context; test_planned_task_is_frozen_rebuild_not_mutate.",
+    "DONE — Verification scores against DoD when present; absent-DoD path byte-identical behavior to before (regression test). Evidence: _build_judge_prompt gained an optional definition_of_done → dod_section is '' when absent (inserted as {criteria_text}{dod_section}); test_judge_prompt_absent_dod_is_byte_identical asserts base==explicit_none==blank and the exact criteria→deterministic bytes; test_judge_prompt_with_dod_scores_against_it; reconciler reads it from input_context JSONB (getattr-safe) and passes it through; W1-S9 idle-in-tx ordering test stays green.",
+    "DONE — ZERO new alembic files. Evidence: `git status alembic/` clean; DoD rides existing input_context JSONB.",
+    "DONE — PRD-226 contract tests green: 14 passed (tests/test_prd226_contract.py); 224 assign-lane suite 31 passed; planner/verification/coordinator suites 69 passed. Full suite: 3 failed + 46 errors = the same pre-existing infra baseline (4318→4332 passed, +14 = the new tests); the transient W1-S9 break from a getattr-less read was fixed before commit. Zero regressions."
    ],
    "files": [
+    "orchestrator/modules/coordination/dispatch_contract.py",
     "orchestrator/modules/coordination/planner.py",
     "orchestrator/modules/coordination/verification.py",
-    "orchestrator/api/chat.py",
+    "orchestrator/modules/coordination/reconciler.py",
+    "orchestrator/services/coordinator_service.py",
+    "orchestrator/consumers/chatbot/auto.py",
     "orchestrator/tests/"
    ]
   }

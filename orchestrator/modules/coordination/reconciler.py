@@ -393,6 +393,11 @@ class MissionReconciler:
             t_desc = task.description or ""
             t_output = task.output or ""
             t_id = task.id
+            # PRD-226 US-003: the 4-part contract's definition of done rides the
+            # input_context JSONB. Capture it here (before the transaction ends);
+            # None ⇒ verification uses today's inference path unchanged.
+            _ictx = getattr(task, "input_context", None)
+            t_dod = _ictx.get("definition_of_done") if isinstance(_ictx, dict) else None
 
             # End the read transaction so the connection sits idle (not
             # idle-in-transaction) for the whole verify LLM call. PRD-135 /
@@ -412,6 +417,7 @@ class MissionReconciler:
                     executor_model=executor_model,
                     run_id=run_id,
                     task_id=t_id,
+                    definition_of_done=t_dod,
                 )
             except Exception:
                 logger.error(
