@@ -99,8 +99,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
               <Suspense fallback={null}>
                 <StudioThemeFlag />
               </Suspense>
-              {/* PRD-222 US-012: the FirstLoginGuard/WelcomeModal mount is
-                  retired for the Auto-led flow — a new workspace lands directly
+              {/* PRD-222 US-012: the first-login welcome-modal mount (see
+                  onboarding/first-login-guard.tsx + onboarding/welcome-modal.tsx)
+                  is retired for the Auto-led flow — a new workspace lands directly
                   in the conversation where Auto opens (OnboardingOpener). The
                   component files stay until W2 deletes them; only the mount is
                   removed here. use-auto-tour keys off isNewWorkspace + the
