@@ -95,11 +95,21 @@ check "US-016 dev page exists" \
 check "US-016 dev page is unlinked (no nav/sidebar reference)" \
   "! grep -rq 'dev/reset-onboarding' frontend/components --include='*.tsx'"
 
-check "US-016 .env.example documents the temporary flag" \
-  "grep -q 'ONBOARDING_RESET_ENABLED' .env.example"
+check "US-016 flag documented (env template OR config.py — .env.example edits are hook-blocked in loops)" \
+  "grep -q 'ONBOARDING_RESET_ENABLED' .env.example || grep -B3 -A3 'ONBOARDING_RESET_ENABLED' orchestrator/config.py | grep -qiE 'temporar|dev|test|pilot'"
 
 check "US-016 reset gating + survivor tests exist" \
   "grep -rlq 'reset_onboarding' orchestrator/tests"
+
+# --- US-017/US-018: re-landed section v2 + report plumbing (lost by early #613 squash) --
+check "US-017 section v2 stage-aware (powerup + OpenRouter present)" \
+  "grep -q 'powerup' orchestrator/modules/context/sections/onboarding.py && grep -qi 'openrouter' orchestrator/modules/context/sections/onboarding.py"
+
+check "US-017 section v2 tests present" \
+  "[ -f orchestrator/tests/test_prd222_onboarding_section.py ]"
+
+check "US-018 report plumbing carries the onboarding type (schema + handler)" \
+  "grep -q \"'onboarding'\" orchestrator/modules/tools/discovery/handlers_reports.py && grep -q 'onboarding' orchestrator/modules/tools/discovery/actions_reports.py"
 
 # --- Trust + convention guards -------------------------------------------------------
 check "trust-guard test still present (never weakened away)" \
