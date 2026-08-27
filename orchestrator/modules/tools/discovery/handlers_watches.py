@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-_VALID_TARGET_TYPES = ("mission", "playbook_execution", "scheduled_playbook")
+_VALID_TARGET_TYPES = ("mission", "playbook_execution", "scheduled_playbook", "board_task")
 _MAX_LIST_LIMIT = 50
 _RECENT_EVENT_LIMIT = 10
 
@@ -153,6 +153,37 @@ def _resolve_target(
             return {
                 "title": f"Watch: {recipe.name[:70]} (schedule)",
                 "criteria": f"Scheduled playbook '{recipe.name}' keeps running on time.",
+            }
+
+        if target_type == "board_task":
+            # PRD-224 US-002: supervise an assigned ticket. target_id is the
+            # integer BoardTask id; a non-integer or cross-workspace/unknown id
+            # is refused here so the watch is never created on a phantom target.
+            from core.models.core import BoardTask
+
+            try:
+                task_id = int(target_id)
+            except (TypeError, ValueError):
+                return None
+            task = (
+                db.query(BoardTask)
+                .filter(
+                    BoardTask.id == task_id,
+                    BoardTask.workspace_id == workspace_id,
+                )
+                .first()
+            )
+            if task is None:
+                return None
+            label = (task.title or "").strip()
+            criteria = (task.description or "").strip() or (
+                f"Board task '{label}' is completed to standard."
+                if label
+                else f"Board task {target_id} is completed to standard."
+            )
+            return {
+                "title": f"Watch: {label[:80]}" if label else f"Watch: task {target_id}",
+                "criteria": criteria,
             }
     except Exception:
         logger.warning(
