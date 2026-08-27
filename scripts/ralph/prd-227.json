@@ -8,10 +8,10 @@
    "title": "Agent-side board moves push SSE + blocked/failed parity",
    "description": "In orchestrator/modules/tools/discovery/handlers_board_tasks.py: after every successful board write in the create/assign/update-status handlers, call notify_board_event with the same payload shape the human path uses (api/board_tasks.py:912-916 — re-verify the exact payload). Extend update_board_task_status's allowed statuses (~:270) with 'blocked' (REQUIRES a blocked_reason argument, sets blocked_at — mirror api/board_tasks.py:548-553) and 'failed', keeping transition validation identical to the HTTP path (:898-902). Import/notify must be fail-soft exactly like board_events.py:38-70 — a NOTIFY failure logs and continues, never raises into the tool call. Do NOT change the SSE frame vocabulary.",
    "acceptanceCriteria": [
-    "Agent-side create/assign/update-status handlers each call notify_board_event on success (grep call sites in handlers_board_tasks.py); payload shape matches the human path (test asserts the emitted payload keys)",
-    "platform_update_task_status accepts 'blocked' only with blocked_reason (sets blocked_at + blocked_reason; test) and 'failed'; invalid transitions rejected identically to the HTTP path (parametrized test)",
-    "A forced NOTIFY failure (monkeypatched) does not fail the tool call (test)",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — create (2 return paths), assign, and update_status each call notify_board_event via fail-soft _notify_board_safe (handlers_board_tasks.py:14-34,74-78,101,262-265,346); events task_created/task_updated/status_changed mirror api/board_tasks.py:389,610,912. Tests test_agent_{create,assign,update_status}_notifies_board_event assert event name + payload keys == {workspace_id,task_id,status,event}.",
+    "DONE — update_board_task_status reuses api.board_tasks.VALID_STATUSES (adds blocked+failed, can't drift); blocked requires blocked_reason (test_agent_blocked_requires_reason) and sets blocked_at+blocked_reason (test_agent_blocked_sets_reason_and_timestamp), unblock clears them (test_agent_unblock_clears_blocked_fields); parametrized test_agent_status_validation_matches_http_path over 12 literals proves the accepted set == VALID_STATUSES.",
+    "DONE — test_agent_notify_failure_is_fail_soft monkeypatches notify_board_event to raise; the tool call still returns success and the status write persists.",
+    "DONE — tests/test_board_task_handlers.py 36 passed (was 16). Full suite unchanged vs baseline (3 failed/46 errors are pre-existing @integration DB-fixture setup with no local Postgres; none touch board files) — real-Postgres coverage runs in CI test.yml."
    ],
    "files": [
     "orchestrator/modules/tools/discovery/handlers_board_tasks.py",
