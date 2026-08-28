@@ -125,18 +125,23 @@ async def answer_clarification(
     # can exceed CLARIFICATION_BUDGET by up to (max_concurrent - 1). We accept the
     # soft cap deliberately rather than hardening it, because a correct atomic
     # spend is unsafe here and the overspend is cheap:
-    #   * Concurrent tasks run their agent I/O in parallel on SEPARATE DB sessions
-    #     (coordinator_service Phase 2, asyncio.gather). emit_event FLUSHES but does
-    #     not COMMIT, and READ COMMITTED sees only committed rows, so no in-flight
-    #     answer is visible to a sibling ask — neither an app-level lock nor an
-    #     advisory lock closes the window without COMMITTING a borrowed
-    #     agent-runtime session mid-tool-execution (which would durably persist
-    #     that session's unrelated pending work — a worse bug than the overspend).
+    #   * The concurrent tasks in one mission-run tick run on a SHARED DB session
+    #     (P229-RVW-5 corrected the earlier "separate sessions" claim):
+    #     coordinator_service opens ONE SessionLocal per tick (:1521), builds
+    #     AgentFactory(db_session=db) per task (:2242), and runs their agent I/O
+    #     concurrently via asyncio.gather (:1750). The ANSWERED marker here is
+    #     emit_event-FLUSHED but NOT committed, and this answer path deliberately
+    #     never commits: a commit would durably persist every SIBLING task's
+    #     in-flight, uncommitted work on that shared session (a worse bug than the
+    #     overspend). So no app-level or advisory lock can close the check→record
+    #     window without committing the shared session mid-tool-execution.
     #   * A schema-encoded slot / separate counter is ruled out: PRD-229 mandates
     #     zero migrations and budget "counted off the run's own event trail".
     #   * The blast radius is bounded by max_concurrent (default 3) and is pure
     #     cost-control softness — escalations are never budget-limited, so the
-    #     human-ask safety valve is unaffected.
+    #     human-ask safety valve is unaffected. (The ESCALATION path DOES commit —
+    #     unlike this ephemeral answer path — because it must durably park a
+    #     human-visible ask; see clarification_ladder.escalate_clarification.)
     if _answers_used(db, subject) >= _budget():
         _record(db, subject, question, outcome="cannot_answer", extra={"reason": REASON_BUDGET})
         return {"cannot_answer": True, "reason": REASON_BUDGET}

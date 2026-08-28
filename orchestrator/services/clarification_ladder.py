@@ -50,6 +50,9 @@ async def escalate_clarification(
     from modules.tools.discovery.handlers_asks import ask_human
 
     # --- create the human ask via 225's SHARED internals (no parallel path) ---
+    # ask_human durably COMMITS the grant (handlers_asks.py:101) — the human sees
+    # the ask / gets the Telegram ping the instant this returns. If it RAISES, no
+    # ask was placed, so we let it propagate (the handler falls back safely).
     ask_params = {
         "subject_type": "tool_call",
         "subject_id": str(subject.task_id),
@@ -60,11 +63,34 @@ async def escalate_clarification(
     ask_result = await ask_human(db, subject.workspace_id, ask_params)
     ask_id = ask_result.get("ask_id") if isinstance(ask_result, dict) else None
 
-    # --- park the task: labelled DRAFT + awaiting marker on EXISTING JSONB ------
-    _park_task_with_draft(subject.task, ask_id=ask_id, question=question, partial_output=partial_output)
-
-    # --- record the escalation on the run event trail --------------------------
-    _record_escalation(db, subject, question, ask_id=ask_id, category=category)
+    # --- park the task + commit it as durably as the ask (P229-RVW-5) ----------
+    # The session is SHARED across every task in this mission-run tick
+    # (coordinator_service opens ONE SessionLocal at :1521 and runs the concurrent
+    # agents' I/O via asyncio.gather at :1750). ask_human already committed the
+    # grant; the park + draft + trail here are only FLUSHED, so a SIBLING task's
+    # tool error firing db.rollback() on the shared session (platform_executor.py
+    # :1245) would wipe this uncommitted draft while the committed ask survives —
+    # an ORPHANED human ask no answer can bridge back to (Gerard's baked
+    # draft-on-park decision silently lost). So we COMMIT the park immediately,
+    # mirroring ask_human's own durably-park-first pattern.
+    #
+    # Everything past the placed ask is best-effort AND non-raising: the human HAS
+    # been asked, so a persistence failure must NOT surface as "escalation failed"
+    # (a retrying agent would file a DUPLICATE ask). On failure we discard the
+    # half-written park (the committed grant still stands) and still report parked.
+    try:
+        _park_task_with_draft(subject.task, ask_id=ask_id, question=question, partial_output=partial_output)
+        _record_escalation(db, subject, question, ask_id=ask_id, category=category)
+        db.commit()
+    except Exception:  # noqa: BLE001 — the ask is already durable; never double-ask
+        logger.error(
+            "[clarify] park+draft persist failed after ask %s was placed; the ask "
+            "stands but the draft could not be preserved", ask_id, exc_info=True,
+        )
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
     return {
         "parked": True,

@@ -95,11 +95,29 @@ async def ask_orchestrator(db: Session, workspace_id: UUID, params: Dict[str, An
     # labelled draft, and the caller gets {parked, ask_id} so it stops cleanly.
     from services.clarification_ladder import escalate_clarification
 
-    escalation = await escalate_clarification(
-        db, subject, question,
-        category=category if isinstance(category, str) else result.get("category"),
-        agent_name=params.get("_agent_name"),
-    )
+    # escalate_clarification is exception-safe ONCE the ask is placed (P229-RVW-5:
+    # it swallows every post-ask_human failure and still returns {parked, ask_id}).
+    # It only RAISES when ask_human itself failed — i.e. NO human ask was placed —
+    # so falling back to proceed-with-assumption here is safe: there is nothing to
+    # orphan, and a retry re-attempts a fresh ask rather than double-asking a
+    # placed one.
+    try:
+        escalation = await escalate_clarification(
+            db, subject, question,
+            category=category if isinstance(category, str) else result.get("category"),
+            agent_name=params.get("_agent_name"),
+        )
+    except Exception:  # noqa: BLE001 — only reached when no ask was placed
+        logger.warning(
+            "[ask_orchestrator] escalation failed before an ask was placed for task %s",
+            task_id, exc_info=True,
+        )
+        return {
+            "success": True,
+            "proceed_with_assumption": _ASSUME_GUIDANCE,
+            "message": _ASSUME_GUIDANCE,
+        }
+
     return {
         "success": True,
         "parked": True,

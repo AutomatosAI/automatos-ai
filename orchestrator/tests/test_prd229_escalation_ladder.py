@@ -278,3 +278,97 @@ async def test_resume_waits_while_grant_still_pending(stub_ask_human):
 def test_render_resume_block_none_without_answer():
     assert render_resume_block(_task(input_context={})) is None
     assert render_resume_block(_task(input_context={RESUME_KEY: {"answer": ""}})) is None
+
+
+# ---------------------------------------------------------------------------
+# P229-RVW-5 — park+draft is COMMITTED (survives a sibling rollback) and the
+# escalation is exception-safe once the ask is placed (never double-asks)
+# ---------------------------------------------------------------------------
+
+class _CommitAwareSession:
+    """Models commit/rollback on the task JSONB: rollback() reverts UNcommitted
+    mutations back to the last committed snapshot, exactly as SQLAlchemy would on
+    the shared per-tick session. Proves the park+draft is COMMITTED (durable), not
+    merely flushed — without escalate_clarification's db.commit(), the sibling
+    rollback below wipes the draft and the assertions fail."""
+
+    def __init__(self, task):
+        import copy
+
+        self._task = task
+        self._copy = copy.deepcopy
+        self._committed = self._snapshot()
+
+    def _snapshot(self):
+        return (
+            self._copy(getattr(self._task, "output_metadata", None)),
+            self._copy(getattr(self._task, "input_context", None)),
+        )
+
+    def commit(self):
+        self._committed = self._snapshot()
+
+    def rollback(self):
+        om, ic = self._committed
+        self._task.output_metadata = self._copy(om)
+        self._task.input_context = self._copy(ic)
+
+    def flush(self):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_escalate_commits_draft_survives_sibling_rollback(stub_ask_human, spy_events):
+    # escalate parks + drafts, then a SIBLING task's tool error rolls back the
+    # SHARED session (platform_executor.py:1245). The draft must survive because
+    # escalate_clarification COMMITTED it (P229-RVW-5) — as durable as the ask.
+    task = _task()
+    db = _CommitAwareSession(task)
+
+    await escalate_clarification(db, _subject(task), "Which vendor?")
+
+    db.rollback()  # a sibling's failure rolls back the shared per-tick session
+
+    assert task.output_metadata[DRAFT_KEY]["ask_id"] == 99      # draft survived
+    assert task.input_context[PENDING_KEY]["ask_id"] == 99      # marker survived
+
+
+@pytest.mark.asyncio
+async def test_escalate_marks_ask_placed_when_park_fails_after_ask(stub_ask_human, spy_events, monkeypatch):
+    # A throw AFTER ask_human has placed the (committed) ask must NOT surface as a
+    # failure — the human WAS asked, and a bare failure would make a retrying agent
+    # file a DUPLICATE ask. escalate swallows it, discards the half-written park,
+    # and still returns {parked, ask_id}.
+    def _boom(*a, **k):
+        raise RuntimeError("JSONB write failed mid-park")
+
+    monkeypatch.setattr(cl, "_park_task_with_draft", _boom)
+    db = MagicMock()
+
+    result = await escalate_clarification(db, _subject(_task()), "Q?")
+
+    assert result["parked"] is True          # ask marked placed, not a failure
+    assert result["ask_id"] == 99
+    db.commit.assert_not_called()            # commit never reached...
+    db.rollback.assert_called_once()         # ...the half-written park is discarded
+
+
+@pytest.mark.asyncio
+async def test_handler_falls_back_when_ask_never_placed(monkeypatch):
+    # escalate_clarification RAISES only when ask_human itself failed — i.e. NO ask
+    # was placed. The handler must fall back to proceed-with-assumption (nothing to
+    # orphan; a retry re-attempts a fresh ask, it does not double-ask).
+    async def _cannot(db, subject, question, *, category=None):
+        return {"cannot_answer": True, "reason": "unretrievable"}
+
+    async def _boom(db, subject, question, *, category=None, partial_output=None, agent_name=None):
+        raise RuntimeError("ask_human DB error — no ask was placed")
+
+    monkeypatch.setattr(oa, "answer_clarification", _cannot)
+    monkeypatch.setattr(cl, "escalate_clarification", _boom)
+
+    result = await hc.ask_orchestrator(MagicMock(), uuid4(), _server_params())
+
+    assert result["success"] is True
+    assert "proceed_with_assumption" in result
+    assert "parked" not in result
