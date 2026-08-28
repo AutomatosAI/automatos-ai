@@ -113,7 +113,11 @@ def test_tool_create_uses_server_injected_origin_only(monkeypatch):
 
 def test_rest_create_strips_caller_supplied_origin_and_chat_id(monkeypatch):
     """The REST route (api/missions.py) copies body.config verbatim; it must
-    strip origin_chat_id/chat_id before they become run.config."""
+    strip origin_chat_id/chat_id before they become run.config. Asserted here for
+    a NON-Clerk caller (no resolvable owner) — where no server origin is ever
+    re-injected, so the strip is the whole story. A Clerk caller's launching chat
+    IS re-set as the server origin, owner-checked at delivery (PRD-227 P227-RVW-3;
+    see test_prd227_rvw3_rest_narration_origin.py)."""
     import api.missions as am
 
     captured: dict = {}
@@ -134,7 +138,12 @@ def test_rest_create_strips_caller_supplied_origin_and_chat_id(monkeypatch):
             "keep": "yes",
         },
     )
-    ctx = types.SimpleNamespace(workspace_id=uuid.uuid4(), user=types.SimpleNamespace(id="user_owner"))
+    # Non-Clerk caller (clerk_user_id=None): the RVW-3 origin re-injection is gated
+    # on a resolvable Clerk owner, so nothing is re-set here — the strip stands.
+    ctx = types.SimpleNamespace(
+        workspace_id=uuid.uuid4(),
+        user=types.SimpleNamespace(id="user_owner", clerk_user_id=None),
+    )
 
     asyncio.run(am.create_mission(body, ctx, MagicMock()))
 
@@ -187,8 +196,8 @@ def test_blog_create_strips_caller_supplied_origin_and_chat_id(monkeypatch):
 
 def test_import_plan_strips_caller_supplied_origin_and_chat_id(monkeypatch):
     """The /import-plan sibling endpoint strips caller origin too — parity with
-    create_mission and defense-in-depth (its created_by is a verified user, but
-    it must not diverge silently from its sibling)."""
+    create_mission and defense-in-depth. Non-Clerk caller (no re-injection), same
+    scope as the create test above; the Clerk re-injection path is RVW-3."""
     import api.missions as am
 
     captured: dict = {}
@@ -210,7 +219,10 @@ def test_import_plan_strips_caller_supplied_origin_and_chat_id(monkeypatch):
             "keep": "yes",
         },
     )
-    ctx = types.SimpleNamespace(workspace_id=uuid.uuid4(), user=types.SimpleNamespace(id="user_owner"))
+    ctx = types.SimpleNamespace(
+        workspace_id=uuid.uuid4(),
+        user=types.SimpleNamespace(id="user_owner", clerk_user_id=None),
+    )
 
     asyncio.run(am.import_mission_plan(body, ctx, MagicMock()))
 

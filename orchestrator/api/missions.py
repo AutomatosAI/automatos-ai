@@ -403,11 +403,22 @@ async def create_mission(
     coordinator = get_coordinator_service()
 
     # Merge template_id into config so it flows to planner.
-    # PRD-227 P227-RVW-2: strip caller-supplied origin_chat_id/chat_id before they
-    # become run.config — this REST path injects no server origin, so narration
-    # falls back to the creator's Auto thread (defense-in-depth: the messenger
-    # re-checks chat ownership at delivery).
+    # PRD-227 P227-RVW-2/RVW-3: strip the caller-supplied origin_chat_id/chat_id
+    # first (never trust the raw caller key), THEN server-set the narration origin
+    # from the AUTHENTICATED request's launching chat so a chat-launched mission
+    # narrates back INTO that thread — the "Launch Mission" suggestion card posts
+    # config={source:'chat', chat_id:<launching chat>}. Cross-user-safe without
+    # reopening RVW-2: the origin is honored only for a Clerk caller whose owner
+    # post_background_message can resolve (created_by → clerk_user_id → users.id),
+    # and its Layer-2 owner check rejects a chat owned by another user (→ Auto
+    # thread). Non-Clerk callers (API key/SDK — no resolvable owner) get no origin
+    # → Auto thread, so a request key is never honored workspace-wide.
+    _launch_chat = None
+    if isinstance(body.config, dict):
+        _launch_chat = body.config.get("chat_id") or body.config.get("origin_chat_id")
     mission_config = strip_caller_narration_origin(body.config)
+    if _launch_chat and ctx.user and ctx.user.clerk_user_id:
+        mission_config["origin_chat_id"] = str(_launch_chat)
     if body.template_id:
         mission_config["template_id"] = body.template_id
     if body.plan_only:
@@ -454,6 +465,17 @@ async def import_mission_plan(
     execute it verbatim — the planner is NOT re-run, so the executed DAG matches the
     given plan exactly (Q54). The mission lands in awaiting_approval."""
     coordinator = get_coordinator_service()
+    # PRD-227 P227-RVW-2/RVW-3: strip the caller keys, then server-set the
+    # narration origin from the authenticated Clerk caller's launching chat
+    # (sibling parity with create_mission) so a chat-launched plan import narrates
+    # into that thread; backstopped by post_background_message's Layer-2 owner
+    # check. Non-Clerk callers get no origin → Auto thread.
+    _import_launch = None
+    if isinstance(body.config, dict):
+        _import_launch = body.config.get("chat_id") or body.config.get("origin_chat_id")
+    _import_config = strip_caller_narration_origin(body.config)
+    if _import_launch and ctx.user and ctx.user.clerk_user_id:
+        _import_config["origin_chat_id"] = str(_import_launch)
     try:
         run = coordinator.import_plan(
             db=db,
@@ -461,9 +483,7 @@ async def import_mission_plan(
             goal=body.goal,
             plan=body.plan,
             created_by=ctx.user.id or "unknown",
-            # PRD-227 P227-RVW-2: same strip as create_mission — the narration
-            # origin is never caller-supplied (sibling endpoint parity).
-            config=strip_caller_narration_origin(body.config),
+            config=_import_config,
         )
         db.commit()
         return _run_to_response(run)
