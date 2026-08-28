@@ -1,0 +1,75 @@
+{
+ "project": "Automatos AI Platform — PRD-229 Mid-Run Clarifications (Auto-as-Manager wave, chain 6/6)",
+ "branchName": "ralph/prd-229-clarifications",
+ "description": "STACKED branch: ralph/prd-229-clarifications ← ralph/prd-228-fleet-state (chain 6/6 — the whole wave is IN your tree: 225's question-asks are your escalation target, 228's fleet state is available answering context; diff scope = merge-base vs the 228 branch). Spec seeded at docs/PRDS/PRD-229-MID-RUN-CLARIFICATIONS.md; wave map docs/PRDS/PRD-WAVE-AUTO-MANAGER.md. SCOPE = the autonomy multiplier: an executing agent can ask the orchestrator; Auto answers routine questions from retrievable context with citations; what Auto cannot answer (or any governance-category question) escalates into PRD-225's queue with the subject parked; and the dead inter_agent machinery is DELETED. BAKED DECISIONS (Gerard 2026-08-27, from PRD-229 §9 proposals): CLARIFICATION_BUDGET default 3 Auto-answers per run (unlimited escalations — they are visible and cheap by design); a question that parks a task mid-run records partial output as a DRAFT result on the card (decision history beats cleanliness); inter_agent.py IS deleted (Component D default confirmed — house rule §5, delete the losers). ANCHORS (verified 2026-08-27 — RE-VERIFY by grep): task execution envelope orchestrator/services/coordinator_service.py:2038 (_prepare_task upstream digest), :2212 (_run_agent_io), :2237-2249 (asyncio.wait_for — the time budget the answer round must fit inside), :2272 (_record_task_result); tool exposure by context mode orchestrator/modules/context/modes.py (TASK_EXECUTION — verify how mode-scoped tools are admitted; the tool must NOT appear in CHATBOT mode); dead code orchestrator/modules/agents/communication/inter_agent.py (AgentCommunicationProtocol :94, SharedContextManager :400, CollaborativeReasoner :651, CollaborativeAgentFactory :978, execute_team_task :991) + re-exports orchestrator/modules/agents/__init__.py:36,60 — zero external callers (re-verify with grep before deleting; ANY caller found = RALPH_BLOCKED, report it); escalation target: 225's platform_ask_human internals (share the service function); run event trail modules/coordination/progress_ledger.py; retrieval = the platform's EXISTING RAG stack (S3 Vectors ONLY — pgvector paths are legacy, never touch them); governance categories per PRD-223 framing: destructive operations, spending real money, scope changes. BINDING RULES: the ladder is worker → orchestrator → human, NOTHING lateral (no agent↔agent messaging of any kind); answers are GROUNDED-ONLY — every answer carries source refs (upstream result id, field doc, memory key, fleet state) and an unretrievable answer is cannot_answer, NEVER a fabrication (the reviewer hunts invented answers); ask_orchestrator is synchronous with a hard time-box FITTING INSIDE the task's asyncio.wait_for envelope (time-box constant in config.py; on timeout → treat as cannot_answer → escalate + park); CLARIFICATION_BUDGET in config.py; escalation REUSES 225's ask internals (shared function — no HTTP self-call, no parallel ask path); parked tasks use the existing blocked status + 225's park semantics; draft partial output stored in the task's EXISTING result/JSONB fields (rebuild-don't-mutate; no schema change); ZERO new alembic revisions; NO new tables; NO new routes (route manifest untouched); DELETE inter_agent.py + its __init__ re-exports in the SAME PR with zero orphan imports (import-lint/declare-the-world files break on the MERGED TIP — check .importlinter-style configs if present and update them in the same commit); no os.getenv outside orchestrator/config.py; canonical terms; PURE tests (LLM-free — the answering service's LLM call is stubbed in tests); NEVER 'git add -A'/'git add .'/'-u'; never 'git stash -u'. No frontend stories.",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "The answering service — grounded, budgeted, cited",
+   "description": "orchestrator/services/orchestrator_answers.py: answer_clarification(db, subject, question) → {answer, sources: [...refs]} | {cannot_answer, reason}. Retrieval scope: the run's mission plan + upstream task results (reuse _prepare_task's digest source), the mission field docs, memory (existing PRD-206 surface), the intake/business corpus via the EXISTING RAG stack (S3 Vectors), and 228's fleet state when the question is about the floor. Every answer carries its source refs; nothing retrievable → cannot_answer (no LLM freestyle: the LLM call is composition over retrieved context, and an empty retrieval short-circuits BEFORE any LLM call). Per-run budget: CLARIFICATION_BUDGET (config.py, default 3) — count on the run, budget-exhausted → cannot_answer(budget). Governance-category detection (destructive/spend/scope keywords + the caller's declared category param) → skip answering entirely, return escalate_directly. Every Q&A (answered or not) appended to the run's event trail via the existing progress ledger.",
+   "acceptanceCriteria": [
+    "Answerable fixture (answer present in upstream digest) → answer with source refs (LLM stubbed; test asserts the refs point at the digest)",
+    "Unretrievable fixture → cannot_answer with NO LLM call made (stub asserts zero invocations)",
+    "Budget: 4th clarification on a run returns cannot_answer(budget) (test); governance fixtures (spend/destructive/scope) return escalate_directly without answering (parametrized test)",
+    "Q&A recorded on the run event trail (test); CLARIFICATION_BUDGET in config.py only",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/config.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "ask_orchestrator — the tool, task-execution-only, time-boxed",
+   "description": "3-file platform-tool ask_orchestrator(question, category?) exposed ONLY in the TASK_EXECUTION context (modes.py — verify the admission mechanism; a CHATBOT-mode agent must not see it). Handler: resolves the calling task/run from caller context (server-injected), calls US-001 inside a hard time-box (constant in config.py) that fits within the task's asyncio.wait_for envelope (re-verify :2237-2249 and pick the constant accordingly — document the arithmetic in a comment); timeout → cannot_answer path. Returns {answer, sources} | {parked: true, ask_id} | {proceed_with_assumption: guidance} — the last only when US-003 isn't triggered and the question was answerable-adjacent (cannot_answer WITHOUT governance category and budget remaining... keep it simple: cannot_answer pre-US-003 returns proceed-with-stated-assumption guidance; US-003 replaces that branch with escalation).",
+   "acceptanceCriteria": [
+    "Tool visible in TASK_EXECUTION context and ABSENT from CHATBOT context (context-mode tests both directions)",
+    "Answer path returns grounded answer + sources (stubbed US-001); timeout path returns the cannot_answer branch (test with a slow stub)",
+    "Time-box constant in config.py with the envelope arithmetic documented; caller task resolved from server context, not a tool param (test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/",
+    "orchestrator/modules/context/modes.py",
+    "orchestrator/config.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "The escalation ladder — cannot_answer becomes a human ask, task parks with a draft",
+   "description": "Replace US-002's proceed-with-assumption branch: cannot_answer OR escalate_directly → create a question-kind ask against the subject via 225's SHARED service internals (the same function platform_ask_human uses — call-site grep must prove reuse, no HTTP self-call, no parallel path), park the task (existing blocked semantics), store the agent's partial output so far as a DRAFT result on the task's existing result JSONB (rebuild-don't-mutate; visibly labeled draft), and return {parked: true, ask_id} so the agent stops cleanly. On human answer (225's answer path — unchanged), the resume injects the Q&A into the next run context; add ONE integration-style test proving the full loop: ask → park+draft → answer → resume → the rerun context contains the Q&A and the draft is available. Escalations are NOT budget-limited (baked decision).",
+   "acceptanceCriteria": [
+    "cannot_answer creates the ask via 225's shared internals (grep proves the shared call; no duplicate ask construction), parks the task, stores the labeled draft (tests)",
+    "Governance-category questions escalate directly with zero answering attempts (test)",
+    "Full-loop test green: ask → park → answer → resume with Q&A in context + draft present",
+    "Escalation count not limited by CLARIFICATION_BUDGET (test: budget exhausted, escalation still works)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/",
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-004",
+   "title": "Delete the dead collaboration machinery",
+   "description": "RE-VERIFY zero external callers (grep execute_team_task, CollaborativeAgentFactory, CollaborativeReasoner, AgentCommunicationProtocol, SharedContextManager across the whole backend — ANY hit outside modules/agents/communication/ and modules/agents/__init__.py = RALPH_BLOCKED, report the caller). Then DELETE orchestrator/modules/agents/communication/inter_agent.py, remove the __init__.py:36,60 re-exports, remove any now-empty communication/ package scaffolding, and update any declare-the-world configs (.importlinter or similar) that name the module — in the SAME commit. Zero orphan imports (a repo-wide grep for the deleted names returns only docs/PRDS + memory references).",
+   "acceptanceCriteria": [
+    "inter_agent.py deleted; __init__ re-exports removed; no empty-package remnants (ls proves)",
+    "Repo-wide grep for the five class/function names hits only docs/ + scripts/ralph (evidence in commit body)",
+    "Import-linter/declare-the-world configs updated in the same commit if they reference the module",
+    "cd orchestrator && python3 -m pytest -q green (full suite proves nothing depended on it)",
+    "ZERO new alembic files; route manifest untouched"
+   ],
+   "files": [
+    "orchestrator/modules/agents/communication/",
+    "orchestrator/modules/agents/__init__.py",
+    "orchestrator/tests/"
+   ]
+  }
+ ]
+}
