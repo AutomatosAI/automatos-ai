@@ -105,9 +105,29 @@ def _persona_hash(text: str) -> str:
     return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()
 
 
+# A transient bug force-wrote the global "Irish CTO" soul onto EVERY per-workspace
+# Auto row: a raw-SQL startup migration in main.py ran, on every boot from
+# 2026-04-13 12:16 to 2026-04-14 19:30,
+#   UPDATE agents SET custom_persona_prompt = <auto-cto-custom-soul.txt, stripped>
+#   WHERE is_system_agent AND slug LIKE 'auto-%' AND workspace_id IS NOT NULL
+# (removed in commit 8c4a1f653, "stop overwriting Auto persona"). A row still
+# carrying that snapshot is residue of the bug, not a user's choice — so it is a
+# shipped default the doctrine backfill may replace, NOT a customization to skip.
+# The soul file was byte-stable across the whole window, so there is exactly one
+# such hash. It is PINNED (not embedded as text) because the 4288-char snapshot
+# carries unicode (— →) that hand-transcription would corrupt, breaking the exact
+# match this guard depends on. Reproduce:
+#   git show 8c4a1f653~1:orchestrator/core/seeds/auto-cto-custom-soul.txt \
+#     | python3 -c "import sys,hashlib;print(hashlib.sha256(sys.stdin.read().strip().encode()).hexdigest())"
+_CTO_SOUL_APR2026_SNAPSHOT_HASH = (
+    "2a5be2b5cb816f493f35355041e37f55b669e03724b173bd646bdda0d25850ab"
+)
+
+
 _KNOWN_SEED_PERSONA_HASHES = frozenset({
     _persona_hash(_FRIENDLY_FALLBACK),
     _persona_hash(_ALEMBIC_BACKFILL_PERSONA),
+    _CTO_SOUL_APR2026_SNAPSHOT_HASH,
 })
 
 

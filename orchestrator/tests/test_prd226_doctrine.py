@@ -155,3 +155,70 @@ def test_sync_auto_personas_reports_each_bucket():
     assert counts == {"updated": 1, "skipped": 1, "current": 1}
     assert old.custom_persona_prompt == seed_mod._default_persona()
     assert custom.custom_persona_prompt == "hand-written persona, do not touch"
+
+
+# ---------------------------------------------------------------------------
+# P226-RVW-1 — the backfill must actually REACH existing workspace Auto rows
+# ---------------------------------------------------------------------------
+# The review found the hash-guarded backfill was a production no-op: every
+# lazy-seed caller reaches seed_auto_agent ONLY when the Auto row is absent, so
+# its existing-row backfill branch never fired for pre-existing rows. The fix
+# wires sync_auto_personas into the leader-gated per-deploy boot seed batch.
+
+_MAIN = Path(__file__).resolve().parent.parent / "main.py"
+
+
+def _boot_phase_1_body() -> str:
+    """The source of main.py's _boot_phase_1_core (read as text, no import — the
+    module pulls in the whole app and can't load in a bare unit-test env)."""
+    src = _MAIN.read_text(encoding="utf-8")
+    start = src.index("async def _boot_phase_1_core")
+    end = src.index("async def ", start + 1)
+    return src[start:end]
+
+
+def test_boot_phase_invokes_sync_auto_personas():
+    """AC1: a NON-test production path runs the backfill when Auto rows already
+    exist. Fails if the boot wiring is ever removed (reachability regression)."""
+    body = _boot_phase_1_body()
+    assert "sync_auto_personas" in body, (
+        "_boot_phase_1_core no longer invokes sync_auto_personas — the doctrine "
+        "backfill is unreachable for existing workspaces again"
+    )
+
+
+def test_backfill_reaches_pre_existing_alembic_row_via_real_caller():
+    """AC2: drive a REAL caller (sync_auto_personas, the fn the boot path calls) —
+    NOT _backfill_auto_persona directly — over a pre-existing row carrying the
+    _ALEMBIC_BACKFILL_PERSONA default plus a customized row. The default row is
+    updated to _default_persona(); the customized row is untouched; a second pass
+    through the same caller mutates nothing (idempotent)."""
+    old = _row(seed_mod._ALEMBIC_BACKFILL_PERSONA)
+    custom = _row("hand-written soul, do not touch")
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.all.return_value = [old, custom]
+
+    first = seed_mod.sync_auto_personas(db)
+    assert first == {"updated": 1, "skipped": 1, "current": 0}
+    assert old.custom_persona_prompt == seed_mod._default_persona()
+    assert custom.custom_persona_prompt == "hand-written soul, do not touch"
+
+    persona_after_first = old.custom_persona_prompt
+    second = seed_mod.sync_auto_personas(db)
+    assert second == {"updated": 0, "skipped": 1, "current": 1}
+    assert old.custom_persona_prompt == persona_after_first  # no second mutation
+    assert custom.custom_persona_prompt == "hand-written soul, do not touch"
+
+
+def test_cto_soul_apr2026_snapshot_hash_is_a_known_seed():
+    """AC3: the transient Irish-CTO soul force-written to every auto-% row by the
+    2026-04-13→14 main.py startup migration is recognised as a shipped default —
+    so a surviving row is reconciled, not misclassified 'customized' and skipped.
+    End-to-end update of any hash-matching row is proven by
+    test_backfill_updates_alembic_backfilled_default; this pins the CTO snapshot
+    into that eligible set."""
+    assert (
+        seed_mod._CTO_SOUL_APR2026_SNAPSHOT_HASH
+        in seed_mod._KNOWN_SEED_PERSONA_HASHES
+    )
