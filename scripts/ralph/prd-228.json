@@ -70,6 +70,39 @@
     "frontend/hooks/",
     "frontend/"
    ]
+  },
+  {
+   "id": "P228-RVW-1",
+   "title": "Fleet read-model must exclude the roster-hidden agents (per-workspace Auto + ephemeral clones)",
+   "severity": "HIGH",
+   "description": "REVIEW FINDING (chain 5/6 adversarial review). The fleet agents query filters by workspace only — services/fleet_state.py:380-381 `db.query(Agent).filter(Agent.workspace_id == workspace_id)` — so it returns EVERY agent in the workspace, including the two categories the canonical roster deliberately hides: (a) the per-workspace system agent Auto (is_system_agent=True, workspace_id set) — core/seeds/seed_auto_agent.py:15 documents it as 'hidden from the Roster UI (is_system_agent=True + workspace_id != None)', and it is seeded into every provisioned workspace, so it appears on EVERY fleet response; and (b) ephemeral Mission Zero clones (agent_type='ephemeral') — services/coordinator_service.py:585 'hidden from roster, cleaned up after mission', present during any onboarding run. The canonical roster excludes both: api/agents.py:538 `.filter(Agent.agent_type != \"ephemeral\")` and api/agents.py:545-547 `~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None))`. Consequence: the fleet TAB and the roster TAB on the SAME Agents page show different agent sets; platform_fleet_status lists Auto (the very agent asking 'how's the team doing?') as a team member, plus onboarding clones during Mission Zero — directly undermining PRD-228 goals G2/G3 (a grounded, accurate 'what's everyone doing' answer). The service docstring (fleet_state.py:369 '1. active agents in the workspace') MISDESCRIBES the actual behavior. Untested: the realdb fixture (tests/test_prd228_fleet_state_realdb.py:74-85) seeds only agent_type='custom' agents with no Auto/ephemeral, so no test exercises the real agent population. Global system agents/templates (workspace_id=None) are already excluded by the workspace filter — the delta is exactly {per-workspace Auto} + {ephemeral clones}. FIX: mirror the roster's exclusions in the agents query and correct the docstring; if including Auto is a deliberate product choice it must be made explicit, but the default must match the roster.",
+   "acceptanceCriteria": [
+    "The get_fleet_state agents query (services/fleet_state.py:380-384) excludes ephemeral agents (`Agent.agent_type != \"ephemeral\"`) AND the per-workspace system agent (`~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None))`), mirroring api/agents.py:538 and :545-547 — one query, still workspace-scoped, still no N+1",
+    "New pure/realdb test: a workspace containing (i) a normal agent, (ii) a per-workspace Auto (is_system_agent=True, workspace_id set), (iii) an ephemeral clone (agent_type='ephemeral') → get_fleet_state returns ONLY the normal agent; the Auto and ephemeral ids are absent",
+    "The service docstring (fleet_state.py module docstring + the entry-point '1. active agents' comment) is corrected to state the exact exclusion (non-ephemeral, non-per-workspace-system), so the doc matches the code",
+    "The existing query-count assertion still holds (bounded query set unchanged); cd orchestrator && python3 -m pytest -q tests/test_prd228_fleet_state.py tests/test_prd228_fleet_state_realdb.py green"
+   ],
+   "files": [
+    "orchestrator/services/fleet_state.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P228-RVW-2",
+   "title": "Route must fail-soft on the omittable enrichment sources (watches/asks), not 500",
+   "severity": "MEDIUM",
+   "description": "REVIEW FINDING (chain 5/6 adversarial review). The binding rule (prd-228.json line 4) is 'fail-soft per source (an unavailable source omits its fields, never 500s — clone the channels sender posture)'; PRD-228 §7 'tolerate partial sources ... by omitting fields, not failing'. Only the COST source is wrapped: services/fleet_state.py:162-181 `_safe_cost` (used at :436). The other two independently-omittable enrichment sources — watches (services/fleet_state.py:413-420) and asks (services/fleet_state.py:422-430) — are UNWRAPPED, so if either query raises (a schema drift / lock / bad row on `watches` or `approval_grants`; cf. the escalation_level migration-drift class already seen in this codebase), the exception propagates out of get_fleet_state and the route (api/fleet.py:36-42, which has no try/except) returns 500. The tool path is protected (handlers_fleet.py:138-142 returns {success:false}) but the ROUTE is not, so a single enrichment-source failure blanks the entire fleet tab ('Fleet state failed to load') even though agents/board/current-work/cost are all healthy — the opposite of the intended degrade-and-omit posture. NOTE: watches/blocked are NON-optional in the frontend contract (FleetAgentRow in api-client.ts), so the correct degrade is to DEFAULT these fields (watches → {active:0, needs_attention:0}; blocked.open_asks → []) rather than drop the keys, keeping the response shape-complete. The core sources (agents/board/mission) are structural and out of scope — they may still raise.",
+   "acceptanceCriteria": [
+    "The watches source and the asks source in get_fleet_state degrade fail-soft (wrapped like `_safe_cost`): a failure of either is caught, logged, and yields safe defaults (watches → {active:0, needs_attention:0}; blocked → {count from board only, open_asks: []}) with all agents and cost/current intact — get_fleet_state does not raise",
+    "New test: monkeypatch the watches query to raise → get_fleet_state returns a whole 200-shaped response (every agent present, cost_24h + current intact, watches defaulted); same for the asks query",
+    "Route-level test: GET /api/v1/fleet returns 200 (not 500) when a non-cost enrichment source fails (extend tests/test_prd228_fleet_route.py or the realdb suite)",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd228_fleet_state.py tests/test_prd228_fleet_route.py green"
+   ],
+   "files": [
+    "orchestrator/services/fleet_state.py",
+    "orchestrator/api/fleet.py",
+    "orchestrator/tests/"
+   ]
   }
  ]
 }
