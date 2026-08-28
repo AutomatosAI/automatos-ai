@@ -310,6 +310,72 @@ async def test_already_answered_target_is_safe(replies):
 
 
 # ===========================================================================
+# P225-RVW-17 — the Telegram confirmation is HONEST about resume: the RVW-11
+# honesty gate reaches this second confirmation channel, and the CAS race-loser
+# is told the truth, never a false 'the agent is resuming'.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_telegram_confirmation_is_honest_on_no_resume(replies, monkeypatch):
+    """The winner whose subject resume no-ops (resumed False) is told 'Answer
+    recorded — nothing to auto-resume', mirroring the in-app confirmation
+    (_confirm_answer_into_chat) — never a false 'the agent is resuming'."""
+    import api.approval_grants as ag
+    from api.webhooks import _maybe_answer_question, _extract_reply_context
+
+    async def _no_resume(db, grant):  # the answer applies, but nothing resumes
+        return False
+
+    monkeypatch.setattr(ag, "_requeue_subject", _no_resume)
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    grant = _question(db, ws, gid=51, telegram_message_id="777")
+    workspace = SimpleNamespace(id=ws)
+
+    body = _tg_body("Use vendor X", reply_to=777)
+    reply_ctx = _extract_reply_context(body, "telegram")
+    res = await _maybe_answer_question(db, workspace, body, reply_ctx, {})
+
+    assert res["route_type"] == "question_answer"
+    assert grant.status == GrantStatus.GRANTED.value      # the answer WAS applied
+    assert grant.answer_text == "Use vendor X"
+    assert len(replies) == 1
+    reply = replies[0]["text"]
+    assert "resuming" not in reply.lower()                 # honest — no false resume
+    assert "recorded" in reply.lower()                     # mirrors the in-app copy
+
+
+@pytest.mark.asyncio
+async def test_telegram_lost_race_reports_already_answered(replies):
+    """Two people answer the same Telegram-delivered question (auth is chat-scoped,
+    not principal-scoped): the CAS race-loser — apply_question_answer's 0-row
+    branch records/resumes NOTHING — is told the question was already answered,
+    never a 'resuming' for an answer that did not even apply (P225-RVW-17)."""
+    from api.webhooks import _apply_telegram_answer
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    # The question already won its flip — another answerer got there first.
+    grant = _question(db, ws, gid=61, telegram_message_id="777")
+    grant.status = GrantStatus.GRANTED.value
+    grant.answer_text = "Vendor A"
+    grant.answered_by = "telegram:111"
+    workspace = SimpleNamespace(id=ws)
+
+    reply_ctx = {"platform": "telegram", "chat_id": "c1", "from_id": 222}
+    res = await _apply_telegram_answer(db, workspace, grant, "Vendor B", reply_ctx, {})
+
+    assert res["route_type"] == "question_answer"
+    assert grant.answer_text == "Vendor A"                 # loser did NOT overwrite
+    assert grant.answered_by == "telegram:111"
+    assert len(replies) == 1
+    reply = replies[0]["text"]
+    assert "already answered" in reply.lower()
+    assert "resuming" not in reply.lower()
+
+
+# ===========================================================================
 # P225-RVW-1 — an answer is bound to the delivery chat, not just (workspace,id)
 # ===========================================================================
 

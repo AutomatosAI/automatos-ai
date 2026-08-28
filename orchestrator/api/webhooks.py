@@ -371,11 +371,19 @@ async def _apply_telegram_answer(
     # P225-RVW-1 AC3: attribute to the STABLE numeric telegram id, never the
     # self-chosen first_name (which is trivially spoofable, e.g. 'telegram:CEO').
     answered_by = f"telegram:{reply_ctx.get('from_id') or reply_ctx.get('chat_id') or 'user'}"
-    await apply_question_answer(db, grant, answer_text=answer_text, answered_by=answered_by)
-    await _deliver_reply(
-        f"Answered #{grant.id} — the agent is resuming.",
-        reply_ctx, integrations, workspace_id=workspace.id,
+    outcome = await apply_question_answer(
+        db, grant, answer_text=answer_text, answered_by=answered_by
     )
+    # Confirm HONESTLY, mirroring the in-app _confirm_answer_into_chat (P225-RVW-17):
+    # this second confirmation channel must never claim 'resuming' for an answer
+    # that lost the compare-and-swap race (applied False) or resumed nothing.
+    if not outcome.applied:
+        reply = f"Question #{grant.id} was already answered."
+    elif outcome.resumed:
+        reply = f"Answered #{grant.id} — the agent is resuming."
+    else:
+        reply = f"Answer recorded for #{grant.id} — nothing to auto-resume."
+    await _deliver_reply(reply, reply_ctx, integrations, workspace_id=workspace.id)
     return {
         "status": "completed",
         "routed": True,

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -266,16 +266,37 @@ async def answer_question(
     return {"grant": grant.to_dict()}
 
 
+class AnswerOutcome(NamedTuple):
+    """Result of :func:`apply_question_answer`, so a caller can confirm HONESTLY.
+
+    ``applied`` — THIS call won the compare-and-swap and recorded the answer (a
+    race-loser is ``False``). ``resumed`` — the parked subject was genuinely
+    re-queued / resumed (a terminal or no-op subject is ``False``). The Telegram
+    bridge branches its confirmation on BOTH so it never tells a human 'the agent
+    is resuming' for an answer that lost the race or resumed nothing — the
+    RVW-11 honesty gate reaching the second confirmation channel (P225-RVW-17).
+    ``grant`` is the committed winning row either way (a bare-grant caller that
+    ignores the tuple is unaffected).
+    """
+    grant: ApprovalGrant
+    applied: bool
+    resumed: bool
+
+
 async def apply_question_answer(
     db: Session, grant: ApprovalGrant, *, answer_text: str, answered_by: str
-) -> ApprovalGrant:
+) -> "AnswerOutcome":
     """Record an answer and resume the parked subject — the shared service the
     HTTP endpoint AND the Telegram bridge both call (PRD-225 US-005; the bridge
     is NOT an HTTP self-call). Assumes the caller validated kind='question' +
     status pending.
 
     ``pending → granted``; the Q&A is appended to the subject's execution context
-    and the work resumes through the EXISTING ``_requeue_subject``.
+    and the work resumes through the EXISTING ``_requeue_subject``. Returns an
+    :class:`AnswerOutcome` — ``(grant, applied, resumed)`` — so a caller can
+    confirm honestly; callers that only need the grant read ``outcome.grant``
+    (the HTTP ``answer_question`` path ignores the tuple entirely and is
+    unaffected).
     """
     now = datetime.now(timezone.utc)
 
@@ -304,10 +325,11 @@ async def apply_question_answer(
     )
     if not flipped:
         # Lost the race — another answer already won. Record / resume / confirm
-        # nothing (no duplicates); return the committed winning state.
+        # nothing (no duplicates); return the committed winning state, flagged
+        # applied=False so the caller never claims 'resuming' for a no-op answer.
         db.rollback()
         db.refresh(grant)
-        return grant
+        return AnswerOutcome(grant, applied=False, resumed=False)
 
     # Won the flip. The UPDATE used synchronize_session=False, so sync the
     # in-memory row for _record_answer_on_subject / the confirmation / the caller.
@@ -324,7 +346,7 @@ async def apply_question_answer(
     db.commit()
 
     _confirm_answer_into_chat(db, grant, resumed=resumed)
-    return grant
+    return AnswerOutcome(grant, applied=True, resumed=resumed)
 
 
 def _record_answer_on_subject(
