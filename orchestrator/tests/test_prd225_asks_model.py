@@ -40,7 +40,16 @@ def test_prd225_revision_chains_onto_prior_head():
     cfg.set_main_option("script_location", str(_ORCH / "alembic"))
     rev = ScriptDirectory.from_config(cfg).get_revision("prd225_s1_asks_on_grants")
 
-    assert rev.down_revision == "prd185_s1b_toollog_user_nullable"
+    # Assert the INTENT, not a literal parent: this revision must be the single
+    # head and must descend from whatever the prior head was. Hard-coding the
+    # parent SHA-name breaks on every rebase onto a moved main (it did, when the
+    # PRD-222 merges buried prd185_s1b_toollog_user_nullable mid-chain), which
+    # would tempt a future rebase into "fixing" the test instead of the chain.
+    assert rev.down_revision, "the revision must descend from the prior head, not sit at base"
+    heads = tuple(ScriptDirectory.from_config(cfg).get_heads())
+    assert heads == ("prd225_s1_asks_on_grants",), (
+        f"must be the SINGLE head (rival heads are the trap this guards): {heads}"
+    )
     assert callable(rev.module.upgrade) and callable(rev.module.downgrade)
 
 

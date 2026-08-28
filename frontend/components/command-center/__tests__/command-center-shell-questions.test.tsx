@@ -40,6 +40,12 @@ vi.mock('../activity-tab', () => ({ ActivityTab: () => <div>activity</div> }))
 vi.mock('../watchlist-tab', () => ({ WatchlistTab: () => <div>watchlist</div> }))
 vi.mock('../governance-tab', () => ({ GovernanceTab: () => <div>governance</div> }))
 vi.mock('../questions-tab', () => ({ QuestionsTab: () => <div>questions-body</div> }))
+// PRD-222's onboarding widgets landed in the shell after this test was written
+// and both call useWorkspace, so rendering the shell without a WorkspaceProvider
+// throws. They are irrelevant to the Questions-tab wiring under test — stub them
+// like every other shell child.
+vi.mock('@/components/onboarding/trial-balance-pill', () => ({ TrialBalancePill: () => <div /> }))
+vi.mock('@/components/onboarding/setup-checklist-card', () => ({ SetupChecklistCard: () => <div /> }))
 
 import { CommandCenterShell } from '../command-center-shell'
 
