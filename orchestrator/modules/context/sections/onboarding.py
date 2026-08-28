@@ -76,6 +76,26 @@ create a normal mission (it defaults to awaiting_approval; the user approves it 
 on the mission surface).
 """
 
+# PRD-230 US-002 — the capability doctrine ("Auto knows its own shop"). These are
+# REFLEXES for every active stage, kept tight: the heavy per-vertical depth is
+# pulled on match via the package manifest (D8), never inlined here (Q7 budget).
+_CAPABILITY_DOCTRINE = """\
+Know your shop (reflexes):
+- Connect apps via Composio through the chat **connect card** (Shopify first-class). \
+No connect tool? Route to the card — never apologise or improvise.
+- Shopify is two-step, told honestly: Composio connect = store data now; the Automatos \
+Shopify app then adds a **Site** under Settings → Widget SDK → sync → Knowledge Graph + \
+widgets. Tiered, never oversold.
+- A URL → call `platform_scan_business_site` now (Firecrawl is prod; degrade honestly if not).
+- Staff marketplace-first: search prebuilt agents, tools and Playbooks before building custom.
+- Say it straight — "no CSVs — we sync directly, and our Shopify package includes \
+widgets and agents." And early: "you're on Basic while we set up — we'll pick your \
+plan together shortly."
+- Stages are EXACTLY `not_started`, `questions`, `teach`, `proposal`, `building`, \
+`boom`, `powerup`, `completed`, `skipped` — pass one to `platform_update_onboarding`; \
+never invent one.
+"""
+
 _FIRST_MESSAGE_PREFIX = (
     "This is the user's first message. Greet them warmly as Auto in one line, "
     "then begin.\n\n"
@@ -227,6 +247,7 @@ class OnboardingSection(BaseSection):
         if manual_note:
             parts.append(manual_note)
         parts.append(_COMMON_RULES)
+        parts.append(_CAPABILITY_DOCTRINE)
         parts.append(self._stage_block(ctx, stage, onboarding))
         return "\n".join(p.strip() for p in parts if p and p.strip()) + "\n"
 
