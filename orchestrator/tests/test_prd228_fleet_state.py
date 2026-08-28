@@ -407,6 +407,74 @@ def test_get_fleet_state_failsoft_cost_still_200_shaped(monkeypatch):
         _assert_documented_shape(entry, cost_expected=False)
 
 
+# ===========================================================================
+# 4b. Fail-soft on the omittable enrichment sources (P228-RVW-2)
+# ===========================================================================
+
+def test_get_fleet_state_failsoft_watches_still_200_shaped(monkeypatch):
+    """A watches-source failure defaults the watch block; response stays whole.
+
+    Every agent is present with cost + current + blocked intact — only the
+    watches field degrades to its zeroed default (kept, not dropped).
+    """
+    ws = uuid4()
+    agents = [_agent(1, "A1"), _agent(2, "A2")]
+    sess = _CountingSession(agents)
+
+    def _boom(*a, **k):
+        raise RuntimeError("watches table locked")
+
+    monkeypatch.setattr(fs, "_watches_source", _boom)
+    out = get_fleet_state(sess, ws)
+
+    assert len(out["agents"]) == 2
+    assert out["cost_available"] is True
+    for entry in out["agents"]:
+        assert entry["watches"] == {"active": 0, "needs_attention": 0}
+        _assert_documented_shape(entry, cost_expected=True)
+
+
+def test_get_fleet_state_failsoft_asks_still_200_shaped(monkeypatch):
+    """An asks-source failure defaults open_asks to []; response stays whole."""
+    ws = uuid4()
+    agents = [_agent(1, "A1"), _agent(2, "A2")]
+    sess = _CountingSession(agents)
+
+    def _boom(*a, **k):
+        raise RuntimeError("approval_grants unavailable")
+
+    monkeypatch.setattr(fs, "_asks_source", _boom)
+    out = get_fleet_state(sess, ws)
+
+    assert len(out["agents"]) == 2
+    assert out["cost_available"] is True
+    for entry in out["agents"]:
+        assert entry["blocked"]["open_asks"] == []
+        _assert_documented_shape(entry, cost_expected=True)
+
+
+def test_safe_watches_and_safe_asks_return_none_on_failure():
+    class _Boom:
+        def query(self, *a, **k):
+            raise RuntimeError("source down")
+
+    assert fs._safe_watches(_Boom(), uuid4()) is None
+    assert fs._safe_asks(_Boom(), uuid4()) is None
+
+
+def test_assembler_defaults_when_watches_or_asks_unavailable():
+    """watches=None → zeroed block; asks=None → open_asks [] (count from board)."""
+    agents = [_agent(1)]
+    board = [_board(7, 1, status="in_progress", started_at=_mins(3),
+                    blocked_at=_mins(1))]
+    out = fs._assemble_fleet(agents, board, [], None, None, {}, generated_at=NOW)
+    entry = out["agents"][0]
+    assert entry["watches"] == {"active": 0, "needs_attention": 0}
+    # blocked.count still reflects the board source; only open_asks defaults.
+    assert entry["blocked"] == {"count": 1, "open_asks": []}
+    _assert_documented_shape(entry, cost_expected=True)
+
+
 def test_empty_workspace_returns_empty_fleet():
     sess = _CountingSession([])
     out = get_fleet_state(sess, uuid4())

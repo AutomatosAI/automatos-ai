@@ -21,9 +21,13 @@ Design invariants (PRD-228 §5, binding rules):
   of agent count — never a per-agent loop hitting the database. Attribution of
   watches/asks/tasks to agents happens in memory from the bulk-loaded rows. A
   query-count assertion test guards this.
-* **Fail-soft per source.** An unavailable source omits its fields rather than
-  raising: the cost source failing drops ``cost_24h`` from every agent while the
-  rest of the response stays intact (same posture as the channels sender).
+* **Fail-soft per source.** Each enrichment source degrades independently rather
+  than raising: a cost-source failure drops ``cost_24h`` from every agent; a
+  watches- or asks-source failure falls back to safe defaults (``watches`` →
+  ``{active: 0, needs_attention: 0}``, ``blocked.open_asks`` → ``[]`` — kept, not
+  dropped, since those fields are non-optional downstream) while the rest of the
+  response stays intact (same posture as the channels sender). The core sources
+  (agents/board/mission) are structural and may still raise.
 * **No rival "busy" derivation.** Mission-task busyness reuses the canonical
   :data:`core.models.orchestration_enums.BUSY_TASK_STATES` — the same constant
   the dispatcher's matcher uses, so there is exactly one definition of busy
@@ -189,6 +193,69 @@ def _safe_cost(
 
 
 # ---------------------------------------------------------------------------
+# Enrichment sources (watches, asks) — isolated so fail-soft can wrap each
+# ---------------------------------------------------------------------------
+
+def _watches_source(db: Session, workspace_id: UUID) -> List[Any]:
+    """Live watches in the workspace (raw query, isolated for fail-soft)."""
+    return (
+        db.query(Watch)
+        .filter(
+            Watch.workspace_id == workspace_id,
+            Watch.status.in_(_LIVE_WATCH_STATUS_VALUES),
+        )
+        .all()
+    )
+
+
+def _safe_watches(db: Session, workspace_id: UUID) -> Optional[List[Any]]:
+    """Fail-soft wrapper: ``None`` if the watches source is unavailable.
+
+    A ``None`` return tells the assembler to default every agent's ``watches``
+    block to ``{active: 0, needs_attention: 0}`` (kept, not dropped — the field
+    is non-optional downstream); the rest of the response is unaffected.
+    """
+    try:
+        return _watches_source(db, workspace_id)
+    except Exception:  # noqa: BLE001 — an enrichment-source failure degrades softly
+        logger.warning(
+            "[FleetState] watches source unavailable; defaulting watch fields",
+            exc_info=True,
+        )
+        return None
+
+
+def _asks_source(db: Session, workspace_id: UUID) -> List[Any]:
+    """Pending question-kind asks in the workspace (raw query, isolated)."""
+    return (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.workspace_id == workspace_id,
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+            ApprovalGrant.kind == KIND_QUESTION,
+        )
+        .all()
+    )
+
+
+def _safe_asks(db: Session, workspace_id: UUID) -> Optional[List[Any]]:
+    """Fail-soft wrapper: ``None`` if the asks source is unavailable.
+
+    A ``None`` return tells the assembler to default every agent's
+    ``blocked.open_asks`` to ``[]`` (``blocked.count`` still reflects the board
+    source); the rest of the response is unaffected.
+    """
+    try:
+        return _asks_source(db, workspace_id)
+    except Exception:  # noqa: BLE001 — an enrichment-source failure degrades softly
+        logger.warning(
+            "[FleetState] asks source unavailable; defaulting open_asks to []",
+            exc_info=True,
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Assembly (pure) — no database access; testable with plain row objects
 # ---------------------------------------------------------------------------
 
@@ -247,9 +314,16 @@ def _assemble_fleet(
     per-agent attribution (tasks, watches, asks) is done here in memory, so the
     caller issues a fixed number of queries irrespective of agent count.
 
-    ``costs`` semantics: a dict (possibly empty) means the cost source is
-    available and every agent carries ``cost_24h``; ``None`` means the source
-    was unavailable and ``cost_24h`` is omitted everywhere (fail-soft).
+    Source-availability semantics (fail-soft, each independent):
+      * ``costs`` — a dict (possibly empty) means available and every agent
+        carries ``cost_24h``; ``None`` means unavailable and ``cost_24h`` is
+        omitted everywhere.
+      * ``watches`` — a list (possibly empty) means available; ``None`` means
+        the source failed and every ``watches`` block defaults to
+        ``{active: 0, needs_attention: 0}`` (kept, not dropped).
+      * ``asks`` — a list (possibly empty) means available; ``None`` means the
+        source failed and every ``blocked.open_asks`` defaults to ``[]`` (the
+        ``blocked.count`` still reflects the board source).
     """
     # Bucket tasks by agent (in-memory group-by, no DB).
     board_by_agent: Dict[int, List[Any]] = {}
@@ -261,6 +335,14 @@ def _assemble_fleet(
 
     cost_available = costs is not None
     cost_map = costs or {}
+
+    # Enrichment sources degrade independently (fail-soft): a ``None`` means that
+    # source failed, so its fields fall back to safe defaults rather than dropping
+    # keys — watches/blocked are non-optional in the frontend contract.
+    watches_available = watches is not None
+    asks_available = asks is not None
+    watch_rows = watches or []
+    ask_rows = asks or []
 
     fleet: List[Dict[str, Any]] = []
     for agent in agents:
@@ -275,20 +357,28 @@ def _assemble_fleet(
         queue_depth = sum(1 for t in my_board if t.status == BOARD_STATUS_ASSIGNED)
 
         # Blocked: board tasks flagged blocked + open (pending, question-kind)
-        # asks raised against the agent or one of its board tasks.
+        # asks raised against the agent or one of its board tasks. If the asks
+        # source failed, open_asks defaults to [] (count still reflects the board).
         blocked_count = sum(1 for t in my_board if t.blocked_at is not None)
-        open_asks = _asks_for_agent(agent.id, my_board_id_strs, asks)
+        open_asks = (
+            _asks_for_agent(agent.id, my_board_id_strs, ask_rows)
+            if asks_available else []
+        )
 
         # Active watches touching the agent (owned by it, or targeting one of
-        # its board tasks), plus how many have hit their action budget.
-        my_watches = _watches_for_agent(agent.id, my_board_id_strs, watches)
-        watch_block = {
-            "active": len(my_watches),
-            "needs_attention": sum(
-                1 for w in my_watches
-                if w.status == WATCH_STATUS_NEEDS_ATTENTION
-            ),
-        }
+        # its board tasks), plus how many have hit their action budget. If the
+        # watches source failed, the block defaults to the zeroed shape (kept).
+        if watches_available:
+            my_watches = _watches_for_agent(agent.id, my_board_id_strs, watch_rows)
+            watch_block = {
+                "active": len(my_watches),
+                "needs_attention": sum(
+                    1 for w in my_watches
+                    if w.status == WATCH_STATUS_NEEDS_ATTENTION
+                ),
+            }
+        else:
+            watch_block = {"active": 0, "needs_attention": 0}
 
         # Last activity: latest task timestamp we already hold (no new tracking).
         last_activity = _max_dt(
@@ -378,9 +468,9 @@ def get_fleet_state(db: Session, workspace_id: UUID) -> Dict[str, Any]:
          system (Auto excluded), mirroring api/agents.py's roster exclusions
       2. their live board tasks (on-board statuses or flagged blocked)
       3. their busy mission tasks (assigned/running — the matcher's derivation)
-      4. live watches in the workspace
-      5. pending question-kind asks in the workspace
-      6. per-agent 24h cost from the canonical source (fail-soft)
+      4. live watches in the workspace (fail-soft → defaulted on failure)
+      5. pending question-kind asks in the workspace (fail-soft → [] on failure)
+      6. per-agent 24h cost from the canonical source (fail-soft → omitted)
     """
     generated_at = datetime.now(timezone.utc)
 
@@ -432,24 +522,10 @@ def get_fleet_state(db: Session, workspace_id: UUID) -> Dict[str, Any]:
         .all()
     )
 
-    watches = (
-        db.query(Watch)
-        .filter(
-            Watch.workspace_id == workspace_id,
-            Watch.status.in_(_LIVE_WATCH_STATUS_VALUES),
-        )
-        .all()
-    )
-
-    asks = (
-        db.query(ApprovalGrant)
-        .filter(
-            ApprovalGrant.workspace_id == workspace_id,
-            ApprovalGrant.status == GrantStatus.PENDING.value,
-            ApprovalGrant.kind == KIND_QUESTION,
-        )
-        .all()
-    )
+    # Enrichment sources wrapped fail-soft: a watches/asks failure degrades to
+    # safe defaults (never a 500 out of the route) rather than blanking the fleet.
+    watches = _safe_watches(db, workspace_id)
+    asks = _safe_asks(db, workspace_id)
 
     # ``llm_usage.created_at`` is a naive UTC column; match the analytics
     # convention (``datetime.utcnow() - window``) so the window aligns with the

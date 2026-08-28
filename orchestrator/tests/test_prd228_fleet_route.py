@@ -34,6 +34,7 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 import api.fleet as fleet_mod  # noqa: E402
+import services.fleet_state as fs  # noqa: E402
 from core.database.database import get_db  # noqa: E402
 
 WS_A = uuid4()
@@ -123,3 +124,64 @@ def test_route_mirrors_board_read_guard():
     # Same guard the board list uses (api/board_tasks.py list_tasks).
     assert "require_task_context(TASKS_READ)" in src
     assert fleet_mod.router.prefix == "/api/v1/fleet"
+
+
+# ---------------------------------------------------------------------------
+# P228-RVW-2 — a non-cost enrichment source failing must NOT 500 the route.
+# This drives the REAL read-model (get_fleet_state is not stubbed) through a
+# minimal session, with the watches source monkeypatched to raise.
+# ---------------------------------------------------------------------------
+
+class _FakeQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def filter(self, *a, **k):
+        return self
+
+    def order_by(self, *a, **k):
+        return self
+
+    def group_by(self, *a, **k):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _RealishSession:
+    """Serves the real read-model: agent rows for the Agent query, empty for
+    every other source (board/mission/asks/cost)."""
+
+    def __init__(self, agents):
+        self._agents = agents
+
+    def query(self, *entities):
+        from core.models.core import Agent
+
+        if entities and entities[0] is Agent:
+            return _FakeQuery(self._agents)
+        return _FakeQuery([])
+
+
+def test_route_returns_200_when_enrichment_source_fails(monkeypatch):
+    """P228-RVW-2: a watches-source failure degrades to safe defaults — the
+    route returns 200 (not 500) with the fleet intact, watches defaulted."""
+    agent = SimpleNamespace(id=1, name="Solo")
+
+    def _boom(*a, **k):
+        raise RuntimeError("watches table locked")
+
+    monkeypatch.setattr(fs, "_watches_source", _boom)
+
+    app = FastAPI()
+    app.include_router(fleet_mod.router)
+    app.dependency_overrides[fleet_mod._require_fleet_read] = _ok_ctx(WS_A)
+    app.dependency_overrides[get_db] = lambda: _RealishSession([agent])
+    client = TestClient(app)
+
+    resp = client.get("/api/v1/fleet")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["agents"]) == 1
+    assert body["agents"][0]["watches"] == {"active": 0, "needs_attention": 0}
