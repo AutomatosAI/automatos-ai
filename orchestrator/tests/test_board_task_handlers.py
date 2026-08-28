@@ -1169,6 +1169,31 @@ def test_auto_ticket_watch_off_attaches_nothing_and_notes_it(monkeypatch):
     assert "AUTO_TICKET_WATCH is off" in result["supervision"]
 
 
+def test_rvw6_watch_attach_failure_while_on_is_honest(monkeypatch):
+    """P224-RVW-6: dial ON but auto_create_ticket_watch returns None (it is
+    fail-soft and swallows any internal error → None). The result must carry an
+    HONEST supervision signal instead of silently omitting it: supervised False and
+    a message that does NOT falsely claim the ticket is supervised / will report
+    back. Mirrors the dial-off path's 'says so' guarantee for the attach-failure
+    precondition."""
+    import config as config_module
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(config_module.config, "AUTO_TICKET_WATCH", True)          # dial ON
+    monkeypatch.setattr(hw, "auto_create_ticket_watch", lambda db, ws, **kw: None)  # attach fails
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+
+    assert result["success"] is True and result["status"] == "assigned"
+    assert result["supervised"] is False, "a None watch under an ON dial is NOT supervised"
+    assert result["supervision"], "an honest non-empty signal, never a silent omission"
+    assert "report back" not in result["supervision"], "must NOT promise a report-back it can't deliver"
+    assert "unwatched" in result["supervision"]
+    assert "watch_id" not in result, "no watch attached → no watch_id"
+
+
 def test_auto_create_ticket_watch_is_run_and_report(monkeypatch):
     """auto_create_ticket_watch creates a board_task watch and never overrides the
     policy → WatchService.create_watch's default (run_and_report) applies."""
