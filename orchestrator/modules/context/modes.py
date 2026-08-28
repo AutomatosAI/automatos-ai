@@ -31,7 +31,7 @@ class ContextMode(str, Enum):
 # this is the one context-scoped platform tool. Both the callable tool surface
 # (ContextService._load_tools) and the prompt action catalog
 # (PlatformActionsSection) strip these names outside the execution modes.
-EXECUTION_ONLY_TOOLS: frozenset[str] = frozenset({"ask_orchestrator"})
+EXECUTION_ONLY_TOOLS: frozenset[str] = frozenset({"platform_ask_orchestrator"})
 
 # The modes that ARE worker execution lanes and may see EXECUTION_ONLY_TOOLS.
 # TASK_EXECUTION is the coordinator's mission-task lane (the PRD-229 anchor).

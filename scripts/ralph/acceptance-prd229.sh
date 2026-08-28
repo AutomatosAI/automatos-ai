@@ -34,6 +34,20 @@ else
   fi
 fi
 
+# P229-RVW-1: the registry namespace invariant (test_tool_reachability) is a
+# full-suite guard the branch-scoped block above MISSES — this PRD does not edit
+# that file, so it never lands in $CHT. Run it explicitly so a stray-prefix
+# regression (the ask_orchestrator → platform_ask_orchestrator class: a
+# registered action with neither platform_ nor workspace_ prefix routes to no
+# dispatch path) fails HERE, not only in CI test.yml.
+echo ""
+echo "── registry namespace invariant (test_tool_reachability — full-suite gate class)"
+if ( cd orchestrator && python3 -m pytest --timeout=90 --timeout-method=thread -o faulthandler_timeout=120 -p no:cacheprovider -q tests/test_tool_reachability.py ); then
+  echo "   ✅ PASS: registry namespace invariant (every action is platform_*/workspace_*)"
+else
+  echo "   ❌ FAIL: registry namespace invariant — a registered action lacks a platform_/workspace_ prefix"; FAIL=1
+fi
+
 echo ""
 echo "── ZERO new alembic revisions vs base ($BASE_BR); route manifest untouched"
 BASE=$(git merge-base HEAD "$BASE_BR" 2>/dev/null || git merge-base HEAD origin/main 2>/dev/null || echo "")

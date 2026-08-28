@@ -558,8 +558,10 @@ class PlatformActionExecutor:
             "platform_check_budget": check_budget_handler,
             # PRD-225: agent → human question (park, notify, return)
             "platform_ask_human": ask_human,
-            # PRD-229: agent → orchestrator clarification (answer inline / escalate)
-            "ask_orchestrator": ask_orchestrator,
+            # PRD-229: agent → orchestrator clarification (answer inline / escalate).
+            # Dispatch key carries the platform_ prefix (namespace invariant); the
+            # handler function keeps its bare name.
+            "platform_ask_orchestrator": ask_orchestrator,
             # Enhanced Analytics (dashboard + performance)
             "platform_get_success_rate": get_success_rate,
             "platform_get_completion_time": get_completion_time,
@@ -1096,7 +1098,7 @@ class PlatformActionExecutor:
         # the clarification subject from these _-prefixed keys; _agent_id is
         # already server-minted above (exec_platform). A tool-supplied run_id/
         # task_id is ignored — only the server context wins.
-        if action_name == "ask_orchestrator":
+        if action_name == "platform_ask_orchestrator":
             fctx = (caller_context or {}).get("field_context") or {}
             for src, dst in (("run_id", "_run_id"), ("task_id", "_task_id"), ("field_id", "_field_id")):
                 val = fctx.get(src)

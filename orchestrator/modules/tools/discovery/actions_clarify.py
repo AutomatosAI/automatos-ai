@@ -19,7 +19,14 @@ def register_clarify_actions(registry: ActionRegistry) -> None:
     """Register the mid-run clarification platform action."""
 
     registry.register(ActionDefinition(
-        name="ask_orchestrator",
+        # Registered name carries the ``platform_`` prefix: the resolver routes
+        # every action by namespace (``platform_*`` → PlatformActionExecutor,
+        # ``workspace_*`` → worker) and a third prefix routes to neither dispatch
+        # path (tests/test_tool_reachability.py namespace invariant). The Python
+        # handler/import stays ``ask_orchestrator``; only the registered string,
+        # the executor dispatch-key, the caller-binding guard and the
+        # EXECUTION_ONLY_TOOLS entry carry the prefix. Sibling: platform_ask_human.
+        name="platform_ask_orchestrator",
         description=(
             "Ask the orchestrator (Auto) a question when you hit genuine ambiguity "
             "mid-task and cannot decide well on your own. Auto answers from the "

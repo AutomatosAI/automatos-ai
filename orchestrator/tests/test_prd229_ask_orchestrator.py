@@ -59,9 +59,9 @@ def test_time_box_fits_inside_smallest_execution_envelope():
 # ---------------------------------------------------------------------------
 
 def test_ask_orchestrator_registered():
-    action = get_action_registry().get("ask_orchestrator")
+    action = get_action_registry().get("platform_ask_orchestrator")
     assert action is not None
-    assert action.name == "ask_orchestrator"
+    assert action.name == "platform_ask_orchestrator"
     # question is the only required param; category is the optional governance mark
     assert action.parameters["required"] == ["question"]
     assert set(action.parameters["properties"]["category"]["enum"]) == {
@@ -76,11 +76,11 @@ def test_ask_orchestrator_registered():
 # ---------------------------------------------------------------------------
 
 def test_excluded_tool_names_both_directions():
-    assert "ask_orchestrator" in EXECUTION_ONLY_TOOLS
-    assert excluded_tool_names(ContextMode.CHATBOT) == frozenset({"ask_orchestrator"})
+    assert "platform_ask_orchestrator" in EXECUTION_ONLY_TOOLS
+    assert excluded_tool_names(ContextMode.CHATBOT) == frozenset({"platform_ask_orchestrator"})
     assert excluded_tool_names(ContextMode.TASK_EXECUTION) == frozenset()
     # accepts the string value too (what flows through SectionContext)
-    assert excluded_tool_names("chatbot") == frozenset({"ask_orchestrator"})
+    assert excluded_tool_names("chatbot") == frozenset({"platform_ask_orchestrator"})
     assert excluded_tool_names("task_execution") == frozenset()
 
 
@@ -89,11 +89,11 @@ def _surface():
         {"type": "function", "function": {
             "name": "platform_execute",
             "parameters": {"type": "object", "properties": {
-                "action": {"type": "string", "enum": ["ask_orchestrator", "platform_list_agents"]},
+                "action": {"type": "string", "enum": ["platform_ask_orchestrator", "platform_list_agents"]},
                 "params": {"type": "object"},
             }, "required": ["action", "params"]},
         }},
-        {"type": "function", "function": {"name": "ask_orchestrator", "parameters": {}}},
+        {"type": "function", "function": {"name": "platform_ask_orchestrator", "parameters": {}}},
         {"type": "function", "function": {"name": "workspace_read_file", "parameters": {}}},
     ]
 
@@ -102,11 +102,11 @@ def test_chatbot_surface_strips_ask_orchestrator():
     tools = _surface()
     stripped = strip_actions_from_surface(tools, excluded_tool_names(ContextMode.CHATBOT))
     names = [t["function"]["name"] for t in stripped]
-    assert "ask_orchestrator" not in names          # first-class schema dropped
+    assert "platform_ask_orchestrator" not in names          # first-class schema dropped
     assert "platform_execute" in names
     dispatcher = next(t for t in stripped if t["function"]["name"] == "platform_execute")
     enum = dispatcher["function"]["parameters"]["properties"]["action"]["enum"]
-    assert "ask_orchestrator" not in enum           # pruned from the dispatcher enum
+    assert "platform_ask_orchestrator" not in enum           # pruned from the dispatcher enum
     assert "platform_list_agents" in enum
 
 
@@ -114,31 +114,31 @@ def test_task_execution_surface_keeps_ask_orchestrator():
     tools = _surface()
     kept = strip_actions_from_surface(tools, excluded_tool_names(ContextMode.TASK_EXECUTION))
     names = [t["function"]["name"] for t in kept]
-    assert "ask_orchestrator" in names
+    assert "platform_ask_orchestrator" in names
     dispatcher = next(t for t in kept if t["function"]["name"] == "platform_execute")
-    assert "ask_orchestrator" in dispatcher["function"]["parameters"]["properties"]["action"]["enum"]
+    assert "platform_ask_orchestrator" in dispatcher["function"]["parameters"]["properties"]["action"]["enum"]
 
 
 def test_strip_is_rebuild_not_mutate():
     tools = _surface()
     original_enum = list(tools[0]["function"]["parameters"]["properties"]["action"]["enum"])
-    strip_actions_from_surface(tools, frozenset({"ask_orchestrator"}))
+    strip_actions_from_surface(tools, frozenset({"platform_ask_orchestrator"}))
     # the input surface is untouched
     assert tools[0]["function"]["parameters"]["properties"]["action"]["enum"] == original_enum
     assert [t["function"]["name"] for t in tools] == [
-        "platform_execute", "ask_orchestrator", "workspace_read_file",
+        "platform_execute", "platform_ask_orchestrator", "workspace_read_file",
     ]
 
 
 def test_prompt_catalog_excludes_in_chat_keeps_in_execution():
     registry = get_action_registry()
     full = registry.build_prompt_summary(exclude_admin=True, exclude_promoted=True)
-    assert "ask_orchestrator" in full  # execution lanes advertise it
+    assert "platform_ask_orchestrator" in full  # execution lanes advertise it
     chat = registry.build_prompt_summary(
         exclude_admin=True, exclude_promoted=True,
         exclude_names=list(excluded_tool_names(ContextMode.CHATBOT)),
     )
-    assert "ask_orchestrator" not in chat  # chat catalog does not
+    assert "platform_ask_orchestrator" not in chat  # chat catalog does not
 
 
 # ---------------------------------------------------------------------------
