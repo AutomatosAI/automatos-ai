@@ -626,6 +626,22 @@ class MissionDispatcher:
                 seen_ids.add(task.id)
                 candidates.append(task)
 
+        # PRD-229 US-005/RVW-6 HOLD: a task parked awaiting a human answer carries
+        # PENDING_KEY in input_context — it is NOT ready work. Hold it OUT of
+        # dispatch (never re-dispatch a parked task) without failing it or counting
+        # it as a stall; it re-enters only after the answer clears the marker (the
+        # resume bridge). The ladder stays vertical — this is a scheduling skip, not
+        # lateral messaging.
+        from services.clarification_ladder import pending_ask_id
+
+        held_count = sum(1 for t in candidates if pending_ask_id(t) is not None)
+        if held_count:
+            candidates = [t for t in candidates if pending_ask_id(t) is None]
+            logger.info(
+                "dispatch_ready(run=%s): holding %d task(s) parked awaiting a human answer",
+                run_id, held_count,
+            )
+
         if not candidates:
             return [
                 DispatchResult(
@@ -754,6 +770,48 @@ class MissionDispatcher:
         status = result.get("status", "error")
 
         if status == "success":
+            # PRD-229 (P229-RVW-6): a task that parked itself mid-run to await a
+            # human answer (platform_ask_orchestrator escalation) must NOT be
+            # finalized here. The normal success path below FULL-REPLACES
+            # output_metadata (wiping the clarification_draft) and transitions the
+            # task to COMPLETED — which would ORPHAN the durable human ask and
+            # DESTROY Gerard's baked draft-on-park (the finding's reachable harm).
+            # Instead: MERGE the execution metadata (keep DRAFT_KEY intact,
+            # rebuild-don't-mutate) and HOLD the task QUEUED — re-dispatchable, but
+            # skipped by dispatch_ready's PENDING_KEY hold — so the human answer can
+            # later resume it. This closes the clobber/complete reachability only;
+            # the answer→resume BRIDGE (apply_answered_clarification on 225's answer
+            # path) + the resume re-dispatch are US-005's (Gerard-authorized) — not
+            # wired blind here (US-003 AC5 flagged the dispatch-loop interactions).
+            from services.clarification_ladder import pending_ask_id
+
+            held_ask_id = pending_ask_id(task)
+            if held_ask_id is not None:
+                exec_meta = result.get("execution", {}) or {}
+                task.output_metadata = {
+                    **(task.output_metadata or {}),  # preserve clarification_draft
+                    "model": exec_meta.get("model"),
+                    "provider": exec_meta.get("provider"),
+                    "execution_time": exec_meta.get("time"),
+                    "attempt": exec_meta.get("attempt"),
+                    "tool_iterations": exec_meta.get("tool_iterations"),
+                }
+                task.tokens_used = (task.tokens_used or 0) + exec_meta.get("tokens_used", 0)
+                transition_task(
+                    db=db,
+                    task=task,
+                    new_state=TaskState.QUEUED,
+                    actor_type=ActorType.AGENT,
+                    actor_id=str(task.assigned_agent_id or "unknown"),
+                    reason=f"Parked awaiting human answer (ask #{held_ask_id}) — held, draft preserved",
+                )
+                logger.info(
+                    "Task %s parked awaiting human answer (ask #%s) — held QUEUED, draft preserved",
+                    task.id, held_ask_id,
+                )
+                sync_board_status(db, task)
+                return
+
             # Store output
             task.output = result.get("result", "")
             task.output_metadata = {
