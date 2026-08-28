@@ -4,7 +4,14 @@ One read-model over existing floor state so "Auto, how's the team doing?" gets a
 grounded answer and the Agents surface can show what each agent is doing *right
 now*. Every input already exists, scattered across board leases, mission-task
 state, watches, pending asks, and usage telemetry; this composes them, per
-active agent, into a deterministic shape.
+agent, into a deterministic shape.
+
+Agent population mirrors the canonical roster exactly (``api/agents.py``): the
+workspace's own agents *minus* the two categories the roster deliberately hides
+— Mission Zero **ephemeral** clones (``agent_type='ephemeral'``) and the
+**per-workspace system agent Auto** (``is_system_agent=True`` with a
+``workspace_id``). So the fleet TAB and the roster TAB on the same Agents page
+show the same set, and Auto never lists itself when asked how the team is doing.
 
 Design invariants (PRD-228 §5, binding rules):
 
@@ -38,7 +45,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 from uuid import UUID
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from core.models.approval_grants import (
@@ -367,7 +374,8 @@ def get_fleet_state(db: Session, workspace_id: UUID) -> Dict[str, Any]:
     """Compose the fleet read-model for one workspace.
 
     Bounded query set (six reads, independent of agent count):
-      1. active agents in the workspace
+      1. the workspace's roster agents — non-ephemeral and non-per-workspace-
+         system (Auto excluded), mirroring api/agents.py's roster exclusions
       2. their live board tasks (on-board statuses or flagged blocked)
       3. their busy mission tasks (assigned/running — the matcher's derivation)
       4. live watches in the workspace
@@ -378,7 +386,21 @@ def get_fleet_state(db: Session, workspace_id: UUID) -> Dict[str, Any]:
 
     agents = (
         db.query(Agent)
-        .filter(Agent.workspace_id == workspace_id)
+        .filter(
+            Agent.workspace_id == workspace_id,
+            # Mirror the canonical roster's exclusions (api/agents.py:538,545-547)
+            # so the fleet TAB and the roster TAB on the same Agents page show the
+            # SAME agent set. Two categories the roster deliberately hides:
+            #   * Mission Zero ephemeral clones (agent_type='ephemeral'), present
+            #     only during an onboarding run; and
+            #   * the per-workspace system agent Auto (is_system_agent=True with a
+            #     workspace_id) — the very agent asking "how's the team doing?",
+            #     which must not list itself as a team member.
+            # Global system agents (workspace_id=None) are already excluded by the
+            # workspace filter above.
+            Agent.agent_type != "ephemeral",
+            ~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None)),
+        )
         .order_by(Agent.name, Agent.id)
         .all()
     )

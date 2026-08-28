@@ -243,3 +243,55 @@ def test_workspace_isolation(seeded, new_session):
     assert set(by_id) == {seeded["intruder"]}
     # ws_other's own cost is intact and not polluted by ws_main.
     assert by_id[seeded["intruder"]]["cost_24h"]["tokens"] == 555
+
+
+@pytest.fixture
+def roster_mix(engine, new_session):
+    """A workspace holding the three agent categories the roster distinguishes:
+    a normal agent, the per-workspace Auto (``is_system_agent=True`` + a
+    ``workspace_id``), and a Mission Zero ephemeral clone (``agent_type=
+    'ephemeral'``). The canonical roster hides the latter two.
+    """
+    ws = str(uuid.uuid4())
+    s = new_session()
+    s.execute(
+        text("INSERT INTO workspaces (id, name) "
+             "VALUES (CAST(:id AS uuid), :n) ON CONFLICT (id) DO NOTHING"),
+        {"id": ws, "n": "prd228-roster-mix"},
+    )
+    s.commit()
+
+    normal = Agent(name="Builder", agent_type="custom", workspace_id=ws, status="active")
+    auto = Agent(name="Auto", agent_type="system", workspace_id=ws, status="active",
+                 is_system_agent=True)
+    ephemeral = Agent(name="Onboarding clone", agent_type="ephemeral",
+                      workspace_id=ws, status="active")
+    s.add_all([normal, auto, ephemeral])
+    s.flush()
+    ids = {"ws": ws, "normal": normal.id, "auto": auto.id, "ephemeral": ephemeral.id}
+    s.commit()
+    s.close()
+
+    yield ids
+
+    s = new_session.sweep()
+    s.execute(text("DELETE FROM agents WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": ws})
+    s.execute(text("DELETE FROM workspaces WHERE id = CAST(:ws AS uuid)"), {"ws": ws})
+    s.commit()
+    s.close()
+
+
+def test_roster_hidden_agents_excluded(roster_mix, new_session):
+    """P228-RVW-1: the fleet mirrors the roster exactly — the per-workspace Auto
+    and the ephemeral clone are absent; only the normal agent appears. Without
+    the exclusions the fleet tab would list agents the roster tab hides (Auto
+    lists itself; onboarding clones appear during Mission Zero).
+    """
+    s = new_session()
+    result = get_fleet_state(s, roster_mix["ws"])
+    s.close()
+
+    ids = {e["agent_id"] for e in result["agents"]}
+    assert ids == {roster_mix["normal"]}
+    assert roster_mix["auto"] not in ids
+    assert roster_mix["ephemeral"] not in ids

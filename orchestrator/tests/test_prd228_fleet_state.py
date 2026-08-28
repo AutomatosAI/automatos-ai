@@ -433,6 +433,21 @@ def test_cost_source_is_pinned_in_source():
     assert "llm_usage" in lowered
 
 
+def test_agent_population_mirrors_roster_exclusions():
+    """P228-RVW-1: the agent query hides the two categories the canonical roster
+    hides — Mission Zero ephemeral clones and the per-workspace system agent
+    (Auto) — so the fleet tab and roster tab on the same page show the same set.
+    Structural guard against silent removal; behavioural proof is in the realdb
+    suite (``test_roster_hidden_agents_excluded``).
+    """
+    # Ephemeral clones excluded (mirrors api/agents.py:538).
+    assert re.search(r'agent_type\s*!=\s*"ephemeral"', _SVC_SRC)
+    # Per-workspace system agent (Auto) excluded (mirrors api/agents.py:545-547).
+    assert "~and_(" in _SVC_SRC
+    assert "Agent.is_system_agent.is_(True)" in _SVC_SRC
+    assert "Agent.workspace_id.isnot(None)" in _SVC_SRC
+
+
 def test_reuses_canonical_busy_derivation_no_rival():
     # The service imports the canonical busy states rather than defining its own,
     # and it is the SAME constant the dispatcher's matcher consumes.
