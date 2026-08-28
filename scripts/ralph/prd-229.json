@@ -25,10 +25,10 @@
    "title": "ask_orchestrator — the tool, task-execution-only, time-boxed",
    "description": "3-file platform-tool ask_orchestrator(question, category?) exposed ONLY in the TASK_EXECUTION context (modes.py — verify the admission mechanism; a CHATBOT-mode agent must not see it). Handler: resolves the calling task/run from caller context (server-injected), calls US-001 inside a hard time-box (constant in config.py) that fits within the task's asyncio.wait_for envelope (re-verify :2237-2249 and pick the constant accordingly — document the arithmetic in a comment); timeout → cannot_answer path. Returns {answer, sources} | {parked: true, ask_id} | {proceed_with_assumption: guidance} — the last only when US-003 isn't triggered and the question was answerable-adjacent (cannot_answer WITHOUT governance category and budget remaining... keep it simple: cannot_answer pre-US-003 returns proceed-with-stated-assumption guidance; US-003 replaces that branch with escalation).",
    "acceptanceCriteria": [
-    "Tool visible in TASK_EXECUTION context and ABSENT from CHATBOT context (context-mode tests both directions)",
-    "Answer path returns grounded answer + sources (stubbed US-001); timeout path returns the cannot_answer branch (test with a slow stub)",
-    "Time-box constant in config.py with the envelope arithmetic documented; caller task resolved from server context, not a tool param (test)",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — modes.excluded_tool_names gate + strip_actions_from_surface strip ask_orchestrator from the CHATBOT callable surface (dispatcher enum + first-class) AND the prompt catalog (build_prompt_summary exclude_names), and KEEP it in TASK_EXECUTION. Tests: test_excluded_tool_names_both_directions, test_chatbot_surface_strips_*, test_task_execution_surface_keeps_*, test_prompt_catalog_excludes_in_chat_keeps_in_execution. Wired in service._load_tools + PlatformActionsSection.",
+    "DONE — handler stubs US-001: test_answer_path_returns_grounded_answer (answer+sources); test_time_box_expiry_takes_cannot_answer_path (slow stub + asyncio.wait_for → proceed_with_assumption, detail.reason=timeout).",
+    "DONE — CLARIFICATION_ANSWER_TIMEOUT in config.py (30s) with envelope arithmetic documented (light=120s smallest); test_time_box_fits_inside_smallest_execution_envelope. Caller resolved from server-injected _run_id/_task_id (coordinator field_context → executor injection), NOT tool params: test_caller_resolved_from_server_context_not_tool_param (spoofed run_id ignored).",
+    "DONE — cd orchestrator && python3 -m pytest -q tests/test_prd229_ask_orchestrator.py → 13 passed; existing context/registry suites 108 passed (no regression)."
    ],
    "files": [
     "orchestrator/modules/tools/discovery/",

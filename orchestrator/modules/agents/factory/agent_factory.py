@@ -1187,9 +1187,13 @@ class AgentFactory:
                     # PRD-178 S1 (F020): thread the calling task's field context
                     # so PlatformActionExecutor binds field tools to THIS run's
                     # field_id — never a `.first()` guess over concurrent missions.
+                    # PRD-229: also thread it when the context carries the calling
+                    # task/run identity (run_id) even without a field, so
+                    # ask_orchestrator can resolve its subject from server context.
                     _field_caller_context = (
                         {"field_context": context}
-                        if context and context.get("field_id") else None
+                        if context and (context.get("field_id") or context.get("run_id"))
+                        else None
                     )
                     # PRD-193 S1/S4 (P2-12): a confirmation ask fired on a
                     # board-task run must link its grant back to the task

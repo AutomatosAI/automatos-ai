@@ -23,6 +23,92 @@ class ContextMode(str, Enum):
     PLANNING = "planning"
 
 
+# PRD-229: ``ask_orchestrator`` (a worker asks the orchestrator a clarification)
+# is admitted ONLY in the worker execution surface. It is nonsensical — and must
+# be absent — everywhere else: in CHATBOT the user IS talking to Auto directly,
+# and the orchestrator tick / planners are the orchestrator, not workers under
+# it. The ladder is vertical (worker → orchestrator → human), never lateral, so
+# this is the one context-scoped platform tool. Both the callable tool surface
+# (ContextService._load_tools) and the prompt action catalog
+# (PlatformActionsSection) strip these names outside the execution modes.
+EXECUTION_ONLY_TOOLS: frozenset[str] = frozenset({"ask_orchestrator"})
+
+# The modes that ARE worker execution lanes and may see EXECUTION_ONLY_TOOLS.
+# TASK_EXECUTION is the coordinator's mission-task lane (the PRD-229 anchor).
+EXECUTION_TOOL_MODES: frozenset["ContextMode"] = frozenset({ContextMode.TASK_EXECUTION})
+
+
+def excluded_tool_names(mode: Optional["ContextMode"]) -> frozenset[str]:
+    """Tool names that must NOT appear in *mode*'s surface (PRD-229).
+
+    Empty for the execution lanes; ``EXECUTION_ONLY_TOOLS`` everywhere else.
+    Accepts the enum or its string value (both flow through the context stack).
+    """
+    resolved = mode
+    if isinstance(mode, str) and not isinstance(mode, ContextMode):
+        try:
+            resolved = ContextMode(mode)
+        except ValueError:
+            resolved = None
+    return frozenset() if resolved in EXECUTION_TOOL_MODES else EXECUTION_ONLY_TOOLS
+
+
+def strip_actions_from_surface(
+    tools: list, excluded: "frozenset[str]"
+) -> list:
+    """Remove *excluded* action names from an assembled tool surface (PRD-229).
+
+    Two removal shapes, rebuild-don't-mutate:
+      * a first-class tool schema whose ``function.name`` is excluded → dropped;
+      * the ``platform_execute`` dispatcher → its ``action.enum`` is rebuilt
+        without the excluded names (a dispatched action not in the enum is not
+        offered to the model).
+    Pure: never mutates the input tools; returns a new list, copying only the
+    dicts it changes.
+    """
+    if not excluded:
+        return tools
+    result: list = []
+    for tool in tools:
+        fn = tool.get("function") if isinstance(tool, dict) else None
+        name = fn.get("name") if isinstance(fn, dict) else None
+        if name in excluded:
+            continue  # drop a first-class execution-only tool
+        if name == "platform_execute":
+            result.append(_prune_dispatcher_enum(tool, excluded))
+            continue
+        result.append(tool)
+    return result
+
+
+def _prune_dispatcher_enum(dispatcher: dict, excluded: "frozenset[str]") -> dict:
+    """Return a copy of the platform_execute schema with excluded names dropped
+    from ``parameters.properties.action.enum``. No-op copy if there is no enum."""
+    fn = dispatcher.get("function", {})
+    params = fn.get("parameters", {})
+    props = params.get("properties", {})
+    action = props.get("action", {})
+    enum = action.get("enum")
+    if not isinstance(enum, list):
+        return dispatcher
+    pruned = [n for n in enum if n not in excluded]
+    if pruned == enum:
+        return dispatcher
+    return {
+        **dispatcher,
+        "function": {
+            **fn,
+            "parameters": {
+                **params,
+                "properties": {
+                    **props,
+                    "action": {**action, "enum": pruned},
+                },
+            },
+        },
+    }
+
+
 @dataclass(frozen=True)
 class ModeConfig:
     """Declarative configuration for a context mode."""

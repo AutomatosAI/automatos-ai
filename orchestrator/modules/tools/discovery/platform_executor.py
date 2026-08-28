@@ -223,6 +223,7 @@ from modules.tools.discovery.handlers_governance import (
     check_budget_handler,
 )
 from modules.tools.discovery.handlers_asks import ask_human  # PRD-225
+from modules.tools.discovery.handlers_clarify import ask_orchestrator  # PRD-229
 from modules.tools.discovery.handlers_graph import (
     handle_query_graph,
     handle_graph_neighbors,
@@ -557,6 +558,8 @@ class PlatformActionExecutor:
             "platform_check_budget": check_budget_handler,
             # PRD-225: agent → human question (park, notify, return)
             "platform_ask_human": ask_human,
+            # PRD-229: agent → orchestrator clarification (answer inline / escalate)
+            "ask_orchestrator": ask_orchestrator,
             # Enhanced Analytics (dashboard + performance)
             "platform_get_success_rate": get_success_rate,
             "platform_get_completion_time": get_completion_time,
@@ -1087,6 +1090,18 @@ class PlatformActionExecutor:
                     "[PRD-178 S1] Bound field_id %s to calling task for %s",
                     field_id, action_name,
                 )
+
+        # PRD-229: bind ask_orchestrator to the CALLING task/run from the same
+        # server-threaded field_context (never a tool param). The handler resolves
+        # the clarification subject from these _-prefixed keys; _agent_id is
+        # already server-minted above (exec_platform). A tool-supplied run_id/
+        # task_id is ignored — only the server context wins.
+        if action_name == "ask_orchestrator":
+            fctx = (caller_context or {}).get("field_context") or {}
+            for src, dst in (("run_id", "_run_id"), ("task_id", "_task_id"), ("field_id", "_field_id")):
+                val = fctx.get(src)
+                if val is not None:
+                    params = {**params, dst: val}
 
         # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
         # user. The chat path threads the driving user's clerk id via

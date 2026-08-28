@@ -57,6 +57,12 @@ class PlatformActionsSection(BaseSection):
           fall back to full ``_build()`` if it returns ``None``
         """
         try:
+            # PRD-229: mode-scoped admission — the action catalog mirrors the
+            # callable-surface gate, so execution-only tools (ask_orchestrator)
+            # are omitted from the prompt catalog outside the execution lanes.
+            from modules.context.modes import excluded_tool_names
+            exclude_names = list(excluded_tool_names(ctx.context_mode))
+
             query = ""
             if ctx.kwargs:
                 raw = ctx.kwargs.get("query", "")
@@ -67,7 +73,9 @@ class PlatformActionsSection(BaseSection):
                 # Graph path (flag-gated, additive over embedding path)
                 if self._graph_routing_enabled():
                     try:
-                        graph_result = await self._build_graph_filtered(query, ctx)
+                        graph_result = await self._build_graph_filtered(
+                            query, ctx, exclude_names=exclude_names
+                        )
                         if graph_result:
                             return graph_result
                     except Exception as e:
@@ -76,7 +84,7 @@ class PlatformActionsSection(BaseSection):
                         )
                         # Fall through to existing embedding path
 
-                filtered = await self._build_filtered(query)
+                filtered = await self._build_filtered(query, exclude_names=exclude_names)
                 if filtered:
                     return filtered
 
@@ -85,11 +93,11 @@ class PlatformActionsSection(BaseSection):
             # instead of the ~4k-token full catalog. Flag-off keeps the full
             # dump (operator explicitly chose the wide surface).
             if self._semantic_routing_enabled() and self._fallback_mode_closed():
-                pins_text = self._build_pins_text()
+                pins_text = self._build_pins_text(exclude_names=exclude_names)
                 if pins_text:
                     return pins_text
 
-            return self._build()
+            return self._build(exclude_names=exclude_names)
         except Exception:
             logger.exception(
                 "PlatformActionsSection.render failed — skipping action catalog"
@@ -131,7 +139,7 @@ class PlatformActionsSection(BaseSection):
         return bool(getattr(config, "TOOL_ROUTING_GRAPH", False))
 
     async def _build_graph_filtered(
-        self, query: str, ctx: SectionContext
+        self, query: str, ctx: SectionContext, exclude_names: Optional[list] = None
     ) -> Optional[str]:
         """Render actions via graph-based chain ranking.
 
@@ -175,6 +183,7 @@ class PlatformActionsSection(BaseSection):
             exclude_admin=True,
             exclude_promoted=True,
             include_super_admin=False,
+            exclude_names=exclude_names,
         )
 
         if not catalog:
@@ -220,7 +229,7 @@ class PlatformActionsSection(BaseSection):
         except Exception:
             return False
 
-    def _build_pins_text(self) -> str:
+    def _build_pins_text(self, exclude_names: Optional[list] = None) -> str:
         """The closed-pins fallback card: pins + the discovery pointer.
 
         ~10 lines instead of the ~4k-token catalog. The model keeps a way
@@ -239,6 +248,7 @@ class PlatformActionsSection(BaseSection):
                 exclude_admin=True,
                 exclude_promoted=False,  # pins are largely promoted by design
                 include_super_admin=False,
+                exclude_names=exclude_names,
             )
             if not catalog:
                 return ""
@@ -255,7 +265,7 @@ class PlatformActionsSection(BaseSection):
             )
             return ""
 
-    def _build(self) -> str:
+    def _build(self, exclude_names: Optional[list] = None) -> str:
         from modules.tools.discovery.action_registry import get_action_registry
 
         registry = get_action_registry()
@@ -264,6 +274,7 @@ class PlatformActionsSection(BaseSection):
             exclude_promoted=True,
             exclude_admin=True,
             include_super_admin=False,
+            exclude_names=exclude_names,
         )
 
         if not catalog:
@@ -279,7 +290,9 @@ class PlatformActionsSection(BaseSection):
 
         return content
 
-    async def _build_filtered(self, query: str) -> Optional[str]:
+    async def _build_filtered(
+        self, query: str, exclude_names: Optional[list] = None
+    ) -> Optional[str]:
         """Render only the top-K actions ranked against ``query``.
 
         Returns the filtered markdown string on success, or ``None`` if any
@@ -317,6 +330,7 @@ class PlatformActionsSection(BaseSection):
                 exclude_admin=True,
                 exclude_promoted=True,
                 include_super_admin=False,
+                exclude_names=exclude_names,
             )
             if not catalog:
                 return None
