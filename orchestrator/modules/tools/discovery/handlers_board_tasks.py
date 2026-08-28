@@ -10,6 +10,29 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+def _notify_board_safe(db: Session, workspace_id: UUID, task_id: int, status: str, event: str) -> None:
+    """Fire the board SSE NOTIFY for an agent-side board write, fail-soft.
+
+    PRD-227 US-001: agent moves must push the same ``board_changed`` frame the
+    human PATCH path emits (``api/board_tasks.py`` notify_board_event call sites)
+    so a card an agent moves lights up the open Command Center at SSE latency,
+    not on the next stale refetch. Best-effort exactly like
+    ``services/board_events.py``: a NOTIFY (or import) failure logs and continues
+    — it must NEVER raise into the tool call. No new SSE event names — payload
+    shape and channel are the human path's.
+    """
+    try:
+        from services.board_events import notify_board_event
+
+        notify_board_event(
+            db, workspace_id=workspace_id, task_id=task_id, status=status, event=event
+        )
+    except Exception:  # noqa: BLE001 — NOTIFY is an optimisation, not a guarantee
+        logger.debug(
+            "[BoardTasks] board NOTIFY skipped for task %s", task_id, exc_info=True
+        )
+
+
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
@@ -73,6 +96,8 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
                 logger.info("[BoardTasks] Auto-approved publish_blog for task %s", task.id)
             task.status = "done"
             db.commit()
+            # PRD-227 US-001: push the create (+immediate done) to Command Centres.
+            _notify_board_safe(db, workspace_id, task.id, task.status, "task_created")
             return {
                 "success": True,
                 "task_id": task.id,
@@ -95,6 +120,9 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
             await send_workspace_notification(str(workspace_id), msg)
         except Exception as notify_err:
             logger.debug("[BoardTasks] Notification skipped: %s", notify_err)
+
+    # PRD-227 US-001: push the new card to Command Centres, same as api/board_tasks.py:389.
+    _notify_board_safe(db, workspace_id, task.id, task.status, "task_created")
 
     return {
         "success": True,
@@ -247,6 +275,10 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         task.status = "assigned"
     db.commit()
 
+    # PRD-227 US-001: push the assignment to Command Centres, mirroring the human
+    # assign path (api/board_tasks.py update_task notify_board_event, event="task_updated").
+    _notify_board_safe(db, workspace_id, task.id, task.status, "task_updated")
+
     return {
         "success": True,
         "task_id": task.id,
@@ -264,9 +296,18 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     if not task_id or not new_status:
         return {"success": False, "error": "task_id and status are required"}
 
-    valid = {"inbox", "assigned", "in_progress", "review", "done"}
-    if new_status not in valid:
-        return {"success": False, "error": f"Invalid status: {new_status}. Must be one of {valid}"}
+    # PRD-227 US-001: agent-side vocabulary reaches parity with the HTTP path by
+    # reusing its VALID_STATUSES set — so 'blocked'/'failed' are accepted and any
+    # future status the HTTP path adds is accepted identically, never drifting.
+    from api.board_tasks import VALID_STATUSES
+    if new_status not in VALID_STATUSES:
+        return {"success": False, "error": f"Invalid status: {new_status}. Must be one of {sorted(VALID_STATUSES)}"}
+
+    # 'blocked' requires a reason for the agent path (the board card renders it);
+    # validated before any DB read so a bad call is a pure, cheap rejection.
+    blocked_reason = params.get("blocked_reason")
+    if new_status == "blocked" and not blocked_reason:
+        return {"success": False, "error": "blocked_reason is required when setting status to 'blocked'"}
 
     task = db.query(BoardTask).filter(
         BoardTask.id == int(task_id),
@@ -275,13 +316,35 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     if not task:
         return {"success": False, "error": f"Task {task_id} not found"}
 
+    old_status = task.status
     task.status = new_status
-    if new_status == "in_progress" and not task.started_at:
+    # PRD-227 P227-RVW-4: mirror the HTTP update_task_status in_progress reset
+    # (api/board_tasks.py:890-895) — clear the terminal fields so a redone task
+    # (done → in_progress → done) does not carry a stale completed_at/error_message/
+    # result. Without this, a task that previously failed then succeeds still renders
+    # as the red 'failed' strip (board-card.tsx isFailed = error_message != null &&
+    # status == 'done') — a board-state lie this PRD exists to kill. started_at is
+    # set unconditionally, matching the HTTP path (restart the clock on a redo).
+    if new_status == "in_progress":
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
+        task.error_message = None
+        task.result = None
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
+    # Mirror the HTTP path's blocked transitions (api/board_tasks.py:548-553, 898-902).
+    if new_status == "blocked" and task.blocked_at is None:
+        task.blocked_at = datetime.now(timezone.utc)
+        task.blocked_reason = blocked_reason
+    if new_status != "blocked" and old_status == "blocked":
+        task.blocked_at = None
+        task.blocked_reason = None
 
     db.commit()
+
+    # PRD-227 US-001: push the status change to Command Centres, same payload
+    # shape + event name as the human PATCH (api/board_tasks.py:912, "status_changed").
+    _notify_board_safe(db, workspace_id, task.id, task.status, "status_changed")
 
     # Trigger agent execution if moved to in_progress with an assigned agent
     if new_status == "in_progress" and task.assigned_agent_id:
