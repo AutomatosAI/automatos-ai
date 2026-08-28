@@ -65,6 +65,13 @@ check "US-002 route-manifest test green" \
 check "US-002 api-client carries the fleet call" \
   "grep -q 'fleet' frontend/lib/api-client.ts"
 
+# test_route_manifest.py regenerates the manifest as a side effect; in a partial
+# local env (infra-gated routers like workflows/* fail to import) that DROPS
+# routes, corrupting the working-tree manifest. The COMMITTED manifest is the
+# source of truth CI regenerates in full — restore it before the route-contract
+# check reads it (a no-op in CI, where regeneration matches committed).
+git checkout -- "$MANIFEST" 2>/dev/null || true
+
 check "US-002 frontend route-contract green" \
   'node frontend/scripts/check-route-contract.js'
 

@@ -196,10 +196,10 @@ def test_stall_threshold_constant_in_config():
 
     assert isinstance(config.FLEET_STALL_SECONDS, int)
     assert config.FLEET_STALL_SECONDS > 0
-    # The handler reads the threshold from config (no os.getenv at the call site).
+    # The handler reads the threshold from config, never a direct env read.
     src = Path(hf.__file__).read_text(encoding="utf-8")
     assert "config.FLEET_STALL_SECONDS" in src
-    assert "os.getenv" not in src
+    assert "getenv" not in src
 
 
 # ===========================================================================
