@@ -318,8 +318,18 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
 
     old_status = task.status
     task.status = new_status
-    if new_status == "in_progress" and not task.started_at:
+    # PRD-227 P227-RVW-4: mirror the HTTP update_task_status in_progress reset
+    # (api/board_tasks.py:890-895) — clear the terminal fields so a redone task
+    # (done → in_progress → done) does not carry a stale completed_at/error_message/
+    # result. Without this, a task that previously failed then succeeds still renders
+    # as the red 'failed' strip (board-card.tsx isFailed = error_message != null &&
+    # status == 'done') — a board-state lie this PRD exists to kill. started_at is
+    # set unconditionally, matching the HTTP path (restart the clock on a redo).
+    if new_status == "in_progress":
         task.started_at = datetime.now(timezone.utc)
+        task.completed_at = None
+        task.error_message = None
+        task.result = None
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
     # Mirror the HTTP path's blocked transitions (api/board_tasks.py:548-553, 898-902).

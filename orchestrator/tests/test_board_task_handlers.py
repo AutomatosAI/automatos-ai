@@ -695,3 +695,80 @@ def test_agent_notify_failure_is_fail_soft(monkeypatch):
 
     assert result["success"] is True, "NOTIFY blew up but the status write succeeded"
     assert task.status == "review"
+
+
+def test_agent_in_progress_clears_stale_terminal_fields(monkeypatch):
+    """P227-RVW-4: moving a task to in_progress clears completed_at/error_message/
+    result, mirroring the HTTP update_task_status reset (api/board_tasks.py:890-895).
+    A done task carrying a prior failed run's error_message, redone by an agent,
+    must not keep the stale terminal fields."""
+    _patch_notify(monkeypatch)
+    task = _fresh_task(
+        id=3, status="done",
+        completed_at="2026-08-27T00:00:00Z",
+        error_message="prior run blew up",
+        result="partial output",
+    )
+    db = _FakeSession(task=task)
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert result["success"] is True
+    assert task.status == "in_progress"
+    assert task.completed_at is None, "stale completed_at must be cleared"
+    assert task.error_message is None, "stale error_message must be cleared"
+    assert task.result is None, "stale result must be cleared"
+    assert task.started_at is not None, "started_at is set on in_progress (HTTP-path parity)"
+
+
+def test_agent_redo_done_task_does_not_render_failed(monkeypatch):
+    """The end-to-end redo: done+error → in_progress → done leaves error_message
+    null, so board-card.tsx isFailed (error_message != null && status == 'done') is
+    False — a task that just succeeded renders as succeeded, not the red 'failed'
+    strip. This is the board-state lie P227-RVW-4 closes."""
+    _patch_notify(monkeypatch)
+    task = _fresh_task(
+        id=3, status="done",
+        completed_at="2026-08-27T00:00:00Z",
+        error_message="prior failure", result="stale",
+    )
+    db = _FakeSession(task=task)
+
+    asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+    asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "done"})
+    )
+
+    assert task.status == "done"
+    assert task.error_message is None, "a redone+succeeded task must not carry a stale error → not 'failed'"
+    assert task.result is None, "stale result stays cleared through the redo"
+    assert task.completed_at is not None, "the fresh done transition sets completed_at"
+
+
+def test_agent_in_progress_reset_leaves_blocked_transition_unchanged(monkeypatch):
+    """AC3 guard: the in_progress terminal-field reset does not disturb the
+    blocked/failed transitions US-001 added — a blocked move still sets
+    blocked_at/blocked_reason and does NOT clear error_message/result."""
+    _patch_notify(monkeypatch)
+    task = _fresh_task(
+        id=3, status="in_progress",
+        error_message="mid-run detail", result="draft",
+    )
+    db = _FakeSession(task=task)
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(
+            db, _WS_ID, {"task_id": 3, "status": "blocked", "blocked_reason": "waiting on API key"}
+        )
+    )
+
+    assert result["success"] is True
+    assert task.status == "blocked"
+    assert task.blocked_at is not None and task.blocked_reason == "waiting on API key"
+    # The in_progress-only reset must not have fired on a blocked move.
+    assert task.error_message == "mid-run detail"
+    assert task.result == "draft"
