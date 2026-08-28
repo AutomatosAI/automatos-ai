@@ -75,6 +75,18 @@ describe('FleetTab — PRD-228', () => {
     expect(screen.getByText(/last 24h · 1,200 tok · \$0\.34/)).toBeInTheDocument()
   })
 
+  it('a blocked agent with no open ask still shows blocked, not idle (P228-RVW-5)', () => {
+    // Approval-/manually-blocked task: blocked.count>0 with open_asks empty.
+    setFleet([
+      agent({ agent_id: 8, name: 'Approval', current: null, blocked: { count: 1, open_asks: [] } }),
+    ])
+    render(<FleetTab onViewDetails={vi.fn()} />)
+    const line = screen.getByText('blocked')
+    expect(line).toBeInTheDocument()
+    expect(line.className).toContain('destructive') // blocked tone, not idle
+    expect(screen.queryByText('idle')).not.toBeInTheDocument()
+  })
+
   it('a blocked agent that is also mid-task shows blocked (awaiting answer wins)', () => {
     setFleet([
       agent({

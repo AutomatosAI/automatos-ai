@@ -2,9 +2,16 @@
 
 ``platform_fleet_status`` renders the US-001 read-model
 (:func:`services.fleet_state.get_fleet_state`) into a compact, token-cheap form
-Auto can read in one call: one line per agent (name — current work or idle —
-queue depth — 24h cost) plus an ANOMALIES section (stalled, over-budget watches,
-blocked-with-open-ask). It writes nothing — it reads the floor and summarises it.
+Auto can read in one call: one line per agent (name — current work, blocked, or
+idle — queue depth — 24h cost) plus an ANOMALIES section (stalled, over-budget
+watches, blocked-with-open-ask, blocked-with-no-ask). It writes nothing — it
+reads the floor and summarises it.
+
+A blocked agent is never rendered as ``idle``: ``blocked.count`` (any board task
+flagged ``blocked_at`` — approval-pending or manually blocked) is surfaced even
+when there is no outstanding question, so "is anyone stuck?" catches the
+approval-/manually-blocked case the ``open_asks`` signal alone would miss
+(P228-RVW-5).
 
 The rendering + anomaly detection live in the pure :func:`_render_fleet` so they
 are unit-testable against a fixture fleet with an injected clock and threshold.
@@ -43,9 +50,20 @@ def _format_cost(entry: Dict[str, Any]) -> str:
 
 
 def _work_phrase(entry: Dict[str, Any]) -> str:
-    """The agent's live line: blocked > working > idle."""
-    if entry["blocked"]["open_asks"]:
+    """The agent's live line: blocked > working > idle.
+
+    An agent counts as blocked either because it has an open question ask
+    (``blocked: awaiting answer``) or because one of its board tasks is flagged
+    blocked with no outstanding question — approval-pending or manually blocked
+    (``blocked``). Both supersede working, and both reuse the already-emitted
+    ``blocked.count`` so an approval-/manually-blocked agent never reads as
+    ``idle`` (P228-RVW-5).
+    """
+    blocked = entry["blocked"]
+    if blocked["open_asks"]:
         return "blocked: awaiting answer"
+    if blocked.get("count", 0) > 0:
+        return "blocked"
     current = entry.get("current")
     if current:
         return f"working: {current['title']}"
@@ -66,11 +84,16 @@ def _render_fleet(
       * **over_budget_watches** — an agent with one or more watches that hit
         their action budget (``watches.needs_attention``).
       * **blocked_with_open_ask** — an agent with a pending question ask.
+      * **blocked_no_ask** — an agent with a board task flagged blocked
+        (``blocked.count > 0``) but no outstanding question (approval-pending /
+        manually blocked). Disjoint from ``blocked_with_open_ask``; together they
+        are the complete "who is stuck" set (P228-RVW-5).
     """
     lines: List[str] = []
     stalled: List[Dict[str, Any]] = []
     over_budget: List[Dict[str, Any]] = []
     blocked_with_ask: List[Dict[str, Any]] = []
+    blocked_no_ask: List[Dict[str, Any]] = []
 
     for entry in state.get("agents", []):
         name = entry["name"]
@@ -95,16 +118,25 @@ def _render_fleet(
                 "agent_id": entry["agent_id"], "agent": name, "watches": na,
             })
 
-        open_asks = entry["blocked"]["open_asks"]
+        blocked = entry["blocked"]
+        open_asks = blocked["open_asks"]
         if open_asks:
             blocked_with_ask.append({
                 "agent_id": entry["agent_id"], "agent": name, "open_asks": open_asks,
+            })
+        elif blocked.get("count", 0) > 0:
+            # Flagged blocked (approval-pending / manually blocked) with no open
+            # question — the case the open_asks signal alone misses (P228-RVW-5).
+            blocked_no_ask.append({
+                "agent_id": entry["agent_id"], "agent": name,
+                "count": blocked["count"],
             })
 
     anomalies = {
         "stalled": stalled,
         "over_budget_watches": over_budget,
         "blocked_with_open_ask": blocked_with_ask,
+        "blocked_no_ask": blocked_no_ask,
     }
     return {
         "as_of": state.get("generated_at"),
@@ -127,6 +159,8 @@ def _as_text(lines: List[str], anomalies: Dict[str, List[Dict[str, Any]]]) -> st
         flagged.append(f"OVER-BUDGET WATCH: {agent['agent']} ({agent['watches']} need attention)")
     for agent in anomalies["blocked_with_open_ask"]:
         flagged.append(f"BLOCKED (awaiting answer): {agent['agent']} — asks {agent['open_asks']}")
+    for agent in anomalies["blocked_no_ask"]:
+        flagged.append(f"BLOCKED (no open ask): {agent['agent']} ({agent['count']} task(s) blocked)")
     anomaly_block = "\n".join(flagged) if flagged else "none"
     return f"{body}\n\nANOMALIES:\n{anomaly_block}"
 

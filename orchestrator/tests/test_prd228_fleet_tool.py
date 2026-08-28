@@ -34,13 +34,20 @@ _UNSET = object()
 
 
 def _entry(agent_id, name, *, current=None, queue=0, open_asks=None,
-           needs_attention=0, cost=_UNSET, last_activity=None):
+           blocked_count=None, needs_attention=0, cost=_UNSET, last_activity=None):
+    # blocked_count defaults to len(open_asks); pass it explicitly to model an
+    # approval-/manually-blocked task (blocked_at set) that raised NO question —
+    # count > 0 with open_asks == [] (P228-RVW-5).
+    asks = list(open_asks or [])
     entry = {
         "agent_id": agent_id,
         "name": name,
         "current": current,
         "queue_depth": queue,
-        "blocked": {"count": len(open_asks or []), "open_asks": list(open_asks or [])},
+        "blocked": {
+            "count": blocked_count if blocked_count is not None else len(asks),
+            "open_asks": asks,
+        },
         "watches": {"active": max(needs_attention, 0), "needs_attention": needs_attention},
         "last_activity_at": last_activity,
     }
@@ -179,7 +186,10 @@ def test_no_anomalies_says_none():
         _entry(2, "Bench"),
     ])
     out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
-    assert out["anomalies"] == {"stalled": [], "over_budget_watches": [], "blocked_with_open_ask": []}
+    assert out["anomalies"] == {
+        "stalled": [], "over_budget_watches": [],
+        "blocked_with_open_ask": [], "blocked_no_ask": [],
+    }
     assert out["text"].rstrip().endswith("none")
 
 
@@ -189,6 +199,49 @@ def test_idle_agent_is_never_stalled():
                            last_activity=(NOW - timedelta(days=3)).isoformat())])
     out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
     assert out["anomalies"]["stalled"] == []
+
+
+def test_blocked_without_open_ask_is_blocked_not_idle():
+    """P228-RVW-5: an approval-/manually-blocked agent (blocked.count>0, open_asks
+    empty, no current work) renders a 'blocked' live line — NOT 'idle' — and is
+    flagged in the anomalies section, so 'is anyone stuck?' catches it. The idle
+    agent alongside it stays idle (blocked.count==0)."""
+    fleet = _state([
+        # Approval-/manually-blocked: blocked_at set, no KIND_QUESTION grant.
+        _entry(1, "Approval", current=None, open_asks=[], blocked_count=1,
+               cost={"tokens": 0, "usd": 0.0}),
+        # Genuinely idle: nothing blocked, nothing current.
+        _entry(2, "Bench", current=None, cost={"tokens": 0, "usd": 0.0}),
+    ])
+    out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
+
+    approval_line = next(ln for ln in out["lines"] if ln.startswith("Approval"))
+    assert " — blocked — " in approval_line          # not idle, not working
+    assert "idle" not in approval_line
+    bench_line = next(ln for ln in out["lines"] if ln.startswith("Bench"))
+    assert " — idle — " in bench_line                # the real idle stays idle
+
+    an = out["anomalies"]
+    # Disjoint from the awaiting-answer bucket; caught here instead.
+    assert [a["agent"] for a in an["blocked_no_ask"]] == ["Approval"]
+    assert an["blocked_no_ask"][0]["count"] == 1
+    assert an["blocked_with_open_ask"] == []
+    assert "BLOCKED (no open ask): Approval (1 task(s) blocked)" in out["text"]
+
+
+def test_blocked_count_supersedes_working_line():
+    """P228-RVW-5: blocked outranks working — an agent with a flagged-blocked task
+    reads as 'blocked' even if it also holds a running task (consistent with the
+    existing awaiting-answer-wins-over-working precedence)."""
+    fleet = _state([
+        _entry(1, "Juggler", current=_current("Another job"), open_asks=[],
+               blocked_count=1, cost={"tokens": 0, "usd": 0.0}),
+    ])
+    out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
+    line = out["lines"][0]
+    assert " — blocked — " in line
+    assert "working:" not in line
+    assert [a["agent"] for a in out["anomalies"]["blocked_no_ask"]] == ["Juggler"]
 
 
 def test_stall_threshold_constant_in_config():

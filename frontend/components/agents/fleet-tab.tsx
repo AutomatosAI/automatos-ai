@@ -24,8 +24,15 @@ interface FleetTabProps {
 type LiveTone = 'working' | 'idle' | 'blocked'
 
 function liveLine(agent: FleetAgentRow): { text: string; tone: LiveTone } {
+  // Blocked > working > idle. An agent is blocked either because it has an open
+  // question ask, or because one of its board tasks is flagged blocked with no
+  // outstanding question (approval-pending / manually blocked) — the latter uses
+  // the already-emitted blocked.count so it never reads as 'idle' (P228-RVW-5).
   if (agent.blocked.open_asks.length > 0) {
     return { text: 'blocked: awaiting answer', tone: 'blocked' }
+  }
+  if (agent.blocked.count > 0) {
+    return { text: 'blocked', tone: 'blocked' }
   }
   if (agent.current) {
     return { text: `working: ${agent.current.title}`, tone: 'working' }
