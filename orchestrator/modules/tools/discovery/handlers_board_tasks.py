@@ -245,6 +245,18 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
                 result["supervised"] = True
                 result["watch_id"] = str(watch.id)
                 result["supervision"] = "supervised — I'll report back here when it's done"
+            else:
+                # P224-RVW-6: the dial is ON but the watch did NOT attach —
+                # auto_create_ticket_watch is fail-soft and returns None on any
+                # internal error (a broken watcher must never break the ticket).
+                # Confirm honestly instead of silently omitting the signal: the
+                # ticket runs, but unwatched. The RVW-3 directive echoes this
+                # 'supervision' field verbatim, so the user is never told a false
+                # "I'll report back here". (A just-created task id can have no
+                # pre-existing live watch, so None here is an attach failure — not
+                # the idempotent already-watched case.)
+                result["supervised"] = False
+                result["supervision"] = "supervision unavailable — the ticket will run unwatched"
 
     return result
 
