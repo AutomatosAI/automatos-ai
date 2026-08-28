@@ -164,6 +164,51 @@ def test_match_roster_empty_name():
 
 
 # ---------------------------------------------------------------------------
+# P224-RVW-1 -- an ambiguous within-workspace contains-match must ASK, never
+# silently pick the first row (which was Postgres-order-dependent).
+# ---------------------------------------------------------------------------
+
+
+def test_match_roster_ambiguous_contains_asks_not_guesses():
+    """'Jim' contains-matches BOTH 'Jim Whitfield' and 'Jimmy Cross'
+    ('jim' is a prefix of 'jimmy'), so it is ambiguous → (None, None)."""
+    roster = [_agent(3, "Jim Whitfield"), _agent(7, "Jimmy Cross")]
+    assert _brain()._match_roster_agent("Jim", roster) == (None, None)
+
+
+def test_match_roster_ambiguous_is_order_independent():
+    """The ambiguous verdict must not depend on roster (Postgres row) order."""
+    a, b = _agent(3, "Jim Whitfield"), _agent(7, "Jimmy Cross")
+    assert _brain()._match_roster_agent("Jim", [a, b]) == (None, None)
+    assert _brain()._match_roster_agent("Jim", [b, a]) == (None, None)
+
+
+def test_match_roster_two_short_names_are_ambiguous():
+    """Short names ('Ops','AI') substring-match a longer target; 2+ hits ask."""
+    roster = [_agent(3, "Ops"), _agent(7, "AI")]
+    # target 'AI Ops' contains both 'ops' and 'ai' → ambiguous.
+    assert _brain()._match_roster_agent("AI Ops", roster) == (None, None)
+
+
+def test_match_roster_single_contains_still_resolves_amid_others():
+    """With only ONE distinct contains-match in a multi-agent roster, resolve —
+    the ambiguity guard must not block a genuinely unique match."""
+    roster = [_agent(3, "Researcher"), _agent(7, "Accountant")]
+    assert _brain()._match_roster_agent("my accountant agent", roster) == (7, "Accountant")
+
+
+def test_ambiguous_match_drives_ask_in_thread_directive():
+    """End-to-end: an ambiguous name leaves target_agent_id None, so
+    apply_assign_bias emits the ask-in-thread directive (never auto-pick)."""
+    roster = [_agent(3, "Jim Whitfield"), _agent(7, "Jimmy Cross")]
+    agent_id, agent_name = _brain()._match_roster_agent("Jim", roster)
+    a = _assessment(target_agent_id=agent_id, target_agent_name=agent_name)
+    apply_assign_bias(a, "have Jim send the invoice reminder now")
+    assert "platform_list_agents" in a.context_directive
+    assert "Do NOT guess or auto-pick" in a.context_directive
+
+
+# ---------------------------------------------------------------------------
 # AC3 -- api/chat.py ASSIGN dispatch (apply_assign_bias, assessment stubbed)
 # ---------------------------------------------------------------------------
 

@@ -909,20 +909,33 @@ class AutoBrain:
     def _match_roster_agent(self, name: Optional[str], agents=None):
         """Resolve an agent name from the user's request against the active
         roster (PRD-224 US-004). Case-insensitive: exact name first, then a
-        forgiving contains match ("my accountant agent" -> "Accountant").
-        Returns (agent_id, canonical_name) or (None, None). NEVER a fuzzy
-        best-guess — an unresolved name is the ask-in-thread signal."""
+        forgiving contains match ("my accountant agent" -> "Accountant") that
+        resolves ONLY when exactly one distinct agent matches. Returns
+        (agent_id, canonical_name) or (None, None). NEVER a fuzzy best-guess —
+        an ambiguous OR unresolved name is the ask-in-thread signal.
+
+        P224-RVW-1: the contains fallback previously returned the FIRST hit,
+        so 'Jim' silently picked whichever of 'Jim Whitfield'/'Jimmy Cross'
+        Postgres returned first. Two-or-more distinct matches now yield
+        (None, None) — resolution never depends on row order."""
         if not name or not name.strip():
             return None, None
         target = name.strip().lower()
         agents = agents if agents is not None else self._active_agents()
-        for a in agents:  # exact match wins
+        for a in agents:  # exact match wins — an exact name is unambiguous
             if (getattr(a, "name", "") or "").lower() == target:
                 return a.id, a.name
-        for a in agents:  # then a contained-name match either direction
+        # No exact hit: collect EVERY contained-name match (either direction),
+        # keyed by agent id so distinct agents don't collapse. Resolve only
+        # when exactly one distinct agent matches; 0 or >=2 → ask in-thread.
+        matches = {}
+        for a in agents:
             an = (getattr(a, "name", "") or "").lower()
             if an and (an in target or target in an):
-                return a.id, a.name
+                matches[a.id] = a.name
+        if len(matches) == 1:
+            (agent_id, canonical_name), = matches.items()
+            return agent_id, canonical_name
         return None, None
 
     @staticmethod
