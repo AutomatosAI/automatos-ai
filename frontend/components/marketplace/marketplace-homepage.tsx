@@ -310,7 +310,7 @@ export function MarketplaceHomepage() {
         }
       />
 
-      <div data-tour="marketplace-search" className="max-w-lg">
+      <div className="max-w-lg">
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
@@ -333,7 +333,7 @@ export function MarketplaceHomepage() {
         transition={{ duration: 0.5, delay: 0.3 }}
       >
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
-          <TabsList data-tour="marketplace-tabs" className="bg-secondary/50">
+          <TabsList className="bg-secondary/50">
             {[
               { value: 'tools', label: 'Applications' },
               { value: 'agents', label: 'Agents' },
@@ -351,7 +351,7 @@ export function MarketplaceHomepage() {
             })}
           </TabsList>
 
-          <TabsContent value="tools" className="mt-0" data-tour="marketplace-content">
+          <TabsContent value="tools" className="mt-0">
             <MarketplaceToolsTab searchQuery={searchQuery} />
           </TabsContent>
 

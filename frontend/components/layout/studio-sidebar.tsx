@@ -52,7 +52,6 @@ export function StudioSidebar({
   return (
     <aside
       className={`sh-side${collapsed ? ' collapsed' : ''}`}
-      data-tour="sidebar-studio"
     >
       {/* Brand row */}
       <div className="sh-brand-row">

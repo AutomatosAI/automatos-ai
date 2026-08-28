@@ -1,5 +1,5 @@
 {
-  "route_count": 770,
+  "route_count": 768,
   "routes": [
     {
       "method": "GET",
@@ -1904,14 +1904,6 @@
     {
       "method": "POST",
       "path": "/api/routing/triggers/setup"
-    },
-    {
-      "method": "GET",
-      "path": "/api/settings/onboarding-agents"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/settings/onboarding-agents/{slug}"
     },
     {
       "method": "POST",

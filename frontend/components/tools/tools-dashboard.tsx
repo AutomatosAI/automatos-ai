@@ -612,7 +612,7 @@ export function ToolsDashboard() {
   return (
     <div className="space-y-6">
       {/* Header Section */}
-      <div data-tour="tools-page-header">
+      <div>
       <PageHeader
         title="Tools &"
         titleAccent="Integrations"
@@ -697,7 +697,7 @@ export function ToolsDashboard() {
             </div>
 
             {/* Search - Full Width */}
-            <div data-tour="tools-search">
+            <div>
             <SearchInput
               value={searchQuery}
               onChange={setSearchQuery}
@@ -727,7 +727,7 @@ export function ToolsDashboard() {
             </div>
           </div>
 
-          <TabsContent value="enabled" className="space-y-6" data-tour="tools-connected-section">
+          <TabsContent value="enabled" className="space-y-6">
             {/* Enabled Tools Management */}
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">Applications</h3>

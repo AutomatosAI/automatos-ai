@@ -718,7 +718,7 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="documents" className="space-y-6">
-          <TabsList data-tour="documents-tabs" className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
+          <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
             <TabsTrigger value="documents" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span>Documents</span>
@@ -784,7 +784,7 @@ export function DocumentManagement() {
             ) : (
               /* Document sub-tabs */
               <Tabs defaultValue="library" className="space-y-6">
-                <TabsList data-tour="documents-subtabs" className="bg-secondary/30">
+                <TabsList className="bg-secondary/30">
                   <TabsTrigger value="library" className="flex items-center space-x-2">
                     <FileText className="w-4 h-4" />
                     <span>Library</span>

@@ -99,7 +99,7 @@ export function OrgChartTab() {
         )}
       </div>
 
-      {/* Empty state — prompt Mission Zero */}
+      {/* Empty state — ask Auto to build the team */}
       {!hasOrgData && (
         <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center">
           <Rocket className="w-10 h-10 mx-auto mb-3 text-primary/60" />
@@ -107,15 +107,15 @@ export function OrgChartTab() {
             No org structure yet
           </h3>
           <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
-            Run <strong className="text-primary">Mission Zero</strong> to design your AI company structure.
-            The CTO agent will audit your roster, browse the marketplace, and build your team.
+            Ask <strong className="text-primary">Auto</strong> to design your AI company structure.
+            He&apos;ll audit your roster, browse the marketplace, and build your team.
           </p>
           <a
-            href="/assignments?tab=missions"
+            href="/chat"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/20 text-primary text-sm font-medium hover:bg-primary/30 transition-colors border border-primary/30"
           >
             <Rocket className="w-4 h-4" />
-            Launch Mission Zero
+            Ask Auto to build your team
           </a>
         </div>
       )}

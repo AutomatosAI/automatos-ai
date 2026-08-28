@@ -11,19 +11,19 @@ import {
   Upload,
 } from 'lucide-react'
 import {
-  useWizardProgress,
-  type WizardStage,
-} from '@/hooks/use-wizard-progress'
+  useIntakeProgress,
+  type IntakeStage,
+} from '@/hooks/use-intake-progress'
 
 /**
  * PRD-222 US-015 (W1·S8) — the intake progress card.
  *
  * A compact chat status card for the intake pipeline Auto kicks off with
  * `platform_scan_business_site`: scan → scrape → ingest → graph → profile. It
- * REUSES the wizard's SSE hook (`useWizardProgress`) verbatim — the same
- * fetch+ReadableStream feed, auth headers, dedupe and auto-reconnect the wizard
- * consumes — so there is one streaming implementation, not two. The wizard's own
- * consumption is untouched; both surfaces read the same hook.
+ * consumes the intake SSE hook (`useIntakeProgress`) — the same
+ * fetch+ReadableStream feed, auth headers, dedupe and auto-reconnect — which is
+ * now the ONE streaming implementation (relocated from the retired wizard in
+ * W2·S5; the backend `/api/wizard/progress` endpoint is unchanged).
  *
  * Terminal states are honest:
  *   - complete → a "here's what I learned" handoff line (Auto takes it from here)
@@ -33,7 +33,7 @@ import {
 // The five user-facing pipeline stages, in order. `graphify` is the hook's stage
 // id; we label it "Graph" to match the PRD's scan → scrape → ingest → graph →
 // profile wording.
-const PIPELINE: { stage: WizardStage; label: string; icon: typeof FileText }[] = [
+const PIPELINE: { stage: IntakeStage; label: string; icon: typeof FileText }[] = [
   { stage: 'scan', label: 'Scan', icon: Network },
   { stage: 'scrape', label: 'Scrape', icon: FileText },
   { stage: 'ingest', label: 'Ingest', icon: Activity },
@@ -41,7 +41,7 @@ const PIPELINE: { stage: WizardStage; label: string; icon: typeof FileText }[] =
   { stage: 'profile', label: 'Profile', icon: CheckCircle2 },
 ]
 
-const ORDER: WizardStage[] = PIPELINE.map((p) => p.stage)
+const ORDER: IntakeStage[] = PIPELINE.map((p) => p.stage)
 
 interface IntakeProgressCardProps {
   /** The intake profile started by `platform_scan_business_site`. */
@@ -57,11 +57,11 @@ export function IntakeProgressCard({
   active = true,
   onUploadDocs,
 }: IntakeProgressCardProps) {
-  const { events, state, latest } = useWizardProgress({ profileId, active })
+  const { events, state, latest } = useIntakeProgress({ profileId, active })
 
   if (!profileId) return null
 
-  const reached = new Set<WizardStage>(events.map((e) => e.stage))
+  const reached = new Set<IntakeStage>(events.map((e) => e.stage))
   const currentStage = latest?.stage ?? null
   const failed = state === 'failed' || state === 'error'
   const complete = state === 'complete'

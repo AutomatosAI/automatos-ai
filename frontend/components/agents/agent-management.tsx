@@ -139,7 +139,7 @@ export function AgentManagement() {
   return (
     <div ref={ref} className="space-y-6">
       {/* Header */}
-      <div data-tour="agents-page-header">
+      <div>
       <PageHeader
         title="Agent"
         titleAccent="Management"
@@ -164,7 +164,6 @@ export function AgentManagement() {
 
             <Button
               variant="outline"
-              data-tour="create-agent-btn"
               onClick={() => setShowCreateModal(true)}
               disabled={!canEdit}
               title={canEdit ? undefined : 'Viewers have read-only access'}
@@ -241,9 +240,9 @@ export function AgentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.6, delay: 0.3 }}
       >
-        <FilterTabs dataTour="agents-tabs" tabs={tabDefs} value={activeTab} onValueChange={setActiveTab} trailing={<ViewToggle value={viewMode} onChange={setViewMode} className="ml-auto" />}>
+        <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab} trailing={<ViewToggle value={viewMode} onChange={setViewMode} className="ml-auto" />}>
           <TabsContent value="roster" className="space-y-6">
-            <div data-tour="agent-roster">
+            <div>
               <AgentRoster
                 agents={agents as any[]}
                 loading={agentsLoading && !agentsError}

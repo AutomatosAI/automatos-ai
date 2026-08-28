@@ -9,7 +9,6 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
-import { resetAllTours, resetOnboarding } from '@/lib/shepherd/tour-storage'
 
 /**
  * PRD-222 US-016 (W1·S10 / D9) — DEV/OPS reset console. UNLINKED from all nav:
@@ -19,10 +18,33 @@ import { resetAllTours, resetOnboarding } from '@/lib/shepherd/tour-storage'
  *
  * Posts the three flags to POST /api/workspaces/current/onboarding/reset via a
  * raw fetch (so the 404-when-disabled response is read from the status code, not
- * an opaque thrown error), then clears the tour/onboarding localStorage through
- * the existing shepherd tour-storage helpers and drops the operator back into
- * the empty chat so the flow re-fires from not_started.
+ * an opaque thrown error), then sweeps any residual legacy tour/onboarding
+ * browser flags and drops the operator back into the empty chat so the flow
+ * re-fires from not_started.
  */
+
+/**
+ * Clear residual client-side onboarding/tour flags. These `automatos-tour*` /
+ * `automatos-onboarding*` localStorage keys were written by the retired guided
+ * tours (W2·S5); nothing writes them anymore, so this is purely a legacy sweep
+ * that keeps a re-run clean. Onboarding state itself is server-side (D8) — this
+ * only touches the old per-user browser flags.
+ */
+function clearLegacyOnboardingStorage(userId: string) {
+  if (typeof window === 'undefined' || !userId) return
+  const remove: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key) continue
+    if (
+      (key.startsWith('automatos-tour') || key.startsWith('automatos-onboarding')) &&
+      key.includes(userId)
+    ) {
+      remove.push(key)
+    }
+  }
+  remove.forEach((k) => localStorage.removeItem(k))
+}
 export default function ResetOnboardingPage() {
   const { user } = useUser()
   const router = useRouter()
@@ -72,12 +94,11 @@ export default function ResetOnboardingPage() {
         return
       }
 
-      // Clear the client-side tour/onboarding flags via the shepherd helpers so
-      // Auto's tours re-evaluate cleanly against the fresh server state.
+      // Sweep any residual legacy tour/onboarding browser flags so a re-run
+      // starts clean against the fresh server state.
       const userId = user?.id
       if (userId) {
-        resetAllTours(userId)
-        resetOnboarding(userId)
+        clearLegacyOnboardingStorage(userId)
       }
       await refreshWorkspace?.()
       router.push('/chat')

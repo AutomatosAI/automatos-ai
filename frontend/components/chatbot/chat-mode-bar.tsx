@@ -57,7 +57,7 @@ export function ChatModeBar({
   }
 
   return (
-    <div data-tour="chat-mode-bar" className="flex flex-wrap justify-center gap-3 md:gap-2">
+    <div className="flex flex-wrap justify-center gap-3 md:gap-2">
       {/* Live voice (PRD-207) */}
       {onLiveClick && (
         <button
