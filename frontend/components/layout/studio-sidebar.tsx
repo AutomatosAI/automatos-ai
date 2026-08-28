@@ -9,6 +9,8 @@ import {
   resolveActiveMenuId,
   type StudioMenuGroup,
 } from '@/lib/studio-menu';
+import { useWorkspaceOptional } from '@/components/workspace-provider';
+import { isNavItemVisible } from '@/lib/nav-exposure';
 
 /**
  * StudioSidebar — SIDE-B (labelled rail, 232px) per CD's shell delivery.
@@ -48,6 +50,9 @@ export function StudioSidebar({
   const pathname = usePathname();
   const activeId = pathname ? resolveActiveMenuId(pathname) : null;
   const mark = workspaceMark ?? workspaceName.slice(0, 1).toUpperCase();
+  // US-024: plan-tier exposure gating for the studio rail (hidden ≠ deleted).
+  // Optional context — the studio shell can render in isolation (fails open).
+  const exposure = useWorkspaceOptional()?.workspace?.exposure;
 
   return (
     <aside
@@ -100,7 +105,7 @@ export function StudioSidebar({
           <div key={group}>
             {!collapsed && <div className="sh-group">{group}</div>}
             {collapsed && <div className="sh-group-rule" aria-hidden />}
-            {STUDIO_MENU_PRIMARY.filter((m) => m.group === group).map((m) => {
+            {STUDIO_MENU_PRIMARY.filter((m) => m.group === group && isNavItemVisible(m.requiredExposure, exposure)).map((m) => {
               const Icon = m.icon;
               const isActive = activeId === m.id;
               const alert = alerts[m.id];

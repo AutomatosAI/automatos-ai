@@ -1746,9 +1746,40 @@ def load_plan_tiers(env_override=None) -> dict:
 
 PLAN_TIERS: dict[str, dict] = load_plan_tiers()
 
+# ---------------------------------------------------------------------------
+# PRD-222 W2·S1b (US-024): tool-name → capability-family map. A platform tool
+# whose name matches an entry belongs to that family; a family DISABLED for the
+# workspace's tier (PLAN_TIERS[plan]["families"]) is trimmed from Auto's per-turn
+# tool surface at the single assembly seam
+# (modules/tools/tool_router.get_tools_for_agent_async → services.plan_tiers.
+# filter_tools_by_plan). Tools in NO family are CORE — always present. This map
+# is config-side (the filter itself hardcodes no family names) so re-gating is a
+# config/env change, and its keys MUST be the family names used in
+# PLAN_TIERS[*]["families"]. Match semantics: exact name, OR prefix when the
+# entry ends in '_'. ``voice`` gates nav/exposure only — Retell (PRD-207) is a
+# separate lane with no platform_execute tools — so it maps to an empty list.
+# Note: ``platform_get_activity_feed`` is deliberately NOT in nl2sql — the
+# Command Center is available to every tier (only NL2SQL/analytics is gated).
+TOOL_FAMILIES: dict[str, list] = {
+    "codegraph": ["platform_codegraph_"],  # prefix — all 9 first-class CodeGraph tools
+    "nl2sql": [
+        "platform_query_data",              # the NL2SQL data query
+        "platform_get_llm_usage", "platform_get_cost_breakdown", "platform_workspace_stats",
+        "platform_get_success_rate", "platform_get_completion_time", "platform_get_error_rates",
+        "platform_get_queue_depth", "platform_get_efficiency_score", "platform_get_cost_per_execution",
+        "platform_get_peak_hours", "platform_get_bottlenecks", "platform_get_predictive_alerts",
+        "platform_get_agent_ranking",
+    ],
+    "team": [
+        "platform_list_members", "platform_invite_member",
+        "platform_set_member_role", "platform_remove_member",
+    ],
+    "voice": [],
+}
+
 # Validate on import (non-blocking)
 # if not config.validate():
 #     logger.warning("⚠️  WARNING: Configuration validation failed")
 
 # Export for easy import
-__all__ = ['config', 'Config', 'orchestrator_config', 'PLAN_TIERS', 'load_plan_tiers']
+__all__ = ['config', 'Config', 'orchestrator_config', 'PLAN_TIERS', 'load_plan_tiers', 'TOOL_FAMILIES']

@@ -822,6 +822,7 @@ async def get_tools_for_agent_async(
             trace_id=trace_id,
             start_time=start_time,
         )
+        tools = _apply_tier_exposure(session_used, workspace_id, tools, trace_id)
         await _maybe_log_shadow_surface(query, is_admin, is_super_admin, tools, trace_id)
         return tools
     except Exception as e:
@@ -830,6 +831,43 @@ async def get_tools_for_agent_async(
     finally:
         if db_session is None:
             session_used.close()
+
+
+def _apply_tier_exposure(
+    session, workspace_id: Optional[Any], tools: List[Dict[str, Any]], trace_id: str
+) -> List[Dict[str, Any]]:
+    """Trim the assembled tool surface to the workspace tier's capability
+    families (PRD-222 US-024). The single seam where per-turn platform tool
+    schemas are gated by plan.
+
+    FAIL-OPEN: a missing workspace_id, an unresolvable plan, or any error returns
+    the surface unchanged — a lookup fault must never hide tools (the correct
+    production posture, and it keeps the mock-based unit suite, which has no real
+    workspace row, on the full surface). Only a CONFIRMED gated tier trims.
+    """
+    if not tools or workspace_id is None:
+        return tools
+    try:
+        from core.models.workspaces import Workspace
+        from services.plan_tiers import filter_tools_by_plan
+
+        ws = session.query(Workspace).filter(Workspace.id == workspace_id).first()
+        plan = getattr(ws, "plan", None)
+        if not plan:
+            return tools
+        trimmed = filter_tools_by_plan(tools, plan)
+        if len(trimmed) != len(tools):
+            logger.info(
+                f"[tool-trace {trace_id}] tier exposure: {len(tools)}→{len(trimmed)} "
+                f"tool schemas for plan={plan} (families trimmed)"
+            )
+        return trimmed
+    except Exception:
+        logger.warning(
+            f"[tool-trace {trace_id}] tier exposure filter failed — full surface kept",
+            exc_info=True,
+        )
+        return tools
 
 
 get_tools_for_agent.__doc__ = (

@@ -24,6 +24,7 @@ NO quota hardening. No billing anywhere: ``display_price_usd`` is a label only
 """
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any, Optional
 
@@ -101,3 +102,115 @@ def assign_plan(db: Any, workspace: Any, plan: str, tiers: Optional[dict] = None
         db.commit()
     logger.info("[plan_tiers] assigned plan=%s to workspace=%s", plan, getattr(workspace, "id", "?"))
     return new_limits
+
+
+# --------------------------------------------------------------------------- #
+# US-024 — exposure profile (nav + families + marketplace depth) from the tier
+# --------------------------------------------------------------------------- #
+
+
+def enabled_families(plan: str, tiers: Optional[dict] = None) -> dict:
+    """The capability families enabled for ``plan`` (unknown plan ⇒ entry tier)."""
+    resolved = _tiers(tiers)
+    tier = resolved.get(plan) or resolved.get("basic") or {}
+    return dict(tier.get("families") or {})
+
+
+def _nav_exposure(families: dict) -> dict:
+    """Nav visibility derived from the tier's families. Only the surfaces that
+    are ACTUAL top-level nav items are keyed here: ``analytics`` (the /analytics
+    item, gated by the nl2sql family) and ``team`` (the /team item). CodeGraph is
+    folded into Knowledge Base and Voice lives in chat — neither is a rail item,
+    so they are gated by the tool surface (Auto) not by nav. A hidden item is
+    simply absent from the rail; its route still resolves (D5 — hidden ≠ deleted).
+    """
+    return {
+        "analytics": bool(families.get("nl2sql")),
+        "team": bool(families.get("team")),
+    }
+
+
+def exposure_for_plan(plan: str, tiers: Optional[dict] = None) -> dict:
+    """The exposure profile for a workspace on ``plan``, derived entirely from
+    PLAN_TIERS: nav visibility, capability families, marketplace depth, and the
+    tier's display info for the UI. Unknown plans fall back to the entry tier so
+    the client is never left without a profile.
+    """
+    resolved = _tiers(tiers)
+    tier = resolved.get(plan) or resolved.get("basic") or {}
+    families = dict(tier.get("families") or {})
+    return {
+        "plan": plan,
+        "display_name": tier.get("display_name"),
+        "display_price_usd": tier.get("display_price_usd"),
+        "price_label": tier.get("price_label"),
+        "families": families,
+        "marketplace_depth": tier.get("marketplace_depth", 1),
+        "nav": _nav_exposure(families),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# US-024 — Auto's per-turn tool surface, trimmed to the tier's families
+# --------------------------------------------------------------------------- #
+
+
+def _tool_family(tool_name: str, family_map: dict) -> Optional[str]:
+    """The family a platform tool name belongs to, or None (⇒ CORE, always on).
+    Match is exact, or a prefix when the map entry ends in ``_``."""
+    for family, patterns in (family_map or {}).items():
+        for pat in patterns or []:
+            if tool_name == pat or (pat.endswith("_") and tool_name.startswith(pat)):
+                return family
+    return None
+
+
+def _prune_dispatcher(schema: dict, disabled: set, family_map: dict) -> dict:
+    """A copy of the ``platform_execute`` dispatcher with disabled-family actions
+    removed from its ``action.enum`` (rebuild, don't mutate). Returns the schema
+    unchanged if it carries no prunable enum."""
+    try:
+        enum = schema["function"]["parameters"]["properties"]["action"].get("enum")
+    except (KeyError, TypeError, AttributeError):
+        return schema
+    if not enum:
+        return schema
+    kept = [a for a in enum if _tool_family(a, family_map) not in disabled]
+    if len(kept) == len(enum):
+        return schema
+    new_schema = copy.deepcopy(schema)
+    new_schema["function"]["parameters"]["properties"]["action"]["enum"] = kept
+    return new_schema
+
+
+def filter_tools_by_plan(
+    tools: list, plan: str, tiers: Optional[dict] = None, family_map: Optional[dict] = None
+) -> list:
+    """Trim Auto's per-turn tool surface to the workspace tier's families.
+
+    Drops platform tool schemas whose family is disabled for ``plan`` (e.g. the
+    9 first-class CodeGraph schemas for a basic workspace) and prunes the
+    ``platform_execute`` dispatcher's ``action.enum`` of disabled-family actions.
+    CORE tools (no family) and the dispatcher itself are always kept. Returns a
+    NEW list and never mutates an input schema (the dispatcher is rebuilt with a
+    pruned enum). When every family is enabled, returns the list unchanged (fast
+    path). Pure — no I/O; the caller resolves ``plan`` from the workspace.
+    """
+    from config import TOOL_FAMILIES
+
+    fam_map = family_map if family_map is not None else TOOL_FAMILIES
+    fams = enabled_families(plan, tiers)
+    disabled = {f for f, on in fams.items() if not on}
+    if not disabled:
+        return list(tools)
+
+    out: list = []
+    for schema in tools or []:
+        name = (schema.get("function") or {}).get("name", "")
+        if name == "platform_execute":
+            out.append(_prune_dispatcher(schema, disabled, fam_map))
+            continue
+        if _tool_family(name, fam_map) in disabled:
+            continue  # drop a promoted/registry tool in a disabled family
+        out.append(schema)
+    return out
