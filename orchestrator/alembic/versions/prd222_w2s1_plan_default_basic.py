@@ -46,6 +46,17 @@ def upgrade() -> None:
         existing_type=sa.String(length=50),
         server_default=_NEW_DEFAULT,
     )
+    # HOTFIX (2026-08-28 deploy crash-loop): production carries a LEGACY
+    # value-list check constraint `workspaces_plan_check` that predates the tier
+    # rename and exists in NO migration (prod-only schema drift — CI schemas are
+    # built from the chain and never had it, so every test lane was green while
+    # the deploy loop failed). It rejects 'basic'; drop it before the backfill.
+    # Deliberately NOT recreated: plan validity is enforced in code against
+    # config.PLAN_TIERS (the US-025 assignable set) — a DB value-list would
+    # re-drift on the next config tier change. IF EXISTS keeps this a no-op on
+    # databases that never had the constraint (CI, fresh installs).
+    op.execute("ALTER TABLE workspaces DROP CONSTRAINT IF EXISTS workspaces_plan_check")
+
     # Bring existing rows onto the renamed tier (idempotent; only 'starter').
     op.execute(_BACKFILL_SQL)
 
