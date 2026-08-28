@@ -224,14 +224,29 @@ class _FakeQ:
         return [self._r] if self._r is not None else []
 
 
+class _FakeResult:
+    """Minimal Result stand-in for db.execute(...).fetchone()."""
+
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
 class _FakeSession:
     """Returns a seeded Agent for Agent queries and a seeded BoardTask for
     everything else; records commits. add() captures a freshly-created task."""
 
-    def __init__(self, agent=None, task=None):
+    def __init__(self, agent=None, task=None, claim_race_lost=False):
         self._agent = agent
         self._task = task
         self.commits = 0
+        # P224-RVW-5: when True, model the board dispatcher committing its
+        # FOR UPDATE SKIP LOCKED claim BETWEEN this handler's SELECT and its
+        # atomic in_progress write — the conditional UPDATE then matches 0 rows.
+        self._claim_race_lost = claim_race_lost
+        self.executes = []
 
     def query(self, model):
         from core.models import Agent
@@ -248,6 +263,34 @@ class _FakeSession:
     def refresh(self, obj):
         if getattr(obj, "id", None) is None:
             obj.id = 4242
+
+    def execute(self, statement, params=None):
+        """Model P224-RVW-5's atomic claim:
+        ``UPDATE board_tasks SET status='in_progress' WHERE id=:id
+          AND status <> 'in_progress' RETURNING id``.
+        Wins (returns a row) only when the row is not already in_progress; a
+        forced ``claim_race_lost`` returns 0 rows (the dispatcher already claimed
+        it) even though the earlier SELECT still saw 'assigned'.
+
+        Only the board-task claim mutates status here. Every OTHER execute() — the
+        fire-and-forget ``SELECT pg_notify(...)`` that notify_board_event issues on
+        the same session — is a benign no-op returning an empty result, exactly as
+        it is in Postgres (it never touches board_tasks.status)."""
+        sql = str(statement)
+        self.executes.append((sql, params))
+        low = sql.lower()
+        is_claim = "update board_tasks" in low and "returning" in low
+        if not is_claim:
+            return _FakeResult(None)
+        task = self._task
+        if self._claim_race_lost:
+            if task is not None:
+                task.status = "in_progress"      # the other actor already flipped it
+            return _FakeResult(None)
+        if task is not None and getattr(task, "status", None) != "in_progress":
+            task.status = "in_progress"
+            return _FakeResult((task.id,))
+        return _FakeResult(None)
 
 
 class _FakeReq:
@@ -969,6 +1012,82 @@ def test_rvw2_create_then_claim_then_update_yields_single_launch(monkeypatch):
         db, _WS_ID, {"task_id": claimed.id, "status": "in_progress"}))
 
     assert len(launches) == 1, "exactly one launch across create→claim→update (no double-exec)"
+
+
+# ---------------------------------------------------------------------------
+# P224-RVW-5 — RVW-2's old_status guard read an UNLOCKED pre-commit SELECT, so a
+# dispatcher claim that commits BETWEEN this handler's SELECT and its write still
+# double-launched. The transition is now an ATOMIC conditional UPDATE (mirroring
+# board_dispatcher.claim_tasks): launch inline ONLY if THIS statement won.
+# ---------------------------------------------------------------------------
+
+
+def test_rvw5_claim_race_lost_between_select_and_write_launches_zero(monkeypatch):
+    """The residual RVW-2 race: the SELECT still reads 'assigned' (so the stale
+    old_status guard would have PASSED and launched), but the dispatcher committed
+    its claim before our write. The atomic UPDATE matches 0 rows → ZERO inline
+    launches, triggered_execution False, and no redundant board frame."""
+    from api import board_tasks as bt
+    board = _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    # status='assigned' at SELECT time; claim_race_lost models the dispatcher
+    # winning between the SELECT and the atomic write.
+    db = _FakeSession(
+        task=_fresh_task(id=3, status="assigned", assigned_agent_id=7),
+        claim_race_lost=True,
+    )
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert launches == [], "lost the atomic claim → the dispatcher already launched; zero here"
+    assert result["triggered_execution"] is False, "no launch → triggered_execution honest"
+    assert result["status"] == "in_progress"
+    assert board == [], "no redundant status_changed frame when we didn't win the claim"
+    assert dispatch == [], "in_progress never wakes the dispatch loop"
+
+
+def test_rvw5_sole_launcher_still_launches_once(monkeypatch):
+    """No competing claim: the atomic UPDATE wins (status was 'assigned') and the
+    handler launches exactly once — the happy path is unbroken."""
+    from api import board_tasks as bt
+    board = _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert len(launches) == 1, "won the atomic claim → launch exactly once"
+    assert result["triggered_execution"] is True
+    assert len(board) == 1, "the winner pushes exactly one status_changed board frame"
+
+
+def test_rvw5_transition_is_an_atomic_conditional_claim_not_a_stale_read(monkeypatch):
+    """The in_progress transition must run the atomic conditional UPDATE — a status
+    precondition + RETURNING — not a blind ORM write gated on the stale SELECT."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: None)
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert len(db.executes) == 1, "exactly one atomic claim statement is issued"
+    sql, params = db.executes[0]
+    assert "update board_tasks" in sql.lower()
+    assert "status <> 'in_progress'" in sql, "the claim wins only if not already in_progress"
+    assert "returning" in sql.lower(), "RETURNING tells us whether THIS statement won"
+    assert params.get("id") == 3
 
 
 def test_dispatch_notify_failure_is_fail_soft(monkeypatch):
