@@ -79,6 +79,13 @@ else
   echo "   ❌ FAIL: no 4-part contract fragment found in orchestrator code"; FAIL=1
 fi
 
+# P226-RVW-2: the single-source guarantee must cover the Markdown seed home too,
+# not just .py files — the always-on platform-management skill embeds the SAME
+# fragment and CI must fail if a hand-edit drifts it. AST-extract the fragment
+# (import-free, no side effects) and assert it is present verbatim in the skill.
+check "P226-RVW-2 skill md embeds the shared contract fragment verbatim (markdown single-source)" \
+  "python3 -c \"import ast,pathlib,sys; src=pathlib.Path('orchestrator/modules/coordination/dispatch_contract.py').read_text(encoding='utf-8'); frag=next(n.value.value for n in ast.walk(ast.parse(src)) if isinstance(n,ast.Assign) and isinstance(n.value,ast.Constant) and any(getattr(t,'id',None)=='DISPATCH_CONTRACT_FRAGMENT' for t in n.targets)); md=pathlib.Path('orchestrator/core/seeds/platform-management-skill.md').read_text(encoding='utf-8'); sys.exit(0 if frag in md else 1)\""
+
 check "US-003 planner stores definition_of_done" \
   "grep -qi 'definition_of_done' orchestrator/modules/coordination/planner.py"
 
