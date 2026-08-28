@@ -372,13 +372,28 @@ def test_endpoint_404_when_reset_disabled(monkeypatch):
     assert exc.value.status_code == 404   # unadvertised, NOT 403
 
 
-def test_endpoint_403_for_non_admin_when_enabled(monkeypatch):
+def test_endpoint_403_for_non_member_when_enabled(monkeypatch):
+    from api import workspaces as wsmod
     from api.workspaces import reset_current_onboarding, OnboardingResetRequest
 
     monkeypatch.setattr(config, "ONBOARDING_RESET_ENABLED", True)
+    # A plain user whose workspace role does NOT grant workspace:manage.
+    monkeypatch.setattr(wsmod, "workspace_permission_granted", lambda *_a, **_k: False)
     with pytest.raises(HTTPException) as exc:
         _run(reset_current_onboarding(OnboardingResetRequest(), _Ctx("user"), object()))
     assert exc.value.status_code == 403
+
+
+def test_endpoint_workspace_admin_passes_without_platform_role(monkeypatch):
+    """The su-lock regression guard: a NORMAL user who administers the current
+    workspace (matrix grants workspace:manage) must pass the gate — the original
+    platform-role-only check 403'd every workspace owner."""
+    from api import workspaces as wsmod
+
+    monkeypatch.setattr(config, "ONBOARDING_RESET_ENABLED", True)
+    monkeypatch.setattr(wsmod, "workspace_permission_granted", lambda *_a, **_k: True)
+    # Must NOT raise:
+    wsmod._require_admin(_Ctx("user"), object())
 
 
 def test_endpoint_admin_success_returns_report(monkeypatch):
