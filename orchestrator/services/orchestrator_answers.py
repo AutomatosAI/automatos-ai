@@ -118,6 +118,25 @@ async def answer_clarification(
         return {"escalate_directly": True, "reason": "governance", "category": gov}
 
     # 2. Budget — count answers already spent on THIS run. Spent → cannot_answer.
+    #
+    # SOFT CAP, by design (P229-RVW-4). This check and the ANSWERED emit_event at
+    # the end are two unlocked operations, so concurrent asks in one run can both
+    # read the same pre-increment count and both answer — the run's answered count
+    # can exceed CLARIFICATION_BUDGET by up to (max_concurrent - 1). We accept the
+    # soft cap deliberately rather than hardening it, because a correct atomic
+    # spend is unsafe here and the overspend is cheap:
+    #   * Concurrent tasks run their agent I/O in parallel on SEPARATE DB sessions
+    #     (coordinator_service Phase 2, asyncio.gather). emit_event FLUSHES but does
+    #     not COMMIT, and READ COMMITTED sees only committed rows, so no in-flight
+    #     answer is visible to a sibling ask — neither an app-level lock nor an
+    #     advisory lock closes the window without COMMITTING a borrowed
+    #     agent-runtime session mid-tool-execution (which would durably persist
+    #     that session's unrelated pending work — a worse bug than the overspend).
+    #   * A schema-encoded slot / separate counter is ruled out: PRD-229 mandates
+    #     zero migrations and budget "counted off the run's own event trail".
+    #   * The blast radius is bounded by max_concurrent (default 3) and is pure
+    #     cost-control softness — escalations are never budget-limited, so the
+    #     human-ask safety valve is unaffected.
     if _answers_used(db, subject) >= _budget():
         _record(db, subject, question, outcome="cannot_answer", extra={"reason": REASON_BUDGET})
         return {"cannot_answer": True, "reason": REASON_BUDGET}

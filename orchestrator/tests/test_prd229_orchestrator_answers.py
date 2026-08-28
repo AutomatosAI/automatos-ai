@@ -309,6 +309,44 @@ async def test_budget_below_limit_still_answers(spy_events, no_external):
     assert stub.calls == 1
 
 
+@pytest.mark.asyncio
+async def test_budget_soft_cap_is_bounded_by_committed_trail(no_external):
+    """P229-RVW-4 — the budget is a SOFT cap BY DESIGN, counted off the run's
+    COMMITTED event trail. The check and the ANSWERED record are intentionally
+    not atomic: concurrent asks run their agent I/O on SEPARATE DB sessions
+    (coordinator Phase 2), and emit_event flushes without committing, so a
+    sibling's in-flight answer is invisible under READ COMMITTED. Two asks that
+    read the SAME committed baseline (budget-1 spent) therefore BOTH answer — an
+    overspend bounded by max_concurrent that we accept (escalations are never
+    budget-limited; hardening would mean committing a borrowed session mid-run).
+
+    This pins the contract the check-site doc relies on: the gate is off the
+    committed count, and once an answer IS committed/visible the next declines.
+    """
+    stub = _LLMStub()
+    # committed trail shows budget-1 answers; a concurrent sibling's answer is
+    # flushed-not-committed → invisible here, so both asks see the same baseline.
+    baseline = _FakeSession({
+        OrchestrationTaskDependency: [_dep()],
+        OrchestrationTask: [_upstream_task()],
+        OrchestrationEvent: [SimpleNamespace()] * (Config.CLARIFICATION_BUDGET - 1),
+    })
+    r1 = await answer_clarification(baseline, _subject(), "Which bucket?", llm_factory=_factory(stub))
+    r2 = await answer_clarification(baseline, _subject(), "Which bucket?", llm_factory=_factory(stub))
+    assert "answer" in r1 and "answer" in r2  # accepted, bounded soft-cap overspend
+
+    # once the trail COMMITS to the budget, the next ask declines without composing
+    committed = _FakeSession({
+        OrchestrationTaskDependency: [_dep()],
+        OrchestrationTask: [_upstream_task()],
+        OrchestrationEvent: [SimpleNamespace()] * Config.CLARIFICATION_BUDGET,
+    })
+    calls_before = stub.calls
+    r3 = await answer_clarification(committed, _subject(), "Which bucket?", llm_factory=_factory(stub))
+    assert r3 == {"cannot_answer": True, "reason": "budget"}
+    assert stub.calls == calls_before  # no compose once the committed cap is reached
+
+
 # ---------------------------------------------------------------------------
 # governance → escalate_directly, no answering attempt
 # ---------------------------------------------------------------------------
