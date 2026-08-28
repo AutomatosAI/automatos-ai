@@ -94,6 +94,8 @@ async def get_current_workspace(
 
         member_role = resolve_workspace_role(db, ctx) or "viewer"
 
+    from services.plan_tiers import exposure_for_plan
+
     return {
         "id": str(workspace.id),
         "name": workspace.name,
@@ -101,6 +103,12 @@ async def get_current_workspace(
         "plan": workspace.plan,
         "role": member_role,
         "plan_limits": workspace.plan_limits or {},
+        # PRD-222 W2·S1b (US-024): exposure profile derived from PLAN_TIERS for
+        # this workspace's plan — nav visibility, capability families,
+        # marketplace depth + tier display info. Field addition only, same route
+        # (route-manifest unchanged). Hidden ≠ deleted (D5): the client trims
+        # nav/marketplace labels; no route or data is removed.
+        "exposure": exposure_for_plan(workspace.plan or "basic"),
         # PRD-222 W1S2: server-side onboarding stage + trial snapshot ({stage,
         # trial}). Field addition only — no new route (route-manifest unchanged).
         # PRD-222 W2·S6 (US-022) retired the legacy new-workspace boolean — its

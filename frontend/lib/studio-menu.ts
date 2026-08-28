@@ -40,6 +40,12 @@ export interface StudioMenuItem {
   icon: LucideIcon;
   /** Group bucket */
   group: StudioMenuGroup;
+  /**
+   * PRD-222 W2·S1b (US-024): plan-tier exposure key gating this item (an
+   * exposure.nav key). Absent ⇒ always shown. A gated item is hidden from the
+   * rail when the tier disables it, but its route still resolves (D5).
+   */
+  requiredExposure?: 'analytics' | 'team';
 }
 
 export interface StudioFooterItem {
@@ -66,8 +72,8 @@ export const STUDIO_MENU_PRIMARY: StudioMenuItem[] = [
   { id: 'market',   label: 'Marketplace',      desc: 'Discover agents, playbooks',         href: '/marketplace',    icon: Store,             group: 'WORKFORCE' },
 
   // WORKSPACE — admin + decision economics
-  { id: 'team',     label: 'Team Management',  desc: 'Manage workspace members',           href: '/team',           icon: Users,             group: 'WORKSPACE' },
-  { id: 'analytics',label: 'Analytics',        desc: 'Performance, costs & insights',      href: '/analytics',      icon: TrendingUp,        group: 'WORKSPACE' },
+  { id: 'team',     label: 'Team Management',  desc: 'Manage workspace members',           href: '/team',           icon: Users,             group: 'WORKSPACE', requiredExposure: 'team' },
+  { id: 'analytics',label: 'Analytics',        desc: 'Performance, costs & insights',      href: '/analytics',      icon: TrendingUp,        group: 'WORKSPACE', requiredExposure: 'analytics' },
   { id: 'admin',    label: 'Workspace Admin',  desc: 'Manage all workspaces',              href: '/admin/workspaces', icon: Building2,       group: 'WORKSPACE' },
 ];
 

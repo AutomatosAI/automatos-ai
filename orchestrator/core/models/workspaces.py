@@ -29,7 +29,7 @@ class Workspace(Base):
     owner_id = Column(Integer)
     clerk_org_id = Column(String(255))
 
-    plan = Column(String(50), default="starter")
+    plan = Column(String(50), default="basic")
     plan_limits = Column(JSONB, default=dict)
     settings = Column(JSONB, default=dict)
 

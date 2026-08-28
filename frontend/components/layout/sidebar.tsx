@@ -26,6 +26,8 @@ import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useSystemRole } from '@/contexts/role-context'
+import { useWorkspace } from '@/components/workspace-provider'
+import { isNavItemVisible } from '@/lib/nav-exposure'
 
 interface SidebarProps {
   collapsed: boolean
@@ -104,6 +106,7 @@ const navigationItems = [
     iconColor: 'text-[hsl(var(--info))]',
     navIconKey: 'nav_team',
     description: 'Manage workspace members',
+    requiredExposure: 'team' as const,
   },
   {
     name: 'Analytics',
@@ -112,6 +115,7 @@ const navigationItems = [
     iconColor: 'text-cyan-400',
     navIconKey: 'nav_analytics',
     description: 'Performance, costs & insights',
+    requiredExposure: 'analytics' as const,
   },
   {
     name: 'Workspace Admin',
@@ -129,11 +133,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isChatPage = pathname?.startsWith('/chat') ?? false
   const { systemRole, isAdmin } = useSystemRole()
   const { data: iconMappings = {} } = useSystemIcons()
+  const { workspace } = useWorkspace()
 
-  // Filter navigation items based on user's system role
+  // Filter nav items by system role (admin gate) AND plan-tier exposure
+  // (US-024): a tier-gated surface is absent from the rail but its route still
+  // resolves (D5 — hidden ≠ deleted). Exposure fails open while unknown.
   const filteredNavItems = navigationItems.filter(item => {
-    if (!item.requiredRole) return true  // No role required, show to everyone
-    return item.requiredRole === 'admin' && isAdmin
+    if (item.requiredRole) {
+      return item.requiredRole === 'admin' && isAdmin
+    }
+    return isNavItemVisible((item as { requiredExposure?: string }).requiredExposure, workspace?.exposure)
   })
 
   return (

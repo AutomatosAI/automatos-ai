@@ -47,9 +47,15 @@ def test_migration_chains_onto_prior_head():
 
 
 def test_exactly_one_head_after_this_migration():
-    heads = _script_dir().get_heads()
+    script = _script_dir()
+    heads = script.get_heads()
     assert len(heads) == 1, f"expected exactly one alembic head, got {heads}"
-    assert heads[0] == NEW_REVISION
+    # This migration is no longer the tip — PRD-222 Wave 2b
+    # (prd222_w2s1_plan_default_basic) lands on top of it — but the single-head
+    # invariant it established must still hold, with the retirement revision
+    # reachable on the mainline from the current head (never a divergent branch).
+    ancestry = {r.revision for r in script.iterate_revisions(heads[0], "base")}
+    assert NEW_REVISION in ancestry
 
 
 # --------------------------------------------------------------------------- #

@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { MarketplaceCard } from './marketplace-card'
 import type { MarketplaceItem } from './marketplace-homepage'
 import { apiClient } from '@/lib/api-client'
+import { useWorkspace } from '@/components/workspace-provider'
+import { planChipForItem } from '@/lib/marketplace-exposure'
 
 interface MarketplaceGridProps {
   items?: MarketplaceItem[]
@@ -26,6 +28,10 @@ export function MarketplaceGrid({
 }: MarketplaceGridProps) {
   const [gridItems, setGridItems] = useState<MarketplaceItem[]>(items || [])
   const [loading, setLoading] = useState(!items)
+  // US-024: the full catalog stays visible to every tier; items beyond the
+  // workspace's marketplace depth get a plan-label chip (no hiding — D5).
+  const { workspace } = useWorkspace()
+  const marketplaceDepth = workspace?.exposure?.marketplace_depth ?? 1
 
   useEffect(() => {
     if (items) {
@@ -74,15 +80,28 @@ export function MarketplaceGrid({
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      {gridItems.map((item) => (
-        <MarketplaceCard
-          key={item.id}
-          item={item}
-          onClick={() => onItemClick(item.id)}
-          isAdmin={isAdmin}
-          onToggleFeatured={onToggleFeatured}
-        />
-      ))}
+      {gridItems.map((item) => {
+        const planChip = planChipForItem(item, marketplaceDepth)
+        return (
+          <div key={item.id} className="relative">
+            {planChip && (
+              <span
+                data-testid="plan-chip"
+                className="absolute right-2 top-2 z-10 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-primary/30"
+                title={`Available on the ${planChip} plan`}
+              >
+                {planChip}
+              </span>
+            )}
+            <MarketplaceCard
+              item={item}
+              onClick={() => onItemClick(item.id)}
+              isAdmin={isAdmin}
+              onToggleFeatured={onToggleFeatured}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }

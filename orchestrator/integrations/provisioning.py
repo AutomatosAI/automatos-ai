@@ -273,7 +273,7 @@ def provision_vertical(
             id=uuid4(),
             name=name,
             slug=_slugify(external_id),
-            plan="starter",
+            plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
             is_personal=False,
             is_active=True,
             webhook_key=uuid4().hex,

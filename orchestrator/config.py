@@ -6,6 +6,8 @@ ONLY PLACE where os.getenv() is called for configuration.
 All other files import from here.
 """
 
+import copy
+import json
 import os
 import logging
 from pathlib import Path
@@ -1642,9 +1644,149 @@ COMPLEXITY_TOKEN_BUDGET: dict[str, int] = {
 # Backward compatibility alias
 orchestrator_config = config
 
+# ---------------------------------------------------------------------------
+# PRD-222 W2·S1 (US-023): PLAN_TIERS — the v1 tier contract (approved strawman,
+# 2026-08-28). DISPLAY PRICING ONLY — no billing or commerce is wired anywhere
+# (PRD §12 Q5); ``display_price_usd`` sources an EARLY-ACCESS label, never a
+# charge. Capability families (codegraph/nl2sql/team/voice) and the quota limits
+# both derive from here: US-024 reads them for exposure profiles, and US-025's
+# assignment helper (services/plan_tiers.py) writes the limits into
+# ``workspaces.plan_limits`` under the keys live code already reads
+# (seats→max_members, max_agents, budget). ``enterprise`` is a COMING-SOON
+# display entry only — never assignable.
+#
+# Every number is env-overridable WITHOUT a redeploy via
+# ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults)
+# so tiers can be tuned live while testing. ``0`` means "unlimited" for
+# max_agents / watcher_limit, and "no ceiling / custom" for budget_usd.
+# ---------------------------------------------------------------------------
+_PLAN_TIERS_DEFAULTS: dict[str, dict] = {
+    "basic": {
+        "display_name": "Basic",
+        "display_price_usd": 19,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 1,
+        "max_agents": 5,
+        "mission_concurrency": 1,
+        "watcher_limit": 1,
+        "marketplace_depth": 1,
+        "budget_usd": 25,
+        "families": {"codegraph": False, "nl2sql": False, "team": False, "voice": False},
+    },
+    "pro": {
+        "display_name": "Pro",
+        "display_price_usd": 49,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 5,
+        "max_agents": 20,
+        "mission_concurrency": 3,
+        "watcher_limit": 5,
+        "marketplace_depth": 2,
+        "budget_usd": 100,
+        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
+    },
+    "business": {
+        "display_name": "Business",
+        "display_price_usd": 99,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 25,
+        "max_agents": 0,
+        "mission_concurrency": 10,
+        "watcher_limit": 0,
+        "marketplace_depth": 3,
+        "budget_usd": 0,
+        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
+    },
+    "enterprise": {
+        # Coming-soon placeholder — no ``families`` key on purpose. A tier
+        # RESTRICTS only by declaring families, so a tier with none is treated as
+        # UNRESTRICTED by both enforcement layers (nav + Auto's tool surface) —
+        # see services/plan_tiers.exposure_for_plan / filter_tools_by_plan
+        # (RVW-5). When enterprise is promoted assignable via
+        # AUTOMATOS_PLAN_TIERS_JSON, add a ``families`` map to gate it; without
+        # one it correctly exposes the FULL surface (top tier ≥ business).
+        "display_name": "Enterprise",
+        "assignable": False,
+        "coming_soon": True,
+    },
+}
+
+
+def load_plan_tiers(env_override=None) -> dict:
+    """Resolve PLAN_TIERS from the defaults + an optional JSON env override.
+
+    The override (``AUTOMATOS_PLAN_TIERS_JSON`` by default, or an explicit string
+    for tests) is a JSON object of ``{tier: {field: value}}`` deep-merged onto
+    the defaults — so one env var can reprice or re-gate any tier with no code
+    change or redeploy. Malformed JSON is ignored (defaults stand) and logged.
+    Returns a fresh deep copy so callers can never mutate the module constant.
+    """
+    tiers = copy.deepcopy(_PLAN_TIERS_DEFAULTS)
+    raw = env_override if env_override is not None else os.getenv("AUTOMATOS_PLAN_TIERS_JSON", "")
+    raw = (raw or "").strip()
+    if not raw:
+        return tiers
+    try:
+        override = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("[config] AUTOMATOS_PLAN_TIERS_JSON is not valid JSON — using tier defaults")
+        return tiers
+    if not isinstance(override, dict):
+        return tiers
+    for name, fields in override.items():
+        if not isinstance(fields, dict):
+            continue
+        merged = dict(tiers.get(name, {}))
+        for key, value in fields.items():
+            if key == "families" and isinstance(value, dict):
+                fam = dict(merged.get("families", {}))
+                fam.update(value)
+                merged["families"] = fam
+            else:
+                merged[key] = value
+        tiers[name] = merged
+    return tiers
+
+
+PLAN_TIERS: dict[str, dict] = load_plan_tiers()
+
+# ---------------------------------------------------------------------------
+# PRD-222 W2·S1b (US-024): tool-name → capability-family map. A platform tool
+# whose name matches an entry belongs to that family; a family DISABLED for the
+# workspace's tier (PLAN_TIERS[plan]["families"]) is trimmed from Auto's per-turn
+# tool surface at the single assembly seam
+# (modules/tools/tool_router.get_tools_for_agent_async → services.plan_tiers.
+# filter_tools_by_plan). Tools in NO family are CORE — always present. This map
+# is config-side (the filter itself hardcodes no family names) so re-gating is a
+# config/env change, and its keys MUST be the family names used in
+# PLAN_TIERS[*]["families"]. Match semantics: exact name, OR prefix when the
+# entry ends in '_'. ``voice`` gates nav/exposure only — Retell (PRD-207) is a
+# separate lane with no platform_execute tools — so it maps to an empty list.
+# Note: ``platform_get_activity_feed`` is deliberately NOT in nl2sql — the
+# Command Center is available to every tier (only NL2SQL/analytics is gated).
+TOOL_FAMILIES: dict[str, list] = {
+    "codegraph": ["platform_codegraph_"],  # prefix — all 9 first-class CodeGraph tools
+    "nl2sql": [
+        "platform_query_data",              # the NL2SQL data query
+        "platform_get_llm_usage", "platform_get_cost_breakdown", "platform_workspace_stats",
+        "platform_get_success_rate", "platform_get_completion_time", "platform_get_error_rates",
+        "platform_get_queue_depth", "platform_get_efficiency_score", "platform_get_cost_per_execution",
+        "platform_get_peak_hours", "platform_get_bottlenecks", "platform_get_predictive_alerts",
+        "platform_get_agent_ranking",
+    ],
+    "team": [
+        "platform_list_members", "platform_invite_member",
+        "platform_set_member_role", "platform_remove_member",
+    ],
+    "voice": [],
+}
+
 # Validate on import (non-blocking)
 # if not config.validate():
 #     logger.warning("⚠️  WARNING: Configuration validation failed")
 
 # Export for easy import
-__all__ = ['config', 'Config', 'orchestrator_config']
+__all__ = ['config', 'Config', 'orchestrator_config', 'PLAN_TIERS', 'load_plan_tiers', 'TOOL_FAMILIES']

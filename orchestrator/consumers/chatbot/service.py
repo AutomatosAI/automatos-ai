@@ -440,7 +440,7 @@ class ChatService:
                     id=workspace_id,
                     name="Dev Workspace",
                     slug="dev",
-                    plan="starter",
+                    plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
                     plan_limits={},
                     settings={},
                     is_personal=True,

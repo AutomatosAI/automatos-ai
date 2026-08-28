@@ -26,18 +26,29 @@ _ADVANCE_TARGETS = [
 def register_onboarding_actions(registry: ActionRegistry) -> None:
     """Register the onboarding-spine tool (PRD-222 W1S3)."""
 
+    # PRD-222 W2·S2 (US-025): the plan field accepts only ASSIGNABLE tiers,
+    # sourced from the config-driven tier contract (PLAN_TIERS). 'enterprise' is
+    # coming-soon and never appears here (nor is it accepted by the handler).
+    from services.plan_tiers import assignable_tiers
+
+    _assignable_plans = sorted(assignable_tiers().keys())
+
     registry.register(ActionDefinition(
         name="platform_update_onboarding",
         description=(
-            "Advance the workspace's Auto-led onboarding spine and/or record the "
-            "user's three segment answers. This is the ONLY way onboarding state "
-            "moves — never assume a stage changed, call this after each step. "
-            "Provide advance_to (the next stage) OR segment (business/goal/comfort) "
-            "— AT LEAST ONE is required; passing neither returns a clear error. "
-            "Stages move forward only: questions -> teach -> proposal -> building "
-            "-> boom -> powerup -> completed; 'skipped' ends the flow from any "
-            "stage. A backward or repeat transition returns an error, not a crash. "
-            "Returns the updated {stage, trial}."
+            "Advance the workspace's Auto-led onboarding spine, record the user's "
+            "segment answers, and/or set the plan the user accepted at the "
+            "proposal. This is the ONLY way onboarding state moves — never assume a "
+            "stage changed, call this after each step. Provide advance_to (the next "
+            "stage), segment (business/goal/comfort/team_size), or plan (the "
+            "accepted tier) — "
+            "AT LEAST ONE is required; passing none returns a clear error. Stages "
+            "move forward only: questions -> teach -> proposal -> building -> boom "
+            "-> powerup -> completed; 'skipped' ends the flow from any stage. A "
+            "backward or repeat transition returns an error, not a crash. Only "
+            "assignable tiers (basic/pro/business) are accepted for plan — "
+            "'enterprise' is coming soon and is rejected. Returns the updated "
+            "{stage, trial}."
         ),
         category="onboarding",
         parameters={
@@ -69,14 +80,34 @@ def register_onboarding_actions(registry: ActionRegistry) -> None:
                                 "'novice' .. 'very technical'."
                             ),
                         },
+                        "team_size": {
+                            "type": "integer",
+                            "description": (
+                                "How many people are on the user's team (seats), if "
+                                "stated. Drives the plan recommendation — solo -> "
+                                "Basic, a small team -> Pro, an org -> Business. Omit "
+                                "if the user hasn't said."
+                            ),
+                        },
                     },
                     "description": (
-                        "The three onboarding answers. Any subset may be supplied; "
-                        "keys are merged into onboarding state. Omit to only advance."
+                        "The onboarding answers — business, goal, comfort, and "
+                        "optional team_size. Any subset may be supplied; keys are "
+                        "merged into onboarding state. Omit to only advance."
+                    ),
+                },
+                "plan": {
+                    "type": "string",
+                    "enum": _assignable_plans,
+                    "description": (
+                        "The plan tier the user accepted at the proposal stage — one "
+                        "of basic/pro/business. Writes plan + plan_limits (auditable, "
+                        "FR-4). 'enterprise' is coming soon and is rejected. Omit "
+                        "unless the user explicitly accepted a plan."
                     ),
                 },
             },
-            # Both optional (each has a handler default); the at-least-one rule is
+            # All optional (each has a handler default); the at-least-one rule is
             # documented above and enforced by the handler — never in required[].
             "required": [],
         },
