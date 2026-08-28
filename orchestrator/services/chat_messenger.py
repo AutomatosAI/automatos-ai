@@ -10,8 +10,12 @@ unprompted, an ordinary chat in every other way).
 Rules enforced here, once:
 - ``chats.user_id`` is INTEGER ``users.id`` — Clerk strings are resolved
   via ``User.clerk_user_id`` (the #513 lesson), never written raw.
-- A ``chat_id`` is honoured only if it belongs to the workspace; anything
-  else falls back to the Auto thread rather than leaking across chats.
+- A ``chat_id`` is honoured only if it belongs to the workspace AND is owned
+  by the message's owner (``clerk_user_id`` → ``users.id``); anything else
+  falls back to the Auto thread rather than leaking across users (P227-RVW-2).
+  When no owner is resolvable (agent-created scheduled tasks, whose origin was
+  server-captured — not a caller-controllable cross-user vector) the legacy
+  workspace-only honour is kept.
 - Producers call ``deliver_background_message`` (fail-soft): a chat
   failure must never break a watcher tick or a scheduled task.
 - After a successful post, a ``chat_changed`` NOTIFY rides the existing
@@ -93,6 +97,27 @@ def find_or_create_auto_chat(db: Session, workspace_id, user_int_id: int):
         return _select()
 
 
+_CALLER_ORIGIN_KEYS = ("origin_chat_id", "chat_id")
+
+
+def strip_caller_narration_origin(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """PRD-227 P227-RVW-2 (layer 1): the mission-narration origin
+    (``run.config['origin_chat_id']``) must be SERVER-injected only.
+
+    Return a FRESH config dict with any caller/LLM-supplied ``origin_chat_id`` or
+    ``chat_id`` removed, so no mission-create path can let a caller aim
+    ``Auto · mission`` lifecycle lines at another workspace-member's private chat.
+    EVERY entry point that turns caller input into ``run.config`` must route
+    through this one helper — a per-path re-implementation is how the blog-create
+    path (handlers_blog.py) reopened this exact hole. A caller that HAS a
+    server-injected origin sets it back on the returned dict afterwards. Pairs
+    with ``post_background_message``'s owner check (layer 2) below: with layer 1
+    complete, the only ``chat_id`` reaching the no-owner branch there is
+    server-captured (scheduled tasks), never caller-chosen.
+    """
+    return {k: v for k, v in (config or {}).items() if k not in _CALLER_ORIGIN_KEYS}
+
+
 def post_background_message(
     db: Session,
     *,
@@ -118,33 +143,53 @@ def post_background_message(
 
     ws_uuid = workspace_id if isinstance(workspace_id, uuid.UUID) else uuid.UUID(str(workspace_id))
 
-    # 1. Resolve the target chat: originating chat if valid for this
-    #    workspace, else the user's Auto thread.
+    # 1. Resolve the target chat: the originating chat when it is valid for this
+    #    workspace AND owned by this message's owner, else the owner's Auto thread.
+    #    PRD-227 P227-RVW-2: the workspace filter is cross-tenant-safe but NOT
+    #    cross-user-safe — without the owner check a caller-supplied chat_id (a
+    #    mission's origin_chat_id, a suggestion-card chat_id) could target another
+    #    workspace-member's private chat. Resolve the owner (clerk → int users.id)
+    #    once; reuse it for the ownership check and the Auto-thread fallback.
+    owner_int_id = _resolve_user_int_id(db, clerk_user_id)
+
     target_chat = None
     if chat_id:
         try:
-            target_chat = (
+            candidate = (
                 db.query(Chat)
                 .filter(Chat.id == uuid.UUID(str(chat_id)), Chat.workspace_id == ws_uuid)
                 .first()
             )
         except ValueError:
-            target_chat = None
-        if target_chat is None:
+            candidate = None
+        if candidate is None:
             logger.warning(
                 "[ChatMessenger] chat_id %s invalid or outside workspace %s — "
                 "falling back to the Auto thread", chat_id, ws_uuid,
             )
+        elif owner_int_id is None:
+            # No owner to verify against (agent-created scheduled tasks whose
+            # origin_chat_id was server-captured at schedule time — not a
+            # caller-controllable cross-user vector). Keep the legacy
+            # workspace-only honour so those producers keep delivering.
+            target_chat = candidate
+        elif int(candidate.user_id) == owner_int_id:
+            target_chat = candidate
+        else:
+            logger.warning(
+                "[ChatMessenger] chat_id %s is owned by another user (not "
+                "clerk_user_id=%r) — falling back to the Auto thread",
+                chat_id, clerk_user_id,
+            )
 
     if target_chat is None:
-        user_int_id = _resolve_user_int_id(db, clerk_user_id)
-        if user_int_id is None:
+        if owner_int_id is None:
             logger.warning(
                 "[ChatMessenger] No valid chat and no resolvable user "
                 "(clerk_user_id=%r) — dropping background message", clerk_user_id,
             )
             return None
-        target_chat = find_or_create_auto_chat(db, ws_uuid, user_int_id)
+        target_chat = find_or_create_auto_chat(db, ws_uuid, owner_int_id)
 
     # 2. Persisted provenance — the badge that survives reload.
     source_doc = {

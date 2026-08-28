@@ -8,6 +8,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from services.chat_messenger import strip_caller_narration_origin
+
 logger = logging.getLogger(__name__)
 
 MIN_CONTENT_CHARS = 500
@@ -266,7 +268,12 @@ async def create_blog_post_from_topic(
             workspace_id=workspace_id,
             goal=goal,
             created_by=created_by,
-            config=params.get("config") or {},
+            # PRD-227 P227-RVW-2: strip caller/LLM-supplied origin_chat_id/chat_id
+            # before they reach run.config. This handler's created_by is an
+            # agent-id (unresolvable to a user), so a caller-supplied origin would
+            # otherwise slip through the messenger's no-owner branch straight into
+            # a victim's private chat — the exact cross-user hole RVW-2 closes.
+            config=strip_caller_narration_origin(params.get("config")),
         )
 
         plan = run.plan or {}

@@ -6,6 +6,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from services.chat_messenger import strip_caller_narration_origin
+
 logger = logging.getLogger(__name__)
 
 # Mirrors the UI suggestion-card's recentMessages.slice(-5) (mission-suggestion-card.tsx).
@@ -100,27 +102,34 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     if not goal:
         return {"success": False, "error": "goal is required"}
 
-    config = dict(params.get("config") or {})
     created_by = _actor(params)
 
-    # PRD-227 US-002: persist the originating chat on the run config so the
-    # coordinator narrates the mission's lifecycle back into that thread. Prefer
-    # the server-injected origin (executor _WATCH_ORIGIN_ACTIONS — never an LLM
-    # arg, the same source watches use), else the UI suggestion-card's chat_id.
-    # Absent for wizard/scheduled runs, which narrate to the creator's Auto
-    # thread. Fresh-dict assignment (config becomes run.config at create) — no
-    # in-place JSONB mutation.
+    # PRD-227 US-002 + P227-RVW-2: persist the originating chat on the run config
+    # so the coordinator narrates the mission's lifecycle back into that thread.
+    # The origin MUST be server-injected only. The executor strips any caller-
+    # supplied _origin_chat_id and re-injects it from caller_context for the
+    # _WATCH_ORIGIN_ACTIONS (platform_executor.py:1126) — the same source watches
+    # use — but that hardening guards only the TOP-LEVEL param, not the nested
+    # config. run.config['origin_chat_id'] is the narration DELIVERY target, so a
+    # caller/LLM-supplied config['origin_chat_id'] (or config['chat_id']) could
+    # redirect 'Auto · mission' lines into another workspace-member's private
+    # chat. Apply the executor's strip-then-inject discipline to config.*: rebuild
+    # config WITHOUT either caller key (fresh dict — no in-place JSONB mutation),
+    # then set origin_chat_id from the server value ONLY. Absent (wizard/scheduled/
+    # REST) → the creator's Auto thread. Defense-in-depth: post_background_message
+    # re-checks that the target chat is owned by the run's creator at delivery.
     from modules.tools.discovery.handlers_watches import _origin_chat_id
     _origin = _origin_chat_id(params)
-    _origin_str = str(_origin) if _origin else (str(config["chat_id"]) if config.get("chat_id") else None)
-    if _origin_str and not config.get("origin_chat_id"):
-        config["origin_chat_id"] = _origin_str
+    config = strip_caller_narration_origin(params.get("config"))
+    if _origin:
+        config["origin_chat_id"] = str(_origin)
 
-    # The UI suggestion-card sets context_messages on its API call; the executor
-    # path did not. Attach recent conversation here too — never clobber a
-    # caller-supplied context.
+    # Recent conversation context for the planner. The UI suggestion-card already
+    # attaches context_messages on its API call; the executor path did not. Narrow
+    # to the SERVER-injected origin chat only — never a caller-supplied chat_id
+    # (same cross-user concern as the narration target above).
     if "context_messages" not in config:
-        recent = _recent_chat_context(db, workspace_id, chat_id=config.get("chat_id"))
+        recent = _recent_chat_context(db, workspace_id, chat_id=str(_origin) if _origin else None)
         if recent:
             config["context_messages"] = recent
             config.setdefault("source", "chat")
