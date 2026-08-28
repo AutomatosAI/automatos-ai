@@ -175,6 +175,116 @@ async def reset_current_onboarding(
     return report
 
 
+# ── Post-setup checklist (PRD-222 W2·S4 / US-020) ────────────────────────────
+
+
+def _workspace_checklist_counts(db: Session, workspace: Workspace) -> dict[str, int]:
+    """Gather the LIVE counts the checklist derives completion from.
+
+    All workspace-scoped, from the stores the platform already keeps:
+    active Composio connections, missions (``orchestration_runs``), and active
+    team members. No new bookkeeping.
+    """
+    from core.composio.entity_manager import EntityManager
+    from core.models.orchestration import OrchestrationRun
+    from core.workspaces.models import WorkspaceMember
+
+    connections_count = len(EntityManager(db).get_connected_apps(workspace.id))
+    missions_count = (
+        db.query(OrchestrationRun)
+        .filter(OrchestrationRun.workspace_id == workspace.id)
+        .count()
+    )
+    members_count = (
+        db.query(WorkspaceMember)
+        .filter(
+            WorkspaceMember.workspace_id == workspace.id,
+            WorkspaceMember.is_active == True,  # noqa: E712 — SQLAlchemy column compare
+        )
+        .count()
+    )
+    return {
+        "connections_count": connections_count,
+        "missions_count": missions_count,
+        "members_count": members_count,
+    }
+
+
+@router.get("/current/onboarding/checklist")
+async def get_current_onboarding_checklist(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """The post-setup checklist for the current workspace (PRD-222 US-020).
+
+    Item completion is DERIVED from live workspace counts on every read (never a
+    stored tick); only the dismissal flags live in ``onboarding.checklist``. The
+    invite item is omitted on single-seat plans.
+    """
+    from services.onboarding_state import build_checklist, get_onboarding
+
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    counts = _workspace_checklist_counts(db, workspace)
+    onboarding = get_onboarding(workspace)
+    plan_limits = workspace.plan_limits or {}
+    plan_seats = int(plan_limits.get("max_members") or 1)
+    return build_checklist(
+        connections_count=counts["connections_count"],
+        missions_count=counts["missions_count"],
+        members_count=counts["members_count"],
+        plan_seats=plan_seats,
+        comfort=(onboarding.get("segment") or {}).get("comfort"),
+        stored=onboarding.get("checklist"),
+    )
+
+
+class ChecklistUpdateRequest(BaseModel):
+    dismissed: Optional[bool] = None
+    academy_done: Optional[bool] = None
+
+
+@router.patch(
+    "/current/onboarding/checklist",
+    dependencies=[Depends(require_workspace_permission("workspace:manage"))],
+)
+async def update_current_onboarding_checklist(
+    payload: ChecklistUpdateRequest = Body(default_factory=ChecklistUpdateRequest),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Persist a checklist dismissal (the card, or the manual Academy item).
+
+    Server-side record (D8 — never localStorage). Writes only the two dismissal
+    flags via ``update_checklist`` (full-JSONB reassignment); item completion
+    stays derived. Returns the fresh checklist so the caller reflects the change.
+    """
+    from services.onboarding_state import build_checklist, get_onboarding, update_checklist
+
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    update_checklist(
+        db, workspace, dismissed=payload.dismissed, academy_done=payload.academy_done
+    )
+
+    counts = _workspace_checklist_counts(db, workspace)
+    onboarding = get_onboarding(workspace)
+    plan_limits = workspace.plan_limits or {}
+    plan_seats = int(plan_limits.get("max_members") or 1)
+    return build_checklist(
+        connections_count=counts["connections_count"],
+        missions_count=counts["missions_count"],
+        members_count=counts["members_count"],
+        plan_seats=plan_seats,
+        comfort=(onboarding.get("segment") or {}).get("comfort"),
+        stored=onboarding.get("checklist"),
+    )
+
+
 @router.get("/current/integrations")
 async def get_integrations(
     ctx: RequestContext = Depends(get_request_context_hybrid),

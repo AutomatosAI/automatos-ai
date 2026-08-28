@@ -25,6 +25,7 @@ import { useWorkspace } from '@/components/workspace-provider'
 import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
 import { OnboardingConnectCards } from '@/components/onboarding/onboarding-connect-cards'
 import { PowerUpCard } from '@/components/onboarding/power-up-card'
+import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
 import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
@@ -975,6 +976,13 @@ export function Chat({
           without leaving chat, and the result reflects back into the card. The
           container self-hides unless there's an app mid-connect. */}
       <OnboardingConnectCards className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4" />
+      {/* PRD-222 US-020: the post-setup checklist floats above the input once
+          onboarding completes — the power-up card owns the slot during powerup,
+          so the chat surface shows the checklist at `completed` (the Command
+          Center shows it from powerup). Dismissible; server-persisted. */}
+      {workspace?.onboarding?.stage === 'completed' && (
+        <SetupChecklistCard className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4" />
+      )}
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
       {hasWidgets && (
         <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">

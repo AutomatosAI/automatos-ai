@@ -264,6 +264,130 @@ def record_first_integration_connected(db: Any, workspace: Any) -> bool:
 
 
 # =========================================================================== #
+# PRD-222 W2·S4 (US-020) — the post-setup "run & learn" CHECKLIST.
+#
+# 3–5 outcome-framed next steps that survive across sessions. Only two dismissal
+# flags are STORED in ``onboarding.checklist`` ({dismissed, academy_done}); every
+# item's completion is RE-DERIVED from live workspace counts on each read, so a
+# tick can never drift from reality. Server is the record (D8) — no localStorage.
+# =========================================================================== #
+
+CHECKLIST_KEY = "checklist"
+
+# The Academy lives in a sibling repo at academy.automatos.app. This is the
+# static comfort → course mapping the PRD asks for (novice → ABF "AI for
+# business", technical → APA "platform"); the referral-parameter deep links are
+# W3·S1's job, so these are the plain course entry points.
+ACADEMY_BASE_URL = "https://academy.automatos.app"
+
+
+def academy_url_for_comfort(comfort: Optional[str]) -> str:
+    """Map the stored ``segment.comfort`` to a static Academy course URL.
+
+    ``technical`` (or an explicit APA/advanced signal) → APA; everything else,
+    including ``novice`` / "brand new" / unset, → ABF (the owner track).
+    """
+    c = (comfort or "").strip().lower()
+    course = "apa" if ("technical" in c or c in ("apa", "advanced", "expert")) else "abf"
+    return f"{ACADEMY_BASE_URL}/{course}"
+
+
+def build_checklist(
+    *,
+    connections_count: int,
+    missions_count: int,
+    members_count: int,
+    plan_seats: int,
+    comfort: Optional[str] = None,
+    stored: Optional[dict] = None,
+) -> dict[str, Any]:
+    """Compute the post-setup checklist from LIVE counts + the stored flags.
+
+    Completion is DERIVED where the platform already records the outcome — never a
+    manual tick:
+
+      * ``connect_second_app`` → ``connections_count >= 2`` (a *second* app)
+      * ``run_first_mission``  → ``missions_count >= 1``
+      * ``invite_teammate``    → ``members_count >= 2`` — and the item is OMITTED
+        entirely on single-seat plans (``plan_seats <= 1``)
+      * ``take_course``        → the ONE manual exception: no cross-repo completion
+        signal exists (the Academy is a sibling repo), so it is checked on dismiss
+        and tracked in ``stored.academy_done``.
+
+    ``stored`` is the persisted ``onboarding.checklist`` doc
+    (``{dismissed, academy_done}``). Returns the client-facing view.
+    """
+    s = stored or {}
+    items: list[dict[str, Any]] = [
+        {
+            "id": "connect_second_app",
+            "label": "Connect a second app",
+            "done": connections_count >= 2,
+        },
+        {
+            "id": "run_first_mission",
+            "label": "Run your first mission",
+            "done": missions_count >= 1,
+        },
+    ]
+    if plan_seats and plan_seats > 1:
+        items.append(
+            {
+                "id": "invite_teammate",
+                "label": "Invite a teammate",
+                "done": members_count >= 2,
+            }
+        )
+    items.append(
+        {
+            "id": "take_course",
+            "label": "Take the matched Academy course",
+            # Manual: no completion signal crosses repos — checked on dismiss.
+            "done": bool(s.get("academy_done")),
+            "href": academy_url_for_comfort(comfort),
+            "manual": True,
+        }
+    )
+    return {
+        "items": items,
+        "dismissed": bool(s.get("dismissed")),
+        "completed_count": sum(1 for i in items if i["done"]),
+        "total_count": len(items),
+    }
+
+
+def get_checklist_state(workspace: Any) -> dict[str, Any]:
+    """Read the STORED checklist flags (``{dismissed, academy_done}``) as a copy."""
+    return dict(get_onboarding(workspace).get(CHECKLIST_KEY) or {})
+
+
+def update_checklist(
+    db: Any,
+    workspace: Any,
+    *,
+    dismissed: Optional[bool] = None,
+    academy_done: Optional[bool] = None,
+) -> dict[str, Any]:
+    """Persist the checklist dismissal flags — full-JSONB-reassignment (PRD-220-safe).
+
+    Only ``dismissed`` and ``academy_done`` are stored; the derived item
+    completion is recomputed from live counts on every read, never persisted.
+    Rebuild-don't-mutate: a NEW ``onboarding`` dict is reassigned (same style as
+    ``reset_onboarding`` / ``_write_trial``). Returns the new stored flags.
+    """
+    doc = get_onboarding(workspace)  # deep copy
+    stored = dict(doc.get(CHECKLIST_KEY) or {})
+    if dismissed is not None:
+        stored["dismissed"] = bool(dismissed)
+    if academy_done is not None:
+        stored["academy_done"] = bool(academy_done)
+    doc[CHECKLIST_KEY] = stored
+    doc["updated_at"] = _now_iso()
+    _persist(db, workspace, doc)
+    return stored
+
+
+# =========================================================================== #
 # PRD-222 W1·S10 (D9) — the dev onboarding RESET.
 #
 # This is the ONLY sanctioned BACKWARD writer of the onboarding document. It

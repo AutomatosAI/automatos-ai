@@ -26,6 +26,7 @@ import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
 import { useWatches } from '@/hooks/use-watches-api'
 
 import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
+import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
 
 import { StatsStrip } from './stats-strip'
 import { IsItWorkingStrip } from './is-it-working-strip'
@@ -172,6 +173,11 @@ export function CommandCenterShell() {
 
       <StatsStrip />
       <IsItWorkingStrip />
+
+      {/* PRD-222 US-020: the post-setup checklist, dual-surfaced here from the
+          same server read-model the chat card reads (self-hides off the
+          powerup/completed stages or once dismissed). */}
+      <SetupChecklistCard className="my-3" />
 
       <nav className="cc-tabs" aria-label="Command Centre sections">
         {TABS.map((t) => {
