@@ -256,3 +256,75 @@ def test_apply_tier_exposure_no_workspace_id_keeps_full_surface():
     surface = _surface()
     out = _apply_tier_exposure(_FakeSession(_FakeWorkspace("basic")), None, surface, "t")
     assert out is surface  # early-out: nothing to resolve
+
+
+# --------------------------------------------------------------------------- #
+# RVW-5 — a KNOWN family-less tier ('enterprise') is UNRESTRICTED in BOTH layers
+# (nav shows all + full tool surface), so the two enforcement layers agree. Was
+# a live divergence (nav hid analytics/team while tools stayed full) latent
+# until enterprise is promoted assignable without a families key.
+# --------------------------------------------------------------------------- #
+
+
+def _enum_of(surface):
+    return [t for t in surface if t["function"]["name"] == "platform_execute"][0][
+        "function"
+    ]["parameters"]["properties"]["action"]["enum"]
+
+
+def test_exposure_enterprise_family_less_is_unrestricted():
+    # enterprise declares NO families key → unrestricted nav (not the old
+    # all-hidden default that disagreed with the full tool surface).
+    exp = pt.exposure_for_plan("enterprise")
+    assert exp["display_name"] == "Enterprise"
+    assert exp["nav"] == {"analytics": True, "team": True}
+
+
+def test_enterprise_tool_surface_and_nav_agree():
+    # AC2: the tool surface and exposure_for_plan('enterprise').nav AGREE — a nav
+    # item is visible IFF the tools backing it are present. A KNOWN tier with no
+    # families is unrestricted on both paths (RVW-5), never nav-hidden/tools-full.
+    nav = pt.exposure_for_plan("enterprise")["nav"]
+    trimmed = pt.filter_tools_by_plan(_surface(), "enterprise")
+    # full surface — nothing dropped, full enum retained
+    assert [t["function"]["name"] for t in trimmed] == [
+        t["function"]["name"] for t in _surface()
+    ]
+    enum = _enum_of(trimmed)
+    assert len(enum) == 6
+    # the invariant: nav visibility matches tool availability on both families.
+    assert nav["analytics"] is ("platform_query_data" in enum)      # nl2sql
+    assert nav["team"] is ("platform_list_members" in enum)         # team
+    assert nav["analytics"] is True and nav["team"] is True          # both shown
+
+
+def test_enterprise_filter_does_not_mutate_input():
+    surface = _surface()
+    original = copy.deepcopy(surface)
+    pt.filter_tools_by_plan(surface, "enterprise")
+    assert surface == original  # fail-open returns a new list, inputs untouched
+
+
+def test_apply_tier_exposure_enterprise_keeps_full_surface():
+    # The seam for a KNOWN family-less tier: enterprise keeps the FULL surface
+    # (unrestricted), consistent with its nav (RVW-5). Zero coverage before.
+    from modules.tools.tool_router import _apply_tier_exposure
+
+    surface = _surface()
+    out = _apply_tier_exposure(_FakeSession(_FakeWorkspace("enterprise")), "ws-1", surface, "t")
+    assert [t["function"]["name"] for t in out] == [
+        t["function"]["name"] for t in surface
+    ]
+    assert len(_enum_of(out)) == 6  # nothing pruned
+
+
+def test_promoted_enterprise_without_families_stays_consistent():
+    # The exact reachability the finding named: ops flips enterprise assignable
+    # via env WITHOUT adding a families key. Both layers must still AGREE
+    # (unrestricted) — no nav-hides-while-tools-show divergence.
+    override = load_plan_tiers(env_override='{"enterprise": {"assignable": true, "coming_soon": false}}')
+    assert pt.is_assignable("enterprise", override) is True  # now assignable
+    nav = pt.exposure_for_plan("enterprise", tiers=override)["nav"]
+    trimmed = pt.filter_tools_by_plan(_surface(), "enterprise", tiers=override)
+    assert nav == {"analytics": True, "team": True}
+    assert len(_enum_of(trimmed)) == 6  # full surface — agrees with nav

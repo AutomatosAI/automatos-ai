@@ -1701,6 +1701,13 @@ _PLAN_TIERS_DEFAULTS: dict[str, dict] = {
         "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
     },
     "enterprise": {
+        # Coming-soon placeholder — no ``families`` key on purpose. A tier
+        # RESTRICTS only by declaring families, so a tier with none is treated as
+        # UNRESTRICTED by both enforcement layers (nav + Auto's tool surface) —
+        # see services/plan_tiers.exposure_for_plan / filter_tools_by_plan
+        # (RVW-5). When enterprise is promoted assignable via
+        # AUTOMATOS_PLAN_TIERS_JSON, add a ``families`` map to gate it; without
+        # one it correctly exposes the FULL surface (top tier ≥ business).
         "display_name": "Enterprise",
         "assignable": False,
         "coming_soon": True,

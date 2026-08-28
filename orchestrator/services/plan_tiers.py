@@ -149,14 +149,21 @@ def enabled_families(plan: str, tiers: Optional[dict] = None) -> dict:
     return dict(tier.get("families") or {})
 
 
-def _nav_exposure(families: dict) -> dict:
+def _nav_exposure(families: dict, declares_families: bool = True) -> dict:
     """Nav visibility derived from the tier's families. Only the surfaces that
     are ACTUAL top-level nav items are keyed here: ``analytics`` (the /analytics
     item, gated by the nl2sql family) and ``team`` (the /team item). CodeGraph is
     folded into Knowledge Base and Voice lives in chat — neither is a rail item,
     so they are gated by the tool surface (Auto) not by nav. A hidden item is
     simply absent from the rail; its route still resolves (D5 — hidden ≠ deleted).
+
+    ``declares_families=False`` — a KNOWN tier that declares NO families policy
+    (``enterprise`` today) — is UNRESTRICTED: every gated item is shown, matching
+    the tool surface's fail-open for the same tier so the two enforcement layers
+    never disagree (RVW-5). A tier restricts ONLY by declaring families.
     """
+    if not declares_families:
+        return {"analytics": True, "team": True}
     return {
         "analytics": bool(families.get("nl2sql")),
         "team": bool(families.get("team")),
@@ -168,10 +175,19 @@ def exposure_for_plan(plan: str, tiers: Optional[dict] = None) -> dict:
     PLAN_TIERS: nav visibility, capability families, marketplace depth, and the
     tier's display info for the UI. Unknown plans fall back to the entry tier so
     the client is never left without a profile.
+
+    A KNOWN tier that declares NO ``families`` policy (``enterprise`` today) is
+    UNRESTRICTED — every nav item visible — matching the tool surface's fail-open
+    for the same tier (RVW-5): a tier restricts ONLY by declaring families, so a
+    half-promoted enterprise shows everything (the top tier's least-surprising
+    default) rather than the nav and tool layers disagreeing. Note this is
+    distinct from the UNKNOWN-plan fallback, which resolves to ``basic`` (a tier
+    that DOES declare families) and is therefore restricted.
     """
     resolved = _tiers(tiers)
     tier = resolved.get(plan) or resolved.get("basic") or {}
     families = dict(tier.get("families") or {})
+    declares_families = isinstance(tier.get("families"), dict)
     return {
         "plan": plan,
         "display_name": tier.get("display_name"),
@@ -179,7 +195,7 @@ def exposure_for_plan(plan: str, tiers: Optional[dict] = None) -> dict:
         "price_label": tier.get("price_label"),
         "families": families,
         "marketplace_depth": tier.get("marketplace_depth", 1),
-        "nav": _nav_exposure(families),
+        "nav": _nav_exposure(families, declares_families=declares_families),
     }
 
 
@@ -234,14 +250,26 @@ def filter_tools_by_plan(
     the surface UNCHANGED. Unlike the UI's :func:`exposure_for_plan`, which
     deliberately falls back to ``basic`` so the client always has a profile, a
     lookup fault on the tool path must never HIDE a tool: better to over-expose
-    than to strip a paying tier's tools because its plan string drifted. A KNOWN
-    tier (including ``basic``) still trims. This is the guarantee that
+    than to strip a paying tier's tools because its plan string drifted.
+
+    A KNOWN tier that declares NO ``families`` policy (``enterprise`` today) is
+    likewise UNRESTRICTED — the full surface — because a tier restricts ONLY by
+    declaring families; this matches :func:`exposure_for_plan`'s nav for the same
+    tier (RVW-5), so the two enforcement layers never disagree once enterprise is
+    promoted. A known tier that DOES declare families (``basic``/``pro``/
+    ``business``) trims the disabled ones. This is the guarantee that
     ``tool_router._apply_tier_exposure`` documents.
     """
     from config import TOOL_FAMILIES
 
-    if get_tier(plan, tiers) is None:
+    tier = get_tier(plan, tiers)
+    if tier is None:
         return list(tools)  # unresolvable plan ⇒ true fail-open (never hide tools)
+    if not isinstance(tier.get("families"), dict):
+        # KNOWN tier that declares NO families policy (enterprise): unrestricted —
+        # a tier restricts only by declaring families, so the full surface stands,
+        # consistent with exposure_for_plan's nav for the same tier (RVW-5).
+        return list(tools)
 
     fam_map = family_map if family_map is not None else TOOL_FAMILIES
     fams = enabled_families(plan, tiers)
