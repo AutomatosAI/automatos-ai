@@ -20,7 +20,9 @@ import logging
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from core.models.core import Agent, Skill, agent_skills
 
@@ -123,6 +125,16 @@ def _persona_hash(text: str) -> str:
     return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()
 
 
+def _mark_jsonb_dirty(agent: Agent, field: str) -> None:
+    """Belt-and-braces after reassigning a NEW dict to a JSON(B) column: flag it
+    modified so the change is guaranteed to persist — mirroring api/workspaces,
+    which writes this same Auto ``configuration`` JSONB. A clean no-op for the
+    plain namespaces the pure unit tests pass (``flag_modified`` needs a mapped
+    instance; ``sa_inspect(..., raiseerr=False)`` is ``None`` for those)."""
+    if sa_inspect(agent, raiseerr=False) is not None:
+        flag_modified(agent, field)
+
+
 # A transient bug force-wrote the global "Irish CTO" soul onto EVERY per-workspace
 # Auto row: a raw-SQL startup migration in main.py ran, on every boot from
 # 2026-04-13 12:16 to 2026-04-14 19:30,
@@ -165,6 +177,22 @@ def _backfill_auto_persona(agent: Agent) -> str:
     if _persona_hash(current) in _KNOWN_SEED_PERSONA_HASHES:
         agent.custom_persona_prompt = new_soul
         agent.use_custom_persona = True
+        # PRD-226 (P226-RVW-5): restore the CREATE-path invariant that a row
+        # holding _default_persona() also declares configuration.personality_mode.
+        # Without it, Settings GET (api/workspaces.get_orchestrator_settings) finds
+        # no stored mode, text-matches the now doctrine-carrying ~2670-char soul
+        # against the doctrine-FREE base voices, fails, and misreports the row as
+        # 'custom' — a later settings save then stamps personality_mode='custom'
+        # permanently, opting this never-customized row out of every future
+        # doctrine backfill. All three known-seed defaults are the friendly-family
+        # shipped default, so stamp 'friendly' — but ONLY when no explicit mode is
+        # stored (never override a workspace's real choice). Rebuild the dict (a
+        # NEW object, no in-place mutation — house rule); flag it so it persists.
+        config = dict(getattr(agent, "configuration", None) or {})
+        if "personality_mode" not in config:
+            config["personality_mode"] = "friendly"
+            agent.configuration = config
+            _mark_jsonb_dirty(agent, "configuration")
         logger.info(
             "PRD-226: backfilled manager doctrine into Auto persona for workspace %s",
             getattr(agent, "workspace_id", "?"),

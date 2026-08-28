@@ -547,6 +547,34 @@ def _resolve_persona_for_mode(personality_mode: str, custom_soul: Optional[str])
     return _PERSONALITY_PRESETS.get(personality_mode, _PERSONALITY_PRESETS["friendly"])
 
 
+def _resolve_persona_view(stored_mode: Optional[str], custom_persona_prompt: Optional[str]) -> dict:
+    """Resolve the ``personality_mode`` + ``custom_soul`` the GET endpoint reports
+    for an Auto row. Pure and DB-free so the read-side detection is unit-testable
+    (mirrors the write-side ``_resolve_persona_for_mode``).
+
+    An explicit stored ``personality_mode`` wins — the invariant P226-RVW-5
+    restored: the doctrine backfill now stamps ``personality_mode='friendly'`` on
+    the rows it lifts, so this branch (not the fragile legacy text-match) resolves
+    them and the ~2670-char doctrine soul is never leaked into the editable
+    custom-soul field. Only rows with NO stored mode fall through to legacy
+    preset-by-text detection against the doctrine-FREE base voices. Returns the
+    override keys to merge onto the result; an empty dict means 'keep the
+    orchestrator defaults' (no persona to report) — byte-identical to the inline
+    branch it replaced.
+    """
+    if stored_mode:
+        return {
+            "personality_mode": stored_mode,
+            "custom_soul": (custom_persona_prompt or "") if stored_mode == "custom" else "",
+        }
+    if custom_persona_prompt:
+        for mode, text in _PERSONALITY_BASE_VOICES.items():
+            if custom_persona_prompt.strip() == text.strip():
+                return {"personality_mode": mode, "custom_soul": ""}
+        return {"personality_mode": "custom", "custom_soul": custom_persona_prompt}
+    return {}
+
+
 def _get_or_seed_auto_agent(db: Session, workspace_id) -> Agent:
     """Return the Auto agent for a workspace, lazy-seeding if needed."""
     slug = f"auto-{workspace_id}"
@@ -599,28 +627,14 @@ async def get_orchestrator_settings(
                 "timeout": mc.get("timeout"),
                 "fallback_model_id": mc.get("fallback_model_id"),
             }
-            # Persona / Soul — read from Auto agent configuration
+            # Persona / Soul — read from Auto agent configuration. Single-source
+            # read-side detection (P226-RVW-5): a stored personality_mode wins;
+            # only rows without one fall through to legacy preset-by-text match
+            # against the doctrine-FREE base voices. Empty dict = keep defaults.
             agent_cfg = auto_agent.configuration or {}
-
-            # personality_mode is stored directly in configuration JSONB
-            stored_mode = agent_cfg.get("personality_mode")
-            if stored_mode:
-                result["personality_mode"] = stored_mode
-                if stored_mode == "custom":
-                    result["custom_soul"] = auto_agent.custom_persona_prompt or ""
-                else:
-                    result["custom_soul"] = ""
-            elif auto_agent.custom_persona_prompt:
-                # Legacy: detect preset by text comparison (agents seeded before mode was stored).
-                # Match against the doctrine-FREE base voices — that is what those
-                # pre-doctrine rows actually hold.
-                matched_preset = None
-                for mode, text in _PERSONALITY_BASE_VOICES.items():
-                    if auto_agent.custom_persona_prompt.strip() == text.strip():
-                        matched_preset = mode
-                        break
-                result["personality_mode"] = matched_preset or "custom"
-                result["custom_soul"] = "" if matched_preset else auto_agent.custom_persona_prompt
+            result.update(
+                _resolve_persona_view(agent_cfg.get("personality_mode"), auto_agent.custom_persona_prompt)
+            )
 
             # Configuration (thinking, proactive, communication style)
             if agent_cfg.get("communication_style"):
