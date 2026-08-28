@@ -121,7 +121,10 @@
     "DONE — _extract_reply_context captures ctx['from_id']=msg.from.id; _apply_telegram_answer builds answered_by='telegram:{from_id or chat_id or user}', never first_name (test_answered_by_carries_numeric_id: 'telegram:12345' with first_name='CEO'); verified target==numeric chat_id end-to-end (telegram.py:151 SendResult.target=str(target), sender.py:145-146 default=telegram_default_chat_id)",
     "DONE — 3 new tests in test_prd225_telegram_bridge.py: test_reply_from_other_chat_does_not_answer (c2→c1 reply falls through, unchanged), test_slash_answer_from_non_delivery_chat_is_refused (c2 /answer refused, unchanged), test_answered_by_carries_numeric_id; cd orchestrator && python3 -m pytest -q tests/test_prd225_telegram_bridge.py green (12 passed); PRD-225 + webhook regression 99 passed together"
    ],
-   "files": ["orchestrator/api/webhooks.py", "orchestrator/tests/test_prd225_telegram_bridge.py"]
+   "files": [
+    "orchestrator/api/webhooks.py",
+    "orchestrator/tests/test_prd225_telegram_bridge.py"
+   ]
   },
   {
    "id": "P225-RVW-2",
@@ -132,7 +135,10 @@
     "DONE — under strict, each shape is HELD as a kind='question' subject_type='channel' row (returns trust_gate_hold, which short-circuits at webhooks.py:731-733 BEFORE the ingestor/router/AutoBrain interception): test_strict_holds_whatsapp_text_message, test_strict_holds_telegram_caption, test_strict_holds_telegram_edited_message",
     "DONE — 3 new hold tests + 1 parametrized extraction test in test_prd225_trust_gate.py cover all three shapes; cd orchestrator && python3 -m pytest -q tests/test_prd225_trust_gate.py green (35 passed); PRD-225 + webhook regression 106 passed together on a clean run (the lone composio dedup 'failure' was cross-run Redis SETNX state on fixed id wh_1 from repeated local runs — proven green on a cleared key, api/composio.py path untouched by this change)"
    ],
-   "files": ["orchestrator/api/webhooks.py", "orchestrator/tests/test_prd225_trust_gate.py"]
+   "files": [
+    "orchestrator/api/webhooks.py",
+    "orchestrator/tests/test_prd225_trust_gate.py"
+   ]
   },
   {
    "id": "P225-RVW-3",
@@ -144,7 +150,10 @@
     "DONE — module docstring (already claimed both sources) now matches; _board_subtree_adjacency + count_downstream_blocked docstrings updated to 'BOTH sources / the DAG' (implemented, not descoped)",
     "DONE — cd orchestrator && python3 -m pytest -q tests/test_prd225_ask_human.py tests/test_prd225_questions_list.py green (21 passed); full PRD-225 backend suite 84 passed together"
    ],
-   "files": ["orchestrator/services/ask_cascade.py", "orchestrator/tests/"]
+   "files": [
+    "orchestrator/services/ask_cascade.py",
+    "orchestrator/tests/"
+   ]
   },
   {
    "id": "P225-RVW-4",
@@ -154,7 +163,10 @@
     "DONE — _board_children skips terminal (done/failed/cancelled) descendants AND their subtrees (ask_cascade.py:_TERMINAL_STATUSES + _add guard), so board_task_cascade AND count_downstream_blocked exclude them; test_terminal_children_excluded_from_cascade: mission-level ask over 7 done + 1 blocked flat sibling → cascade==['9'], count==1 (not 8), is_urgent_cascade False, detail total 1",
     "DONE — board_task_cascade_detail loads shown ids via ONE db.query(BoardTask).filter(workspace_id, id.in_(int_ids)).all() then re-orders by BFS (ask_cascade.py:199-223); test_cascade_detail_loads_shown_tasks_in_one_query asserts db.stats['in_filters']==1 for a 3-child cascade (traversal uses equality filters, only the detail batch is in_); regression: test_prd225_ask_human fake-session taught in_op (7 passed questions_list, 86 PRD-225 backend, 37 approval-kind regression green)"
    ],
-   "files": ["orchestrator/services/ask_cascade.py", "orchestrator/tests/"]
+   "files": [
+    "orchestrator/services/ask_cascade.py",
+    "orchestrator/tests/"
+   ]
   },
   {
    "id": "P225-RVW-5",
@@ -164,7 +176,10 @@
     "DONE — _apply_trust_gate fails CLOSED once a channel is confirmed: the mode/classify/hold body is wrapped so ANY error returns {status:held, routed:False, reason:'trust_gate_error', ask_id:None} (logged at error, no message body) instead of raising; the handler except block (webhooks.py:2d) no longer 'routes normally' — it logs at error and, unless _channel_is_allow_all (True only for a provable allow_all), returns the held response so nothing reaches the WebhookIngestor/UniversalRouter/AutoBrain interception. allow_all is resolved before the classifier so a route-everything channel is a safe no-op",
     "DONE — test_gate_error_fails_closed_under_strict: should_hold monkeypatched to raise under a strict channel → res is not None (held), routed False, reason 'trust_gate_error', NO ApprovalGrant written (nothing executed), an error-level gate log with no directive body; test_gate_error_under_allow_all_still_routes (allow_all short-circuits before should_hold → None → routes); test_channel_is_allow_all_fails_closed (allow_all True; strict/no-channel False). cd orchestrator && python3.10 -m pytest tests/test_prd225_trust_gate.py green (38 passed); 136 PRD-225 + webhook regression green together"
    ],
-   "files": ["orchestrator/api/webhooks.py", "orchestrator/tests/"]
+   "files": [
+    "orchestrator/api/webhooks.py",
+    "orchestrator/tests/"
+   ]
   },
   {
    "id": "P225-RVW-6",
@@ -174,7 +189,11 @@
     "DONE — _apply_trust_gate stores the channel body via _fence_untrusted (webhooks.py): a fenced code block whose fence is one backtick longer than the longest inner backtick run (no breakout), so inside GFM markdown the link syntax [x](url) and bare autolinks are LITERAL text, never an anchor. Scoped to channel-sourced text only — agent-authored question_md (platform_ask_human) is untouched. Backend: test_channel_directive_is_stored_fenced_inert (link + bare URL sit inside the fence, raw text preserved), test_fence_untrusted_prevents_backtick_breakout",
     "DONE — questions-tab.test.tsx 'a strict-held channel directive renders inert': fenced question_md → NO a[href=https://attacker.example], NO a[href=https://evil.example], no link role for the inbound text, raw text still readable (CodeBlock renders it as literal, never invoking the a renderer); control test 'agent-authored question still renders real markdown links' proves the fix is scoped. cd frontend && npm run -s test green (50 files, 296 tests); 40 trust-gate + 52 backend green"
    ],
-   "files": ["orchestrator/api/webhooks.py", "orchestrator/tests/", "frontend/components/command-center/questions-tab.tsx"]
+   "files": [
+    "orchestrator/api/webhooks.py",
+    "orchestrator/tests/",
+    "frontend/components/command-center/questions-tab.tsx"
+   ]
   },
   {
    "id": "P225-RVW-7",
@@ -184,7 +203,10 @@
     "DONE — update_channel: when 'config' is in the payload without an explicit 'trigger_mode', it backfills the stored mode via with_trigger_mode(new_config, normalize_trigger_mode(_current_channel_config(db,id)['trigger_mode'])) — rebuild-don't-mutate — so a creds-only edit no longer replaces the whole config and drops the mode; an explicit payload trigger_mode still wins (the if-branch). A modeless channel materializes no 'strict' (normalize returns None → no backfill). New _current_channel_config helper shared with the mode-only branch (channels.py:433-500)",
     "DONE — test_prd225_channels_trigger_mode.py (fake db intercepts the raw SQL): test_config_only_update_preserves_stored_trigger_mode (PUT {config:{bot_token:'NEW'}} vs stored allow_all → written config trigger_mode=='allow_all', bot_token=='NEW'), test_explicit_trigger_mode_overrides_stored, test_modeless_channel_config_edit_materializes_no_mode. cd orchestrator && python3.10 -m pytest tests/test_prd225_channels_trigger_mode.py green (3 passed)"
    ],
-   "files": ["orchestrator/api/channels.py", "orchestrator/tests/"]
+   "files": [
+    "orchestrator/api/channels.py",
+    "orchestrator/tests/"
+   ]
   },
   {
    "id": "P225-RVW-8",
@@ -194,7 +216,115 @@
     "DONE — ask_human rejects a terminal board_task BEFORE create_grant: after the not-found check, if board_task.status in _TERMINAL_STATUSES (done/failed/cancelled) it returns {success:False, parked:False, error:'board task N is already <status>; a finished task cannot be parked or resumed by an answer'} — no grant row, no dispatch, no 'Parked ...' message; the park flip is unreachable for terminals so line 94 simplified to 'if board_task is not None'. _PARKED_STATUSES renamed _TERMINAL_STATUSES (+cancelled, matching ask_cascade). handlers_asks.py:22,69-81,105-110",
     "DONE — test_terminal_board_task_is_rejected_not_parked parametrized over done/failed/cancelled: success False, parked False, error names the finished state, no 'Parked', no 'message' key, ZERO ApprovalGrant rows, status untouched (not flipped to blocked), dispatched==[]. cd orchestrator && python3.10 -m pytest tests/test_prd225_ask_human.py green (19 passed); 97 PRD-225 backend green together"
    ],
-   "files": ["orchestrator/modules/tools/discovery/handlers_asks.py", "orchestrator/tests/"]
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_asks.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P225-RVW-9",
+   "title": "CRITICAL — strict gate is bypassed by any content-bearing non-text update; the raw JSON body reaches AutoBrain's platform-tool interception even in strict",
+   "description": "REVIEW FINDING (security-reviewer CRITICAL + manual, verified). webhooks.py:404-458 (_inbound_text) reads ONLY message/edited_message .text/.caption, event.text, Twilio Body, WhatsApp messages[].text.body — its own docstring admits the WebhookIngestor json.dumps fallback is 'deliberately NOT mirrored'. webhooks.py:519-521 returns None for empty text ('nothing to hold (non-text update)') BEFORE should_hold/the classifier ever runs, so a text-less update falls through to routing regardless of trigger_mode, strict included. But WebhookIngestor (core/routing/ingestors/webhook.py:76-77) sets envelope.content = json.dumps(body) for any body it finds no text in, and webhooks.py:921 runs AutoBrain._match_platform_query over that blob with an UNANCHORED word-boundary regex (consumers/chatbot/auto.py:1153-1166) — a keyword ANYWHERE in the dumped JSON hits, routing to the auto-cto system agent (broad platform-tool access) with the full attacker JSON as its prompt (webhooks.py:929-940). Exact payload: any Telegram user who can message the bot sends a caption-less DOCUMENT whose filename is 'run the recipe.pdf' (verbatim from _PLATFORM_KEYWORDS['platform_execute_recipe'], auto.py:221-290) — document/poll/contact/venue/sticker updates have no .text/.caption, so _inbound_text returns '' while the ingestor serialises the whole update. On a strict channel this is never held and can trigger platform_execute_recipe / platform_delete_recipe / platform_delete_document / platform_reprocess_document — a full bypass of the governance control this PRD exists to add, on the public-ingress surface. test_prd225_trust_gate.py:242-329 proves parity ONLY for caption/edited/whatsapp-body shapes; poll/document-filename/contact/venue/sticker are untested.",
+   "acceptanceCriteria": [
+    "Under a strict channel each content-bearing non-text Telegram shape is HELD (a kind='question' subject_type='channel' row is created and the response short-circuits BEFORE WebhookIngestor/AutoBrain/UniversalRouter): a caption-less document whose file_name carries a platform keyword (test_strict_holds_document_filename), a poll whose question carries one (test_strict_holds_poll_question), a shared contact whose first_name/last_name carries one (test_strict_holds_contact_name), a venue whose title/address carries one (test_strict_holds_venue)",
+    "_inbound_text extracts every Telegram content-bearing subfield the router would otherwise serialise via json.dumps — message/edited_message .text/.caption (existing) PLUS poll.question, contact.first_name+last_name, venue.title+address, document/audio/video/voice.file_name, sticker.emoji — so no update the WebhookIngestor turns into non-json.dumps content is scored empty by the gate; a genuinely user-contentless status/delivery callback may still score empty and route",
+    "A parametrized test feeds each shape through BOTH _inbound_text and WebhookIngestor.ingest and asserts that whenever the ingestor yields content that is NOT json.dumps(body), _inbound_text is non-empty (test_gate_covers_all_ingestor_content_shapes)",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd225_trust_gate.py green; PRD-225 + webhook regression green together"
+   ],
+   "files": [
+    "orchestrator/api/webhooks.py",
+    "orchestrator/tests/test_prd225_trust_gate.py"
+   ]
+  },
+  {
+   "id": "P225-RVW-10",
+   "title": "HIGH — Telegram default-chat is hijackable by any inbound sender, re-opening the RVW-1 answer-injection class through the mutable anchor",
+   "description": "REVIEW FINDING (manual, verified; NOT caught by the RVW-1 fix, which only bound the answer lookup to the STORED channel_refs — the stored anchor is itself attacker-settable). webhooks.py:864 (step 2b) calls _persist_integration_default(db, workspace, 'telegram_default_chat_id', reply_ctx['chat_id']) on EVERY inbound telegram message, BEFORE correlation (2c, :873) and the trust gate (2d, :890); _persist_integration_default (webhooks.py:695-711) overwrites the stored value whenever it differs (last-sender-wins). The polling adapter does the same (channels/telegram_adapter.py:118-146,154). Telegram exposes no stable metadata.default_target (the driver's verify sets only bot_id/username, telegram.py:95-99), so channels/sender.py:145-146 (_resolve_target step 3) resolves the send target to that mutable telegram_default_chat_id. handlers_asks.py:206-220 (_capture_question_telegram) delivers the question to it and stores it as channel_refs.telegram={chat_id: result.target, ...}. The RVW-1 authorization (webhooks.py:264-304) then binds the answer to channel_refs.telegram.chat_id == sending chat — but that anchor is now the ATTACKER'S chat. Exploit: an attacker who can message the bot (discoverable @username / shared group / ex-member — the exact RVW-1 threat model) sends any message, so telegram_default_chat_id becomes the attacker chat; the next platform_ask_human delivers the agent's question to the attacker and pins their chat as the anchor; the attacker replies and apply_question_answer resumes the parked board task with the attacker's free text appended verbatim into planning_data.human_qa. This re-opens the RVW-1 in-workspace answer-injection class through the mutable anchor; existing tests fix the stored anchor and never exercise a hijacked default. Amplifier (pre-existing, security-reviewer): the webhook verifies no Telegram X-Telegram-Bot-Api-Secret-Token and applies HMAC only when a webhook_secret was configured, and SlowAPIMiddleware is off by default (main.py, POLICY_PLANE_ENABLED=False) — so there is no rate limit on the retarget.",
+   "acceptanceCriteria": [
+    "The chat authorized to answer a question is a STABLE, operator-designated Telegram chat that untrusted inbound traffic cannot silently repoint: an inbound message from a chat OTHER than the currently-designated delivery chat must NOT become the delivery target for a subsequent platform_ask_human nor the correlation anchor (e.g. platform_ask_human delivery reads an operator-set questions/default chat that _persist_integration_default does not overwrite from arbitrary senders, or the persist sets it once and never silently retargets to a different chat_id)",
+    "test_default_chat_is_not_hijacked_by_inbound: with designated chat A, an inbound message from chat B, then a platform_ask_human, the question's channel_refs.telegram.chat_id is A (not B), a reply from B does NOT answer it (falls through), and a reply from A does",
+    "test_answer_injection_via_retarget_is_blocked drives the full attacker sequence (B messages, ask fires, B replies) and asserts the parked board task is NOT resumed and no attacker text lands in planning_data.human_qa",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd225_telegram_bridge.py green; PRD-225 + webhook regression green together"
+   ],
+   "files": [
+    "orchestrator/api/webhooks.py",
+    "orchestrator/channels/sender.py",
+    "orchestrator/modules/tools/discovery/handlers_asks.py",
+    "orchestrator/tests/test_prd225_telegram_bridge.py"
+   ]
+  },
+  {
+   "id": "P225-RVW-11",
+   "title": "HIGH — the answer confirmation claims 'resuming' when nothing resumed; strict-held directives and tool_call/playbook_run asks have no working resume path",
+   "description": "REVIEW FINDING (code-reviewer HIGH x2, verified). _confirm_answer_into_chat (api/approval_grants.py:326-344) unconditionally posts 'Answered — resuming <subject>' without checking the resume outcome — the RVW-8 'the tool lied' class, recurring on the answer side. Three subjects resume to a no-op yet still claim success: (1) the trust gate stages subject_type='channel' rows (webhooks.py:534-544) whose question_md literally says 'Answer \"route it\" to let it proceed', but 'channel' matches none of _requeue_subject's three constants (approval_grants.py:347-371, silent return); the held directive is never re-injected into UniversalRouter (grep: nothing branches on subject_type=='channel' except the gate that creates it), so a strict channel can HOLD a directive but has NO working release path (dismiss and answer both discard it), contradicting US-006's 'approving = answering with route it'. (2) tool_call asks: handlers_asks.py:97-108 create_grant never sets tool_name/details.action/params (the tool schema has no such field, actions_asks.py:28-64), so _resume_tool_call always hits 'if not action' (approval_grants.py:440-449) and records 'grant carries no stored action to resume' — nothing executes. (3) playbook_run asks: resume_playbook_run_grant (services/watch_rerun.py) needs details.watch_action, absent here, so it records 'grant carries no executable watch_action (None)' — a no-op. All three still fire the 'resuming' chat confirmation. Only board_task genuinely resumes, yet PRD G1/G3 promise all three subject types.",
+   "acceptanceCriteria": [
+    "_confirm_answer_into_chat is gated on the actual resume outcome and must NOT claim the subject is 'resuming' when the resume was a no-op/failure; for a subject that did not resume (channel; tool_call/playbook_run with no stored action) the chat message reflects that honestly (e.g. 'Answer recorded' / 'Noted — nothing to resume'), never 'resuming' (test_confirmation_is_honest_when_no_resume)",
+    "EITHER platform_ask_human's tool_call/playbook_run subjects genuinely resume the parked work on answer, OR — if resume is out of v1 scope (Gerard's explicit call, not a silent descope) — the tool refuses those subject types up front with a clear error the way a terminal board_task is refused (RVW-8), so it never reports parked:true for work its answer cannot resume (test_tool_call_ask_resumes_or_is_refused / test_playbook_run_ask_resumes_or_is_refused)",
+    "The strict-held channel directive has a defined release outcome: answering a subject_type='channel' question either actually routes the held directive OR the question_md copy no longer promises 'route it' does something it does not — the stored instruction and the answer behaviour agree (test_channel_hold_release_semantics_match_copy)",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd225_answer_resume.py tests/test_prd225_trust_gate.py green; the 44 approval-kind regression tests stay green untouched"
+   ],
+   "files": [
+    "orchestrator/api/approval_grants.py",
+    "orchestrator/api/webhooks.py",
+    "orchestrator/modules/tools/discovery/handlers_asks.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P225-RVW-12",
+   "title": "HIGH — the trust gate never applies to legacy integrations-configured channels; strict is the advertised default but those bots are silently ungated",
+   "description": "REVIEW FINDING (security-reviewer HIGH, verified). _apply_trust_gate resolves the channel via _channel_for_platform (webhooks.py:390-401), which queries ONLY channel_connections; if none, it returns None with 'no connected channel, the gate does not apply' (webhooks.py:504-506). But a Telegram/Slack bot configured through the pre-existing Settings→Integrations surface (api/workspaces.py:144-168 save_integrations, PUT /api/workspaces/current/integrations, gated only by workspace:manage) sets telegram_bot_token in workspace.settings.integrations WITHOUT creating a channel_connections row — and both the outbound sender and the answer bridge honor that legacy config (channels/sender.py:182-193 legacy fallback), so those bots are fully live. Result: DEFAULT_TRIGGER_MODE='strict' (ingress_gate.py:36) is advertised as the safe default but silently does NOT apply to any workspace whose bot predates the Channels UI — plausibly most existing pilot workspaces — and nothing surfaces that the channel is ungated. Confirmed intentional by test_no_channel_row_means_no_gate, but it leaves the new security control with a silent coverage hole on the public-ingress surface.",
+   "acceptanceCriteria": [
+    "Inbound on a platform that is live via legacy workspace.settings.integrations (no channel_connections row) is gated the same as a ChannelConnection channel: _apply_trust_gate resolves trigger_mode for the integrations-configured channel too (or save_integrations backfills a channel_connections row on write), so a default/strict inbound directive is HELD, not routed (test_legacy_integrations_channel_is_gated_strict)",
+    "test_legacy_integrations_default_is_strict: a workspace with only settings.integrations.telegram_bot_token (no channel row) holds an inbound directive by default; an explicit allow_all opt-out still routes",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd225_trust_gate.py green; PRD-225 + webhook regression green together"
+   ],
+   "files": [
+    "orchestrator/api/webhooks.py",
+    "orchestrator/services/ingress_gate.py",
+    "orchestrator/tests/test_prd225_trust_gate.py"
+   ]
+  },
+  {
+   "id": "P225-RVW-13",
+   "title": "MEDIUM — the blocked cascade traversal is N+1/multiplicative on the 30s-polled grants list",
+   "description": "REVIEW FINDING (code-reviewer + manual, verified). _board_children (services/ask_cascade.py:107-121) issues one query for parent_task_id children + one for OrchestrationTaskDependency edges + ONE MORE query PER edge for the dep_board lookup (a .filter(...).first() inside 'for edge in edges'). _board_subtree_adjacency (:149-159) calls _board_children once per visited node. _grant_payload (api/approval_grants.py:61-67) recomputes the FULL cascade for every kind='question'/subject_type='board_task' row on every GET /api/v1/approval-grants (list_grants :102-121, up to 200 rows), which useQuestions polls every 30s (frontend/hooks/use-approval-grants.ts:38) from each open Command Center. P225-RVW-4 batched only the DISPLAY load (shown ids), not this traversal. A workspace with N open board-task questions rooted in M-step mission DAGs pays roughly N×(2M+edges) synchronous round-trips per poll. Cycle-safety itself is fine; this is a scalability cliff, not a wrong-output bug.",
+   "acceptanceCriteria": [
+    "The cascade traversal resolves each level's dependent board tasks in bounded queries independent of edge count: the per-edge dep_board .first() loop is replaced by ONE batched load per level (collect all edge.task_id, then BoardTask.orchestration_task_id.in_(...)), so a mission with M dependency edges costs O(1) dep-board queries per level, not O(M) (test_cascade_traversal_batches_dependent_lookups asserts the dep-board query count is independent of edge count for a fan-out fixture)",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd225_ask_human.py tests/test_prd225_questions_list.py green"
+   ],
+   "files": [
+    "orchestrator/services/ask_cascade.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P225-RVW-14",
+   "title": "MEDIUM — apply_question_answer has no compare-and-swap; two concurrent answers to the same question both apply",
+   "description": "REVIEW FINDING (security-reviewer, verified). _load_grant (api/approval_grants.py:124-132) and the Telegram lookups (webhooks.py:242-304) are plain non-locking SELECTs; apply_question_answer (approval_grants.py:269-291) mutates and commits off that unlocked read with no SELECT...FOR UPDATE and no atomic UPDATE...WHERE status='pending'. Authorization is chat-scoped, not principal-scoped (by design), so any member of a shared authorized group chat can answer, widening the race, and there is no rate limit by default (main.py SlowAPIMiddleware gated on POLICY_PLANE_ENABLED=False). Two near-simultaneous answers (two group members, or '/answer id a' then '/answer id b', or a Telegram reply racing POST /{id}/answer) both pass the pending check and both apply: duplicate human_qa entries (_record_answer_on_subject), duplicate 'resuming' confirmations, and under truly concurrent transactions a duplicate notify_task_available. Bounded today (board re-queue is idempotent-ish; tool_call/playbook_run no-op), but the missing guard becomes severe once a subject with a populated details.action rides this shared path.",
+   "acceptanceCriteria": [
+    "The pending→granted flip is atomic: apply_question_answer records the answer only if the row is still pending (an UPDATE approval_grants SET status='granted',... WHERE id=:id AND status='pending' that affects 0 rows aborts, OR a SELECT...FOR UPDATE re-check under the row lock), so a second concurrent answer to the same question is a safe no-op — one human_qa entry, one resume, one confirmation (test_concurrent_answers_apply_once)",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd225_answer_resume.py green; the 44 approval-kind regression tests stay green"
+   ],
+   "files": [
+    "orchestrator/api/approval_grants.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P225-RVW-15",
+   "title": "MEDIUM — agent-authored question_md is stored unfenced; the same clickable-phishing-link sink RVW-6 hardened for channel text, on the sibling producer",
+   "description": "REVIEW FINDING (security-reviewer, verified). RVW-6 fenced CHANNEL-sourced directive text via _fence_untrusted (webhooks.py:461-489,538) precisely because questions-tab.tsx renders question_md through ReactMarkdown+remarkGfm with GFM autolinking, turning [x](url) and bare URLs into clickable anchors in the admin's trusted surface. But platform_ask_human stores its question raw (handlers_asks.py:102 question_md=question) and the SAME sink (questions-tab.tsx:103-105) renders it for every grant. An agent relaying attacker-controlled text into its question (a document/webpage/inbound message it is summarizing that contains '[Approve the transfer](https://evil.example/phish)' or a bare autolinkable URL) produces a clickable phishing anchor next to the answer box. Compound/indirect (needs an upstream prompt-injection precursor to plant the text in the agent's question), hence MEDIUM — but it is the exact clickable-anchor class _fence_untrusted was built to stop, on the sibling producer it does not cover. Note: RVW-6 deliberately scoped fencing to channel text to keep legit agent markdown formatting, so the fix here is link-inerting (strip href/autolink) rather than full fencing, preserving emphasis/lists.",
+   "acceptanceCriteria": [
+    "Untrusted/relayed URLs in agent-authored question_md cannot render as clickable anchors in the Questions tab: either the QuestionsTab markdown 'a' renderer strips/inerts href for question content, or agent question_md is stored link-inert, so a question containing '[x](https://evil.example)' or a bare URL shows literal text with NO anchor/href — while legitimate agent markdown (emphasis, lists) still renders (frontend questions-tab.test.tsx 'agent question with a URL renders no clickable anchor' + backend test_agent_question_links_are_inert if inerted server-side)",
+    "cd frontend && npm run -s test green; cd orchestrator && python3 -m pytest -q tests/test_prd225_ask_human.py green"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_asks.py",
+    "frontend/components/command-center/questions-tab.tsx",
+    "frontend/",
+    "orchestrator/tests/"
+   ]
   }
  ]
 }
