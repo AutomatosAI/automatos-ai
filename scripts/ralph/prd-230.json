@@ -69,11 +69,11 @@
    "title": "Workspace registration installer — D1/D2/D3 enforced",
    "description": "install_package(ws, slug) / install_marketplace_agent(ws, ref): resolve closure → register EVERY member to the workspace using the EXISTING per-type patterns (workspace_enabled_skills / workspace_enabled_plugins rows; skills content-hash conventions) — add NEW registration surfaces ONLY where a type has none (agents: workspace-owned editable copy rows — re-verify how marketplace agents install today via 20260131_add_marketplace_to_agents; LLM: workspace availability via the 20260214 llm marketplace tables — re-verify their shape). Idempotent (re-install = zero dupes). Returns a manifest listing every registration by type. Every installed artifact marked workspace-owned/editable (D3). required_connects returned for the guide step, never auto-connected (FR-4).",
    "acceptanceCriteria": [
-    "Full-closure registration test: installing seeded agent-A registers all 7 (D2); installing a 2-agent package registers both closures",
-    "Idempotency test: second install adds nothing",
-    "Ownership test: every registered row carries the workspace id and is editable by the workspace (D3)",
-    "No new parallel registration mechanism where a pattern exists (reviewer-checkable; cite reused tables in commit body)",
-    "Orchestrator baseline"
+    "DONE — services/package_installer.py install_marketplace_agent + install_package. test_prd230_package_installer.py 16 passed: test_install_agent_registers_full_closure_of_seven (agent + 1 LLM + 2 skills + 3 plugins = 7, by_type counts), test_two_agent_package_registers_both_closures_deduped (both agents, shared llm deduped once). Full-closure registration + 2-agent package",
+    "DONE — test_reinstall_reuses_clone_and_adds_nothing: _existing_workspace_clone returns the prior clone → agent status=already_installed, clone_agent_to_workspace asserted NOT called, cascade re-run reports already_installed, manifest.added==[]. Per-type installers are idempotent (already_enabled/already_installed). Second install adds nothing",
+    "DONE — every Registration carries workspace_owned=True (agents via owner_type='workspace' clone; skills/plugins/llm via workspace_enabled_*/workspace_models rows keyed by workspace_id). test_every_registration_is_workspace_owned + to_dict shape. Ownership (D3)",
+    "DONE — REUSES existing patterns, zero new registration mechanism: clone_agent_to_workspace + cascade_agent_dependencies (workspace_models, workspace_enabled_skills, workspace_enabled_plugins, agent_assigned_plugins, agent_app_assignments), cascade_recipe_dependencies, install_skill/install_plugin/install_model. Only new code = the orchestration/manifest wrapper + a reflective recipe-clone helper (no shared one existed; cascade IS reused). No parallel registration mechanism; reused tables cited",
+    "DONE — additive-only (2 new files). Full suite 4803 passed; only the 2 inherited-baseline failures (byte-identical to origin/main, main CI 33212994947). required_connects (FR-4): test_oauth_tool_becomes_required_connect surfaces apps as guided connects, never auto. Orchestrator baseline"
    ],
    "files": [
     "orchestrator/services/",
