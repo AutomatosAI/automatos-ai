@@ -172,31 +172,50 @@ async def test_answer_path_returns_grounded_answer(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cannot_answer_maps_to_proceed_guidance(monkeypatch):
+async def test_cannot_answer_escalates(monkeypatch):
+    # US-003 replaced US-002's proceed-with-assumption branch: cannot_answer now
+    # escalates to a human ask and the task parks.
+    import services.clarification_ladder as cl
+
     async def _stub(db, subject, question, *, category=None):
         return {"cannot_answer": True, "reason": "unretrievable"}
 
+    async def _escalate(db, subject, question, *, category=None, partial_output=None, agent_name=None):
+        return {"parked": True, "ask_id": 3, "message": "parked"}
+
     monkeypatch.setattr(oa, "answer_clarification", _stub)
+    monkeypatch.setattr(cl, "escalate_clarification", _escalate)
     result = await ask_orchestrator(MagicMock(), uuid4(), _server_params())
 
     assert result["success"] is True
-    assert "proceed_with_assumption" in result
-    assert "answer" not in result
+    assert result["parked"] is True
+    assert result["ask_id"] == 3
     assert result["detail"]["reason"] == "unretrievable"
+    assert "answer" not in result
 
 
 @pytest.mark.asyncio
 async def test_time_box_expiry_takes_cannot_answer_path(monkeypatch):
+    # A slow answer round is time-boxed → cannot_answer(timeout) → escalation.
+    import services.clarification_ladder as cl
+    seen = {}
+
     async def _slow(db, subject, question, *, category=None):
         await asyncio.sleep(0.2)
         return {"answer": "too late"}
 
+    async def _escalate(db, subject, question, *, category=None, partial_output=None, agent_name=None):
+        seen["called"] = True
+        return {"parked": True, "ask_id": 4, "message": "parked"}
+
     monkeypatch.setattr(oa, "answer_clarification", _slow)
+    monkeypatch.setattr(cl, "escalate_clarification", _escalate)
     monkeypatch.setattr(Config, "CLARIFICATION_ANSWER_TIMEOUT", 0.01)
     result = await ask_orchestrator(MagicMock(), uuid4(), _server_params())
 
     assert result["success"] is True
-    assert "proceed_with_assumption" in result
+    assert seen.get("called") is True          # the time-box fired → escalated
+    assert result["parked"] is True
     assert result["detail"]["reason"] == "timeout"
 
 

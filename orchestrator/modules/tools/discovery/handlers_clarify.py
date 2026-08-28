@@ -90,12 +90,21 @@ async def ask_orchestrator(db: Session, workspace_id: UUID, params: Dict[str, An
             "sources": result.get("sources", []),
         }
 
-    # cannot_answer / escalate_directly / timeout — US-002 pre-escalation guidance.
-    # (US-003 replaces this with: create a human ask, park the task, return parked.)
+    # US-003 — the escalation ladder: cannot_answer / escalate_directly / timeout
+    # becomes a human ask (via PRD-225's shared ask_human), the task parks with a
+    # labelled draft, and the caller gets {parked, ask_id} so it stops cleanly.
+    from services.clarification_ladder import escalate_clarification
+
+    escalation = await escalate_clarification(
+        db, subject, question,
+        category=category if isinstance(category, str) else result.get("category"),
+        agent_name=params.get("_agent_name"),
+    )
     return {
         "success": True,
-        "proceed_with_assumption": _ASSUME_GUIDANCE,
-        "message": _ASSUME_GUIDANCE,
+        "parked": True,
+        "ask_id": escalation.get("ask_id"),
+        "message": escalation.get("message"),
         "detail": {k: v for k, v in result.items() if k != "answer"},
     }
 

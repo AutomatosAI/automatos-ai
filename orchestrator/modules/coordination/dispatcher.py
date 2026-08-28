@@ -930,6 +930,18 @@ class MissionDispatcher:
                     "findings surface first. Stale information fades naturally."
                 )
 
+            # PRD-229: a re-run after a parked clarification injects the human's
+            # answer + the preserved draft, so the agent continues from where it
+            # stopped rather than restarting blind. Present only when the ask was
+            # answered (apply_answered_clarification bridged it into input_context).
+            try:
+                from services.clarification_ladder import render_resume_block
+                resume_block = render_resume_block(task)
+                if resume_block:
+                    parts.append(resume_block)
+            except Exception:  # noqa: BLE001 — a resume-render fault never breaks dispatch
+                pass
+
         # PRD-127: Attachments are now handled via attachment_ids → build_context()
         # Not injected directly into prompt anymore.
 
