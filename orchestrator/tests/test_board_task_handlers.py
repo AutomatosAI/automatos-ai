@@ -217,15 +217,36 @@ class _FakeQ:
     def get(self, *_a):
         return self._r
 
+    def all(self):
+        # A single seeded agent models the one active row the name query returns;
+        # None models an empty result. P224-RVW-4's _resolve_active_agent_by_name
+        # calls .all() then matches the name in Python.
+        return [self._r] if self._r is not None else []
+
+
+class _FakeResult:
+    """Minimal Result stand-in for db.execute(...).fetchone()."""
+
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
 
 class _FakeSession:
     """Returns a seeded Agent for Agent queries and a seeded BoardTask for
     everything else; records commits. add() captures a freshly-created task."""
 
-    def __init__(self, agent=None, task=None):
+    def __init__(self, agent=None, task=None, claim_race_lost=False):
         self._agent = agent
         self._task = task
         self.commits = 0
+        # P224-RVW-5: when True, model the board dispatcher committing its
+        # FOR UPDATE SKIP LOCKED claim BETWEEN this handler's SELECT and its
+        # atomic in_progress write — the conditional UPDATE then matches 0 rows.
+        self._claim_race_lost = claim_race_lost
+        self.executes = []
 
     def query(self, model):
         from core.models import Agent
@@ -242,6 +263,34 @@ class _FakeSession:
     def refresh(self, obj):
         if getattr(obj, "id", None) is None:
             obj.id = 4242
+
+    def execute(self, statement, params=None):
+        """Model P224-RVW-5's atomic claim:
+        ``UPDATE board_tasks SET status='in_progress' WHERE id=:id
+          AND status <> 'in_progress' RETURNING id``.
+        Wins (returns a row) only when the row is not already in_progress; a
+        forced ``claim_race_lost`` returns 0 rows (the dispatcher already claimed
+        it) even though the earlier SELECT still saw 'assigned'.
+
+        Only the board-task claim mutates status here. Every OTHER execute() — the
+        fire-and-forget ``SELECT pg_notify(...)`` that notify_board_event issues on
+        the same session — is a benign no-op returning an empty result, exactly as
+        it is in Postgres (it never touches board_tasks.status)."""
+        sql = str(statement)
+        self.executes.append((sql, params))
+        low = sql.lower()
+        is_claim = "update board_tasks" in low and "returning" in low
+        if not is_claim:
+            return _FakeResult(None)
+        task = self._task
+        if self._claim_race_lost:
+            if task is not None:
+                task.status = "in_progress"      # the other actor already flipped it
+            return _FakeResult(None)
+        if task is not None and getattr(task, "status", None) != "in_progress":
+            task.status = "in_progress"
+            return _FakeResult((task.id,))
+        return _FakeResult(None)
 
 
 class _FakeReq:
@@ -772,3 +821,712 @@ def test_agent_in_progress_reset_leaves_blocked_transition_unchanged(monkeypatch
     # The in_progress-only reset must not have fired on a blocked move.
     assert task.error_message == "mid-run detail"
     assert task.result == "draft"
+def _patch_dispatch(monkeypatch):
+    """Capture chat-side dispatch NOTIFYs. ``_notify_dispatch_safe`` re-imports
+    ``notify_task_available`` from services.board_dispatcher at call time, so
+    patching the module attribute (not the handler) intercepts it."""
+    import services.board_dispatcher as bd
+    calls = []
+    monkeypatch.setattr(bd, "notify_task_available", lambda db, **kw: calls.append(kw))
+    return calls
+
+
+def test_agent_create_assigned_notifies_dispatch(monkeypatch):
+    """A chat-created ticket with a resolvable agent lands 'assigned' and wakes the
+    dispatch loop (mirrors api/board_tasks.py:397-398)."""
+    _patch_notify(monkeypatch)  # silence the board-event NOTIFY
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))  # refresh() assigns id=4242
+
+    result = asyncio.run(
+        _HANDLER.create_board_task(
+            db, _WS_ID,
+            {"title": "chase invoices", "description": "d", "assigned_agent_name": "ATLAS"},
+        )
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert len(dispatch) == 1, "an assigned chat-created ticket must wake the dispatch loop"
+    assert dispatch[0]["task_id"] == 4242
+    assert dispatch[0]["workspace_id"] == _WS_ID
+
+
+def test_agent_create_unassigned_does_not_notify_dispatch(monkeypatch):
+    """No agent → the ticket lands 'inbox', which the dispatch loop never claims,
+    so no dispatch NOTIFY fires (only the board-event NOTIFY does)."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _FakeSession()  # no agent to resolve
+
+    result = asyncio.run(
+        _HANDLER.create_board_task(db, _WS_ID, {"title": "t", "description": "d"})
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "inbox"
+    assert dispatch == [], "an unassigned (inbox) ticket must not wake the dispatch loop"
+
+
+def test_agent_assign_notifies_dispatch(monkeypatch):
+    """platform_assign_task moves an inbox task to 'assigned' and wakes the dispatch
+    loop (mirrors api/board_tasks.py:624-632)."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _FakeSession(agent=_ns(id=9, name="ATLAS"), task=task)
+
+    result = asyncio.run(
+        _HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "ATLAS"})
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert len(dispatch) == 1, "assignment must wake the dispatch loop"
+    assert dispatch[0]["task_id"] == 5
+
+
+def test_agent_assign_on_recipe_task_does_not_notify_dispatch(monkeypatch):
+    """Recipe-mirror tasks are driven by the recipe executor, never the board
+    dispatch loop — assignment must not wake it (mirrors api/board_tasks.py:628)."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    task = BoardTask(id=8, workspace_id=_WS_ID, title="t", status="inbox", source_type="recipe")
+    db = _FakeSession(agent=_ns(id=3, name="ATLAS"), task=task)
+
+    asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 8, "agent_name": "ATLAS"}))
+
+    assert dispatch == [], "recipe-mirror tasks are not board-dispatched"
+
+
+def test_agent_update_status_to_assigned_notifies_dispatch(monkeypatch):
+    """Re-queuing a ticket to 'assigned' via platform_update_task_status wakes the
+    dispatch loop so it's re-claimed on the LISTEN wake, not the fallback poll."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _FakeSession(task=_fresh_task(id=3, status="blocked", assigned_agent_id=7,
+                                       blocked_at="2026-08-27T00:00:00Z", blocked_reason="x"))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "assigned"})
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert len(dispatch) == 1, "a re-queue to 'assigned' must wake the dispatch loop"
+    assert dispatch[0]["task_id"] == 3
+
+
+def test_agent_update_status_in_progress_does_not_notify_dispatch(monkeypatch):
+    """Moving to in_progress launches inline (existing path); the dispatch loop
+    claims only 'assigned' tasks, so in_progress must NOT wake it."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert result["success"] is True
+    assert len(launches) == 1, "in_progress launches inline"
+    assert dispatch == [], "in_progress must not wake the dispatch loop (it claims 'assigned' only)"
+
+
+# ---------------------------------------------------------------------------
+# P224-RVW-2 — the ASSIGN immediate-start must not race the dispatcher into a
+# DOUBLE execution. create() lands 'assigned' + wakes the dispatcher (US-001);
+# the dispatcher claims the row (→ in_progress) and launches ONCE; Auto's
+# back-to-back update_board_task_status(...,'in_progress') must add ZERO launches.
+# ---------------------------------------------------------------------------
+
+
+def test_rvw2_update_to_in_progress_skips_relaunch_when_already_in_progress(monkeypatch):
+    """A row the dispatcher already claimed (status='in_progress') receiving a
+    status write to 'in_progress' launches ZERO additional executions — the
+    old_status guard mirrors run_task_now (api/board_tasks.py:871)."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="in_progress", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert result["success"] is True
+    assert launches == [], "already-in_progress row must not re-launch (double-exec guard)"
+    assert result["triggered_execution"] is False, "no launch → triggered_execution stays honest"
+    assert dispatch == [], "in_progress never wakes the dispatch loop"
+
+
+def test_rvw2_normal_assigned_to_in_progress_still_launches_once(monkeypatch):
+    """The guard must not break the sole-launcher happy path: an 'assigned' row
+    moved to 'in_progress' with no racing claim launches exactly once."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert len(launches) == 1, "assigned→in_progress with no prior claim launches once"
+    assert result["triggered_execution"] is True
+
+
+def test_rvw2_create_then_claim_then_update_yields_single_launch(monkeypatch):
+    """The full ASSIGN sequence — create('assigned') → dispatcher claim → Auto's
+    update('in_progress') — yields EXACTLY ONE launch (the claim's), never two."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+
+    # 1. Auto files the ticket: it lands 'assigned' and hands off to the dispatcher
+    #    (US-001 NOTIFY) — create never launches inline.
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+    asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID, {"title": "t", "description": "d", "assigned_agent_name": "ATLAS"}))
+    assert launches == [], "create(assigned) hands off to the dispatcher, no inline launch"
+
+    # 2. The board dispatcher claims the row: FOR UPDATE SKIP LOCKED flips it to
+    #    in_progress and launches once (its own path, simulated here).
+    claimed = db._task
+    claimed.status = "in_progress"
+    launches.append({"by": "dispatcher_claim"})
+
+    # 3. Auto's back-to-back status write to in_progress must NOT launch again.
+    asyncio.run(_HANDLER.update_board_task_status(
+        db, _WS_ID, {"task_id": claimed.id, "status": "in_progress"}))
+
+    assert len(launches) == 1, "exactly one launch across create→claim→update (no double-exec)"
+
+
+# ---------------------------------------------------------------------------
+# P224-RVW-5 — RVW-2's old_status guard read an UNLOCKED pre-commit SELECT, so a
+# dispatcher claim that commits BETWEEN this handler's SELECT and its write still
+# double-launched. The transition is now an ATOMIC conditional UPDATE (mirroring
+# board_dispatcher.claim_tasks): launch inline ONLY if THIS statement won.
+# ---------------------------------------------------------------------------
+
+
+def test_rvw5_claim_race_lost_between_select_and_write_launches_zero(monkeypatch):
+    """The residual RVW-2 race: the SELECT still reads 'assigned' (so the stale
+    old_status guard would have PASSED and launched), but the dispatcher committed
+    its claim before our write. The atomic UPDATE matches 0 rows → ZERO inline
+    launches, triggered_execution False, and no redundant board frame."""
+    from api import board_tasks as bt
+    board = _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    # status='assigned' at SELECT time; claim_race_lost models the dispatcher
+    # winning between the SELECT and the atomic write.
+    db = _FakeSession(
+        task=_fresh_task(id=3, status="assigned", assigned_agent_id=7),
+        claim_race_lost=True,
+    )
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert launches == [], "lost the atomic claim → the dispatcher already launched; zero here"
+    assert result["triggered_execution"] is False, "no launch → triggered_execution honest"
+    assert result["status"] == "in_progress"
+    assert board == [], "no redundant status_changed frame when we didn't win the claim"
+    assert dispatch == [], "in_progress never wakes the dispatch loop"
+
+
+def test_rvw5_sole_launcher_still_launches_once(monkeypatch):
+    """No competing claim: the atomic UPDATE wins (status was 'assigned') and the
+    handler launches exactly once — the happy path is unbroken."""
+    from api import board_tasks as bt
+    board = _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert len(launches) == 1, "won the atomic claim → launch exactly once"
+    assert result["triggered_execution"] is True
+    assert len(board) == 1, "the winner pushes exactly one status_changed board frame"
+
+
+def test_rvw5_transition_is_an_atomic_conditional_claim_not_a_stale_read(monkeypatch):
+    """The in_progress transition must run the atomic conditional UPDATE — a status
+    precondition + RETURNING — not a blind ORM write gated on the stale SELECT."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: None)
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert len(db.executes) == 1, "exactly one atomic claim statement is issued"
+    sql, params = db.executes[0]
+    assert "update board_tasks" in sql.lower()
+    assert "status <> 'in_progress'" in sql, "the claim wins only if not already in_progress"
+    assert "returning" in sql.lower(), "RETURNING tells us whether THIS statement won"
+    assert params.get("id") == 3
+
+
+def test_dispatch_notify_failure_is_fail_soft(monkeypatch):
+    """A forced dispatch NOTIFY failure must NOT fail the tool call — fail-soft
+    exactly like the board-event NOTIFY beside it (PRD-224 US-001)."""
+    import services.board_dispatcher as bd
+    _patch_notify(monkeypatch)
+
+    def _boom(db, **kw):
+        raise RuntimeError("pg_notify down")
+
+    monkeypatch.setattr(bd, "notify_task_available", _boom)
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(
+        _HANDLER.create_board_task(
+            db, _WS_ID,
+            {"title": "t", "description": "d", "assigned_agent_name": "ATLAS"},
+        )
+    )
+
+    assert result["success"] is True, "NOTIFY blew up but the create succeeded"
+    assert result["status"] == "assigned"
+
+
+# ===========================================================================
+# PRD-224 US-005 — auto-supervision on assignment (AUTO_TICKET_WATCH)
+# ===========================================================================
+#
+# When a ticket is created via the ASSIGN lane (the server-injected, unspoofable
+# _assign_lane flag + an assigned agent), create_board_task auto-attaches a
+# run_and_report board_task watch in the create transaction path so the LLM
+# cannot forget it. Gated on the config dial AUTO_TICKET_WATCH (default ON, read
+# through config.py only). A non-ASSIGN creation (heartbeat, recipe, plain agent
+# task) carries no _assign_lane and attaches nothing. The verdict later narrates
+# back into the ORIGINATING thread via the existing PRD-205 seam because the
+# create captured origin_chat_id onto the watch. Pure — the watcher machinery is
+# stubbed; its behaviour is locked by the PRD-204 suites.
+
+_ORIGIN = UUID("00000000-0000-0000-0000-0000000000cc")
+
+
+def _assign_params(**over):
+    base = dict(
+        title="chase invoices", description="Chase the overdue Q3 invoices.",
+        assigned_agent_name="ATLAS", _assign_lane=True,
+        _origin_chat_id=str(_ORIGIN), _created_by="user_x",
+    )
+    base.update(over)
+    return base
+
+
+def test_assign_lane_attaches_ticket_watch(monkeypatch):
+    """An ASSIGN-lane assigned ticket attaches a board_task watch and confirms
+    supervision, passing the description as success_criteria and the origin."""
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    created = []
+
+    def _capture(db, ws, **kw):
+        created.append(kw)
+        return _ns(id=UUID("00000000-0000-0000-0000-0000000000dd"))
+
+    monkeypatch.setattr(hw, "auto_create_ticket_watch", _capture)
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))  # refresh() → task id 4242
+
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+
+    assert result["success"] is True and result["status"] == "assigned"
+    assert result["supervised"] is True
+    assert result["watch_id"] == "00000000-0000-0000-0000-0000000000dd"
+    assert "report back" in result["supervision"]
+    assert len(created) == 1
+    assert created[0]["task_id"] == 4242
+    assert created[0]["success_criteria"] == "Chase the overdue Q3 invoices."
+    assert created[0]["owner_agent_id"] == 7
+    assert str(created[0]["origin_chat_id"]) == str(_ORIGIN)
+
+
+def test_non_assign_creation_attaches_no_watch(monkeypatch):
+    """No _assign_lane (heartbeat, recipe, plain agent task) → no watch, no
+    supervision key on the result."""
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    calls = []
+    monkeypatch.setattr(hw, "auto_create_ticket_watch",
+                        lambda db, ws, **kw: calls.append(kw))
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "t", "description": "d", "assigned_agent_name": "ATLAS"},  # no _assign_lane
+    ))
+
+    assert result["success"] is True
+    assert calls == [], "a non-ASSIGN creation must not auto-supervise"
+    assert "supervised" not in result
+
+
+def test_assign_lane_without_agent_attaches_no_watch(monkeypatch):
+    """_assign_lane but no resolvable agent → the ticket lands 'inbox' and there
+    is nothing to supervise (the gate requires an assigned agent)."""
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    calls = []
+    monkeypatch.setattr(hw, "auto_create_ticket_watch",
+                        lambda db, ws, **kw: calls.append(kw))
+    db = _FakeSession()  # no agent resolves
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID, {"title": "t", "description": "d", "_assign_lane": True},
+    ))
+
+    assert result["status"] == "inbox"
+    assert calls == []
+    assert "supervised" not in result
+
+
+def test_auto_ticket_watch_off_attaches_nothing_and_notes_it(monkeypatch):
+    """AUTO_TICKET_WATCH=False → no watch attached, and the tool result says so."""
+    import config as config_module
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(config_module.config, "AUTO_TICKET_WATCH", False)
+    calls = []
+    monkeypatch.setattr(hw, "auto_create_ticket_watch",
+                        lambda db, ws, **kw: calls.append(kw))
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+
+    assert calls == [], "dial off must not attach a watch"
+    assert result["supervised"] is False
+    assert "AUTO_TICKET_WATCH is off" in result["supervision"]
+
+
+def test_rvw6_watch_attach_failure_while_on_is_honest(monkeypatch):
+    """P224-RVW-6: dial ON but auto_create_ticket_watch returns None (it is
+    fail-soft and swallows any internal error → None). The result must carry an
+    HONEST supervision signal instead of silently omitting it: supervised False and
+    a message that does NOT falsely claim the ticket is supervised / will report
+    back. Mirrors the dial-off path's 'says so' guarantee for the attach-failure
+    precondition."""
+    import config as config_module
+    import modules.tools.discovery.handlers_watches as hw
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(config_module.config, "AUTO_TICKET_WATCH", True)          # dial ON
+    monkeypatch.setattr(hw, "auto_create_ticket_watch", lambda db, ws, **kw: None)  # attach fails
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+
+    assert result["success"] is True and result["status"] == "assigned"
+    assert result["supervised"] is False, "a None watch under an ON dial is NOT supervised"
+    assert result["supervision"], "an honest non-empty signal, never a silent omission"
+    assert "report back" not in result["supervision"], "must NOT promise a report-back it can't deliver"
+    assert "unwatched" in result["supervision"]
+    assert "watch_id" not in result, "no watch attached → no watch_id"
+
+
+def test_auto_create_ticket_watch_is_run_and_report(monkeypatch):
+    """auto_create_ticket_watch creates a board_task watch and never overrides the
+    policy → WatchService.create_watch's default (run_and_report) applies."""
+    import modules.tools.discovery.handlers_watches as hw
+    import services.watch_service as ws_mod
+    monkeypatch.setattr(ws_mod.WatchService, "find_live_watch",
+                        staticmethod(lambda db, **kw: None))
+    captured = {}
+
+    def _create(db, **kw):
+        captured.update(kw)
+        return _ns(id=UUID("00000000-0000-0000-0000-0000000000ee"))
+
+    monkeypatch.setattr(ws_mod.WatchService, "create_watch", staticmethod(_create))
+
+    w = hw.auto_create_ticket_watch(None, _WS_ID, task_id=42, title="Ticket: t",
+                                    success_criteria="crit", owner_agent_id=7)
+
+    assert w is not None
+    assert captured["target_type"] == "board_task" and captured["watch_type"] == "board_task"
+    assert captured["target_id"] == "42"
+    assert captured["success_criteria"] == "crit"
+    assert "policy" not in captured, "no override → create_watch default run_and_report"
+
+
+def test_auto_create_ticket_watch_off_returns_none(monkeypatch):
+    import config as config_module
+    import modules.tools.discovery.handlers_watches as hw
+    monkeypatch.setattr(config_module.config, "AUTO_TICKET_WATCH", False)
+    assert hw.auto_create_ticket_watch(None, _WS_ID, task_id=1, title="t",
+                                       success_criteria="c") is None
+
+
+def test_assign_ticket_verdict_narrates_to_origin_thread(monkeypatch):
+    """AC4 end-to-end: the create captures the origin onto the watch; when the
+    ticket completes, notify_watch_verdict narrates into that ORIGINATING thread
+    via the existing watch_notifications → deliver_background_message seam."""
+    import modules.tools.discovery.handlers_watches as hw
+    import services.watch_service as ws_mod
+    import services.watch_notifications as wn
+    import core.services.notification_dispatcher as nd
+    import services.chat_messenger as cm
+
+    # -- create (ASSIGN lane): real auto_create_ticket_watch, create_watch stubbed
+    #    to build a watch carrying exactly what the handler passed.
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    monkeypatch.setattr(ws_mod.WatchService, "find_live_watch",
+                        staticmethod(lambda db, **kw: None))
+    built = {}
+
+    def _create(db, **kw):
+        built.update(kw)
+        return _ns(id=UUID("00000000-0000-0000-0000-0000000000df"),
+                   origin_chat_id=kw.get("origin_chat_id"))
+
+    monkeypatch.setattr(ws_mod.WatchService, "create_watch", staticmethod(_create))
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+    result = asyncio.run(_HANDLER.create_board_task(db, _WS_ID, _assign_params()))
+    assert result["supervised"] is True
+    assert built["target_type"] == "board_task"
+    assert str(built["origin_chat_id"]) == str(_ORIGIN), "origin captured onto the watch"
+
+    # -- complete: the verdict narrates into the originating thread.
+    class _FakeDispatcher:
+        def __init__(self, db, ws):
+            pass
+
+        async def dispatch(self, **kw):
+            return None
+
+    monkeypatch.setattr(nd, "NotificationDispatcher", _FakeDispatcher)
+    delivered = []
+    monkeypatch.setattr(cm, "deliver_background_message", lambda db, **kw: delivered.append(kw))
+
+    watch = _ns(id=UUID("00000000-0000-0000-0000-0000000000df"), workspace_id=_WS_ID,
+                title="Ticket: chase invoices", target_type="board_task",
+                target_id="4242", status="watching", created_by="user_x",
+                origin_chat_id=_ORIGIN, quality_threshold=0.8, final_score=0.9)
+    ok = asyncio.run(wn.notify_watch_verdict(
+        _FakeSession(), watch, score=0.9, explanation="Invoices chased.",
+        passed=True, terminal_state="completed"))
+
+    assert ok is True
+    assert len(delivered) == 1, "the completed ticket narrates its verdict once"
+    assert delivered[0]["chat_id"] == str(_ORIGIN), "into the ORIGINATING thread"
+    assert delivered[0]["source"]["event"] == "watch_verdict"
+
+
+def test_auto_ticket_watch_read_through_config_only():
+    """AC3: the dial is consumed through config.AUTO_TICKET_WATCH; the raw env
+    read lives ONLY in config.py. The forbidden token is built by concatenation
+    so this test file itself stays clean for the diff-scope env-read guard."""
+    env_read = "os." + "getenv"  # the raw-env-read token, never a literal here
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for rel in ("modules/tools/discovery/handlers_board_tasks.py",
+                "modules/tools/discovery/handlers_watches.py"):
+        with open(os.path.join(here, rel)) as f:
+            src = f.read()
+        assert "AUTO_TICKET_WATCH" in src            # consumed here (via config)
+        assert env_read not in src                    # but never a raw env read
+    with open(os.path.join(here, "config.py")) as f:
+        assert (env_read + '("AUTO_TICKET_WATCH"') in f.read()  # declared in config.py
+
+
+# ---------------------------------------------------------------------------
+# P224-RVW-4 -- the WRITE layer (create/assign) resolves an agent NAME against
+# ACTIVE agents and REFUSES an ambiguous name instead of silently .first()-ing
+# a Postgres-row-order pick. Agent.name has no unique constraint (only
+# (workspace_id, slug)), so 'Atlas'/'atlas' can coexist; and the classifier
+# matches active-only while the old write query matched any status — the two
+# rosters could diverge and dispatch the wrong (or a deactivated) agent.
+# ---------------------------------------------------------------------------
+
+
+def _ag(id, name, status="active"):
+    return _ns(id=id, name=name, status=status)
+
+
+class _RosterQ:
+    """An Agent query modeling the RVW-4 resolution query's ACTIVE filter: .all()
+    returns only status=='active' rows (the SQL predicate the handler applies),
+    leaving the handler's Python name-match + ambiguity guard to be exercised."""
+
+    def __init__(self, agents):
+        self._agents = agents
+
+    def filter(self, *a, **k):
+        return self
+
+    def all(self):
+        return [a for a in self._agents if getattr(a, "status", "active") == "active"]
+
+
+class _RosterDB:
+    """Fake session seeded with a full agent roster (any status) + an optional
+    task. Agent queries honor the ACTIVE filter; every other query returns the
+    seeded task. add()/refresh()/commit() support the create path."""
+
+    def __init__(self, agents, task=None):
+        self._agents = agents
+        self._task = task
+        self.commits = 0
+
+    def query(self, model):
+        from core.models import Agent
+        if model is Agent:
+            return _RosterQ(self._agents)
+        return _FakeQ(self._task)
+
+    def add(self, obj):
+        self._task = obj
+
+    def commit(self):
+        self.commits += 1
+
+    def refresh(self, obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = 4242
+
+
+def test_rvw4_create_ambiguous_active_name_refuses(monkeypatch):
+    """create_board_task with a name matching TWO active agents refuses — no
+    arbitrary first-row pick, and no ticket is filed for a guessed agent."""
+    calls = _patch_notify(monkeypatch)
+    db = _RosterDB([_ag(7, "Atlas"), _ag(8, "atlas")])  # same name, both active
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "chase", "description": "d", "assigned_agent_name": "Atlas"},
+    ))
+
+    assert result["success"] is False
+    assert "Multiple active agents" in result["error"]
+    assert db.commits == 0, "an ambiguous create commits nothing"
+    assert calls == [], "and fires no board NOTIFY"
+
+
+def test_rvw4_assign_ambiguous_active_name_refuses(monkeypatch):
+    """assign_board_task with an ambiguous active name refuses rather than
+    .first()-ing a nondeterministic row."""
+    from core.models.core import BoardTask
+    calls = _patch_notify(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _RosterDB([_ag(7, "Atlas"), _ag(8, "atlas")], task=task)
+
+    result = asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "Atlas"}))
+
+    assert result["success"] is False
+    assert "Multiple active agents" in result["error"]
+    assert task.assigned_agent_id is None, "no arbitrary assignment on ambiguity"
+    assert calls == [], "and no board NOTIFY"
+
+
+def test_rvw4_create_resolves_active_over_inactive_same_name(monkeypatch):
+    """An active + inactive agent share a name: the ACTIVE one (id=7) is assigned,
+    never the inactive (id=99) — the inactive is not in the roster the match runs
+    over, so it is a single-match resolve, not an ambiguity."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _RosterDB([_ag(7, "Atlas", "active"), _ag(99, "Atlas", "inactive")])
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "chase", "description": "d", "assigned_agent_name": "Atlas"},
+    ))
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"  # resolved → assigned, not inbox
+    assert db._task.assigned_agent_id == 7, "the ACTIVE agent, never the inactive id=99"
+    assert len(dispatch) == 1, "an assigned+agent ticket wakes the dispatch loop"
+
+
+def test_rvw4_assign_resolves_active_over_inactive_same_name(monkeypatch):
+    """assign_board_task resolves the ACTIVE same-named agent (id=7), never the
+    inactive (id=99)."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _RosterDB([_ag(7, "Atlas", "active"), _ag(99, "Atlas", "inactive")], task=task)
+
+    result = asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "Atlas"}))
+
+    assert result["success"] is True
+    assert result["assigned_agent"] == "Atlas"
+    assert task.assigned_agent_id == 7, "assigned to the ACTIVE agent, never the inactive id=99"
+
+
+def test_rvw4_create_no_active_match_leaves_unassigned(monkeypatch):
+    """A name matching only an INACTIVE agent → no active match → the ticket lands
+    'inbox' (unassigned): the unchanged no-match behavior, never a stealth assign
+    to a deactivated agent."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _RosterDB([_ag(99, "Atlas", "inactive")])
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "t", "description": "d", "assigned_agent_name": "Atlas"},
+    ))
+
+    assert result["success"] is True
+    assert result["status"] == "inbox"
+    assert dispatch == [], "an unassigned inbox ticket does not wake the dispatch loop"
+
+
+def test_rvw4_assign_no_active_match_is_not_found(monkeypatch):
+    """assign_board_task with a name matching only an inactive agent returns
+    'not found' — the unchanged no-match behavior."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _RosterDB([_ag(99, "Atlas", "inactive")], task=task)
+
+    result = asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "Atlas"}))
+
+    assert result["success"] is False
+    assert "not found" in result["error"]
+
+
+def test_rvw4_single_active_match_still_resolves(monkeypatch):
+    """The guard must not block a genuinely unique active match amid others —
+    case-insensitively ('atlas' → 'Atlas', id=7)."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _RosterDB([_ag(3, "Researcher"), _ag(7, "Atlas")])
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "t", "description": "d", "assigned_agent_name": "atlas"},
+    ))
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert db._task.assigned_agent_id == 7
+    assert len(dispatch) == 1

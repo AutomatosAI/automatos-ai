@@ -88,7 +88,7 @@ class RunOutputBundle:
     """What the judge sees for one run-shaped target."""
 
     text: str                       # composed run output
-    kind: str                       # 'mission' | 'playbook_execution'
+    kind: str                       # 'mission' | 'playbook_execution' | 'board_task'
     terminal_state: str
     mechanics_reliability: float    # 0-1 rule-based
     executor_model: Optional[str] = None
@@ -294,6 +294,8 @@ class RunVerdictService:
             return RunVerdictService._collect_mission(db, watch)
         if target_type == "playbook_execution":
             return RunVerdictService._collect_playbook(db, watch)
+        if target_type == "board_task":
+            return RunVerdictService._collect_board_task(db, watch)
         return None
 
     @staticmethod
@@ -339,6 +341,56 @@ class RunVerdictService:
             terminal_state=getattr(run, "state", "unknown"),
             mechanics_reliability=mechanics,
             executor_model=None,  # multi-agent run: no single executor family
+            empty=not text.strip(),
+        )
+
+    @staticmethod
+    def _collect_board_task(db: Session, watch) -> Optional[RunOutputBundle]:
+        """PRD-224 US-002: compose a board task's recorded output for the SAME
+        run-level judge missions/playbooks use -- result (+ any review feedback,
+        or the error on a failed task). Returns None when the task row is gone
+        (caller parks the watch), mirroring the mission/playbook collectors.
+        """
+        from core.models.core import BoardTask
+
+        try:
+            task_id = int(watch.target_id)
+        except (TypeError, ValueError):
+            return None
+        task = db.query(BoardTask).filter(BoardTask.id == task_id).first()
+        if task is None:
+            return None
+
+        status = getattr(task, "status", "") or ""
+        sections: List[str] = []
+        result = getattr(task, "result", None)
+        if result:
+            sections.append("### Result\n" + _compact(result, 8000))
+        review_feedback = getattr(task, "review_feedback", None)
+        if review_feedback:
+            sections.append("### Review feedback\n" + _compact(review_feedback, 2000))
+        error_message = getattr(task, "error_message", None)
+        if error_message:
+            sections.append("### Error\n" + _compact(error_message, 1000))
+
+        # Rule-based reliability (the MECHANICS dimension, not an LLM opinion):
+        # a 'done' task ran clean, 'failed' is a hard mechanical miss, anything
+        # else terminal-with-output (e.g. reviewed) sits neutral -- the judge
+        # scores the content quality separately.
+        if status == "done":
+            mechanics = 1.0
+        elif status == "failed":
+            mechanics = 0.0
+        else:
+            mechanics = 0.5
+
+        text = "\n\n".join(sections)
+        return RunOutputBundle(
+            text=text,
+            kind="board_task",
+            terminal_state=status or "unknown",
+            mechanics_reliability=mechanics,
+            executor_model=None,  # single-agent ticket: executor known at run time
             empty=not text.strip(),
         )
 

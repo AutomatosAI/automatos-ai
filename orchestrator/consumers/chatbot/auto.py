@@ -56,9 +56,101 @@ class Complexity(str, Enum):
 class Action(str, Enum):
     """What Auto should do with this request."""
     RESPOND = "respond"      # Auto responds directly (no delegation)
-    DELEGATE = "delegate"    # Route to a single sub-agent
+    DELEGATE = "delegate"    # Route to a single sub-agent (answers THIS turn)
     WORKFLOW = "workflow"    # DEPRECATED — kept for backward compat parsing
     MISSION = "mission"      # PRD-125: Complex multi-step → suggest mission to user
+    ASSIGN = "assign"        # PRD-224: file a board ticket for a named single agent (off-thread)
+
+
+# PRD-224 US-004: the ASSIGN lane steers the turn to the three ticket tools.
+ASSIGN_TOOL_HINTS = [
+    "platform_create_task",
+    "platform_assign_task",
+    "platform_update_task_status",
+]
+
+# Imperative-by-default: only these defer phrasings queue the ticket instead of
+# starting it (baked decision, Gerard 2026-08-27).
+_DEFER_PHRASES = (
+    "queue it", "queue this", "later", "when free", "when you're free",
+    "when you get a chance", "no rush", "no hurry", "whenever", "hold off",
+    "don't start", "do not start", "when there's time",
+)
+
+
+def is_deferred_phrasing(message_text: Optional[str]) -> bool:
+    """True when the user's phrasing defers the ticket (queue, not start now)."""
+    m = (message_text or "").lower()
+    return any(p in m for p in _DEFER_PHRASES)
+
+
+def build_assign_directive(
+    *, target_agent_name: Optional[str], resolved: bool, deferred: bool
+) -> str:
+    """The ASSIGN-lane manager directive injected into Auto's system prompt.
+
+    When an agent name resolved to the roster, instruct Auto to file the ticket
+    for that agent and start it (unless deferred). When nothing resolved, the
+    baked decision (Gerard 2026-08-27) is to ASK in-thread — never auto-pick.
+
+    P224-RVW-3: the directive must NOT hardcode a 'supervised' claim. Supervision
+    is decided later in the handler (US-005: AUTO_TICKET_WATCH may be off, or the
+    watch may fail to attach), so Auto is told to report the platform_create_task
+    result's own 'supervision' field rather than assert supervision unconditionally.
+    """
+    if resolved and target_agent_name:
+        start = (
+            "Leave it queued (create it with status 'assigned') — the user asked "
+            "to defer it; the dispatcher will pick it up."
+            if deferred
+            else "Start it immediately: platform_update_task_status the new task "
+            "to 'in_progress' (an assigned agent begins at once)."
+        )
+        confirm_word = "queued" if deferred else "started"
+        return (
+            "\n\n## Manager directive — file this as a board ticket\n"
+            f"The user wants the agent '{target_agent_name}' to do this off-thread "
+            "on the board, NOT an inline answer. Do this now; do not answer the "
+            "request yourself:\n"
+            "1. platform_create_task with a clear title and a SELF-CONTAINED "
+            "description (everything the assigned agent needs to do the work "
+            "without reading this conversation), "
+            f"assigned_agent_name=\"{target_agent_name}\".\n"
+            f"2. {start}\n"
+            f"3. Confirm in ONE line with the task id and that it is {confirm_word}, "
+            "then state its supervision status by echoing the platform_create_task "
+            "result's 'supervision' field (set honestly from the AUTO_TICKET_WATCH "
+            "outcome). Do NOT claim it is supervised unless that field says so.\n"
+        )
+    return (
+        "\n\n## Manager directive — confirm the agent first\n"
+        "The user wants a single agent to own this on the board, but no agent name "
+        "resolved to your roster. Do NOT guess or auto-pick an agent. Call "
+        "platform_list_agents, then ask the user which agent should own it — name "
+        "2-3 plausible candidates from the roster. Once they choose, file the "
+        "ticket (platform_create_task with assigned_agent_name), start it unless "
+        "they deferred, and confirm in one line with the task id.\n"
+    )
+
+
+def apply_assign_bias(assessment: "ComplexityAssessment", message_text: Optional[str]) -> bool:
+    """PRD-224 US-004: bias an ASSIGN-lane turn in place (api/chat.py dispatch).
+
+    Steers ``tool_hints`` to the three ticket tools and attaches the manager
+    directive (start-now vs queued vs ask-in-thread), reading the start mode from
+    the user's phrasing. Returns the deferred flag (for the log line). Mutates the
+    per-turn assessment, matching how api/chat.py already adjusts it.
+    """
+    deferred = is_deferred_phrasing(message_text)
+    assessment.tool_hints = list(
+        dict.fromkeys(ASSIGN_TOOL_HINTS + (assessment.tool_hints or []))
+    )
+    assessment.context_directive = build_assign_directive(
+        target_agent_name=assessment.target_agent_name,
+        resolved=assessment.target_agent_id is not None,
+        deferred=deferred,
+    )
+    return deferred
 
 
 @dataclass
@@ -75,6 +167,9 @@ class ComplexityAssessment:
     needs_memory: bool = False
     tool_hints: List[str] = field(default_factory=list)
     needs_multi_agent: bool = False
+    # PRD-224 US-004: the ASSIGN-lane system-prompt directive, set per-turn by
+    # api/chat.py (never by the classifier), so it is deliberately NOT cached.
+    context_directive: Optional[str] = None
 
     def to_dict(self):
         return {
@@ -85,6 +180,10 @@ class ComplexityAssessment:
             "needs_memory": self.needs_memory,
             "needs_multi_agent": self.needs_multi_agent,
             "confidence": self.confidence,
+            # PRD-224: the resolved ASSIGN target survives the Redis round-trip so
+            # a cached "have <agent> do X" keeps its named-agent routing.
+            "target_agent_id": self.target_agent_id,
+            "target_agent_name": self.target_agent_name,
         }
 
 
@@ -580,6 +679,82 @@ _MEMORY_PATTERN = re.compile(
 )
 
 
+def build_assessment_prompt(
+    message: str, conversation_length: int, platform_context: str = ""
+) -> str:
+    """The Tier-3 classifier prompt (pure — string-presence testable).
+
+    Carries the three-lane routing rubric (PRD-224 US-004): DELEGATE answers
+    THIS turn, ASSIGN files an off-thread board ticket for a named single agent,
+    MISSION staffs a multi-agent project.
+    """
+    return f"""You are a message complexity classifier for an AI platform.
+
+Analyze the user's message step by step, then classify it.
+
+Message: "{message}"
+Conversation turn: {conversation_length}
+
+## Reasoning Steps (think through each):
+
+1. **Intent**: What is the user asking for? (greeting, question, action, complex task)
+2. **Tool need**: Does this require external data or actions? (database, email, search, file ops)
+3. **Memory need**: Does this reference past conversations or user preferences?
+4. **Coordination**: How many systems need to work together?
+
+## Classification levels:
+
+- **atom**: Greetings, chitchat, opinions, simple factual questions, jokes, acknowledgements. NO tools needed. This is the most common category — when in doubt, choose atom.
+- **molecule**: Needs 1-3 tools or actions. "Send email", "search docs", "check my emails and calendar", "list my agents". Even if multiple tools are needed, if it's a straightforward fetch-and-display, it's molecule.
+- **cell**: Needs tools + memory/context. "Reply to that email we discussed", "update the report from last week".
+- **organ**: Needs 4+ agents with different specializations coordinating on a multi-phase plan. "Research competitors, write a report, create a presentation, and email it to the team".
+- **organism**: Enterprise multi-step pipeline with verification and feedback loops. Very rare.
+
+## Routing lanes (the `action`):
+
+Three lanes decide WHERE the work happens. Pick deliberately:
+
+- **delegate**: a specialist agent answers THIS conversation, inline, and it's over. The user wants an answer in the chat now. (Most molecule/cell/organ work.)
+- **assign**: a named or single agent does work OFF-THREAD, on the board, to a deliverable — not an inline answer. Choose assign when there are ANY of these signals:
+    - an explicit agent name or role possessive: "have Jim…", "my accountant agent…", "get the researcher to…";
+    - a deliverable that outlives this turn (a report to file, invoices to chase, a task to own);
+    - no conversational answer is needed — the user is handing off work, not asking a question.
+  Defer phrasing means queue it rather than start now: "queue it", "later", "when free", "no rush". Imperative phrasing ("do it", "start now") means start immediately.
+- **mission**: a multi-agent PROJECT (organ/organism) — several specializations coordinating in phases. Reserved for genuinely multi-agent work.
+
+A single named agent doing one piece of work is **assign**, NOT mission. Missions are for multi-agent projects.
+
+## Examples:
+
+- "Morning Auto" → atom / respond (greeting)
+- "How are you?" → atom / respond (chitchat)
+- "Send an email to John" → molecule / delegate (email tool, inline)
+- "What agents do I have?" → molecule / respond (platform query)
+- "Search my docs for the Q4 report" → molecule / delegate (search tool, inline)
+- "Have my accountant agent chase the overdue invoices" → assign (named agent, off-thread deliverable), target_agent "accountant"
+- "Get Jim to draft the board pack, no rush" → assign + deferred (named agent, defer phrasing), target_agent "Jim"
+- "Research competitors, write a report, build a deck, and email the team" → organ / mission (multi-agent project)
+
+**Default bias: atom.** Most messages are simpler than they look.
+**Multi-tool ≠ complex.** Using 2-3 tools in parallel is molecule, not organ.
+**One named agent ≠ mission.** A single agent owning a deliverable is assign.
+{platform_context}
+Return ONLY valid JSON:
+{{
+  "complexity": "atom|molecule|cell|organ|organism",
+  "action": "respond|delegate|assign|mission",
+  "target_agent": "the agent name for an assign (else empty)",
+  "tool_hints": [],
+  "needs_memory": false,
+  "needs_multi_agent": false,
+  "reasoning": "one sentence"
+}}
+
+action mapping: "respond" for atom; "delegate" for inline molecule/cell/organ answers; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
+target_agent: for "assign", the agent name the user named (or the role, e.g. "accountant"); empty otherwise.
+tool_hints: short domain keywords like "email", "github", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
+
+
 # ---------------------------------------------------------------------------
 # AutoBrain (The Assessor)
 # ---------------------------------------------------------------------------
@@ -715,22 +890,14 @@ class AutoBrain:
     # Tier 3: LLM classification
     # ------------------------------------------------------------------
 
-    async def _planning_context_block(self, message: str) -> str:
-        """Cheap routing hint for Tier-3 classification: the active-agent roster.
-
-        The classifier only needs to know which specialisations exist to
-        delegate to. It must NOT share the planners' full
-        ``ContextService.build_planning_context`` pack (doc-RAG + graph BFS +
-        agent-performance history): on the hot path (every non-heuristic
-        message) that ran ~80-113s to inform a decision the message intent
-        already drives. The real planners (MissionPlanner, board plan_task)
-        keep the rich pack; the hot-path classifier does not. Empty string on
-        any failure — the classifier must never break because of this.
-        """
+    def _active_agents(self) -> List[Any]:
+        """The capped active-agent roster — the shared source for the Tier-3
+        routing context block AND ASSIGN-lane name matching. Fail-soft: an empty
+        list on any error, so the classifier never breaks because of this."""
         try:
             from core.models.core import Agent
 
-            agents = (
+            return (
                 self._db.query(Agent)
                 .filter(
                     Agent.workspace_id == self._workspace_id,
@@ -739,27 +906,97 @@ class AutoBrain:
                 .limit(_ROSTER_LIMIT)
                 .all()
             )
-            if not agents:
-                return ""
-            lines = []
-            for a in agents:
-                name = getattr(a, "name", None) or getattr(a, "slug", None) or "agent"
-                role = getattr(a, "role", None)
-                desc = (getattr(a, "description", None) or "").strip()
-                label = f"{name} ({role})" if role else str(name)
-                summary = f": {desc[:80]}" if desc else ""
-                lines.append(f"- {label}{summary}")
-            return (
-                "\n## Available agents (for routing)\n"
-                + "\n".join(lines)
-                + "\n\nThe roster shows which specialisations exist to delegate to.\n"
-            )
         except Exception:
             logger.debug(
                 "[AutoBrain] roster unavailable — classifying without it",
                 exc_info=True,
             )
+            return []
+
+    def _match_roster_agent(self, name: Optional[str], agents=None):
+        """Resolve an agent name from the user's request against the active
+        roster (PRD-224 US-004). Case-insensitive: exact name first, then a
+        forgiving contains match ("my accountant agent" -> "Accountant"). BOTH
+        stages resolve ONLY when exactly one distinct agent matches. Returns
+        (agent_id, canonical_name) or (None, None). NEVER a fuzzy best-guess —
+        an ambiguous OR unresolved name is the ask-in-thread signal.
+
+        P224-RVW-1: the contains fallback previously returned the FIRST hit,
+        so 'Jim' silently picked whichever of 'Jim Whitfield'/'Jimmy Cross'
+        Postgres returned first. P224-RVW-4: the EXACT loop had the same defect
+        — it returned the first exact hit with no ambiguity check, so two ACTIVE
+        agents sharing a case-insensitive name ('Atlas'/'atlas' — Agent.name has
+        no unique constraint, only (workspace_id, slug)) resolved row-order-
+        dependently. Both stages now dedup by agent id and resolve only on a
+        single distinct match — resolution never depends on row order."""
+        if not name or not name.strip():
+            return None, None
+        target = name.strip().lower()
+        agents = agents if agents is not None else self._active_agents()
+        # Exact match wins — but collect EVERY exact (case-insensitive) hit keyed
+        # by agent id so two agents sharing a name don't collapse to a first-row
+        # pick. Resolve on exactly one; >=2 exact is ambiguous → ask in-thread.
+        exact = {}
+        for a in agents:
+            if (getattr(a, "name", "") or "").lower() == target:
+                exact[a.id] = a.name
+        if len(exact) == 1:
+            (agent_id, canonical_name), = exact.items()
+            return agent_id, canonical_name
+        if len(exact) >= 2:
+            return None, None
+        # No exact hit: collect EVERY contained-name match (either direction),
+        # keyed by agent id so distinct agents don't collapse. Resolve only
+        # when exactly one distinct agent matches; 0 or >=2 → ask in-thread.
+        matches = {}
+        for a in agents:
+            an = (getattr(a, "name", "") or "").lower()
+            if an and (an in target or target in an):
+                matches[a.id] = a.name
+        if len(matches) == 1:
+            (agent_id, canonical_name), = matches.items()
+            return agent_id, canonical_name
+        return None, None
+
+    @staticmethod
+    def _normalize_action(raw: Optional[str]) -> "Action":
+        """Map a raw classifier action string to an Action. 'workflow' is the
+        deprecated alias for 'mission' (PRD-125). Raises ValueError on an unknown
+        value — the caller's LLM-failure fallback owns that."""
+        a = (raw or "respond").strip().lower()
+        if a == "workflow":
+            a = "mission"
+        return Action(a)
+
+    async def _planning_context_block(self, message: str, agents=None) -> str:
+        """Cheap routing hint for Tier-3 classification: the active-agent roster.
+
+        The classifier only needs to know which specialisations exist to
+        delegate/assign to. It must NOT share the planners' full
+        ``ContextService.build_planning_context`` pack (doc-RAG + graph BFS +
+        agent-performance history): on the hot path (every non-heuristic
+        message) that ran ~80-113s to inform a decision the message intent
+        already drives. The real planners (MissionPlanner, board plan_task)
+        keep the rich pack; the hot-path classifier does not. ``agents`` may be
+        pre-fetched (so classify + name-match share one query). Empty string on
+        an empty roster — the classifier must never break because of this.
+        """
+        agents = agents if agents is not None else self._active_agents()
+        if not agents:
             return ""
+        lines = []
+        for a in agents:
+            name = getattr(a, "name", None) or getattr(a, "slug", None) or "agent"
+            role = getattr(a, "role", None)
+            desc = (getattr(a, "description", None) or "").strip()
+            label = f"{name} ({role})" if role else str(name)
+            summary = f": {desc[:80]}" if desc else ""
+            lines.append(f"- {label}{summary}")
+        return (
+            "\n## Available agents (for routing)\n"
+            + "\n".join(lines)
+            + "\n\nThe roster shows which specialisations exist to delegate or assign to.\n"
+        )
 
     async def _llm_classify(
         self, message: str, conversation_length: int
@@ -783,60 +1020,11 @@ class AutoBrain:
         t0 = time.monotonic()
 
         # PRD-164 S1 (Q61): the one planning pack informs routing decisions.
-        platform_context = await self._planning_context_block(message)
-
-        prompt = f"""You are a message complexity classifier for an AI platform.
-
-Analyze the user's message step by step, then classify it.
-
-Message: "{message}"
-Conversation turn: {conversation_length}
-
-## Reasoning Steps (think through each):
-
-1. **Intent**: What is the user asking for? (greeting, question, action, complex task)
-2. **Tool need**: Does this require external data or actions? (database, email, search, file ops)
-3. **Memory need**: Does this reference past conversations or user preferences?
-4. **Coordination**: How many systems need to work together?
-
-## Classification levels:
-
-- **atom**: Greetings, chitchat, opinions, simple factual questions, jokes, acknowledgements. NO tools needed. This is the most common category — when in doubt, choose atom.
-- **molecule**: Needs 1-3 tools or actions. "Send email", "search docs", "check my emails and calendar", "list my agents". Even if multiple tools are needed, if it's a straightforward fetch-and-display, it's molecule.
-- **cell**: Needs tools + memory/context. "Reply to that email we discussed", "update the report from last week".
-- **organ**: Needs 4+ agents with different specializations coordinating on a multi-phase plan. "Research competitors, write a report, create a presentation, and email it to the team".
-- **organism**: Enterprise multi-step pipeline with verification and feedback loops. Very rare.
-
-## Examples:
-
-- "Morning Auto" → atom (greeting)
-- "How are you?" → atom (chitchat)
-- "What's the weather like?" → atom (conversational)
-- "Tell me about yourself" → atom (identity question)
-- "Send an email to John" → molecule (email tool)
-- "What agents do I have?" → molecule (platform query)
-- "Search my docs for the Q4 report" → molecule (search tool)
-- "Check my emails and calendar for today" → molecule (2 tools, but simple fetch)
-- "What meetings do I have and any urgent emails?" → molecule (2 tools, straightforward)
-- "Create an agent with these 3 skills" → molecule (platform tools, one workflow)
-- "Remember last week's meeting? Update those notes" → cell (memory + action)
-- "Research this topic, write a blog post, then publish it" → organ (multi-phase, different skills)
-
-**Default bias: atom.** Most messages are simpler than they look.
-**Multi-tool ≠ complex.** Using 2-3 tools in parallel is molecule, not organ. Organ requires different agents with different specializations working in phases.
-{platform_context}
-Return ONLY valid JSON:
-{{
-  "complexity": "atom|molecule|cell|organ|organism",
-  "action": "respond|delegate|mission",
-  "tool_hints": [],
-  "needs_memory": false,
-  "needs_multi_agent": false,
-  "reasoning": "one sentence"
-}}
-
-action mapping: "respond" for atom, "delegate" for molecule/cell/organ, "mission" ONLY for organism (very rare, needs 4+ agents in phases).
-tool_hints: short domain keywords like "email", "github", "jira", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
+        # PRD-224 US-004: fetch the roster once — it drives BOTH the routing
+        # context block and the ASSIGN-lane name match below.
+        roster = self._active_agents()
+        platform_context = await self._planning_context_block(message, roster)
+        prompt = build_assessment_prompt(message, conversation_length, platform_context)
 
         try:
             from core.llm import create_llm_manager
@@ -852,15 +1040,28 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
             if json_match:
                 data = json.loads(json_match.group(0))
                 elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
-                # PRD-125: Normalize "workflow" → MISSION (backward compat)
-                raw_action = data.get("action", "respond").lower()
-                if raw_action == "workflow":
-                    raw_action = "mission"
+                # PRD-125: "workflow" → MISSION (deprecated alias, back-compat).
+                action = self._normalize_action(data.get("action", "respond"))
+                # PRD-224 US-004: on the ASSIGN lane, resolve the named agent
+                # against the SAME roster shown to the classifier. An unresolved
+                # name keeps target_agent_id None → api/chat.py asks in-thread
+                # (baked decision: never reflexive matcher auto-pick).
+                target_agent_id = None
+                target_agent_name = None
+                if action == Action.ASSIGN:
+                    proposed = (data.get("target_agent") or "").strip()
+                    target_agent_id, target_agent_name = self._match_roster_agent(
+                        proposed, roster
+                    )
+                    if target_agent_name is None and proposed:
+                        target_agent_name = proposed  # keep the name for the ask
                 assessment = ComplexityAssessment(
                     complexity=Complexity(data.get("complexity", "atom").lower()),
-                    action=Action(raw_action),
+                    action=action,
                     reasoning=data.get("reasoning", "LLM classified"),
                     confidence=0.85,
+                    target_agent_id=target_agent_id,
+                    target_agent_name=target_agent_name,
                     needs_memory=data.get("needs_memory", False),
                     tool_hints=data.get("tool_hints", []),
                     needs_multi_agent=data.get("needs_multi_agent", False),
@@ -922,15 +1123,15 @@ tool_hints: short domain keywords like "email", "github", "jira", "code", "datab
                         "workspace_id": self._workspace_id,
                     },
                 )
-                # PRD-125: Normalize cached "workflow" → "mission"
-                cached_action = data["action"]
-                if cached_action == "workflow":
-                    cached_action = "mission"
+                # PRD-125: cached "workflow" → "mission" (deprecated alias).
                 return ComplexityAssessment(
                     complexity=Complexity(data["complexity"]),
-                    action=Action(cached_action),
+                    action=self._normalize_action(data["action"]),
                     reasoning=data.get("reasoning", "cached") + " (cached)",
                     confidence=data.get("confidence", 0.90),
+                    # PRD-224: restore the resolved ASSIGN target from cache.
+                    target_agent_id=data.get("target_agent_id"),
+                    target_agent_name=data.get("target_agent_name"),
                     needs_memory=data.get("needs_memory", False),
                     tool_hints=data.get("tool_hints", []),
                     needs_multi_agent=data.get("needs_multi_agent", False),

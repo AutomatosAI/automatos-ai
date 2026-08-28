@@ -29,19 +29,26 @@ def register_watch_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "target_type": {
                     "type": "string",
-                    "enum": ["mission", "playbook_execution", "scheduled_playbook"],
+                    "enum": [
+                        "mission",
+                        "playbook_execution",
+                        "scheduled_playbook",
+                        "board_task",
+                    ],
                     "description": (
                         "What kind of thing to watch: a mission (run UUID), a "
-                        "playbook execution (execution_id like 'exec-...'), or a "
+                        "playbook execution (execution_id like 'exec-...'), a "
                         "scheduled playbook (playbook id -- watches the schedule "
-                        "for missed/benched runs)."
+                        "for missed/benched runs), or a board task (the integer "
+                        "task id -- supervises an assigned ticket to a verdict)."
                     ),
                 },
                 "target_id": {
                     "type": "string",
                     "description": (
-                        "The id of the target: mission UUID, execution_id, or "
-                        "playbook id."
+                        "The id of the target: mission UUID, execution_id, "
+                        "playbook id, or -- for a board_task -- the integer task "
+                        "id as a string (e.g. '4242')."
                     ),
                 },
                 "title": {

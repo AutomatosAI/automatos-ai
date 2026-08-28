@@ -1122,12 +1122,25 @@ class PlatformActionExecutor:
             "platform_execute_playbook",
             "platform_execute_recipe",
             "platform_schedule_task",
+            # PRD-224 US-005: the ASSIGN-lane ticket auto-attaches a watch whose
+            # verdict must post back to THIS conversation.
+            "platform_create_task",
         )
         if action_name in _WATCH_ORIGIN_ACTIONS:
             params = {k: v for k, v in params.items() if k != "_origin_chat_id"}
             _origin_chat = (caller_context or {}).get("conversation_id")
             if _origin_chat:
                 params = {**params, "_origin_chat_id": str(_origin_chat)}
+
+        # PRD-224 US-005: the ASSIGN-lane flag rides caller_context (set only when
+        # Auto's turn routed ASSIGN). Strip-then-inject like the origin above, so a
+        # tool arg can NEVER fake supervision on headless paths (board dispatcher,
+        # heartbeat, recipes) where caller_context carries no lane. This is what
+        # makes auto-supervision mechanical — the LLM cannot forget or spoof it.
+        if action_name == "platform_create_task":
+            params = {k: v for k, v in params.items() if k != "_assign_lane"}
+            if (caller_context or {}).get("assign_lane"):
+                params = {**params, "_assign_lane": True}
 
         # PRD-206 S1: memory writes carry their owner (drives the Q7 private/
         # workspace scope default) and their originating chat (the thread
