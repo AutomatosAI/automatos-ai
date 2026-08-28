@@ -1,0 +1,62 @@
+{
+ "project": "Automatos AI Platform — PRD-222 Wave 2b: tiers v1, exposure profiles, plan recommendation (Q1 ANSWERED)",
+ "branchName": "ralph/prd-222-w2b",
+ "description": "Cut from origin/main AFTER PR #630 (Wave 2a) is merged — launch preflight verifies the retirement landed (seed_onboarding_agents.py ABSENT on origin/main) and ABORTS otherwise. Q1 is ANSWERED: docs/PRDS/PRD-222-Q1-TIER-STRAWMAN.md (seeded on this branch) is the APPROVED v1 numbers contract — Basic $19 / Pro $49 / Business $99 display-only pricing (NO billing/checkout code — Q5 explicitly out), enterprise coming-soon label only, every number config-driven because Gerard tunes them live while testing. BINDING RULES: exactly ONE migration (US-023 plan default rename + backfill); hidden ≠ deleted (D5 — exposure trims nav/tool-surface/labels, never data or routes); JSONB rebuild-don't-mutate; no os.getenv outside config.py; never weaken tests/test_prd222_trust_guards.py or advance_onboarding_stage's validator; Wave-1 + Wave-2a surfaces are load-bearing (opener, power-up, pill, banner, intake card, connect card, checklist card, reset endpoint + dev page, v2 section) — breaking any is a hard failure; state changes flow through platform_update_onboarding only (FR-4); tool-surface trimming happens at the single assembly seam with families mapped in config, and the basic-tier token saving is MEASURED and recorded; PURE tests locally (@integration skips; real-Postgres in CI per-story push); NEVER git add -A/./-u; never git stash -u. Frontend gate: vitest + build green after every frontend story; orchestrator gate: documented env baseline (prd172|dr_restore|composio flakes only).",
+ "userStories": [
+  {
+   "id": "US-023",
+   "title": "W2·S1a — Tier config v1 (Basic/Pro/Business) + plan default rename & backfill",
+   "description": "Q1 ANSWERED (docs/PRDS/PRD-222-Q1-TIER-STRAWMAN.md is APPROVED v1 — seeded on this branch; it is the numbers contract). (1) config.py: a PLAN_TIERS structure (env-overridable JSON or structured constants — follow config.py's existing style) carrying, per tier basic/pro/business: display_name, display_price_usd (19/49/99 — DISPLAY ONLY, label as early-access; no billing code anywhere, Q5), seats, max_agents (0=unlimited), mission_concurrency, watcher_limit, marketplace_depth, and the capability families (codegraph, nl2sql, team, voice booleans per the strawman table). 'enterprise' appears ONLY as a coming_soon display entry — no limits, not assignable. (2) THE ONE migration: workspaces.plan server default 'starter' → 'basic' + backfill existing rows ('starter'→'basic'); idempotent; nothing else. (3) plan assignment helper (service layer, reused by US-025's tool path): setting a plan writes the tier's limits into plan_limits (seats/max_agents/budget…) as a NEW dict (PRD-220 rebuild-don't-mutate) so existing plan_limits consumers (budget at config.py:794, max_agents) keep working unchanged. NO enforcement hardening beyond what exists — exposure is US-024, quotas stay as-is.",
+   "acceptanceCriteria": [
+    "PLAN_TIERS in config.py matches the strawman v1 exactly (names basic/pro/business, prices 19/49/99, seats 1/5/25, agents 5/20/0, concurrency 1/3/10, watchers 1/5/0-unlimited); enterprise = coming_soon display-only; all env-overridable without redeploy",
+    "Exactly ONE new alembic revision: default 'basic' + starter→basic backfill, idempotent (test: runs twice, and a workspace with plan='pro' untouched)",
+    "Plan-assignment helper writes tier limits into plan_limits via full-dict reassignment; existing budget/max_agents consumers still green",
+    "No billing/checkout/payment code anywhere in the diff (grep stripe|checkout|payment == 0 in code dirs); orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "orchestrator/config.py",
+    "orchestrator/alembic/versions/",
+    "orchestrator/services/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-024",
+   "title": "W2·S1b — Exposure profiles: nav + tool-surface + marketplace depth from the tier",
+   "description": "Hidden ≠ deleted (D5): trimming is presentation + tool-surface, never data. (1) Server: GET /api/workspaces/current gains an `exposure` block derived from PLAN_TIERS for the workspace's plan (nav item keys, tool families, marketplace_depth, plus the tier display info for UI). Follow US-002's serialization pattern in api/workspaces.py; route manifest untouched (same route). (2) Frontend nav: FIND the real nav/sidebar component (grep for the app's nav item definitions — e.g. command-center/agents/missions link array; it was NOT pinned at kit time); render items gated by exposure.nav — basic hides codegraph/nl2sql/team surfaces per the strawman; a hidden item is absent from nav, its route still resolves (deep links work — no route deletion). (3) Auto's per-turn tool surface: find the single assembly point where platform tool schemas are gathered for a turn (modules/tools/discovery — the registration/listing seam) and filter by the tier's tool families for the workspace; MEASURE per-turn schema tokens before/after for a basic workspace and record the numbers in the commit body (the ~11k-token tool-surface load is a standing complaint — this is the first real trim). Families must be a config-side mapping (tool name → family), not hardcoded in the filter. (4) Marketplace: full catalog stays VISIBLE for all tiers; items beyond the workspace's depth get a plan label chip ('Pro' / 'Business') in marketplace-grid.tsx — no install blocking in this story beyond what exists. All of it config-driven: changing a tier's exposure in config/env changes behavior without redeploy (test proves a config override flips a nav key).",
+   "acceptanceCriteria": [
+    "exposure block on the current-workspace response, derived from PLAN_TIERS (backend test per tier)",
+    "Nav renders from exposure: basic hides the strawman's gated surfaces, pro/business show them (component tests); hidden routes still resolve directly",
+    "Auto's tool surface filtered by tier family map at the single assembly seam; commit body records measured before/after token counts for basic; full surface unchanged for business (test)",
+    "Marketplace shows plan-label chips beyond the tier's depth; no item hidden (component test)",
+    "Config override flips exposure without code change (test); frontend suite + build green; orchestrator baseline"
+   ],
+   "files": [
+    "orchestrator/api/workspaces.py",
+    "orchestrator/modules/tools/discovery/",
+    "frontend/components/",
+    "frontend/components/marketplace/marketplace-grid.tsx",
+    "orchestrator/tests/",
+    "frontend/"
+   ]
+  },
+  {
+   "id": "US-025",
+   "title": "W2·S2 — The proposal recommends a plan; acceptance sets it",
+   "description": "The v2 onboarding section's proposal block (orchestrator/modules/context/sections/onboarding.py ~:129 'Present a structured setup proposal' — re-verify) gains plan recommendation: Auto recommends basic/pro/business from the stored segment (business type, goal, comfort) + expressed team size — simple explainable rules in a pure helper (no LLM-side pricing math), display prices from PLAN_TIERS with the early-access label, 'Enterprise coming soon' as a single line. Acceptance of the proposal sets the plan via the EXISTING platform_update_onboarding tool path extended with an optional validated plan field (schema+handler+3-file pattern; only assignable tiers accepted — 'enterprise' rejected with honest copy) → the US-023 assignment helper writes plan + plan_limits (FR-4 auditability: state changes only through the tool). Funnel: plan_recommended / plan_accepted events (follow the trial_* event pattern). The section stays within its token budget — re-measure the largest variant and record it (raise deliberately per Q7 only if measurement demands).",
+   "acceptanceCriteria": [
+    "Pure recommendation helper with tests (segment+size → tier, explainable); proposal block renders recommendation + display pricing + enterprise-soon line (section tests)",
+    "platform_update_onboarding accepts an optional plan field validated against assignable tiers; enterprise rejected honestly; walker/schema-truth test still green",
+    "Accepting writes plan + derived plan_limits through the US-023 helper (integration-style test); plan_recommended/plan_accepted funnel events emitted",
+    "Largest section variant measured and within budget (number in commit body); orchestrator baseline; frontend suite green if touched"
+   ],
+   "files": [
+    "orchestrator/modules/context/sections/onboarding.py",
+    "orchestrator/modules/tools/discovery/actions_onboarding.py",
+    "orchestrator/modules/tools/discovery/handlers_onboarding.py",
+    "orchestrator/services/",
+    "orchestrator/tests/"
+   ]
+  }
+ ]
+}
