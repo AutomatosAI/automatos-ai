@@ -208,6 +208,68 @@ async def test_no_answer_sentinel_is_cannot_answer(spy_events, no_external):
     assert stub.calls == 1  # composed, then declined — no fabrication
 
 
+@pytest.mark.parametrize("reply", [
+    "NO_ANSWER",
+    "NO_ANSWER.",
+    "**NO_ANSWER**",
+    "NO_ANSWER - not in context",
+    "NO_ANSWER — the context does not cover this",
+    "> NO_ANSWER",
+    "no_answer",
+])
+@pytest.mark.asyncio
+async def test_no_answer_near_miss_is_cannot_answer(reply, spy_events, no_external):
+    """P229-RVW-3 — a non-bare declination (punctuation / markdown / caveat) is
+    cannot_answer, NOT a cited answer. Exact equality only caught the bare form,
+    letting the refusal text leak WITH sources — a fabrication-adjacent bug."""
+    stub = _LLMStub(content=reply)
+    db = _FakeSession({
+        OrchestrationTaskDependency: [_dep()],
+        OrchestrationTask: [_upstream_task()],
+        OrchestrationEvent: [],
+    })
+
+    result = await answer_clarification(
+        db, _subject(), "Unrelated question?", llm_factory=_factory(stub),
+    )
+
+    assert result == {"cannot_answer": True, "reason": "unretrievable"}
+    assert stub.calls == 1  # composed, then declined — no leaked sources
+
+
+@pytest.mark.asyncio
+async def test_genuine_answer_mentioning_sentinel_is_returned(spy_events, no_external):
+    # A real grounded answer that merely MENTIONS the token mid-sentence is not a
+    # declination — it is returned normally with its sources.
+    stub = _LLMStub(
+        content="Write to s3://acme-staging; the pipeline emits NO_ANSWER only on empty input (see [1]).",
+    )
+    db = _FakeSession({
+        OrchestrationTaskDependency: [_dep()],
+        OrchestrationTask: [_upstream_task()],
+        OrchestrationEvent: [],
+    })
+
+    result = await answer_clarification(
+        db, _subject(), "Where do I write?", llm_factory=_factory(stub),
+    )
+
+    assert "answer" in result and result["answer"]
+    assert result["sources"]
+    assert [c.event_type for c in spy_events] == [EventType.CLARIFICATION_ANSWERED]
+
+
+def test_is_no_answer_unit():
+    # bare + non-bare forms decline; genuine answers (incl. mid-sentence mention) do not
+    assert oa._is_no_answer("NO_ANSWER")
+    assert oa._is_no_answer("**NO_ANSWER**")
+    assert oa._is_no_answer("NO_ANSWER.")
+    assert oa._is_no_answer("  no_answer  ")
+    assert oa._is_no_answer("")
+    assert not oa._is_no_answer("Use output B (see [1]).")
+    assert not oa._is_no_answer("The pipeline emits NO_ANSWER on empty input.")
+
+
 # ---------------------------------------------------------------------------
 # budget → cannot_answer(budget), no retrieval, no LLM
 # ---------------------------------------------------------------------------

@@ -38,10 +38,15 @@ REASON_UNRETRIEVABLE = "unretrievable"
 # Governance categories (PRD-223 framing) — never answered by Auto; escalated.
 GOVERNANCE_CATEGORIES = ("destructive", "spend", "scope")
 
-# The exact sentinel the composition prompt returns when the retrieved context
-# does not actually answer the question — treated as cannot_answer (grounding
-# guard: retrieval hits do not guarantee an answer lives in them).
+# The sentinel the composition prompt returns when the retrieved context does
+# not actually answer the question — treated as cannot_answer (grounding guard:
+# retrieval hits do not guarantee an answer lives in them).
 _NO_ANSWER = "NO_ANSWER"
+
+# Characters a model tends to wrap the bare sentinel in — markdown emphasis,
+# blockquote/list markers, quotes, whitespace — stripped from the LEFT before
+# the leading-sentinel test so '**NO_ANSWER**' / '> NO_ANSWER' still decline.
+_SENTINEL_LEADING = "*_`~'\"#>- \t"
 
 # Conservative keyword probes for governance detection when the caller does not
 # declare a category. A false positive only OVER-escalates (safe + visible); it
@@ -128,7 +133,7 @@ async def answer_clarification(
     answer = await _compose_answer(
         question, blocks, workspace_id=subject.workspace_id, llm_factory=llm_factory
     )
-    if not answer or answer.strip() == _NO_ANSWER:
+    if not answer or _is_no_answer(answer):
         _record(db, subject, question, outcome="cannot_answer", extra={"reason": REASON_UNRETRIEVABLE})
         return {"cannot_answer": True, "reason": REASON_UNRETRIEVABLE}
 
@@ -470,6 +475,20 @@ def _record(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _is_no_answer(reply: str) -> bool:
+    """True when the composed reply is a declination, robust to non-bare forms
+    (P229-RVW-3). The prompt asks for exactly ``NO_ANSWER``; models often add
+    trailing punctuation, a caveat, or markdown emphasis. Any reply that LEADS
+    with the sentinel — after uppercasing and stripping surrounding markup —
+    declines; a mid-sentence mention inside a genuine answer does NOT (so a real
+    answer that references the token is still returned). Exact-string equality
+    let '**NO_ANSWER**' / 'NO_ANSWER — not in context' leak as a cited answer."""
+    if not reply:
+        return True
+    normalized = reply.strip().upper().lstrip(_SENTINEL_LEADING)
+    return normalized.startswith(_NO_ANSWER)
+
 
 def _ref_label(source: Dict[str, Any]) -> str:
     kind = source.get("type", "source")
