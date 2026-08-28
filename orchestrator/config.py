@@ -6,6 +6,8 @@ ONLY PLACE where os.getenv() is called for configuration.
 All other files import from here.
 """
 
+import copy
+import json
 import os
 import logging
 from pathlib import Path
@@ -1642,9 +1644,111 @@ COMPLEXITY_TOKEN_BUDGET: dict[str, int] = {
 # Backward compatibility alias
 orchestrator_config = config
 
+# ---------------------------------------------------------------------------
+# PRD-222 W2·S1 (US-023): PLAN_TIERS — the v1 tier contract (approved strawman,
+# 2026-08-28). DISPLAY PRICING ONLY — no billing/checkout is wired anywhere
+# (PRD §12 Q5); ``display_price_usd`` sources an EARLY-ACCESS label, never a
+# charge. Capability families (codegraph/nl2sql/team/voice) and the quota limits
+# both derive from here: US-024 reads them for exposure profiles, and US-025's
+# assignment helper (services/plan_tiers.py) writes the limits into
+# ``workspaces.plan_limits`` under the keys live code already reads
+# (seats→max_members, max_agents, budget). ``enterprise`` is a COMING-SOON
+# display entry only — never assignable.
+#
+# Every number is env-overridable WITHOUT a redeploy via
+# ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults)
+# so tiers can be tuned live while testing. ``0`` means "unlimited" for
+# max_agents / watcher_limit, and "no ceiling / custom" for budget_usd.
+# ---------------------------------------------------------------------------
+_PLAN_TIERS_DEFAULTS: dict[str, dict] = {
+    "basic": {
+        "display_name": "Basic",
+        "display_price_usd": 19,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 1,
+        "max_agents": 5,
+        "mission_concurrency": 1,
+        "watcher_limit": 1,
+        "marketplace_depth": 1,
+        "budget_usd": 25,
+        "families": {"codegraph": False, "nl2sql": False, "team": False, "voice": False},
+    },
+    "pro": {
+        "display_name": "Pro",
+        "display_price_usd": 49,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 5,
+        "max_agents": 20,
+        "mission_concurrency": 3,
+        "watcher_limit": 5,
+        "marketplace_depth": 2,
+        "budget_usd": 100,
+        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
+    },
+    "business": {
+        "display_name": "Business",
+        "display_price_usd": 99,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 25,
+        "max_agents": 0,
+        "mission_concurrency": 10,
+        "watcher_limit": 0,
+        "marketplace_depth": 3,
+        "budget_usd": 0,
+        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
+    },
+    "enterprise": {
+        "display_name": "Enterprise",
+        "assignable": False,
+        "coming_soon": True,
+    },
+}
+
+
+def load_plan_tiers(env_override=None) -> dict:
+    """Resolve PLAN_TIERS from the defaults + an optional JSON env override.
+
+    The override (``AUTOMATOS_PLAN_TIERS_JSON`` by default, or an explicit string
+    for tests) is a JSON object of ``{tier: {field: value}}`` deep-merged onto
+    the defaults — so one env var can reprice or re-gate any tier with no code
+    change or redeploy. Malformed JSON is ignored (defaults stand) and logged.
+    Returns a fresh deep copy so callers can never mutate the module constant.
+    """
+    tiers = copy.deepcopy(_PLAN_TIERS_DEFAULTS)
+    raw = env_override if env_override is not None else os.getenv("AUTOMATOS_PLAN_TIERS_JSON", "")
+    raw = (raw or "").strip()
+    if not raw:
+        return tiers
+    try:
+        override = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("[config] AUTOMATOS_PLAN_TIERS_JSON is not valid JSON — using tier defaults")
+        return tiers
+    if not isinstance(override, dict):
+        return tiers
+    for name, fields in override.items():
+        if not isinstance(fields, dict):
+            continue
+        merged = dict(tiers.get(name, {}))
+        for key, value in fields.items():
+            if key == "families" and isinstance(value, dict):
+                fam = dict(merged.get("families", {}))
+                fam.update(value)
+                merged["families"] = fam
+            else:
+                merged[key] = value
+        tiers[name] = merged
+    return tiers
+
+
+PLAN_TIERS: dict[str, dict] = load_plan_tiers()
+
 # Validate on import (non-blocking)
 # if not config.validate():
 #     logger.warning("⚠️  WARNING: Configuration validation failed")
 
 # Export for easy import
-__all__ = ['config', 'Config', 'orchestrator_config']
+__all__ = ['config', 'Config', 'orchestrator_config', 'PLAN_TIERS', 'load_plan_tiers']
