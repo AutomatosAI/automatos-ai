@@ -52,6 +52,42 @@
     "frontend/components/command-center/command-center-shell.tsx",
     "frontend/"
    ]
+  },
+  {
+   "id": "P227-RVW-1",
+   "title": "CRITICAL (review) — mission narration commits/rolls back the coordinator's SHARED session, silently destroying mission state on a chat-write failure",
+   "description": "US-002 narration is NOT fail-soft the way US-001's board NOTIFY is. _narrate_mission (coordinator_service.py:398) → deliver_background_message → post_background_message → ChatService.save_message does a REAL self.db.commit() on the coordinator's own session (consumers/chatbot/service.py:469,475); on ANY exception deliver_background_message calls db.rollback() on that same session (chat_messenger.py:199). Every narration call site fires MID-transaction, before the caller commits: approve_plan (:3270), _record_task_result (:2413,:2415), cancel_mission (:3443), the tick terminal observer (:1808), approval-expiry (:2875). The transitions before them are flush-only (orchestration_state.py:163,282,394) and the real commit is the caller's (api/missions.py:1301 after approve_plan; :419 after create; the tool executor for the tool path). FAILURE: approve_plan flushes RUNNING + queued tasks (uncommitted) → save_message's commit raises (transient DB error / dropped connection / serialization failure, plausible under load since this fires on EVERY approve/cancel/task-terminal) → deliver_background_message rolls back → the RUNNING transition + RUN_APPROVED event + queued tasks are destroyed → approve_plan returns run normally → the caller commits an empty tx → the API returns HTTP 200 state='awaiting_approval' (the tool returns success:true, state:awaiting_approval — self-contradictory) and the mission is silently stuck forever. Same class: cancel_mission (cancel reverted → mission still RUNNING, keeps dispatching + burning budget while the caller was told 'cancelled') and _record_task_result (task COMPLETED/FAILED reverted → re-dispatched next tick = duplicate execution). Invisible to test_prd227_mission_narration.py because it monkeypatches deliver_background_message wholesale and passes MagicMock() as db, so the real commit/rollback semantics are never exercised. US-001's notify_board_event (board_events.py:38-68 — pg_notify SELECT only, never commit/rollback; NOTIFY buffers until the caller's commit) is the correct reference pattern narration must match.",
+   "acceptanceCriteria": [
+    "Mission narration NEVER commits or rolls back the coordinator's session. Route the chat-message write used by mission narration through an INDEPENDENT short-lived session (e.g. a SessionLocal() scoped to just the message insert, the isolation the tick already uses for side effects) OR a savepoint (db.begin_nested()) whose failure rolls back ONLY to the savepoint — the caller's pending flushed work must be untouched on both the success and failure paths.",
+    "Regression test drives the REAL post_background_message / ChatService.save_message (NOT a monkeypatched deliver_background_message) against a Session whose message-write commit raises, and asserts a prior uncommitted caller write (a run flushed to RUNNING) SURVIVES the narration failure — the coordinator transaction is intact and the run is still RUNNING after the caller commits.",
+    "Test proves narration is not load-bearing for durability: approve_plan followed by the caller's commit persists RUNNING even when narration delivers nothing (disabled/no-op messenger).",
+    "No behavioural change to US-001 (notify_board_event stays pg_notify-only) and the existing watch_notifications / scheduled_task deliver_background_message producers keep working (their own top-level contexts own their commit).",
+    "bash scripts/ralph/acceptance-prd227.sh exits 0 and branch CI test.yml is green; no new SSE event names, routes, or alembic revisions."
+   ],
+   "files": [
+    "orchestrator/services/chat_messenger.py",
+    "orchestrator/consumers/chatbot/service.py",
+    "orchestrator/services/coordinator_service.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P227-RVW-2",
+   "title": "HIGH (review) — mission narration target is caller-controlled (config.origin_chat_id / config.chat_id) with workspace-only scoping → cross-user chat injection within a workspace",
+   "description": "The narration delivery target run.config['origin_chat_id'] is caller-controllable. handlers_missions.py:115 falls back to config['chat_id'] (a plain key inside the caller/LLM-supplied config tool-arg, never stripped) and :116 (if _origin_str and not config.get('origin_chat_id')) PRESERVES a caller-supplied config['origin_chat_id'] — it is never overwritten and never stripped, so it survives even over the server-injected origin. The executor's strip-then-inject hardening (platform_executor.py:1126-1130) guards only the top-level _origin_chat_id, never the nested config.*. The REST route POST /api/missions (api/missions.py:405,417) bypasses the executor entirely and copies body.config verbatim into coordinator.create_mission, which stores it as run.config unmodified (coordinator_service.py:2491); MissionCreateRequest.config is an unrestricted Dict[str,Any] (missions.py:83-85) and the tool schema has no additionalProperties:false (actions_missions.py:29-40). At delivery, _narrate_mission reads run.config['origin_chat_id'] (coordinator_service.py:418,427) and post_background_message honors any chat matching Chat.workspace_id — with NO Chat.user_id check (chat_messenger.py:124-137). FAILURE: any caller with missions:create (or a prompt-injected agent) creates a mission whose config.origin_chat_id (or config.chat_id on the tool path) is another workspace member's private chat uuid, and every 'Auto · mission' lifecycle line is persisted into that other user's chat — workspace-clamped (no cross-tenant) but cross-USER, violating chat_messenger's own documented 'rather than leaking across chats' invariant. Contract US-002 mandates the origin be server-injected only. (Independent reviewer rated this CRITICAL; down-rated to HIGH here because the workspace clamp blocks cross-tenant — Gerard to arbitrate.)",
+   "acceptanceCriteria": [
+    "run.config['origin_chat_id'] is set from the SERVER-injected _origin_chat_id ONLY. Delete the config['chat_id'] fallback (handlers_missions.py:115) and stop preserving a caller-supplied config['origin_chat_id'] — strip/ignore any caller-supplied origin_chat_id/chat_id from config before it becomes run.config, mirroring the executor's strip-then-inject discipline for the nested config.",
+    "Defense-in-depth at the single choke point: post_background_message honors a chat_id only when the target Chat.user_id equals the resolved owner (run.created_by → int users.id), else falls back to the Auto thread — add the user_id check beside the existing Chat.workspace_id filter (chat_messenger.py:124-137).",
+    "Test: a mission carrying a caller-supplied config['origin_chat_id'] (and, separately, config['chat_id']) pointing at a DIFFERENT user's workspace chat does NOT deliver there — it falls back to the creator's Auto thread.",
+    "Test: a server-injected _origin_chat_id still targets the originating chat; post_background_message rejects a workspace-valid chat owned by another user.",
+    "bash scripts/ralph/acceptance-prd227.sh exits 0 and branch CI test.yml is green."
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_missions.py",
+    "orchestrator/services/chat_messenger.py",
+    "orchestrator/api/missions.py",
+    "orchestrator/tests/"
+   ]
   }
  ]
 }
