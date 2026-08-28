@@ -65,9 +65,9 @@ def _board_children(db: Any, workspace_id: Any, parent: Any) -> list:
        board task (orchestration_board_bridge), so step→step blocking lives ONLY
        here — without it the cascade is 0 for the primary mission ask (P225-RVW-3).
 
-    Returned deduped by id, order stable (tree children first). Resolved with
-    equality queries per edge (mission DAGs are small; this is the cold cascade
-    path, not a request-hot loop).
+    Returned deduped by id, order stable (tree children first). Each level costs
+    O(1) queries — a parent_task_id tree query, an edge query, and ONE batched
+    dep-board load — independent of the DAG fan-out (P225-RVW-13).
     """
     from core.models.core import BoardTask
 
@@ -99,26 +99,34 @@ def _board_children(db: Any, workspace_id: Any, parent: Any) -> list:
     ):
         _add(child)
 
-    # Source 2 — the mission OrchestrationTaskDependency DAG.
+    # Source 2 — the mission OrchestrationTaskDependency DAG. The dependent board
+    # tasks load in ONE batched query (BoardTask.orchestration_task_id IN {edge
+    # task ids}), NOT a per-edge .first() loop: this traversal reruns per question
+    # row (up to 200) on the 30s-polled grants list, so an O(edges) round-trip
+    # loop per level was a scalability cliff (P225-RVW-13).
     ot_id = getattr(parent, "orchestration_task_id", None)
     if ot_id is not None:
         from core.models.orchestration import OrchestrationTaskDependency
 
-        edges = (
-            db.query(OrchestrationTaskDependency)
-            .filter(OrchestrationTaskDependency.depends_on_task_id == ot_id)
-            .all()
-        )
-        for edge in edges:
-            dep_board = (
+        dependent_ot_ids = [
+            edge.task_id
+            for edge in (
+                db.query(OrchestrationTaskDependency)
+                .filter(OrchestrationTaskDependency.depends_on_task_id == ot_id)
+                .all()
+            )
+            if edge.task_id is not None
+        ]
+        if dependent_ot_ids:
+            for dep_board in (
                 db.query(BoardTask)
                 .filter(
                     BoardTask.workspace_id == workspace_id,
-                    BoardTask.orchestration_task_id == edge.task_id,
+                    BoardTask.orchestration_task_id.in_(dependent_ot_ids),
                 )
-                .first()
-            )
-            _add(dep_board)
+                .all()
+            ):
+                _add(dep_board)
 
     return kids
 

@@ -175,6 +175,37 @@ def test_cascade_detail_loads_shown_tasks_in_one_query():
     assert db.stats["in_filters"] == 1  # one batched load, not three point reads
 
 
+def test_cascade_traversal_batches_dependent_lookups():
+    """The DAG dependent board tasks load in ONE batched ``in_()`` query per
+    level, not a per-edge ``.first()`` — so a fan-out of M dependency edges costs
+    O(1) dep-board queries, independent of M (P225-RVW-13). This traversal reruns
+    per question row on the 30s-polled grants list."""
+    from services.ask_cascade import board_task_cascade
+    from core.models.orchestration import OrchestrationTaskDependency
+
+    def _run(fanout):
+        db = _FakeSession()
+        ws = uuid.uuid4()
+        # Root board task 1 → orchestration task 100.
+        db.add(BoardTask(id=1, workspace_id=ws, title="root", status="in_progress",
+                         orchestration_task_id=100))
+        # `fanout` dependents, each blocked on OT 100 via the DAG ONLY (flat
+        # siblings, no parent_task_id — the primary mission shape, P225-RVW-3).
+        for k in range(fanout):
+            db.add(BoardTask(id=2 + k, workspace_id=ws, title=f"d{k}", status="assigned",
+                             parent_task_id=None, orchestration_task_id=200 + k))
+            db.add(OrchestrationTaskDependency(task_id=200 + k, depends_on_task_id=100))
+        cascade = board_task_cascade(db, ws, 1)
+        return len(cascade), db.stats.get("in_filters", 0)
+
+    small_n, small_in = _run(3)
+    large_n, large_in = _run(30)
+    assert (small_n, large_n) == (3, 30)   # every dependent is found either way
+    # ONE batched dep-board load at the root level, edge-count-independent (the
+    # per-edge .first() loop would have fired 0 in_ filters and M point reads).
+    assert small_in == large_in == 1
+
+
 # ===========================================================================
 # list route — kind filter + question-only cascade enrichment
 # ===========================================================================
