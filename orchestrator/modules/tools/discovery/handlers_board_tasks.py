@@ -417,8 +417,17 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # shape + event name as the human PATCH (api/board_tasks.py:912, "status_changed").
     _notify_board_safe(db, workspace_id, task.id, task.status, "status_changed")
 
-    # Trigger agent execution if moved to in_progress with an assigned agent
-    if new_status == "in_progress" and task.assigned_agent_id:
+    # Trigger agent execution if moved to in_progress with an assigned agent.
+    # P224-RVW-2: guard on the PRIOR status. An ASSIGN-lane ticket is created
+    # 'assigned' (US-001 NOTIFYs the dispatcher) then updated to 'in_progress'
+    # back-to-back; by then board_dispatcher.claim_tasks has usually already
+    # claimed the row (flipping it to in_progress via FOR UPDATE SKIP LOCKED) and
+    # launched once. Launching again on a row that was ALREADY in_progress double-
+    # executes the agent's real side effects (emails, external calls). Mirror
+    # run_task_now's guard (api/board_tasks.py:871): a task already in_progress is
+    # left alone — zero additional launches.
+    launched = False
+    if new_status == "in_progress" and task.assigned_agent_id and old_status != "in_progress":
         from api.board_tasks import _launch_task_execution
         _launch_task_execution(
             task_id=task.id,
@@ -427,6 +436,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
             prompt=task.raw_prompt or task.description or task.title,
             review_mode=task.review_mode or "auto",
         )
+        launched = True
     # PRD-224 US-001: a move back to 'assigned' (re-queue) wakes the dispatch loop
     # so the ticket is claimed on the LISTEN wake, not the fallback poll — the same
     # claimable guard the HTTP layer notifies on. in_progress launches inline above.
@@ -437,5 +447,5 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
         "success": True,
         "task_id": task.id,
         "status": task.status,
-        "triggered_execution": new_status == "in_progress" and task.assigned_agent_id is not None,
+        "triggered_execution": launched,
     }
