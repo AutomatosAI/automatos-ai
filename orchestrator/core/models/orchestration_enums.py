@@ -135,6 +135,13 @@ class EventType(str, Enum):
     # Permission (PRD-123 Pattern #5)
     PERMISSION_DENIED = "permission_denied"
 
+    # Mid-run clarifications (PRD-229 — ask_orchestrator ladder). Recorded on the
+    # run event trail; ANSWERED counts against CLARIFICATION_BUDGET, ESCALATED
+    # (cannot_answer / governance) does not. Stored in the String(50) event_type
+    # column — no migration.
+    CLARIFICATION_ANSWERED = "clarification_answered"
+    CLARIFICATION_ESCALATED = "clarification_escalated"
+
 
 # ---------------------------------------------------------------------------
 # ActorType — who triggered an orchestration event

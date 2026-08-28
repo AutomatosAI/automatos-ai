@@ -938,6 +938,11 @@ class Config:
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
+    # PRD-229: mid-run clarifications (ask_orchestrator). CLARIFICATION_BUDGET
+    # caps how many questions Auto ANSWERS per run from retrievable context;
+    # once spent, everything escalates (escalations are never budget-limited —
+    # they are visible and cheap by design). Default 3 (Gerard, 2026-08-27).
+    CLARIFICATION_BUDGET: int = int(os.getenv("CLARIFICATION_BUDGET", "3"))
     # Note: synthesis-task model selection is now driven by power_mode +
     # the agent's own configured model — no synthesis-specific override.
     # System LLM (gemini-2.5-flash) is reserved for codegraph / memory / planner.
