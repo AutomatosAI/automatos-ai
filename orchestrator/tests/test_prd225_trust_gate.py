@@ -385,3 +385,83 @@ async def test_gate_log_has_no_message_body(acks, caplog):
     gate_logs = [r.getMessage() for r in caplog.records if "trust-gate" in r.getMessage()]
     assert gate_logs, "expected a gate decision log line"
     assert all("ABC-SECRET" not in line and "wire 9000" not in line for line in gate_logs)
+
+
+# ===========================================================================
+# 7. P225-RVW-5 — the gate fails CLOSED on any internal error
+# ===========================================================================
+
+def _boom(*_a, **_k):
+    raise RuntimeError("classifier exploded")
+
+
+@pytest.mark.asyncio
+async def test_gate_error_fails_closed_under_strict(acks, caplog, monkeypatch):
+    """A classify-path error under a non-allow_all channel HOLDS (never routes)
+    and logs at error level — an internal gate error must not silently open
+    strict. ``res is not None`` is exactly what makes the handler return without
+    reaching UniversalRouter / the platform-tool interception."""
+    from api.webhooks import _apply_trust_gate
+
+    # _apply_trust_gate imports should_hold from the module at call time, so
+    # patching the attribute lands on the runtime import.
+    monkeypatch.setattr("services.ingress_gate.should_hold", _boom)
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    with caplog.at_level(logging.ERROR):
+        res = await _apply_trust_gate(
+            db, workspace, "telegram", _tg("delete the vault"),
+            {"platform": "telegram"}, {},
+        )
+
+    assert res is not None and res["routed"] is False  # held → not routed
+    assert res["reason"] == "trust_gate_error"
+    assert not any(isinstance(r, ApprovalGrant) for r in db.rows)  # nothing executed
+    errs = [
+        r for r in caplog.records
+        if r.levelno >= logging.ERROR and "trust-gate" in r.getMessage()
+    ]
+    assert errs, "expected an error-level gate log"
+    assert all("delete the vault" not in r.getMessage() for r in errs)  # no body
+
+
+@pytest.mark.asyncio
+async def test_gate_error_under_allow_all_still_routes(acks, monkeypatch):
+    """allow_all is resolved BEFORE the classifier, so a classifier error can't
+    turn an allow_all channel into a hold — it routes as today (a gate error on
+    the one route-everything mode is a safe no-op, not a bypass)."""
+    from api.webhooks import _apply_trust_gate
+
+    monkeypatch.setattr("services.ingress_gate.should_hold", _boom)
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "allow_all"}))
+    workspace = SimpleNamespace(id=ws)
+
+    res = await _apply_trust_gate(
+        db, workspace, "telegram", _tg("delete the vault"),
+        {"platform": "telegram"}, {},
+    )
+    assert res is None  # short-circuits before should_hold → routes
+
+
+def test_channel_is_allow_all_fails_closed():
+    """The handler's fallthrough decision: True ONLY for a provable allow_all;
+    strict / no-channel / lookup-error all resolve to False (fail closed)."""
+    from api.webhooks import _channel_is_allow_all
+
+    ws = uuid.uuid4()
+    db_allow = _FakeSession()
+    db_allow.add(_channel(ws, config={"trigger_mode": "allow_all"}))
+    assert _channel_is_allow_all(db_allow, ws, "telegram") is True
+
+    db_strict = _FakeSession()
+    db_strict.add(_channel(ws, config={"trigger_mode": "strict"}))
+    assert _channel_is_allow_all(db_strict, ws, "telegram") is False
+
+    assert _channel_is_allow_all(_FakeSession(), ws, "telegram") is False  # no channel

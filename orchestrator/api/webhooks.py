@@ -480,41 +480,58 @@ async def _apply_trust_gate(
     channel = _channel_for_platform(db, workspace.id, platform)
     if channel is None:
         return None  # no connected channel → the gate does not apply
-    mode = trigger_mode_of(channel.config)
-    if mode == TRIGGER_MODE_ALLOW_ALL:
-        return None
 
-    text_in = _inbound_text(body)
-    if not text_in.strip():
-        return None  # nothing to hold (non-text update)
-    if not should_hold(mode, text_in):
-        # NOTE: never log the message body — only the gate decision.
-        logger.info(
-            "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=route",
-            workspace.id, channel.id, platform, mode,
+    # A channel exists, so this inbound IS gated. From here ANY failure must
+    # fail CLOSED — return a hold, never fall through to routing — so an internal
+    # gate error can't silently open a strict / communication_only channel
+    # (P225-RVW-5). ``allow_all`` is resolved first: it legitimately routes
+    # everything, so an error on that path is a harmless no-op, not a bypass.
+    ask_id = None
+    try:
+        mode = trigger_mode_of(channel.config)
+        if mode == TRIGGER_MODE_ALLOW_ALL:
+            return None
+
+        text_in = _inbound_text(body)
+        if not text_in.strip():
+            return None  # nothing to hold (non-text update)
+        if not should_hold(mode, text_in):
+            # NOTE: never log the message body — only the gate decision.
+            logger.info(
+                "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=route",
+                workspace.id, channel.id, platform, mode,
+            )
+            return None
+
+        # HELD — record a question-kind row against the channel; nothing executes.
+        from core.models.approval_grants import KIND_QUESTION
+        from core.services.approval_grants import create_grant
+
+        grant = create_grant(
+            db, workspace.id,
+            subject_type="channel", subject_id=str(channel.id),
+            kind=KIND_QUESTION,
+            question_md=(
+                "**Inbound directive awaiting approval**\n\n"
+                f"{text_in.strip()}\n\n"
+                '_Answer "route it" to let it proceed, or dismiss to keep it held._'
+            ),
+            reason="Inbound directive held by the channel trust gate",
         )
-        return None
+        db.commit()
+        ask_id = grant.id
+        logger.info(
+            "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=hold ask=%s",
+            workspace.id, channel.id, platform, mode, ask_id,
+        )
+    except Exception:
+        # Fail CLOSED: a gated channel errored — refuse to route. No message body
+        # in the log (only the gate decision), consistent with the hold path.
+        logger.error(
+            "[trust-gate] ws=%s channel=%s platform=%s verdict=hold-on-error — failing closed",
+            workspace.id, channel.id, platform, exc_info=True,
+        )
 
-    # HELD — record a question-kind row against the channel; nothing executes.
-    from core.models.approval_grants import KIND_QUESTION
-    from core.services.approval_grants import create_grant
-
-    grant = create_grant(
-        db, workspace.id,
-        subject_type="channel", subject_id=str(channel.id),
-        kind=KIND_QUESTION,
-        question_md=(
-            "**Inbound directive awaiting approval**\n\n"
-            f"{text_in.strip()}\n\n"
-            '_Answer "route it" to let it proceed, or dismiss to keep it held._'
-        ),
-        reason="Inbound directive held by the channel trust gate",
-    )
-    db.commit()
-    logger.info(
-        "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=hold ask=%s",
-        workspace.id, channel.id, platform, mode, grant.id,
-    )
     try:
         await _deliver_reply(
             "Received — this needs an operator's approval before I act on it.",
@@ -522,7 +539,34 @@ async def _apply_trust_gate(
         )
     except Exception:  # noqa: BLE001 — the ack is best-effort
         logger.debug("[trust-gate] ack reply failed", exc_info=True)
-    return {"status": "held", "routed": False, "reason": "trust_gate_hold", "ask_id": grant.id}
+    return {
+        "status": "held", "routed": False,
+        "reason": "trust_gate_hold" if ask_id is not None else "trust_gate_error",
+        "ask_id": ask_id,
+    }
+
+
+def _channel_is_allow_all(db: Session, workspace_id: Any, platform: str) -> bool:
+    """True only when the channel is provably ``allow_all``.
+
+    Any lookup failure — or no channel row — returns False, so a trust-gate error
+    fails CLOSED (P225-RVW-5): the outer handler holds rather than silently
+    opening a strict / communication_only channel. ``allow_all`` routes
+    everything anyway, so this is the one mode where a gate error is a safe no-op.
+    """
+    try:
+        from services.ingress_gate import trigger_mode_of, TRIGGER_MODE_ALLOW_ALL
+
+        channel = _channel_for_platform(db, workspace_id, platform)
+        if channel is None:
+            return False
+        return trigger_mode_of(channel.config) == TRIGGER_MODE_ALLOW_ALL
+    except Exception:  # noqa: BLE001 — unknown mode ⇒ treat as gated (fail closed)
+        logger.warning(
+            "[trust-gate] allow_all resolution failed for ws=%s — treating as gated",
+            workspace_id, exc_info=True,
+        )
+        return False
 
 
 # =============================================================================
@@ -814,18 +858,28 @@ async def general_workspace_webhook(
     # 2d. PRD-225 US-006: the ingress trust gate. Per the channel's trigger_mode,
     # hold inbound directives as pending questions instead of routing them.
     # Runs AFTER correlation (answers already returned) and BEFORE any routing or
-    # platform-tool interception. Fail-open on gate error — an errored gate must
-    # not silently swallow inbound traffic.
+    # platform-tool interception. Fail CLOSED on gate error (P225-RVW-5): a
+    # strict / communication_only channel must never be opened by an internal
+    # gate error — only a provably-allow_all channel falls through to routing.
     if platform:
         try:
             held = await _apply_trust_gate(db, workspace, platform, body, reply_ctx, integrations)
             if held is not None:
                 return held
         except Exception:
-            logger.exception(
-                "[webhook/ws] trust gate errored for ws=%s — routing normally",
-                workspace.id,
+            logger.error(
+                "[webhook/ws] trust gate errored for ws=%s — failing closed",
+                workspace.id, exc_info=True,
             )
+            if not _channel_is_allow_all(db, workspace.id, platform):
+                try:
+                    await _deliver_reply(
+                        "Received — an internal check must clear before I can act on it.",
+                        reply_ctx, integrations, workspace_id=workspace.id,
+                    )
+                except Exception:  # noqa: BLE001 — best-effort ack
+                    logger.debug("[trust-gate] fail-closed ack failed", exc_info=True)
+                return {"status": "held", "routed": False, "reason": "trust_gate_error"}
 
     # 3. Build RequestEnvelope via WebhookIngestor
     ingestor = WebhookIngestor()
