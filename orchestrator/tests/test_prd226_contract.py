@@ -23,6 +23,28 @@ from modules.coordination.verification import VerificationService, _build_judge_
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SKIP_DIRS = {"tests", "__pycache__", ".git", "node_modules", "alembic", ".venv", "venv"}
+_SKILL_MD = _ROOT / "core" / "seeds" / "platform-management-skill.md"
+
+
+# ---------------------------------------------------------------------------
+# P226-RVW-2 — the always-on skill seed must not carry a hand-copy of the
+# contract that drifts from the code fragment behind CI's back. The single-
+# source guards above walk .py files only; the skill's Markdown home was
+# invisible to them. It now embeds DISPATCH_CONTRACT_FRAGMENT verbatim, so this
+# fails the moment the fragment is edited without mirroring the skill.
+# ---------------------------------------------------------------------------
+
+def test_skill_seed_embeds_the_fragment_verbatim():
+    """The platform-management skill (always-on, injected into every Auto turn,
+    refreshed to existing installs by skill_loader) carries the 4-part contract
+    as the SAME text as the code fragment — not an independently-maintained copy.
+    Verbatim lock-step: drift fails CI."""
+    skill_md = _SKILL_MD.read_text(encoding="utf-8")
+    assert DISPATCH_CONTRACT_FRAGMENT in skill_md, (
+        "platform-management-skill.md §17.5 no longer embeds DISPATCH_CONTRACT_FRAGMENT "
+        "verbatim — the skill's dispatch-contract text has drifted from the single "
+        "source in modules/coordination/dispatch_contract.py"
+    )
 
 
 # ---------------------------------------------------------------------------
