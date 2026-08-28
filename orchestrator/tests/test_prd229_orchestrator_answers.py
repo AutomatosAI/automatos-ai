@@ -18,6 +18,7 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -396,6 +397,55 @@ def test_declared_category_wins_over_benign_text():
 def test_non_governance_declared_category_is_ignored():
     # a non-governance declared category does not force escalation
     assert oa._governance_category("benign text", "logistics") is None
+
+
+# ---------------------------------------------------------------------------
+# P229-RVW-7 — natural phrasing escalates (the keyword backstop had gaps)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        # spend — word-order-independent budget + money stems the list missed
+        ("Should I increase the compute budget for this task?", "spend"),
+        ("What will this cost the client?", "spend"),
+        ("Do I expense the new tool?", "spend"),
+        ("Is there a fee to process this?", "spend"),
+        # destructive — verbs the original list missed
+        ("Can I overwrite the existing records?", "destructive"),
+        ("Should I revoke the old API key?", "destructive"),
+        ("Do I deactivate the stale account?", "destructive"),
+        # scope — implicit "also"/additional-work phrasing
+        ("Should I also fix the login page?", "scope"),
+        ("While I'm here, should I refactor the parser?", "scope"),
+    ],
+)
+def test_natural_phrasing_governance_keyword_detection(question, expected):
+    # the unit-level backstop now recognises natural phrasings, not only the
+    # verbatim keywords the original list required.
+    assert oa._governance_category(question, None) == expected
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Should I increase the compute budget for this task?",
+        "Can I overwrite the existing records?",
+        "Should I also fix the login page while I'm here?",
+    ],
+)
+@pytest.mark.asyncio
+async def test_natural_phrasing_governance_escalates_without_llm(question, spy_events):
+    # end-to-end: a natural-phrasing governance question escalates directly with
+    # ZERO retrieval and ZERO LLM composition — Auto never auto-answers a
+    # spend/destructive/scope decision (G3), it hands it to a human.
+    stub = _LLMStub()
+    result = await answer_clarification(
+        MagicMock(), _subject(), question, llm_factory=_factory(stub),
+    )
+    assert result["escalate_directly"] is True
+    assert result["reason"] == "governance"
+    assert stub.calls == 0  # no composition — the backstop caught it first
 
 
 # ---------------------------------------------------------------------------

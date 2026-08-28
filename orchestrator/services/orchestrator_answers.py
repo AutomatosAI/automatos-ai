@@ -55,14 +55,28 @@ _GOVERNANCE_KEYWORDS: Dict[str, tuple] = {
     "destructive": (
         "delete", "drop table", "truncate", "wipe", "destroy", "purge",
         "remove all", "rm -rf", "erase", "tear down",
+        # P229-RVW-7: common destructive verbs the original list missed.
+        "overwrite", "revoke", "deactivate", "reformat", "uninstall",
     ),
     "spend": (
         "spend", "purchase", "buy ", "pay ", "payment", "invoice", "charge",
-        "budget increase", "upgrade the plan", "upgrade plan", "$",
+        "upgrade the plan", "upgrade plan", "$",
+        # P229-RVW-7: word-order-independent "budget" (so "increase the budget"
+        # matches, not only "budget increase") + the money stems the original
+        # list missed. Governance detection biases toward OVER-escalation
+        # (safe + visible; it never fabricates), so broad money words are by
+        # design — a false hit escalates a routine question, never invents one.
+        "budget", "cost", "expense", "fee", "billing",
     ),
     "scope": (
         "out of scope", "scope change", "change the scope", "expand the scope",
         "new requirement", "add a feature", "change the goal",
+        # P229-RVW-7: implicit "also"/additional-work phrasing ("should I also
+        # fix X while I'm here?") — targeted action bigrams, NOT bare "also"
+        # (which would over-escalate every incidental mention).
+        "also fix", "also add", "also implement", "also build", "also handle",
+        "also update", "also create", "also refactor", "while i'm here",
+        "while i am here", "additional feature", "additional work",
     ),
 }
 
