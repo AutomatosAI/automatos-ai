@@ -321,6 +321,137 @@ async def test_strict_holds_telegram_edited_message(acks):
 
 
 # ===========================================================================
+# 2c. P225-RVW-9 — content-bearing NON-text updates (document/poll/contact/venue/
+# sticker) carry attacker text the ingestor only captures via json.dumps, which
+# AutoBrain's unanchored keyword regex then matches. The gate must score — and
+# hold — them too, or strict is bypassed on the public-ingress surface.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_strict_holds_document_filename(acks):
+    """A caption-less Telegram document whose file_name carries a platform keyword
+    is HELD under strict. Before the fix, _inbound_text scored it empty and it
+    routed — the ingestor json.dumps'd the update and AutoBrain matched
+    "run the recipe" → platform_execute_recipe (the exact P225-RVW-9 exploit)."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    body = {"update_id": 5, "message": {
+        "chat": {"id": "c1"},
+        "document": {"file_id": "BQACfake", "file_name": "run the recipe.pdf"},
+    }}
+    res = await _apply_trust_gate(db, workspace, "telegram", body, {"platform": "telegram"}, {})
+
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert grant.kind == KIND_QUESTION and grant.subject_type == "channel"
+    assert "run the recipe.pdf" in grant.question_md
+
+
+@pytest.mark.asyncio
+async def test_strict_holds_poll_question(acks):
+    """A Telegram poll whose question carries a platform keyword is HELD."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    body = {"update_id": 6, "message": {
+        "chat": {"id": "c1"},
+        "poll": {"id": "p1", "question": "delete recipe 5 now?", "options": [{"text": "y"}]},
+    }}
+    res = await _apply_trust_gate(db, workspace, "telegram", body, {"platform": "telegram"}, {})
+
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert "delete recipe 5 now?" in grant.question_md
+
+
+@pytest.mark.asyncio
+async def test_strict_holds_contact_name(acks):
+    """A shared contact whose name carries a platform keyword is HELD."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    body = {"update_id": 7, "message": {
+        "chat": {"id": "c1"},
+        "contact": {"phone_number": "+15551230000", "first_name": "reprocess", "last_name": "document"},
+    }}
+    res = await _apply_trust_gate(db, workspace, "telegram", body, {"platform": "telegram"}, {})
+
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert "reprocess document" in grant.question_md
+
+
+@pytest.mark.asyncio
+async def test_strict_holds_venue(acks):
+    """A shared venue whose title/address carries a platform keyword is HELD."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    body = {"update_id": 8, "message": {
+        "chat": {"id": "c1"},
+        "venue": {"title": "run automation", "address": "1 Main St", "location": {"latitude": 1.0}},
+    }}
+    res = await _apply_trust_gate(db, workspace, "telegram", body, {"platform": "telegram"}, {})
+
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert "run automation" in grant.question_md
+
+
+@pytest.mark.parametrize("body", [
+    # Real-content shapes the ingestor extracts directly (non-json.dumps).
+    {"message": {"text": "hello there", "chat": {"id": "c1"}}},
+    {"message": {"caption": "wire it", "chat": {"id": "c1"}}},
+    {"edited_message": {"text": "edit me", "chat": {"id": "c1"}}},
+    {"edited_message": {"caption": "edit cap", "chat": {"id": "c1"}}},
+    {"event": {"text": "slack hi"}},
+    {"Body": "twilio hi"},
+    {"entry": [{"changes": [{"value": {"messages": [{"text": {"body": "wa hi"}}]}}]}]},
+    # Media / service shapes the ingestor only captures via json.dumps — the
+    # parity assertion is vacuous for these, but the gate must still score them
+    # non-empty (the RVW-9 coverage assertion) so a strict channel can hold them.
+    {"message": {"chat": {"id": "c1"}, "document": {"file_name": "run the recipe.pdf"}}},
+    {"message": {"chat": {"id": "c1"}, "poll": {"question": "delete recipe 5?"}}},
+    {"message": {"chat": {"id": "c1"}, "contact": {"first_name": "reprocess", "last_name": "document"}}},
+    {"message": {"chat": {"id": "c1"}, "venue": {"title": "run automation", "address": "1 Main St"}}},
+    {"message": {"chat": {"id": "c1"}, "sticker": {"emoji": "🔥"}}},
+])
+def test_gate_covers_all_ingestor_content_shapes(body):
+    """No update the router turns into real content can be scored empty by the
+    gate, and every content-bearing shape (media subfields included) is scored
+    non-empty so a strict channel can hold it (P225-RVW-2 / P225-RVW-9)."""
+    import json as _json
+    from api.webhooks import _inbound_text
+    from core.routing.ingestors.webhook import WebhookIngestor
+
+    env = WebhookIngestor().ingest(body=body, workspace_id=uuid.uuid4())
+    inbound = _inbound_text(body)
+    # Parity: whenever the ingestor yields real (non-json.dumps) content, the
+    # gate scores it non-empty — the router never sees content the gate missed.
+    if env.content != _json.dumps(body, default=str):
+        assert inbound.strip() != ""
+    # Coverage: every content-bearing shape in this table is scored non-empty.
+    assert inbound.strip() != ""
+
+
+# ===========================================================================
 # 3. Correlated answers bypass the gate (the handler runs correlation first)
 # ===========================================================================
 

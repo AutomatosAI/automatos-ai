@@ -401,6 +401,62 @@ def _channel_for_platform(db: Session, workspace_id: Any, platform: str):
     )
 
 
+def _telegram_message_content(m: Any) -> str:
+    """Operator-visible text carried by a Telegram message / edited_message.
+
+    Beyond ``text``/``caption``, a media or service message carries
+    attacker-controllable text in a sub-object: a document/audio/video/voice
+    ``file_name``, a ``poll`` question, a ``contact`` name, a ``venue``
+    title/address, a ``sticker`` emoji. The ``WebhookIngestor`` has no explicit
+    branch for these, so it serialises the whole update via ``json.dumps`` — and
+    AutoBrain's UNANCHORED platform-keyword regex (consumers/chatbot/auto.py
+    ``_match_platform_query``) then matches a platform keyword ANYWHERE in that
+    blob, e.g. a caption-less document named "run the recipe.pdf" triggering
+    ``platform_execute_recipe`` (P225-RVW-9). Extracting the same subfields here
+    lets the gate score — and hold — them under a strict / communication_only
+    channel, before the ingestor or the platform-tool interception ever runs.
+    """
+    if not isinstance(m, dict):
+        return ""
+
+    v = m.get("text") or m.get("caption")
+    if isinstance(v, str) and v.strip():
+        return v
+
+    poll = m.get("poll")
+    if isinstance(poll, dict) and isinstance(poll.get("question"), str) and poll["question"].strip():
+        return poll["question"]
+
+    contact = m.get("contact")
+    if isinstance(contact, dict):
+        name = " ".join(
+            p.strip() for p in (contact.get("first_name"), contact.get("last_name"))
+            if isinstance(p, str) and p.strip()
+        )
+        if name:
+            return name
+
+    venue = m.get("venue")
+    if isinstance(venue, dict):
+        place = " ".join(
+            p.strip() for p in (venue.get("title"), venue.get("address"))
+            if isinstance(p, str) and p.strip()
+        )
+        if place:
+            return place
+
+    for fkey in ("document", "audio", "video", "voice"):
+        f = m.get(fkey)
+        if isinstance(f, dict) and isinstance(f.get("file_name"), str) and f["file_name"].strip():
+            return f["file_name"]
+
+    sticker = m.get("sticker")
+    if isinstance(sticker, dict) and isinstance(sticker.get("emoji"), str) and sticker["emoji"].strip():
+        return sticker["emoji"]
+
+    return ""
+
+
 def _inbound_text(body: Dict[str, Any]) -> str:
     """The inbound message text the router would act on, across platforms.
 
@@ -408,12 +464,15 @@ def _inbound_text(body: Dict[str, Any]) -> str:
     (core/routing/ingestors/webhook.py): the gate scores exactly the text the
     router would route, so a directive can NEVER be scored empty here yet reach
     the router as content (P225-RVW-2). Covers Telegram text+caption including
-    ``edited_message``, Slack ``event.text``, Meta-WhatsApp
-    ``messages[].text.body``, Twilio ``Body``, and top-level string fields.
+    ``edited_message`` AND the text-bearing subfield of a media / service message
+    (file_name, poll question, contact, venue, sticker — P225-RVW-9), Slack
+    ``event.text``, Meta-WhatsApp ``messages[].text.body``, Twilio ``Body``, and
+    top-level string fields.
 
-    The ingestor's ``json.dumps(body)`` last-resort fallback is deliberately NOT
-    mirrored: a genuinely text-less update (a status / delivery-receipt callback)
-    scores empty and is left to route as today, not held as a question.
+    The ingestor's ``json.dumps(body)`` blanket fallback is deliberately NOT
+    mirrored: a genuinely user-contentless update (a status / delivery-receipt
+    callback with none of the above subfields) scores empty and is left to route
+    as today, not held as a question.
     """
     if not isinstance(body, dict):
         return ""
@@ -424,16 +483,16 @@ def _inbound_text(body: Dict[str, Any]) -> str:
         if isinstance(v, str) and v.strip():
             return v
 
-    # 2. Telegram message / edited_message: text or caption. The ingestor reads
-    #    only `message`; an `edited_message` (or a caption-only media message)
-    #    otherwise reaches the router via its json.dumps fallback, so extract it
-    #    explicitly to hold it under a strict/communication_only channel.
+    # 2. Telegram message / edited_message content: text, caption, OR the
+    #    text-bearing subfield of a media / service message (file_name, poll
+    #    question, contact name, venue, sticker emoji). The ingestor has no branch
+    #    for the media subfields, so it json.dumps the whole update and AutoBrain's
+    #    unanchored keyword regex matches a platform keyword anywhere in it
+    #    (P225-RVW-9) — extract them so a strict/communication_only channel holds.
     for mkey in ("message", "edited_message"):
-        m = body.get(mkey)
-        if isinstance(m, dict):
-            v = m.get("text") or m.get("caption")
-            if isinstance(v, str) and v.strip():
-                return v
+        content = _telegram_message_content(body.get(mkey))
+        if content.strip():
+            return content
 
     # 3. Slack: event.text — ingestor step 3.
     event = body.get("event")
