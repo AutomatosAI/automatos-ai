@@ -59,6 +59,13 @@ class TaskState(str, Enum):
     RETRYING = "retrying"
 
 
+# Canonical "busy" derivation: an agent is busy when it holds an ASSIGNED or
+# RUNNING orchestration task. Single source of truth shared by the dispatcher's
+# matcher (``agent_matcher._get_busy_agent_ids``) and the fleet read-model
+# (PRD-228 ``services/fleet_state``) so "busy" has exactly one definition.
+BUSY_TASK_STATES: tuple[str, ...] = (TaskState.ASSIGNED.value, TaskState.RUNNING.value)
+
+
 # ---------------------------------------------------------------------------
 # EventType — typed events for orchestration_events (30+ values)
 # Source: PRD-101 Section 6.2

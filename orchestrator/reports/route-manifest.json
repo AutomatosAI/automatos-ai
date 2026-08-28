@@ -1,5 +1,5 @@
 {
-  "route_count": 769,
+  "route_count": 770,
   "routes": [
     {
       "method": "GET",
@@ -2216,6 +2216,10 @@
     {
       "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/fleet"
     },
     {
       "method": "POST",

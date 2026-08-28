@@ -201,6 +201,7 @@ from modules.tools.discovery.handlers_watches import (  # PRD-204 S9
     get_watch,
     cancel_watch,
 )
+from modules.tools.discovery.handlers_fleet import fleet_status  # PRD-228
 from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
@@ -537,6 +538,8 @@ class PlatformActionExecutor:
             "platform_list_watches": list_watches,
             "platform_get_watch": get_watch,
             "platform_cancel_watch": cancel_watch,
+            # PRD-228: live floor read-model in one call
+            "platform_fleet_status": fleet_status,
             # PRD-163 S1: mission lifecycle control
             "platform_approve_mission": approve_mission,
             "platform_reject_mission": reject_mission,
