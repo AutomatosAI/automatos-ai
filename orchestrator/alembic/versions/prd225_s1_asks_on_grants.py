@@ -31,7 +31,7 @@ from alembic import op
 
 
 revision = "prd225_s1_asks_on_grants"
-down_revision = "prd185_s1b_toollog_user_nullable"
+down_revision = "prd222_veteran_skip_backfill"
 branch_labels = None
 depends_on = None
 
