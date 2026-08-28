@@ -86,11 +86,11 @@
    "title": "Platform tools — search/install packages + install marketplace agent",
    "description": "3-file pattern: platform_search_packages (signals → ranked matches w/ contents summary), platform_install_package, platform_install_marketplace_agent. Onboarding restriction (D6/FR-3): while the workspace's onboarding is non-terminal, a second platform_install_package call returns honest copy ('one package during onboarding — more any time after setup'); unrestricted when terminal. All installs via US-005 (invariant inherited). Walker/schema-truth green; either-of conventions followed. D9: over-quota package install returns honest copy + the plan recommendation — never a partial install (closure is atomic).",
    "acceptanceCriteria": [
-    "Three tools registered (executor grep), schemas match handlers (walker green)",
-    "Onboarding one-package restriction test (second call rejected with the honest copy; post-onboarding unrestricted)",
-    "Tool responses carry the registration manifest (what was added, what needs connecting)",
-    "Orchestrator baseline",
-    "Over-quota install (basic tier, 6-agent package) returns honest plan-conversation copy with zero partial registrations (test)"
+    "DONE — 3-file pattern: actions_packages.py (register_package_actions wired into platform_actions.register_all_actions) + handlers_packages.py + platform_executor._handlers ('platform_search_packages','platform_install_package','platform_install_marketplace_agent'). test_prd222_tool_schema_walker 18 passed (live-registry sweep includes the 3); test_tool_registered_and_dispatched (registry+handler), required=['slug'] (walker C), either-of agent_id/agent_name documented (walker B). Three tools registered, schemas match handlers, walker green",
+    "DONE — test_second_package_during_onboarding_is_rejected (funnel.package_installed present + non-terminal → onboarding_restricted, honest copy, install spy calls==0); test_first_package_during_onboarding_installs_and_records (records package_installed); test_post_onboarding_install_is_unrestricted (terminal stage → installs despite prior package). Restriction via new onboarding_state.record_package_event/onboarding_package_installed (reused by US-009). Onboarding one-package restriction",
+    "DONE — install responses spread manifest.to_dict() (registrations + required_connects + added_count); test_response_carries_the_registration_manifest. Tool responses carry the registration manifest",
+    "DONE — full suite 4816 passed (+14 US-006), only the 2 inherited-baseline failures. Tools not routes (no route-manifest bump). Orchestrator baseline",
+    "DONE — test_over_quota_returns_plan_conversation_with_zero_installs: basic tier (max_agents=5, from PLAN_TIERS read-only), 6-agent package → over_quota:True + plan_recommendation (pro/business via recommend_plan) + package_agents=6/max_agents=5, install spy calls==0 (quota checked BEFORE any registration → atomic). Over-quota returns honest plan-conversation copy with zero partial registrations"
    ],
    "files": [
     "orchestrator/modules/tools/discovery/",
