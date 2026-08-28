@@ -22,7 +22,7 @@ import remarkGfm from 'remark-gfm'
 import { Bot, Check, X, Clock, CornerDownRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { chatMarkdownComponents } from '@/components/chatbot/markdown-components'
+import { questionMarkdownComponents } from '@/components/chatbot/markdown-components'
 import {
   useQuestions,
   useAnswerQuestion,
@@ -100,7 +100,7 @@ function QuestionCard({ q }: { q: ApprovalGrant }) {
 
       {/* The ask — markdown, via the shared chat renderer. */}
       <div className="prose prose-sm max-w-none dark:prose-invert" aria-label="Question">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={questionMarkdownComponents}>
           {q.question_md || ''}
         </ReactMarkdown>
       </div>

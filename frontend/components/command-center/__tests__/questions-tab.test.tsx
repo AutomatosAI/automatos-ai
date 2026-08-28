@@ -199,14 +199,29 @@ describe('QuestionsTab — PRD-225', () => {
     expect(screen.queryByRole('link', { name: /route it now/ })).not.toBeInTheDocument()
   })
 
-  it('an agent-authored question still renders real markdown links (fix is scoped)', () => {
+  it('agent question with a URL renders no clickable anchor (P225-RVW-15)', () => {
+    // An agent can relay attacker-controlled text into its question (a document /
+    // webpage / inbound message it is summarising). A markdown link or a bare URL
+    // must NOT become a clickable phishing anchor in the admin's trusted Questions
+    // tab — the text stays readable, the anchor is gone. Legit agent markdown
+    // (emphasis) still renders (link-inerting, not full fencing).
     setQuestions([
-      question({ id: 22, question_md: 'See [the doc](https://trusted.example) first.' }),
+      question({
+        id: 22,
+        question_md:
+          'See [Approve the transfer](https://evil.example/phish) — it is **urgent**. https://evil.example/bare',
+      }),
     ])
     render(<QuestionsTab />)
-    expect(screen.getByRole('link', { name: 'the doc' })).toHaveAttribute(
-      'href',
-      'https://trusted.example',
-    )
+
+    // The link / URL text stays readable to the operator...
+    expect(document.body.textContent).toContain('Approve the transfer')
+    expect(document.body.textContent).toContain('https://evil.example/bare')
+    // ...but nothing agent-authored is a clickable anchor.
+    expect(document.querySelector('a[href="https://evil.example/phish"]')).toBeNull()
+    expect(document.querySelector('a[href="https://evil.example/bare"]')).toBeNull()
+    expect(screen.queryByRole('link', { name: /Approve the transfer/ })).not.toBeInTheDocument()
+    // Legitimate agent markdown still renders (emphasis preserved, not fenced).
+    expect(screen.getByText('urgent')).toBeInTheDocument()
   })
 })

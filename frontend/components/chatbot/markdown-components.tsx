@@ -122,3 +122,24 @@ export const chatMarkdownComponents = {
   // Images handled by ImageGallery — strip from markdown
   img: () => null,
 }
+
+/**
+ * QuestionsTab variant: identical to {@link chatMarkdownComponents} EXCEPT links
+ * render INERT — plain text, no href/anchor (P225-RVW-15).
+ *
+ * Agent-authored (or agent-RELAYED) `question_md` is shown in the admin's trusted
+ * Questions tab, right next to the answer box. An agent summarising an untrusted
+ * document / webpage / inbound message could relay a `[Approve the transfer]
+ * (https://evil.example/phish)` link — or a bare autolinked URL — which GFM would
+ * otherwise turn into a CLICKABLE phishing anchor in that trusted surface. RVW-6
+ * fenced channel-sourced directive text for the same sink; this covers the
+ * sibling producer (agent questions). Only the anchor is neutralised — emphasis,
+ * lists, code, and tables still render (the finding calls for link-inerting, not
+ * full fencing, to keep legitimate agent formatting).
+ */
+export const questionMarkdownComponents = {
+  ...chatMarkdownComponents,
+  a: ({ children }: any) => (
+    <span className="text-foreground dark:text-gray-100">{children}</span>
+  ),
+}
