@@ -7,7 +7,10 @@ FAIL=0
 SVC="orchestrator/services/fleet_state.py"
 MANIFEST="orchestrator/reports/route-manifest.json"
 MGMT="frontend/components/agents/agent-management.tsx"
-BASE_BR="ralph/prd-225-ask-me"
+# Chain parent PRD-225 is MERGED (#637), so the diff base is main. Comparing
+# against the stale local parent branch counted 225's now-merged migration as
+# "new" and failed the zero-migration check on a read-model-only PRD.
+BASE_BR="origin/main"
 check() {
   local name="$1"; shift
   echo ""
