@@ -22,6 +22,7 @@ so the unit suite runs with no LLM and no external infra.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -175,7 +176,7 @@ async def answer_clarification(
         _record(db, subject, question, outcome="cannot_answer", extra={"reason": REASON_UNRETRIEVABLE})
         return {"cannot_answer": True, "reason": REASON_UNRETRIEVABLE}
 
-    sources = [b["source"] for b in blocks]
+    sources = _cited_sources(answer, blocks)
     _record(db, subject, question, outcome="answered", extra={"sources": sources})
     return {"answer": answer, "sources": sources}
 
@@ -488,6 +489,31 @@ async def _compose_answer(
     except Exception:  # noqa: BLE001
         logger.warning("[clarify] composition failed", exc_info=True)
         return ""
+
+
+# Citation markers the composed answer uses to reference numbered blocks ([1],
+# [2], … — the 1-based index _build_messages assigns).
+_CITATION_RE = re.compile(r"\[(\d+)\]")
+
+
+def _cited_sources(answer: str, blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The sources the composed answer actually CITED — not every retrieved block
+    (P229-RVW-9). Parse the answer's [n] markers (1-based, as _build_messages
+    numbers them) back to blocks, in first-cited order, de-duped by block index.
+
+    Falls back to ALL retrieved sources ONLY when the answer cited none (or cited
+    no VALID index) — so the returned ``sources`` mean "what this answer was
+    grounded on", the guarantee the module docstring makes, instead of over-
+    claiming the whole retrieval set as its grounding. Every returned ref is still
+    a real retrieved source; this only ever NARROWS, never invents."""
+    seen: set = set()
+    cited: List[Dict[str, Any]] = []
+    for marker in _CITATION_RE.findall(answer or ""):
+        idx = int(marker) - 1
+        if 0 <= idx < len(blocks) and idx not in seen:
+            seen.add(idx)
+            cited.append(blocks[idx]["source"])
+    return cited if cited else [b["source"] for b in blocks]
 
 
 def _build_messages(question: str, blocks: List[Dict[str, Any]]) -> List[Dict[str, str]]:

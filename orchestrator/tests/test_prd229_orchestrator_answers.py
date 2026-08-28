@@ -542,3 +542,66 @@ def test_upstream_blocks_guards_missing_run():
         OrchestrationTask: [SimpleNamespace(id=100, run_id="run-A", output="x", title="t", sequence_number=1)],
     })
     assert oa._upstream_blocks(db, subject) == []
+
+
+# ---------------------------------------------------------------------------
+# P229-RVW-9 — sources are the CITED blocks, not the whole retrieval set
+# ---------------------------------------------------------------------------
+
+def test_cited_sources_unit():
+    blocks = [
+        {"source": {"type": "upstream_task", "task_id": "1"}},
+        {"source": {"type": "memory", "id": "m2"}},
+        {"source": {"type": "field", "id": "f3"}},
+    ]
+    # cites [3] then [1], repeats [3], and a bogus [9] → valid indices only, in
+    # first-cited order, de-duped; [9] ignored (never invents a source).
+    assert oa._cited_sources("see [3] and [1] and [3] and [9]", blocks) == [
+        {"type": "field", "id": "f3"},
+        {"type": "upstream_task", "task_id": "1"},
+    ]
+    # no valid citation → fall back to ALL retrieved sources
+    assert oa._cited_sources("no markers here", blocks) == [b["source"] for b in blocks]
+    assert oa._cited_sources("only bogus [42]", blocks) == [b["source"] for b in blocks]
+
+
+@pytest.mark.asyncio
+async def test_sources_reflect_cited_block_not_full_retrieval(spy_events, monkeypatch):
+    # several blocks retrieved, the answer cites ONLY [2] → sources is exactly that
+    # one block's ref, not all three (the grounded/cited guarantee, not over-claim).
+    blocks = [
+        {"text": "alpha", "source": {"type": "upstream_task", "task_id": "1"}},
+        {"text": "beta", "source": {"type": "memory", "id": "m2"}},
+        {"text": "gamma", "source": {"type": "field", "id": "f3"}},
+    ]
+
+    async def _blocks(db, subject, question):
+        return blocks
+
+    monkeypatch.setattr(oa, "_retrieve", _blocks)
+    stub = _LLMStub(content="Use the memory note (see [2]).")
+    db = _FakeSession({OrchestrationEvent: []})  # 0 answers spent → under budget
+
+    result = await answer_clarification(db, _subject(), "Q?", llm_factory=_factory(stub))
+
+    assert result["answer"]
+    assert result["sources"] == [{"type": "memory", "id": "m2"}]  # ONLY [2]
+
+
+@pytest.mark.asyncio
+async def test_sources_fall_back_to_all_when_answer_cites_nothing(spy_events, monkeypatch):
+    blocks = [
+        {"text": "alpha", "source": {"type": "upstream_task", "task_id": "1"}},
+        {"text": "beta", "source": {"type": "memory", "id": "m2"}},
+    ]
+
+    async def _blocks(db, subject, question):
+        return blocks
+
+    monkeypatch.setattr(oa, "_retrieve", _blocks)
+    stub = _LLMStub(content="Write to the staging bucket.")  # no [n] markers
+    db = _FakeSession({OrchestrationEvent: []})
+
+    result = await answer_clarification(db, _subject(), "Q?", llm_factory=_factory(stub))
+
+    assert result["sources"] == [b["source"] for b in blocks]  # fallback: all retrieved
