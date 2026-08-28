@@ -535,7 +535,7 @@ async def list_agents(
             db.query(Agent)
             .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
             .filter(scope_filter)
-            .filter(Agent.agent_type != "ephemeral")  # Hide Mission Zero ephemeral clones
+            .filter(Agent.agent_type != "ephemeral")  # defensive: keep any legacy ephemeral clone rows out of the roster (their creator was retired, no new ones are made)
         )
 
         # By default hide per-workspace system agents (Auto) from the Roster —
