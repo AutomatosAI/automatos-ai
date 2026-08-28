@@ -217,6 +217,12 @@ class _FakeQ:
     def get(self, *_a):
         return self._r
 
+    def all(self):
+        # A single seeded agent models the one active row the name query returns;
+        # None models an empty result. P224-RVW-4's _resolve_active_agent_by_name
+        # calls .all() then matches the name in Python.
+        return [self._r] if self._r is not None else []
+
 
 class _FakeSession:
     """Returns a seeded Agent for Agent queries and a seeded BoardTask for
@@ -1147,3 +1153,177 @@ def test_auto_ticket_watch_read_through_config_only():
         assert env_read not in src                    # but never a raw env read
     with open(os.path.join(here, "config.py")) as f:
         assert (env_read + '("AUTO_TICKET_WATCH"') in f.read()  # declared in config.py
+
+
+# ---------------------------------------------------------------------------
+# P224-RVW-4 -- the WRITE layer (create/assign) resolves an agent NAME against
+# ACTIVE agents and REFUSES an ambiguous name instead of silently .first()-ing
+# a Postgres-row-order pick. Agent.name has no unique constraint (only
+# (workspace_id, slug)), so 'Atlas'/'atlas' can coexist; and the classifier
+# matches active-only while the old write query matched any status — the two
+# rosters could diverge and dispatch the wrong (or a deactivated) agent.
+# ---------------------------------------------------------------------------
+
+
+def _ag(id, name, status="active"):
+    return _ns(id=id, name=name, status=status)
+
+
+class _RosterQ:
+    """An Agent query modeling the RVW-4 resolution query's ACTIVE filter: .all()
+    returns only status=='active' rows (the SQL predicate the handler applies),
+    leaving the handler's Python name-match + ambiguity guard to be exercised."""
+
+    def __init__(self, agents):
+        self._agents = agents
+
+    def filter(self, *a, **k):
+        return self
+
+    def all(self):
+        return [a for a in self._agents if getattr(a, "status", "active") == "active"]
+
+
+class _RosterDB:
+    """Fake session seeded with a full agent roster (any status) + an optional
+    task. Agent queries honor the ACTIVE filter; every other query returns the
+    seeded task. add()/refresh()/commit() support the create path."""
+
+    def __init__(self, agents, task=None):
+        self._agents = agents
+        self._task = task
+        self.commits = 0
+
+    def query(self, model):
+        from core.models import Agent
+        if model is Agent:
+            return _RosterQ(self._agents)
+        return _FakeQ(self._task)
+
+    def add(self, obj):
+        self._task = obj
+
+    def commit(self):
+        self.commits += 1
+
+    def refresh(self, obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = 4242
+
+
+def test_rvw4_create_ambiguous_active_name_refuses(monkeypatch):
+    """create_board_task with a name matching TWO active agents refuses — no
+    arbitrary first-row pick, and no ticket is filed for a guessed agent."""
+    calls = _patch_notify(monkeypatch)
+    db = _RosterDB([_ag(7, "Atlas"), _ag(8, "atlas")])  # same name, both active
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "chase", "description": "d", "assigned_agent_name": "Atlas"},
+    ))
+
+    assert result["success"] is False
+    assert "Multiple active agents" in result["error"]
+    assert db.commits == 0, "an ambiguous create commits nothing"
+    assert calls == [], "and fires no board NOTIFY"
+
+
+def test_rvw4_assign_ambiguous_active_name_refuses(monkeypatch):
+    """assign_board_task with an ambiguous active name refuses rather than
+    .first()-ing a nondeterministic row."""
+    from core.models.core import BoardTask
+    calls = _patch_notify(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _RosterDB([_ag(7, "Atlas"), _ag(8, "atlas")], task=task)
+
+    result = asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "Atlas"}))
+
+    assert result["success"] is False
+    assert "Multiple active agents" in result["error"]
+    assert task.assigned_agent_id is None, "no arbitrary assignment on ambiguity"
+    assert calls == [], "and no board NOTIFY"
+
+
+def test_rvw4_create_resolves_active_over_inactive_same_name(monkeypatch):
+    """An active + inactive agent share a name: the ACTIVE one (id=7) is assigned,
+    never the inactive (id=99) — the inactive is not in the roster the match runs
+    over, so it is a single-match resolve, not an ambiguity."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _RosterDB([_ag(7, "Atlas", "active"), _ag(99, "Atlas", "inactive")])
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "chase", "description": "d", "assigned_agent_name": "Atlas"},
+    ))
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"  # resolved → assigned, not inbox
+    assert db._task.assigned_agent_id == 7, "the ACTIVE agent, never the inactive id=99"
+    assert len(dispatch) == 1, "an assigned+agent ticket wakes the dispatch loop"
+
+
+def test_rvw4_assign_resolves_active_over_inactive_same_name(monkeypatch):
+    """assign_board_task resolves the ACTIVE same-named agent (id=7), never the
+    inactive (id=99)."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _RosterDB([_ag(7, "Atlas", "active"), _ag(99, "Atlas", "inactive")], task=task)
+
+    result = asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "Atlas"}))
+
+    assert result["success"] is True
+    assert result["assigned_agent"] == "Atlas"
+    assert task.assigned_agent_id == 7, "assigned to the ACTIVE agent, never the inactive id=99"
+
+
+def test_rvw4_create_no_active_match_leaves_unassigned(monkeypatch):
+    """A name matching only an INACTIVE agent → no active match → the ticket lands
+    'inbox' (unassigned): the unchanged no-match behavior, never a stealth assign
+    to a deactivated agent."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _RosterDB([_ag(99, "Atlas", "inactive")])
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "t", "description": "d", "assigned_agent_name": "Atlas"},
+    ))
+
+    assert result["success"] is True
+    assert result["status"] == "inbox"
+    assert dispatch == [], "an unassigned inbox ticket does not wake the dispatch loop"
+
+
+def test_rvw4_assign_no_active_match_is_not_found(monkeypatch):
+    """assign_board_task with a name matching only an inactive agent returns
+    'not found' — the unchanged no-match behavior."""
+    from core.models.core import BoardTask
+    _patch_notify(monkeypatch)
+    task = BoardTask(id=5, workspace_id=_WS_ID, title="t", status="inbox", source_type="user")
+    db = _RosterDB([_ag(99, "Atlas", "inactive")], task=task)
+
+    result = asyncio.run(_HANDLER.assign_board_task(db, _WS_ID, {"task_id": 5, "agent_name": "Atlas"}))
+
+    assert result["success"] is False
+    assert "not found" in result["error"]
+
+
+def test_rvw4_single_active_match_still_resolves(monkeypatch):
+    """The guard must not block a genuinely unique active match amid others —
+    case-insensitively ('atlas' → 'Atlas', id=7)."""
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    db = _RosterDB([_ag(3, "Researcher"), _ag(7, "Atlas")])
+
+    result = asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID,
+        {"title": "t", "description": "d", "assigned_agent_name": "atlas"},
+    ))
+
+    assert result["success"] is True
+    assert result["status"] == "assigned"
+    assert db._task.assigned_agent_id == 7
+    assert len(dispatch) == 1
