@@ -55,9 +55,9 @@
    "title": "Dependency-closure resolver (pure)",
    "description": "closure(ref) -> ordered typed set. Walk: agent → model_config LLM + agent_skills + agent_assigned_plugins (marketplace_plugins.py:243) + agent_app_assignments (composio_cache.py:171 — these become required_connects, not installs); playbook → member agents → recurse; skill/plugin/tool/llm → self. Cycle-safe, deterministic, db-read-only. THE CANONICAL TEST: agent A with 3 tools + 2 skills + 1 LLM ⇒ closure of exactly 7 typed entries (Gerard's example, D2).",
    "acceptanceCriteria": [
-    "Pure resolver with the agent-A canonical test + a playbook-recursion test + a cycle test",
-    "App assignments surface as required_connects entries, distinct from installable members",
-    "Orchestrator baseline"
+    "DONE — services/dependency_closure.py resolve_closure(root, reader) is a PURE BFS over a DependencyReader (cycle-safe visited-set, deterministic, dedup) + resolve_many for whole packages + DbDependencyReader (agent→model_config LLM, agent_skills, agent_assigned_plugins; playbook→WorkflowTemplate steps[].agent_id + template_definition.agents). test_prd230_closure_resolver.py 12 passed: canonical agent-A (llm+2 skills+3 plugins/tools + itself = 7 members, root first), playbook recursion pulls member-agent closures, mutual + self playbook cycles terminate deduped, leaves resolve to self, determinism, resolve_many shared-dep dedup. Pure resolver with agent-A canonical + playbook-recursion + cycle tests",
+    "DONE — agent_app_assignments surface as ClosureResult.required_connects (RequiredConnect app_name/app_type/via_agent), NEVER as installable members (FR-4). test_agent_apps_become_required_connects_not_members: apps do not inflate members; test_required_connects_deduped_case_insensitively (keyed by app_name.upper()). App assignments surface as required_connects entries, distinct from installable members",
+    "DONE — additive-only (2 new files: service + test). Full suite 4786 passed (+12 US-004), only the 2 inherited-baseline failures remain (byte-identical to origin/main, main CI 33212994947). DbDependencyReader lazy imports verified (Agent, AgentAppAssignment, WorkflowTemplate). Orchestrator baseline"
    ],
    "files": [
     "orchestrator/services/",
