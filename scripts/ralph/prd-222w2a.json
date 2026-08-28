@@ -98,9 +98,9 @@
    "title": "MEDIUM — data-tour retirement residue: dead [data-tour=\"sidebar\"] selectors survive in app/globals.css",
    "description": "REVIEW FINDING. US-021 AC #2 claims 'grep -c data-tour in frontend = 0', but frontend/app/globals.css still carries 7 data-tour hits: line 987 (comment) and the `.studio [data-tour=\"sidebar\"]` selector rules at lines 996-997, 1016-1017, 1024-1025. Every data-tour ATTRIBUTE was stripped from .tsx (verified), so these CSS selectors now match NOTHING — dead styling left over from the retired Shepherd tour's sidebar highlight. The acceptance script's data-tour gate greps only `*.tsx` (scripts/ralph/acceptance-prd222w2a.sh:68), so it structurally cannot catch the .css residue — that is why the build reported clean. Functionally inert (the rules never apply), but it contradicts the stated AC and the §5/§10 clean-replace mandate to delete dead code with the surface it served.",
    "acceptanceCriteria": [
-    "the dead `.studio [data-tour=\"sidebar\"]` selector blocks and the data-tour comment in frontend/app/globals.css (lines ~987, 996-997, 1016-1017, 1024-1025) are removed",
-    "grep -rn 'data-tour' frontend/app frontend/components frontend/lib frontend/hooks (excl node_modules) = 0 hits — .css included, not only .tsx",
-    "cd frontend && npm run -s build exits 0 and vitest stays green after the CSS removal"
+    "DONE — removed all 3 dead `.studio [data-tour=\"sidebar\"]` rule blocks (base cream override, active-nav-item, workspace-pill) + their comments + the data-tour bullet in the studio-chrome comment header from app/globals.css. The live block that actually styles the sidebar cream survives (`.studio aside.glass-card` / `.glass-card[class*=\"fixed\"][class*=\"top-0\"]`), so NO visual regression: studio-sidebar.tsx uses .sh-* classes, classic sidebar.tsx uses glass-card+fixed+top-0+border-r — neither uses data-tour.",
+    "DONE — grep -rn data-tour over app/components/lib/hooks (excl node_modules) = 0 hits; .css now included, not only .tsx (was 7 hits, all in globals.css).",
+    "DONE — cd frontend && npm run -s build exit 0 (full route table emitted, no errors); vitest 55 files / 328 tests green after the CSS removal (studio-sidebar.test.tsx among them)."
    ],
    "files": [
     "frontend/app/globals.css"
