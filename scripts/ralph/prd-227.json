@@ -88,6 +88,37 @@
     "orchestrator/api/missions.py",
     "orchestrator/tests/"
    ]
+  },
+  {
+   "id": "P227-RVW-3",
+   "title": "HIGH (review) — REST/suggestion-card chat-launched missions never narrate into the launching thread; they always fall back to the Auto thread, so US-002 AC3 is unmet for the primary human 'Launch Mission' path",
+   "description": "US-002 AC3 ('a chat-launched mission produces narration messages in the launching thread') is satisfied only for the TOOL path (Auto autonomously calling platform_create_mission mid-chat — the executor server-injects _origin_chat_id from caller_context.conversation_id at platform_executor.py:1126-1130, and handlers_missions.py:124-125 sets run.config['origin_chat_id']). It is NOT satisfied for the SUGGESTION-CARD REST launch — the direct human 'Launch Mission' affordance rendered inside any chat: frontend/components/chatbot/chat.tsx:977,1364 render <MissionSuggestionCard chatId={id}> where id is the CURRENT conversation (not necessarily the Auto thread); mission-suggestion-card.tsx:44-46 posts config={source:'chat', chat_id: chatId} via useCreateMission → POST /api/missions. api/missions.py:410 does mission_config = strip_caller_narration_origin(body.config), which removes chat_id and NEVER re-injects origin_chat_id (the REST path has no server-side origin capture). _narrate_mission (coordinator_service.py:421) reads only cfg.get('origin_chat_id'), so it is always absent for REST-created missions → every 'Auto · mission' lifecycle line lands in the creator's Auto thread (find_or_create_auto_chat), never the chat the user launched from. This is NOT a P227-RVW-2 regression — the pre-RVW-2 code (mission_config = dict(body.config)) preserved config['chat_id'] but never mapped it to origin_chat_id either, so this path never narrated to the launching chat; it is an original US-002 incompleteness surfaced by the RVW-2 layer. SAFE FIX: the REST caller is AUTHENTICATED (created_by=ctx.user.id, api/missions.py:421) and chat_messenger.py:176's Layer-2 owner check (int(candidate.user_id)==owner_int_id) already forces a chat_id owned by another user to fall back to Auto — so honoring the authenticated user's OWN chat_id as origin is cross-user-safe WITHOUT reopening RVW-2. The RVW-2 blanket Layer-1 strip on the authenticated REST path is over-broad: it removes the one legitimate origin-capture AC3 needs while adding zero security margin over Layer-2.",
+   "acceptanceCriteria": [
+    "On the REST create path (api/missions.py::create_mission), the mission's origin_chat_id is server-set from the authenticated request's chat_id (body.config['chat_id'] or a dedicated field) so a same-user chat-launched mission narrates INTO that chat. Keep the RVW-2 discipline (strip caller keys first, then server-set origin from the authenticated identity) — do NOT simply stop stripping — and lean on the Layer-2 owner check for safety.",
+    "Cross-user safety preserved (RVW-2 NOT reopened): a REST create whose config.chat_id is owned by ANOTHER workspace user still delivers to the creator's Auto thread, 0 messages in the other user's chat (chat_messenger.py:176 Layer-2 owner check). Ensure run.created_by resolves to the authenticated user (coordinator treats created_by as a Clerk id via User.clerk_user_id lookup at coordinator_service.py:305) so the owner comparison is correct; if ctx.user.id is not the clerk id, resolve it before persisting created_by.",
+    "Test (PURE where possible): POST /api/missions with config={source:'chat', chat_id:<creator's OWN chat>} → run.config['origin_chat_id']==that chat AND narration target is that chat, not the Auto thread. Second test: config.chat_id=<another user's chat> → narration falls back to the creator's Auto thread, 0 messages in the other user's chat (mirror test_prd227_narration_target_owner.py's cross-user assertion). Neither test reintroduces a caller-controllable cross-user origin.",
+    "import_mission_plan (api/missions.py:466) parity if it can carry a legitimate origin. No new routes, no new SSE event names, no os.getenv outside config.py, narration stays fail-soft."
+   ],
+   "files": [
+    "orchestrator/api/missions.py",
+    "orchestrator/services/chat_messenger.py",
+    "orchestrator/services/coordinator_service.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P227-RVW-4",
+   "title": "MEDIUM (review, pre-existing) — agent update_board_task_status omits the in_progress field-reset the human update_task_status endpoint performs, leaving stale completed_at/error_message/result on a redo → a succeeded task renders as failed",
+   "description": "PRE-EXISTING divergence (the in_progress field lines at handlers_board_tasks.py:321-322 are UNCHANGED base context — NOT introduced by this diff) that US-001's status-parity goal should close: US-001 explicitly aligns the agent handler with the HTTP path and its own comment at handlers_board_tasks.py:336 cites api/board_tasks.py:912, the update_task_status drag endpoint. That endpoint (api/board_tasks.py:891-895) resets completed_at=None, error_message=None, result=None on every in_progress transition; the agent handler only sets started_at (and only when unset). FAILURE: a BoardTask that reached status='done' carrying a non-null error_message from a prior failed execution is redone by an agent (platform_update_task_status status='in_progress' then later 'done'); the stale error_message survives, and board-card.tsx:62 (isFailed = task.error_message != null && task.status === 'done') renders the red 'failed' strip (board-card.tsx:176-179) with the OLD error on a task that just succeeded — the board-state-lies class 'light up the board' exists to kill. The agent handler currently matches the OTHER HTTP endpoint (update_task, api/board_tasks.py:544 — guarded, no reset), so the HTTP side is itself inconsistent; mirror update_task_status since that is the status-change semantic and the one US-001's comment cites. Gerard to arbitrate scope (pre-existing, outside the diff's change surface).",
+   "acceptanceCriteria": [
+    "handlers_board_tasks.py update_board_task_status clears completed_at, error_message, and result when new_status=='in_progress', mirroring api/board_tasks.py:891-895 (the update_task_status endpoint US-001's comment cites), so a redone task carries no stale terminal fields.",
+    "Test: a task with status='done' + error_message set, moved to 'in_progress' via update_board_task_status, has completed_at/error_message/result cleared; moving it back to 'done' does not render as failed (error_message stays null).",
+    "No behavior change to the blocked/failed transitions already added; VALID_STATUSES reuse, notify, and fail-soft all unchanged."
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_board_tasks.py",
+    "orchestrator/tests/"
+   ]
   }
  ]
 }
