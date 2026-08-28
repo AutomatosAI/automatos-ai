@@ -430,6 +430,20 @@ async def connect_channel_for_workspace(
     }
 
 
+def _current_channel_config(db: Session, channel_id: str) -> Dict[str, Any]:
+    """The channel row's stored config JSONB (``{}`` if absent/non-dict).
+
+    Read-only helper so both the trigger_mode-only update and the config-only
+    update (which must preserve the stored mode, P225-RVW-7) read the current
+    config from one place.
+    """
+    existing = db.execute(
+        text("SELECT config FROM channel_connections WHERE id = :id"),
+        {"id": channel_id},
+    ).fetchone()
+    return existing.config if existing and isinstance(existing.config, dict) else {}
+
+
 @router.put("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_channel(
     channel_id: str,
@@ -460,14 +474,20 @@ async def update_channel(
         if mode is None:
             raise HTTPException(400, f"trigger_mode must be one of {list(TRIGGER_MODES)}")
         if new_config is None:
-            existing = db.execute(
-                text("SELECT config FROM channel_connections WHERE id = :id"),
-                {"id": channel_id},
-            ).fetchone()
-            base = existing.config if existing and isinstance(existing.config, dict) else {}
-            new_config = with_trigger_mode(base, mode)
+            new_config = with_trigger_mode(_current_channel_config(db, channel_id), mode)
         else:
             new_config = with_trigger_mode(new_config, mode)
+    elif new_config is not None and "trigger_mode" not in new_config:
+        # P225-RVW-7: a config-only edit (e.g. rotating a bot_token) REPLACES the
+        # whole config JSONB. list_channels never surfaces the raw config (it
+        # holds creds), so the client can't round-trip trigger_mode itself —
+        # carry the stored mode across, or the operator's allow_all /
+        # communication_only choice silently reverts to the strict default.
+        stored = normalize_trigger_mode(
+            _current_channel_config(db, channel_id).get("trigger_mode")
+        )
+        if stored is not None:
+            new_config = with_trigger_mode(new_config, stored)
     if new_config is not None:
         updates.append("config = :config")
         params["config"] = _json.dumps(new_config)
