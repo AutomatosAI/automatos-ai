@@ -48,36 +48,102 @@ def reachable_from(adjacency: Mapping[Any, Iterable[Any]], root: Any) -> list:
     return order
 
 
-def _board_subtree_adjacency(db: Any, workspace_id: Any, root_id: int) -> dict:
-    """parent→children adjacency for the transitive descendants of ``root_id``.
+def _board_children(db: Any, workspace_id: Any, parent: Any) -> list:
+    """The direct downstream board tasks of ``parent``, from BOTH edge sources.
 
-    Built by BFS querying children by ``parent_task_id`` so we never scan the
-    whole workspace, and guarded by a visited set so corrupt parent chains can't
-    loop. Keys and values are string ids (stable for ``reachable_from``).
+    1. ``parent_task_id`` children — the board-task subtree.
+    2. the mission ``OrchestrationTaskDependency`` DAG — tasks that DEPEND ON
+       this task's orchestration task (``depends_on_task_id == parent's OT id``),
+       mapped back to their board tasks via ``BoardTask.orchestration_task_id``.
+       A mission's steps are FLAT ``parent_task_id`` siblings under the mission
+       board task (orchestration_board_bridge), so step→step blocking lives ONLY
+       here — without it the cascade is 0 for the primary mission ask (P225-RVW-3).
+
+    Returned deduped by id, order stable (tree children first). Resolved with
+    equality queries per edge (mission DAGs are small; this is the cold cascade
+    path, not a request-hot loop).
     """
     from core.models.core import BoardTask
 
-    adjacency: dict = {}
-    seen = {str(root_id)}
-    frontier = [int(root_id)]
-    while frontier:
-        parents, frontier = frontier, []
-        for pid in parents:
-            children = (
+    kids: list = []
+    seen_ids: set = set()
+
+    def _add(task: Any) -> None:
+        if task is None:
+            return
+        tid = str(task.id)
+        if tid not in seen_ids:
+            seen_ids.add(tid)
+            kids.append(task)
+
+    # Source 1 — the parent_task_id tree.
+    for child in (
+        db.query(BoardTask)
+        .filter(
+            BoardTask.workspace_id == workspace_id,
+            BoardTask.parent_task_id == parent.id,
+        )
+        .all()
+    ):
+        _add(child)
+
+    # Source 2 — the mission OrchestrationTaskDependency DAG.
+    ot_id = getattr(parent, "orchestration_task_id", None)
+    if ot_id is not None:
+        from core.models.orchestration import OrchestrationTaskDependency
+
+        edges = (
+            db.query(OrchestrationTaskDependency)
+            .filter(OrchestrationTaskDependency.depends_on_task_id == ot_id)
+            .all()
+        )
+        for edge in edges:
+            dep_board = (
                 db.query(BoardTask)
                 .filter(
                     BoardTask.workspace_id == workspace_id,
-                    BoardTask.parent_task_id == pid,
+                    BoardTask.orchestration_task_id == edge.task_id,
                 )
-                .all()
+                .first()
             )
-            kids = [str(c.id) for c in children]
-            adjacency[str(pid)] = kids
-            for c in children:
-                cid = str(c.id)
+            _add(dep_board)
+
+    return kids
+
+
+def _board_subtree_adjacency(db: Any, workspace_id: Any, root_id: int) -> dict:
+    """board→children adjacency for the transitive dependents of ``root_id``,
+    merging BOTH edge sources — the ``parent_task_id`` tree AND the mission
+    ``OrchestrationTaskDependency`` DAG (P225-RVW-3, see ``_board_children``).
+
+    BFS over board-task rows (each row is needed to read its
+    ``orchestration_task_id``), guarded by a single visited set so a cycle in
+    EITHER source terminates. Keys and values are string ids (stable for
+    ``reachable_from``). An absent root row ⇒ empty cascade.
+    """
+    from core.models.core import BoardTask
+
+    root = (
+        db.query(BoardTask)
+        .filter(BoardTask.id == int(root_id), BoardTask.workspace_id == workspace_id)
+        .first()
+    )
+    if root is None:
+        return {}
+
+    adjacency: dict = {}
+    seen = {str(root.id)}
+    frontier = [root]
+    while frontier:
+        parents, frontier = frontier, []
+        for parent in parents:
+            children = _board_children(db, workspace_id, parent)
+            adjacency[str(parent.id)] = [str(c.id) for c in children]
+            for child in children:
+                cid = str(child.id)
                 if cid not in seen:
                     seen.add(cid)
-                    frontier.append(int(c.id))
+                    frontier.append(child)
     return adjacency
 
 
@@ -135,7 +201,8 @@ def count_downstream_blocked(
 ) -> int:
     """How many tasks are transitively blocked behind this parked subject.
 
-    Board-task subjects walk the ``parent_task_id`` tree. Other subject kinds
+    Board-task subjects walk BOTH the ``parent_task_id`` tree and the mission
+    ``OrchestrationTaskDependency`` DAG (P225-RVW-3). Other subject kinds
     (playbook_run / tool_call) have no board-shaped dependent tree in v1 and
     return 0 — they never trip the urgent bypass, which is the conservative
     default. Never raises: a traversal fault degrades to 0 (non-urgent).

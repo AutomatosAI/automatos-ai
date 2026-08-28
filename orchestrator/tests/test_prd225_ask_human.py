@@ -278,6 +278,90 @@ def test_reachable_from_is_cycle_safe():
 
 
 # ===========================================================================
+# 4b. P225-RVW-3 — the cascade follows the mission DAG, not just parent_task_id
+# ===========================================================================
+
+def _dag_mission(db, ws):
+    """Steps 5..9 as FLAT parent_task_id siblings of one mission board task, with
+    6,7,8,9 depending on step 5 ONLY through OrchestrationTaskDependency (not
+    parent_task_id) — the flat-sibling shape orchestration_board_bridge produces."""
+    from core.models.core import BoardTask
+    from core.models.orchestration import OrchestrationTaskDependency
+
+    ot = {n: uuid4() for n in (5, 6, 7, 8, 9)}
+    mission_parent = 100
+    db.add(BoardTask(id=5, workspace_id=ws, title="step 5", status="in_progress",
+                     parent_task_id=mission_parent, orchestration_task_id=ot[5]))
+    for n in (6, 7, 8, 9):
+        db.add(BoardTask(id=n, workspace_id=ws, title=f"step {n}", status="assigned",
+                         parent_task_id=mission_parent, orchestration_task_id=ot[n]))
+        # OrchestrationTaskDependency(task_id=downstream, depends_on_task_id=upstream):
+        # step n depends on step 5, so parking step 5 blocks step n.
+        db.add(OrchestrationTaskDependency(task_id=ot[n], depends_on_task_id=ot[5]))
+    return ot
+
+
+def test_mission_dag_cascade_counts_dependents():
+    """count_downstream_blocked / board_task_cascade_detail follow the DAG: step 5
+    with steps 6-9 depending on it (NOT parent_task_id children) counts 4."""
+    from services.ask_cascade import (
+        count_downstream_blocked, is_urgent_cascade, board_task_cascade_detail,
+    )
+
+    db = _FakeSession()
+    ws = uuid4()
+    _dag_mission(db, ws)
+
+    count = count_downstream_blocked(db, ws, "board_task", "5")
+    assert count == 4  # 0 via parent_task_id, 4 via the DAG
+    assert is_urgent_cascade(count) is True
+
+    detail = board_task_cascade_detail(db, ws, "5")
+    assert detail["total"] == 4
+    assert {t["id"] for t in detail["tasks"]} == {6, 7, 8, 9}
+
+
+@pytest.mark.asyncio
+async def test_mission_dag_ask_marks_urgent(dispatched):
+    """The real handler on a mission-blocking ask fires the urgent bypass — the
+    baked >=3 rule now works for a genuine mission ask (was 0 → never urgent)."""
+    from modules.tools.discovery.handlers_asks import ask_human
+
+    db = _FakeSession()
+    ws = uuid4()
+    _dag_mission(db, ws)
+
+    res = await ask_human(db, ws, {
+        "subject_type": "board_task", "subject_id": "5",
+        "question": "Blocking steps 6-9 — proceed?", "_agent_id": 5,
+    })
+    assert res["downstream_blocked"] == 4
+    assert dispatched[0]["severity"] == "urgent"
+
+
+def test_mission_dag_cascade_is_cycle_safe():
+    """A DAG cycle (5→6→5 via dependency edges) terminates and each node counts
+    once — cycle-safety holds across the merged adjacency."""
+    from services.ask_cascade import board_task_cascade
+    from core.models.core import BoardTask
+    from core.models.orchestration import OrchestrationTaskDependency
+
+    db = _FakeSession()
+    ws = uuid4()
+    ot5, ot6 = uuid4(), uuid4()
+    db.add(BoardTask(id=5, workspace_id=ws, title="s5", status="in_progress",
+                     parent_task_id=None, orchestration_task_id=ot5))
+    db.add(BoardTask(id=6, workspace_id=ws, title="s6", status="assigned",
+                     parent_task_id=None, orchestration_task_id=ot6))
+    # 6 depends on 5 AND 5 depends on 6 — a corrupt cycle.
+    db.add(OrchestrationTaskDependency(task_id=ot6, depends_on_task_id=ot5))
+    db.add(OrchestrationTaskDependency(task_id=ot5, depends_on_task_id=ot6))
+
+    order = board_task_cascade(db, ws, 5)
+    assert order == ["6"]  # terminates; 5 is the root, 6 counted once
+
+
+# ===========================================================================
 # 5. Asker is server-minted (never a tool param) + no waiting
 # ===========================================================================
 
