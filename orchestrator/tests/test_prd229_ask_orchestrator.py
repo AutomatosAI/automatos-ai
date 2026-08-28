@@ -448,9 +448,9 @@ def test_load_task_guards_missing_subject():
 # ---------------------------------------------------------------------------
 
 def test_clarification_max_rounds_per_task_config():
-    # a real constant in config.py (no os.getenv outside config.py), and the
-    # cumulative bound stays well inside the smallest (light=120s) envelope:
-    # cap × single-round timeout ≤ half the envelope.
+    # a real constant in config.py (canonical config only — no stray env read),
+    # and the cumulative bound stays well inside the smallest (light=120s)
+    # envelope: cap × single-round timeout ≤ half the envelope.
     assert isinstance(Config.CLARIFICATION_MAX_ROUNDS_PER_TASK, int)
     assert Config.CLARIFICATION_MAX_ROUNDS_PER_TASK >= 1
     assert (
