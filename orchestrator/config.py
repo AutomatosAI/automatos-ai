@@ -991,6 +991,19 @@ class Config:
         "TOOL_FALLBACK_PINS",
         "platform_find_tools,platform_search_memory,platform_store_memory,platform_resume_context",
     )
+    # PRD-228 (P228-RVW-4): actions the dispatcher_only surface (the heartbeat
+    # orchestrator) MUST keep reachable regardless of the semantic top-K ranking
+    # outcome, so the standing health loop can always read live floor state.
+    # Unioned onto the NARROWED enum only (an open-full/None surface already
+    # exposes every action). CSV of action names; each is role-gate-checked
+    # before admission, so a gated/unknown name can never be forced in. Default
+    # pins platform_fleet_status (PRD-228 US-003 fleet read-model tool) — without
+    # a reserved slot it can rank out of the top-15 on any given tick and the
+    # loop silently loses situational awareness (signal-tool-routing-drop class).
+    HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE: str = os.getenv(
+        "HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE",
+        "platform_fleet_status",
+    )
     # Shadow telemetry: log (never ship) what the PR-C relevance-gated surface
     # WOULD have been for each turn — the eval data for the flip.
     TOOL_SURFACE_SHADOW: bool = os.getenv("TOOL_SURFACE_SHADOW", "true").lower() == "true"

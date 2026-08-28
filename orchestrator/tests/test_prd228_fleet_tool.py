@@ -212,14 +212,110 @@ def test_heartbeat_orchestrator_mode_is_dispatcher_only():
     assert MODE_CONFIGS[ContextMode.HEARTBEAT_ORCHESTRATOR].tool_loading == "dispatcher_only"
 
 
-def test_visible_in_heartbeat_dispatcher_surface():
-    """The tool appears in the open-full dispatcher enum the heartbeat loads
-    (``_load_dispatcher_only`` → to_dispatcher_schema(exclude_admin=True))."""
+def test_visible_in_heartbeat_dispatcher_surface_openfull_fallback():
+    """FALLBACK path only: the tool is in the open-full dispatcher enum the
+    heartbeat loads when narrowing CAN'T decide (flag off / no query / rank
+    failure → allowed_names=None). This does NOT prove production visibility —
+    a real tick supplies a query and ships the ranked semantic top-K, where the
+    tool has no reserved slot. That production path is proven by
+    ``test_heartbeat_dispatcher_always_includes_fleet_under_semantic_narrowing``
+    (the always-include union) — the guarantee P228-RVW-4 requires.
+    """
     from modules.tools.discovery.action_registry import get_action_registry
 
     registry = get_action_registry()
-    # allowed_names=None mirrors the default open-full fallback the heartbeat
-    # tick uses when no query narrows the enum.
+    # allowed_names=None is ONLY the open-full fallback (no query / flag off /
+    # rank failure) — NOT the narrowed production tick.
     schema = registry.to_dispatcher_schema(exclude_admin=True, allowed_names=None)
     enum = schema["function"]["parameters"]["properties"]["action"]["enum"]
     assert "platform_fleet_status" in enum
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_dispatcher_always_includes_fleet_under_semantic_narrowing(monkeypatch):
+    """P228-RVW-4 (production path): on a real heartbeat tick the dispatcher enum
+    is the ranked semantic top-K (SEMANTIC_TOOL_ROUTING on, a non-empty query),
+    where platform_fleet_status has NO reserved slot. Drive the SAME loader the
+    heartbeat runs (``ToolsSection().load_tools(strategy=DISPATCHER_ONLY,
+    query=...)``) with ranking that returns a TOP-K WITHOUT the fleet tool (as if
+    it ranked #16+), and assert it is STILL in the enum — reachable regardless of
+    the ranking outcome, via the always-include union rather than the
+    allowed_names=None open-full path.
+    """
+    from modules.context.sections.tools import ToolLoadingStrategy, ToolsSection
+    import modules.tools.tool_router as tr
+
+    # A decided, NARROWED ranked list that does NOT contain the fleet tool.
+    ranked_without_fleet = [
+        "platform_list_agents", "platform_list_tasks", "platform_list_missions",
+        "platform_list_watches", "platform_search_memory",
+    ]
+    assert "platform_fleet_status" not in ranked_without_fleet
+
+    async def _fake_narrow(query, is_admin, is_super_admin):
+        # (allowed_names, reason, from_pins) — a decided, narrowed surface.
+        assert query  # the heartbeat always supplies a non-empty query
+        return list(ranked_without_fleet), "ranked", False
+
+    monkeypatch.setattr(tr, "_narrow_dispatcher_actions_async", _fake_narrow)
+
+    # A representative non-empty heartbeat query (mirrors heartbeat_service.py).
+    query = ("Perform a scheduled health check for this workspace. "
+             "Analyze your workspace using the tools provided.")
+    tools, tool_choice = await ToolsSection().load_tools(
+        agent_id=None, workspace_id="ws-hb",
+        strategy=ToolLoadingStrategy.DISPATCHER_ONLY, query=query,
+    )
+
+    assert tool_choice == "auto"
+    enum = tools[0]["function"]["parameters"]["properties"]["action"]["enum"]
+    # The always-include re-added the fleet tool despite it not being ranked...
+    assert "platform_fleet_status" in enum
+    # ...and the union is ADDITIVE — non-promoted ranked entries are preserved
+    # (promoted names like platform_list_agents are excluded from the dispatcher
+    # enum by exclude_promoted, which is orthogonal to this fix).
+    assert "platform_list_tasks" in enum
+    assert len(enum) >= 2
+
+
+def test_apply_dispatcher_always_include_unions_onto_narrowed_but_not_openfull():
+    """P228-RVW-4 unit: the helper appends configured, gate-cleared pins onto a
+    NARROWED list (dedup, order-stable) and leaves an open-full (None) surface
+    untouched — the full enum already exposes everything."""
+    from modules.tools.tool_router import _apply_dispatcher_always_include
+
+    # open-full surface: unchanged.
+    assert _apply_dispatcher_always_include(None) is None
+
+    # narrowed surface without the fleet tool → fleet appended (registered +
+    # non-admin, so it clears the gate); the ranked head stays first.
+    out = _apply_dispatcher_always_include(["platform_list_agents"])
+    assert out is not None
+    assert out[0] == "platform_list_agents"
+    assert "platform_fleet_status" in out
+
+    # idempotent: already present → not duplicated.
+    already = _apply_dispatcher_always_include(["platform_fleet_status", "platform_list_agents"])
+    assert already.count("platform_fleet_status") == 1
+
+
+def test_apply_dispatcher_always_include_drops_unknown_or_gated_pin(monkeypatch):
+    """P228-RVW-4: a configured pin that is unregistered (or role-gated) is never
+    forced into the enum — the same fail-closed gate page-prior uses."""
+    import modules.tools.tool_router as tr
+
+    monkeypatch.setattr(
+        tr, "_dispatcher_always_include",
+        lambda: ["platform_fleet_status", "definitely_not_a_real_action_xyz"],
+    )
+    out = tr._apply_dispatcher_always_include(["platform_list_agents"])
+    assert "platform_fleet_status" in out                  # registered → admitted
+    assert "definitely_not_a_real_action_xyz" not in out   # unknown → dropped
+
+
+def test_dispatcher_always_include_defaults_to_fleet_status():
+    """The config default pins platform_fleet_status so the heartbeat guarantee
+    holds out of the box (no env override required)."""
+    from modules.tools.tool_router import _dispatcher_always_include
+
+    assert "platform_fleet_status" in _dispatcher_always_include()
