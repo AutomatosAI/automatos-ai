@@ -48,7 +48,6 @@ export interface Workspace {
     slug: string
     plan: 'starter' | 'business' | 'enterprise'
     role: 'owner' | 'admin' | 'editor' | 'viewer' | 'member'
-    isNewWorkspace: boolean
     planLimits: {
         max_agents: number
         max_workflows: number
@@ -150,7 +149,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 slug: data.slug,
                 plan: data.plan,
                 role: data.role,
-                isNewWorkspace: data.is_new_workspace ?? false,
                 planLimits: data.plan_limits,
                 onboarding: data.onboarding ?? undefined,
                 webhookUrl: data.webhook_url,

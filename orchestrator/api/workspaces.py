@@ -52,20 +52,13 @@ async def get_current_workspace(
     The auth dependency auto-provisions a personal workspace for new Clerk users,
     so ctx.workspace_id should always point to a valid workspace.
 
-    Returns `is_new_workspace: true` when the workspace has no agents yet,
-    signalling the frontend to trigger the onboarding flow.
+    The response carries the server-side onboarding snapshot (`onboarding`:
+    {stage, trial}); the frontend drives the Auto-led flow off `onboarding.stage`.
     """
     workspace = db.query(Workspace).get(ctx.workspace_id)
 
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
-
-    # Detect brand-new workspace: no user-created agents yet
-    # Exclude system agents (Auto) — they're seeded automatically during provisioning
-    agent_count = db.query(Agent).filter(
-        Agent.workspace_id == workspace.id,
-        Agent.is_system_agent.isnot(True),
-    ).count()
 
     # Auto-generate webhook_key if missing (for workspaces created before migration)
     if not workspace.webhook_key:
@@ -108,10 +101,11 @@ async def get_current_workspace(
         "plan": workspace.plan,
         "role": member_role,
         "plan_limits": workspace.plan_limits or {},
-        "is_new_workspace": agent_count == 0,
         # PRD-222 W1S2: server-side onboarding stage + trial snapshot ({stage,
         # trial}). Field addition only — no new route (route-manifest unchanged).
-        # is_new_workspace stays until W2·S6 migrates its consumers.
+        # PRD-222 W2·S6 (US-022) retired the legacy new-workspace boolean — its
+        # only consumers (the first-login guard + tour) are gone; the frontend
+        # detects a new workspace from onboarding.stage now.
         "onboarding": public_snapshot(workspace),
         "webhook_url": webhook_url,
         "webhook_key": workspace.webhook_key,
