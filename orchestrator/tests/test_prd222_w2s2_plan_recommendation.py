@@ -155,3 +155,118 @@ def test_handler_at_least_one_rule_names_plan():
     res = _run(update_onboarding(_db_returning(ws), uuid4(), {}))
     assert res["success"] is False
     assert "plan" in res["error"]
+
+
+# --------------------------------------------------------------------------- #
+# Atomicity — plan/stage + funnel land in ONE commit, or nothing (RVW-2, FR-4)
+# --------------------------------------------------------------------------- #
+
+
+def _raise(*_a, **_k):
+    raise RuntimeError("funnel write failed")
+
+
+def test_accept_path_commits_exactly_once():
+    # plan + plan_limits + plan_accepted are ONE transaction, not two commits.
+    ws = _FakeWorkspace(plan="basic", plan_limits={"max_documents": 100})
+    db = _db_returning(ws)
+    res = _run(update_onboarding(db, uuid4(), {"plan": "pro"}))
+    assert res["success"] is True
+    assert db.commit.call_count == 1
+
+
+def test_accept_funnel_failure_commits_nothing_and_reports_failure(monkeypatch):
+    # A funnel-write failure must NOT leave a durable plan change reported as a
+    # failure: the single commit never runs and the tx is rolled back, so no
+    # partial write reaches the DB while success is False (FR-4).
+    import modules.tools.discovery.handlers_onboarding as h
+
+    monkeypatch.setattr(h, "record_plan_event", _raise)
+    ws = _FakeWorkspace(plan="basic", plan_limits={"max_documents": 100})
+    db = _db_returning(ws)
+    res = _run(update_onboarding(db, uuid4(), {"plan": "pro"}))
+    assert res["success"] is False
+    assert db.commit.call_count == 0  # nothing committed — no partial write
+    assert db.rollback.call_count == 1
+
+
+def test_proposal_advance_commits_exactly_once():
+    # Stage advance + plan_recommended land in ONE commit.
+    ws = _FakeWorkspace(onboarding={"stage": "teach"})
+    db = _db_returning(ws)
+    res = _run(
+        update_onboarding(db, uuid4(), {"advance_to": "proposal", "segment": {"business": "an agency"}})
+    )
+    assert res["success"] is True
+    assert db.commit.call_count == 1
+
+
+def test_proposal_funnel_failure_leaves_stage_uncommitted(monkeypatch):
+    # A funnel-write failure on the proposal path does not leave the stage
+    # advanced without its recorded recommendation — nothing is committed.
+    import modules.tools.discovery.handlers_onboarding as h
+
+    monkeypatch.setattr(h, "record_plan_event", _raise)
+    ws = _FakeWorkspace(onboarding={"stage": "teach"})
+    db = _db_returning(ws)
+    res = _run(
+        update_onboarding(db, uuid4(), {"advance_to": "proposal", "segment": {"business": "an agency"}})
+    )
+    assert res["success"] is False
+    assert db.commit.call_count == 0
+    assert db.rollback.call_count == 1
+
+
+# --------------------------------------------------------------------------- #
+# @integration — real transaction: a funnel failure rolls back the plan write so
+# workspace.plan is UNCHANGED in the DB (the literal RVW-2 AC). Skips w/o Postgres.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def engine():
+    from sqlalchemy import create_engine, text
+
+    from core.database.database import get_database_url
+
+    try:
+        eng = create_engine(get_database_url(), pool_pre_ping=True)
+        with eng.connect() as c:
+            c.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"plan-accept atomicity integration test needs a reachable Postgres: {exc}")
+    yield eng
+    eng.dispose()
+
+
+@pytest.mark.integration
+def test_accept_funnel_failure_does_not_change_plan_real_db(engine, new_session, monkeypatch):
+    from sqlalchemy import text
+
+    from core.models.workspaces import Workspace
+    import modules.tools.discovery.handlers_onboarding as h
+
+    s = new_session()
+    wid = str(uuid4())
+    try:
+        s.execute(
+            text("INSERT INTO workspaces (id, name, plan) VALUES (CAST(:i AS uuid), :n, 'basic')"),
+            {"i": wid, "n": "w2s2-atomic"},
+        )
+        s.commit()
+
+        # Inject a failure on the funnel write that follows assign_plan's flush.
+        monkeypatch.setattr(h, "record_plan_event", _raise)
+        res = _run(update_onboarding(s, wid, {"plan": "pro"}))
+        assert res["success"] is False
+
+        # The flushed-but-uncommitted plan write was rolled back — the row is
+        # still 'basic' (no partial durable write; FR-4).
+        row = s.execute(
+            text("SELECT plan FROM workspaces WHERE id = CAST(:i AS uuid)"), {"i": wid}
+        ).fetchone()
+        assert row[0] == "basic"
+    finally:
+        s.rollback()
+        s.execute(text("DELETE FROM workspaces WHERE id = CAST(:i AS uuid)"), {"i": wid})
+        s.commit()

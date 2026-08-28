@@ -82,14 +82,19 @@ def plan_limits_for_tier(plan: str, tiers: Optional[dict] = None) -> dict:
     return limits
 
 
-def assign_plan(db: Any, workspace: Any, plan: str, tiers: Optional[dict] = None) -> dict:
+def assign_plan(
+    db: Any, workspace: Any, plan: str, tiers: Optional[dict] = None, commit: bool = True
+) -> dict:
     """Set ``workspace.plan`` and merge the tier's limits into ``plan_limits``.
 
     Rebuild-don't-mutate (PRD-220): a NEW ``plan_limits`` dict is built from the
     existing one (so keys this tier does not manage survive) with the tier's
     limits overlaid, then reassigned so SQLAlchemy marks the JSONB column dirty.
     ``db is None`` performs the in-memory assignment only — the escape hatch for
-    pure-logic tests (mirrors ``services/onboarding_state._persist``). Returns the
+    pure-logic tests (mirrors ``services/onboarding_state._persist``).
+    ``commit=False`` flushes the write but leaves the transaction OPEN so a caller
+    that also stamps the ``plan_accepted`` funnel event lands BOTH in one commit
+    (FR-4 atomicity — see ``handlers_onboarding.update_onboarding``). Returns the
     new ``plan_limits``. Raises :class:`ValueError` for a non-assignable plan.
     """
     limits = plan_limits_for_tier(plan, tiers)  # validates assignability first
@@ -99,7 +104,10 @@ def assign_plan(db: Any, workspace: Any, plan: str, tiers: Optional[dict] = None
     workspace.plan_limits = new_limits
     if db is not None:
         db.add(workspace)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     logger.info("[plan_tiers] assigned plan=%s to workspace=%s", plan, getattr(workspace, "id", "?"))
     return new_limits
 

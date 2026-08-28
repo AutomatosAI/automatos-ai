@@ -150,16 +150,24 @@ def _clean_segment(segment: Optional[dict]) -> dict[str, Any]:
     return {k: segment[k] for k in SEGMENT_KEYS if segment.get(k) is not None}
 
 
-def _persist(db: Any, workspace: Any, new_doc: dict[str, Any]) -> dict[str, Any]:
+def _persist(
+    db: Any, workspace: Any, new_doc: dict[str, Any], *, commit: bool = True
+) -> dict[str, Any]:
     """Assign a NEW dict to the column (never mutate) and commit.
 
     ``db is None`` runs the assignment only — the escape hatch for pure logic
-    tests that verify the rebuild contract without a session.
+    tests that verify the rebuild contract without a session. ``commit=False``
+    flushes but leaves the transaction OPEN, so a caller making several writes
+    (e.g. a stage advance + a plan funnel stamp) commits them ATOMICALLY in one
+    transaction (FR-4 — see ``handlers_onboarding.update_onboarding``).
     """
     workspace.onboarding = new_doc
     if db is not None:
         db.add(workspace)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     return new_doc
 
 
@@ -169,11 +177,13 @@ def advance_onboarding_stage(
     to_stage: str,
     *,
     segment: Optional[dict] = None,
+    commit: bool = True,
 ) -> dict[str, Any]:
     """Advance the workspace to ``to_stage``, stamping the funnel timestamp.
 
     Rebuilds the whole document and reassigns it (rebuild-don't-mutate).
-    Optionally merges segment answers in the same write. Raises
+    Optionally merges segment answers in the same write. ``commit=False`` defers
+    the commit to an atomic caller (see ``_persist``). Raises
     :class:`InvalidStageTransition` on a backward / same-stage / unknown /
     from-terminal move.
     """
@@ -207,14 +217,17 @@ def advance_onboarding_stage(
         merged.update(_clean_segment(segment))
         doc["segment"] = merged
 
-    return _persist(db, workspace, doc)
+    return _persist(db, workspace, doc, commit=commit)
 
 
-def set_segment(db: Any, workspace: Any, segment: dict) -> dict[str, Any]:
+def set_segment(
+    db: Any, workspace: Any, segment: dict, *, commit: bool = True
+) -> dict[str, Any]:
     """Merge segment answers (business/goal/comfort) without advancing the stage.
 
-    Rebuild-don't-mutate. Raises ``ValueError`` if no recognised segment key is
-    supplied (so a no-op write can never masquerade as a saved answer).
+    Rebuild-don't-mutate. ``commit=False`` defers the commit to an atomic caller.
+    Raises ``ValueError`` if no recognised segment key is supplied (so a no-op
+    write can never masquerade as a saved answer).
     """
     cleaned = _clean_segment(segment)
     if not cleaned:
@@ -226,7 +239,7 @@ def set_segment(db: Any, workspace: Any, segment: dict) -> dict[str, Any]:
     merged.update(cleaned)
     doc["segment"] = merged
     doc["updated_at"] = _now_iso()
-    return _persist(db, workspace, doc)
+    return _persist(db, workspace, doc, commit=commit)
 
 
 # The funnel-timestamp key stamped by the first integration a workspace connects
@@ -270,12 +283,16 @@ def record_first_integration_connected(db: Any, workspace: Any) -> bool:
 PLAN_FUNNEL_EVENTS = ("plan_recommended", "plan_accepted")
 
 
-def record_plan_event(db: Any, workspace: Any, event: str, plan: str) -> dict[str, Any]:
+def record_plan_event(
+    db: Any, workspace: Any, event: str, plan: str, *, commit: bool = True
+) -> dict[str, Any]:
     """Stamp a plan funnel event (``plan_recommended`` / ``plan_accepted``).
 
     Records ``{plan, at}`` under ``onboarding.funnel[event]`` (rebuild-don't-mutate,
     PRD-220-safe), overwriting so it reflects the latest recommendation/acceptance.
-    Raises ``ValueError`` for an unknown event name — the funnel keys are a fixed,
+    ``commit=False`` defers the commit so the stamp lands ATOMICALLY with the
+    plan/stage write that precedes it (FR-4 — see ``update_onboarding``). Raises
+    ``ValueError`` for an unknown event name — the funnel keys are a fixed,
     auditable set. Returns the new onboarding doc.
     """
     if event not in PLAN_FUNNEL_EVENTS:
@@ -286,7 +303,7 @@ def record_plan_event(db: Any, workspace: Any, event: str, plan: str) -> dict[st
     funnel[event] = {"plan": plan, "at": now}
     doc["funnel"] = funnel
     doc["updated_at"] = now
-    _persist(db, workspace, doc)
+    _persist(db, workspace, doc, commit=commit)
     logger.info(
         "Funnel: %s plan=%s for workspace %s", event, plan, getattr(workspace, "id", None)
     )

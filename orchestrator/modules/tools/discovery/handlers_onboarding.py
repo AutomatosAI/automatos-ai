@@ -65,12 +65,17 @@ async def update_onboarding(
                 ),
             }
 
+    # ATOMICITY (FR-4, RVW-2): every writer below runs with commit=False and the
+    # WHOLE tool call is committed ONCE at the end. A state change (plan +
+    # plan_limits, or a stage advance) and its funnel audit stamp therefore land
+    # together or not at all — a durable change can never be reported success:False
+    # (nothing committed on failure) nor left without its recorded audit event.
     try:
         if advance_to:
             # A single write advances the stage and merges any segment answers.
-            advance_onboarding_stage(db, workspace, advance_to, segment=segment)
+            advance_onboarding_stage(db, workspace, advance_to, segment=segment, commit=False)
         elif segment:
-            set_segment(db, workspace, segment)
+            set_segment(db, workspace, segment, commit=False)
 
         # Funnel: reaching the proposal records the plan Auto will recommend
         # (derived from the stored segment). Auditable, FR-4.
@@ -78,23 +83,32 @@ async def update_onboarding(
             from services.plan_tiers import recommend_plan
 
             rec_plan, _reason = recommend_plan(get_onboarding(workspace).get("segment") or {})
-            record_plan_event(db, workspace, "plan_recommended", rec_plan)
+            record_plan_event(db, workspace, "plan_recommended", rec_plan, commit=False)
 
         # Accepting a plan writes plan + plan_limits through the US-023 helper and
         # stamps plan_accepted — state changes only through this tool (FR-4).
         if plan is not None:
             from services.plan_tiers import assign_plan
 
-            assign_plan(db, workspace, plan)
-            record_plan_event(db, workspace, "plan_accepted", plan)
+            assign_plan(db, workspace, plan, commit=False)
+            record_plan_event(db, workspace, "plan_accepted", plan, commit=False)
+
+        # The single commit — all deferred writes land as one transaction.
+        if db is not None:
+            db.commit()
     except InvalidStageTransition as exc:
+        if db is not None:
+            db.rollback()
         return {"success": False, "error": str(exc)}
     except ValueError as exc:
         # e.g. set_segment called with no recognised keys.
+        if db is not None:
+            db.rollback()
         return {"success": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - surface a clean tool error, never crash
         logger.error("[update_onboarding] failed: %s", exc, exc_info=True)
-        db.rollback()
+        if db is not None:
+            db.rollback()
         return {"success": False, "error": str(exc)}
 
     return {"success": True, "data": public_snapshot(workspace)}
