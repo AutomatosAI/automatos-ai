@@ -889,6 +889,82 @@ def test_agent_update_status_in_progress_does_not_notify_dispatch(monkeypatch):
     assert dispatch == [], "in_progress must not wake the dispatch loop (it claims 'assigned' only)"
 
 
+# ---------------------------------------------------------------------------
+# P224-RVW-2 — the ASSIGN immediate-start must not race the dispatcher into a
+# DOUBLE execution. create() lands 'assigned' + wakes the dispatcher (US-001);
+# the dispatcher claims the row (→ in_progress) and launches ONCE; Auto's
+# back-to-back update_board_task_status(...,'in_progress') must add ZERO launches.
+# ---------------------------------------------------------------------------
+
+
+def test_rvw2_update_to_in_progress_skips_relaunch_when_already_in_progress(monkeypatch):
+    """A row the dispatcher already claimed (status='in_progress') receiving a
+    status write to 'in_progress' launches ZERO additional executions — the
+    old_status guard mirrors run_task_now (api/board_tasks.py:871)."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    dispatch = _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="in_progress", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert result["success"] is True
+    assert launches == [], "already-in_progress row must not re-launch (double-exec guard)"
+    assert result["triggered_execution"] is False, "no launch → triggered_execution stays honest"
+    assert dispatch == [], "in_progress never wakes the dispatch loop"
+
+
+def test_rvw2_normal_assigned_to_in_progress_still_launches_once(monkeypatch):
+    """The guard must not break the sole-launcher happy path: an 'assigned' row
+    moved to 'in_progress' with no racing claim launches exactly once."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+    db = _FakeSession(task=_fresh_task(id=3, status="assigned", assigned_agent_id=7))
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_id": 3, "status": "in_progress"})
+    )
+
+    assert len(launches) == 1, "assigned→in_progress with no prior claim launches once"
+    assert result["triggered_execution"] is True
+
+
+def test_rvw2_create_then_claim_then_update_yields_single_launch(monkeypatch):
+    """The full ASSIGN sequence — create('assigned') → dispatcher claim → Auto's
+    update('in_progress') — yields EXACTLY ONE launch (the claim's), never two."""
+    from api import board_tasks as bt
+    _patch_notify(monkeypatch)
+    _patch_dispatch(monkeypatch)
+    launches = []
+    monkeypatch.setattr(bt, "_launch_task_execution", lambda **kw: launches.append(kw))
+
+    # 1. Auto files the ticket: it lands 'assigned' and hands off to the dispatcher
+    #    (US-001 NOTIFY) — create never launches inline.
+    db = _FakeSession(agent=_ns(id=7, name="ATLAS"))
+    asyncio.run(_HANDLER.create_board_task(
+        db, _WS_ID, {"title": "t", "description": "d", "assigned_agent_name": "ATLAS"}))
+    assert launches == [], "create(assigned) hands off to the dispatcher, no inline launch"
+
+    # 2. The board dispatcher claims the row: FOR UPDATE SKIP LOCKED flips it to
+    #    in_progress and launches once (its own path, simulated here).
+    claimed = db._task
+    claimed.status = "in_progress"
+    launches.append({"by": "dispatcher_claim"})
+
+    # 3. Auto's back-to-back status write to in_progress must NOT launch again.
+    asyncio.run(_HANDLER.update_board_task_status(
+        db, _WS_ID, {"task_id": claimed.id, "status": "in_progress"}))
+
+    assert len(launches) == 1, "exactly one launch across create→claim→update (no double-exec)"
+
+
 def test_dispatch_notify_failure_is_fail_soft(monkeypatch):
     """A forced dispatch NOTIFY failure must NOT fail the tool call — fail-soft
     exactly like the board-event NOTIFY beside it (PRD-224 US-001)."""

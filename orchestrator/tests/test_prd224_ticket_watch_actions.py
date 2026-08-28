@@ -202,6 +202,23 @@ def test_unassigned_task_escalates(monkeypatch):
     assert bag["redispatched"] == []
 
 
+def test_rvw2_in_progress_task_is_not_redispatched(monkeypatch):
+    """P224-RVW-2: a task already in_progress (a concurrent Run-Now / dispatcher
+    claim restarted it AFTER the decider's terminal read) must NOT be re-dispatched
+    — that would reset the live run to 'assigned' and double-execute. It escalates
+    instead, honoring _redispatch_task's 'caller guarantees not in_progress', and
+    the guard fires BEFORE the budget rail so a benign race spends no budget."""
+    watch, task = _watch(), _task(status="in_progress")
+    bag, db = _wire(monkeypatch, budget_rail=_BudgetRail(2), task_result=task)
+
+    outcome = asyncio.run(wa.run_board_task_action(db, watch, "rerun", diagnosis="below bar"))
+
+    assert outcome.escalated is True
+    assert bag["redispatched"] == [], "an in_progress task must never be re-dispatched"
+    assert watch.actions_taken == 0, "guard precedes the budget rail — no action budget spent"
+    assert len(bag["escalated"]) == 1 and "in_progress" in bag["escalated"][0]
+
+
 # ---------------------------------------------------------------------------
 # escalation narration -- the EXISTING escalate_watch_now → seam
 # ---------------------------------------------------------------------------

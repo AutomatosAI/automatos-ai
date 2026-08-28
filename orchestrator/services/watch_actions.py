@@ -243,6 +243,23 @@ async def run_board_task_action(
             action=action, escalated=True, error="no assigned agent"
         )
 
+    # P224-RVW-2: never re-dispatch a task that is already running. The decider
+    # reached this rerun off a TERMINAL read, but a concurrent Run-Now / dispatcher
+    # claim (or the US-001 re-queue) may have restarted the ticket since — and
+    # _redispatch_task's contract requires the caller guarantee it is not
+    # in_progress (the Run-Now route enforces the same guard at api/board_tasks.py:871).
+    # A re-dispatch would reset the live run to 'assigned' and double-execute. Escalate
+    # (like the sibling preconditions) rather than clobbering the in-flight run;
+    # placed BEFORE the budget rail so a benign race costs no action budget.
+    if task.status == "in_progress":
+        await escalate_watch_now(
+            db, watch,
+            reason=f"task {watch.target_id} already in_progress — not re-dispatching",
+        )
+        return WatchActionOutcome(
+            action=action, escalated=True, detail="task already in_progress"
+        )
+
     # --- budget hard rail (record at initiation; see module docstring) ---
     _, allowed = WatchService.record_action(
         db,
