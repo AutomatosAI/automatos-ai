@@ -13,9 +13,14 @@ so unmanaged keys survive, under the keys the LIVE consumers already read:
     and the onboarding checklist gates the invite item on it, so the tier's
     ``seats`` lands HERE, not in a parallel ``seats`` key.
   * ``max_agents``  — documented concurrency cap (0 = unlimited).
-  * ``budget``      — ``{window, max_cost_usd}``, read by ``modules/policy/budget.py``;
-    written only when the tier sets a positive ``budget_usd`` (0 = custom / no
-    ceiling, so an existing explicit budget is preserved on merge).
+  * ``budget``      — ``{window, max_cost_usd, source}``, read by
+    ``modules/policy/budget.py`` (which ignores ``source``). A tier with a
+    positive ``budget_usd`` writes a tier-OWNED ceiling (``source="tier"``);
+    a tier with ``budget_usd = 0`` (business = custom / no ceiling) sets no
+    budget key and :func:`assign_plan` CLEARS a tier-owned ceiling a prior tier
+    wrote, so no stale ceiling survives an upgrade (RVW-4). An admin custom
+    budget (written by ``policy.budget.set_budget``, which strips ``source``) is
+    admin-owned and is NEVER cleared by a tier change.
 
 ``mission_concurrency`` / ``watcher_limit`` / ``marketplace_depth`` are stored too
 (the tier's declared limits) but have no enforcement consumer yet — this wave adds
@@ -78,7 +83,13 @@ def plan_limits_for_tier(plan: str, tiers: Optional[dict] = None) -> dict:
     }
     budget_usd = tier.get("budget_usd") or 0
     if budget_usd and budget_usd > 0:
-        limits["budget"] = {"window": "month", "max_cost_usd": float(budget_usd)}
+        # A tier-OWNED ceiling (``source="tier"``): re-derived on every assignment
+        # and cleared when the workspace moves to a no-ceiling tier (see
+        # :func:`assign_plan`). An admin budget carries no such marker and is never
+        # tier-cleared (RVW-4). ``budget_usd = 0`` ⇒ no key ⇒ custom / no ceiling.
+        limits["budget"] = {
+            "window": "month", "max_cost_usd": float(budget_usd), "source": "tier",
+        }
     return limits
 
 
@@ -96,10 +107,24 @@ def assign_plan(
     that also stamps the ``plan_accepted`` funnel event lands BOTH in one commit
     (FR-4 atomicity — see ``handlers_onboarding.update_onboarding``). Returns the
     new ``plan_limits``. Raises :class:`ValueError` for a non-assignable plan.
+
+    Budget provenance (RVW-4): moving to a no-ceiling tier (``business``) CLEARS a
+    tier-owned ``budget`` a prior tier wrote, so no stale ceiling lingers on
+    ``plan_limits`` (GET /budget would otherwise still show it, and an enforce
+    stage would throttle at it). An admin custom budget — ``source != "tier"`` —
+    is the customer's own explicit ceiling and is left untouched on any tier.
     """
     limits = plan_limits_for_tier(plan, tiers)  # validates assignability first
     new_limits = dict(workspace.plan_limits or {})
     new_limits.update(limits)
+    # RVW-4: a 0-budget tier implies NO 'budget' key, so the merge above cannot
+    # clear a ceiling a prior tier wrote. Drop a tier-OWNED budget so no stale
+    # ceiling survives the upgrade; an admin custom budget (source != "tier") is
+    # a deliberate ceiling — valid on any tier, incl. business — and is preserved.
+    if "budget" not in limits:
+        existing = new_limits.get("budget")
+        if isinstance(existing, dict) and existing.get("source") == "tier":
+            new_limits.pop("budget", None)
     workspace.plan = plan
     workspace.plan_limits = new_limits
     if db is not None:

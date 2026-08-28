@@ -135,7 +135,9 @@ def test_plan_limits_for_tier_maps_seats_to_max_members_and_budget():
     assert basic["mission_concurrency"] == 1
     assert basic["watcher_limit"] == 1
     assert basic["marketplace_depth"] == 1
-    assert basic["budget"] == {"window": "month", "max_cost_usd": 25.0}
+    # A tier-derived ceiling is tagged source="tier" so a later move to a
+    # no-ceiling tier can clear it without wiping an admin custom budget (RVW-4).
+    assert basic["budget"] == {"window": "month", "max_cost_usd": 25.0, "source": "tier"}
     # business: seats 25, unlimited agents (0), custom budget (0) ⇒ no budget key
     biz = pt.plan_limits_for_tier("business")
     assert biz["max_members"] == 25
@@ -168,6 +170,78 @@ def test_assign_plan_rejects_enterprise():
     with pytest.raises(ValueError):
         pt.assign_plan(None, ws, "enterprise")
     assert ws.plan == "basic"  # unchanged on rejection
+
+
+# --------------------------------------------------------------------------- #
+# RVW-4 — a tier-owned budget is re-derived on every assignment; upgrading to a
+# no-ceiling tier (business) clears the prior tier's stale ceiling, but an admin
+# custom budget survives untouched. Cross-assignment on the SAME workspace —
+# the merge path the isolated plan_limits_for_tier tests never exercised.
+# --------------------------------------------------------------------------- #
+
+
+def test_assign_business_after_pro_clears_stale_tier_ceiling():
+    # pro writes a tier-owned $100 ceiling; upgrading to business (custom / no
+    # ceiling) must not leave that $100 lingering on plan_limits.
+    ws = SimpleNamespace(plan="basic", plan_limits={})
+    pt.assign_plan(None, ws, "pro")
+    assert ws.plan_limits["budget"]["max_cost_usd"] == 100.0  # tier ceiling landed
+    pt.assign_plan(None, ws, "business")
+    assert ws.plan == "business"
+    assert "budget" not in ws.plan_limits  # no stale ceiling survives the upgrade
+    assert ws.plan_limits["max_members"] == 25  # business's other limits still land
+    assert ws.plan_limits["max_agents"] == 0
+
+
+def test_assign_business_after_basic_clears_stale_tier_ceiling():
+    ws = SimpleNamespace(plan="basic", plan_limits={})
+    pt.assign_plan(None, ws, "basic")
+    assert ws.plan_limits["budget"]["max_cost_usd"] == 25.0
+    pt.assign_plan(None, ws, "business")
+    assert "budget" not in ws.plan_limits  # basic's $25 ceiling gone too
+
+
+def test_assign_business_preserves_admin_custom_budget():
+    # An admin-set custom budget (no tier provenance marker) is the customer's
+    # own ceiling — valid on business (custom) and NEVER cleared by a tier change.
+    ws = SimpleNamespace(
+        plan="pro",
+        plan_limits={"budget": {"window": "month", "max_cost_usd": 500.0}},
+    )
+    pt.assign_plan(None, ws, "business")
+    assert ws.plan == "business"
+    assert ws.plan_limits["budget"] == {"window": "month", "max_cost_usd": 500.0}
+
+
+def test_assign_positive_tier_after_business_sets_fresh_tier_ceiling():
+    # business (no ceiling) → pro re-derives the tier-owned $100 ceiling.
+    ws = SimpleNamespace(plan="business", plan_limits={"max_members": 25})
+    pt.assign_plan(None, ws, "pro")
+    assert ws.plan_limits["budget"] == {
+        "window": "month", "max_cost_usd": 100.0, "source": "tier",
+    }
+
+
+def test_load_budget_shows_no_ceiling_after_upgrade_to_business(monkeypatch):
+    # RVW-4 AC3: the ceiling GET /budget surfaces (modules.policy.budget.load_budget,
+    # governance.py:257) reads NO stale tier ceiling for a workspace upgraded
+    # pro → business — proving the fix at the exact read the customer/admin sees.
+    pytest.importorskip("core.models.workspaces")
+    pytest.importorskip("core.services.auto_autonomy")
+    from unittest.mock import MagicMock
+
+    from modules.policy.budget import load_budget
+
+    # A supervised (non-autonomy) workspace stays ceiling-less when no budget key.
+    monkeypatch.setattr("core.services.auto_autonomy.is_full_autonomy", lambda db, ws: False)
+
+    ws = SimpleNamespace(plan="basic", plan_limits={})
+    pt.assign_plan(None, ws, "pro")       # tier-owned $100 ceiling written
+    pt.assign_plan(None, ws, "business")  # business = no ceiling — clears the $100
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = ws
+    assert load_budget(db, "ws-rvw4") == {}  # no ceiling surfaced, not a stale $100
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +358,38 @@ def test_assign_plan_writes_plan_and_limits_real_db(engine, new_session):
         assert row[0] == "pro"
         assert row[1]["max_members"] == 5  # the seat key the checklist reads
         assert row[1]["max_agents"] == 20
-        assert row[1]["budget"] == {"window": "month", "max_cost_usd": 100.0}
+        assert row[1]["budget"] == {"window": "month", "max_cost_usd": 100.0, "source": "tier"}
+    finally:
+        s.execute(text("DELETE FROM workspaces WHERE id = CAST(:i AS uuid)"), {"i": wid})
+        s.commit()
+
+
+@pytest.mark.integration
+def test_load_budget_no_ceiling_after_upgrade_to_business_real_db(engine, new_session):
+    # RVW-4 AC3 on real rows: pro (tier $100) → business (no ceiling) leaves GET
+    # /budget's load_budget with NO max_cost_usd — the stale ceiling is gone at
+    # the exact read governance.py:257 serves. Skips w/o Postgres; CI runs it.
+    from sqlalchemy import text
+
+    from core.models.workspaces import Workspace
+    from modules.policy.budget import load_budget
+
+    s = new_session()
+    wid = str(uuid.uuid4())
+    try:
+        s.execute(
+            text("INSERT INTO workspaces (id, name, plan) VALUES (CAST(:i AS uuid), :n, 'basic')"),
+            {"i": wid, "n": "w2s1-rvw4-budget"},
+        )
+        s.commit()
+
+        ws = s.query(Workspace).get(wid)
+        pt.assign_plan(s, ws, "pro")
+        assert load_budget(s, wid).get("max_cost_usd") == 100.0  # tier ceiling live
+
+        pt.assign_plan(s, ws, "business")
+        # business = custom / no ceiling — the $100 must not linger.
+        assert "max_cost_usd" not in load_budget(s, wid)
     finally:
         s.execute(text("DELETE FROM workspaces WHERE id = CAST(:i AS uuid)"), {"i": wid})
         s.commit()
