@@ -47,8 +47,12 @@ def test_prd225_revision_chains_onto_prior_head():
     # would tempt a future rebase into "fixing" the test instead of the chain.
     assert rev.down_revision, "the revision must descend from the prior head, not sit at base"
     heads = tuple(ScriptDirectory.from_config(cfg).get_heads())
-    assert heads == ("prd225_s1_asks_on_grants",), (
-        f"must be the SINGLE head (rival heads are the trap this guards): {heads}"
+    # The rival-head trap this guards is "more than one head", NOT "prd225 stays
+    # the head forever" — a later migration landing on top (PRD-230's
+    # marketplace_packages) legitimately moves the single head. prd225's place on
+    # the live chain is asserted by test_prd225_is_reachable_from_the_head.
+    assert len(heads) == 1, (
+        f"must be a SINGLE head (rival heads are the trap this guards): {heads}"
     )
     assert callable(rev.module.upgrade) and callable(rev.module.downgrade)
 

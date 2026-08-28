@@ -19,6 +19,7 @@ from .approval_grants import ApprovalGrant, GrantStatus  # noqa: F401  # PRD-181
 from .routing import *  # PRD-50: Universal Orchestrator Router
 from .channels import *  # PRD-55: Channel Connections (US-019)
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
+from .marketplace_packages import *  # PRD-230: Marketplace Packages
 from .personas import *  # PRD-42: Agent Personas
 from .system_prompts import *  # PRD-58: System Prompt Management
 from .voice_profiles import *  # PRD-74: Voice Profiles
