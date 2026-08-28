@@ -70,6 +70,73 @@
     "orchestrator/modules/agents/__init__.py",
     "orchestrator/tests/"
    ]
+  },
+  {
+   "id": "P229-RVW-1",
+   "title": "Fix CI regression — ask_orchestrator breaks the registry namespace invariant (rename to platform_ask_orchestrator)",
+   "description": "REVIEW FINDING (HIGH, verified). CI test.yml (required orchestrator-tests gate) is RED on the branch tip and has been since the US-002 commit. Base ralph/prd-228-fleet-state is GREEN. The new action is registered as 'ask_orchestrator' with NO platform_/workspace_ prefix, violating the registry namespace invariant at orchestrator/tests/test_tool_reachability.py:187 ('every action is platform_* or workspace_*; a third prefix would route to neither dispatch path'). Its sibling PRD-225 tool is correctly named platform_ask_human (actions_asks.py:17). Reproduced locally: cd orchestrator && python3 -m pytest -q tests/test_tool_reachability.py -> '1 failed, 5 passed' with 'AssertionError: Actions with no platform_/workspace_ prefix: [ask_orchestrator]'. The local acceptance gate (acceptance-prd229.sh) missed it because it only runs test_prd229_*.py, not the full suite (CI test.yml is the full-suite gate). FIX: rename the REGISTERED action name to 'platform_ask_orchestrator' (the Python function/import may stay ask_orchestrator; only the registered string, the executor dispatch-key, the caller-binding guard, and the EXECUTION_ONLY_TOOLS entry must carry the prefix). Evidence: actions_clarify.py:22 name=ask_orchestrator; platform_executor.py:562 handler-map key; platform_executor.py:1099 'if action_name == ask_orchestrator'; modes.py:34 EXECUTION_ONLY_TOOLS.",
+   "acceptanceCriteria": [
+    "actions_clarify.py registers name='platform_ask_orchestrator'; grep confirms no registry action lacks a platform_/workspace_ prefix.",
+    "platform_executor.py handler map key, the 'if action_name ==' caller-binding guard (near :1099), and modes.EXECUTION_ONLY_TOOLS all reference the SAME prefixed name 'platform_ask_orchestrator'.",
+    "The PRD-229 tests (test_prd229_ask_orchestrator.py: registry.get(...), the _surface() fixture names/enum, test_prompt_catalog_excludes_in_chat_keeps_in_execution) reference the prefixed name and stay green.",
+    "cd orchestrator && python3 -m pytest -q tests/test_tool_reachability.py -> 6 passed, 0 failed (no stray-prefix list).",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_ask_orchestrator.py tests/test_prd229_escalation_ladder.py tests/test_prd229_orchestrator_answers.py -> all green.",
+    "CI test.yml orchestrator-tests job green on the pushed tip (1 failed -> 0).",
+    "Harden the local gate: scripts/ralph/acceptance-prd229.sh also runs tests/test_tool_reachability.py so this class fails locally, not only in CI."
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/actions_clarify.py",
+    "orchestrator/modules/tools/discovery/platform_executor.py",
+    "orchestrator/modules/context/modes.py",
+    "orchestrator/tests/test_prd229_ask_orchestrator.py",
+    "scripts/ralph/acceptance-prd229.sh"
+   ]
+  },
+  {
+   "id": "P229-RVW-2",
+   "title": "Broken object-level authorization — ask_orchestrator trusts client _run_id/_task_id and loads/mutates tasks with no workspace/run scoping",
+   "description": "REVIEW FINDING (HIGH, verified end-to-end). The handler docstring and the executor comment both claim the caller subject is 'server-injected, never a tool parameter; a client-supplied run_id/task_id is ignored'. That is only true in the real mission lane, where coordinator_service.py:2296-2308 now always threads field_context={run_id,task_id,agent_id}. It is NOT true in five OTHER execute_with_prompt lanes that pass no context_mode: agent_factory.py:1004 defaults the mode to TASK_EXECUTION, so ask_orchestrator is EXPOSED in api/board_tasks.py:1168, api/composio.py:839, api/webhooks.py:992, services/scheduled_task_service.py:426, and channels/base.py:170 (the last feeds EXTERNAL attacker-controlled content, envelope.content). Those lanes pass a context with no run_id/field_id, so agent_factory.py:1192-1197 builds field_context=None, and the executor's ask_orchestrator binding block (platform_executor.py:1099-1104) only CONDITIONALLY injects (if fctx value is not None) and — unlike exec_platform's _agent_id handling (exec_platform.py:66-69, which strips-then-injects) — never STRIPS a client-supplied value first. The LLM params reach the handler unfiltered: via platform_execute, unified_executor.py:708-741 validates only that 'question' is present (no additionalProperties:false, no key filtering) and forwards the raw params object. Then handlers_clarify.py:112-125 (_load_task) and orchestrator_answers.py:204-249 (_upstream_blocks) query OrchestrationTask by id with NO workspace/run filter (OrchestrationTask has no workspace_id column). Failure scenario: an agent in a channel/webhook/board/scheduled lane is prompt-injected to call platform_execute with params={question:..., _run_id:<x>, _task_id:<uuid of a task in workspace B>}; _upstream_blocks returns that task's dependency outputs as a 'grounded, cited' answer (cross-tenant read) and _park_task_with_draft writes DRAFT_KEY/PENDING_KEY onto that task's JSONB (cross-tenant write). Gated behind knowing a victim task UUID, hence HIGH not CRITICAL — but the authorization check is genuinely missing and reachable. FIX: mirror the established _agent_id pattern — strip client _run_id/_task_id/_field_id at the executor chokepoint before injecting from field_context, AND scope the task read to the server subject.",
+   "acceptanceCriteria": [
+    "platform_executor.py ask_orchestrator binding: client-supplied _run_id/_task_id/_field_id are STRIPPED from params (like exec_platform strips _agent_id) BEFORE injecting server field_context values; a tool call carrying _run_id/_task_id can never have them survive.",
+    "handlers_clarify._load_task (and orchestrator_answers._upstream_blocks) scope the read: a task whose run_id != the server-resolved subject.run_id, or whose run's workspace_id != subject.workspace_id, is NOT loaded/used (returns None / no blocks).",
+    "New test: in a non-mission lane (empty field_context) a smuggled _run_id/_task_id in tool params does NOT load a foreign task — the handler falls to proceed_with_assumption; the existing test_caller_resolved_from_server_context_not_tool_param is extended to cover the _-prefixed smuggle (not just the non-underscore run_id/task_id keys).",
+    "New test: a cross-run/cross-workspace task_id reaching _load_task/_upstream_blocks yields no cross-tenant read (scoped-out).",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_ask_orchestrator.py tests/test_prd229_orchestrator_answers.py tests/test_prd229_escalation_ladder.py -> all green; no regression in tests/test_tool_reachability.py."
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/platform_executor.py",
+    "orchestrator/modules/tools/discovery/handlers_clarify.py",
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/tests/test_prd229_ask_orchestrator.py"
+   ]
+  },
+  {
+   "id": "P229-RVW-3",
+   "title": "NO_ANSWER sentinel matched by exact-string equality — a non-conforming declination leaks as a grounded, cited answer",
+   "description": "REVIEW FINDING (MEDIUM, verified; fabrication-adjacent — this platform's known failure family, PRD-223). orchestrator_answers.py:131 guards the composition reply with `if not answer or answer.strip() == _NO_ANSWER:`. The system prompt (:377-383) tells the LLM to reply 'exactly NO_ANSWER and nothing else', but nothing enforces the format. If the model appends punctuation or a caveat or markdown ('NO_ANSWER — the context does not cover this', '**NO_ANSWER**'), the exact-equality check fails, the guard falls through, and the declination text itself becomes result['answer'] WITH sources attached (:135-137) — a cited, confident-looking answer that is really a refusal, which also defeats the cannot_answer -> escalation path. Only the verbatim string is exercised by the suite (test_no_answer_sentinel_is_cannot_answer). FIX: robust sentinel detection (e.g. treat a reply whose normalized/upper form starts with or contains NO_ANSWER as cannot_answer).",
+   "acceptanceCriteria": [
+    "The NO_ANSWER guard treats a reply as cannot_answer when the sentinel appears in a non-bare form (leading/trailing punctuation, markdown emphasis, or a trailing caveat) — not only the exact string.",
+    "New parametrized test covers near-miss replies ('NO_ANSWER.', '**NO_ANSWER**', 'NO_ANSWER - not in context') -> {cannot_answer: True, reason: unretrievable}, and confirms a genuine grounded answer is still returned normally.",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_orchestrator_answers.py -> green."
+   ],
+   "files": [
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/tests/test_prd229_orchestrator_answers.py"
+   ]
+  },
+  {
+   "id": "P229-RVW-4",
+   "title": "CLARIFICATION_BUDGET check is a non-atomic read-then-write — concurrent asks in one run can exceed the budget",
+   "description": "REVIEW FINDING (MEDIUM, verified; low blast radius). orchestrator_answers.py:116-118 checks _answers_used() (a COUNT of CLARIFICATION_ANSWERED events, :170-186) and only later _record()s the answer via emit_event INSERT (:430-459) — two unlocked operations. Tasks in one run execute concurrently (coordinator_service._run_agent_io via asyncio.gather; dispatcher dispatches up to max_concurrent). Two tasks calling ask_orchestrator at once can both read the same pre-increment count, both pass the >= budget check, and both answer — the run's answered count can exceed Config.CLARIFICATION_BUDGET by the degree of concurrency. Impact is cost-control softness (default budget 3), not correctness or security, so this is a low-priority hardening. FIX: make the budget spend atomic (e.g. count+record under a per-run guard, or a conditional insert), or explicitly accept the soft cap with a comment noting the race is bounded by max_concurrent.",
+   "acceptanceCriteria": [
+    "The answered-clarification count cannot exceed CLARIFICATION_BUDGET under concurrent asks in the same run (atomic check+record), OR the soft cap is explicitly documented at the check site with the max_concurrent bound.",
+    "If made atomic: a test simulates two concurrent answerable asks against a run at budget-1 and asserts only one is answered, the other escalates.",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_orchestrator_answers.py -> green."
+   ],
+   "files": [
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/tests/test_prd229_orchestrator_answers.py"
+   ]
   }
  ]
 }
