@@ -35,8 +35,11 @@ Document shape::
 from __future__ import annotations
 
 import copy
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 # Ordered spine (app-level enum, NOT a Postgres enum). ``skipped`` is a terminal
 # branch reachable from any non-terminal stage, so it is deliberately NOT part
@@ -224,6 +227,40 @@ def set_segment(db: Any, workspace: Any, segment: dict) -> dict[str, Any]:
     doc["segment"] = merged
     doc["updated_at"] = _now_iso()
     return _persist(db, workspace, doc)
+
+
+# The funnel-timestamp key stamped by the first integration a workspace connects
+# (PRD-222 W2·S3 / US-019). Lives in the same onboarding doc as the per-stage
+# timestamps — the Wave-1 funnel record — never exposed by ``public_snapshot``.
+FIRST_INTEGRATION_KEY = "first_integration_connected_at"
+
+
+def record_first_integration_connected(db: Any, workspace: Any) -> bool:
+    """Stamp the ``first_integration_connected`` funnel event — once per workspace.
+
+    The Wave-1 funnel has no generic event sink (see ``advance_onboarding_stage``'s
+    note): a "funnel event" is a single ISO timestamp in this onboarding JSONB doc
+    plus a log line. This mirrors the trial_* funnel events (US-004/005) — an
+    idempotent stamp guarded by presence so it fires EXACTLY ONCE per workspace,
+    ever, even if the workspace later disconnects every app and reconnects.
+
+    Rebuild-don't-mutate: reassigns a NEW onboarding dict (PRD-220-safe). The
+    caller decides WHEN (the active-connection count crossing 0 → 1); this decides
+    only whether it has already been recorded. Returns ``True`` when it stamped
+    (the first time), ``False`` on the idempotent no-op.
+    """
+    doc = get_onboarding(workspace)  # deep copy
+    if doc.get(FIRST_INTEGRATION_KEY):
+        return False  # already recorded — exactly once per workspace
+    now = _now_iso()
+    doc[FIRST_INTEGRATION_KEY] = now
+    doc["updated_at"] = now
+    _persist(db, workspace, doc)
+    logger.info(
+        "Funnel: first_integration_connected for workspace %s",
+        getattr(workspace, "id", None),
+    )
+    return True
 
 
 # =========================================================================== #

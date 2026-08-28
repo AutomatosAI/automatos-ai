@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from services.onboarding_state import (
+    FIRST_INTEGRATION_KEY,
     INITIAL_STAGE,
     SEGMENT_KEYS,
     STAGE_ORDER,
@@ -21,6 +22,7 @@ from services.onboarding_state import (
     current_stage,
     get_onboarding,
     is_onboarding_active,
+    record_first_integration_connected,
     set_segment,
 )
 
@@ -252,3 +254,53 @@ def test_set_segment_empty_raises():
         set_segment(None, ws, {})
     with pytest.raises(ValueError):
         set_segment(None, ws, {"comfort": None})
+
+
+# --------------------------------------------------------------------------- #
+# PRD-222 US-019 — first_integration_connected funnel stamp (once per workspace)
+# --------------------------------------------------------------------------- #
+
+
+def test_first_integration_stamps_once_and_rebuilds():
+    ws = _FakeWorkspace({"stage": "building", "stages": {}, "segment": {}})
+    original = ws.onboarding
+    db = _RecordingDB()
+
+    fired = record_first_integration_connected(db, ws)
+
+    assert fired is True
+    _assert_iso(ws.onboarding[FIRST_INTEGRATION_KEY])
+    _assert_iso(ws.onboarding["updated_at"])
+    assert db.commits == 1 and ws in db.added
+    # rebuild-don't-mutate: a NEW dict was assigned; the original is untouched.
+    assert ws.onboarding is not original
+    assert FIRST_INTEGRATION_KEY not in original
+
+
+def test_first_integration_is_idempotent_exactly_once():
+    ws = _FakeWorkspace({"stage": "building", "stages": {}, "segment": {}})
+
+    assert record_first_integration_connected(None, ws) is True
+    stamp = ws.onboarding[FIRST_INTEGRATION_KEY]
+
+    # A second connection (2nd app, or a re-fired callback) must NOT re-stamp.
+    assert record_first_integration_connected(None, ws) is False
+    assert ws.onboarding[FIRST_INTEGRATION_KEY] == stamp
+
+
+def test_first_integration_reconnect_after_disconnect_never_refires():
+    # Even if the workspace later drops to 0 connections and reconnects, the
+    # once-per-workspace guard means the event never fires a second time.
+    ws = _FakeWorkspace({"stage": "completed", FIRST_INTEGRATION_KEY: "2026-08-01T00:00:00+00:00"})
+    assert record_first_integration_connected(None, ws) is False
+
+
+def test_first_integration_preserves_other_onboarding_keys():
+    ws = _FakeWorkspace(
+        {"stage": "boom", "segment": {"business": "cafe"}, "trial": {"state": "active"}}
+    )
+    record_first_integration_connected(None, ws)
+    assert ws.onboarding["stage"] == "boom"
+    assert ws.onboarding["segment"] == {"business": "cafe"}
+    assert ws.onboarding["trial"] == {"state": "active"}
+    _assert_iso(ws.onboarding[FIRST_INTEGRATION_KEY])

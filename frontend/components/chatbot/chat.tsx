@@ -23,6 +23,7 @@ import { Canvas } from '@/components/workspace'
 import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, CodingCanvasWidgetData } from '@/components/widgets/types'
 import { useWorkspace } from '@/components/workspace-provider'
 import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
+import { OnboardingConnectCards } from '@/components/onboarding/onboarding-connect-cards'
 import { PowerUpCard } from '@/components/onboarding/power-up-card'
 import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
@@ -969,6 +970,11 @@ export function Chat({
           <PowerUpCard />
         </div>
       )}
+      {/* PRD-222 US-019: inline Composio connect cards float above the input
+          during the build stage — Auto asks for the app, the user connects it
+          without leaving chat, and the result reflects back into the card. The
+          container self-hides unless there's an app mid-connect. */}
+      <OnboardingConnectCards className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4" />
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
       {hasWidgets && (
         <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">
