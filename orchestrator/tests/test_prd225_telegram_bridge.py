@@ -141,15 +141,28 @@ async def test_outbound_capture_swallows_raise(monkeypatch):
 # Inbound — reply / /answer correlation via the shared service
 # ===========================================================================
 
-def _tg_body(text, *, reply_to=None, chat="c1", first_name="Ger"):
-    msg = {"text": text, "chat": {"id": chat}, "from": {"first_name": first_name}, "message_id": 1000}
+def _tg_body(text, *, reply_to=None, chat="c1", first_name="Ger", from_id=555):
+    msg = {
+        "text": text,
+        "chat": {"id": chat},
+        # ``from.id`` is the stable Telegram-assigned sender id; ``first_name`` is
+        # self-chosen (spoofable) — P225-RVW-1 attributes to the id, not the name.
+        "from": {"id": from_id, "first_name": first_name},
+        "message_id": 1000,
+    }
     if reply_to is not None:
         msg["reply_to_message"] = {"message_id": reply_to}
     return {"update_id": 1, "message": msg}
 
 
-def _question(db, ws, *, gid, telegram_message_id=None, subject_id="call-1"):
-    refs = {"telegram": {"chat_id": "c1", "message_id": telegram_message_id}} if telegram_message_id else None
+def _question(db, ws, *, gid, telegram_message_id=None, chat_id="c1", subject_id="call-1"):
+    """A pending question row, delivered to Telegram ``chat_id`` (the ONLY chat
+    authorized to answer it — P225-RVW-1). Pass ``chat_id=None`` for a question
+    with no Telegram delivery ref at all."""
+    refs = (
+        {"telegram": {"chat_id": chat_id, "message_id": telegram_message_id}}
+        if chat_id is not None else None
+    )
     g = ApprovalGrant(
         id=gid, workspace_id=ws, subject_type="tool_call", subject_id=subject_id,
         kind=KIND_QUESTION, question_md="Which vendor?", channel_refs=refs,
@@ -188,7 +201,7 @@ async def test_reply_to_correlated_message_answers(replies):
     assert res["ask_id"] == 42
     assert grant.status == GrantStatus.GRANTED.value
     assert grant.answer_text == "Use vendor X"
-    assert grant.answered_by == "telegram:Ger"
+    assert grant.answered_by == "telegram:555"  # numeric from_id, not first_name
     assert len(replies) == 1  # confirmation into the same thread
 
 
@@ -277,3 +290,71 @@ async def test_already_answered_target_is_safe(replies):
     res = await _maybe_answer_question(db, workspace, body, reply_ctx, {})
     assert res["reason"] == "answer_target_not_found"  # not pending → not found
     assert grant.answer_text is None
+
+
+# ===========================================================================
+# P225-RVW-1 — an answer is bound to the delivery chat, not just (workspace,id)
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_reply_from_other_chat_does_not_answer(replies):
+    """A reply that targets the correlated message id but comes from a DIFFERENT
+    chat than the one the question was delivered to must NOT answer — it falls
+    through to routing (a same-workspace attacker cannot reply-collide)."""
+    from api.webhooks import _maybe_answer_question, _extract_reply_context
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    grant = _question(db, ws, gid=42, telegram_message_id="777", chat_id="c1")
+    workspace = SimpleNamespace(id=ws)
+
+    # Correct message id (777), but sent from chat c2 — not the delivery chat c1.
+    body = _tg_body("Use vendor X", reply_to=777, chat="c2", from_id=666)
+    reply_ctx = _extract_reply_context(body, "telegram")
+    res = await _maybe_answer_question(db, workspace, body, reply_ctx, {})
+
+    assert res is None  # falls through to normal routing
+    assert grant.status == GrantStatus.PENDING.value  # unchanged
+    assert grant.answer_text is None
+    assert replies == []  # no confirmation, no leak
+
+
+@pytest.mark.asyncio
+async def test_slash_answer_from_non_delivery_chat_is_refused(replies):
+    """``/answer <id>`` from a chat that is NOT the question's delivery chat gets
+    the identical polite 'isn't open' reply and changes nothing — indistinguishable
+    from a wrong-workspace id or an already-answered target (no existence leak)."""
+    from api.webhooks import _maybe_answer_question, _extract_reply_context
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    grant = _question(db, ws, gid=8, chat_id="c1")  # delivered to c1
+    workspace = SimpleNamespace(id=ws)
+
+    body = _tg_body("/answer 8 sneaky", chat="c2", from_id=999)  # from c2
+    reply_ctx = _extract_reply_context(body, "telegram")
+    res = await _maybe_answer_question(db, workspace, body, reply_ctx, {})
+
+    assert res["reason"] == "answer_target_not_found"
+    assert grant.status == GrantStatus.PENDING.value  # nothing changed
+    assert grant.answer_text is None
+    assert len(replies) == 1
+    assert "isn't open" in replies[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_answered_by_carries_numeric_id(replies):
+    """answered_by is the stable numeric telegram id, never the self-chosen
+    first_name (which could read 'telegram:CEO')."""
+    from api.webhooks import _maybe_answer_question, _extract_reply_context
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    grant = _question(db, ws, gid=42, telegram_message_id="777", chat_id="c1")
+    workspace = SimpleNamespace(id=ws)
+
+    body = _tg_body("Use vendor X", reply_to=777, chat="c1", first_name="CEO", from_id=12345)
+    reply_ctx = _extract_reply_context(body, "telegram")
+    await _maybe_answer_question(db, workspace, body, reply_ctx, {})
+
+    assert grant.answered_by == "telegram:12345"  # numeric id, not "telegram:CEO"

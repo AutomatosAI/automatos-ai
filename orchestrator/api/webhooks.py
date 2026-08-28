@@ -192,6 +192,9 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
         msg = body.get("message", {})
         ctx["chat_id"] = msg.get("chat", {}).get("id")
         ctx["from_user"] = msg.get("from", {}).get("first_name", "")
+        # P225-RVW-1: the STABLE numeric sender id (Telegram-assigned, not the
+        # self-chosen first_name) — used for answer attribution, never for auth.
+        ctx["from_id"] = msg.get("from", {}).get("id")
         # PRD-225: reply correlation — the id of THIS message and the id of the
         # message it replies to (a reply to a correlated question answers it).
         ctx["message_id"] = msg.get("message_id")
@@ -249,13 +252,53 @@ def _find_pending_question(db: Session, workspace_id: Any, ask_id: int):
     return None
 
 
-def _find_question_by_telegram_message(db: Session, workspace_id: Any, message_id: str):
-    """The pending question whose stored Telegram message_id matches a reply's
-    target. Python-side filter over the few open asks (JSONB-portable)."""
+def _telegram_ref(grant: Any) -> Optional[Dict[str, Any]]:
+    """The grant's stored Telegram delivery ref ``{chat_id, message_id}`` (the
+    chat the question was delivered to), or None. That chat is the ONLY one
+    authorized to answer the question (P225-RVW-1)."""
+    refs = grant.channel_refs if isinstance(grant.channel_refs, dict) else {}
+    tg = refs.get("telegram") if isinstance(refs, dict) else None
+    return tg if isinstance(tg, dict) else None
+
+
+def _find_answerable_question(
+    db: Session, workspace_id: Any, ask_id: int, reply_chat_id: Any,
+):
+    """A pending question the replying chat is AUTHORIZED to answer by id.
+
+    Telegram routes EVERY bot update to the one workspace webhook, so scoping the
+    lookup to (workspace, id) alone lets any reachable chat inject an answer
+    against the global auto-increment grant id. Authorization additionally binds
+    the sending chat to the question's stored delivery chat
+    (``channel_refs.telegram.chat_id``) (P225-RVW-1).
+
+    Every failure — wrong id, wrong-workspace id, already-answered, no delivery
+    ref, or an unauthorized chat — returns None so the caller emits ONE identical
+    'isn't open' reply (no existence leak)."""
+    grant = _find_pending_question(db, workspace_id, ask_id)
+    if grant is None:
+        return None
+    tg = _telegram_ref(grant)
+    if tg is None or str(tg.get("chat_id")) != str(reply_chat_id):
+        return None
+    return grant
+
+
+def _find_question_by_telegram_message(
+    db: Session, workspace_id: Any, message_id: str, reply_chat_id: Any,
+):
+    """The pending question whose stored Telegram delivery matches BOTH the target
+    ``message_id`` AND the replying ``chat_id``. Binding the chat stops a
+    same-workspace but unauthorized chat from reply-colliding on a per-chat
+    sequential ``reply_to_message_id`` (P225-RVW-1). Python-side filter over the
+    few open asks (JSONB-portable)."""
     for g in _pending_questions(db, workspace_id):
-        refs = g.channel_refs if isinstance(g.channel_refs, dict) else {}
-        tg = refs.get("telegram") if isinstance(refs, dict) else None
-        if isinstance(tg, dict) and str(tg.get("message_id")) == str(message_id):
+        tg = _telegram_ref(g)
+        if (
+            tg is not None
+            and str(tg.get("message_id")) == str(message_id)
+            and str(tg.get("chat_id")) == str(reply_chat_id)
+        ):
             return g
     return None
 
@@ -283,12 +326,14 @@ async def _maybe_answer_question(
     if not text:
         return None
 
-    # 1. Explicit fallback: /answer <id> <text>
+    # 1. Explicit fallback: /answer <id> <text> — applied ONLY from the chat the
+    #    question was delivered to (P225-RVW-1: the id is a global auto-increment,
+    #    so id-scope alone lets any reachable chat inject an answer).
     m = _ANSWER_CMD.match(text)
     if m:
         ask_id = int(m.group(1))
         answer_text = m.group(2).strip()
-        grant = _find_pending_question(db, workspace.id, ask_id)
+        grant = _find_answerable_question(db, workspace.id, ask_id, reply_ctx.get("chat_id"))
         if grant is None:
             await _deliver_reply(
                 f"Question #{ask_id} isn't open in this workspace.",
@@ -297,10 +342,13 @@ async def _maybe_answer_question(
             return {"status": "received", "routed": False, "reason": "answer_target_not_found"}
         return await _apply_telegram_answer(db, workspace, grant, answer_text, reply_ctx, integrations)
 
-    # 2. A reply to a correlated question message answers it.
+    # 2. A reply to a correlated question message answers it — the reply must come
+    #    from the delivery chat too (P225-RVW-1), not merely target the message id.
     reply_to = reply_ctx.get("reply_to_message_id")
     if reply_to is not None:
-        grant = _find_question_by_telegram_message(db, workspace.id, str(reply_to))
+        grant = _find_question_by_telegram_message(
+            db, workspace.id, str(reply_to), reply_ctx.get("chat_id"),
+        )
         if grant is not None:
             return await _apply_telegram_answer(db, workspace, grant, text, reply_ctx, integrations)
 
@@ -319,7 +367,9 @@ async def _apply_telegram_answer(
     into the same thread through the existing ``_deliver_reply`` path."""
     from api.approval_grants import apply_question_answer
 
-    answered_by = f"telegram:{reply_ctx.get('from_user') or reply_ctx.get('chat_id') or 'user'}"
+    # P225-RVW-1 AC3: attribute to the STABLE numeric telegram id, never the
+    # self-chosen first_name (which is trivially spoofable, e.g. 'telegram:CEO').
+    answered_by = f"telegram:{reply_ctx.get('from_id') or reply_ctx.get('chat_id') or 'user'}"
     await apply_question_answer(db, grant, answer_text=answer_text, answered_by=answered_by)
     await _deliver_reply(
         f"Answered #{grant.id} — the agent is resuming.",
