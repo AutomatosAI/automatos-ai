@@ -56,6 +56,55 @@
     "orchestrator/consumers/chatbot/auto.py",
     "orchestrator/tests/"
    ]
+  },
+  {
+   "id": "P226-RVW-1",
+   "title": "HIGH — persona doctrine backfill is unreachable for existing workspaces (production no-op)",
+   "description": "US-001's headline deliverable — the hash-guarded backfill that brings EXISTING workspace Auto rows up to the doctrine — never runs in production. `_backfill_auto_persona` is invoked only from `seed_auto_agent`'s else-branch (orchestrator/core/seeds/seed_auto_agent.py:326-329), which executes only when `seed_auto_agent` is called on an ALREADY-EXISTING Auto row. But every production caller guards on existence and calls `seed_auto_agent` ONLY when the row is ABSENT: api/chat.py:150-156 (`if row: return int(row)` precedes the call), api/workspaces.py:350-353 (`_get_or_seed_auto_agent`: `if agent: return agent` precedes the call; callers at :378/:568/:655 route through this guard), core/auth/hybrid.py:319-370 (personal-workspace CREATE path with a fresh uuid4 ws_id). So the else-branch is dead for existing rows. `sync_auto_personas` (seed_auto_agent.py:142-165) has NO production caller — grep shows only tests/test_prd226_doctrine.py:153. Existing workspaces already carry `_ALEMBIC_BACKFILL_PERSONA` rows (inserted by orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py:65-72), whose hash IS in `_KNOWN_SEED_PERSONA_HASHES` — they WOULD be updated if the backfill were reached, but nothing reaches them. Net: only brand-new workspaces get the persona-level doctrine (via the CREATE path's `_default_persona()`); every pre-existing workspace keeps its pre-226 persona. The backfill LOGIC is correct and pure-tested; only the wiring is missing. The green suite masks the gap — every backfill test calls `_backfill_auto_persona`/`sync_auto_personas`/the CREATE path DIRECTLY, none through a real caller on an existing row, so no test asserts reachability. Review pass-note (b) ('backfill runs on deploy via the seed path — customized-soul skips appear in boot logs') is false as built. Partial mitigation: the platform-management skill §17 doctrine DOES refresh to existing installs via skill_loader._maybe_refresh_builtin_skill, so Auto is not doctrine-blind — but the always-on persona block never lands. ADVISORY (code-reviewer, unverifiable from code): a transient CTO-soul persona was force-written to every auto-% row by a raw-SQL main.py startup migration 2026-04-12→04-14 (removed in commit 8c4a1f653 'stop overwriting Auto persona'); that snapshot's hash is NOT in `_KNOWN_SEED_PERSONA_HASHES`, so any surviving row carrying it would be misclassified 'customized' and skipped even once the backfill is wired.",
+   "acceptanceCriteria": [
+    "A reachable production path applies the hash-guarded backfill to EXISTING Auto rows — e.g. `_get_or_seed_auto_agent` (and chat.py's helper) call `_backfill_auto_persona` on the existing-row branch and commit, OR `sync_auto_personas` is invoked from a boot/ops path. Grep shows at least one NON-test caller of the backfill that runs when the Auto row already exists.",
+    "A behavioral test drives a REAL caller (NOT a direct `_backfill_auto_persona` call) with a pre-existing Auto row carrying `_ALEMBIC_BACKFILL_PERSONA`, and asserts the row's custom_persona_prompt becomes `_default_persona()`; a customized row is left untouched; a second call through the same caller mutates nothing (idempotent).",
+    "The known-hash set is reconciled against every default persona historically written to auto-% rows (including the 2026-04-12→04-14 main.py CTO-soul snapshot): either the missing hash(es) are added to `_KNOWN_SEED_PERSONA_HASHES` or a comment documents why they are out of scope — no silent misclassification of a shipped default as 'customized'."
+   ],
+   "files": [
+    "orchestrator/api/workspaces.py",
+    "orchestrator/api/chat.py",
+    "orchestrator/core/auth/hybrid.py",
+    "orchestrator/core/seeds/seed_auto_agent.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P226-RVW-2",
+   "title": "HIGH — 4-part dispatch contract hand-duplicated in platform-management-skill.md, outside the single-source guarantee",
+   "description": "The skill seed restates the 4-part contract as a near-verbatim hand-copy of the shared fragment, defeating US-003's single-source rule where the tests cannot see it. platform-management-skill.md:1090-1095 (§17 point 5 'Dispatch as a contract') repeats the same four bold labels (OBJECTIVE/OUTPUT/TOOLS/BOUNDARIES), the same clause order, and the same closer ('Reference artifacts by name or id; never paste their content...') as `DISPATCH_CONTRACT_FRAGMENT` in orchestrator/modules/coordination/dispatch_contract.py:15-21 — but as an independently-maintained Markdown string, not a reference. The single-source guards are code-only: test_fragment_has_exactly_one_definition_site (tests/test_prd226_contract.py:32-47) walks .py files, and the acceptance grep (scripts/ralph/acceptance-prd226.sh:74-80) is scoped to orchestrator --include=*.py — so this Markdown duplicate is structurally invisible to the guarantee they claim to enforce. The platform-management skill is always-on (injected into every Auto chat turn) and refreshes to existing installs via skill_loader._maybe_refresh_builtin_skill. FAILURE: a future PRD edits `DISPATCH_CONTRACT_FRAGMENT` (e.g. tweaks the TOOLS bullet); the planner prompt and the ASSIGN directive pick it up automatically, but the skill keeps the old wording — Auto's own context then carries two divergent definitions of 'the dispatch contract' simultaneously, and nothing in CI catches the divergence.",
+   "acceptanceCriteria": [
+    "The skill's contract description is no longer an independently-maintained copy: either §17 point 5's body is assembled from `DISPATCH_CONTRACT_FRAGMENT` at seed time (single source), OR a test asserts the four labels + the 'never paste' closer in platform-management-skill.md stay in lock-step with `DISPATCH_CONTRACT_FRAGMENT` and fails on divergence.",
+    "The single-source check (test and/or acceptance-prd226.sh) covers the Markdown seed home, not just .py files — a hand-edit that drifts the skill's contract text from the fragment fails CI."
+   ],
+   "files": [
+    "orchestrator/core/seeds/platform-management-skill.md",
+    "orchestrator/core/seeds/seed_auto_agent.py",
+    "orchestrator/modules/coordination/dispatch_contract.py",
+    "orchestrator/tests/",
+    "scripts/ralph/acceptance-prd226.sh"
+   ]
+  },
+  {
+   "id": "P226-RVW-3",
+   "title": "MEDIUM — doctrine triplicated; the soul-file edit lands on the CTO agent, not Auto; point 7 already drifted",
+   "description": "The 9-point doctrine now lives in three hand-maintained homes, and US-001's soul-file edit does not reach the agent it was written for. Homes: (1) core/seeds/auto-cto-custom-soul.txt:101-113, (2) platform-management-skill.md §17, (3) `MANAGER_DOCTRINE_BLOCK` at seed_auto_agent.py:66-76. But auto-cto-custom-soul.txt is read ONLY by seed_cto_agent.py:22-29 (the GLOBAL, admin-only CTO agent, workspace_id=None) — NOT by the per-workspace Auto agent: seed_auto_agent.py's `_load_default_persona`/`_SOUL_DOC_PATH` (:168-175, :30) are DEAD (no caller); Auto's persona is `_default_persona()` = `_FRIENDLY_FALLBACK` + `MANAGER_DOCTRINE_BLOCK` (:79-86, seeded at :313). So the soul-file doctrine feeds the CTO agent, and PRD-226 §2/§5's grounding ('Auto's persona is seeded per workspace from auto-cto-custom-soul.txt') is factually wrong. The copies have ALREADY drifted: point 7's ask-length is stated three ways — 'keep it under a screen' (soul:109), '≤ ~700 characters' (skill §17), 'short' (block). Only the nine title-anchors are pinned across homes (tests/test_prd226_doctrine.py:21-31 DOCTRINE_ANCHORS); the substantive prose is free to diverge unnoticed.",
+   "acceptanceCriteria": [
+    "The dead `_load_default_persona` + `_SOUL_DOC_PATH` are removed from seed_auto_agent.py (Auto never reads the CTO soul file), OR a comment states explicitly that auto-cto-custom-soul.txt feeds the CTO agent (seed_cto_agent.py) and NOT the per-workspace Auto agent.",
+    "PRD-226 §2 and §5 are corrected to state the per-workspace Auto persona seeds from `_default_persona()` (friendly base + `MANAGER_DOCTRINE_BLOCK`), not from auto-cto-custom-soul.txt.",
+    "Point 7's ask-length guidance reads consistently across the two Auto-facing homes (skill §17 and `MANAGER_DOCTRINE_BLOCK`), or a test pins the substantive doctrine (ask-length, tool names, lane definitions) — not just the nine titles — across those homes."
+   ],
+   "files": [
+    "orchestrator/core/seeds/seed_auto_agent.py",
+    "docs/PRDS/PRD-226-AUTO-MANAGER-DOCTRINE.md",
+    "orchestrator/core/seeds/platform-management-skill.md",
+    "orchestrator/tests/"
+   ]
   }
  ]
 }
