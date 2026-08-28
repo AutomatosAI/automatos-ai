@@ -81,7 +81,7 @@ def main() -> int:
                 name=WORKSPACE_NAME,
                 slug=WORKSPACE_SLUG,
                 owner_id=template.owner_id,
-                plan="starter",
+                plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
                 is_personal=False,
                 is_active=True,
                 webhook_key=uuid4().hex,

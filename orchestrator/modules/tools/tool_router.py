@@ -840,10 +840,13 @@ def _apply_tier_exposure(
     families (PRD-222 US-024). The single seam where per-turn platform tool
     schemas are gated by plan.
 
-    FAIL-OPEN: a missing workspace_id, an unresolvable plan, or any error returns
-    the surface unchanged — a lookup fault must never hide tools (the correct
-    production posture, and it keeps the mock-based unit suite, which has no real
-    workspace row, on the full surface). Only a CONFIRMED gated tier trims.
+    FAIL-OPEN, enforced at every step: a missing workspace_id or an empty plan
+    returns the surface unchanged here; a NON-EMPTY but unresolvable plan (a
+    stale/renamed/stray value such as a legacy 'starter' row) is failed open by
+    ``filter_tools_by_plan`` itself, which trims only KNOWN tiers — so a lookup
+    fault can never HIDE a tool. Any exception below is likewise swallowed to the
+    full surface. Only a CONFIRMED gated tier trims. This also keeps the
+    mock-based unit suite (no real workspace row) on the full surface.
     """
     if not tools or workspace_id is None:
         return tools
@@ -855,6 +858,8 @@ def _apply_tier_exposure(
         plan = getattr(ws, "plan", None)
         if not plan:
             return tools
+        # A non-empty but unresolvable plan does NOT reach a trim: filter_tools_by_plan
+        # returns the surface unchanged for any plan not in PLAN_TIERS (true fail-open).
         trimmed = filter_tools_by_plan(tools, plan)
         if len(trimmed) != len(tools):
             logger.info(

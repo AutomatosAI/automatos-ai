@@ -195,8 +195,20 @@ def filter_tools_by_plan(
     NEW list and never mutates an input schema (the dispatcher is rebuilt with a
     pruned enum). When every family is enabled, returns the list unchanged (fast
     path). Pure — no I/O; the caller resolves ``plan`` from the workspace.
+
+    FAIL-OPEN on an UNRESOLVABLE plan: a plan that is not a known tier — falsy,
+    or a stale/renamed/stray string such as a legacy ``'starter'`` row — returns
+    the surface UNCHANGED. Unlike the UI's :func:`exposure_for_plan`, which
+    deliberately falls back to ``basic`` so the client always has a profile, a
+    lookup fault on the tool path must never HIDE a tool: better to over-expose
+    than to strip a paying tier's tools because its plan string drifted. A KNOWN
+    tier (including ``basic``) still trims. This is the guarantee that
+    ``tool_router._apply_tier_exposure`` documents.
     """
     from config import TOOL_FAMILIES
+
+    if get_tier(plan, tiers) is None:
+        return list(tools)  # unresolvable plan ⇒ true fail-open (never hide tools)
 
     fam_map = family_map if family_map is not None else TOOL_FAMILIES
     fams = enabled_families(plan, tiers)

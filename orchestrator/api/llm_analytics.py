@@ -1029,7 +1029,7 @@ async def get_admin_dashboard(
         workspaces.append({
             "id": ws_id,
             "name": ws.name,
-            "plan": ws.plan or "starter",
+            "plan": ws.plan or "basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
             "is_personal": ws.is_personal,
             "created_at": ws.created_at.isoformat() if ws.created_at else None,
             "agents": agent_counts.get(ws.id, 0),

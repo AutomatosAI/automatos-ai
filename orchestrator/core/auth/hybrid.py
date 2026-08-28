@@ -330,7 +330,7 @@ def _provision_new_user_workspace(
             db.execute(
                 text(
                     "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits, webhook_key) "
-                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'starter', :plan_limits, :webhook_key)"
+                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'basic', :plan_limits, :webhook_key)"  # PRD-222 W2·S1: entry tier (renamed from 'starter')
                 ),
                 {
                     "id": str(ws_id),

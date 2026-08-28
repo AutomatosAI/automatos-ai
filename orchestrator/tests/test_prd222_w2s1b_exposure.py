@@ -3,8 +3,13 @@
 Pure tests: the exposure block derived from PLAN_TIERS per tier, a config
 override flipping a nav key with no code change (config-driven proof), and the
 tool-surface family filter — basic drops the CodeGraph first-class schemas and
-prunes the dispatcher enum of nl2sql/team actions, business is untouched, and an
-unresolved/unknown plan fails open to the entry tier.
+prunes the dispatcher enum of nl2sql/team actions, business is untouched.
+
+The two paths fail open DIFFERENTLY, and that asymmetry is deliberate (RVW-1):
+the UI's ``exposure_for_plan`` falls back to the entry tier for an unknown plan
+(the client always has a profile), while the tool path (``filter_tools_by_plan``
+and the ``_apply_tier_exposure`` seam) returns the FULL surface for an unknown
+plan — a stale plan string must never HIDE a paid tool.
 """
 from __future__ import annotations
 
@@ -152,3 +157,102 @@ def test_tool_families_map_covers_all_analytics_and_team_names():
     # Command Center + generic tools are CORE (no family) — never gated.
     assert pt._tool_family("platform_get_activity_feed", TOOL_FAMILIES) is None
     assert pt._tool_family("composio_execute", TOOL_FAMILIES) is None
+
+
+# --------------------------------------------------------------------------- #
+# Unresolvable plan — TRUE fail-open on the tool path (RVW-1)
+# --------------------------------------------------------------------------- #
+
+
+def test_get_tier_distinguishes_unknown_from_known():
+    # The renamed-away entry tier is unresolvable; 'basic' is a real trimming tier.
+    assert pt.get_tier("starter") is None
+    assert pt.get_tier("basic") is not None
+
+
+def test_unknown_plan_tool_surface_fails_open_full_not_basic():
+    # filter_tools_by_plan distinguishes an UNKNOWN plan from 'basic': a plan not
+    # in PLAN_TIERS (a stale/renamed 'starter' row) returns the surface UNCHANGED
+    # — the full surface, NOT the silent entry-tier trim exposure_for_plan uses
+    # for the UI. A lookup fault must never hide a paid tool (RVW-1).
+    surface = _surface()
+    trimmed = pt.filter_tools_by_plan(surface, "starter")
+    assert [t["function"]["name"] for t in trimmed] == [
+        t["function"]["name"] for t in surface
+    ]
+    enum = [t for t in trimmed if t["function"]["name"] == "platform_execute"][0][
+        "function"
+    ]["parameters"]["properties"]["action"]["enum"]
+    assert len(enum) == 6  # full enum retained — no basic-profile pruning
+
+
+def test_unknown_plan_does_not_mutate_input():
+    surface = _surface()
+    original = copy.deepcopy(surface)
+    pt.filter_tools_by_plan(surface, "starter")
+    assert surface == original  # fail-open returns a new list, inputs untouched
+
+
+# --------------------------------------------------------------------------- #
+# Direct coverage of the _apply_tier_exposure seam (had none before — RVW-1)
+# --------------------------------------------------------------------------- #
+
+
+class _FakeQuery:
+    def __init__(self, ws):
+        self._ws = ws
+
+    def filter(self, *a, **k):
+        return self
+
+    def first(self):
+        return self._ws
+
+
+class _FakeSession:
+    """Minimal stand-in: query(Workspace).filter(...).first() → the fake row."""
+
+    def __init__(self, ws):
+        self._ws = ws
+
+    def query(self, *a, **k):
+        return _FakeQuery(self._ws)
+
+
+class _FakeWorkspace:
+    def __init__(self, plan):
+        self.plan = plan
+
+
+def test_apply_tier_exposure_unknown_plan_keeps_full_surface():
+    # The seam the finding flagged with zero direct coverage: a workspace on a
+    # stale 'starter' plan (no longer in PLAN_TIERS) keeps the FULL surface —
+    # true fail-open, not a silent strip to basic.
+    from modules.tools.tool_router import _apply_tier_exposure
+
+    surface = _surface()
+    out = _apply_tier_exposure(_FakeSession(_FakeWorkspace("starter")), "ws-1", surface, "t")
+    assert [t["function"]["name"] for t in out] == [
+        t["function"]["name"] for t in surface
+    ]
+    enum = [t for t in out if t["function"]["name"] == "platform_execute"][0][
+        "function"
+    ]["parameters"]["properties"]["action"]["enum"]
+    assert len(enum) == 6  # nothing pruned
+
+
+def test_apply_tier_exposure_basic_still_trims_at_the_seam():
+    # A KNOWN gated tier still trims through the seam — the fail-open guard did
+    # not disable real gating.
+    from modules.tools.tool_router import _apply_tier_exposure
+
+    out = _apply_tier_exposure(_FakeSession(_FakeWorkspace("basic")), "ws-1", _surface(), "t")
+    assert "platform_codegraph_search" not in [t["function"]["name"] for t in out]
+
+
+def test_apply_tier_exposure_no_workspace_id_keeps_full_surface():
+    from modules.tools.tool_router import _apply_tier_exposure
+
+    surface = _surface()
+    out = _apply_tier_exposure(_FakeSession(_FakeWorkspace("basic")), None, surface, "t")
+    assert out is surface  # early-out: nothing to resolve
