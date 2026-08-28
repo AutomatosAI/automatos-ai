@@ -127,9 +127,10 @@ def test_migration_removes_seeded_agents_spares_fixture(engine, new_session):
     sys_other = mk_agent("Auto", is_system=True, role=None)
     regular = mk_agent("Marketing helper", is_system=False, role=None)
     # A dependent agent_skills row on the seeded template (the FK with no cascade).
+    # skills requires a NOT NULL skill_type and has no bare short-name column;
+    # insert only real columns so the fixture builds under CI Postgres.
     skill_id = s.execute(
-        text("INSERT INTO skills (name, slug) VALUES ('t', :sl) RETURNING id"),
-        {"sl": f"t-{uuid.uuid4().hex[:8]}"},
+        text("INSERT INTO skills (name, skill_type) VALUES ('t', 'technical') RETURNING id"),
     ).fetchone()[0]
     s.execute(
         text("INSERT INTO agent_skills (agent_id, skill_id) VALUES (:a, :s)"),
