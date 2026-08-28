@@ -37,6 +37,7 @@ import services.orchestrator_answers as oa  # noqa: E402
 from config import Config  # noqa: E402
 from core.models.orchestration import (  # noqa: E402
     OrchestrationEvent,
+    OrchestrationRun,
     OrchestrationTask,
     OrchestrationTaskDependency,
 )
@@ -605,3 +606,46 @@ async def test_sources_fall_back_to_all_when_answer_cites_nothing(spy_events, mo
     result = await answer_clarification(db, _subject(), "Q?", llm_factory=_factory(stub))
 
     assert result["sources"] == [b["source"] for b in blocks]  # fallback: all retrieved
+
+
+# ---------------------------------------------------------------------------
+# P229-RVW-10 — the upstream READ is really gated by run→workspace, not just
+# documented as such (defence-in-depth made real)
+# ---------------------------------------------------------------------------
+
+def test_upstream_blocks_refuses_run_owned_by_other_workspace():
+    # the subject's run is loadable but owned by workspace B; the subject is
+    # workspace A → the upstream read REFUSES (no split-provenance grounding).
+    subject = _subject(run_id="run-A", workspace_id="ws-A", task_id=200)
+    db = _ScopedSession({
+        OrchestrationRun: [SimpleNamespace(id="run-A", workspace_id="ws-B")],
+        OrchestrationTaskDependency: [SimpleNamespace(task_id=200, depends_on_task_id=100)],
+        OrchestrationTask: [SimpleNamespace(id=100, run_id="run-A", output="secret", title="x", sequence_number=1)],
+    })
+    assert oa._upstream_blocks(db, subject) == []
+
+
+def test_upstream_blocks_allows_run_in_subject_workspace():
+    # positive twin: run owned by the subject's OWN workspace → read proceeds.
+    subject = _subject(run_id="run-A", workspace_id="ws-A", task_id=200)
+    db = _ScopedSession({
+        OrchestrationRun: [SimpleNamespace(id="run-A", workspace_id="ws-A")],
+        OrchestrationTaskDependency: [SimpleNamespace(task_id=200, depends_on_task_id=100)],
+        OrchestrationTask: [SimpleNamespace(id=100, run_id="run-A", output="ours", title="x", sequence_number=1)],
+    })
+    blocks = oa._upstream_blocks(db, subject)
+    assert len(blocks) == 1
+    assert blocks[0]["source"]["task_id"] == "100"
+
+
+def test_upstream_blocks_fails_open_when_run_unloadable():
+    # when the run row is absent (unloadable), the read falls back to the run_id
+    # fence — a bogus run_id has no dep outputs to leak anyway. Mirrors the prior
+    # behaviour so the RVW-2 fence tests are unaffected by the RVW-10 addition.
+    subject = _subject(run_id="run-A", workspace_id="ws-A", task_id=200)
+    db = _ScopedSession({
+        OrchestrationTaskDependency: [SimpleNamespace(task_id=200, depends_on_task_id=100)],
+        OrchestrationTask: [SimpleNamespace(id=100, run_id="run-A", output="ours", title="x", sequence_number=1)],
+    })
+    blocks = oa._upstream_blocks(db, subject)
+    assert len(blocks) == 1  # no OrchestrationRun row → fail-open → run_id fence applies

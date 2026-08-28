@@ -283,9 +283,34 @@ def _upstream_blocks(db: Any, subject: ClarificationSubject) -> List[Dict[str, A
         return []
     try:
         from core.models.orchestration import (
+            OrchestrationRun,
             OrchestrationTask,
             OrchestrationTaskDependency,
         )
+
+        # P229-RVW-10: make the run→workspace defence-in-depth REAL for THIS read.
+        # The run_id fence below is intra-run only; _load_task's workspace scope
+        # gates the PARK write, not this read (which uses subject.run_id directly,
+        # never subject.task). So confirm the run belongs to the subject's
+        # workspace here: if the run is loadable and owned by a DIFFERENT
+        # workspace, refuse — a run_id that diverged from workspace_id (the known
+        # cached-agent-runtime workspace-staleness pattern) must not surface
+        # another tenant's outputs as "grounding" while _external_blocks reads the
+        # (different) subject.workspace_id. Fail-open only when the run is
+        # unloadable — a bogus run_id has no dep outputs to leak, and the run_id
+        # fence still applies.
+        if subject.workspace_id is not None:
+            run = (
+                db.query(OrchestrationRun)
+                .filter(OrchestrationRun.id == subject.run_id)
+                .first()
+            )
+            if run is not None and getattr(run, "workspace_id", None) != subject.workspace_id:
+                logger.warning(
+                    "[clarify] upstream read refused — run %s is not in the subject's workspace",
+                    subject.run_id,
+                )
+                return []
 
         deps = (
             db.query(OrchestrationTaskDependency)
@@ -301,9 +326,11 @@ def _upstream_blocks(db: Any, subject: ClarificationSubject) -> List[Dict[str, A
                 OrchestrationTask.id.in_(dep_ids),
                 # P229-RVW-2: fence upstream reads to the subject's OWN run. A
                 # task's upstream deps are intra-run by DAG construction, so this
-                # loses no legitimate context; it stops a foreign task_id
-                # (defence in depth behind the executor strip + _load_task scope)
-                # from surfacing another tenant's outputs as a "grounded" answer.
+                # loses no legitimate context; it stops a foreign task_id from
+                # surfacing another tenant's outputs as a "grounded" answer. The
+                # tenant boundary for this read is the run→workspace confirmation
+                # above + the executor strip (which binds run_id/task_id
+                # self-consistently from server field_context) — NOT _load_task.
                 OrchestrationTask.run_id == subject.run_id,
             )
             .order_by(OrchestrationTask.sequence_number)
