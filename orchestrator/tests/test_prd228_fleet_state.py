@@ -75,10 +75,11 @@ def _orch(
     )
 
 
-def _watch(watch_id, *, owner_agent_id=None, target_type="board_task", target_id="0"):
+def _watch(watch_id, *, owner_agent_id=None, target_type="board_task",
+           target_id="0", status="watching"):
     return SimpleNamespace(
         id=watch_id, owner_agent_id=owner_agent_id,
-        target_type=target_type, target_id=target_id,
+        target_type=target_type, target_id=target_id, status=status,
     )
 
 
@@ -116,7 +117,7 @@ def _assert_documented_shape(entry, *, cost_expected=True):
     }.issubset(entry)
     assert set(entry["blocked"]) == {"count", "open_asks"}
     assert isinstance(entry["blocked"]["open_asks"], list)
-    assert set(entry["watches"]) == {"active"}
+    assert set(entry["watches"]) == {"active", "needs_attention"}
     if entry["current"] is not None:
         assert set(entry["current"]) == {"kind", "id", "title", "since"}
         assert entry["current"]["kind"] in {"board_task", "mission_task"}
@@ -163,7 +164,7 @@ def _scenario_idle():
     assert entry["current"] is None
     assert entry["queue_depth"] == 0
     assert entry["blocked"] == {"count": 0, "open_asks": []}
-    assert entry["watches"] == {"active": 0}
+    assert entry["watches"] == {"active": 0, "needs_attention": 0}
     assert entry["last_activity_at"] is None
     return entry
 
@@ -233,7 +234,19 @@ def test_watches_attributed_by_owner_and_target_deduped():
         _watch("w-other", owner_agent_id=2, target_type="board_task", target_id="99"),
     ]
     entry = _assemble(agents, board=board, watches=watches)["agents"][0]
-    assert entry["watches"] == {"active": 3}
+    assert entry["watches"] == {"active": 3, "needs_attention": 0}
+
+
+def test_watches_needs_attention_counted():
+    # A watch that hit its action budget (needs_attention) is the over-budget signal.
+    agents = [_agent(1)]
+    board = [_board(7, 1, status="in_progress", started_at=_mins(3))]
+    watches = [
+        _watch("w-ok", owner_agent_id=1, status="watching"),
+        _watch("w-stuck", owner_agent_id=1, status="needs_attention"),
+    ]
+    entry = _assemble(agents, board=board, watches=watches)["agents"][0]
+    assert entry["watches"] == {"active": 2, "needs_attention": 1}
 
 
 def test_open_asks_attributed_by_agent_and_by_subject():

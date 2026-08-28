@@ -611,6 +611,9 @@ class Config:
     # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
     # connection-liveness heartbeat cadence (a ':hb' comment), not a refresh tick.
     BOARD_SSE_HEARTBEAT_SECONDS: float = float(os.getenv("BOARD_SSE_HEARTBEAT_SECONDS", "20"))
+    # PRD-228: an agent shown as "working" whose last task activity is older than
+    # this is flagged STALLED by the fleet-status anomaly surface (default 30 min).
+    FLEET_STALL_SECONDS: int = int(os.getenv("FLEET_STALL_SECONDS", "1800"))
 
     # =============================================================================
     # AUTO WATCHER (PRD-204: persistent supervision of launched work)

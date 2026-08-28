@@ -209,7 +209,7 @@ def test_fleet_shape_and_values(seeded, new_session):
     assert builder["current"]["kind"] == "board_task"
     assert builder["current"]["title"] == "Ship the widget"
     assert builder["queue_depth"] == 1
-    assert builder["watches"]["active"] == 1
+    assert builder["watches"] == {"active": 1, "needs_attention": 0}
     # 24h cost = 1000 tokens / $0.50; the 30h-old $9.90 row is excluded.
     assert builder["cost_24h"]["tokens"] == 1000
     assert builder["cost_24h"]["usd"] == pytest.approx(0.50, abs=1e-6)

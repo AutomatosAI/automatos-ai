@@ -52,7 +52,11 @@ from core.models.orchestration import OrchestrationTask
 # Single source of truth for mission-task busyness (no rival derivation): the
 # same constant the dispatcher's matcher uses to decide who is busy.
 from core.models.orchestration_enums import BUSY_TASK_STATES, TaskState
-from core.models.watch_enums import LIVE_WATCH_STATUSES, WatchTargetType
+from core.models.watch_enums import (
+    LIVE_WATCH_STATUSES,
+    WatchStatus,
+    WatchTargetType,
+)
 from core.models.watches import Watch
 
 logger = logging.getLogger(__name__)
@@ -80,6 +84,10 @@ BOARD_STATUS_IN_PROGRESS: str = "in_progress"
 
 #: Board status meaning "assigned but not yet started" (queue depth).
 BOARD_STATUS_ASSIGNED: str = "assigned"
+
+#: Watch status a watch lands in once it exhausts its action budget (or loses
+#: its target) — the "over-budget" signal the fleet anomaly surface flags.
+WATCH_STATUS_NEEDS_ATTENTION: str = WatchStatus.NEEDS_ATTENTION.value
 
 #: Live (non-terminal) watch status values, as strings for the IN-filter.
 _LIVE_WATCH_STATUS_VALUES: tuple[str, ...] = tuple(
@@ -265,8 +273,15 @@ def _assemble_fleet(
         open_asks = _asks_for_agent(agent.id, my_board_id_strs, asks)
 
         # Active watches touching the agent (owned by it, or targeting one of
-        # its board tasks).
-        watch_count = _watches_for_agent(agent.id, my_board_id_strs, watches)
+        # its board tasks), plus how many have hit their action budget.
+        my_watches = _watches_for_agent(agent.id, my_board_id_strs, watches)
+        watch_block = {
+            "active": len(my_watches),
+            "needs_attention": sum(
+                1 for w in my_watches
+                if w.status == WATCH_STATUS_NEEDS_ATTENTION
+            ),
+        }
 
         # Last activity: latest task timestamp we already hold (no new tracking).
         last_activity = _max_dt(
@@ -284,7 +299,7 @@ def _assemble_fleet(
             "current": current,
             "queue_depth": queue_depth,
             "blocked": {"count": blocked_count, "open_asks": open_asks},
-            "watches": {"active": watch_count},
+            "watches": watch_block,
             "last_activity_at": _iso(last_activity),
         }
         if cost_available:
@@ -325,23 +340,23 @@ def _asks_for_agent(
 
 def _watches_for_agent(
     agent_id: int, board_id_strs: set, watches: List[Any]
-) -> int:
-    """Count of live watches touching this agent (in-memory).
+) -> List[Any]:
+    """Live watches touching this agent (in-memory), deduped by watch id.
 
     A watch touches the agent when it is owned by it (``owner_agent_id``) or its
-    current target is one of the agent's board tasks. Deduped by watch id so the
-    two conditions never double-count.
+    current target is one of the agent's board tasks. Returns the matched watch
+    rows so the caller can both count them and inspect their status.
     """
-    matched = {
-        w.id
-        for w in watches
-        if w.owner_agent_id == agent_id
-        or (
+    matched: Dict[Any, Any] = {}
+    for w in watches:
+        if w.id in matched:
+            continue
+        if w.owner_agent_id == agent_id or (
             w.target_type == WatchTargetType.BOARD_TASK.value
             and str(w.target_id) in board_id_strs
-        )
-    }
-    return len(matched)
+        ):
+            matched[w.id] = w
+    return list(matched.values())
 
 
 # ---------------------------------------------------------------------------

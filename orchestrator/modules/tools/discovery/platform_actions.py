@@ -46,6 +46,7 @@ from .actions_power import register_power_actions  # PRD-142 Wave 4 (W4-S5)
 from .actions_autonomy import register_autonomy_actions
 from .actions_deliverables import register_deliverables_actions  # PRD-164 S3
 from .actions_watches import register_watch_actions  # PRD-204 S9
+from .actions_fleet import register_fleet_actions  # PRD-228: platform_fleet_status
 from .actions_capabilities import register_capabilities_actions  # tool-surface PR-B
 from .actions_onboarding import register_onboarding_actions  # PRD-222 W1S3
 from .actions_intake import register_intake_actions  # PRD-222 W1S8
@@ -88,6 +89,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_autonomy_actions(registry)
     register_deliverables_actions(registry)  # PRD-164 S3: deliverable list/get tools
     register_watch_actions(registry)  # PRD-204 S9: watch create/list/get/cancel
+    register_fleet_actions(registry)  # PRD-228: platform_fleet_status (live floor read)
     register_capabilities_actions(registry)  # PR-B: platform_find_tools discovery seam
     register_onboarding_actions(registry)  # PRD-222 W1S3: platform_update_onboarding
     register_intake_actions(registry)  # PRD-222 W1S8: platform_scan_business_site + status

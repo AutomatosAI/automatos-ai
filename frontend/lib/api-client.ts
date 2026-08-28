@@ -334,7 +334,7 @@ export interface FleetAgentRow {
   current: FleetCurrentWork | null
   queue_depth: number
   blocked: { count: number; open_asks: Array<number | string> }
-  watches: { active: number }
+  watches: { active: number; needs_attention: number }
   last_activity_at: string | null
   // Omitted when the cost source is unavailable (fail-soft).
   cost_24h?: { tokens: number; usd: number }
