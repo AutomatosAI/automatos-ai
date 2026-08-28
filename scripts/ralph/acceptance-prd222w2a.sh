@@ -100,9 +100,13 @@ check "advance_onboarding_stage validator untouched" \
   "grep -q 'InvalidStageTransition' $OSTATE"
 
 # --- Scope guard: no W2·S1/S2 (Q1-gated) ----------------------------------------------
+# Scope the diff to CODE dirs only — the guard's intent is "no exposure/plan CODE".
+# Grepping the whole diff is self-defeating: this script (added in $BASE..HEAD) and the
+# spec/JSON name these tokens verbatim as the boundary to NOT cross, so an unscoped grep
+# matches its own pattern line and reports a phantom violation (ralph-acceptance gotcha).
 echo ""
 echo "── scope guard: no exposure-profile / plan-recommendation code (Q1-gated)"
-if [ -n "$BASE" ] && git diff "$BASE"..HEAD 2>/dev/null | grep -qiE '^\+.*(exposure_profile|plan_recommendation)'; then
+if [ -n "$BASE" ] && git diff "$BASE"..HEAD -- orchestrator/ frontend/ 2>/dev/null | grep -qiE '^\+.*(exposure_profile|plan_recommendation)'; then
   echo "   ❌ FAIL: W2·S1/S2 territory touched — that kit waits on Q1"; FAIL=1
 else
   echo "   ✅ PASS: Q1-gated planes untouched"
