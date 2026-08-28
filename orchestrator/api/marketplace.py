@@ -1002,3 +1002,102 @@ async def get_pending_items(
     except Exception as e:
         logger.error(f"Error fetching pending items: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# ===================================================================
+# PRD-230 — Marketplace Packages (curated per-vertical bundles)
+# ===================================================================
+#
+# A package is a curated bundle of EXISTING marketplace artifacts (agents,
+# tools, skills, plugins, playbooks, LLMs) with matching metadata + a setup
+# manifest (D4 — data, not code). These read/install routes back the marketplace
+# Packages tab (US-007). Install reuses the US-006 tool handler so the invariant
+# holds identically on the UI path: D1/D2/D3 (full closure, workspace-owned),
+# D6 (one package during onboarding), and D9 (over-quota = the honest plan
+# conversation, never a partial install). One install code path, not a parallel
+# mechanism (§8 trap).
+
+
+class PackageMemberOut(BaseModel):
+    type: str  # agent | tool | skill | plugin | playbook | llm
+    ref: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class PackageOut(BaseModel):
+    id: str
+    slug: str
+    name: str
+    description: Optional[str] = None
+    vertical_tags: List[str] = Field(default_factory=list)
+    matching: Dict[str, Any] = Field(default_factory=dict)
+    members: List[Dict[str, Any]] = Field(default_factory=list)
+    setup_manifest: Dict[str, Any] = Field(default_factory=dict)
+    showcase: bool = False
+
+
+@router.get("/packages", response_model=List[PackageOut])
+async def list_marketplace_packages(
+    showcase: Optional[bool] = Query(None, description="Filter to showcased packages only"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List marketplace packages, showcased first then by name.
+
+    Each package carries full detail (members + setup_manifest) so the Packages
+    tab's detail popup renders without a second fetch. All tiers see all packages
+    (D9) — nothing is hidden here; plan gating is a UI chip, never a filter.
+    """
+    from services.marketplace_packages import list_packages, list_showcased
+
+    try:
+        packages = list_showcased(db) if showcase else list_packages(db)
+        # Showcased first, then name — a stable default order for the tab.
+        packages = sorted(
+            packages, key=lambda p: (not bool(p.showcase), (p.name or "").lower())
+        )
+        return [p.to_dict() for p in packages]
+    except Exception as e:
+        logger.error(f"Error listing marketplace packages: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/packages/{slug}", response_model=PackageOut)
+async def get_marketplace_package(
+    slug: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Fetch a single package by slug (deep-link / refresh support for the popup)."""
+    from services.marketplace_packages import get_by_slug
+
+    package = get_by_slug(db, slug)
+    if package is None:
+        raise HTTPException(status_code=404, detail="Package not found")
+    return package.to_dict()
+
+
+@router.post(
+    "/packages/{slug}/install",
+    dependencies=[Depends(require_workspace_permission("agents:create"))],
+)
+async def install_marketplace_package(
+    slug: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Install a package's full dependency closure into the workspace (US-005),
+    via the US-006 tool handler so D6/D9 and the returned manifest are byte-for-byte
+    the chat path. Returns the manifest on success, or the honest over-quota /
+    onboarding-restriction payload — the CTA renders whatever comes back."""
+    from modules.tools.discovery.handlers_packages import install_package_tool
+
+    try:
+        return await install_package_tool(db, ctx.workspace_id, {"slug": slug})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error installing package {slug}: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Internal server error")
