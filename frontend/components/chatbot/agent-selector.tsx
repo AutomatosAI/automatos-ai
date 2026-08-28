@@ -116,7 +116,6 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
         <Button
           variant="ghost"
           size="sm"
-          data-tour="chat-agent-selector"
           className="h-9 px-3 rounded-full border-2 border-primary/20 bg-black/20 hover:bg-primary/5 hover:border-primary/40 text-foreground/90 text-xs gap-2"
         >
           {isLoading ? (

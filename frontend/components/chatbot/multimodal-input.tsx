@@ -115,7 +115,7 @@ export function MultimodalInput({
   const isStreaming = status === 'streaming'
 
   return (
-    <form onSubmit={handleSubmit} className="w-full" data-tour="chat-input-area">
+    <form onSubmit={handleSubmit} className="w-full">
       {/* PRD-127: Ephemeral attachment upload */}
       <input
         ref={fileInputRef}

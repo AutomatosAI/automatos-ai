@@ -1,21 +1,21 @@
 /**
  * PRD-222 US-015 — the intake progress card.
  *
- * The card reuses the wizard's `useWizardProgress` SSE hook (mocked here) and
+ * The card consumes the intake `useIntakeProgress` SSE hook (mocked here) and
  * renders the five pipeline stages plus the two terminal states: profile-ready
  * (a "here's what I learned" handoff) and failed / stream-error (an honest error
- * with an "upload docs instead" fallback). Pure/mocked — only the shared hook is
- * stubbed, so the wizard's own consumption of it is provably untouched.
+ * with an "upload docs instead" fallback). Pure/mocked — only the hook is
+ * stubbed (relocated from the retired wizard in W2·S5).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
-const { useWizardProgressMock } = vi.hoisted(() => ({
-  useWizardProgressMock: vi.fn(),
+const { useIntakeProgressMock } = vi.hoisted(() => ({
+  useIntakeProgressMock: vi.fn(),
 }))
 
-vi.mock('@/hooks/use-wizard-progress', () => ({
-  useWizardProgress: (opts: unknown) => useWizardProgressMock(opts),
+vi.mock('@/hooks/use-intake-progress', () => ({
+  useIntakeProgress: (opts: unknown) => useIntakeProgressMock(opts),
 }))
 
 import { IntakeProgressCard } from '../intake-progress-card'
@@ -27,7 +27,7 @@ function ev(stage: string, message: string, level = 'info'): Ev {
 }
 
 function mockProgress(state: string, events: Ev[]) {
-  useWizardProgressMock.mockReturnValue({
+  useIntakeProgressMock.mockReturnValue({
     events,
     state,
     latest: events.length ? events[events.length - 1] : null,
@@ -36,7 +36,7 @@ function mockProgress(state: string, events: Ev[]) {
 }
 
 describe('IntakeProgressCard (US-015)', () => {
-  beforeEach(() => useWizardProgressMock.mockReset())
+  beforeEach(() => useIntakeProgressMock.mockReset())
 
   it('renders nothing without a profileId', () => {
     mockProgress('idle', [])

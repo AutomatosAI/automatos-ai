@@ -184,7 +184,7 @@ export function NotificationsSettingsTab() {
   }
 
   return (
-    <Card data-tour="notification-preferences">
+    <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
           <Bell className="w-5 h-5" />

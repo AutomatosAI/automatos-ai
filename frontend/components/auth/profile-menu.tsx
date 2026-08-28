@@ -3,9 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { User, Settings, LogOut, ChevronDown, Sparkles } from 'lucide-react'
+import { User, Settings, LogOut, ChevronDown } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { usePathname } from 'next/navigation'
 
 /**
  * Profile Menu Component
@@ -21,14 +20,7 @@ export function ProfileMenu() {
     const router = useRouter()
     const { user, isLoaded } = useUser()
     const { signOut } = useClerk()
-    const pathname = usePathname()
     const [open, setOpen] = useState(false)
-
-    // Derive current page name for "Tour this page" label
-    const currentPage = (() => {
-        const segment = pathname?.split('/').filter(Boolean)[0] || 'dashboard'
-        return segment.charAt(0).toUpperCase() + segment.slice(1)
-    })()
 
     const handleSignOut = async () => {
         localStorage.removeItem('last_active_workspace')
@@ -130,29 +122,6 @@ export function ProfileMenu() {
                     >
                         <Settings className="w-4 h-4 text-primary" />
                         <span>Settings</span>
-                    </DropdownMenu.Item>
-
-                    <DropdownMenu.Item
-                        className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-foreground hover:text-foreground hover:bg-accent cursor-pointer outline-none transition-colors"
-                        disabled={!pathname}
-                        onSelect={() => {
-                            setOpen(false)
-                            setTimeout(async () => {
-                                if (user && pathname) {
-                                    const { getTourForRoute } = await import('@/lib/shepherd/tour-registry')
-                                    const { resetTour } = await import('@/lib/shepherd/tour-storage')
-                                    const entry = getTourForRoute(pathname)
-                                    if (entry) {
-                                        resetTour(entry.id, user.id)
-                                        const tour = await entry.factory(user.id)
-                                        tour.start()
-                                    }
-                                }
-                            }, 150)
-                        }}
-                    >
-                        <Sparkles className="w-4 h-4 text-primary" />
-                        <span>Tour this page</span>
                     </DropdownMenu.Item>
 
                     <DropdownMenu.Separator className="h-px bg-border my-2" />

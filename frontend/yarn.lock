@@ -6627,13 +6627,6 @@ react-resize-detector@^8.0.4:
   dependencies:
     lodash "^4.17.21"
 
-react-shepherd@^6.1.9:
-  version "6.1.9"
-  resolved "https://registry.npmjs.org/react-shepherd/-/react-shepherd-6.1.9.tgz"
-  integrity sha512-kSFs7ER9+tDAQ9a80CGTaWHpuNf/6RNnnAqtPxFqZSt5NnlKi6T8/E93sYMPOibhvdtpG5pIZpeT3JI1+Ppqiw==
-  dependencies:
-    shepherd.js "14.5.1"
-
 react-smooth@^2.0.2:
   version "2.0.5"
   resolved "https://registry.npmjs.org/react-smooth/-/react-smooth-2.0.5.tgz"
@@ -7096,15 +7089,6 @@ shebang-regex@^3.0.0:
   version "3.0.0"
   resolved "https://registry.npmjs.org/shebang-regex/-/shebang-regex-3.0.0.tgz"
   integrity sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==
-
-shepherd.js@^14.5.1, shepherd.js@14.5.1:
-  version "14.5.1"
-  resolved "https://registry.npmjs.org/shepherd.js/-/shepherd.js-14.5.1.tgz"
-  integrity sha512-VuvPvLG1QjNOLP7AIm2HGyfmxEIz8QdskvWOHwUcxLDibYWjLRBmCWd8LSL5FlwhBW7D/GU+3gNVC/ASxAWdxg==
-  dependencies:
-    "@floating-ui/dom" "^1.7.0"
-    "@scarf/scarf" "^1.4.0"
-    deepmerge-ts "^7.1.1"
 
 side-channel-list@^1.0.0:
   version "1.0.0"

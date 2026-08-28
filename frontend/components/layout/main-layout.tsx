@@ -13,7 +13,6 @@ import { StudioPageTabs } from './studio-page-tabs'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useAutoTour } from '@/hooks/use-auto-tour'
 import { useIsStudio } from '@/hooks/use-studio-theme'
 
 interface MainLayoutProps {
@@ -51,9 +50,6 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
       return next
     })
   }
-
-  // Auto-start page tour on first visit (per-user, per-page)
-  useAutoTour()
 
   // Get current page context for the chat
   const getCurrentPage = () => {

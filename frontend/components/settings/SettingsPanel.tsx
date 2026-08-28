@@ -31,7 +31,7 @@ export function SettingsPanel() {
 
   return (
     <div className="space-y-6">
-      <div data-tour="settings-page-header">
+      <div>
         <PageHeader
           title="System"
           titleAccent="Settings"
@@ -44,7 +44,6 @@ export function SettingsPanel() {
         tabs={tabs}
         value={activeTab}
         onValueChange={setActiveTab}
-        dataTour="settings-tabs"
       >
         {/* System Settings Tab — Admin only */}
         {isAdmin && (
@@ -69,7 +68,7 @@ export function SettingsPanel() {
         </TabsContent>
 
         {/* PRD-18: Credentials Management Tab */}
-        <TabsContent value="credentials" data-tour="settings-credentials-tab">
+        <TabsContent value="credentials">
           <CredentialsTab />
         </TabsContent>
 
@@ -79,7 +78,7 @@ export function SettingsPanel() {
         </TabsContent>
 
         {/* PRD-128: Notification Preferences */}
-        <TabsContent value="notifications" data-tour="settings-notifications-tab">
+        <TabsContent value="notifications">
           <NotificationsSettingsTab />
         </TabsContent>
 

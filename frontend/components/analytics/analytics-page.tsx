@@ -61,7 +61,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      <div data-tour="analytics-page-header">
+      <div>
       <PageHeader
         title="Workspace"
         titleAccent="Analytics"
@@ -72,7 +72,7 @@ export function AnalyticsPage() {
             {isAdmin && <AdminWorkspaceSwitcher onWorkspaceChange={handleWorkspaceChange} />}
 
             <Select value={timeRange} onValueChange={setTimeRange}>
-              <SelectTrigger data-tour="analytics-time-range" className="w-28 bg-secondary/50">
+              <SelectTrigger className="w-28 bg-secondary/50">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -92,7 +92,7 @@ export function AnalyticsPage() {
       </div>
 
       <div>
-      <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab} dataTour="analytics-tabs">
+      <FilterTabs tabs={tabDefs} value={activeTab} onValueChange={setActiveTab}>
         <TabsContent value="overview">
           <AnalyticsOverview days={days} />
         </TabsContent>

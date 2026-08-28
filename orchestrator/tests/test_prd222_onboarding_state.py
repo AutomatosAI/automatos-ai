@@ -13,15 +13,22 @@ from pathlib import Path
 import pytest
 
 from services.onboarding_state import (
+    CHECKLIST_KEY,
+    FIRST_INTEGRATION_KEY,
     INITIAL_STAGE,
     SEGMENT_KEYS,
     STAGE_ORDER,
     InvalidStageTransition,
+    academy_url_for_comfort,
     advance_onboarding_stage,
+    build_checklist,
     current_stage,
+    get_checklist_state,
     get_onboarding,
     is_onboarding_active,
+    record_first_integration_connected,
     set_segment,
+    update_checklist,
 )
 
 NEW_REVISION = "prd222_w1s1_onboarding_jsonb"
@@ -252,3 +259,159 @@ def test_set_segment_empty_raises():
         set_segment(None, ws, {})
     with pytest.raises(ValueError):
         set_segment(None, ws, {"comfort": None})
+
+
+# --------------------------------------------------------------------------- #
+# PRD-222 US-019 — first_integration_connected funnel stamp (once per workspace)
+# --------------------------------------------------------------------------- #
+
+
+def test_first_integration_stamps_once_and_rebuilds():
+    ws = _FakeWorkspace({"stage": "building", "stages": {}, "segment": {}})
+    original = ws.onboarding
+    db = _RecordingDB()
+
+    fired = record_first_integration_connected(db, ws)
+
+    assert fired is True
+    _assert_iso(ws.onboarding[FIRST_INTEGRATION_KEY])
+    _assert_iso(ws.onboarding["updated_at"])
+    assert db.commits == 1 and ws in db.added
+    # rebuild-don't-mutate: a NEW dict was assigned; the original is untouched.
+    assert ws.onboarding is not original
+    assert FIRST_INTEGRATION_KEY not in original
+
+
+def test_first_integration_is_idempotent_exactly_once():
+    ws = _FakeWorkspace({"stage": "building", "stages": {}, "segment": {}})
+
+    assert record_first_integration_connected(None, ws) is True
+    stamp = ws.onboarding[FIRST_INTEGRATION_KEY]
+
+    # A second connection (2nd app, or a re-fired callback) must NOT re-stamp.
+    assert record_first_integration_connected(None, ws) is False
+    assert ws.onboarding[FIRST_INTEGRATION_KEY] == stamp
+
+
+def test_first_integration_reconnect_after_disconnect_never_refires():
+    # Even if the workspace later drops to 0 connections and reconnects, the
+    # once-per-workspace guard means the event never fires a second time.
+    ws = _FakeWorkspace({"stage": "completed", FIRST_INTEGRATION_KEY: "2026-08-01T00:00:00+00:00"})
+    assert record_first_integration_connected(None, ws) is False
+
+
+def test_first_integration_preserves_other_onboarding_keys():
+    ws = _FakeWorkspace(
+        {"stage": "boom", "segment": {"business": "cafe"}, "trial": {"state": "active"}}
+    )
+    record_first_integration_connected(None, ws)
+    assert ws.onboarding["stage"] == "boom"
+    assert ws.onboarding["segment"] == {"business": "cafe"}
+    assert ws.onboarding["trial"] == {"state": "active"}
+    _assert_iso(ws.onboarding[FIRST_INTEGRATION_KEY])
+
+
+# --------------------------------------------------------------------------- #
+# PRD-222 US-020 — the post-setup checklist (derived completion + dismissal)
+# --------------------------------------------------------------------------- #
+
+
+def _item(checklist, item_id):
+    return next((i for i in checklist["items"] if i["id"] == item_id), None)
+
+
+def _base_checklist(**overrides):
+    kw = dict(
+        connections_count=0, missions_count=0, members_count=1, plan_seats=5, comfort=None
+    )
+    kw.update(overrides)
+    return build_checklist(**kw)
+
+
+def test_checklist_connect_second_app_needs_two_connections():
+    assert _item(_base_checklist(connections_count=1), "connect_second_app")["done"] is False
+    assert _item(_base_checklist(connections_count=2), "connect_second_app")["done"] is True
+
+
+def test_checklist_run_first_mission_needs_one_mission():
+    assert _item(_base_checklist(missions_count=0), "run_first_mission")["done"] is False
+    assert _item(_base_checklist(missions_count=1), "run_first_mission")["done"] is True
+
+
+def test_checklist_invite_teammate_needs_second_member():
+    # owner alone = 1 member → not done; a teammate → 2 → done.
+    assert _item(_base_checklist(members_count=1), "invite_teammate")["done"] is False
+    assert _item(_base_checklist(members_count=2), "invite_teammate")["done"] is True
+
+
+def test_checklist_invite_absent_on_single_seat_plans():
+    single = _base_checklist(plan_seats=1)
+    assert _item(single, "invite_teammate") is None
+    # multi-seat plans DO offer it
+    assert _item(_base_checklist(plan_seats=5), "invite_teammate") is not None
+
+
+def test_checklist_academy_item_is_manual_and_comfort_matched():
+    novice = _base_checklist(comfort="brand new")
+    course = _item(novice, "take_course")
+    assert course["manual"] is True
+    assert course["done"] is False  # nothing dismissed yet
+    assert course["href"].endswith("/abf")
+    # a stored academy_done flag checks it off
+    done = build_checklist(
+        connections_count=0, missions_count=0, members_count=1, plan_seats=1,
+        comfort="very technical", stored={"academy_done": True},
+    )
+    course2 = _item(done, "take_course")
+    assert course2["done"] is True
+    assert course2["href"].endswith("/apa")
+
+
+def test_academy_url_for_comfort_mapping():
+    assert academy_url_for_comfort("novice").endswith("/abf")
+    assert academy_url_for_comfort("brand new").endswith("/abf")
+    assert academy_url_for_comfort(None).endswith("/abf")
+    assert academy_url_for_comfort("very technical").endswith("/apa")
+    assert academy_url_for_comfort("APA").endswith("/apa")
+
+
+def test_checklist_dismissed_flag_reflected():
+    assert _base_checklist()["dismissed"] is False
+    dismissed = build_checklist(
+        connections_count=0, missions_count=0, members_count=1, plan_seats=1,
+        stored={"dismissed": True},
+    )
+    assert dismissed["dismissed"] is True
+
+
+def test_checklist_completed_and_total_counts():
+    cl = build_checklist(
+        connections_count=2, missions_count=1, members_count=2, plan_seats=5,
+        stored={"academy_done": True},
+    )
+    # 4 items (connect, mission, invite, course), all done
+    assert cl["total_count"] == 4
+    assert cl["completed_count"] == 4
+
+
+def test_update_checklist_persists_flags_and_rebuilds():
+    ws = _FakeWorkspace({"stage": "completed", "stages": {}, "segment": {}})
+    original = ws.onboarding
+    db = _RecordingDB()
+
+    stored = update_checklist(db, ws, dismissed=True)
+
+    assert stored == {"dismissed": True}
+    assert ws.onboarding[CHECKLIST_KEY] == {"dismissed": True}
+    assert db.commits == 1 and ws in db.added
+    # rebuild-don't-mutate: NEW dict assigned; original untouched.
+    assert ws.onboarding is not original
+    assert CHECKLIST_KEY not in original
+
+
+def test_update_checklist_merges_flags_across_writes():
+    ws = _FakeWorkspace({"stage": "completed", CHECKLIST_KEY: {"dismissed": True}})
+    update_checklist(None, ws, academy_done=True)
+    # academy_done added WITHOUT clobbering the prior dismissed flag
+    assert ws.onboarding[CHECKLIST_KEY] == {"dismissed": True, "academy_done": True}
+    assert get_checklist_state(ws) == {"dismissed": True, "academy_done": True}

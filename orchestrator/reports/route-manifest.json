@@ -1906,14 +1906,6 @@
       "path": "/api/routing/triggers/setup"
     },
     {
-      "method": "GET",
-      "path": "/api/settings/onboarding-agents"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/settings/onboarding-agents/{slug}"
-    },
-    {
       "method": "POST",
       "path": "/api/shopify/connect"
     },
@@ -2868,6 +2860,14 @@
     {
       "method": "GET",
       "path": "/api/workspaces/current/memory-stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/current/onboarding/checklist"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/current/onboarding/checklist"
     },
     {
       "method": "POST",

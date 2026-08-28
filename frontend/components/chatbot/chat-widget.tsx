@@ -684,7 +684,7 @@ export function AutoWidget({
   }
 
   return (
-    <div data-tour="auto-widget" className={`fixed ${positionClasses[position]} z-[60]`}>
+    <div className={`fixed ${positionClasses[position]} z-[60]`}>
       <AnimatePresence mode="wait">
         {isOpen && (
           <motion.div

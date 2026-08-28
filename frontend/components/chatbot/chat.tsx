@@ -23,7 +23,9 @@ import { Canvas } from '@/components/workspace'
 import type { Widget, CodeWidgetData, DataWidgetData, DocumentWidgetData, CodingCanvasWidgetData } from '@/components/widgets/types'
 import { useWorkspace } from '@/components/workspace-provider'
 import { OnboardingOpener } from '@/components/onboarding/onboarding-opener'
+import { OnboardingConnectCards } from '@/components/onboarding/onboarding-connect-cards'
 import { PowerUpCard } from '@/components/onboarding/power-up-card'
+import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
 import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { TrialExhaustedBanner } from '@/components/onboarding/trial-exhausted-banner'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
@@ -968,6 +970,18 @@ export function Chat({
         <div className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4">
           <PowerUpCard />
         </div>
+      )}
+      {/* PRD-222 US-019: inline Composio connect cards float above the input
+          during the build stage — Auto asks for the app, the user connects it
+          without leaving chat, and the result reflects back into the card. The
+          container self-hides unless there's an app mid-connect. */}
+      <OnboardingConnectCards className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4" />
+      {/* PRD-222 US-020: the post-setup checklist floats above the input once
+          onboarding completes — the power-up card owns the slot during powerup,
+          so the chat surface shows the checklist at `completed` (the Command
+          Center shows it from powerup). Dismissible; server-persisted. */}
+      {workspace?.onboarding?.stage === 'completed' && (
+        <SetupChecklistCard className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4" />
       )}
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
       {hasWidgets && (

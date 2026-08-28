@@ -39,17 +39,31 @@ export default function ComposioCallbackPage() {
                 }
             }
 
-            // NOW close the popup (after the API call completes)
-            if (status === 'success' || status === 'active' || connected) {
+            // NOW close the popup (after the API call completes). The message
+            // names the app + carries a connected boolean so an inline connect
+            // card (PRD-222 US-019) can match its own app and reflect the result
+            // — the Tools page ignores the payload and just polls popup.closed,
+            // so this stays backward compatible.
+            const appName = connected ? connected.toUpperCase() : undefined
+            const succeeded = status === 'success' || status === 'active' || !!connected
+            if (succeeded) {
                 if (window.opener) {
                     const trustedOrigin = window.location.origin
-                    window.opener.postMessage({ type: 'COMPOSIO_CONNECTED', status, connectionId }, trustedOrigin)
+                    window.opener.postMessage(
+                        { type: 'COMPOSIO_CONNECTED', app: appName, status, connectionId, connected: true },
+                        trustedOrigin,
+                    )
                     window.close()
                 } else {
                     router.push('/tools')
                 }
             } else if (status === 'error' || status === 'failed') {
                 if (window.opener) {
+                    const trustedOrigin = window.location.origin
+                    window.opener.postMessage(
+                        { type: 'COMPOSIO_CONNECTED', app: appName, status, connectionId, connected: false },
+                        trustedOrigin,
+                    )
                     window.close()
                 } else {
                     router.push('/tools?error=connection_failed')

@@ -60,7 +60,6 @@ from api.credentials import router as credentials_router  # PRD-18: Enhanced cre
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
 from api.wizard import router as wizard_router  # PRD-130: Business Intake Wizard (PoC)
-from api.onboarding_agents import router as onboarding_agents_router
 from api.statistics import router as statistics_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
@@ -208,15 +207,6 @@ async def _boot_phase_1_core():
                 seed_system_prompts(db)
         except Exception as e:
             logger.warning("System prompts seed: %s", e)
-
-        # Seed onboarding agents (personas/configs may change per release)
-        try:
-            from core.seeds.seed_onboarding_agents import seed_onboarding_agents
-            with get_db_session() as db:
-                seed_onboarding_agents(db)
-            logger.info("Onboarding agents seeded")
-        except Exception as e:
-            logger.warning("Onboarding agent seed: %s", e)
 
         # Seed system settings (new setting keys may ship with code changes)
         try:
@@ -1000,7 +990,6 @@ app.include_router(credentials_router)  # PRD-18: Enhanced credentials with mana
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(wizard_router)  # PRD-130: Business Intake Wizard (PoC)
-app.include_router(onboarding_agents_router)
 app.include_router(statistics_router)
 app.include_router(skills_router)
 app.include_router(templates_router)

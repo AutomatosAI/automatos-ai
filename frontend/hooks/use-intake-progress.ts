@@ -1,11 +1,15 @@
 'use client'
 
 /**
- * PRD-130: Wizard Progress Hook
- * ==============================
+ * PRD-222 W2·S5 — Intake Progress Hook (relocated from the retired wizard).
+ * ========================================================================
  *
  * Subscribes to `GET /api/wizard/progress/{profileId}` (Server-Sent Events)
  * and returns a streaming list of events the UI can render as a live feed.
+ * This is the ONE streaming implementation for the intake pipeline — the
+ * intake-progress chat card (US-015) consumes it. The logic is unchanged from
+ * the wizard's original hook; only the file + identifier names moved when the
+ * wizard UI was retired (the backend `/api/wizard/progress` endpoint stays).
  *
  * Why fetch + ReadableStream instead of EventSource?
  * ---------------------------------------------------
@@ -18,14 +22,14 @@
  * -----------------
  * The stream ends when the server emits a `stage === "complete"` or
  * `stage === "failed"` event (backend closes the generator). The hook
- * surfaces this through `state` so the wizard shell can advance to step 6
- * or render an error panel without needing to poll anything.
+ * surfaces this through `state` so the consumer can hand off or render an
+ * error panel without needing to poll anything.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiClient } from '@/lib/api-client'
 
-export type WizardStage =
+export type IntakeStage =
   | 'scan'
   | 'scrape'
   | 'ingest'
@@ -35,39 +39,39 @@ export type WizardStage =
   | 'complete'
   | 'failed'
 
-export type WizardEventLevel = 'info' | 'warn' | 'error'
+export type IntakeEventLevel = 'info' | 'warn' | 'error'
 
-export interface WizardProgressEvent {
+export interface IntakeProgressEvent {
   ts: number
-  stage: WizardStage
-  level: WizardEventLevel
+  stage: IntakeStage
+  level: IntakeEventLevel
   message: string
   meta: Record<string, unknown>
 }
 
-export type WizardProgressState = 'idle' | 'streaming' | 'complete' | 'failed' | 'error'
+export type IntakeProgressState = 'idle' | 'streaming' | 'complete' | 'failed' | 'error'
 
-interface UseWizardProgressOptions {
+interface UseIntakeProgressOptions {
   profileId: string | null
   /** Set to `true` to open the stream. Flip back to `false` to stop. */
   active: boolean
 }
 
-interface UseWizardProgressResult {
-  events: WizardProgressEvent[]
-  state: WizardProgressState
+interface UseIntakeProgressResult {
+  events: IntakeProgressEvent[]
+  state: IntakeProgressState
   /** The latest event seen — handy for showing a headline status line. */
-  latest: WizardProgressEvent | null
+  latest: IntakeProgressEvent | null
   /** Clear buffered events locally (does not reset the server feed). */
   reset: () => void
 }
 
-export function useWizardProgress({
+export function useIntakeProgress({
   profileId,
   active,
-}: UseWizardProgressOptions): UseWizardProgressResult {
-  const [events, setEvents] = useState<WizardProgressEvent[]>([])
-  const [state, setState] = useState<WizardProgressState>('idle')
+}: UseIntakeProgressOptions): UseIntakeProgressResult {
+  const [events, setEvents] = useState<IntakeProgressEvent[]>([])
+  const [state, setState] = useState<IntakeProgressState>('idle')
   const abortRef = useRef<AbortController | null>(null)
 
   const reset = useCallback(() => {
@@ -135,7 +139,7 @@ export function useWizardProgress({
             const raw = dataLines.join('\n')
 
             try {
-              const parsed = JSON.parse(raw) as WizardProgressEvent
+              const parsed = JSON.parse(raw) as IntakeProgressEvent
               if (cancelled) return 'terminal'
 
               // Dedupe by timestamp+stage+message so reconnects that
@@ -175,7 +179,7 @@ export function useWizardProgress({
         return cancelled ? 'terminal' : 'ended'
       } catch (err: any) {
         if (cancelled || err?.name === 'AbortError') return 'terminal'
-        console.error('[wizard-progress] stream error:', err)
+        console.error('[intake-progress] stream error:', err)
         return 'error'
       }
     }

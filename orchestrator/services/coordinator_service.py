@@ -478,113 +478,6 @@ def _log_mission_cost_summary(db: Session, run) -> float:
         return 0.0
 
 
-# ---------------------------------------------------------------------------
-# Ephemeral onboarding agents
-# ---------------------------------------------------------------------------
-
-
-def _clone_onboarding_agents(
-    db: Session,
-    run: OrchestrationRun,
-) -> List[int]:
-    """Clone global onboarding agent templates into workspace-scoped ephemeral
-    instances for this mission run.
-
-    Each clone:
-    - Has workspace_id set → native RAG/file access
-    - agent_type = "ephemeral" → hidden from roster, cleaned up after mission
-    - cloned_from_id → points to the global template
-    - Slug = "{template_slug}-{run_id[:8]}" → unique per run
-
-    Returns the list of new agent IDs (stored in run.config["ephemeral_agent_ids"]).
-    """
-    from uuid import uuid4
-
-    templates = (
-        db.query(Agent)
-        .filter(
-            Agent.is_system_agent.is_(True),
-            Agent.required_role == "onboarding",
-            Agent.status == "active",
-        )
-        .all()
-    )
-    if not templates:
-        logger.warning("No onboarding agent templates found — cannot clone")
-        return []
-
-    run_short = str(run.id)[:8]
-    ephemeral_ids: List[int] = []
-
-    for tmpl in templates:
-        clone = Agent(
-            public_id=uuid4(),
-            name=tmpl.name,  # Same name so AgentMatcher role matching works
-            description=f"[Ephemeral] {tmpl.description or ''}",
-            agent_type="ephemeral",
-            status="active",
-            workspace_id=run.workspace_id,
-            is_system_agent=False,
-            required_role=None,
-            owner_type="workspace",
-            slug=f"{tmpl.slug}-{run_short}",
-            cloned_from_id=tmpl.id,
-            use_custom_persona=tmpl.use_custom_persona,
-            custom_persona_prompt=tmpl.custom_persona_prompt,
-            model_config=dict(tmpl.model_config) if tmpl.model_config else None,
-            configuration=dict(tmpl.configuration) if tmpl.configuration else None,
-            tags=(tmpl.tags or []) + ["ephemeral", f"run:{run.id}"],
-            team=tmpl.team,
-            job_title=tmpl.job_title,
-        )
-        db.add(clone)
-
-    db.flush()  # Get IDs assigned
-
-    # Collect the IDs after flush
-    for tmpl in templates:
-        slug = f"{tmpl.slug}-{run_short}"
-        row = db.query(Agent.id).filter(Agent.slug == slug).first()
-        if row:
-            ephemeral_ids.append(row[0])
-
-    # Store in run config so we don't re-clone on next tick
-    config = dict(run.config or {})
-    config["ephemeral_agent_ids"] = ephemeral_ids
-    run.config = config
-    db.commit()
-
-    logger.info(
-        "Cloned %d ephemeral onboarding agents for run %s (ids=%s)",
-        len(ephemeral_ids),
-        run.id,
-        ephemeral_ids,
-    )
-    return ephemeral_ids
-
-
-def _cleanup_ephemeral_agents(db: Session, run: OrchestrationRun) -> int:
-    """Delete ephemeral agents created for a completed/failed mission run."""
-    config = run.config or {}
-    ephemeral_ids = config.get("ephemeral_agent_ids", [])
-    if not ephemeral_ids:
-        return 0
-
-    count = (
-        db.query(Agent)
-        .filter(Agent.id.in_(ephemeral_ids), Agent.agent_type == "ephemeral")
-        .delete(synchronize_session="fetch")
-    )
-    db.commit()
-
-    logger.info(
-        "Cleaned up %d ephemeral agents for run %s",
-        count,
-        run.id,
-    )
-    return count
-
-
 async def _store_mission_memory_safe(
     db: Session,
     run_id,
@@ -1573,22 +1466,6 @@ class CoordinatorService:
             .all()
         )
 
-        # Mission Zero: spin up ephemeral workspace-scoped clones of the
-        # global onboarding agents so they can access this workspace's RAG/docs.
-        # Clones are created once (first tick) and stored in run.config.
-        run_config = run.config or {}
-        if run_config.get("source") == "mission_zero":
-            ephemeral_ids = run_config.get("ephemeral_agent_ids")
-            if not ephemeral_ids:
-                ephemeral_ids = _clone_onboarding_agents(db, run)
-            if ephemeral_ids:
-                ephemeral_agents = (
-                    db.query(Agent)
-                    .filter(Agent.id.in_(ephemeral_ids), Agent.status == "active")
-                    .all()
-                )
-                agents.extend(ephemeral_agents)
-
         # --- Dispatch phase (parallel via dispatch_ready) ---
         dispatch_results = MissionDispatcher.dispatch_ready(db, run, agents)
 
@@ -1676,10 +1553,7 @@ class CoordinatorService:
         # --- Reconcile phase ---
         await MissionReconciler.reconcile(db, run)
 
-        # --- Cleanup ephemeral agents when run reaches terminal state ---
         db.refresh(run)
-        if RunState(run.state) in TERMINAL_RUN_STATES:
-            _cleanup_ephemeral_agents(db, run)
 
         if RunState(run.state) == RunState.VERIFYING:
             await self._complete_verified_run(db, run)
@@ -2458,20 +2332,6 @@ class CoordinatorService:
             )
             .all()
         )
-
-        # Mission Zero: include global onboarding agents (VOYAGER, BLUEPRINT,
-        # SCRIBE, FORGE) so the planner/dispatcher can assign them tasks.
-        if mission_config and mission_config.get("source") == "mission_zero":
-            onboarding_agents: List[Agent] = (
-                db.query(Agent)
-                .filter(
-                    Agent.is_system_agent.is_(True),
-                    Agent.required_role == "onboarding",
-                    Agent.status == "active",
-                )
-                .all()
-            )
-            agents.extend(onboarding_agents)
 
         # Decompose goal into task DAG
         try:

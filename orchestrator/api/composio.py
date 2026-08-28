@@ -299,6 +299,35 @@ async def test_linkedin_upload_init():
 
 
 
+def _record_first_integration_if_first(
+    db: Session, entity_manager: EntityManager, workspace_id: Any
+) -> None:
+    """PRD-222 US-019: emit ``first_integration_connected`` on the 0 → 1 crossing.
+
+    The trigger is the workspace's ACTIVE connection count reaching exactly 1 —
+    the 0 → 1 transition — read from the same connection store the Tools page
+    uses, NOT the OAuth popup closing. The stamp itself is idempotent (once per
+    workspace, ever, via ``record_first_integration_connected``), so a reconnect
+    after a full disconnect never re-fires. Best effort: a funnel miss must never
+    break a real connection, so any failure is logged and swallowed.
+    """
+    try:
+        active = entity_manager.get_connected_apps(workspace_id)
+        if len(active) != 1:
+            return
+        from core.models.workspaces import Workspace
+        from services.onboarding_state import record_first_integration_connected
+
+        ws = db.query(Workspace).get(workspace_id)
+        if ws is not None:
+            record_first_integration_connected(db, ws)
+    except Exception:
+        logger.warning(
+            "[FUNNEL] first_integration_connected check failed for workspace %s",
+            workspace_id, exc_info=True,
+        )
+
+
 @router.post("/connect/{app_name}", response_model=InitiateConnectionResponse, dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def initiate_connection(
     app_name: str,
@@ -326,6 +355,7 @@ async def initiate_connection(
             status="active",
         )
         logger.info(f"[CONNECT] {app_name.upper()} is NO_AUTH — activated immediately")
+        _record_first_integration_if_first(db, entity_manager, ctx.workspace_id)
         return InitiateConnectionResponse(
             redirect_url="",
             app_name=app_name.upper(),
@@ -447,6 +477,12 @@ async def connection_callback(
     )
 
     logger.info(f"[CALLBACK] {app_name.upper()} connection updated to {normalized_status} (connection_id={resolved_connection_id})")
+
+    # PRD-222 US-019: the first integration a workspace connects is a first-class
+    # funnel event — fire it here (the real OAuth completion), off the 0 → 1
+    # active-connection crossing, not the popup closing.
+    if normalized_status == "active":
+        _record_first_integration_if_first(db, entity_manager, ctx.workspace_id)
 
     return {"status": "success", "app_name": app_name.upper(), "connected": normalized_status == "active"}
 
