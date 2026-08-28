@@ -67,6 +67,48 @@ def _is_dispatch_claimable(task) -> bool:
     )
 
 
+def _resolve_active_agent_by_name(db: Session, workspace_id: UUID, agent_name: str):
+    """Resolve an agent NAME to a single ACTIVE agent for a board write.
+
+    P224-RVW-4: the write layer must honor the same contract AutoBrain's ASSIGN
+    classifier does — resolve only against ACTIVE agents (the same source
+    ``AutoBrain._active_agents`` uses) and NEVER silently ``.first()`` on an
+    ambiguous name. ``Agent.name`` has no unique constraint (only
+    ``(workspace_id, slug)``) and the create/clone guards compare
+    case-SENSITIVELY, so 'Atlas' and 'atlas' can coexist and collide under this
+    case-insensitive match. Fetch the active roster and match the name in Python
+    (same active-only source + case-insensitive comparison the classifier uses),
+    dedup by agent id. Returns ``(agent, error)``:
+
+    * exactly one active match   -> ``(agent, None)``
+    * no active match            -> ``(None, None)`` — caller decides unassigned vs 'not found'
+    * two-or-more active matches  -> ``(None, "<ambiguity message>")`` — caller refuses
+
+    So a same-named pair never yields a row-order-dependent dispatch, and an
+    active-vs-inactive pair resolves to the ACTIVE one (the inactive is never in
+    the active roster the match runs over).
+    """
+    from core.models import Agent
+
+    active = (
+        db.query(Agent)
+        .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
+        .all()
+    )
+    target = agent_name.strip().lower()
+    matches = {
+        a.id: a for a in active if (getattr(a, "name", "") or "").lower() == target
+    }
+    if len(matches) == 1:
+        return next(iter(matches.values())), None
+    if len(matches) >= 2:
+        return None, (
+            f"Multiple active agents named '{agent_name}' — I can't tell which one "
+            "you mean. Rename or deactivate the duplicate, then try again."
+        )
+    return None, None
+
+
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
@@ -76,16 +118,16 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if not title or not description:
         return {"success": False, "error": "title and description are required"}
 
-    # Resolve assigned agent by name
+    # Resolve assigned agent by name — ACTIVE only + ambiguity-aware (P224-RVW-4).
+    # A same-named pair refuses rather than silently dispatching to a row-order
+    # pick; an active-vs-inactive pair resolves to the active one. No match leaves
+    # the ticket unassigned (inbox), exactly as before.
     assigned_agent_id = None
     agent_name = params.get("assigned_agent_name")
     if agent_name:
-        from core.models import Agent
-        from sqlalchemy import func as sa_func
-        agent = db.query(Agent).filter(
-            Agent.workspace_id == workspace_id,
-            sa_func.lower(Agent.name) == agent_name.lower(),
-        ).first()
+        agent, ambiguity_error = _resolve_active_agent_by_name(db, workspace_id, agent_name)
+        if ambiguity_error:
+            return {"success": False, "error": ambiguity_error}
         if agent:
             assigned_agent_id = agent.id
 
@@ -323,8 +365,6 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
 async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Assign a board task to an agent by name."""
     from core.models.core import BoardTask
-    from core.models import Agent
-    from sqlalchemy import func as sa_func
 
     task_id = params.get("task_id")
     agent_name = params.get("agent_name")
@@ -338,10 +378,11 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if not task:
         return {"success": False, "error": f"Task {task_id} not found"}
 
-    agent = db.query(Agent).filter(
-        Agent.workspace_id == workspace_id,
-        sa_func.lower(Agent.name) == agent_name.lower(),
-    ).first()
+    # ACTIVE only + ambiguity-aware (P224-RVW-4): a same-named pair refuses rather
+    # than silently .first()-ing a row-order pick; no active match is 'not found'.
+    agent, ambiguity_error = _resolve_active_agent_by_name(db, workspace_id, agent_name)
+    if ambiguity_error:
+        return {"success": False, "error": ambiguity_error}
     if not agent:
         return {"success": False, "error": f"Agent '{agent_name}' not found"}
 

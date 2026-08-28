@@ -916,22 +916,35 @@ class AutoBrain:
     def _match_roster_agent(self, name: Optional[str], agents=None):
         """Resolve an agent name from the user's request against the active
         roster (PRD-224 US-004). Case-insensitive: exact name first, then a
-        forgiving contains match ("my accountant agent" -> "Accountant") that
-        resolves ONLY when exactly one distinct agent matches. Returns
+        forgiving contains match ("my accountant agent" -> "Accountant"). BOTH
+        stages resolve ONLY when exactly one distinct agent matches. Returns
         (agent_id, canonical_name) or (None, None). NEVER a fuzzy best-guess —
         an ambiguous OR unresolved name is the ask-in-thread signal.
 
         P224-RVW-1: the contains fallback previously returned the FIRST hit,
         so 'Jim' silently picked whichever of 'Jim Whitfield'/'Jimmy Cross'
-        Postgres returned first. Two-or-more distinct matches now yield
-        (None, None) — resolution never depends on row order."""
+        Postgres returned first. P224-RVW-4: the EXACT loop had the same defect
+        — it returned the first exact hit with no ambiguity check, so two ACTIVE
+        agents sharing a case-insensitive name ('Atlas'/'atlas' — Agent.name has
+        no unique constraint, only (workspace_id, slug)) resolved row-order-
+        dependently. Both stages now dedup by agent id and resolve only on a
+        single distinct match — resolution never depends on row order."""
         if not name or not name.strip():
             return None, None
         target = name.strip().lower()
         agents = agents if agents is not None else self._active_agents()
-        for a in agents:  # exact match wins — an exact name is unambiguous
+        # Exact match wins — but collect EVERY exact (case-insensitive) hit keyed
+        # by agent id so two agents sharing a name don't collapse to a first-row
+        # pick. Resolve on exactly one; >=2 exact is ambiguous → ask in-thread.
+        exact = {}
+        for a in agents:
             if (getattr(a, "name", "") or "").lower() == target:
-                return a.id, a.name
+                exact[a.id] = a.name
+        if len(exact) == 1:
+            (agent_id, canonical_name), = exact.items()
+            return agent_id, canonical_name
+        if len(exact) >= 2:
+            return None, None
         # No exact hit: collect EVERY contained-name match (either direction),
         # keyed by agent id so distinct agents don't collapse. Resolve only
         # when exactly one distinct agent matches; 0 or >=2 → ask in-thread.

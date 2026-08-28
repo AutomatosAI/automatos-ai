@@ -209,6 +209,42 @@ def test_ambiguous_match_drives_ask_in_thread_directive():
 
 
 # ---------------------------------------------------------------------------
+# P224-RVW-4 -- the EXACT-match loop must ALSO dedup-by-id and ask on >=2, not
+# return the first exact hit. Two active agents 'Atlas'/'atlas' (Agent.name has
+# no unique constraint — only (workspace_id, slug)) previously resolved to
+# whichever row Postgres returned first.
+# ---------------------------------------------------------------------------
+
+
+def test_match_roster_exact_duplicate_asks_not_guesses():
+    """Two agents share a case-insensitive exact name → ambiguous → (None, None),
+    never a first-row pick."""
+    roster = [_agent(7, "Atlas"), _agent(99, "atlas")]
+    assert _brain()._match_roster_agent("Atlas", roster) == (None, None)
+
+
+def test_match_roster_exact_duplicate_is_order_independent():
+    """The ambiguous-exact verdict must not depend on roster (row) order."""
+    a, b = _agent(7, "Atlas"), _agent(99, "atlas")
+    assert _brain()._match_roster_agent("atlas", [a, b]) == (None, None)
+    assert _brain()._match_roster_agent("atlas", [b, a]) == (None, None)
+
+
+def test_match_roster_single_exact_still_resolves_amid_others():
+    """A unique exact match still resolves — the ambiguity guard must not
+    over-block a genuinely unique exact name."""
+    roster = [_agent(3, "Atlas"), _agent(7, "Researcher")]
+    assert _brain()._match_roster_agent("atlas", roster) == (3, "Atlas")
+
+
+def test_match_roster_exact_wins_over_contains_ambiguity():
+    """An exact hit resolves and short-circuits the contains stage — even when the
+    same target would contains-match another agent ('ops' ⊂ 'operations lead')."""
+    roster = [_agent(5, "Ops"), _agent(9, "Operations Lead")]
+    assert _brain()._match_roster_agent("Ops", roster) == (5, "Ops")
+
+
+# ---------------------------------------------------------------------------
 # AC3 -- api/chat.py ASSIGN dispatch (apply_assign_bias, assessment stubbed)
 # ---------------------------------------------------------------------------
 
