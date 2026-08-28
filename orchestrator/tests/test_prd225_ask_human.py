@@ -200,6 +200,36 @@ async def test_board_task_not_found_is_rejected(dispatched):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["done", "failed", "cancelled"])
+async def test_terminal_board_task_is_rejected_not_parked(dispatched, terminal):
+    """Asking against a finished task is refused honestly — no grant row, no
+    'Parked' confirmation, no dispatch, status untouched. Answering later would
+    no-op the resume yet claim it 'resumed', so the tool refuses up front
+    (P225-RVW-8)."""
+    from modules.tools.discovery.handlers_asks import ask_human
+    from core.models.approval_grants import ApprovalGrant
+
+    db = _FakeSession()
+    ws = uuid4()
+    task = _board_task(ws, 77, status=terminal)
+    db.add(task)
+
+    res = await ask_human(db, ws, {
+        "subject_type": "board_task", "subject_id": "77",
+        "question": "Ship it?", "_agent_id": 5,
+    })
+
+    assert res["success"] is False
+    assert res.get("parked") is False
+    assert terminal in res["error"]          # honest: names the finished state
+    assert "Parked" not in res.get("error", "")
+    assert "message" not in res              # no fabricated "Parked ..." message
+    assert not any(isinstance(r, ApprovalGrant) for r in db.rows)  # no resumable row
+    assert task.status == terminal           # not flipped to blocked
+    assert dispatched == []                  # no question_pending emitted
+
+
+@pytest.mark.asyncio
 async def test_missing_question_rejected(dispatched):
     from modules.tools.discovery.handlers_asks import ask_human
 

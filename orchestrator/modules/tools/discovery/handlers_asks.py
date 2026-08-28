@@ -19,7 +19,12 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 _SUBJECTS = ("board_task", "playbook_run", "tool_call")
-_PARKED_STATUSES = ("done", "failed")  # a terminal task is not re-parked
+# A terminal board task can neither be parked nor resumed by an answer
+# (_requeue_blocked_task only re-queues a 'blocked' task), so asking against one
+# is rejected up front rather than fabricating a Parked confirmation (P225-RVW-8).
+# done/failed are the canonical board terminals (board_tasks.VALID_STATUSES);
+# 'cancelled' is included defensively, matching services/ask_cascade.
+_TERMINAL_STATUSES = ("done", "failed", "cancelled")
 
 
 async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,6 +73,18 @@ async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
         )
         if board_task is None:
             return {"success": False, "error": "board task not found in this workspace"}
+        # A finished task can't be parked, and answering later would no-op the
+        # resume while still telling the human it "resumed" — refuse honestly
+        # before staging any row (P225-RVW-8).
+        if board_task.status in _TERMINAL_STATUSES:
+            return {
+                "success": False,
+                "parked": False,
+                "error": (
+                    f"board task {subject_id} is already {board_task.status}; "
+                    "a finished task cannot be parked or resumed by an answer"
+                ),
+            }
 
     # --- stage the ask row ------------------------------------------------
     try:
@@ -91,7 +108,8 @@ async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
     )
 
     # --- park the subject -------------------------------------------------
-    if board_task is not None and board_task.status not in _PARKED_STATUSES:
+    # Terminal subjects were rejected above, so a found board task always parks.
+    if board_task is not None:
         board_task.status = "blocked"
         board_task.blocked_at = datetime.now(timezone.utc)
         board_task.blocked_reason = f"Awaiting human answer (ask #{grant.id})"
