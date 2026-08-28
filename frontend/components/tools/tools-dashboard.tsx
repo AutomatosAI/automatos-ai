@@ -60,6 +60,7 @@ import { useTools, useToolsStats, useToolCategories } from '@/hooks/use-tools-ap
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { ComposioAppsSection } from './composio-apps-section' // PRD-36: Composio Integration
 import { ToolActionsModal } from './tool-actions-modal'
+import { handleComposioConnectedMessage } from './composio-connection-message'
 import { useInitiateConnection, useDisconnectApp } from '@/hooks/use-composio-api'
 import { Loader2, ExternalLink, Wrench } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -243,22 +244,13 @@ export function ToolsDashboard() {
   const initiateConnection = useInitiateConnection()
   const [connectingTool, setConnectingTool] = useState<string | null>(null)
 
-  // Listen for popup messages
+  // Listen for the OAuth callback popup message. The callback posts
+  // COMPOSIO_CONNECTED on BOTH success and failure, so the handler must inspect
+  // the payload — a denied connection must not read as "Connected!".
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
-      if (event.data?.type === 'COMPOSIO_CONNECTED') {
-        console.log('✅ Connection successful message received!', event.data)
-        setConnectingTool(null)
-
-        // Invalidate and refetch ALL tools queries to update connection status immediately
-        console.log('[AUTO-REFRESH] Invalidating and refetching tools queries...')
-        await queryClient.invalidateQueries({ queryKey: ['tools'] })
-        await queryClient.refetchQueries({ queryKey: ['tools'] })
-        await queryClient.invalidateQueries({ queryKey: ['composio', 'connections'] })
-        console.log('[AUTO-REFRESH] Queries refetched successfully')
-
-        toast('Connected!', { description: `${event.data.app_name || 'App'} is now connected and ready to use.` })
-      }
+      if (event.data?.type !== 'COMPOSIO_CONNECTED') return
+      await handleComposioConnectedMessage(event.data, { queryClient, setConnectingTool, toast })
     }
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
