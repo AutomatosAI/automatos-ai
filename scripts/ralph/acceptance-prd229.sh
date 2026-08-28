@@ -81,17 +81,23 @@ check "US-004 zero orphan references in backend code" \
   "! grep -rqE 'CollaborativeAgentFactory|AgentCommunicationProtocol|CollaborativeReasoner|execute_team_task' orchestrator --include='*.py'"
 
 # --- Conventions -------------------------------------------------------------
+# These forbid a pattern in NEW code. They are scoped to orchestrator/ (the only
+# tree this PRD touches — no frontend stories) so they do not self-defeat on the
+# seed spec/json/prompt, which legitimately document the very rules ("delete
+# inter_agent.py", "pgvector paths are legacy", "no AWAITING_HUMAN writers") and
+# would otherwise trip an unscoped added-line grep. Mirrors the os.getenv check's
+# existing scoping. (Memory: ralph-acceptance-script-gotchas — scope to code.)
 check "no lateral messaging surfaces (no mailbox/inter-agent send in diff)" \
-  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD | grep -E '^\\+' | grep -qiE 'inter_agent|agent_mailbox'"
+  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- orchestrator/ | grep -E '^\\+' | grep -qiE 'inter_agent|agent_mailbox'"
 
 check "no pgvector touches (RAG is S3 Vectors only)" \
-  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD | grep -E '^\\+' | grep -qi 'pgvector'"
+  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- orchestrator/ | grep -E '^\\+' | grep -qi 'pgvector'"
 
 check "no os.getenv outside config.py (diff scope)" \
   "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- 'orchestrator/**/*.py' ':!orchestrator/config.py' | grep -E '^\\+' | grep -q 'os.getenv'"
 
 check "no AWAITING_HUMAN writers introduced" \
-  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD | grep -E '^\\+' | grep -q 'AWAITING_HUMAN'"
+  "! git diff \$(git merge-base HEAD $BASE_BR 2>/dev/null || git merge-base HEAD origin/main)..HEAD -- orchestrator/ | grep -E '^\\+' | grep -q 'AWAITING_HUMAN'"
 
 echo ""
 if [ "$FAIL" = "0" ]; then echo "ACCEPTANCE: PASS (PRD-229)"; exit 0; else echo "ACCEPTANCE: FAIL (PRD-229)"; exit 1; fi
