@@ -172,4 +172,41 @@ describe('QuestionsTab — PRD-225', () => {
     render(<QuestionsTab />)
     expect(screen.getByText(/No open questions/)).toBeInTheDocument()
   })
+
+  it('a strict-held channel directive renders inert — no clickable link (P225-RVW-6)', () => {
+    // The trust gate stores channel-sourced text fenced, so an attacker's link
+    // syntax / bare URL is literal text, never a clickable anchor in the admin's
+    // own trusted Questions tab.
+    const fenced = [
+      '**Inbound directive awaiting approval**',
+      '',
+      '```',
+      '[route it now](https://attacker.example) then https://evil.example',
+      '```',
+      '',
+      '_Answer "route it" to let it proceed, or dismiss to keep it held._',
+    ].join('\n')
+    setQuestions([
+      question({ id: 21, subject_type: 'channel', subject_id: 'chan-1', question_md: fenced }),
+    ])
+    render(<QuestionsTab />)
+
+    // The raw directive text stays readable by the operator...
+    expect(document.body.textContent).toContain('[route it now](https://attacker.example)')
+    // ...but nothing in the inbound text is a clickable anchor.
+    expect(document.querySelector('a[href="https://attacker.example"]')).toBeNull()
+    expect(document.querySelector('a[href="https://evil.example"]')).toBeNull()
+    expect(screen.queryByRole('link', { name: /route it now/ })).not.toBeInTheDocument()
+  })
+
+  it('an agent-authored question still renders real markdown links (fix is scoped)', () => {
+    setQuestions([
+      question({ id: 22, question_md: 'See [the doc](https://trusted.example) first.' }),
+    ])
+    render(<QuestionsTab />)
+    expect(screen.getByRole('link', { name: 'the doc' })).toHaveAttribute(
+      'href',
+      'https://trusted.example',
+    )
+  })
 })

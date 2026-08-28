@@ -458,6 +458,30 @@ def _inbound_text(body: Dict[str, Any]) -> str:
     return ""
 
 
+def _fence_untrusted(text: str) -> str:
+    """Wrap untrusted inbound text as an inert fenced code block (P225-RVW-6).
+
+    Channel-sourced directive text is shown in the admin Questions tab, which
+    renders ``question_md`` as GFM markdown. Interpolated raw, an attacker's
+    ``[click me](https://evil.example)`` — or a bare URL that GFM autolinks —
+    becomes a CLICKABLE anchor next to copy priming the operator to act: a
+    phishing vector inside a trusted surface. Inside a code fence nothing renders
+    as markdown (no links, no autolinks, no emphasis) and the operator still
+    reads the literal text. The fence is one backtick longer than the longest
+    backtick run in the body, so the content cannot break out of the fence.
+    """
+    body = text.strip()
+    longest = run = 0
+    for ch in body:
+        if ch == "`":
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{body}\n{fence}"
+
+
 async def _apply_trust_gate(
     db: Session,
     workspace: Any,
@@ -513,7 +537,7 @@ async def _apply_trust_gate(
             kind=KIND_QUESTION,
             question_md=(
                 "**Inbound directive awaiting approval**\n\n"
-                f"{text_in.strip()}\n\n"
+                f"{_fence_untrusted(text_in)}\n\n"
                 '_Answer "route it" to let it proceed, or dismiss to keep it held._'
             ),
             reason="Inbound directive held by the channel trust gate",

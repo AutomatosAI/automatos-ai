@@ -465,3 +465,45 @@ def test_channel_is_allow_all_fails_closed():
     assert _channel_is_allow_all(db_strict, ws, "telegram") is False
 
     assert _channel_is_allow_all(_FakeSession(), ws, "telegram") is False  # no channel
+
+
+# ===========================================================================
+# 8. P225-RVW-6 — channel text is stored inert (no clickable links in the tab)
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_channel_directive_is_stored_fenced_inert(acks):
+    """A strict-held directive is stored fenced, so its markdown link syntax and
+    bare autolinks are LITERAL text (not clickable) in the admin tab — the raw
+    text stays readable, but sits inside a code fence (P225-RVW-6)."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    directive = "[route it now](https://attacker.example) then https://evil.example"
+    await _apply_trust_gate(
+        db, workspace, "telegram", _tg(directive), {"platform": "telegram"}, {},
+    )
+
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    md = grant.question_md
+    assert directive in md  # operators can still read exactly what was sent
+    # the link syntax sits INSIDE a code fence, never at top level
+    open_fence = md.index("```")
+    close_fence = md.index("```", open_fence + 3)
+    assert open_fence < md.index("[route it now]") < close_fence
+    assert open_fence < md.index("https://evil.example") < close_fence
+
+
+def test_fence_untrusted_prevents_backtick_breakout():
+    """A body carrying its own ``` cannot close the fence early — the fence grows
+    one backtick longer than the longest inner run (P225-RVW-6)."""
+    from api.webhooks import _fence_untrusted
+
+    body = "text ``` [x](https://e.example) ``` more"
+    fenced = _fence_untrusted(body)
+    assert fenced.startswith("````") and fenced.endswith("````")  # 4 > inner 3
+    assert body in fenced
