@@ -30,6 +30,7 @@ from .actions_blog import register_blog_actions
 from .actions_missions import register_mission_actions
 from .actions_analytics_enhanced import register_analytics_enhanced_actions
 from .actions_governance import register_governance_actions
+from .actions_asks import register_asks_actions  # PRD-225: platform_ask_human
 from .actions_harness import register_harness_actions
 from .actions_graph import register_graph_actions
 from .actions_codegraph import register_codegraph_actions  # PRD-165 S4
@@ -71,6 +72,7 @@ def register_all_actions(registry: ActionRegistry) -> None:
     register_mission_actions(registry)
     register_analytics_enhanced_actions(registry)
     register_governance_actions(registry)
+    register_asks_actions(registry)  # PRD-225: platform_ask_human
     register_harness_actions(registry)
     register_graph_actions(registry)
     register_codegraph_actions(registry)  # PRD-165 S4: codegraph as an agent capability

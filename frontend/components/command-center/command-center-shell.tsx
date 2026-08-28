@@ -24,6 +24,7 @@ import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useActivitySchedule } from '@/hooks/use-activity-api'
 import { useDecisionsNeeded } from '@/hooks/use-kpi-api'
 import { useWatches } from '@/hooks/use-watches-api'
+import { useQuestions } from '@/hooks/use-approval-grants'
 
 import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
@@ -36,6 +37,7 @@ import { CalendarTab } from './calendar-tab'
 import { ActivityTab } from './activity-tab'
 import { WatchlistTab } from './watchlist-tab'
 import { GovernanceTab } from './governance-tab'
+import { QuestionsTab } from './questions-tab'
 
 type TabKey =
   | 'summary'
@@ -43,6 +45,7 @@ type TabKey =
   | 'calendar'
   | 'activity'
   | 'watchlist'
+  | 'questions'
   | 'governance'
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -52,6 +55,9 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'activity', label: 'Activity' },
   // PRD-204 S11: the watchlist -- work Auto is supervising to a verdict.
   { key: 'watchlist', label: 'Watchlist' },
+  // PRD-225 (G2): the Questions tab -- every open agent ask, with the blocked
+  // cascade behind it. The badge is a live count of open questions.
+  { key: 'questions', label: 'Questions' },
   // PRD-196 (P2-15): the governance pillar (Approvals · Audit · Policy ·
   // Compliance), ws-admin-only. The human surface for the policy plane.
   { key: 'governance', label: 'Governance' },
@@ -88,6 +94,8 @@ export function CommandCenterShell() {
   // PRD-204 S11: live watches only (the default list) -- the tab badge is
   // "how many things is Auto supervising right now".
   const { data: watchlist } = useWatches()
+  // PRD-225: open (pending) question-kind asks — the Questions tab badge.
+  const { data: questions } = useQuestions()
 
   // PRD-180 S1 (F090): real-time board push. Subscribes to the LISTEN/NOTIFY
   // SSE and invalidates the board cache on each pushed event — this is what
@@ -106,11 +114,14 @@ export function CommandCenterShell() {
       calendar: schedule?.scheduled?.length ?? 0,
       activity: feed?.total ?? feed?.items?.length ?? 0,
       watchlist: watchlist?.total ?? 0,
+      // PRD-225: the count of open questions — the wave's most user-visible
+      // surface earns a live badge (a member without ws-admin gets 0).
+      questions: questions?.grants?.length ?? 0,
       // No live badge on Governance — the pending-approvals count lives inside
       // the ws-admin-gated pane, not fetched for every member on the shell.
       governance: 0,
     }),
-    [decisions, columns, schedule, feed, watchlist],
+    [decisions, columns, schedule, feed, watchlist, questions],
   )
 
   const working = stats?.working_now ?? 0
@@ -204,6 +215,7 @@ export function CommandCenterShell() {
         {activeTab === 'calendar' && <CalendarTab />}
         {activeTab === 'activity' && <ActivityTab />}
         {activeTab === 'watchlist' && <WatchlistTab />}
+        {activeTab === 'questions' && <QuestionsTab />}
         {activeTab === 'governance' && <GovernanceTab />}
       </div>
     </div>

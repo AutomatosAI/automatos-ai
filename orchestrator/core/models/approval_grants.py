@@ -54,6 +54,12 @@ SUBJECT_BOARD_TASK = "board_task"
 SUBJECT_PLAYBOOK_RUN = "playbook_run"
 SUBJECT_TOOL_CALL = "tool_call"
 
+# PRD-225: a grant's ``kind`` — the classic boolean approval, or a free-text ask.
+# A question is a grant whose decision is words instead of yes/no; the status
+# vocabulary is reused (pending=open, granted=answered, denied=dismissed).
+KIND_APPROVAL = "approval"
+KIND_QUESTION = "question"
+
 
 class ApprovalGrant(Base):
     """A durable authorisation record for a scoped, side-effecting action."""
@@ -83,6 +89,20 @@ class ApprovalGrant(Base):
     reason = Column(Text, nullable=True)               # why approval was needed
     estimated_cost_usd = Column(String(32), nullable=True)  # decimal-as-text, avoids float drift
 
+    # PRD-225: a grant is a question when its decision is words, not a boolean.
+    # ``kind`` defaults to 'approval' so every existing row and flow is unchanged.
+    kind = Column(
+        String(16), nullable=False,
+        default=KIND_APPROVAL, server_default=KIND_APPROVAL,
+    )
+    question_md = Column(Text, nullable=True)          # the ask, markdown
+    options = Column(JSONB, nullable=True)             # optional discrete choices
+    answer_text = Column(Text, nullable=True)          # the human's free-text answer
+    answered_by = Column(String(255), nullable=True)   # actor ref, e.g. 'user:42'
+    answered_at = Column(DateTime(timezone=True), nullable=True)
+    asked_by_agent_id = Column(Integer, nullable=True)  # who raised the ask
+    channel_refs = Column(JSONB, nullable=True)        # outbound delivery correlation
+
     requested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=True)
     granted_at = Column(DateTime(timezone=True), nullable=True)
@@ -110,6 +130,16 @@ class ApprovalGrant(Base):
             "status": self.status,
             "reason": self.reason,
             "estimated_cost_usd": self.estimated_cost_usd,
+            # PRD-225: the ask fields — 'approval' rows leave question_md/answer
+            # null, so the classic approval card is unaffected.
+            "kind": self.kind or KIND_APPROVAL,
+            "question_md": self.question_md,
+            "options": self.options,
+            "answer_text": self.answer_text,
+            "answered_by": self.answered_by,
+            "answered_at": self.answered_at.isoformat() if self.answered_at else None,
+            "asked_by_agent_id": self.asked_by_agent_id,
+            "channel_refs": self.channel_refs or {},
             "requested_at": self.requested_at.isoformat() if self.requested_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "granted_at": self.granted_at.isoformat() if self.granted_at else None,

@@ -42,7 +42,16 @@ _ALLOWED_INTEGRATION_KEYS = {
     "slack_default_channel",
     "whatsapp_phone_number_id",
     "whatsapp_access_token",
+    # PRD-225 US-006 / P225-RVW-12: the ingress trust_mode for a LEGACY bot
+    # (one live via this bag, with no channel_connections row). The gate reads
+    # {platform}_trigger_mode here, defaulting to strict; this is the operator's
+    # opt-out to allow_all / communication_only for such a bot.
+    "telegram_trigger_mode",
+    "slack_trigger_mode",
 }
+
+# Integration keys whose value is a trust trigger_mode, validated on save.
+_TRIGGER_MODE_INTEGRATION_KEYS = {"telegram_trigger_mode", "slack_trigger_mode"}
 
 
 @router.get("/current")
@@ -343,8 +352,20 @@ async def save_integrations(
     settings = dict(workspace.settings or {})
     integrations = dict(settings.get("integrations", {}))
 
+    from services.ingress_gate import normalize_trigger_mode
+
     for key, value in payload.items():
         if key not in _ALLOWED_INTEGRATION_KEYS:
+            continue
+        if key in _TRIGGER_MODE_INTEGRATION_KEYS:
+            # A valid trigger_mode is stored; anything else (empty/garbage) is
+            # removed so the gate falls back to the strict default — never a
+            # silently-stored bad mode.
+            mode = normalize_trigger_mode(value)
+            if mode:
+                integrations[key] = mode
+            else:
+                integrations.pop(key, None)
             continue
         if value and isinstance(value, str) and value.strip():
             integrations[key] = value.strip()

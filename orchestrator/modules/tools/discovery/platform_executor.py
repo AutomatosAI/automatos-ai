@@ -221,6 +221,7 @@ from modules.tools.discovery.handlers_governance import (
     validate_agent_handler,
     check_budget_handler,
 )
+from modules.tools.discovery.handlers_asks import ask_human  # PRD-225
 from modules.tools.discovery.handlers_graph import (
     handle_query_graph,
     handle_graph_neighbors,
@@ -551,6 +552,8 @@ class PlatformActionExecutor:
             "platform_update_blueprint": update_blueprint,
             "platform_validate_agent": validate_agent_handler,
             "platform_check_budget": check_budget_handler,
+            # PRD-225: agent → human question (park, notify, return)
+            "platform_ask_human": ask_human,
             # Enhanced Analytics (dashboard + performance)
             "platform_get_success_rate": get_success_rate,
             "platform_get_completion_time": get_completion_time,

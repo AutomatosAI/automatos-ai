@@ -81,6 +81,11 @@ class SendResult:
     # 5xx) — False for permanent failures (invalid token, missing
     # chat_id, etc.). Mirrors ``DispatchResult.retryable``.
     retryable: bool = True
+    # PRD-225: the platform's id for the sent message and the target it went to.
+    # Drivers that can report them (Telegram) populate these so a reply can be
+    # correlated back to a pending question. Optional — other drivers leave None.
+    message_id: Optional[str] = None
+    target: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

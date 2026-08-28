@@ -16,15 +16,22 @@ path — the actor here is the human approver.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
-from core.models.approval_grants import ApprovalGrant, GrantStatus, SUBJECT_BOARD_TASK
+from core.models.approval_grants import (
+    ApprovalGrant,
+    GrantStatus,
+    KIND_QUESTION,
+    SUBJECT_BOARD_TASK,
+)
 from core.models.core import BoardTask
 from modules.policy.ai_act import oversight_for_risk
 
@@ -43,6 +50,23 @@ def grant_with_oversight(grant: ApprovalGrant) -> Dict[str, Any]:
     """
     data = grant.to_dict()
     data["oversight"] = oversight_for_risk(grant.risk_tier).to_dict()
+    return data
+
+
+def _grant_payload(db: Session, grant: ApprovalGrant) -> Dict[str, Any]:
+    """List payload for one grant. Question-kind rows carry their blocked
+    cascade (PRD-225) so the Questions tab renders the downstream work stuck
+    behind the ask without a second round-trip."""
+    data = grant_with_oversight(grant)
+    if getattr(grant, "kind", None) == KIND_QUESTION:
+        if grant.subject_type == SUBJECT_BOARD_TASK:
+            from services.ask_cascade import board_task_cascade_detail
+
+            data["cascade"] = board_task_cascade_detail(
+                db, grant.workspace_id, grant.subject_id
+            )
+        else:
+            data["cascade"] = {"total": 0, "tasks": []}
     return data
 
 
@@ -78,15 +102,23 @@ def _audit(db: Session, ctx: RequestContext, action: str, grant: ApprovalGrant) 
 @router.get("")
 async def list_grants(
     status: Optional[str] = None,
+    kind: Optional[str] = None,
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """List this workspace's approval grants, newest first. Filter by ``status``."""
+    """List this workspace's approval grants, newest first.
+
+    Filter by ``status`` and/or ``kind`` — the Questions tab reuses THIS route
+    with ``kind=question`` (PRD-225: no separate list endpoint). Question rows
+    are enriched with their blocked cascade.
+    """
     q = db.query(ApprovalGrant).filter(ApprovalGrant.workspace_id == ctx.workspace_id)
     if status:
         q = q.filter(ApprovalGrant.status == status)
+    if kind:
+        q = q.filter(ApprovalGrant.kind == kind)
     rows: List[ApprovalGrant] = q.order_by(ApprovalGrant.requested_at.desc()).limit(200).all()
-    return {"grants": [grant_with_oversight(g) for g in rows]}
+    return {"grants": [_grant_payload(db, g) for g in rows]}
 
 
 def _load_grant(db: Session, ctx: RequestContext, grant_id: int) -> ApprovalGrant:
@@ -110,6 +142,13 @@ async def grant_approval(
     from core.services.approval_grants import grant_grant
 
     grant = _load_grant(db, ctx, grant_id)
+    # PRD-225: a question is answered, never approved — /answer is its only
+    # completion path (a yes/no can't stand in for a free-text decision).
+    if grant.kind == KIND_QUESTION:
+        raise HTTPException(
+            status_code=422,
+            detail="This is a question — answer it via POST /{id}/answer, not /grant.",
+        )
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
@@ -130,23 +169,87 @@ async def grant_approval(
     return {"grant": grant.to_dict()}
 
 
+def _cas_resolve_grant(
+    db: Session,
+    grant: ApprovalGrant,
+    *,
+    to_status: str,
+    allowed_from: tuple,
+    actor: str,
+    now: datetime,
+) -> bool:
+    """Atomically flip ``grant.status`` to ``to_status`` ONLY while it is still
+    one of ``allowed_from`` — the compare-and-swap that stops a deny / revoke
+    racing a just-applied answer (or another deny / revoke) from overwriting an
+    already-resolved grant (P225-RVW-18: the RVW-14 pattern extended to the two
+    resolve endpoints that lacked it).
+
+    Returns ``True`` if THIS call won the flip (the caller proceeds to
+    ``_fail_subject`` / audit-as-success); ``False`` means the grant was already
+    resolved, and the caller MUST 422 with no in-memory mutate, no
+    ``_fail_subject`` and no audit-as-success — never an unconditional commit.
+    ``UPDATE ... WHERE id AND status IN (allowed_from)`` is atomic in Postgres, so
+    the race-loser matches 0 rows and is a safe no-op. ``synchronize_session=False``
+    leaves the ORM row stale, so on a win the in-memory row is synced for the
+    caller's ``_fail_subject`` / ``to_dict`` / audit.
+    """
+    flipped = (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.id == grant.id,
+            ApprovalGrant.status.in_(list(allowed_from)),
+        )
+        .update(
+            {
+                ApprovalGrant.status: to_status,
+                ApprovalGrant.revoked_at: now,
+                ApprovalGrant.revoked_by: actor,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not flipped:
+        db.rollback()
+        db.refresh(grant)
+        return False
+    grant.status = to_status
+    grant.revoked_at = now
+    grant.revoked_by = actor
+    return True
+
+
 @router.post("/{grant_id}/deny")
 async def deny_approval(
     grant_id: int,
     ctx: RequestContext = Depends(require_workspace_admin),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Refuse a pending grant — the subject fails rather than retrying."""
-    from core.services.approval_grants import deny_grant
-
+    """Refuse a pending grant. An approval denial FAILS the subject; a question
+    denial is a *dismiss* — the subject stays blocked and the asker may re-ask
+    (PRD-225 baked decision), so no answer is fabricated and the trail is kept."""
     grant = _load_grant(db, ctx, grant_id)
-    if grant.status != GrantStatus.PENDING.value:
+    is_question = grant.kind == KIND_QUESTION
+
+    # Atomic pending→denied flip. A /deny racing a just-applied /answer (dismiss in
+    # the Questions tab while a Telegram reply answers) must NOT overwrite the
+    # answered row to 'denied' (P225-RVW-18) — the CAS loser 422s and changes
+    # nothing, so the audit log never carries BOTH answered and dismissed for one id.
+    if not _cas_resolve_grant(
+        db, grant,
+        to_status=GrantStatus.DENIED.value,
+        allowed_from=(GrantStatus.PENDING.value,),
+        actor=_actor_ref(ctx),
+        now=datetime.now(timezone.utc),
+    ):
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
-    deny_grant(grant, revoked_by=_actor_ref(ctx))
-    _fail_subject(db, grant)
+    if not is_question:
+        # Only an approval denial fails the subject. A dismissed question leaves
+        # the parked subject blocked — answering "use your judgment" is the
+        # one-click unblock path.
+        _fail_subject(db, grant)
     db.commit()
-    _audit(db, ctx, "approval_grant:denied", grant)
+    _audit(db, ctx, "question:dismissed" if is_question else "approval_grant:denied", grant)
     return {"grant": grant.to_dict()}
 
 
@@ -157,43 +260,262 @@ async def revoke_approval(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Retract a granted authorisation before it expires."""
-    from core.services.approval_grants import revoke_grant
-
     grant = _load_grant(db, ctx, grant_id)
-    if grant.status not in (GrantStatus.GRANTED.value, GrantStatus.PENDING.value):
+
+    # Atomic flip from pending|granted → revoked. A /revoke racing another
+    # /revoke (or a deny) must apply exactly once; the CAS loser 422s and leaves
+    # the winning resolution intact — no self-contradictory audited row
+    # (P225-RVW-18, the RVW-14 pattern extended to revoke).
+    if not _cas_resolve_grant(
+        db, grant,
+        to_status=GrantStatus.REVOKED.value,
+        allowed_from=(GrantStatus.PENDING.value, GrantStatus.GRANTED.value),
+        actor=_actor_ref(ctx),
+        now=datetime.now(timezone.utc),
+    ):
         raise HTTPException(status_code=422, detail=f"Grant cannot be revoked (status: {grant.status})")
 
-    revoke_grant(grant, revoked_by=_actor_ref(ctx))
     db.commit()
     _audit(db, ctx, "approval_grant:revoked", grant)
     return {"grant": grant.to_dict()}
 
 
-async def _requeue_subject(db: Session, grant: ApprovalGrant) -> None:
-    """On grant, resume the blocked subject.
+# ---------------------------------------------------------------------------
+# PRD-225 — answer a question and resume the parked subject
+# ---------------------------------------------------------------------------
 
-    - ``board_task``: return the blocked task to the dispatch queue (unchanged).
+class AnswerRequest(BaseModel):
+    """The human's answer: free text and/or one of the offered options."""
+
+    answer_text: Optional[str] = None
+    option: Optional[str] = None
+
+
+@router.post("/{grant_id}/answer")
+async def answer_question(
+    grant_id: int,
+    body: AnswerRequest,
+    ctx: RequestContext = Depends(require_workspace_admin),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Answer a pending question: record the answer, resume the parked subject
+    through the SAME machinery a grant uses, and confirm into chat.
+
+    ``pending → granted`` on a ``kind='question'`` row. The Q&A is appended to the
+    subject's execution context (board task ``planning_data.human_qa`` or the
+    tool-call resume payload) so the agent's next run reads the answer verbatim.
+    """
+    grant = _load_grant(db, ctx, grant_id)
+    if grant.kind != KIND_QUESTION:
+        raise HTTPException(
+            status_code=422, detail="This grant is an approval, not a question."
+        )
+    if grant.status != GrantStatus.PENDING.value:
+        raise HTTPException(
+            status_code=422, detail=f"Question is not open (status: {grant.status})"
+        )
+
+    answer = (body.answer_text or body.option or "").strip()
+    if not answer:
+        raise HTTPException(status_code=422, detail="answer_text or option is required")
+    # A chosen option must be one of the offered choices; free text is unconstrained.
+    if body.option and not body.answer_text:
+        options = grant.options if isinstance(grant.options, list) else []
+        if options and body.option not in options:
+            raise HTTPException(
+                status_code=422, detail="option is not one of the offered choices"
+            )
+
+    await apply_question_answer(db, grant, answer_text=answer, answered_by=_actor_ref(ctx))
+    _audit(db, ctx, "question:answered", grant)
+    return {"grant": grant.to_dict()}
+
+
+class AnswerOutcome(NamedTuple):
+    """Result of :func:`apply_question_answer`, so a caller can confirm HONESTLY.
+
+    ``applied`` — THIS call won the compare-and-swap and recorded the answer (a
+    race-loser is ``False``). ``resumed`` — the parked subject was genuinely
+    re-queued / resumed (a terminal or no-op subject is ``False``). The Telegram
+    bridge branches its confirmation on BOTH so it never tells a human 'the agent
+    is resuming' for an answer that lost the race or resumed nothing — the
+    RVW-11 honesty gate reaching the second confirmation channel (P225-RVW-17).
+    ``grant`` is the committed winning row either way (a bare-grant caller that
+    ignores the tuple is unaffected).
+    """
+    grant: ApprovalGrant
+    applied: bool
+    resumed: bool
+
+
+async def apply_question_answer(
+    db: Session, grant: ApprovalGrant, *, answer_text: str, answered_by: str
+) -> "AnswerOutcome":
+    """Record an answer and resume the parked subject — the shared service the
+    HTTP endpoint AND the Telegram bridge both call (PRD-225 US-005; the bridge
+    is NOT an HTTP self-call). Assumes the caller validated kind='question' +
+    status pending.
+
+    ``pending → granted``; the Q&A is appended to the subject's execution context
+    and the work resumes through the EXISTING ``_requeue_subject``. Returns an
+    :class:`AnswerOutcome` — ``(grant, applied, resumed)`` — so a caller can
+    confirm honestly; callers that only need the grant read ``outcome.grant``
+    (the HTTP ``answer_question`` path ignores the tuple entirely and is
+    unaffected).
+    """
+    now = datetime.now(timezone.utc)
+
+    # Compare-and-swap the pending→granted flip so two concurrent answers to the
+    # same question cannot BOTH apply (P225-RVW-14). Authorization is chat-scoped,
+    # not principal-scoped — any member of a shared authorized group chat can
+    # answer, and there is no default rate limit — so a reply racing POST /answer,
+    # or two '/answer' messages, is reachable. ``UPDATE ... WHERE status='pending'``
+    # is atomic in Postgres: the loser's UPDATE matches 0 rows and aborts as a safe
+    # no-op — one human_qa entry, one resume, one confirmation.
+    flipped = (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.id == grant.id,
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+        )
+        .update(
+            {
+                ApprovalGrant.status: GrantStatus.GRANTED.value,
+                ApprovalGrant.answer_text: answer_text,
+                ApprovalGrant.answered_by: answered_by,
+                ApprovalGrant.answered_at: now,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not flipped:
+        # Lost the race — another answer already won. Record / resume / confirm
+        # nothing (no duplicates); return the committed winning state, flagged
+        # applied=False so the caller never claims 'resuming' for a no-op answer.
+        db.rollback()
+        db.refresh(grant)
+        return AnswerOutcome(grant, applied=False, resumed=False)
+
+    # Won the flip. The UPDATE used synchronize_session=False, so sync the
+    # in-memory row for _record_answer_on_subject / the confirmation / the caller.
+    grant.status = GrantStatus.GRANTED.value
+    grant.answer_text = answer_text
+    grant.answered_by = answered_by
+    grant.answered_at = now
+    _record_answer_on_subject(db, grant, answer_text, now)
+
+    # Commit the answer BEFORE resuming — mirror grant_approval's 2026-08-06
+    # ordering so the resume path sees a committed, non-pending row.
+    db.commit()
+    resumed = await _requeue_subject(db, grant)
+    db.commit()
+
+    _confirm_answer_into_chat(db, grant, resumed=resumed)
+    return AnswerOutcome(grant, applied=True, resumed=resumed)
+
+
+def _record_answer_on_subject(
+    db: Session, grant: ApprovalGrant, answer: str, now: datetime
+) -> None:
+    """Append the Q&A into the subject's execution context (rebuild-don't-mutate
+    the JSONB) so the agent's next run reads the human's answer verbatim."""
+    entry = {
+        "q": grant.question_md,
+        "a": answer,
+        "answered_by": grant.answered_by,
+        "at": now.isoformat(),
+    }
+    if grant.subject_type == SUBJECT_BOARD_TASK:
+        try:
+            task = db.query(BoardTask).get(int(grant.subject_id))
+        except (TypeError, ValueError):
+            task = None
+        if task is not None:
+            pdata = dict(task.planning_data or {})
+            qa = list(pdata.get("human_qa") or [])
+            qa.append(entry)
+            task.planning_data = {**pdata, "human_qa": qa}
+        return
+    # tool_call / playbook_run: the resume payload carries the Q&A.
+    details = dict(grant.details or {})
+    qa = list(details.get("human_qa") or [])
+    qa.append(entry)
+    grant.details = {**details, "human_qa": qa}
+
+
+def _confirm_answer_into_chat(db: Session, grant: ApprovalGrant, *, resumed: bool) -> None:
+    """Fail-soft chat confirmation — HONEST about the resume outcome.
+
+    Only claim the work is resuming when it genuinely did (P225-RVW-11). A
+    channel-hold answer, or a subject whose resume was a no-op, records the
+    answer without a false 'resuming' the human would act on."""
+    try:
+        from services.chat_messenger import deliver_background_message
+
+        subject_label = f"{grant.subject_type.replace('_', ' ')} {grant.subject_id}"
+        text = (
+            f"Answered — resuming {subject_label}."
+            if resumed
+            else f"Answer recorded for {subject_label} — nothing to auto-resume."
+        )
+        deliver_background_message(
+            db,
+            workspace_id=grant.workspace_id,
+            text=text,
+            source={"origin": "question_answer", "grant_id": grant.id},
+            link_type="question",
+            link_id=str(grant.id),
+        )
+    except Exception:  # noqa: BLE001 — confirmation must never fail the answer
+        logger.warning(
+            "[approval_grants.api] answer confirmation failed for grant %s",
+            grant.id, exc_info=True,
+        )
+
+
+def _executed_result_succeeded(grant: ApprovalGrant) -> bool:
+    """True iff a tool_call / playbook_run resume actually did work — a stored
+    action re-dispatched OK, or a board-linked re-queue fired. A grant carrying
+    no re-dispatchable action records success=False (or nothing), so the answer
+    confirmation stays honest about a no-op (P225-RVW-11)."""
+    details = grant.details if isinstance(grant.details, dict) else {}
+    result = details.get("executed_result") or {}
+    return bool(result.get("success") or result.get("resumed_via"))
+
+
+async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
+    """On grant, resume the blocked subject. Returns True iff the subject
+    GENUINELY resumed, so the chat confirmation never claims 'resuming' for a
+    no-op (P225-RVW-11).
+
+    - ``board_task``: return the blocked task to the dispatch queue (unchanged);
+      True iff a still-blocked task was re-queued.
     - ``tool_call`` (PRD-193 S4, P2-12): re-dispatch the stored call through
       the spine — or, for board-originated asks, ride the existing board
-      re-queue so the re-run completes into the now-active grant (S2).
+      re-queue so the re-run completes into the now-active grant (S2). True iff
+      a stored action executed / a board re-queue fired.
     - ``playbook_run`` (PRD-204 S7/S8): the watcher's corrective-action
       grants -- ``details.watch_action`` discriminates (rerun / replan /
       reassign / spawn_agent); the stored spec launches and the supervising
       watch follows the work. First real wiring of SUBJECT_PLAYBOOK_RUN.
+    - anything else (e.g. a ``channel`` trust-gate hold): no resume path,
+      returns False. platform_ask_human refuses tool_call/playbook_run
+      questions up front (handlers_asks, P225-RVW-11), so a question only ever
+      reaches here as a board_task (resumable) or a channel hold (not).
     """
     from core.models.approval_grants import SUBJECT_PLAYBOOK_RUN, SUBJECT_TOOL_CALL
 
     if grant.subject_type == SUBJECT_TOOL_CALL:
         await _resume_tool_call(db, grant)
-        return
+        return _executed_result_succeeded(grant)
     if grant.subject_type == SUBJECT_PLAYBOOK_RUN:
         from services.watch_rerun import resume_playbook_run_grant
 
         await resume_playbook_run_grant(db, grant)
-        return
+        return _executed_result_succeeded(grant)
     if grant.subject_type != SUBJECT_BOARD_TASK:
-        return
-    _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
+        return False
+    return _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
 
 
 def _requeue_blocked_task(db: Session, workspace_id: Any, task_id: Any) -> bool:

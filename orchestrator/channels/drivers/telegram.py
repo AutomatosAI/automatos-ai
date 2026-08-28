@@ -140,7 +140,16 @@ class TelegramDriver(ChannelDriver):
 
         latency_ms = int((time.monotonic() - started) * 1000)
         if resp.status_code == 200 and (resp.json() or {}).get("ok"):
-            return SendResult(ok=True, latency_ms=latency_ms)
+            # PRD-225: echo the sent message_id + target so a Telegram reply can
+            # be correlated back to a pending question (channel_refs).
+            result_obj = (resp.json() or {}).get("result") or {}
+            message_id = result_obj.get("message_id")
+            return SendResult(
+                ok=True,
+                latency_ms=latency_ms,
+                message_id=str(message_id) if message_id is not None else None,
+                target=str(target),
+            )
 
         # Telegram error shape: {"ok": false, "error_code": 400, "description": "Bad Request: chat not found"}
         body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
