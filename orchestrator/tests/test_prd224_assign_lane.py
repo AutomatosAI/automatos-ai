@@ -249,6 +249,37 @@ def test_assign_bias_merges_existing_hints():
         assert tool in a.tool_hints
 
 
+# ---------------------------------------------------------------------------
+# P224-RVW-3 -- the directive must not SCRIPT supervision. AUTO_TICKET_WATCH can
+# be off (or the watch fails to attach), so create_board_task may return
+# supervised=False; the confirmation reports the result's field, never a
+# hardcoded 'supervised — you'll report back here'.
+# ---------------------------------------------------------------------------
+
+
+def test_assign_directive_defers_supervision_to_create_result():
+    """The resolved-agent directive no longer asserts supervision unconditionally;
+    it tells Auto to report the platform_create_task result's own supervision
+    field, so an AUTO_TICKET_WATCH-off ticket is not described as supervised."""
+    d = build_assign_directive(target_agent_name="Jim", resolved=True, deferred=False)
+    # The old unconditional claim is gone.
+    assert "and supervised — you" not in d
+    assert "supervised — you'll report back here" not in d
+    # It defers to the create result's supervision field, honestly.
+    assert "supervision" in d
+    assert "platform_create_task result" in d
+    assert "unless that field says so" in d
+
+
+def test_assign_directive_queued_also_defers_supervision():
+    """A deferred (queued) ASSIGN ticket is supervised-per-result too — the same
+    honesty applies, and the queued path still carries no unconditional claim."""
+    d = build_assign_directive(target_agent_name="Jim", resolved=True, deferred=True)
+    assert "queued" in d
+    assert "supervised — you'll report back here" not in d
+    assert "'supervision' field" in d
+
+
 @pytest.mark.parametrize("phrase, deferred", [
     ("do it now", False),
     ("start it immediately", False),
