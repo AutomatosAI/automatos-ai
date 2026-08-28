@@ -57,6 +57,53 @@
     "orchestrator/services/",
     "orchestrator/tests/"
    ]
+  },
+  {
+   "id": "P222W2B-RVW-1",
+   "title": "REVIEW (MEDIUM) — _apply_tier_exposure fail-open contract is FALSE for an unresolvable non-empty plan; zero direct coverage",
+   "description": "orchestrator/modules/tools/tool_router.py:836-870 — the docstring promises 'FAIL-OPEN: a missing workspace_id, an unresolvable plan, or any error returns the surface unchanged — a lookup fault must never hide tools.' That is false for the unresolvable-plan case. _apply_tier_exposure only fail-opens when plan is falsy (tool_router.py:857 `if not plan: return tools`). A NON-EMPTY unrecognized plan proceeds into services/plan_tiers.filter_tools_by_plan -> enabled_families (plan_tiers.py:112-116 `resolved.get(plan) or resolved.get('basic')`), which silently substitutes the most-restrictive basic profile (all families False) and TRIMS the CodeGraph/NL2SQL/Team schemas + prunes the platform_execute enum — the opposite of the stated guarantee, with only an INFO log. Concrete in-repo trigger: orchestrator/scripts/create_test_workspace.py:84 still mints plan='starter' (a value no longer in PLAN_TIERS), so any such workspace, plus any unmigrated/stray plan string or an env-rename that leaves workspace.plan stale, gets Auto's paid-tier tools silently removed. There is NO direct test for _apply_tier_exposure. Note the contradiction with exposure_for_plan/enabled_families, which INTENTIONALLY fall back to basic ('the UI is never left without a profile') — so either the tool-surface path or the docstring is wrong. Gerard's call which way to reconcile.",
+   "acceptanceCriteria": [
+    "filter_tools_by_plan / enabled_families distinguishes an UNKNOWN plan from 'basic': for a non-empty plan not in PLAN_TIERS, _apply_tier_exposure either returns the surface unchanged (true fail-open, e.g. guard on `services.plan_tiers.get_tier(plan) is None`) OR the fall-back-to-entry-tier behavior is made explicit and the tool_router.py docstring corrected to match — no silent trim that contradicts the written contract",
+    "A new PURE test exercises the unresolved-plan path directly (filter_tools_by_plan(surface, 'starter') and/or _apply_tier_exposure with an unrecognized plan) and asserts the DELIBERATE behavior; test_prd222_w2s1b_exposure.py currently has no unknown-plan tool-surface case (only exposure_for_plan unknown-plan is covered)",
+    "orchestrator/scripts/create_test_workspace.py:84 no longer mints plan='starter' (uses 'basic', the renamed entry tier) so the repo carries no live producer of an unresolvable plan string"
+   ],
+   "files": [
+    "orchestrator/modules/tools/tool_router.py",
+    "orchestrator/services/plan_tiers.py",
+    "orchestrator/scripts/create_test_workspace.py",
+    "orchestrator/tests/test_prd222_w2s1b_exposure.py"
+   ]
+  },
+  {
+   "id": "P222W2B-RVW-2",
+   "title": "REVIEW (LOW-MEDIUM) — plan-accept path is two non-atomic commits: a second-commit failure changes plan durably, leaves it unaudited, and reports success:false (FR-4)",
+   "description": "orchestrator/modules/tools/discovery/handlers_onboarding.py:85-89 — the accept path calls assign_plan(db, workspace, plan) (which commits plan + plan_limits at services/plan_tiers.py:100-102) and THEN record_plan_event(db, workspace, 'plan_accepted', plan) (a SEPARATE commit at services/onboarding_state.py:160-162). If the funnel commit fails transiently, the except Exception at handlers_onboarding.py:95-98 does db.rollback() — which cannot undo the already-committed assign_plan transaction — and returns {success: False}. Net: workspace.plan/plan_limits are durably changed to the new tier, the plan_accepted audit stamp never lands, and Auto is told the call FAILED — contradicting the module's own 'state changes only through this tool (FR-4)' auditability claim. Same two-commit shape at handlers_onboarding.py:77-81 (advance to proposal, then a separate plan_recommended commit). Low probability, self-heals on an idempotent retry, and plan+plan_limits always land together (one commit) — but it is a genuine success-reported-as-failure + lost-audit edge worth closing.",
+   "acceptanceCriteria": [
+    "The accept path commits plan + the plan_accepted funnel event in a SINGLE transaction (commit once after both writes, or defer the writers' internal commit when invoked from the handler): a test that injects a failure on the funnel write asserts workspace.plan is UNCHANGED (no partial write) and the handler returns success:false honestly",
+    "The advance-to-proposal path (plan_recommended) is likewise atomic with the stage advance — a funnel-write failure does not leave the stage advanced without its recorded recommendation"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/handlers_onboarding.py",
+    "orchestrator/services/plan_tiers.py",
+    "orchestrator/services/onboarding_state.py",
+    "orchestrator/tests/test_prd222_w2s2_plan_recommendation.py"
+   ]
+  },
+  {
+   "id": "P222W2B-RVW-3",
+   "title": "REVIEW (MEDIUM) — recommend_plan team-size branches are DEAD in production; US-025 'expressed team size' input is non-functional and masked by tests",
+   "description": "services/plan_tiers.recommend_plan (plan_tiers.py:236-252) has size>=6 -> business (line 248) and size>=2 -> pro (line 250) branches, but team_size can never be non-None at any REAL caller. The proposal display (modules/context/sections/onboarding.py:268) reads segment.get('team_size'), which is provably always None: the tool 'segment' schema exposes only business/goal/comfort (actions_onboarding.py:64-87), SEGMENT_KEYS=('business','goal','comfort') (services/onboarding_state.py:61), and _clean_segment (onboarding_state.py:146-150) strips any other key before persisting; the funnel path (handlers_onboarding.py:80) passes no team_size at all. So the US-025 AC input '+ expressed team size' is non-functional — only free-text keyword matching (_BUSINESS_SIGNALS / _PRO_SIGNALS / 'technical') can ever fire. The cited proof test_recommend_plan_rules[7] MASKS this: test_prd222_w2s2_plan_recommendation.py:54 ({'business':'small marketing team'},3,'pro') and :56 ({'business':'consultancy'},8,'business') pass team_size DIRECTLY to the pure helper — the text alone matches no signal, so they only go green because of an injected number the product can never supply. Gerard's call: wire team_size end-to-end, or delete the dead path and the claim.",
+   "acceptanceCriteria": [
+    "EITHER team_size is captured, persisted, and threaded through the REAL path (added to the tool segment schema + SEGMENT_KEYS + passed at BOTH onboarding.py:269 display and handlers_onboarding.py:80 funnel) and a test drives recommend_plan to 'business'/'pro' via a STORED team size (not a directly-injected arg) — OR the size>=6/size>=2 branches AND the two team_size-injecting parametrize cases (test_prd222_w2s2_plan_recommendation.py:54,56) are removed and the 'expressed team size' claim is dropped from the US-025 description/AC",
+    "handlers_onboarding.py:80 (funnel recommend_plan) and onboarding.py:269 (display recommend_plan) use the SAME inputs — both pass team_size or neither — so the recorded plan_recommended event matches the tier Auto actually shows the user"
+   ],
+   "files": [
+    "orchestrator/services/plan_tiers.py",
+    "orchestrator/modules/context/sections/onboarding.py",
+    "orchestrator/modules/tools/discovery/handlers_onboarding.py",
+    "orchestrator/services/onboarding_state.py",
+    "orchestrator/tests/test_prd222_w2s2_plan_recommendation.py"
+   ]
   }
  ]
 }
