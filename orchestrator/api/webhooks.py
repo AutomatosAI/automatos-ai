@@ -402,19 +402,59 @@ def _channel_for_platform(db: Session, workspace_id: Any, platform: str):
 
 
 def _inbound_text(body: Dict[str, Any]) -> str:
-    """Best-effort inbound message text across platforms, for classification."""
+    """The inbound message text the router would act on, across platforms.
+
+    MUST stay aligned with ``WebhookIngestor`` content extraction
+    (core/routing/ingestors/webhook.py): the gate scores exactly the text the
+    router would route, so a directive can NEVER be scored empty here yet reach
+    the router as content (P225-RVW-2). Covers Telegram text+caption including
+    ``edited_message``, Slack ``event.text``, Meta-WhatsApp
+    ``messages[].text.body``, Twilio ``Body``, and top-level string fields.
+
+    The ingestor's ``json.dumps(body)`` last-resort fallback is deliberately NOT
+    mirrored: a genuinely text-less update (a status / delivery-receipt callback)
+    scores empty and is left to route as today, not held as a question.
+    """
     if not isinstance(body, dict):
         return ""
-    msg = body.get("message")
-    if isinstance(msg, dict) and isinstance(msg.get("text"), str):
-        return msg["text"]
+
+    # 1. Direct string fields (simple webhooks / curl) — ingestor step 1.
+    for key in ("message", "text", "content", "body"):
+        v = body.get(key)
+        if isinstance(v, str) and v.strip():
+            return v
+
+    # 2. Telegram message / edited_message: text or caption. The ingestor reads
+    #    only `message`; an `edited_message` (or a caption-only media message)
+    #    otherwise reaches the router via its json.dumps fallback, so extract it
+    #    explicitly to hold it under a strict/communication_only channel.
+    for mkey in ("message", "edited_message"):
+        m = body.get(mkey)
+        if isinstance(m, dict):
+            v = m.get("text") or m.get("caption")
+            if isinstance(v, str) and v.strip():
+                return v
+
+    # 3. Slack: event.text — ingestor step 3.
     event = body.get("event")
     if isinstance(event, dict) and isinstance(event.get("text"), str):
         return event["text"]
-    for key in ("text", "content", "Body"):
-        v = body.get(key)
-        if isinstance(v, str):
-            return v
+
+    # 4. Twilio `Body`, then Meta-WhatsApp entry[].changes[].value.messages[].text.body.
+    twilio = body.get("Body")
+    if isinstance(twilio, str) and twilio.strip():
+        return twilio
+    entries = body.get("entry")
+    if isinstance(entries, list) and entries and isinstance(entries[0], dict):
+        changes = entries[0].get("changes", [])
+        if changes and isinstance(changes[0], dict):
+            value = changes[0].get("value", {})
+            messages = value.get("messages", []) if isinstance(value, dict) else []
+            if messages and isinstance(messages[0], dict):
+                text_obj = messages[0].get("text", {})
+                if isinstance(text_obj, dict) and isinstance(text_obj.get("body"), str):
+                    return text_obj["body"]
+
     return ""
 
 

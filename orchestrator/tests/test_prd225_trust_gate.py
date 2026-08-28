@@ -233,6 +233,94 @@ async def test_no_channel_row_means_no_gate(acks):
 
 
 # ===========================================================================
+# 2b. P225-RVW-2 — the gate scores the SAME content the router routes, so
+# caption / edited_message / Meta-WhatsApp shapes cannot bypass strict.
+# ===========================================================================
+
+@pytest.mark.parametrize("body,expected", [
+    # Telegram caption-only media (no `text`, only `caption`).
+    ({"message": {"caption": "wire it", "chat": {"id": "c1"}}}, "wire it"),
+    # Telegram edited_message — body carries `edited_message`, not `message`.
+    ({"edited_message": {"text": "edit me", "chat": {"id": "c1"}}}, "edit me"),
+    ({"edited_message": {"caption": "edit cap", "chat": {"id": "c1"}}}, "edit cap"),
+    # Meta-WhatsApp text message — no text/event/Body key at all.
+    ({"entry": [{"changes": [{"value": {"messages": [{"text": {"body": "wa hi"}}]}}]}]}, "wa hi"),
+])
+def test_inbound_text_matches_ingestor_shapes(body, expected):
+    """The gate extracts the same real-message content the WebhookIngestor routes
+    (caption / edited_message / WhatsApp body) — never scores it empty."""
+    from api.webhooks import _inbound_text
+
+    assert _inbound_text(body) == expected
+
+
+@pytest.mark.asyncio
+async def test_strict_holds_whatsapp_text_message(acks):
+    """A Meta-WhatsApp text message is HELD under strict — it has no
+    message.text / event.text / Body key; the gate reads messages[].text.body."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}, platform="whatsapp"))
+    workspace = SimpleNamespace(id=ws)
+
+    wa = {"entry": [{"changes": [{"value": {"messages": [
+        {"text": {"body": "delete the vault"}, "from": "15551230000"}
+    ]}}]}]}
+    res = await _apply_trust_gate(db, workspace, "whatsapp", wa, {"platform": "whatsapp"}, {})
+
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert grant.kind == KIND_QUESTION and grant.subject_type == "channel"
+    assert "delete the vault" in grant.question_md
+
+
+@pytest.mark.asyncio
+async def test_strict_holds_telegram_caption(acks):
+    """A Telegram caption-only media message is HELD under strict (the ingestor
+    routes on message.caption; the gate must score it too)."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    body = {"update_id": 3, "message": {
+        "caption": "wire the funds now", "chat": {"id": "c1"},
+        "photo": [{"file_id": "AgACfake"}],
+    }}
+    res = await _apply_trust_gate(db, workspace, "telegram", body, {"platform": "telegram"}, {})
+
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert "wire the funds now" in grant.question_md
+
+
+@pytest.mark.asyncio
+async def test_strict_holds_telegram_edited_message(acks):
+    """A Telegram edited_message is HELD under strict — its body carries
+    'edited_message', not 'message', so the ingestor would json.dumps it and the
+    directive would otherwise reach the router."""
+    from api.webhooks import _apply_trust_gate
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    body = {"update_id": 4, "edited_message": {
+        "text": "deploy to production", "chat": {"id": "c1"},
+    }}
+    res = await _apply_trust_gate(db, workspace, "telegram", body, {"platform": "telegram"}, {})
+
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert "deploy to production" in grant.question_md
+
+
+# ===========================================================================
 # 3. Correlated answers bypass the gate (the handler runs correlation first)
 # ===========================================================================
 
