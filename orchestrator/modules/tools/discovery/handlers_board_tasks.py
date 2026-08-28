@@ -439,6 +439,69 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
         return {"success": False, "error": f"Task {task_id} not found"}
 
     old_status = task.status
+
+    # P224-RVW-5: the assigned->in_progress transition that LAUNCHES the agent must
+    # be ATOMIC against the board dispatcher's concurrent claim. RVW-2's
+    # old_status != 'in_progress' guard read from THIS unlocked pre-commit SELECT,
+    # so if board_dispatcher.claim_tasks committed its FOR UPDATE SKIP LOCKED claim
+    # (flipping the row to in_progress and launching once) AFTER this SELECT but
+    # BEFORE our write, old_status was still 'assigned', the guard passed, and we
+    # launched a SECOND time — the agent's real side effects (emails, external
+    # calls) ran twice. Mirror claim_tasks' exactly-once idiom: a conditional UPDATE
+    # that wins only when the row is NOT already in_progress, and launch inline ONLY
+    # if THIS statement won the transition (it RETURNs a row). So exactly one of
+    # {inline, dispatcher} ever reaches execute_with_prompt for a given claim.
+    # Workspace ownership was already verified by the SELECT above; the PK uniquely
+    # identifies the row, so the atomic claim filters on id + the status precondition.
+    if new_status == "in_progress" and task.assigned_agent_id:
+        from sqlalchemy import text
+
+        # Capture launch inputs before the write — commit expires ORM attributes.
+        agent_id = task.assigned_agent_id
+        prompt = task.raw_prompt or task.description or task.title
+        review_mode = task.review_mode or "auto"
+        now = datetime.now(timezone.utc)
+
+        won = db.execute(
+            text(
+                "UPDATE board_tasks "
+                "SET status = 'in_progress', "
+                "    started_at = COALESCE(started_at, :now), "
+                "    blocked_at = NULL, blocked_reason = NULL, "
+                "    updated_at = :now "
+                "WHERE id = :id AND status <> 'in_progress' "
+                "RETURNING id"
+            ),
+            {"id": int(task_id), "now": now},
+        ).fetchone()
+        db.commit()
+
+        launched = False
+        if won is not None:
+            # We won the assigned->in_progress transition — the dispatcher did not
+            # beat us to this claim. Push the board frame and launch exactly once.
+            _notify_board_safe(db, workspace_id, int(task_id), "in_progress", "status_changed")
+            from api.board_tasks import _launch_task_execution
+
+            _launch_task_execution(
+                task_id=int(task_id),
+                agent_id=agent_id,
+                workspace_id=str(workspace_id),
+                prompt=prompt,
+                review_mode=review_mode,
+            )
+            launched = True
+        # If we lost, the dispatcher already claimed + launched this row — no second
+        # launch and no redundant board frame (its task_claimed NOTIFY already fired).
+        return {
+            "success": True,
+            "task_id": int(task_id),
+            "status": "in_progress",
+            "triggered_execution": launched,
+        }
+
+    # Every other transition is a plain ORM write with no launch and no dispatcher
+    # race (in_progress WITHOUT an assigned agent cannot run, so it falls here too).
     task.status = new_status
     if new_status == "in_progress" and not task.started_at:
         task.started_at = datetime.now(timezone.utc)
@@ -458,35 +521,15 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # shape + event name as the human PATCH (api/board_tasks.py:912, "status_changed").
     _notify_board_safe(db, workspace_id, task.id, task.status, "status_changed")
 
-    # Trigger agent execution if moved to in_progress with an assigned agent.
-    # P224-RVW-2: guard on the PRIOR status. An ASSIGN-lane ticket is created
-    # 'assigned' (US-001 NOTIFYs the dispatcher) then updated to 'in_progress'
-    # back-to-back; by then board_dispatcher.claim_tasks has usually already
-    # claimed the row (flipping it to in_progress via FOR UPDATE SKIP LOCKED) and
-    # launched once. Launching again on a row that was ALREADY in_progress double-
-    # executes the agent's real side effects (emails, external calls). Mirror
-    # run_task_now's guard (api/board_tasks.py:871): a task already in_progress is
-    # left alone — zero additional launches.
-    launched = False
-    if new_status == "in_progress" and task.assigned_agent_id and old_status != "in_progress":
-        from api.board_tasks import _launch_task_execution
-        _launch_task_execution(
-            task_id=task.id,
-            agent_id=task.assigned_agent_id,
-            workspace_id=str(workspace_id),
-            prompt=task.raw_prompt or task.description or task.title,
-            review_mode=task.review_mode or "auto",
-        )
-        launched = True
     # PRD-224 US-001: a move back to 'assigned' (re-queue) wakes the dispatch loop
     # so the ticket is claimed on the LISTEN wake, not the fallback poll — the same
-    # claimable guard the HTTP layer notifies on. in_progress launches inline above.
-    elif _is_dispatch_claimable(task):
+    # claimable guard the HTTP layer notifies on.
+    if _is_dispatch_claimable(task):
         _notify_dispatch_safe(db, workspace_id, task.id)
 
     return {
         "success": True,
         "task_id": task.id,
         "status": task.status,
-        "triggered_execution": launched,
+        "triggered_execution": False,
     }
