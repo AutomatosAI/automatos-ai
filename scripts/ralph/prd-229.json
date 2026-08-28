@@ -154,6 +154,81 @@
     "orchestrator/services/orchestrator_answers.py",
     "orchestrator/tests/"
    ]
+  },
+  {
+   "id": "P229-RVW-6",
+   "title": "HIGH — a parked task is not held: record_task_completion clobbers the draft and completes it, and apply_answered_clarification has zero production callers so the human answer can never resume",
+   "description": "REVIEW FINDING (HIGH, verified end-to-end; DISTINCT from P229-RVW-5's uncommitted-draft/rollback angle — this occurs even after RVW-5 commits the draft). escalate_clarification writes a draft + PENDING_KEY and returns {parked} so the agent stops (clarification_ladder.py:64,79-103), but NOTHING in the coordinator holds the task. After the agent tool loop returns, coordinator_service.py:1764 UNCONDITIONALLY calls _record_task_result -> dispatcher.record_task_completion (coordinator_service.py:2381) with NO pending_ask_id() check. On success that path FULL-REPLACES output_metadata (dispatcher.py:759 — a brand-new dict, wiping the clarification_draft key) and transitions the task to COMPLETED (dispatcher.py:771). apply_answered_clarification/pending_ask_id have ZERO production callers (grep: only tests; render_resume_block at dispatcher.py:939 reads RESUME_KEY, which ONLY apply_answered_clarification sets, so the resume block is dead code in the live flow). NET, reachable now (the tool is live in TASK_EXECUTION — modes.py:34,38): a mission agent that calls platform_ask_orchestrator and escalates gets a real, human-notifying ask_human grant, then the task COMPLETES with the agent's post-park text as PERMANENT output (consumed by downstream dependent tasks) and the draft is wiped — the human's answer can never resume the work. This is the auto-hold/rerun gap surfaced in US-003 AC5, but the surfacing understated it: the tool is live-exposed while escalation actively ORPHANS human asks and DEGRADES task output, not merely 'not yet wired'. FIX closes the REACHABLE HARM only — the full auto-hold/rerun dispatch surgery stays Gerard's call (US-003 AC5 flags stall-detection/infinite-loop interactions needing the real loop + integration tests; do NOT wire it blind).",
+   "acceptanceCriteria": [
+    "A parked task's clarification_draft is NOT destroyed by completion recording: record_task_completion preserves DRAFT_KEY when pending_ask_id(task) is truthy (merge, not full-replace) and does not finalize a parked task — OR platform_ask_orchestrator's escalation path is gated out of the live surface until the hold is wired. Test drives a parked task through record_task_completion and asserts the chosen invariant (DRAFT_KEY survives / task not COMPLETED, or the tool/escalation is gated).",
+    "No orphaned human ask in the live flow: either the escalation's ask_human grant is reachable by the resume bridge (apply_answered_clarification is called from the live dispatch/resume path) OR a live escalation does not create a durable human ask until resume is wired — proven by test.",
+    "The story explicitly does NOT wire the risky auto-hold/rerun blind (US-003 AC5 defers that to Gerard); it closes the orphaned-ask + clobbered-draft reachability only, and the deferral is re-stated in the code/comment.",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_escalation_ladder.py and the dispatcher suite green (no regression)."
+   ],
+   "files": [
+    "orchestrator/modules/coordination/dispatcher.py",
+    "orchestrator/services/coordinator_service.py",
+    "orchestrator/services/clarification_ladder.py",
+    "orchestrator/modules/tools/discovery/handlers_clarify.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "P229-RVW-7",
+   "title": "MEDIUM — governance keyword backstop misses common phrasings, so spend/destructive/scope questions can be auto-answered instead of escalated",
+   "description": "REVIEW FINDING (MEDIUM, verified). Governance detection = caller-declared category (optional, LLM-self-declared, advisory — actions_clarify.py:52-60) OR a conservative substring scan (_GOVERNANCE_KEYWORDS orchestrator_answers.py:54-67; _governance_category :168-180). The substring list has real gaps for natural phrasing: spend lacks cost/expense/fee/billing and matches 'budget increase' only in that word order (so 'increase the budget' misses); destructive lacks overwrite/revoke/deactivate/reformat/uninstall; scope needs verbatim 'scope change'/'out of scope' (so 'should I also fix X while I am here?' misses). FAILURE: platform_ask_orchestrator(question='Should I increase the compute budget for this task?', category=None) -> _governance_category returns None -> ordinary clarification -> Auto composes a grounded, cited answer on a SPEND decision with no human in the loop. The answer is grounded (not a fabrication) and downstream approval gates still apply (PRD-229 §4), so this is a hardening of the escalate-governance guarantee (G3), not a fabrication. Existing governance tests exercise only verbatim keywords (delete/purchase/scope change). FIX: broaden keyword coverage and add a natural-phrasing fixture that must escalate.",
+   "acceptanceCriteria": [
+    "_GOVERNANCE_KEYWORDS broadened to cover the missed stems (at minimum spend: cost/expense/fee/billing + word-order-independent budget; destructive: overwrite/revoke/deactivate/reformat/uninstall; scope: implicit 'also'/additional-work phrasing) — grep the new needles.",
+    "A parametrized test of natural-phrasing governance questions (e.g. 'increase the compute budget', 'overwrite the records', 'also fix the login page') asserts each returns escalate_directly with zero LLM composition (stub.calls==0).",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_orchestrator_answers.py green."
+   ],
+   "files": [
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/tests/test_prd229_orchestrator_answers.py"
+   ]
+  },
+  {
+   "id": "P229-RVW-8",
+   "title": "MEDIUM — no per-task cap on platform_ask_orchestrator rounds: N slow answer rounds can consume most of the task envelope (the 30s box bounds ONE call only)",
+   "description": "REVIEW FINDING (MEDIUM, verified). CLARIFICATION_ANSWER_TIMEOUT (config.py, 30s) bounds a SINGLE answer round (handlers_clarify.py:74-78 asyncio.wait_for). CLARIFICATION_BUDGET (3) caps ANSWERED rounds per RUN (not per task), and cannot_answer/escalate rounds are unlimited by design. So one light-mode task (max_tool_iterations=5, timeout_seconds=120 — coordinator_service.py:92) can spend up to 3 near-30s answered rounds = ~90s of its 120s asyncio.wait_for envelope on clarifications alone, before its own LLM turns; the outer envelope then hard-cancels the ENTIRE task (lost work + retry) instead of gracefully declining a round. The config comment ('30s sits well inside the smallest envelope … can never blow the task timeout') and the only test (test_prd229_ask_orchestrator.py — asserts 0 < timeout < 120) reason about a SINGLE call, not the N the tool permits per task. Low-probability (needs near-max timings) but real. FIX: bound the CUMULATIVE clarification time or count per task (a per-task call cap, or subtract elapsed clarification time from the remaining envelope) so N rounds cannot approach the envelope; update the config comment to state the per-task bound.",
+   "acceptanceCriteria": [
+    "A per-task bound exists so cumulative platform_ask_orchestrator time (or call count) cannot approach the task envelope — a constant in config.py (no os.getenv outside config.py), documented with the light=120s arithmetic for N calls (not 1).",
+    "Test: N (>= the cap) ask_orchestrator calls in one task hit the cap and the (N+1)th short-circuits WITHOUT a 30s round (the answer/timeout path is not entered).",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_ask_orchestrator.py green."
+   ],
+   "files": [
+    "orchestrator/config.py",
+    "orchestrator/modules/tools/discovery/handlers_clarify.py",
+    "orchestrator/tests/test_prd229_ask_orchestrator.py"
+   ]
+  },
+  {
+   "id": "P229-RVW-9",
+   "title": "MEDIUM — every retrieved block is reported as a source, not the subset the model cited — weakens the grounded/cited guarantee",
+   "description": "REVIEW FINDING (MEDIUM, verified). answer_clarification returns sources = [b['source'] for b in blocks] (orchestrator_answers.py:159) — EVERY retrieved block (up to _MAX_BLOCKS=12, spanning upstream/field/memory/corpus/fleet), regardless of whether the composition used it. The system prompt asks the model to 'Cite the [n] blocks you used' (:409-415) but nothing parses the [n] markers back against sources, and _upstream_blocks includes every upstream dependency output with no relevance filter (:228-281). Every source IS a real retrieved ref (not a fabrication), but an answer composed from 1 of 12 blocks still reports all 12 as its grounding — over-claiming the 'every answer carries the source refs it was grounded on' guarantee the module docstring makes, and misleading any downstream audit/UI that treats sources as 'what was actually used'. Tests cover only the single-block happy path. FIX: parse the model's [n] citations and return only the cited blocks' sources (fall back to all only when the model cited none), OR rename/document the field as the retrieved-context set rather than the cited subset.",
+   "acceptanceCriteria": [
+    "sources reflects the blocks the composition cited (parse [n] markers) not the full retrieval set — OR the field is renamed/documented (e.g. retrieved_context) to match reality. Pick one; a test asserts the chosen contract.",
+    "Test: a composed answer citing only [1] of several retrieved blocks returns exactly that block's source (or the renamed field is documented as carrying all).",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_orchestrator_answers.py green."
+   ],
+   "files": [
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/tests/test_prd229_orchestrator_answers.py"
+   ]
+  },
+  {
+   "id": "P229-RVW-10",
+   "title": "LOW/MEDIUM — the workspace-ownership check in _load_task does not gate the upstream-outputs READ it is documented to protect (defence-in-depth gap; not exploitable today)",
+   "description": "REVIEW FINDING (LOW/MEDIUM, verified; NOT independently exploitable). _load_task (handlers_clarify.py:112-148) withholds the task ORM object when the run does not belong to workspace_id, and the comment at orchestrator_answers.py:255-259 claims cross-tenant protection is 'defence in depth behind the executor strip + _load_task scope'. But _upstream_blocks reads subject.task_id/subject.run_id directly (orchestrator_answers.py:234), never subject.task, so _load_task's workspace result only decides whether _park_task_with_draft gets a task to write — it never gates the upstream READ. That read is protected solely by its own OrchestrationTask.run_id==subject.run_id filter (:260) plus the executor strip (_bind_ask_orchestrator_context) that makes run_id/task_id self-consistent from server field_context — hence no live exploit. But the documented defence-in-depth is not actually wired: if workspace_id and the field_context run_id ever diverged (e.g. the known cached-agent-runtime workspace-staleness pattern), _upstream_blocks would read that run's outputs with no workspace check while _external_blocks used the different subject.workspace_id — a split-provenance answer. FIX: scope the _upstream_blocks read through the run->workspace join (make the defence-in-depth real), or correct the comment to claim only the run_id + executor-strip protection it actually has.",
+   "acceptanceCriteria": [
+    "Either _upstream_blocks confirms the run belongs to subject.workspace_id before returning dep outputs (test: a dep whose run is owned by a different workspace -> []), OR the orchestrator_answers.py comment is corrected to drop the _load_task-scope defence-in-depth claim for the read (grep).",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_orchestrator_answers.py green."
+   ],
+   "files": [
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/modules/tools/discovery/handlers_clarify.py",
+    "orchestrator/tests/test_prd229_orchestrator_answers.py"
+   ]
   }
  ]
 }
