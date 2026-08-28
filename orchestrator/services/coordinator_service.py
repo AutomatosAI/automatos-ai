@@ -2207,10 +2207,17 @@ class CoordinatorService:
             # resolved on the serial DB path. Threaded into execute_with_prompt →
             # the tool loop → PlatformActionExecutor so field_id no longer comes
             # from a `.first()` guess over concurrent running missions.
+            # PRD-229: also carry the calling task/run/agent identity so
+            # ask_orchestrator resolves its clarification subject from server
+            # context (never a tool param) — present even when the run has no
+            # field. field_id is added only when the mission actually has one.
             "field_context": {
-                "field_id": field_id,
+                "run_id": str(run.id),
+                "task_id": str(task.id),
+                "agent_id": agent_id,
                 "mission_id": str(run.id),
-            } if field_id else None,
+                **({"field_id": field_id} if field_id else {}),
+            },
         }
 
     async def _run_agent_io(

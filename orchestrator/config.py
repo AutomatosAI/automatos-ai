@@ -938,6 +938,31 @@ class Config:
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
+    # PRD-229: mid-run clarifications (ask_orchestrator). CLARIFICATION_BUDGET
+    # caps how many questions Auto ANSWERS per run from retrievable context;
+    # once spent, everything escalates (escalations are never budget-limited —
+    # they are visible and cheap by design). Default 3 (Gerard, 2026-08-27).
+    CLARIFICATION_BUDGET: int = int(os.getenv("CLARIFICATION_BUDGET", "3"))
+    # PRD-229: hard time-box for ONE ask_orchestrator answer round (retrieval +
+    # one composition call). It runs INSIDE the executing task's asyncio.wait_for
+    # envelope (coordinator_service._run_agent_io), whose timeout is the power
+    # mode's timeout_seconds (_POWER_MODE_DEFAULTS: light=120s, standard=240s,
+    # max=600s). 30s sits well inside the SMALLEST (light, 120s) envelope; the
+    # cumulative N-round bound is CLARIFICATION_MAX_ROUNDS_PER_TASK below (this
+    # constant only bounds a SINGLE round). On time-box expiry the tool takes the
+    # cannot_answer path.
+    CLARIFICATION_ANSWER_TIMEOUT: int = int(os.getenv("CLARIFICATION_ANSWER_TIMEOUT", "30"))
+    # PRD-229 (P229-RVW-8): CLARIFICATION_ANSWER_TIMEOUT bounds ONE round and
+    # CLARIFICATION_BUDGET caps ANSWERED rounds per RUN — but neither bounds the
+    # CUMULATIVE answer-round time a SINGLE task can spend (N rounds ×
+    # CLARIFICATION_ANSWER_TIMEOUT could approach the task envelope, then the outer
+    # asyncio.wait_for hard-cancels the WHOLE task — lost work + retry). This caps
+    # the answer rounds one task may ENTER: worst-case clarification time =
+    # CLARIFICATION_MAX_ROUNDS_PER_TASK × CLARIFICATION_ANSWER_TIMEOUT (2 × 30s =
+    # 60s) — half the smallest (light, 120s) envelope, leaving ~60s for the task's
+    # own LLM turns. The (cap+1)th ask_orchestrator call short-circuits to
+    # escalation (park + human) WITHOUT entering a 30s round.
+    CLARIFICATION_MAX_ROUNDS_PER_TASK: int = int(os.getenv("CLARIFICATION_MAX_ROUNDS_PER_TASK", "2"))
     # Note: synthesis-task model selection is now driven by power_mode +
     # the agent's own configured model — no synthesis-specific override.
     # System LLM (gemini-2.5-flash) is reserved for codegraph / memory / planner.

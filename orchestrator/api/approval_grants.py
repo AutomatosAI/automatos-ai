@@ -506,6 +506,13 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
     from core.models.approval_grants import SUBJECT_PLAYBOOK_RUN, SUBJECT_TOOL_CALL
 
     if grant.subject_type == SUBJECT_TOOL_CALL:
+        # PRD-229 US-005 BRIDGE: a mid-run clarification park is a tool_call grant
+        # carrying an OrchestrationTask id parked on THIS ask (no stored call).
+        # Bridge the answer into the task's next-run context instead of the
+        # PRD-193 stored-call path — this is the missing production caller of
+        # apply_answered_clarification (no parallel resume path).
+        if _resume_clarification_if_parked(db, grant):
+            return
         await _resume_tool_call(db, grant)
         return _executed_result_succeeded(grant)
     if grant.subject_type == SUBJECT_PLAYBOOK_RUN:
@@ -541,6 +548,39 @@ def _requeue_blocked_task(db: Session, workspace_id: Any, task_id: Any) -> bool:
     except Exception:
         logger.warning("[approval_grants.api] notify_task_available failed", exc_info=True)
     return True
+
+
+def _resume_clarification_if_parked(db: Session, grant: ApprovalGrant) -> bool:
+    """PRD-229 US-005 BRIDGE: if this ``tool_call`` grant is a mid-run
+    clarification park, bridge the human answer into the parked OrchestrationTask's
+    resume context and return True; else return False (a PRD-193 stored-call grant
+    resumes through ``_resume_tool_call`` unchanged).
+
+    A clarification park is discriminated precisely: the grant's ``subject_id`` is
+    an OrchestrationTask id whose ``input_context`` is parked on THIS ask
+    (``pending_ask_id(task) == grant.id``). On match,
+    ``apply_answered_clarification`` sets RESUME_KEY (the Q&A) + clears PENDING_KEY,
+    so the held task drops out of dispatch_ready's hold and the next 5s coordinator
+    tick re-dispatches it — its prompt then carries render_resume_block's Q&A +
+    preserved draft. This is the ONLY production caller; no parallel resume path."""
+    from core.models.orchestration import OrchestrationTask
+    from services.clarification_ladder import apply_answered_clarification, pending_ask_id
+
+    try:
+        task = (
+            db.query(OrchestrationTask)
+            .filter(OrchestrationTask.id == grant.subject_id)
+            .first()
+        )
+    except Exception:  # noqa: BLE001 — a non-orchestration subject_id is not a clarification park
+        logger.debug(
+            "[approval_grants.api] clarification bridge: subject_id %s is not an orchestration task",
+            grant.subject_id,
+        )
+        return False
+    if task is None or str(pending_ask_id(task)) != str(grant.id):
+        return False
+    return apply_answered_clarification(db, task)
 
 
 async def _resume_tool_call(db: Session, grant: ApprovalGrant) -> None:
