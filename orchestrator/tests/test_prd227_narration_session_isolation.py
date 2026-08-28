@@ -84,6 +84,14 @@ def test_narration_delivery_runs_on_independent_session(monkeypatch):
     # The coordinator session was neither committed nor rolled back by narration.
     caller.commit.assert_not_called()
     caller.rollback.assert_not_called()
+    # PRD-227 P227-RVW-5: the trailing chat_changed pg_notify is flushed by
+    # committing the INDEPENDENT session on the success path — else close would
+    # roll it back (reset_on_return='rollback') and the live SSE frame would never
+    # fire. The commit lands on the narration session (never the caller's) and
+    # happens BEFORE the close.
+    narration_db.commit.assert_called_once()
+    ordered = [c[0] for c in narration_db.method_calls if c[0] in ("commit", "close")]
+    assert ordered == ["commit", "close"]
     # The short-lived session was closed.
     narration_db.close.assert_called_once()
 
@@ -317,4 +325,89 @@ def test_approve_plan_persists_running_with_noop_messenger(seeded, new_session, 
     verify = new_session()
     persisted = verify.query(OrchestrationRun).get(run_id)
     assert persisted is not None and persisted.state == RunState.RUNNING.value
+    verify.close()
+
+
+def test_narration_notify_reaches_board_events_listener(seeded, new_session, engine):
+    """AC3 — a raw LISTEN on the 'board_events' channel RECEIVES a ``chat_changed``
+    frame for a mission-narration line driven through the REAL ``_narrate_mission``
+    → deliver_background_message → post_background_message path.
+
+    Proves the P227-RVW-5 fix delivers the live push end-to-end: the independent
+    narration session COMMITS its trailing ``pg_notify`` (before RVW-5 it was
+    rolled back on close and Postgres never delivered it), so the message row AND
+    the NOTIFY are both present. Uses the REAL ``SessionLocal`` (unpatched) so the
+    genuine commit fires. Mirrors ``board_events._SSEListener``'s raw LISTEN;
+    skips cleanly without Postgres (CI test.yml is the gate)."""
+    import json as _json
+    import select as _select
+    import time as _time
+    import types
+
+    from core.models.core import Message
+    from services.board_events import NOTIFY_CHANNEL
+
+    ws_id, clerk_id, chat_id = seeded
+
+    # Raw LISTEN on the SSE lane's channel, mirroring _SSEListener: autocommit so
+    # the LISTEN registers immediately (a LISTEN inside a tx only takes on commit).
+    raw = engine.raw_connection()
+    try:
+        raw.connection.autocommit = True
+        cur = raw.cursor()
+        cur.execute(f"LISTEN {NOTIFY_CHANNEL}")
+
+        # Run whose origin is the creator's OWN chat (the owner check honours it),
+        # narrated through the REAL messenger on the REAL independent SessionLocal.
+        run = types.SimpleNamespace(
+            id=uuid.uuid4(),
+            workspace_id=uuid.UUID(ws_id),
+            goal="RVW-5 live push",
+            created_by=clerk_id,
+            state=RunState.RUNNING.value,
+            config={"origin_chat_id": chat_id},
+            plan={"tasks": [{"id": 1}]},
+            stop_detail=None,
+            stop_reason=None,
+        )
+
+        caller = new_session()
+        cs._narrate_mission(
+            caller, run, "Mission approved — starting", level="run", event="run_started"
+        )
+        caller.close()  # caller session owns nothing here; narration used its own
+
+        # Drain notifications for a short window (the NOTIFY fired on the narration
+        # commit, which already returned above).
+        got = []
+        end = _time.time() + 5.0
+        while _time.time() < end and not got:
+            if _select.select([raw.connection], [], [], 1.0)[0]:
+                raw.connection.poll()
+                while raw.connection.notifies:
+                    got.append(raw.connection.notifies.pop(0).payload)
+
+        frames = [_json.loads(p) for p in got]
+        chat_frames = [
+            d for d in frames
+            if d.get("event") == "chat_changed" and d.get("workspace_id") == ws_id
+        ]
+        assert chat_frames, f"no chat_changed NOTIFY received from narration: {got}"
+        assert any(d.get("chat_id") == chat_id for d in chat_frames), (
+            f"chat_changed NOTIFY did not target the origin chat {chat_id}: {chat_frames}"
+        )
+    finally:
+        # Return the connection to the pool CLEAN (the _SSEListener lesson: a leaked
+        # autocommit connection silently auto-commits the next SessionLocal caller).
+        try:
+            raw.connection.autocommit = False
+        except Exception:  # noqa: BLE001
+            pass
+        raw.close()
+
+    # The message row persisted too (save_message committed it) — the live NOTIFY
+    # is not firing on an empty write.
+    verify = new_session()
+    msgs = verify.query(Message).filter(Message.chat_id == uuid.UUID(chat_id)).all()
+    assert len(msgs) >= 1
     verify.close()

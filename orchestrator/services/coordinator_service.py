@@ -449,6 +449,21 @@ def _narrate_mission(
                 link_type="mission",
                 link_id=str(run.id),
             )
+            # PRD-227 P227-RVW-5: flush the trailing chat_changed pg_notify so the
+            # open launching chat lights up at SSE latency. save_message hard-commits
+            # the message row, but post_background_message's notify_chat_event issues
+            # its pg_notify on THIS autocommit=False session (SessionLocal,
+            # database.py:94) without committing — closing the session would roll
+            # that back (reset_on_return='rollback') and Postgres never delivers the
+            # NOTIFY (a NOTIFY fires only when its issuing tx commits), so the
+            # 'Auto · mission' line would persist yet never reach the open thread
+            # until the next manual refetch. Committing THIS independent session
+            # flushes it — still NEVER the coordinator's shared db (the RVW-1
+            # invariant). deliver_background_message is fail-soft (rolls back its own
+            # session on failure), so on the failure path this commits an empty tx;
+            # a raising commit is caught by the outer handler and the session is
+            # still closed in finally.
+            narration_db.commit()
         finally:
             narration_db.close()
     except Exception:  # noqa: BLE001 — narration is best-effort, never fatal
