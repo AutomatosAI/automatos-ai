@@ -410,6 +410,9 @@ def _narrate_mission(
     send. Routed through ``deliver_background_message`` (the only PRD-205
     producer seam) and wrapped fail-soft, so a chat failure never breaks the
     coordinator tick or lifecycle transition that produced the event.
+
+    The delivery runs on an INDEPENDENT short-lived session, never the
+    coordinator's shared ``db`` (PRD-227 P227-RVW-1) — see below.
     """
     try:
         if level == "task" and _mission_task_count(run) > Config.MISSION_NARRATION_TASK_CAP:
@@ -417,18 +420,37 @@ def _narrate_mission(
         cfg = getattr(run, "config", None) or {}
         origin_chat = cfg.get("origin_chat_id") if isinstance(cfg, dict) else None
 
+        from core.database.database import SessionLocal
         from services.chat_messenger import deliver_background_message
 
-        deliver_background_message(
-            db,
-            workspace_id=run.workspace_id,
-            text=text,
-            source={"origin": "mission", "label": _MISSION_NARRATION_LABEL, "event": event},
-            chat_id=str(origin_chat) if origin_chat else None,
-            clerk_user_id=getattr(run, "created_by", None),
-            link_type="mission",
-            link_id=str(run.id),
-        )
+        # PRD-227 P227-RVW-1: narration must NEVER commit or roll back the
+        # coordinator's SHARED session. ChatService.save_message hard-commits,
+        # and deliver_background_message rolls back on failure; on the
+        # coordinator's own session — this fires MID-transaction, before the
+        # caller commits (approve_plan / _record_task_result / cancel_mission /
+        # the tick terminal observer / approval-expiry) — that would either
+        # commit half-built mission state early or, on a transient chat-write
+        # failure, roll back the caller's uncommitted transition (RUNNING +
+        # queued tasks) and silently strand the mission. An independent
+        # short-lived session (the isolation the tick already uses for side
+        # effects) confines the commit AND any rollback to the message insert
+        # alone — the coordinator transaction is untouched on both paths. This
+        # matches US-001's notify_board_event, which never commits the caller's
+        # session either.
+        narration_db = SessionLocal()
+        try:
+            deliver_background_message(
+                narration_db,
+                workspace_id=run.workspace_id,
+                text=text,
+                source={"origin": "mission", "label": _MISSION_NARRATION_LABEL, "event": event},
+                chat_id=str(origin_chat) if origin_chat else None,
+                clerk_user_id=getattr(run, "created_by", None),
+                link_type="mission",
+                link_id=str(run.id),
+            )
+        finally:
+            narration_db.close()
     except Exception:  # noqa: BLE001 — narration is best-effort, never fatal
         logger.error(
             "[Coordinator] mission narration (%s) failed for run %s",
