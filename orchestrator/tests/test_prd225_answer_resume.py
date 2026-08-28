@@ -34,7 +34,7 @@ if str(_ORCH) not in sys.path:
 
 from fastapi import HTTPException
 
-from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_QUESTION
+from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_APPROVAL, KIND_QUESTION
 from core.models.core import BoardTask
 
 
@@ -57,7 +57,13 @@ class _Query:
         for cond in conds:
             key = cond.left.key
             value = getattr(cond.right, "value", None)
-            rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
+            if isinstance(value, (list, tuple, set)):
+                # column.in_([...]) — the P225-RVW-18 revoke CAS guard
+                # (status IN ('pending','granted')). Emulate set membership.
+                allowed = {str(v) for v in value}
+                rows = [r for r in rows if str(getattr(r, key, None)) in allowed]
+            else:
+                rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
         return _Query(rows)
 
     def order_by(self, *a):
@@ -376,3 +382,64 @@ async def test_concurrent_answers_apply_once(ws, ctx, confirmed):
     qa = task.planning_data["human_qa"]
     assert len(qa) == 1 and qa[0]["a"] == "Ship A"  # exactly one Q&A entry
     assert len(confirmed) == 1                       # exactly one confirmation
+
+
+# ===========================================================================
+# 8. P225-RVW-18 — deny/revoke flip status via the SAME compare-and-swap, so a
+# /deny (or /revoke) racing a just-applied /answer cannot overwrite the resolved
+# grant, leaving a self-contradictory audited row.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_deny_racing_answer_is_a_noop(ws, ctx, confirmed):
+    """A dismiss (/deny) racing a just-applied /answer: the answer flips
+    pending→granted, so deny's CAS (UPDATE ... WHERE status='pending') matches 0
+    rows → 422, and the row STAYS granted with answer_text intact — never a grant
+    that reads BOTH answered and denied for one id (P225-RVW-18)."""
+    from api.approval_grants import apply_question_answer, deny_approval
+
+    db = _FakeSession()
+    task = BoardTask(id=42, workspace_id=ws, title="T", status="blocked")
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="42")
+
+    # The answer wins first (pending→granted, Q&A recorded, task re-queued).
+    await apply_question_answer(db, grant, answer_text="Ship A", answered_by="user:1")
+    assert grant.status == GrantStatus.GRANTED.value
+
+    # The racing dismiss loses the CAS — 422, and it overwrites NOTHING.
+    with pytest.raises(HTTPException) as ei:
+        await deny_approval(grant.id, ctx, db)
+    assert ei.value.status_code == 422
+    assert grant.status == GrantStatus.GRANTED.value      # not flipped to denied
+    assert grant.answer_text == "Ship A"                  # answer intact
+    assert grant.revoked_by is None                       # no dismiss actor recorded
+
+
+@pytest.mark.asyncio
+async def test_revoke_racing_resolution_is_a_noop(ws, ctx):
+    """Two /revoke calls (or a revoke racing a deny) apply exactly once: the first
+    flips granted→revoked; the second's CAS (WHERE status IN ('pending','granted'))
+    matches 0 rows → 422, leaving the FIRST revoker's resolution intact — the
+    RVW-14 pattern extended to revoke (P225-RVW-18)."""
+    from api.approval_grants import revoke_approval
+
+    db = _FakeSession()
+    grant = ApprovalGrant(
+        workspace_id=ws, subject_type="tool_call", subject_id="call-9",
+        kind=KIND_APPROVAL, status=GrantStatus.GRANTED.value,
+    )
+    db.add(grant)
+
+    # First revoke wins (granted→revoked).
+    res = await revoke_approval(grant.id, ctx, db)
+    assert grant.status == GrantStatus.REVOKED.value
+    assert res["grant"]["status"] == GrantStatus.REVOKED.value
+    first_revoker = grant.revoked_by
+
+    # The racing second revoke loses the CAS — 422, resolution unchanged.
+    with pytest.raises(HTTPException) as ei:
+        await revoke_approval(grant.id, ctx, db)
+    assert ei.value.status_code == 422
+    assert grant.status == GrantStatus.REVOKED.value      # still revoked, once
+    assert grant.revoked_by == first_revoker              # loser did not overwrite

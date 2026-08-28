@@ -169,6 +169,55 @@ async def grant_approval(
     return {"grant": grant.to_dict()}
 
 
+def _cas_resolve_grant(
+    db: Session,
+    grant: ApprovalGrant,
+    *,
+    to_status: str,
+    allowed_from: tuple,
+    actor: str,
+    now: datetime,
+) -> bool:
+    """Atomically flip ``grant.status`` to ``to_status`` ONLY while it is still
+    one of ``allowed_from`` — the compare-and-swap that stops a deny / revoke
+    racing a just-applied answer (or another deny / revoke) from overwriting an
+    already-resolved grant (P225-RVW-18: the RVW-14 pattern extended to the two
+    resolve endpoints that lacked it).
+
+    Returns ``True`` if THIS call won the flip (the caller proceeds to
+    ``_fail_subject`` / audit-as-success); ``False`` means the grant was already
+    resolved, and the caller MUST 422 with no in-memory mutate, no
+    ``_fail_subject`` and no audit-as-success — never an unconditional commit.
+    ``UPDATE ... WHERE id AND status IN (allowed_from)`` is atomic in Postgres, so
+    the race-loser matches 0 rows and is a safe no-op. ``synchronize_session=False``
+    leaves the ORM row stale, so on a win the in-memory row is synced for the
+    caller's ``_fail_subject`` / ``to_dict`` / audit.
+    """
+    flipped = (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.id == grant.id,
+            ApprovalGrant.status.in_(list(allowed_from)),
+        )
+        .update(
+            {
+                ApprovalGrant.status: to_status,
+                ApprovalGrant.revoked_at: now,
+                ApprovalGrant.revoked_by: actor,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not flipped:
+        db.rollback()
+        db.refresh(grant)
+        return False
+    grant.status = to_status
+    grant.revoked_at = now
+    grant.revoked_by = actor
+    return True
+
+
 @router.post("/{grant_id}/deny")
 async def deny_approval(
     grant_id: int,
@@ -178,14 +227,22 @@ async def deny_approval(
     """Refuse a pending grant. An approval denial FAILS the subject; a question
     denial is a *dismiss* — the subject stays blocked and the asker may re-ask
     (PRD-225 baked decision), so no answer is fabricated and the trail is kept."""
-    from core.services.approval_grants import deny_grant
-
     grant = _load_grant(db, ctx, grant_id)
-    if grant.status != GrantStatus.PENDING.value:
+    is_question = grant.kind == KIND_QUESTION
+
+    # Atomic pending→denied flip. A /deny racing a just-applied /answer (dismiss in
+    # the Questions tab while a Telegram reply answers) must NOT overwrite the
+    # answered row to 'denied' (P225-RVW-18) — the CAS loser 422s and changes
+    # nothing, so the audit log never carries BOTH answered and dismissed for one id.
+    if not _cas_resolve_grant(
+        db, grant,
+        to_status=GrantStatus.DENIED.value,
+        allowed_from=(GrantStatus.PENDING.value,),
+        actor=_actor_ref(ctx),
+        now=datetime.now(timezone.utc),
+    ):
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
 
-    is_question = grant.kind == KIND_QUESTION
-    deny_grant(grant, revoked_by=_actor_ref(ctx))
     if not is_question:
         # Only an approval denial fails the subject. A dismissed question leaves
         # the parked subject blocked — answering "use your judgment" is the
@@ -203,13 +260,21 @@ async def revoke_approval(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Retract a granted authorisation before it expires."""
-    from core.services.approval_grants import revoke_grant
-
     grant = _load_grant(db, ctx, grant_id)
-    if grant.status not in (GrantStatus.GRANTED.value, GrantStatus.PENDING.value):
+
+    # Atomic flip from pending|granted → revoked. A /revoke racing another
+    # /revoke (or a deny) must apply exactly once; the CAS loser 422s and leaves
+    # the winning resolution intact — no self-contradictory audited row
+    # (P225-RVW-18, the RVW-14 pattern extended to revoke).
+    if not _cas_resolve_grant(
+        db, grant,
+        to_status=GrantStatus.REVOKED.value,
+        allowed_from=(GrantStatus.PENDING.value, GrantStatus.GRANTED.value),
+        actor=_actor_ref(ctx),
+        now=datetime.now(timezone.utc),
+    ):
         raise HTTPException(status_code=422, detail=f"Grant cannot be revoked (status: {grant.status})")
 
-    revoke_grant(grant, revoked_by=_actor_ref(ctx))
     db.commit()
     _audit(db, ctx, "approval_grant:revoked", grant)
     return {"grant": grant.to_dict()}
