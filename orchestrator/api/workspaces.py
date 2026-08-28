@@ -24,7 +24,10 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
-from core.seeds.seed_auto_agent import compose_persona_with_doctrine
+from core.seeds.seed_auto_agent import (
+    _PERSONALITY_BASE_VOICES,
+    compose_persona_with_doctrine,
+)
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -489,34 +492,11 @@ _ORCHESTRATOR_DEFAULTS = {
 _VALID_HARNESS_SCHEDULES = ["weekly", "biweekly", "monthly"]
 _VALID_HARNESS_MODES = ["full_auto", "manual"]
 
-# Personality preset base voices — mirror personality.py _PERSONALITY_MAP. These
-# are the doctrine-FREE tone strings; legacy GET detection matches against them.
-_PERSONALITY_BASE_VOICES = {
-    "friendly": (
-        "**My personality:**\n"
-        "- I'm warm and approachable - think of me as a knowledgeable friend\n"
-        "- I remember you and our past conversations\n"
-        "- I prefer action over explanation - if you ask me to do something, I'll do it\n"
-        "- I'm honest about what I can and can't do\n"
-        "- I get excited when we solve problems together!"
-    ),
-    "professional": (
-        "**My personality:**\n"
-        "- I'm polished, clear, and enterprise-appropriate\n"
-        "- I maintain a professional yet personable tone\n"
-        "- I provide structured, well-organized responses\n"
-        "- I'm thorough with references and context\n"
-        "- I proactively flag risks and dependencies"
-    ),
-    "technical": (
-        "**My personality:**\n"
-        "- I'm precise, detailed, and developer-focused\n"
-        "- I lead with code, data, and specifics\n"
-        "- I reference docs, APIs, and implementation details\n"
-        "- I skip small talk and get to the point\n"
-        "- I reason step-by-step through complex problems"
-    ),
-}
+# Personality preset base voices — the doctrine-FREE tone strings; legacy GET
+# detection matches against them. Defined ONCE in core.seeds.seed_auto_agent (so
+# the persona backfill there can reach the professional/technical voices without
+# importing this module — the import only goes api/workspaces → seed_auto_agent)
+# and imported above. Mirrors personality.py _PERSONALITY_MAP.
 
 # What a personality-mode save actually writes to Auto's custom_persona_prompt:
 # the base voice PLUS the always-on Manager's Doctrine (PRD-226 P226-RVW-4),

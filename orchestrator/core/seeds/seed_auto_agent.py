@@ -106,18 +106,53 @@ def _default_persona() -> str:
     return compose_persona_with_doctrine(_FRIENDLY_FALLBACK)
 
 
-# Persona texts that shipped as an uncustomized default before PRD-226. A row
-# still carrying one of these has never been edited by the workspace, so the
-# doctrine backfill may safely replace it. Customized souls hash to none of
-# these and are left untouched (and reported).
-_ALEMBIC_BACKFILL_PERSONA = (
-    "**My personality:**\n"
-    "- I'm warm and approachable - think of me as a knowledgeable friend\n"
-    "- I remember you and our past conversations\n"
-    "- I prefer action over explanation - if you ask me to do something, I'll do it\n"
-    "- I'm honest about what I can and can't do\n"
-    "- I get excited when we solve problems together!"
-)
+# ── Personality preset base voices (single source) ───────────────────────────
+# The doctrine-FREE tone strings a workspace picks in Settings > Orchestrator.
+# They live HERE, not in api/workspaces, so the persona backfill can reach the
+# professional/technical voices WITHOUT importing api/workspaces — api/workspaces
+# already imports FROM this module (compose_persona_with_doctrine), so the map
+# must sit on this side of that import edge to avoid a cycle. api/workspaces
+# imports this exact object and builds _PERSONALITY_PRESETS = {mode:
+# compose_persona_with_doctrine(voice)} from it, so there is ONE definition site.
+# Mirrors personality.py _PERSONALITY_MAP.
+_PERSONALITY_BASE_VOICES = {
+    "friendly": (
+        "**My personality:**\n"
+        "- I'm warm and approachable - think of me as a knowledgeable friend\n"
+        "- I remember you and our past conversations\n"
+        "- I prefer action over explanation - if you ask me to do something, I'll do it\n"
+        "- I'm honest about what I can and can't do\n"
+        "- I get excited when we solve problems together!"
+    ),
+    "professional": (
+        "**My personality:**\n"
+        "- I'm polished, clear, and enterprise-appropriate\n"
+        "- I maintain a professional yet personable tone\n"
+        "- I provide structured, well-organized responses\n"
+        "- I'm thorough with references and context\n"
+        "- I proactively flag risks and dependencies"
+    ),
+    "technical": (
+        "**My personality:**\n"
+        "- I'm precise, detailed, and developer-focused\n"
+        "- I lead with code, data, and specifics\n"
+        "- I reference docs, APIs, and implementation details\n"
+        "- I skip small talk and get to the point\n"
+        "- I reason step-by-step through complex problems"
+    ),
+}
+
+
+# The persona that shipped as an uncustomized default before PRD-226: the
+# 'friendly' base voice, inserted verbatim into every pre-existing workspace by
+# orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py. It is
+# byte-identical to the friendly base voice above (verified against the migration
+# SQL) — kept as an ALIAS, not a second literal, so the base voices keep one
+# definition site. A row still carrying a shipped default (this, or a preset base
+# voice, or the CTO-soul snapshot below) has never been hand-edited, so the
+# doctrine backfill may safely lift it; customized souls hash to none of the
+# defaults and are left untouched (and reported).
+_ALEMBIC_BACKFILL_PERSONA = _PERSONALITY_BASE_VOICES["friendly"]
 
 
 def _persona_hash(text: str) -> str:
@@ -154,48 +189,99 @@ _CTO_SOUL_APR2026_SNAPSHOT_HASH = (
 )
 
 
-_KNOWN_SEED_PERSONA_HASHES = frozenset({
-    _persona_hash(_FRIENDLY_FALLBACK),
-    _persona_hash(_ALEMBIC_BACKFILL_PERSONA),
-    _CTO_SOUL_APR2026_SNAPSHOT_HASH,
-})
+# ── PRD-226 P226-RVW-6: voice-preserving, mode-aware backfill ────────────────
+# Each doctrine-FREE shipped default lifts to the doctrine-carrying version of
+# ITS OWN voice, and declares the personality_mode that names that voice — so a
+# workspace that picked 'Professional' or 'Technical' keeps its tone (never
+# silently swapped to the friendly voice by a blunt lift-to-_default_persona) and
+# Settings GET reports the right mode. Friendly-family defaults — the rich
+# onboarding _FRIENDLY_FALLBACK, the terse friendly base voice (== the alembic
+# backfill persona), and the transient CTO-soul residue — all lift to
+# _default_persona() with mode 'friendly', unchanged from RVW-4/RVW-5.
+#
+#   {hash(doctrine-FREE shipped default) -> (doctrine-carrying target,
+#    personality_mode to stamp when the row has no stored mode)}
+#
+# The CTO snapshot is keyed by its recovered raw hash (its source text is pinned,
+# not carried here — see the provenance note above).
+_PERSONA_BACKFILL_LIFTS: dict[str, tuple[str, str]] = {
+    _persona_hash(_FRIENDLY_FALLBACK): (_default_persona(), "friendly"),
+    _persona_hash(_ALEMBIC_BACKFILL_PERSONA): (_default_persona(), "friendly"),
+    _CTO_SOUL_APR2026_SNAPSHOT_HASH: (_default_persona(), "friendly"),
+    _persona_hash(_PERSONALITY_BASE_VOICES["professional"]): (
+        compose_persona_with_doctrine(_PERSONALITY_BASE_VOICES["professional"]),
+        "professional",
+    ),
+    _persona_hash(_PERSONALITY_BASE_VOICES["technical"]): (
+        compose_persona_with_doctrine(_PERSONALITY_BASE_VOICES["technical"]),
+        "technical",
+    ),
+}
+
+# The doctrine-FREE shipped defaults the backfill may replace — exactly the key
+# set of the lift table. Kept as a public name for callers/tests that assert
+# replace-set membership (a row on one of these is a shipped default, not a
+# customization).
+_KNOWN_SEED_PERSONA_HASHES = frozenset(_PERSONA_BACKFILL_LIFTS)
+
+# The doctrine-CARRYING texts a row can already hold and be considered CURRENT
+# (idempotent no-op, never mislabelled 'customized'): the lift targets above PLUS
+# every shipped preset (base voice + doctrine, what a settings save writes). This
+# is what makes a second pass over a lifted professional/technical row return
+# 'current', and keeps a preset-saved row out of the 'skipped (customized)' bucket.
+_CURRENT_PERSONA_HASHES = frozenset(
+    {_persona_hash(target) for target, _mode in _PERSONA_BACKFILL_LIFTS.values()}
+    | {
+        _persona_hash(compose_persona_with_doctrine(voice))
+        for voice in _PERSONALITY_BASE_VOICES.values()
+    }
+)
 
 
 def _backfill_auto_persona(agent: Agent) -> str:
     """Bring one Auto row's persona up to the current doctrine-carrying seed.
 
-    Hash-guarded (PRD-226): the persona is replaced ONLY when it still matches a
-    previously shipped seed default — a workspace that customized its Auto soul
-    is left untouched and the skip is reported. Idempotent: once a row holds the
-    current persona, re-running is a no-op. Returns 'current', 'updated', or
-    'skipped'.
+    Hash-guarded and voice-preserving (PRD-226): a row still holding a shipped
+    default is lifted to the doctrine-carrying version of THAT SAME voice — the
+    friendly family to _default_persona(), the professional/technical presets to
+    their own doctrine-carrying preset — so a workspace that picked 'Professional'
+    keeps its tone rather than being silently switched to friendly. A workspace
+    that hand-customized its Auto soul hashes to none of the shipped defaults and
+    is left untouched (the skip is reported). Idempotent: once a row holds any
+    doctrine-carrying target, re-running is a no-op. Returns 'current', 'updated',
+    or 'skipped'.
     """
     current = getattr(agent, "custom_persona_prompt", None) or ""
-    new_soul = _default_persona()
-    if _persona_hash(current) == _persona_hash(new_soul):
+    current_hash = _persona_hash(current)
+    if current_hash in _CURRENT_PERSONA_HASHES:
         return "current"
-    if _persona_hash(current) in _KNOWN_SEED_PERSONA_HASHES:
+    lift = _PERSONA_BACKFILL_LIFTS.get(current_hash)
+    if lift is not None:
+        new_soul, seed_mode = lift
         agent.custom_persona_prompt = new_soul
         agent.use_custom_persona = True
         # PRD-226 (P226-RVW-5): restore the CREATE-path invariant that a row
-        # holding _default_persona() also declares configuration.personality_mode.
+        # holding a shipped default also declares configuration.personality_mode.
         # Without it, Settings GET (api/workspaces.get_orchestrator_settings) finds
-        # no stored mode, text-matches the now doctrine-carrying ~2670-char soul
-        # against the doctrine-FREE base voices, fails, and misreports the row as
-        # 'custom' — a later settings save then stamps personality_mode='custom'
-        # permanently, opting this never-customized row out of every future
-        # doctrine backfill. All three known-seed defaults are the friendly-family
-        # shipped default, so stamp 'friendly' — but ONLY when no explicit mode is
-        # stored (never override a workspace's real choice). Rebuild the dict (a
-        # NEW object, no in-place mutation — house rule); flag it so it persists.
+        # no stored mode, text-matches the now doctrine-carrying soul against the
+        # doctrine-FREE base voices, fails, and misreports the row as 'custom' — a
+        # later settings save then stamps personality_mode='custom' permanently,
+        # opting this never-customized row out of every future doctrine backfill.
+        # Stamp the mode that NAMES the voice we lifted to (P226-RVW-6: 'friendly'
+        # for the friendly family, 'professional'/'technical' for those presets),
+        # so a subsequent same-mode save re-writes the SAME voice and converges —
+        # a blunt 'friendly' stamp on a professional row would let the next save
+        # swap it to the friendly voice. Only when no explicit mode is stored
+        # (never override a workspace's real choice). Rebuild the dict (a NEW
+        # object, no in-place mutation — house rule); flag it so it persists.
         config = dict(getattr(agent, "configuration", None) or {})
         if "personality_mode" not in config:
-            config["personality_mode"] = "friendly"
+            config["personality_mode"] = seed_mode
             agent.configuration = config
             _mark_jsonb_dirty(agent, "configuration")
         logger.info(
-            "PRD-226: backfilled manager doctrine into Auto persona for workspace %s",
-            getattr(agent, "workspace_id", "?"),
+            "PRD-226: backfilled manager doctrine into Auto persona for workspace %s (voice=%s)",
+            getattr(agent, "workspace_id", "?"), seed_mode,
         )
         return "updated"
     logger.info(
