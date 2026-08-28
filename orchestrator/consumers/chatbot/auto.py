@@ -92,6 +92,11 @@ def build_assign_directive(
     When an agent name resolved to the roster, instruct Auto to file the ticket
     for that agent and start it (unless deferred). When nothing resolved, the
     baked decision (Gerard 2026-08-27) is to ASK in-thread — never auto-pick.
+
+    P224-RVW-3: the directive must NOT hardcode a 'supervised' claim. Supervision
+    is decided later in the handler (US-005: AUTO_TICKET_WATCH may be off, or the
+    watch may fail to attach), so Auto is told to report the platform_create_task
+    result's own 'supervision' field rather than assert supervision unconditionally.
     """
     if resolved and target_agent_name:
         start = (
@@ -112,8 +117,10 @@ def build_assign_directive(
             "without reading this conversation), "
             f"assigned_agent_name=\"{target_agent_name}\".\n"
             f"2. {start}\n"
-            f"3. Confirm in ONE line with the task id and that it is {confirm_word} "
-            "and supervised — you'll report back here.\n"
+            f"3. Confirm in ONE line with the task id and that it is {confirm_word}, "
+            "then state its supervision status by echoing the platform_create_task "
+            "result's 'supervision' field (set honestly from the AUTO_TICKET_WATCH "
+            "outcome). Do NOT claim it is supervised unless that field says so.\n"
         )
     return (
         "\n\n## Manager directive — confirm the agent first\n"
