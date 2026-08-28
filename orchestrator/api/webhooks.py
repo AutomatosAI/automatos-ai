@@ -19,6 +19,7 @@ import hmac
 import logging
 import re
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
 
@@ -401,6 +402,41 @@ def _channel_for_platform(db: Session, workspace_id: Any, platform: str):
     )
 
 
+def _gated_channel_for_platform(db: Session, workspace: Any, platform: str):
+    """The channel this inbound is gated against — a ``ChannelConnection`` row if
+    one exists, else a synthetic channel for a Telegram/Slack bot that is LIVE
+    via the legacy ``settings.integrations`` bag (no channel_connections row).
+
+    Both the sender and the answer bridge honour a legacy-configured bot
+    (channels/sender.py ``_legacy_integration_config``), so both MUST be gated:
+    without this, ``strict`` (the advertised default) silently did NOT apply to
+    any workspace whose bot predates the Channels UI — plausibly most existing
+    pilots — leaving the new control with a coverage hole on the public-ingress
+    surface (P225-RVW-12). Resolving the mode from the bag (default strict) also
+    covers those EXISTING workspaces with no schema change — the wave's one
+    migration is already spent.
+
+    Returns None only when the platform is not live at all (truly no channel →
+    no gate, legacy inbound unchanged). A legacy channel's trigger_mode rides the
+    bag under ``{platform}_trigger_mode`` (settable via Settings→Integrations),
+    defaulting to strict when unset — the same default a ChannelConnection uses.
+    """
+    channel = _channel_for_platform(db, workspace.id, platform)
+    if channel is not None:
+        return channel
+
+    settings = getattr(workspace, "settings", None)
+    integrations = settings.get("integrations") or {} if isinstance(settings, dict) else {}
+    if not integrations.get(f"{platform}_bot_token"):
+        return None  # not live via legacy integrations either → no gate
+
+    mode = integrations.get(f"{platform}_trigger_mode")
+    return SimpleNamespace(
+        id=f"legacy:{platform}",
+        config=({"trigger_mode": mode} if mode else {}),
+    )
+
+
 def _telegram_message_content(m: Any) -> str:
     """Operator-visible text carried by a Telegram message / edited_message.
 
@@ -560,9 +596,9 @@ async def _apply_trust_gate(
         should_hold, trigger_mode_of, TRIGGER_MODE_ALLOW_ALL,
     )
 
-    channel = _channel_for_platform(db, workspace.id, platform)
+    channel = _gated_channel_for_platform(db, workspace, platform)
     if channel is None:
-        return None  # no connected channel → the gate does not apply
+        return None  # platform not live here → the gate does not apply
 
     # A channel exists, so this inbound IS gated. From here ANY failure must
     # fail CLOSED — return a hold, never fall through to routing — so an internal
@@ -636,25 +672,26 @@ async def _apply_trust_gate(
     }
 
 
-def _channel_is_allow_all(db: Session, workspace_id: Any, platform: str) -> bool:
-    """True only when the channel is provably ``allow_all``.
+def _channel_is_allow_all(db: Session, workspace: Any, platform: str) -> bool:
+    """True only when the channel is provably ``allow_all`` — including a legacy
+    integrations-configured bot (P225-RVW-12), resolved the same way the gate is.
 
-    Any lookup failure — or no channel row — returns False, so a trust-gate error
-    fails CLOSED (P225-RVW-5): the outer handler holds rather than silently
+    Any lookup failure — or no channel at all — returns False, so a trust-gate
+    error fails CLOSED (P225-RVW-5): the outer handler holds rather than silently
     opening a strict / communication_only channel. ``allow_all`` routes
     everything anyway, so this is the one mode where a gate error is a safe no-op.
     """
     try:
         from services.ingress_gate import trigger_mode_of, TRIGGER_MODE_ALLOW_ALL
 
-        channel = _channel_for_platform(db, workspace_id, platform)
+        channel = _gated_channel_for_platform(db, workspace, platform)
         if channel is None:
             return False
         return trigger_mode_of(channel.config) == TRIGGER_MODE_ALLOW_ALL
     except Exception:  # noqa: BLE001 — unknown mode ⇒ treat as gated (fail closed)
         logger.warning(
             "[trust-gate] allow_all resolution failed for ws=%s — treating as gated",
-            workspace_id, exc_info=True,
+            getattr(workspace, "id", None), exc_info=True,
         )
         return False
 
@@ -981,7 +1018,7 @@ async def general_workspace_webhook(
                 "[webhook/ws] trust gate errored for ws=%s — failing closed",
                 workspace.id, exc_info=True,
             )
-            if not _channel_is_allow_all(db, workspace.id, platform):
+            if not _channel_is_allow_all(db, workspace, platform):
                 try:
                     await _deliver_reply(
                         "Received — an internal check must clear before I can act on it.",

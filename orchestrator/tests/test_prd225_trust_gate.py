@@ -220,16 +220,105 @@ async def test_default_mode_is_strict(acks):
 
 @pytest.mark.asyncio
 async def test_no_channel_row_means_no_gate(acks):
-    """Legacy-integration inbound (no channel connection) is unchanged."""
+    """No channel connection AND no legacy bot token ⇒ nothing is live to gate,
+    so inbound is unchanged. (A legacy bot IS gated — see
+    test_legacy_integrations_default_is_strict, P225-RVW-12.)"""
     from api.webhooks import _apply_trust_gate
 
     db = _FakeSession()
-    ws = uuid.uuid4()  # no channel added
+    ws = uuid.uuid4()  # no channel added, workspace carries no integrations
     workspace = SimpleNamespace(id=ws)
 
     res = await _apply_trust_gate(db, workspace, "telegram", _tg("delete everything"), {"platform": "telegram"}, {})
     assert res is None
     assert not any(isinstance(r, ApprovalGrant) for r in db.rows)
+
+
+@pytest.mark.asyncio
+async def test_legacy_integrations_default_is_strict(acks):
+    """A workspace live ONLY via settings.integrations.telegram_bot_token (no
+    channel_connections row) is gated STRICT by default: an inbound directive is
+    HELD, not routed. An explicit allow_all opt-out (telegram_trigger_mode) still
+    routes (P225-RVW-12)."""
+    from api.webhooks import _apply_trust_gate
+
+    # Legacy bot, no trigger_mode set ⇒ strict default ⇒ HELD.
+    db = _FakeSession()  # NO ChannelConnection row
+    ws = SimpleNamespace(id=uuid.uuid4(), settings={
+        "integrations": {"telegram_bot_token": "FAKE_TG_TOKEN"},
+    })
+    res = await _apply_trust_gate(db, ws, "telegram", _tg("delete the vault"), {"platform": "telegram"}, {})
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+    assert grant.subject_type == "channel"
+    assert "delete the vault" in grant.question_md
+
+    # Explicit allow_all opt-out ⇒ routes as today (nothing held).
+    db2 = _FakeSession()
+    ws2 = SimpleNamespace(id=uuid.uuid4(), settings={"integrations": {
+        "telegram_bot_token": "FAKE_TG_TOKEN", "telegram_trigger_mode": "allow_all",
+    }})
+    assert await _apply_trust_gate(
+        db2, ws2, "telegram", _tg("delete the vault"), {"platform": "telegram"}, {},
+    ) is None
+    assert not any(isinstance(r, ApprovalGrant) for r in db2.rows)
+
+
+@pytest.mark.asyncio
+async def test_legacy_integrations_channel_is_gated_strict(acks):
+    """A legacy integrations-configured bot is gated the SAME as a
+    ChannelConnection channel: under communication_only a directive is HELD as a
+    channel question while chatter routes (P225-RVW-12)."""
+    from api.webhooks import _apply_trust_gate
+
+    ws = SimpleNamespace(id=uuid.uuid4(), settings={"integrations": {
+        "telegram_bot_token": "FAKE_TG_TOKEN", "telegram_trigger_mode": "communication_only",
+    }})
+
+    held = await _apply_trust_gate(
+        _FakeSession(), ws, "telegram", _tg("send the invoice now"), {"platform": "telegram"}, {},
+    )
+    assert held["reason"] == "trust_gate_hold"
+
+    routed = await _apply_trust_gate(
+        _FakeSession(), ws, "telegram", _tg("thanks so much"), {"platform": "telegram"}, {},
+    )
+    assert routed is None
+
+
+@pytest.mark.asyncio
+async def test_save_integrations_sets_the_legacy_opt_out(monkeypatch):
+    """The operator opt-out is reachable: Settings→Integrations stores a valid
+    {platform}_trigger_mode and drops garbage (⇒ strict default), so a legacy bot
+    can be moved to allow_all without a channel_connections row (P225-RVW-12)."""
+    import api.workspaces as wsmod
+
+    # flag_modified needs a real ORM instance; the fake workspace isn't one.
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda obj, key: None)
+
+    workspace = SimpleNamespace(
+        id=uuid.uuid4(),
+        settings={"integrations": {"telegram_bot_token": "FAKE_TG_TOKEN"}},
+    )
+
+    class _DB:
+        def query(self, model):
+            return self
+
+        def get(self, pk):
+            return workspace
+
+        def commit(self):
+            pass
+
+    ctx = SimpleNamespace(workspace_id=workspace.id)
+
+    await wsmod.save_integrations({"telegram_trigger_mode": "allow_all"}, ctx, _DB())
+    assert workspace.settings["integrations"]["telegram_trigger_mode"] == "allow_all"
+
+    # Garbage is not stored — the gate falls back to the strict default.
+    await wsmod.save_integrations({"telegram_trigger_mode": "bogus"}, ctx, _DB())
+    assert "telegram_trigger_mode" not in workspace.settings["integrations"]
 
 
 # ===========================================================================
@@ -587,15 +676,16 @@ def test_channel_is_allow_all_fails_closed():
     from api.webhooks import _channel_is_allow_all
 
     ws = uuid.uuid4()
+    workspace = SimpleNamespace(id=ws)
     db_allow = _FakeSession()
     db_allow.add(_channel(ws, config={"trigger_mode": "allow_all"}))
-    assert _channel_is_allow_all(db_allow, ws, "telegram") is True
+    assert _channel_is_allow_all(db_allow, workspace, "telegram") is True
 
     db_strict = _FakeSession()
     db_strict.add(_channel(ws, config={"trigger_mode": "strict"}))
-    assert _channel_is_allow_all(db_strict, ws, "telegram") is False
+    assert _channel_is_allow_all(db_strict, workspace, "telegram") is False
 
-    assert _channel_is_allow_all(_FakeSession(), ws, "telegram") is False  # no channel
+    assert _channel_is_allow_all(_FakeSession(), workspace, "telegram") is False  # no channel
 
 
 # ===========================================================================
