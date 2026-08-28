@@ -441,3 +441,96 @@ def test_load_task_guards_missing_subject():
     assert hc._load_task(db, None, "ws-A", "task-1") is None   # no run
     assert hc._load_task(db, "run-A", None, "task-1") is None  # no workspace
     assert hc._load_task(db, "run-A", "ws-A", None) is None    # no task
+
+
+# ---------------------------------------------------------------------------
+# P229-RVW-8 — per-task round cap: N rounds cannot approach the task envelope
+# ---------------------------------------------------------------------------
+
+def test_clarification_max_rounds_per_task_config():
+    # a real constant in config.py (no os.getenv outside config.py), and the
+    # cumulative bound stays well inside the smallest (light=120s) envelope:
+    # cap × single-round timeout ≤ half the envelope.
+    assert isinstance(Config.CLARIFICATION_MAX_ROUNDS_PER_TASK, int)
+    assert Config.CLARIFICATION_MAX_ROUNDS_PER_TASK >= 1
+    assert (
+        Config.CLARIFICATION_MAX_ROUNDS_PER_TASK * Config.CLARIFICATION_ANSWER_TIMEOUT
+        <= 120 // 2
+    )
+
+
+class _EventCountDB:
+    """Counts preset OrchestrationEvent rows for any filtered query."""
+
+    def __init__(self, n):
+        self._n = n
+
+    def query(self, *a, **k):
+        return self
+
+    def filter(self, *a, **k):
+        return self
+
+    def count(self):
+        return self._n
+
+
+def test_task_clarification_rounds_counts_trail():
+    subj = oa.ClarificationSubject(run_id="r", workspace_id="w", task_id="t")
+    assert oa.task_clarification_rounds(_EventCountDB(2), subj) == 2
+    # a run-level question (no task) never accrues a per-task count
+    assert oa.task_clarification_rounds(_EventCountDB(5), oa.ClarificationSubject(run_id="r", workspace_id="w")) == 0
+
+
+@pytest.mark.asyncio
+async def test_under_round_cap_still_answers(monkeypatch):
+    # below the cap, the answer round runs normally (the cap does not break the
+    # happy path).
+    async def _answer(db, subject, question, *, category=None):
+        return {"answer": "Use output B.", "sources": []}
+
+    monkeypatch.setattr(oa, "answer_clarification", _answer)
+    monkeypatch.setattr(oa, "task_clarification_rounds", lambda db, subject: 0)
+    monkeypatch.setattr(Config, "CLARIFICATION_MAX_ROUNDS_PER_TASK", 2)
+
+    result = await ask_orchestrator(MagicMock(), uuid4(), _server_params())
+    assert result["answer"] == "Use output B."
+
+
+@pytest.mark.asyncio
+async def test_per_task_round_cap_short_circuits_across_calls(monkeypatch):
+    # AC2 — drive N+1 real handler calls: the trail grows on each ANSWERED round,
+    # and the (cap+1)th call short-circuits to escalation WITHOUT entering the
+    # answer round (answer_clarification is never called on that call — no 30s
+    # round). Genuine guard: without the cap, call 3 would answer (trail→3).
+    import services.clarification_ladder as cl
+
+    trail = {"answered": 0}
+
+    async def _answer(db, subject, question, *, category=None):
+        trail["answered"] += 1                      # an answered round hits the trail
+        return {"answer": f"A{trail['answered']}", "sources": []}
+
+    escalated = {"n": 0}
+
+    async def _escalate(db, subject, question, *, category=None, partial_output=None, agent_name=None):
+        escalated["n"] += 1
+        return {"parked": True, "ask_id": 9, "message": "parked"}
+
+    monkeypatch.setattr(oa, "answer_clarification", _answer)
+    monkeypatch.setattr(oa, "task_clarification_rounds", lambda db, subject: trail["answered"])
+    monkeypatch.setattr(cl, "escalate_clarification", _escalate)
+    monkeypatch.setattr(Config, "CLARIFICATION_MAX_ROUNDS_PER_TASK", 2)
+
+    db = MagicMock()
+    r1 = await ask_orchestrator(db, uuid4(), _server_params())
+    r2 = await ask_orchestrator(db, uuid4(), _server_params())
+    assert r1["answer"] == "A1" and r2["answer"] == "A2"
+
+    # call 3 (>= cap) short-circuits: no answer round, escalate with reason round_cap
+    r3 = await ask_orchestrator(db, uuid4(), _server_params())
+    assert "answer" not in r3
+    assert r3["parked"] is True
+    assert r3["detail"]["reason"] == "round_cap"
+    assert trail["answered"] == 2                   # answer round NOT entered on call 3
+    assert escalated["n"] == 1

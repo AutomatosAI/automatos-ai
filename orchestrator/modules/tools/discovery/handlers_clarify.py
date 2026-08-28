@@ -35,7 +35,11 @@ _ASSUME_GUIDANCE = (
 async def ask_orchestrator(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Answer a mid-run clarification inline, or guide the agent to proceed."""
     from config import Config
-    from services.orchestrator_answers import ClarificationSubject, answer_clarification
+    from services.orchestrator_answers import (
+        ClarificationSubject,
+        answer_clarification,
+        task_clarification_rounds,
+    )
 
     question = (params.get("question") or "").strip()
     category = params.get("category")
@@ -69,19 +73,33 @@ async def ask_orchestrator(db: Session, workspace_id: UUID, params: Dict[str, An
         agent_id=int(agent_id) if agent_id else None,
     )
 
-    # Hard time-box: the answer round must fit inside the task's execution
-    # envelope (Config docs the arithmetic). A slow round → cannot_answer.
-    try:
-        result = await asyncio.wait_for(
-            answer_clarification(db, subject, question, category=category),
-            timeout=Config.CLARIFICATION_ANSWER_TIMEOUT,
+    # Per-task round cap (P229-RVW-8): CLARIFICATION_ANSWER_TIMEOUT bounds ONE
+    # round and CLARIFICATION_BUDGET caps ANSWERED rounds per RUN, but neither
+    # bounds the CUMULATIVE answer-round time a SINGLE task can burn — N near-30s
+    # rounds could approach the task's asyncio.wait_for envelope and get the whole
+    # task hard-cancelled. Once this task has spent its rounds, skip the answer
+    # round ENTIRELY (no 30s wait) and go straight to escalation (park + human).
+    if task_clarification_rounds(db, subject) >= Config.CLARIFICATION_MAX_ROUNDS_PER_TASK:
+        logger.info(
+            "[ask_orchestrator] task %s hit the per-task clarification round cap (%s) "
+            "— escalating without an answer round",
+            task_id, Config.CLARIFICATION_MAX_ROUNDS_PER_TASK,
         )
-    except asyncio.TimeoutError:
-        logger.warning("[ask_orchestrator] answer round timed out for task %s", task_id)
-        result = {"cannot_answer": True, "reason": "timeout"}
-    except Exception:  # noqa: BLE001 — a broken answer round must not crash the agent
-        logger.warning("[ask_orchestrator] answer round failed for task %s", task_id, exc_info=True)
-        result = {"cannot_answer": True, "reason": "error"}
+        result = {"cannot_answer": True, "reason": "round_cap"}
+    else:
+        # Hard time-box: the answer round must fit inside the task's execution
+        # envelope (Config docs the arithmetic). A slow round → cannot_answer.
+        try:
+            result = await asyncio.wait_for(
+                answer_clarification(db, subject, question, category=category),
+                timeout=Config.CLARIFICATION_ANSWER_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[ask_orchestrator] answer round timed out for task %s", task_id)
+            result = {"cannot_answer": True, "reason": "timeout"}
+        except Exception:  # noqa: BLE001 — a broken answer round must not crash the agent
+            logger.warning("[ask_orchestrator] answer round failed for task %s", task_id, exc_info=True)
+            result = {"cannot_answer": True, "reason": "error"}
 
     if "answer" in result:
         return {

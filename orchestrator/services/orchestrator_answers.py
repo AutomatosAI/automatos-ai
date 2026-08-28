@@ -228,6 +228,33 @@ def _answers_used(db: Any, subject: ClarificationSubject) -> int:
         return 0
 
 
+def task_clarification_rounds(db: Any, subject: ClarificationSubject) -> int:
+    """How many clarification ANSWER rounds THIS task has already spent (per-task,
+    counted off the run's own event trail — no new counter, no schema). Bounds the
+    cumulative answer-round time a single task can burn inside its execution
+    envelope (P229-RVW-8): only ANSWERED rounds let the agent continue (a
+    cannot_answer / escalate round parks the task), so this is the number of prior
+    calls that entered the (up-to-CLARIFICATION_ANSWER_TIMEOUT) answer round."""
+    if subject.task_id is None:
+        return 0
+    try:
+        from core.models.orchestration import OrchestrationEvent
+
+        count = (
+            db.query(OrchestrationEvent)
+            .filter(
+                OrchestrationEvent.run_id == subject.run_id,
+                OrchestrationEvent.task_id == subject.task_id,
+                OrchestrationEvent.event_type == EventType.CLARIFICATION_ANSWERED.value,
+            )
+            .count()
+        )
+        return count if isinstance(count, int) else 0
+    except Exception:  # noqa: BLE001 — degrade to "no rounds spent" (fail-open)
+        logger.warning("[clarify] per-task round count failed; treating as 0", exc_info=True)
+        return 0
+
+
 # ---------------------------------------------------------------------------
 # Retrieval — upstream digest (real) + external sources (fail-soft)
 # ---------------------------------------------------------------------------
