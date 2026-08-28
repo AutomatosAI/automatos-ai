@@ -41,6 +41,9 @@ from modules.context.modes import (  # noqa: E402
 )
 from modules.tools.discovery.action_registry import get_action_registry  # noqa: E402
 from modules.tools.discovery.handlers_clarify import ask_orchestrator  # noqa: E402
+from modules.tools.discovery.platform_executor import (  # noqa: E402
+    _bind_ask_orchestrator_context,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -228,15 +231,23 @@ async def test_caller_resolved_from_server_context_not_tool_param(monkeypatch):
         return {"answer": "ok", "sources": []}
 
     monkeypatch.setattr(oa, "answer_clarification", _capture)
-    # A tool call that SMUGGLES run_id/task_id — must be ignored; only the
-    # server-injected _run_id/_task_id win.
-    params = _server_params(run_id="SPOOF-run", task_id="SPOOF-task")
-    await ask_orchestrator(MagicMock(), uuid4(), params)
+    # A tool call that SMUGGLES the subject two ways: plain run_id/task_id (the
+    # handler reads only _-prefixed keys, so these are inert) AND _-prefixed
+    # _run_id/_task_id (which the EXECUTOR binding strips before injecting the
+    # real server field_context). Neither smuggle survives — only server wins.
+    smuggled = _server_params(
+        run_id="SPOOF-run", task_id="SPOOF-task",     # non-underscore: handler ignores
+        _run_id="SPOOF-run", _task_id="SPOOF-task",   # underscore: executor strips
+    )
+    ctx = {"field_context": {"run_id": "run-abc", "task_id": "task-xyz", "field_id": "field-1"}}
+    bound = _bind_ask_orchestrator_context(smuggled, ctx)
+    await ask_orchestrator(MagicMock(), uuid4(), bound)
 
     subject = seen["subject"]
     assert subject.run_id == "run-abc"
     assert subject.task_id == "task-xyz"
     assert subject.run_id != "SPOOF-run"
+    assert subject.task_id != "SPOOF-task"
 
 
 @pytest.mark.asyncio
@@ -261,3 +272,172 @@ async def test_missing_question_is_rejected():
     result = await ask_orchestrator(MagicMock(), uuid4(), {"_run_id": "r", "_task_id": "t"})
     assert result["success"] is False
     assert "question" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# P229-RVW-2 — broken object-level authorization, closed.
+#
+# Two guarantees: (1) the executor binding STRIPS any smuggled _run_id/_task_id/
+# _field_id before injecting the server field_context, so a prompt-injected call
+# in a non-mission lane cannot point Auto at a foreign task; (2) the task read is
+# tenant-scoped, so even a same-shaped foreign task_id can never load a
+# cross-run / cross-workspace row.
+# ---------------------------------------------------------------------------
+
+import operator as _operator  # noqa: E402
+from sqlalchemy.sql.operators import in_op  # noqa: E402
+
+
+def _row_matches(row, expr) -> bool:
+    """Evaluate a simple SQLAlchemy eq / in_ predicate against a fake row."""
+    key = getattr(getattr(expr, "left", None), "key", None)
+    if key is None:
+        return True  # not a column predicate we model → don't filter
+    actual = getattr(row, key, None)
+    op = getattr(expr, "operator", None)
+    if op is _operator.eq:
+        return actual == expr.right.value
+    if op is in_op:
+        return actual in (expr.right.value or [])
+    return True
+
+
+class _ScopedQuery:
+    """Filter-AWARE fake query: evaluates eq / in_ predicates so tenant scoping
+    is actually exercised (unlike the filter-ignoring US-001 fake)."""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def join(self, *a, **k):
+        return self
+
+    def filter(self, *exprs):
+        rows = self._rows
+        for e in exprs:
+            rows = [r for r in rows if _row_matches(r, e)]
+        return _ScopedQuery(rows)
+
+    def order_by(self, *a, **k):
+        return self
+
+    def all(self):
+        return list(self._rows)
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+    def count(self):
+        return len(self._rows)
+
+
+class _ScopedSession:
+    def __init__(self, by_model):
+        self._by_model = by_model
+
+    def query(self, model):
+        return _ScopedQuery(self._by_model.get(model, []))
+
+
+def _task_row(task_id="task-1", run_id="run-A"):
+    return SimpleNamespace(id=task_id, run_id=run_id)
+
+
+def _run_row(run_id="run-A", workspace_id="ws-A"):
+    return SimpleNamespace(id=run_id, workspace_id=workspace_id)
+
+
+# --- executor binding: strip-then-inject ---
+
+def test_bind_strips_smuggled_subject_keys_when_no_field_context():
+    # Non-mission lane: field_context is empty. A smuggled _run_id/_task_id/
+    # _field_id must NOT survive — the binding strips them and injects nothing.
+    smuggled = {
+        "question": "what?",
+        "_run_id": "victim-run",
+        "_task_id": "victim-task",
+        "_field_id": "victim-field",
+    }
+    bound = _bind_ask_orchestrator_context(smuggled, {})
+    assert bound == {"question": "what?"}
+    # rebuild-don't-mutate: the caller's dict is untouched
+    assert smuggled["_run_id"] == "victim-run"
+
+
+def test_bind_server_field_context_overrides_smuggled_keys():
+    smuggled = {"question": "q", "_run_id": "SPOOF", "_task_id": "SPOOF", "_field_id": "SPOOF"}
+    ctx = {"field_context": {"run_id": "real-run", "task_id": "real-task", "field_id": "real-field"}}
+    bound = _bind_ask_orchestrator_context(smuggled, ctx)
+    assert bound["_run_id"] == "real-run"
+    assert bound["_task_id"] == "real-task"
+    assert bound["_field_id"] == "real-field"
+    assert "SPOOF" not in set(bound.values())
+
+
+@pytest.mark.asyncio
+async def test_smuggled_underscore_keys_stripped_then_handler_proceeds(monkeypatch):
+    # Full non-mission smuggle path: the executor binding strips the smuggled
+    # _run_id/_task_id (empty field_context); the handler then sees no run context
+    # and falls to proceed_with_assumption — it NEVER attempts an answer, so no
+    # foreign task is ever loaded.
+    called = {"n": 0}
+
+    async def _stub(db, subject, question, *, category=None):
+        called["n"] += 1
+        return {"answer": "should not run"}
+
+    monkeypatch.setattr(oa, "answer_clarification", _stub)
+    smuggled = _server_params(_run_id="victim-run", _task_id="victim-task")
+    bound = _bind_ask_orchestrator_context(smuggled, {})  # non-mission lane
+    result = await ask_orchestrator(MagicMock(), uuid4(), bound)
+
+    assert result["success"] is True
+    assert "proceed_with_assumption" in result
+    assert called["n"] == 0
+
+
+# --- handler task read: tenant-scoped (_load_task) ---
+
+def test_load_task_loads_in_scope_task():
+    from core.models.orchestration import OrchestrationRun, OrchestrationTask
+
+    db = _ScopedSession({
+        OrchestrationTask: [_task_row("task-1", "run-A")],
+        OrchestrationRun: [_run_row("run-A", "ws-A")],
+    })
+    task = hc._load_task(db, "run-A", "ws-A", "task-1")
+    assert task is not None and task.id == "task-1"
+
+
+def test_load_task_scopes_out_foreign_run():
+    from core.models.orchestration import OrchestrationRun, OrchestrationTask
+
+    # The task belongs to run-A; the server subject says run-B → no row loads.
+    db = _ScopedSession({
+        OrchestrationTask: [_task_row("task-1", "run-A")],
+        OrchestrationRun: [_run_row("run-A", "ws-A"), _run_row("run-B", "ws-A")],
+    })
+    assert hc._load_task(db, "run-B", "ws-A", "task-1") is None
+
+
+def test_load_task_scopes_out_foreign_workspace():
+    from core.models.orchestration import OrchestrationRun, OrchestrationTask
+
+    # task-1 is in run-A which belongs to ws-A; the subject workspace is ws-B.
+    db = _ScopedSession({
+        OrchestrationTask: [_task_row("task-1", "run-A")],
+        OrchestrationRun: [_run_row("run-A", "ws-A")],
+    })
+    assert hc._load_task(db, "run-A", "ws-B", "task-1") is None
+
+
+def test_load_task_guards_missing_subject():
+    from core.models.orchestration import OrchestrationRun, OrchestrationTask
+
+    db = _ScopedSession({
+        OrchestrationTask: [_task_row("task-1", "run-A")],
+        OrchestrationRun: [_run_row("run-A", "ws-A")],
+    })
+    assert hc._load_task(db, None, "ws-A", "task-1") is None   # no run
+    assert hc._load_task(db, "run-A", None, "task-1") is None  # no workspace
+    assert hc._load_task(db, "run-A", "ws-A", None) is None    # no task

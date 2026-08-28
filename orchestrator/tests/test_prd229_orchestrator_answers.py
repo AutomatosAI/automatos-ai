@@ -305,3 +305,90 @@ def test_non_governance_declared_category_is_ignored():
 def test_answers_used_counts_only_answered_events():
     db = _FakeSession({OrchestrationEvent: [SimpleNamespace(), SimpleNamespace()]})
     assert oa._answers_used(db, _subject()) == 2
+
+
+# ---------------------------------------------------------------------------
+# P229-RVW-2 — upstream retrieval is fenced to the subject's OWN run. A foreign
+# dependency task (different run) is never surfaced as a "grounded" answer, even
+# if a same-shaped task_id reaches _upstream_blocks. Uses a filter-AWARE fake
+# (the _FakeSession above ignores filters, so it cannot exercise scoping).
+# ---------------------------------------------------------------------------
+
+import operator as _operator  # noqa: E402
+from sqlalchemy.sql.operators import in_op  # noqa: E402
+
+
+def _row_matches(row, expr) -> bool:
+    key = getattr(getattr(expr, "left", None), "key", None)
+    if key is None:
+        return True
+    actual = getattr(row, key, None)
+    op = getattr(expr, "operator", None)
+    if op is _operator.eq:
+        return actual == expr.right.value
+    if op is in_op:
+        return actual in (expr.right.value or [])
+    return True
+
+
+class _ScopedQuery:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def filter(self, *exprs):
+        rows = self._rows
+        for e in exprs:
+            rows = [r for r in rows if _row_matches(r, e)]
+        return _ScopedQuery(rows)
+
+    def order_by(self, *a, **k):
+        return self
+
+    def all(self):
+        return list(self._rows)
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+    def count(self):
+        return len(self._rows)
+
+
+class _ScopedSession:
+    def __init__(self, by_model):
+        self._by_model = by_model
+
+    def query(self, model):
+        return _ScopedQuery(self._by_model.get(model, []))
+
+
+def test_upstream_blocks_scopes_out_foreign_run():
+    # dep task id=100 lives in run-B; the subject is run-A → no blocks.
+    subject = _subject(run_id="run-A", task_id=200)
+    foreign = SimpleNamespace(id=100, run_id="run-B", output="secret", title="x", sequence_number=1)
+    db = _ScopedSession({
+        OrchestrationTaskDependency: [SimpleNamespace(task_id=200, depends_on_task_id=100)],
+        OrchestrationTask: [foreign],
+    })
+    assert oa._upstream_blocks(db, subject) == []
+
+
+def test_upstream_blocks_returns_same_run_deps():
+    subject = _subject(run_id="run-A", task_id=200)
+    same = SimpleNamespace(id=100, run_id="run-A", output="ours", title="x", sequence_number=1)
+    db = _ScopedSession({
+        OrchestrationTaskDependency: [SimpleNamespace(task_id=200, depends_on_task_id=100)],
+        OrchestrationTask: [same],
+    })
+    blocks = oa._upstream_blocks(db, subject)
+    assert len(blocks) == 1
+    assert blocks[0]["source"]["task_id"] == "100"
+
+
+def test_upstream_blocks_guards_missing_run():
+    subject = _subject(run_id=None, task_id=200)
+    db = _ScopedSession({
+        OrchestrationTaskDependency: [SimpleNamespace(task_id=200, depends_on_task_id=100)],
+        OrchestrationTask: [SimpleNamespace(id=100, run_id="run-A", output="x", title="t", sequence_number=1)],
+    })
+    assert oa._upstream_blocks(db, subject) == []

@@ -208,7 +208,7 @@ def _upstream_blocks(db: Any, subject: ClarificationSubject) -> List[Dict[str, A
     source) with a local query, so the answering path never imports the hot
     coordinator module (circular-import + heavy-load hazard)."""
     task_id = subject.task_id if subject.task_id is not None else getattr(subject.task, "id", None)
-    if task_id is None:
+    if task_id is None or subject.run_id is None:
         return []
     try:
         from core.models.orchestration import (
@@ -226,7 +226,15 @@ def _upstream_blocks(db: Any, subject: ClarificationSubject) -> List[Dict[str, A
         dep_ids = [d.depends_on_task_id for d in deps]
         rows = (
             db.query(OrchestrationTask)
-            .filter(OrchestrationTask.id.in_(dep_ids))
+            .filter(
+                OrchestrationTask.id.in_(dep_ids),
+                # P229-RVW-2: fence upstream reads to the subject's OWN run. A
+                # task's upstream deps are intra-run by DAG construction, so this
+                # loses no legitimate context; it stops a foreign task_id
+                # (defence in depth behind the executor strip + _load_task scope)
+                # from surfacing another tenant's outputs as a "grounded" answer.
+                OrchestrationTask.run_id == subject.run_id,
+            )
             .order_by(OrchestrationTask.sequence_number)
             .all()
         )

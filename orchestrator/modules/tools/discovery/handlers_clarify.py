@@ -59,7 +59,7 @@ async def ask_orchestrator(db: Session, workspace_id: UUID, params: Dict[str, An
             "message": _ASSUME_GUIDANCE,
         }
 
-    task = _load_task(db, task_id)
+    task = _load_task(db, run_id, workspace_id, task_id)
     subject = ClarificationSubject(
         run_id=run_id,
         workspace_id=workspace_id,
@@ -109,17 +109,40 @@ async def ask_orchestrator(db: Session, workspace_id: UUID, params: Dict[str, An
     }
 
 
-def _load_task(db: Session, task_id: Any) -> Any:
-    """Load the calling OrchestrationTask (upstream-digest source). Fail-soft —
-    a missing/failed load leaves ``task=None`` and retrieval falls back."""
-    try:
-        from core.models.orchestration import OrchestrationTask
+def _load_task(db: Session, run_id: Any, workspace_id: Any, task_id: Any) -> Any:
+    """Load the calling OrchestrationTask (upstream-digest source), SCOPED to the
+    server-resolved subject (P229-RVW-2).
 
-        return (
+    The task must belong to ``run_id`` AND that run must belong to
+    ``workspace_id``. ``OrchestrationTask`` carries no ``workspace_id`` column —
+    the tenant boundary is reached via its run — so a smuggled foreign ``task_id``
+    that slipped a same-shaped id past the executor could still never load a
+    cross-tenant row here. Fail-soft: a missing / failed / out-of-scope load
+    leaves ``task=None`` and retrieval falls back."""
+    if not run_id or not workspace_id or task_id is None:
+        return None
+    try:
+        from core.models.orchestration import OrchestrationRun, OrchestrationTask
+
+        task = (
             db.query(OrchestrationTask)
-            .filter(OrchestrationTask.id == task_id)
+            .filter(
+                OrchestrationTask.id == task_id,
+                OrchestrationTask.run_id == run_id,
+            )
             .first()
         )
+        if task is None:
+            return None
+        run = (
+            db.query(OrchestrationRun)
+            .filter(
+                OrchestrationRun.id == run_id,
+                OrchestrationRun.workspace_id == workspace_id,
+            )
+            .first()
+        )
+        return task if run is not None else None
     except Exception:  # noqa: BLE001
         logger.warning("[ask_orchestrator] task load failed for %s", task_id, exc_info=True)
         return None
