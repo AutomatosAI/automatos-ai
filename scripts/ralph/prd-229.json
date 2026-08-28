@@ -137,6 +137,23 @@
     "orchestrator/services/orchestrator_answers.py",
     "orchestrator/tests/test_prd229_orchestrator_answers.py"
    ]
+  },
+  {
+   "id": "P229-RVW-5",
+   "title": "HIGH — escalation park+draft is neither committed nor exception-safe: a sibling task's rollback silently destroys the draft and orphans the human ask",
+   "description": "SUPERVISOR-FILED from a targeted security review (the automated reviewer crashed 3x and never reached this). VERIFIED SHARED SESSION: coordinator_service.py:2242 builds AgentFactory(db_session=db) per task inside _prepare_task, all from ONE SessionLocal() opened at :1521, and Phase 2 runs them CONCURRENTLY via asyncio.gather (:1740-1750) — so orchestrator_answers.py:128-134's comment claiming 'concurrent tasks run on SEPARATE DB sessions' is factually wrong and must be corrected. DEFECT: clarification_ladder.py escalate_clarification (:35-76) calls ask_human (:60) which durably COMMITS the grant (human sees the ask / gets the Telegram ping), then _park_task_with_draft (:64, mutating output_metadata[DRAFT_KEY] + input_context[PENDING_KEY] at :96-103) and _record_escalation (:67) only flush — never commit. FAILURE: sibling task B's unrelated tool error fires platform_executor.py:1244-1247 db.rollback() on the SHARED session, wiping task A's uncommitted draft + PENDING_KEY while the human-visible ask survives → an orphaned ask no answer can ever bridge back, and Gerard's baked 'draft on park' decision silently lost with nothing logged. SECOND DEFECT: handlers_clarify.py:93-109 does not wrap escalate_clarification, so a throw AFTER ask_human committed returns a bare {'success': False} to the agent even though a human WAS asked — a naive retry files a duplicate ask. FIX: (a) commit immediately after _park_task_with_draft, mirroring ask_human's own durably-park-first pattern; (b) wrap the escalation call in handlers_clarify so a post-ask_human failure reports the ask as PLACED rather than as a failure; (c) correct the incorrect session comment in orchestrator_answers.py:128-134.",
+   "acceptanceCriteria": [
+    "Draft + PENDING_KEY survive a sibling rollback: test drives escalate_clarification, then calls db.rollback() on the SAME session, and asserts the task still carries DRAFT_KEY and PENDING_KEY",
+    "A raise after ask_human returns a result marking the ask as placed (not a bare failure) and does not double-ask on retry (test)",
+    "orchestrator_answers.py session comment corrected to state the session is SHARED per mission-run tick (grep)",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_escalation_ladder.py green"
+   ],
+   "files": [
+    "orchestrator/services/clarification_ladder.py",
+    "orchestrator/modules/tools/discovery/handlers_clarify.py",
+    "orchestrator/services/orchestrator_answers.py",
+    "orchestrator/tests/"
+   ]
   }
  ]
 }
