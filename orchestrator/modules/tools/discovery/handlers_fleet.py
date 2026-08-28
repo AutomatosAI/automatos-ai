@@ -138,19 +138,44 @@ def _render_fleet(
         "blocked_with_open_ask": blocked_with_ask,
         "blocked_no_ask": blocked_no_ask,
     }
+    # Source-availability (mirrors cost_available): a defaulted zero from a
+    # degraded watches/asks source must not read as a clean "no anomalies"
+    # (P228-RVW-6). Absent keys default to available (older shape / no failure).
+    watches_available = state.get("watches_available", True)
+    asks_available = state.get("asks_available", True)
     return {
         "as_of": state.get("generated_at"),
         "window": "last 24h",
         "cost_available": state.get("cost_available", False),
+        "watches_available": watches_available,
+        "asks_available": asks_available,
         "agent_count": len(state.get("agents", [])),
         "lines": lines,
         "anomalies": anomalies,
-        "text": _as_text(lines, anomalies),
+        "text": _as_text(
+            lines, anomalies,
+            watches_available=watches_available,
+            asks_available=asks_available,
+        ),
     }
 
 
-def _as_text(lines: List[str], anomalies: Dict[str, List[Dict[str, Any]]]) -> str:
-    """The single-string compact rendering (agent lines + ANOMALIES section)."""
+def _as_text(
+    lines: List[str],
+    anomalies: Dict[str, List[Dict[str, Any]]],
+    *,
+    watches_available: bool = True,
+    asks_available: bool = True,
+) -> str:
+    """The single-string compact rendering (agent lines + ANOMALIES section).
+
+    When the watches or asks source is unavailable its anomaly bucket is a
+    fail-soft zero (defaulted, not real), so an empty ANOMALIES block could be
+    misread as a clean bill of health. A SOURCES DEGRADED notice states which
+    source was down and which signal is therefore uncounted this tick, so "is
+    anyone stuck / over budget?" is never answered with a confident false "none"
+    (P228-RVW-6).
+    """
     body = "\n".join(lines) if lines else "(no agents)"
     flagged: List[str] = []
     for agent in anomalies["stalled"]:
@@ -162,7 +187,20 @@ def _as_text(lines: List[str], anomalies: Dict[str, List[Dict[str, Any]]]) -> st
     for agent in anomalies["blocked_no_ask"]:
         flagged.append(f"BLOCKED (no open ask): {agent['agent']} ({agent['count']} task(s) blocked)")
     anomaly_block = "\n".join(flagged) if flagged else "none"
-    return f"{body}\n\nANOMALIES:\n{anomaly_block}"
+    text = f"{body}\n\nANOMALIES:\n{anomaly_block}"
+
+    notices: List[str] = []
+    if not watches_available:
+        notices.append(
+            "watches: source unavailable — over-budget watches not counted this tick"
+        )
+    if not asks_available:
+        notices.append(
+            "asks: source unavailable — awaiting-answer blocks not counted this tick"
+        )
+    if notices:
+        text += "\n\nSOURCES DEGRADED:\n" + "\n".join(notices)
+    return text
 
 
 async def fleet_status(

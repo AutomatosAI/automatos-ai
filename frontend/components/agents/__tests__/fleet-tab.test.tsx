@@ -40,6 +40,8 @@ function setFleet(agents: FleetAgentRow[], extra: Partial<FleetStateResponse> = 
     window_hours: 24,
     cost_available: true,
     cost_source: 'llm_usage',
+    watches_available: true,
+    asks_available: true,
     agents,
     ...extra,
   }
@@ -115,6 +117,24 @@ describe('FleetTab — PRD-228', () => {
     render(<FleetTab onViewDetails={onViewDetails} />)
     fireEvent.click(screen.getByTestId('fleet-row'))
     expect(onViewDetails).toHaveBeenCalledWith('42')
+  })
+
+  it('flags a degraded watches/asks source instead of a silent clean zero (P228-RVW-6)', () => {
+    // Both enrichment sources down: their zeros are fail-soft defaults, not real.
+    setFleet([agent({ agent_id: 1, name: 'Solo' })], {
+      watches_available: false,
+      asks_available: false,
+    })
+    render(<FleetTab onViewDetails={vi.fn()} />)
+    expect(screen.getByText('watches unavailable')).toBeInTheDocument()
+    expect(screen.getByText('asks unavailable')).toBeInTheDocument()
+  })
+
+  it('shows no degradation badge when watches/asks sources are healthy (P228-RVW-6)', () => {
+    setFleet([agent({ agent_id: 1, name: 'Solo' })]) // defaults: both available
+    render(<FleetTab onViewDetails={vi.fn()} />)
+    expect(screen.queryByText('watches unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByText('asks unavailable')).not.toBeInTheDocument()
   })
 
   it('shows cost n/a when the cost source is unavailable', () => {

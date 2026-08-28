@@ -483,6 +483,63 @@ def test_empty_workspace_returns_empty_fleet():
 
 
 # ===========================================================================
+# 4c. Source-availability flags — degraded ≠ genuine zero (P228-RVW-6)
+# ===========================================================================
+
+def test_availability_flags_true_when_sources_healthy():
+    """P228-RVW-6: healthy watches/asks sources → both availability flags True
+    (mirroring cost_available)."""
+    out = fs._assemble_fleet([_agent(1)], [], [], [], [], {}, generated_at=NOW)
+    assert out["watches_available"] is True
+    assert out["asks_available"] is True
+
+
+def test_watches_available_false_when_source_fails(monkeypatch):
+    """P228-RVW-6: a watches-source failure sets watches_available False — a
+    defaulted zero distinguishable from a real zero — while the response stays
+    whole (every agent present, cost + asks intact)."""
+    ws = uuid4()
+    agents = [_agent(1, "A1"), _agent(2, "A2")]
+    sess = _CountingSession(agents)
+
+    def _boom(*a, **k):
+        raise RuntimeError("watches table locked")
+
+    monkeypatch.setattr(fs, "_watches_source", _boom)
+    out = get_fleet_state(sess, ws)
+
+    assert out["watches_available"] is False   # degradation is observable
+    assert out["asks_available"] is True       # the other source is unaffected
+    assert out["cost_available"] is True
+    assert len(out["agents"]) == 2
+    for entry in out["agents"]:
+        assert entry["watches"] == {"active": 0, "needs_attention": 0}
+        _assert_documented_shape(entry, cost_expected=True)
+
+
+def test_asks_available_false_when_source_fails(monkeypatch):
+    """P228-RVW-6: an asks-source failure sets asks_available False while the
+    response stays whole (every agent present, cost + watches intact)."""
+    ws = uuid4()
+    agents = [_agent(1, "A1"), _agent(2, "A2")]
+    sess = _CountingSession(agents)
+
+    def _boom(*a, **k):
+        raise RuntimeError("approval_grants unavailable")
+
+    monkeypatch.setattr(fs, "_asks_source", _boom)
+    out = get_fleet_state(sess, ws)
+
+    assert out["asks_available"] is False
+    assert out["watches_available"] is True
+    assert out["cost_available"] is True
+    assert len(out["agents"]) == 2
+    for entry in out["agents"]:
+        assert entry["blocked"]["open_asks"] == []
+        _assert_documented_shape(entry, cost_expected=True)
+
+
+# ===========================================================================
 # 5. Structural invariants (read-only + cost-source pin)
 # ===========================================================================
 

@@ -144,15 +144,33 @@ export function FleetTab({ onViewDetails }: FleetTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between px-1">
+      <div className="flex items-center justify-between gap-2 px-1">
         <p className="text-sm text-muted-foreground">
           What each agent is doing right now. Cost is the rolling last 24h.
         </p>
-        {data && !data.cost_available && (
-          <Badge variant="outline" className="text-muted-foreground">
-            cost unavailable
-          </Badge>
-        )}
+        {/*
+          Source-degradation indicators. A degraded watches/asks source defaults
+          its fields to zero (fail-soft); flag it so those zeros are not read as
+          a clean bill of health (P228-RVW-6). Destructive tone = uncounted data,
+          not a real zero; muted tone for the always-omittable cost.
+        */}
+        <div className="flex shrink-0 items-center gap-2">
+          {data && !data.cost_available && (
+            <Badge variant="outline" className="text-muted-foreground">
+              cost unavailable
+            </Badge>
+          )}
+          {data && !data.watches_available && (
+            <Badge variant="outline" className="text-[hsl(var(--destructive))]">
+              watches unavailable
+            </Badge>
+          )}
+          {data && !data.asks_available && (
+            <Badge variant="outline" className="text-[hsl(var(--destructive))]">
+              asks unavailable
+            </Badge>
+          )}
+        </div>
       </div>
       <div className="space-y-2">
         {agents.map((agent) => (

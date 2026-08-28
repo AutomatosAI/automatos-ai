@@ -60,13 +60,15 @@ def _current(title="Ship it", kind="board_task"):
     return {"kind": kind, "id": 1, "title": title, "since": (NOW - timedelta(minutes=5)).isoformat()}
 
 
-def _state(entries, *, cost_available=True):
+def _state(entries, *, cost_available=True, watches_available=True, asks_available=True):
     return {
         "version": 1,
         "generated_at": NOW.isoformat(),
         "window_hours": 24,
         "cost_available": cost_available,
         "cost_source": "llm_usage" if cost_available else None,
+        "watches_available": watches_available,
+        "asks_available": asks_available,
         "agents": entries,
     }
 
@@ -253,6 +255,60 @@ def test_stall_threshold_constant_in_config():
     src = Path(hf.__file__).read_text(encoding="utf-8")
     assert "config.FLEET_STALL_SECONDS" in src
     assert "getenv" not in src
+
+
+# ===========================================================================
+# 3b. Source-degradation observability (P228-RVW-6)
+# ===========================================================================
+
+def test_degraded_source_surfaces_notice_not_clean_none():
+    """A watches/asks source failure defaults its anomaly bucket to empty; the
+    render must state the source was down (SOURCES DEGRADED) so the empty
+    ANOMALIES block is not misread as a clean 'no anomalies'."""
+    fleet = _state(
+        [_entry(1, "Solo", current=_current("Active job"),
+                last_activity=(NOW - timedelta(minutes=1)).isoformat(),
+                cost={"tokens": 0, "usd": 0.0})],
+        watches_available=False, asks_available=False,
+    )
+    out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
+
+    # No real anomalies, but the sources are down — must NOT read as clean.
+    assert out["anomalies"]["over_budget_watches"] == []
+    assert out["anomalies"]["blocked_with_open_ask"] == []
+    # The flags propagate to the rendered dict (mirroring cost_available)...
+    assert out["watches_available"] is False
+    assert out["asks_available"] is False
+    # ...and the text warns instead of implying a clean bill of health.
+    assert "SOURCES DEGRADED" in out["text"]
+    assert "watches: source unavailable" in out["text"]
+    assert "asks: source unavailable" in out["text"]
+
+
+def test_only_the_failed_source_is_flagged_degraded():
+    """Watches down but asks healthy → only the watches notice appears."""
+    fleet = _state(
+        [_entry(1, "Solo", cost={"tokens": 0, "usd": 0.0})],
+        watches_available=False, asks_available=True,
+    )
+    out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
+    assert out["watches_available"] is False
+    assert out["asks_available"] is True
+    assert "watches: source unavailable" in out["text"]
+    assert "asks: source unavailable" not in out["text"]
+
+
+def test_healthy_sources_have_no_degraded_notice():
+    """A healthy fleet renders no SOURCES DEGRADED section (no false alarm)."""
+    fleet = _state([
+        _entry(1, "Fresh", current=_current(),
+               last_activity=(NOW - timedelta(minutes=1)).isoformat(),
+               cost={"tokens": 0, "usd": 0.0}),
+    ])
+    out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
+    assert out["watches_available"] is True
+    assert out["asks_available"] is True
+    assert "SOURCES DEGRADED" not in out["text"]
 
 
 # ===========================================================================

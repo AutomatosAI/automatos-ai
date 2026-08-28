@@ -37,8 +37,12 @@ Design invariants (PRD-228 §5, binding rules):
   watches- or asks-source failure falls back to safe defaults (``watches`` →
   ``{active: 0, needs_attention: 0}``, ``blocked.open_asks`` → ``[]`` — kept, not
   dropped, since those fields are non-optional downstream) while the rest of the
-  response stays intact (same posture as the channels sender). The core sources
-  (agents/board/mission) are structural and may still raise.
+  response stays intact (same posture as the channels sender). The response also
+  carries ``watches_available`` / ``asks_available`` booleans (mirroring
+  ``cost_available``) so a defaulted zero is distinguishable from a genuine zero
+  and a consumer never reports a confident "none" over degraded data
+  (P228-RVW-6). The core sources (agents/board/mission) are structural and may
+  still raise.
 * **No rival "busy" derivation.** Mission-task busyness reuses the canonical
   :data:`core.models.orchestration_enums.BUSY_TASK_STATES` — the same constant
   the dispatcher's matcher uses, so there is exactly one definition of busy
@@ -420,6 +424,13 @@ def _assemble_fleet(
         "window_hours": COST_WINDOW_HOURS,
         "cost_available": cost_available,
         "cost_source": COST_SOURCE if cost_available else None,
+        # Source-availability flags, mirroring ``cost_available``: a defaulted
+        # zero (source down) must be distinguishable from a genuine zero, so a
+        # consumer never reports a confident "none" over degraded data. False
+        # means the source failed and the corresponding fields carry safe
+        # defaults, not real values (P228-RVW-6).
+        "watches_available": watches_available,
+        "asks_available": asks_available,
         "agents": fleet,
     }
 

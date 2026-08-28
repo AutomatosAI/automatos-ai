@@ -346,6 +346,11 @@ export interface FleetStateResponse {
   window_hours: number
   cost_available: boolean
   cost_source: string | null
+  // Source-availability flags (mirror cost_available): false means the source
+  // failed and its fields carry fail-soft defaults, not real values — so a
+  // degraded source is distinguishable from a genuine zero (P228-RVW-6).
+  watches_available: boolean
+  asks_available: boolean
   agents: FleetAgentRow[]
 }
 
