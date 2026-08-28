@@ -28,6 +28,7 @@ if str(_ORCH) not in sys.path:
 
 from channels.drivers.base import SendResult
 from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_QUESTION
+from core.models.core import BoardTask
 
 
 class _Query:
@@ -358,3 +359,114 @@ async def test_answered_by_carries_numeric_id(replies):
     await _maybe_answer_question(db, workspace, body, reply_ctx, {})
 
     assert grant.answered_by == "telegram:12345"  # numeric id, not "telegram:CEO"
+
+
+# ===========================================================================
+# P225-RVW-10 — the delivery/correlation anchor is set-once; inbound traffic
+# from a different chat cannot repoint it and hijack the answer path.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_default_chat_is_not_hijacked_by_inbound(monkeypatch, replies):
+    """An operator-designated delivery chat A is not repointed by an inbound
+    message from a different chat B: a subsequent platform_ask_human still
+    delivers to (and anchors on) A, a reply from B does NOT answer, a reply from
+    A does (P225-RVW-10)."""
+    from api.webhooks import (
+        _persist_integration_default, _maybe_answer_question, _extract_reply_context,
+    )
+    from modules.tools.discovery import handlers_asks
+
+    workspace = SimpleNamespace(
+        id=uuid.uuid4(),
+        settings={"integrations": {"telegram_default_chat_id": "A"}},
+    )
+    db = _FakeSession()
+
+    # An attacker in chat B messages the bot (webhook step 2b). Last-sender-wins
+    # WAS the bug; set-once must leave the anchor on A.
+    _persist_integration_default(db, workspace, "telegram_default_chat_id", "B")
+    assert workspace.settings["integrations"]["telegram_default_chat_id"] == "A"
+
+    # platform_ask_human fires; send_to_channel resolves the (still-A) default.
+    async def resolving_send(**kwargs):
+        target = workspace.settings["integrations"]["telegram_default_chat_id"]
+        return SendResult(ok=True, latency_ms=1, message_id="777", target=target)
+    monkeypatch.setattr("channels.sender.send_to_channel", resolving_send)
+
+    grant = ApprovalGrant(
+        id=70, workspace_id=workspace.id, subject_type="tool_call", subject_id="call-1",
+        kind=KIND_QUESTION, question_md="Which vendor?", status=GrantStatus.PENDING.value,
+        channel_refs=None,
+    )
+    db.add(grant)
+    await handlers_asks._capture_question_telegram(
+        db, workspace.id, grant, agent_name="Scout", question="Which vendor?",
+    )
+    # Anchored to the operator's A, not the attacker's B.
+    assert grant.channel_refs["telegram"]["chat_id"] == "A"
+
+    # A reply from B does NOT answer (RVW-1 binding over the stable anchor).
+    body_b = _tg_body("attacker answer", reply_to=777, chat="B", from_id=666)
+    assert await _maybe_answer_question(
+        db, workspace, body_b, _extract_reply_context(body_b, "telegram"), {}
+    ) is None
+    assert grant.status == GrantStatus.PENDING.value
+
+    # A reply from A does.
+    body_a = _tg_body("Use vendor X", reply_to=777, chat="A", from_id=111)
+    res = await _maybe_answer_question(
+        db, workspace, body_a, _extract_reply_context(body_a, "telegram"), {}
+    )
+    assert res["route_type"] == "question_answer"
+    assert grant.status == GrantStatus.GRANTED.value
+
+
+@pytest.mark.asyncio
+async def test_answer_injection_via_retarget_is_blocked(monkeypatch, replies):
+    """The full attacker sequence — B messages the bot, an ask fires, B replies —
+    leaves the parked board task NOT resumed and no attacker text in
+    planning_data.human_qa (P225-RVW-10)."""
+    from api.webhooks import (
+        _persist_integration_default, _maybe_answer_question, _extract_reply_context,
+    )
+    from modules.tools.discovery import handlers_asks
+
+    workspace = SimpleNamespace(
+        id=uuid.uuid4(),
+        settings={"integrations": {"telegram_default_chat_id": "A"}},
+    )
+    db = _FakeSession()
+
+    task = BoardTask(id=88, workspace_id=workspace.id, title="T", status="blocked")
+    task.planning_data = {"human_qa": []}
+    db.add(task)
+
+    _persist_integration_default(db, workspace, "telegram_default_chat_id", "B")
+    assert workspace.settings["integrations"]["telegram_default_chat_id"] == "A"
+
+    async def resolving_send(**kwargs):
+        target = workspace.settings["integrations"]["telegram_default_chat_id"]
+        return SendResult(ok=True, latency_ms=1, message_id="777", target=target)
+    monkeypatch.setattr("channels.sender.send_to_channel", resolving_send)
+
+    grant = ApprovalGrant(
+        id=71, workspace_id=workspace.id, subject_type="board_task", subject_id="88",
+        kind=KIND_QUESTION, question_md="Proceed?", status=GrantStatus.PENDING.value,
+        channel_refs=None,
+    )
+    db.add(grant)
+    await handlers_asks._capture_question_telegram(
+        db, workspace.id, grant, agent_name="Scout", question="Proceed?",
+    )
+    assert grant.channel_refs["telegram"]["chat_id"] == "A"
+
+    # The attacker (chat B) replies to the correlated message id.
+    body_b = _tg_body("resume with attacker text", reply_to=777, chat="B", from_id=666)
+    res = await _maybe_answer_question(
+        db, workspace, body_b, _extract_reply_context(body_b, "telegram"), {}
+    )
+    assert res is None                                # not correlated → falls through
+    assert grant.status == GrantStatus.PENDING.value  # question still open
+    assert task.status == "blocked"                   # parked work NOT resumed
+    assert task.planning_data.get("human_qa") == []   # no attacker text appended

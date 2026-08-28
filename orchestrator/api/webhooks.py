@@ -752,20 +752,40 @@ def _extract_response_text(result: Any) -> str:
 # =============================================================================
 
 def _persist_integration_default(db: Session, workspace, key: str, value: str):
-    """Store a platform default (e.g. telegram_default_chat_id) in workspace
-    settings.integrations if not already set or changed."""
+    """Seed a platform delivery default (e.g. telegram_default_chat_id) in
+    workspace settings.integrations — SET ONCE, never silently retargeted.
+
+    This value is the delivery target for agent-initiated questions
+    (``platform_ask_human`` → ``channels.sender._resolve_target``) AND the chat
+    the answer path binds a reply to (P225-RVW-1). Telegram/Slack deliver every
+    inbound update for the bot to the one workspace webhook, so overwriting the
+    anchor from arbitrary inbound senders let any user who can message the bot
+    repoint the operator's questions to their own chat and answer them —
+    re-opening the RVW-1 answer-injection class through the mutable anchor
+    (P225-RVW-10). We therefore write the default only when it is UNSET:
+    first-inbound seeds it as a convenience, later senders cannot move it. An
+    operator changes it explicitly via Settings→Integrations
+    (api/workspaces.save_integrations), never inbound traffic.
+    """
     try:
         settings = dict(workspace.settings or {})
         integrations = dict(settings.get("integrations", {}))
-        if integrations.get(key) == value:
-            return  # already correct
+        existing = integrations.get(key)
+        if existing:
+            # Already anchored — never silently retarget from inbound traffic.
+            if str(existing) != str(value):
+                logger.info(
+                    "[webhook] %s already anchored for ws=%s — ignoring inbound retarget",
+                    key, workspace.id,
+                )
+            return
         integrations[key] = value
         settings["integrations"] = integrations
         workspace.settings = settings
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(workspace, "settings")
         db.commit()
-        logger.info("[webhook] Persisted %s=%s for workspace %s", key, value, workspace.id)
+        logger.info("[webhook] Seeded %s for workspace %s (set-once)", key, workspace.id)
     except Exception as e:
         logger.debug("[webhook] Failed to persist %s: %s", key, e)
 

@@ -116,7 +116,14 @@ class TelegramAdapter(BaseChannelAdapter):
             logger.warning("[Telegram:%s] Failed to ack /start: %s", self.connection_id, e)
 
     def _persist_default_chat_id(self, chat_id: str) -> None:
-        """Store chat_id in workspace.settings.integrations.telegram_default_chat_id."""
+        """Seed telegram_default_chat_id in workspace settings.integrations —
+        SET ONCE, never retargeted from inbound traffic.
+
+        The stored chat is the delivery target for agent-initiated questions and
+        the chat the answer path binds a reply to; overwriting it from arbitrary
+        inbound senders let any user who can message the bot repoint the
+        operator's questions to their own chat (P225-RVW-10, mirroring the
+        webhook path). Only seed it when unset."""
         try:
             from core.database.database import SessionLocal
             from core.models.workspaces import Workspace
@@ -129,7 +136,8 @@ class TelegramAdapter(BaseChannelAdapter):
                     return
                 settings = dict(ws.settings or {})
                 integrations = dict(settings.get("integrations", {}))
-                if integrations.get("telegram_default_chat_id") == chat_id:
+                if integrations.get("telegram_default_chat_id"):
+                    # Already anchored — never silently retarget from inbound.
                     return
                 integrations["telegram_default_chat_id"] = chat_id
                 settings["integrations"] = integrations
@@ -137,8 +145,8 @@ class TelegramAdapter(BaseChannelAdapter):
                 flag_modified(ws, "settings")
                 db.commit()
                 logger.info(
-                    "[Telegram:%s] Persisted telegram_default_chat_id=%s for ws=%s",
-                    self.connection_id, chat_id, self.workspace_id,
+                    "[Telegram:%s] Seeded telegram_default_chat_id for ws=%s (set-once)",
+                    self.connection_id, self.workspace_id,
                 )
             finally:
                 db.close()
