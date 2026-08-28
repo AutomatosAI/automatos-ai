@@ -77,6 +77,46 @@
     "orchestrator/tests/",
     "frontend/"
    ]
+  },
+  {
+   "id": "P222W2A-RVW-1",
+   "title": "CRITICAL — retirement-migration integration test RED in CI (skills.slug undefined); migration scope-safety UNVERIFIED, required orchestrator-tests check failing",
+   "description": "REVIEW FINDING (adversarial review 2026-08-28). The REQUIRED orchestrator-tests CI job has been RED on every push since US-021 (runs 33162512949 US-021, 33163126563 US-022, 33163986823 scope-guard — all fail identically). Root cause: tests/test_prd222_retirement_migration.py:131 runs `INSERT INTO skills (name, slug) VALUES ('t', :sl)` but the skills table has NO `slug` column — core/models/core.py:359-394 defines name + skill_type (NOT NULL, :365) + package_slug (:380); there is no bare `slug`. CI error verbatim: `sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedColumn) column \"slug\" of relation \"skills\" does not exist`. The test dies at FIXTURE SETUP (line 131) BEFORE it executes any migration DELETE (lines 141-144) or any assertion (lines 150-156). Consequences: (a) required CI check red = merge blocker; (b) the CRITICAL scope-safety property this @integration test exists to prove — seeded onboarding agents removed while a non-onboarding system agent AND a normal user agent SURVIVE, plus FK-safe agent_skills cleanup and idempotent re-run — is UNVERIFIED in CI; the pure chain/scope tests pass but none exercise real rows. (c) The US-021 AC ('orchestrator full suite 4292 passed at documented baseline... @integration test proving seeded row removed... CI runs it') and US-022 AC ('4292 passed... documented baseline UNCHANGED') are FALSE: the builder ran locally where this @integration test SKIPS (engine fixture skip at :98, no local Postgres), so the failure only surfaces in CI where Postgres is present. Note: the migration SQL itself is schema-valid — all columns it touches were verified to exist (agent_skills.agent_id core.py:32, workflow_agents.agent_id core.py:39, workflow_executions.agent_id core.py:569, agents.is_system_agent/required_role core.py:260-261) — so this is a broken-TEST + red-CI + false-green finding, NOT a migration-crashes-on-deploy one. But the safety net that proves the delete cannot over-reach is down.",
+   "acceptanceCriteria": [
+    "tests/test_prd222_retirement_migration.py:131 skill insert references ONLY real skills columns: drop the non-existent `slug` and satisfy the NOT NULL skill_type (e.g. `INSERT INTO skills (name, skill_type) VALUES ('t', 'technical') RETURNING id`); grep the test file for `slug` = 0 hits",
+    "the @integration test test_migration_removes_seeded_agents_spares_fixture RUNS to completion under CI Postgres and PASSES — its assertions actually execute: seeded VOYAGER removed, sys_other + regular SURVIVE, dependent agent_skills row gone, idempotent second DELETE is a clean no-op",
+    "required orchestrator-tests CI job is GREEN on branch head (gh run list --branch ralph/prd-222-w2a --workflow test.yml --limit 1 shows success) with no NEW failures vs base outside the documented prd172|dr_restore|composio flake set",
+    "bash scripts/ralph/acceptance-prd222w2a.sh exits 0 in a Postgres-backed run (the orchestrator-full-suite gate no longer passes only because the integration test locally skips)"
+   ],
+   "files": [
+    "orchestrator/tests/test_prd222_retirement_migration.py",
+    "orchestrator/core/models/core.py"
+   ]
+  },
+  {
+   "id": "P222W2A-RVW-2",
+   "title": "MEDIUM — data-tour retirement residue: dead [data-tour=\"sidebar\"] selectors survive in app/globals.css",
+   "description": "REVIEW FINDING. US-021 AC #2 claims 'grep -c data-tour in frontend = 0', but frontend/app/globals.css still carries 7 data-tour hits: line 987 (comment) and the `.studio [data-tour=\"sidebar\"]` selector rules at lines 996-997, 1016-1017, 1024-1025. Every data-tour ATTRIBUTE was stripped from .tsx (verified), so these CSS selectors now match NOTHING — dead styling left over from the retired Shepherd tour's sidebar highlight. The acceptance script's data-tour gate greps only `*.tsx` (scripts/ralph/acceptance-prd222w2a.sh:68), so it structurally cannot catch the .css residue — that is why the build reported clean. Functionally inert (the rules never apply), but it contradicts the stated AC and the §5/§10 clean-replace mandate to delete dead code with the surface it served.",
+   "acceptanceCriteria": [
+    "the dead `.studio [data-tour=\"sidebar\"]` selector blocks and the data-tour comment in frontend/app/globals.css (lines ~987, 996-997, 1016-1017, 1024-1025) are removed",
+    "grep -rn 'data-tour' frontend/app frontend/components frontend/lib frontend/hooks (excl node_modules) = 0 hits — .css included, not only .tsx",
+    "cd frontend && npm run -s build exits 0 and vitest stays green after the CSS removal"
+   ],
+   "files": [
+    "frontend/app/globals.css"
+   ]
+  },
+  {
+   "id": "P222W2A-RVW-3",
+   "title": "LOW — dead ephemeral-agent filter + retired 'Mission Zero' comment in api/agents.py after clone machinery deleted",
+   "description": "REVIEW FINDING (low priority — Gerard's call). api/agents.py:538 still carries `.filter(Agent.agent_type != \"ephemeral\")  # Hide Mission Zero ephemeral clones`. US-021 deleted _clone_onboarding_agents from coordinator_service.py — the ONLY code that ever created agent_type='ephemeral' rows — so no ephemeral agent is created again and this filter is now dead defensive code whose comment names the retired 'Mission Zero' concept the wave set out to purge (the grep-clean swept the token `mission_zero`, not the words 'Mission Zero', so it slipped through). Harmless (filtering for a never-created type changes no result), but it is retirement residue. Optionally verify no ephemeral rows linger in live DBs before removing the filter.",
+   "acceptanceCriteria": [
+    "api/agents.py:538 either drops the now-dead `agent_type != 'ephemeral'` filter or keeps it with the 'Mission Zero' reference removed from the comment — decision recorded in the commit body",
+    "grep confirms no remaining code path creates agent_type='ephemeral' agents"
+   ],
+   "files": [
+    "orchestrator/api/agents.py"
+   ]
   }
  ]
 }
