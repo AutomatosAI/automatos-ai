@@ -69,6 +69,16 @@ class _Query:
     def all(self):
         return list(self._rows)
 
+    def update(self, values, synchronize_session=False):
+        """Emulate a filtered UPDATE (the P225-RVW-14 compare-and-swap): mutate
+        the already-filtered rows and return the affected count."""
+        n = 0
+        for r in self._rows:
+            for col, val in values.items():
+                setattr(r, getattr(col, "key", col), val)
+            n += 1
+        return n
+
 
 class _FakeSession:
     def __init__(self):
@@ -87,6 +97,9 @@ class _FakeSession:
         self.commits += 1
 
     def rollback(self):
+        pass
+
+    def refresh(self, obj):
         pass
 
     def query(self, model):
@@ -332,3 +345,34 @@ async def test_confirmation_is_honest_when_no_resume(ws, ctx, confirmed):
     text = confirmed[0]["text"].lower()
     assert "resuming" not in text     # never a false resume claim
     assert "recorded" in text         # honest: recorded, nothing to auto-resume
+
+
+# ===========================================================================
+# 7. P225-RVW-14 — the pending→granted flip is atomic (compare-and-swap), so
+# two concurrent answers to the same question apply exactly once.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_concurrent_answers_apply_once(ws, ctx, confirmed):
+    """Two near-simultaneous answers (both having passed the pending pre-check)
+    reach the CAS in apply_question_answer: the first flips pending→granted and
+    applies; the second's UPDATE...WHERE status='pending' matches 0 rows and is a
+    safe no-op — one human_qa entry, one resume, one confirmation (P225-RVW-14)."""
+    from api.approval_grants import apply_question_answer
+
+    db = _FakeSession()
+    task = BoardTask(id=42, workspace_id=ws, title="T", status="blocked")
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="42")
+
+    # First answer wins the CAS and applies.
+    await apply_question_answer(db, grant, answer_text="Ship A", answered_by="user:1")
+    # Second concurrent answer to the SAME question is a safe no-op.
+    await apply_question_answer(db, grant, answer_text="Ship B", answered_by="user:2")
+
+    assert grant.status == GrantStatus.GRANTED.value
+    assert grant.answer_text == "Ship A"          # the first answer won
+    assert grant.answered_by == "user:1"
+    qa = task.planning_data["human_qa"]
+    assert len(qa) == 1 and qa[0]["a"] == "Ship A"  # exactly one Q&A entry
+    assert len(confirmed) == 1                       # exactly one confirmation

@@ -55,6 +55,16 @@ class _Query:
     def first(self):
         return self._rows[0] if self._rows else None
 
+    def update(self, values, synchronize_session=False):
+        """Emulate a filtered UPDATE (the P225-RVW-14 compare-and-swap): mutate
+        the already-filtered rows and return the affected count."""
+        n = 0
+        for r in self._rows:
+            for col, val in values.items():
+                setattr(r, getattr(col, "key", col), val)
+            n += 1
+        return n
+
 
 class _FakeSession:
     def __init__(self):
@@ -69,6 +79,12 @@ class _FakeSession:
         pass
 
     def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def refresh(self, obj):
         pass
 
     def query(self, model):

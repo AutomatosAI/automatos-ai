@@ -278,10 +278,43 @@ async def apply_question_answer(
     and the work resumes through the EXISTING ``_requeue_subject``.
     """
     now = datetime.now(timezone.utc)
+
+    # Compare-and-swap the pending→granted flip so two concurrent answers to the
+    # same question cannot BOTH apply (P225-RVW-14). Authorization is chat-scoped,
+    # not principal-scoped — any member of a shared authorized group chat can
+    # answer, and there is no default rate limit — so a reply racing POST /answer,
+    # or two '/answer' messages, is reachable. ``UPDATE ... WHERE status='pending'``
+    # is atomic in Postgres: the loser's UPDATE matches 0 rows and aborts as a safe
+    # no-op — one human_qa entry, one resume, one confirmation.
+    flipped = (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.id == grant.id,
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+        )
+        .update(
+            {
+                ApprovalGrant.status: GrantStatus.GRANTED.value,
+                ApprovalGrant.answer_text: answer_text,
+                ApprovalGrant.answered_by: answered_by,
+                ApprovalGrant.answered_at: now,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not flipped:
+        # Lost the race — another answer already won. Record / resume / confirm
+        # nothing (no duplicates); return the committed winning state.
+        db.rollback()
+        db.refresh(grant)
+        return grant
+
+    # Won the flip. The UPDATE used synchronize_session=False, so sync the
+    # in-memory row for _record_answer_on_subject / the confirmation / the caller.
+    grant.status = GrantStatus.GRANTED.value
     grant.answer_text = answer_text
     grant.answered_by = answered_by
     grant.answered_at = now
-    grant.status = GrantStatus.GRANTED.value
     _record_answer_on_subject(db, grant, answer_text, now)
 
     # Commit the answer BEFORE resuming — mirror grant_approval's 2026-08-06
