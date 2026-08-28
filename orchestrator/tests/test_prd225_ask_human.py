@@ -135,31 +135,49 @@ def test_ask_human_wired_into_executor_map():
 
 
 # ===========================================================================
-# 2. Parking across all three subject types
+# 2. Only board_task questions resume on answer — tool_call / playbook_run are
+# refused up front (their answer would no-op the resume, P225-RVW-11).
 # ===========================================================================
 
-@pytest.mark.parametrize("subject_type,subject_id", [
-    ("playbook_run", "run-abc"),
-    ("tool_call", "call-xyz"),
-])
 @pytest.mark.asyncio
-async def test_non_board_subjects_park_as_a_row(dispatched, subject_type, subject_id):
+async def test_tool_call_ask_resumes_or_is_refused(dispatched):
+    """A tool_call question's answer cannot resume the parked call (no stored,
+    re-dispatchable action), so platform_ask_human refuses it up front rather
+    than reporting parked:true for work its answer cannot resume — the way a
+    terminal board task is refused (P225-RVW-11 / P225-RVW-8). No grant row is
+    staged and nothing is dispatched."""
     from modules.tools.discovery.handlers_asks import ask_human
-    from core.models.approval_grants import ApprovalGrant, KIND_QUESTION
+    from core.models.approval_grants import ApprovalGrant
 
     db = _FakeSession()
     ws = uuid4()
     res = await ask_human(db, ws, {
-        "subject_type": subject_type, "subject_id": subject_id,
+        "subject_type": "tool_call", "subject_id": "call-xyz",
         "question": "Which vendor?", "_agent_id": 7,
     })
-    assert res["success"] is True and res["parked"] is True
-    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
-    assert grant.kind == KIND_QUESTION
-    assert grant.subject_type == subject_type
-    assert grant.subject_id == subject_id
-    assert grant.question_md == "Which vendor?"
-    assert res["ask_id"] == grant.id
+    assert res["success"] is False and res.get("parked") is False
+    assert "tool_call" in res["error"]
+    assert not any(isinstance(r, ApprovalGrant) for r in db.rows)
+    assert dispatched == []
+
+
+@pytest.mark.asyncio
+async def test_playbook_run_ask_resumes_or_is_refused(dispatched):
+    """Same for a playbook_run question — refused up front, no row, no dispatch
+    (P225-RVW-11)."""
+    from modules.tools.discovery.handlers_asks import ask_human
+    from core.models.approval_grants import ApprovalGrant
+
+    db = _FakeSession()
+    ws = uuid4()
+    res = await ask_human(db, ws, {
+        "subject_type": "playbook_run", "subject_id": "run-abc",
+        "question": "Which vendor?", "_agent_id": 7,
+    })
+    assert res["success"] is False and res.get("parked") is False
+    assert "playbook_run" in res["error"]
+    assert not any(isinstance(r, ApprovalGrant) for r in db.rows)
+    assert dispatched == []
 
 
 @pytest.mark.asyncio
@@ -249,8 +267,9 @@ async def test_dispatch_fires_with_question_link(dispatched):
 
     db = _FakeSession()
     ws = uuid4()
+    db.add(_board_task(ws, 1, status="in_progress"))  # lone task ⇒ no cascade
     res = await ask_human(db, ws, {
-        "subject_type": "tool_call", "subject_id": "c1",
+        "subject_type": "board_task", "subject_id": "1",
         "question": "Proceed?", "_agent_id": 3, "_agent_name": "Scout",
     })
     assert len(dispatched) == 1
@@ -406,8 +425,10 @@ async def test_asked_by_agent_id_is_server_minted(dispatched):
     from core.models.approval_grants import ApprovalGrant
 
     db = _FakeSession()
-    res = await ask_human(db, uuid4(), {
-        "subject_type": "tool_call", "subject_id": "c1", "question": "Q",
+    ws = uuid4()
+    db.add(_board_task(ws, 1, status="in_progress"))
+    res = await ask_human(db, ws, {
+        "subject_type": "board_task", "subject_id": "1", "question": "Q",
         "_agent_id": 42,
         # A spoofed asker in the tool args must be ignored — only _agent_id counts.
         "asked_by_agent_id": 999,

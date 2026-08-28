@@ -54,6 +54,26 @@ async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
     if options is not None and not isinstance(options, list):
         return {"success": False, "error": "options must be a list of strings"}
 
+    # Only a board task has a working park→answer→resume path: the status flip
+    # parks it and _requeue_blocked_task re-queues it on answer, and the agent
+    # re-reads the answer from planning_data.human_qa. A tool_call / playbook_run
+    # question carries no re-dispatchable action, so its answer no-ops the resume
+    # (_resume_tool_call / resume_playbook_run_grant record 'no stored action')
+    # while the human is still told the work "resumed" (P225-RVW-11). Refuse
+    # those subjects up front — honestly, the way a terminal board task is
+    # refused (P225-RVW-8) — rather than staging a row whose answer resumes
+    # nothing. Genuine resume for those subjects is a separate re-entry
+    # mechanism, not wired in this version.
+    if subject_type != "board_task":
+        return {
+            "success": False,
+            "parked": False,
+            "error": (
+                f"platform_ask_human cannot park a '{subject_type}' subject: only "
+                "board_task questions resume on answer in this version"
+            ),
+        }
+
     # The board-task subject is validated against the workspace and parked by a
     # status flip. playbook_run / tool_call subjects follow the grant precedent
     # (issue_tool_grant): the pending row IS the park — the subject id references

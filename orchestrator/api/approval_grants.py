@@ -287,10 +287,10 @@ async def apply_question_answer(
     # Commit the answer BEFORE resuming — mirror grant_approval's 2026-08-06
     # ordering so the resume path sees a committed, non-pending row.
     db.commit()
-    await _requeue_subject(db, grant)
+    resumed = await _requeue_subject(db, grant)
     db.commit()
 
-    _confirm_answer_into_chat(db, grant)
+    _confirm_answer_into_chat(db, grant, resumed=resumed)
     return grant
 
 
@@ -323,16 +323,25 @@ def _record_answer_on_subject(
     grant.details = {**details, "human_qa": qa}
 
 
-def _confirm_answer_into_chat(db: Session, grant: ApprovalGrant) -> None:
-    """Fail-soft chat confirmation that the answered work is resuming."""
+def _confirm_answer_into_chat(db: Session, grant: ApprovalGrant, *, resumed: bool) -> None:
+    """Fail-soft chat confirmation — HONEST about the resume outcome.
+
+    Only claim the work is resuming when it genuinely did (P225-RVW-11). A
+    channel-hold answer, or a subject whose resume was a no-op, records the
+    answer without a false 'resuming' the human would act on."""
     try:
         from services.chat_messenger import deliver_background_message
 
         subject_label = f"{grant.subject_type.replace('_', ' ')} {grant.subject_id}"
+        text = (
+            f"Answered — resuming {subject_label}."
+            if resumed
+            else f"Answer recorded for {subject_label} — nothing to auto-resume."
+        )
         deliver_background_message(
             db,
             workspace_id=grant.workspace_id,
-            text=f"Answered — resuming {subject_label}.",
+            text=text,
             source={"origin": "question_answer", "grant_id": grant.id},
             link_type="question",
             link_id=str(grant.id),
@@ -344,31 +353,49 @@ def _confirm_answer_into_chat(db: Session, grant: ApprovalGrant) -> None:
         )
 
 
-async def _requeue_subject(db: Session, grant: ApprovalGrant) -> None:
-    """On grant, resume the blocked subject.
+def _executed_result_succeeded(grant: ApprovalGrant) -> bool:
+    """True iff a tool_call / playbook_run resume actually did work — a stored
+    action re-dispatched OK, or a board-linked re-queue fired. A grant carrying
+    no re-dispatchable action records success=False (or nothing), so the answer
+    confirmation stays honest about a no-op (P225-RVW-11)."""
+    details = grant.details if isinstance(grant.details, dict) else {}
+    result = details.get("executed_result") or {}
+    return bool(result.get("success") or result.get("resumed_via"))
 
-    - ``board_task``: return the blocked task to the dispatch queue (unchanged).
+
+async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
+    """On grant, resume the blocked subject. Returns True iff the subject
+    GENUINELY resumed, so the chat confirmation never claims 'resuming' for a
+    no-op (P225-RVW-11).
+
+    - ``board_task``: return the blocked task to the dispatch queue (unchanged);
+      True iff a still-blocked task was re-queued.
     - ``tool_call`` (PRD-193 S4, P2-12): re-dispatch the stored call through
       the spine — or, for board-originated asks, ride the existing board
-      re-queue so the re-run completes into the now-active grant (S2).
+      re-queue so the re-run completes into the now-active grant (S2). True iff
+      a stored action executed / a board re-queue fired.
     - ``playbook_run`` (PRD-204 S7/S8): the watcher's corrective-action
       grants -- ``details.watch_action`` discriminates (rerun / replan /
       reassign / spawn_agent); the stored spec launches and the supervising
       watch follows the work. First real wiring of SUBJECT_PLAYBOOK_RUN.
+    - anything else (e.g. a ``channel`` trust-gate hold): no resume path,
+      returns False. platform_ask_human refuses tool_call/playbook_run
+      questions up front (handlers_asks, P225-RVW-11), so a question only ever
+      reaches here as a board_task (resumable) or a channel hold (not).
     """
     from core.models.approval_grants import SUBJECT_PLAYBOOK_RUN, SUBJECT_TOOL_CALL
 
     if grant.subject_type == SUBJECT_TOOL_CALL:
         await _resume_tool_call(db, grant)
-        return
+        return _executed_result_succeeded(grant)
     if grant.subject_type == SUBJECT_PLAYBOOK_RUN:
         from services.watch_rerun import resume_playbook_run_grant
 
         await resume_playbook_run_grant(db, grant)
-        return
+        return _executed_result_succeeded(grant)
     if grant.subject_type != SUBJECT_BOARD_TASK:
-        return
-    _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
+        return False
+    return _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
 
 
 def _requeue_blocked_task(db: Session, workspace_id: Any, task_id: Any) -> bool:

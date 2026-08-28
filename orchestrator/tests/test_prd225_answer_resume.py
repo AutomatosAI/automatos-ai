@@ -299,10 +299,14 @@ async def test_answer_rejects_non_question(ws, ctx, confirmed):
 
 @pytest.mark.asyncio
 async def test_answer_confirms_into_chat(ws, ctx, confirmed):
+    """A board-task answer genuinely resumes the parked task, so the confirmation
+    says 'resuming' and carries the question link."""
     from api.approval_grants import answer_question, AnswerRequest
 
     db = _FakeSession()
-    grant = _question(db, ws, subject_type="tool_call", subject_id="c6")
+    task = BoardTask(id=6, workspace_id=ws, title="T", status="blocked")
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="6")
     await answer_question(grant.id, AnswerRequest(answer_text="go"), ctx, db)
 
     assert len(confirmed) == 1
@@ -310,3 +314,21 @@ async def test_answer_confirms_into_chat(ws, ctx, confirmed):
     assert call["link_type"] == "question"
     assert call["link_id"] == str(grant.id)
     assert "resuming" in call["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_is_honest_when_no_resume(ws, ctx, confirmed):
+    """A channel trust-gate hold has NO resume path: answering it records the
+    answer, but the chat confirmation must NOT claim the work is 'resuming' —
+    it says the answer was recorded with nothing to auto-resume (P225-RVW-11)."""
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    grant = _question(db, ws, subject_type="channel", subject_id="chan-1")
+    await answer_question(grant.id, AnswerRequest(answer_text="route it"), ctx, db)
+
+    assert grant.status == GrantStatus.GRANTED.value  # the answer is recorded
+    assert len(confirmed) == 1
+    text = confirmed[0]["text"].lower()
+    assert "resuming" not in text     # never a false resume claim
+    assert "recorded" in text         # honest: recorded, nothing to auto-resume

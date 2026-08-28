@@ -594,10 +594,17 @@ async def _apply_trust_gate(
             db, workspace.id,
             subject_type="channel", subject_id=str(channel.id),
             kind=KIND_QUESTION,
+            # Honest copy: answering a channel hold records a note but does NOT
+            # auto-route the directive — there is no channel resume path, so the
+            # old "answer 'route it' to let it proceed" promised something the
+            # answer never did (P225-RVW-11). The gate's value is that the
+            # directive was held and NOT executed; the operator acts on it.
             question_md=(
-                "**Inbound directive awaiting approval**\n\n"
+                "**Inbound directive held for review**\n\n"
                 f"{_fence_untrusted(text_in)}\n\n"
-                '_Answer "route it" to let it proceed, or dismiss to keep it held._'
+                "_This message was held and NOT executed. Dismiss it once you've "
+                "handled it — answering here records a note but does not auto-route "
+                "the directive._"
             ),
             reason="Inbound directive held by the channel trust gate",
         )

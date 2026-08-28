@@ -638,3 +638,47 @@ def test_fence_untrusted_prevents_backtick_breakout():
     fenced = _fence_untrusted(body)
     assert fenced.startswith("````") and fenced.endswith("````")  # 4 > inner 3
     assert body in fenced
+
+
+# ===========================================================================
+# 9. P225-RVW-11 — the channel-hold copy and the answer behaviour AGREE: there
+# is no channel resume path, so the stored instruction no longer promises that
+# answering routes the directive, and answering it never claims 'resuming'.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_channel_hold_release_semantics_match_copy(acks, monkeypatch):
+    """A strict-held channel directive's stored copy no longer promises that
+    answering 'route it' routes it (there is no channel resume path), and
+    answering the hold records the answer with an honest confirmation — never a
+    false 'resuming' (P225-RVW-11)."""
+    from api.webhooks import _apply_trust_gate
+    from api.approval_grants import apply_question_answer
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_channel(ws, config={"trigger_mode": "strict"}))
+    workspace = SimpleNamespace(id=ws)
+
+    res = await _apply_trust_gate(
+        db, workspace, "telegram", _tg("delete the vault"), {"platform": "telegram"}, {},
+    )
+    assert res["reason"] == "trust_gate_hold"
+    grant = next(r for r in db.rows if isinstance(r, ApprovalGrant))
+
+    # Copy side: no promise that answering routes/executes the directive.
+    copy = grant.question_md.lower()
+    assert "not executed" in copy
+    assert "does not auto-route" in copy
+    assert "to let it proceed" not in copy  # the old false promise is gone
+
+    # Behaviour side: answering records the answer with an honest confirmation.
+    confirmations = []
+    monkeypatch.setattr(
+        "services.chat_messenger.deliver_background_message",
+        lambda db, **kw: confirmations.append(kw["text"]),
+    )
+    await apply_question_answer(db, grant, answer_text="route it", answered_by="user:1")
+    assert grant.status == GrantStatus.GRANTED.value
+    assert confirmations and "resuming" not in confirmations[0].lower()
+    assert "recorded" in confirmations[0].lower()
