@@ -8,10 +8,10 @@
    "title": "W0 fix(prd-222) — chat trial metering: thread workspace identity to the factory",
    "description": "The trial choke point (agent_factory._create_llm_manager / resolve_trial_routing, modules/agents/factory/agent_factory.py:506/:546) NO-OPS when workspace_id is None — and the chatbot pipeline (consumers/chatbot/service.py imports the factory) builds Auto without passing it, so CHAT — the primary surface — is unmetered, unpinned, and can never exhaust ($0.00 observed after a full onboarding conversation). FIND the chatbot→factory call site(s), thread the conversation's workspace identity through, and verify accrual end-to-end: manager.py:~718 gates record_trial_spend on self._tracking_ctx['trial'] which the factory sets. Do NOT touch BYOK behavior. Commit prefix fix(prd-222).",
    "acceptanceCriteria": [
-    "Chatbot factory call passes the real workspace_id (grep-proof call site in commit body)",
-    "Regression test: a chat-path turn on an active-trial workspace accrues spend (record_trial_spend called) AND pins to TRIAL_MODEL_ALLOWLIST; a BYOK workspace bypasses untouched",
-    "Exhausted trial workspace gets the typed trial_exhausted error on the chat path (test)",
-    "Full orchestrator suite at documented baseline"
+    "DONE — consumers/chatbot/service.py:2143 passes workspace_id=self.workspace_id into activate_agent; agent_factory.activate_agent gains a workspace_id param and threads effective_ws_id (conversation ws || db_agent.workspace_id) into key resolution + trial gate + LLMManager. Chatbot factory call passes the real workspace_id (grep-proof call site in commit body)",
+    "DONE — test_prd230_chat_trial_metering.py: active trial → _resolve_trial_decision returns (True, pinned-to-allowlist); BYOK → (False,None) with a Boom session proving no ws read; warned still meters. Shared gate _resolve_trial_decision called by BOTH _create_llm_manager and activate_agent (count>=2). Regression test: a chat-path turn on an active-trial workspace accrues spend (record_trial_spend called) AND pins to TRIAL_MODEL_ALLOWLIST; a BYOK workspace bypasses untouched",
+    "DONE — test_exhausted_trial_raises_typed_error_on_chat_path asserts TrialExhaustedError(error_code='trial_exhausted'); activate_agent re-raises it past the generic except so it is not swallowed to None. Exhausted trial workspace gets the typed trial_exhausted error on the chat path (test)",
+    "DONE — local full suite 4749 passed; only non-flake failures (test_p2w2_authz_boundary_sweep, test_prd222_w2s1 head-pin) are byte-identical to origin/main and present in main's OWN red CI run 33214280416/33212994947 (2 failed, 4847 passed) — inherited baseline, zero new failures from US-001. Full orchestrator suite at documented baseline"
    ],
    "files": [
     "orchestrator/consumers/chatbot/",

@@ -2139,9 +2139,17 @@ class StreamingChatService:
             if fresh_start:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
 
-            # Start agent activation (concurrent with chat-id emission)
+            # Start agent activation (concurrent with chat-id emission).
+            # PRD-230 US-001: thread the CONVERSATION's workspace so the trial gate
+            # meters + pins chat turns (Auto the system agent carries no workspace
+            # of its own — without this, chat ran unmetered/unpinned on the primary
+            # surface). self.workspace_id is resolved above.
             agent_task = asyncio.create_task(
-                self.agent_factory.activate_agent(agent_id, use_orchestrator_llm=use_orchestrator_llm)
+                self.agent_factory.activate_agent(
+                    agent_id,
+                    use_orchestrator_llm=use_orchestrator_llm,
+                    workspace_id=self.workspace_id,
+                )
             )
 
             # Send chat_id to frontend
