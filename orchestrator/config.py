@@ -1646,7 +1646,7 @@ orchestrator_config = config
 
 # ---------------------------------------------------------------------------
 # PRD-222 W2·S1 (US-023): PLAN_TIERS — the v1 tier contract (approved strawman,
-# 2026-08-28). DISPLAY PRICING ONLY — no billing/checkout is wired anywhere
+# 2026-08-28). DISPLAY PRICING ONLY — no billing or commerce is wired anywhere
 # (PRD §12 Q5); ``display_price_usd`` sources an EARLY-ACCESS label, never a
 # charge. Capability families (codegraph/nl2sql/team/voice) and the quota limits
 # both derive from here: US-024 reads them for exposure profiles, and US-025's

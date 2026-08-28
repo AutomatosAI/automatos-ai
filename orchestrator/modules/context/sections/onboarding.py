@@ -113,6 +113,7 @@ gets Auto + 1–2 helpers and ~2 Playbooks; a larger company gets more), what ea
 piece does for THEM, the 1–2 apps to connect, and the estimated cost ("this build \
 is covered by your trial credit"). Nothing is built before they say yes. Let them \
 edit conversationally. On an explicit yes, advance_to `building` and start.
+Plan: {plan_recommendation}
 """
 
 _STAGE_BUILDING = """\
@@ -242,7 +243,9 @@ class OnboardingSection(BaseSection):
         if stage == "teach":
             return _STAGE_TEACH.format(firecrawl_note=self._firecrawl_note(ctx))
         if stage == "proposal":
-            return _STAGE_PROPOSAL
+            return _STAGE_PROPOSAL.format(
+                plan_recommendation=self._plan_recommendation(onboarding)
+            )
         if stage == "building":
             return _STAGE_BUILDING
         if stage == "boom":
@@ -250,6 +253,27 @@ class OnboardingSection(BaseSection):
         if stage == "powerup":
             return _STAGE_POWERUP.format(trial_line=_trial_line(onboarding))
         return ""  # defensive — terminal stages never reach here
+
+    def _plan_recommendation(self, onboarding: dict[str, Any]) -> str:
+        """The plan-recommendation line for the proposal stage (US-025).
+
+        Derived from the stored segment via a pure helper; display prices come
+        from PLAN_TIERS. Fail-safe: any error degrades to a plain instruction so
+        a helper fault never blanks the proposal guidance.
+        """
+        try:
+            from services.plan_tiers import plan_proposal_copy
+
+            segment = onboarding.get("segment") or {}
+            team_size = segment.get("team_size") if isinstance(segment.get("team_size"), int) else None
+            return plan_proposal_copy(segment, team_size)
+        except Exception:  # noqa: BLE001 — guidance must never blank on a helper error
+            logger.warning("OnboardingSection._plan_recommendation failed", exc_info=True)
+            return (
+                "Recommend a plan (Basic $19 · Pro $49 · Business $99/mo, early access; "
+                "Enterprise coming soon) and set the accepted tier via "
+                "`platform_update_onboarding` (plan)."
+            )
 
     def _firecrawl_note(self, ctx: SectionContext) -> str:
         """Honest-degrade: suppress the scan offer when Firecrawl is unconfigured.

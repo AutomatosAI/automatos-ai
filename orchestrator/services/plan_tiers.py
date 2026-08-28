@@ -214,3 +214,65 @@ def filter_tools_by_plan(
             continue  # drop a promoted/registry tool in a disabled family
         out.append(schema)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# US-025 — plan recommendation (proposal stage). Pure, explainable rules; NO
+# pricing math (display prices come straight from PLAN_TIERS).
+# --------------------------------------------------------------------------- #
+
+# Signals in the free-text segment that point at a tier. Kept small and
+# explainable — the recommendation is a starting point the user can override.
+_BUSINESS_SIGNALS = (
+    "agency", "multiple teams", "several teams", "multiple pods", "departments",
+    "organisation", "organization", "franchise", "enterprise",
+)
+_PRO_SIGNALS = (
+    "developer", "engineering", "software", "code", "analytics", "dashboard",
+    "sql", "data team", "automation",
+)
+
+
+def recommend_plan(segment: Optional[dict], team_size=None, tiers: Optional[dict] = None):
+    """Recommend an assignable tier from the stored segment + expressed team size.
+
+    Simple, explainable rules (NO pricing math): an org-scale operation (≥6 seats
+    or multi-team language) → business; a small team, technical comfort, or
+    code/data needs → pro; a solo operator → basic. Returns ``(plan, reason)``
+    where reason is a short plain-language phrase for the proposal copy.
+    """
+    seg = segment or {}
+    text = " ".join(str(seg.get(k) or "") for k in ("business", "goal", "comfort")).lower()
+    size = team_size if isinstance(team_size, int) and team_size > 0 else None
+
+    if (size is not None and size >= 6) or any(s in text for s in _BUSINESS_SIGNALS):
+        return "business", "you're running multiple teams or pods"
+    if (size is not None and size >= 2) or "technical" in text or any(s in text for s in _PRO_SIGNALS):
+        return "pro", "you've got a small team or code/data needs"
+    return "basic", "you're a solo operator getting started"
+
+
+def plan_proposal_copy(segment: Optional[dict], team_size=None, tiers: Optional[dict] = None) -> str:
+    """The plan-recommendation line injected into the proposal stage guidance.
+
+    Names the recommended tier with its DISPLAY price + early-access label, lists
+    every assignable tier's price, states Enterprise is coming soon, and tells
+    Auto to set the accepted plan via ``platform_update_onboarding`` (only
+    assignable tiers). Display strings come from PLAN_TIERS — no charge is ever
+    computed (Q5).
+    """
+    resolved = _tiers(tiers)
+    plan, reason = recommend_plan(segment, team_size, resolved)
+    tier = resolved.get(plan) or {}
+    name = tier.get("display_name") or plan.title()
+    price = tier.get("display_price_usd")
+    options = " · ".join(
+        f"{t.get('display_name') or p.title()} ${t.get('display_price_usd')}/mo"
+        for p, t in assignable_tiers(resolved).items()
+    )
+    return (
+        f"Recommend the **{name} plan — ${price}/mo** (early-access pricing) because {reason}. "
+        f"Show the options — {options} (all early access) — and note Enterprise is coming soon. "
+        f"On an explicit yes, set it with `platform_update_onboarding` (plan: \"{plan}\"); "
+        f"only basic/pro/business are assignable."
+    )

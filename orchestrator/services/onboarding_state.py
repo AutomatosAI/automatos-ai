@@ -263,6 +263,36 @@ def record_first_integration_connected(db: Any, workspace: Any) -> bool:
     return True
 
 
+# PRD-222 W2·S2 (US-025) — plan funnel events. Same mechanism as the trial_* and
+# first_integration events: a named entry (plan + ISO timestamp) in this
+# onboarding JSONB doc, the Wave-1 funnel record — there is no generic analytics
+# sink to emit into (see ``advance_onboarding_stage``'s note).
+PLAN_FUNNEL_EVENTS = ("plan_recommended", "plan_accepted")
+
+
+def record_plan_event(db: Any, workspace: Any, event: str, plan: str) -> dict[str, Any]:
+    """Stamp a plan funnel event (``plan_recommended`` / ``plan_accepted``).
+
+    Records ``{plan, at}`` under ``onboarding.funnel[event]`` (rebuild-don't-mutate,
+    PRD-220-safe), overwriting so it reflects the latest recommendation/acceptance.
+    Raises ``ValueError`` for an unknown event name — the funnel keys are a fixed,
+    auditable set. Returns the new onboarding doc.
+    """
+    if event not in PLAN_FUNNEL_EVENTS:
+        raise ValueError(f"unknown plan funnel event: {event!r}")
+    doc = get_onboarding(workspace)  # deep copy
+    now = _now_iso()
+    funnel = dict(doc.get("funnel") or {})
+    funnel[event] = {"plan": plan, "at": now}
+    doc["funnel"] = funnel
+    doc["updated_at"] = now
+    _persist(db, workspace, doc)
+    logger.info(
+        "Funnel: %s plan=%s for workspace %s", event, plan, getattr(workspace, "id", None)
+    )
+    return doc
+
+
 # =========================================================================== #
 # PRD-222 W2·S4 (US-020) — the post-setup "run & learn" CHECKLIST.
 #
