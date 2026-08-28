@@ -368,6 +368,12 @@ def _upsert_platform_management_skill(db: Session) -> Skill | None:
 
     raw = _PLATFORM_SKILL_PATH.read_text(encoding="utf-8").strip()
 
+    # The seed file is GENERATED from automatos-skills/team/auto/SKILL.md
+    # (scripts/sync-auto-skill.py) — its frontmatter version is the truth.
+    import re as _re
+    _vm = _re.search(r'^version:\s*"?([\d.]+)"?', raw, _re.M)
+    skill_version = _vm.group(1) if _vm else "1.0.0"
+
     # Split YAML frontmatter from markdown body
     if raw.startswith("---"):
         parts = raw.split("---", 2)
@@ -382,7 +388,7 @@ def _upsert_platform_management_skill(db: Session) -> Skill | None:
         description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
         skill_type="technical",
         category="agent-role",
-        skill_version="1.0.0",
+        skill_version=skill_version,
         skill_source="builtin-core",
         prompt_template=markdown_body,
         content_hash=content_hash,
