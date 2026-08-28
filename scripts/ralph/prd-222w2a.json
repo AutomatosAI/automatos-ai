@@ -1,0 +1,82 @@
+{
+ "project": "Automatos AI Platform — PRD-222 Auto-Led Onboarding — Wave 2a: connect + checklist + retirement + gate migration (Q1-independent)",
+ "branchName": "ralph/prd-222-w2a",
+ "description": "Cut from origin/main AFTER PR #628 (Wave 1b) is merged — the launch script verifies reset_onboarding exists on main and ABORTS otherwise. SCOPE = the four Q1-independent Wave-2 stories of docs/PRDS/PRD-222-AUTO-LED-ONBOARDING.md §6 (W2·S3/S4/S5/S6) per Gerard's 2026-08-27 decisions: wizard UI DELETED outright (Q3 answered — PRD default), retirement proceeds now (Q2), exposure profiles + plan recommendation (W2·S1/S2) are a LATER kit gated on Q1 tiers — do NOT build them, do NOT touch plans/tiers/exposure. BINDING RULES: EXACTLY ONE new alembic revision this wave (US-021's seeded-agent cleanup — idempotent, scoped); JSONB rebuild-don't-mutate everywhere (checklist writes included); no os.getenv outside config.py; never weaken tests/test_prd222_trust_guards.py or advance_onboarding_stage's validator; Wave-1 surfaces (opener, power-up, pill, banner, intake card, reset endpoint + /dev/reset-onboarding) must survive retirement PROVABLY — deleting any of them is a hard failure; backend intake pipeline + api/wizard.py endpoints STAY (tool substrate); route-manifest changes are HAND edits with count bumps (never regenerate — the committed file deliberately carries stale rows); deletions delete their own tests too, and every deletion ends grep-CLEAN in code dirs (the LX-wave dropped-hunks lesson: builds+suites are the only link-check browser ESM gets); PURE tests locally, real-Postgres in CI per-story push; NEVER git add -A/./-u (node_modules untracked+ungitignored) and stage package.json/lockfile explicitly on the dep removal; never git stash -u. Frontend gate: cd frontend && npm run -s test green after every frontend story; orchestrator gate: documented env baseline (prd172|dr_restore|composio flakes only).",
+ "userStories": [
+  {
+   "id": "US-019",
+   "title": "W2·S3 — Inline Composio connect card in chat",
+   "description": "Reuse the EXISTING Composio OAuth flow — do not build a second one. Grounding (2026-08-27): the OAuth callback page is frontend/app/tools/callback/page.tsx; the initiation endpoint was not pinned at kit time — RE-VERIFY by grep (candidates: api/composio*.py, the integrations/tools settings surface that today's Tools page uses to connect apps) and reuse whatever route the existing Tools connect button calls. New frontend/components/onboarding/connect-app-card.tsx rendered in chat (follow the wave-1b chat-card pattern from power-up-card/intake-progress-card): names the app Auto asked for, opens the existing OAuth popup, reflects the callback result back into the conversation (the callback page already lands the result — bridge it to chat state via the same mechanism the Tools page uses, or a focused refetch on window focus; do NOT invent a new event bus). Emit 'first integration connected' as a first-class funnel event (follow the trial_* funnel event pattern from US-004/005) exactly once per workspace — detected from the workspace's connection count transitioning 0→1, not from the popup closing.",
+   "acceptanceCriteria": [
+    "connect-app-card.tsx exists, rendered from the chat surface, opens the EXISTING OAuth initiation route (grep proves reuse — no new OAuth/redirect endpoint added; route manifest unchanged by this story)",
+    "Callback result reflected into chat state (component test with mocked popup/callback contract)",
+    "first_integration_connected funnel event emitted exactly once per workspace on 0→1 connections (backend test)",
+    "cd frontend && npm run -s test green; cd orchestrator && python3 -m pytest -q at documented baseline"
+   ],
+   "files": [
+    "frontend/components/onboarding/connect-app-card.tsx",
+    "frontend/app/tools/callback/page.tsx",
+    "orchestrator/"
+   ]
+  },
+  {
+   "id": "US-020",
+   "title": "W2·S4 — Post-setup checklist card (chat + Command Center)",
+   "description": "Checklist state lives INSIDE workspaces.onboarding.checklist (JSONB — NO migration; extend onboarding_state.py with a checklist read/update entrypoint that follows the same full-reassignment write style as reset_onboarding/_write_trial). Items (per PRD): connect a second app · invite a teammate (ONLY rendered when the workspace plan has >1 seat — read the existing plan/plan_limits surface) · run your first mission · take the matched Academy course (map the stored segment.comfort to a static academy URL — novice→ABF, technical→APA; a simple mapping constant, no new service). Completion detection from REAL events where the platform already records them: second app = connections count ≥2; first mission = missions count ≥1; teammate = members count ≥2; the Academy item is the one manual-dismiss exception (no cross-repo tracking exists — render its check on dismiss and say so in a code comment). Frontend: frontend/components/onboarding/setup-checklist-card.tsx rendered in chat AND on the Command Center (follow trial-balance-pill's dual-surface pattern from wave 1b); dismissible; dismissal persisted in the checklist doc (server-side, NOT localStorage — D8).",
+   "acceptanceCriteria": [
+    "Checklist read/update entrypoint in onboarding_state.py using full-JSONB-reassignment writes; state under workspaces.onboarding.checklist; zero new migrations from this story",
+    "Item completion derived from real counts (connections/missions/members) — backend tests prove each detection; invite item absent for single-seat plans (test)",
+    "setup-checklist-card.tsx renders on chat + Command Center, dismissible, dismissal server-persisted (component tests; grep proves no localStorage use)",
+    "cd frontend && npm run -s test green; orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "orchestrator/services/onboarding_state.py",
+    "frontend/components/onboarding/setup-checklist-card.tsx",
+    "frontend/components/command-center/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-021",
+   "title": "W2·S5 — Retirement: delete Shepherd, wizard UI, 4-agent machinery (clean-replace)",
+   "description": "The PRD §10 inventory, anchors re-verified 2026-08-27. ORDER MATTERS: (1) FIRST relocate the SSE progress hook — intake-progress-card.tsx imports useWizardProgress from @/hooks/use-wizard-progress (verbatim reuse, wave 1b); MOVE that hook file to frontend/hooks/use-intake-progress.ts (rename, keep logic identical), update the intake card's import, THEN the wizard tree can die. (2) Shepherd: delete frontend/components/onboarding/{first-login-guard,welcome-modal}.tsx (+ their tests), frontend/hooks/use-auto-tour.ts, frontend/lib/shepherd/**, frontend/styles/shepherd-custom.css (verify import site in globals/layout), strip all data-tour attributes (19 files at kit time — recount), remove package.json deps shepherd.js + react-shepherd (lockfile via the repo's package manager, staged explicitly — NEVER git add -A), delete the ProfileMenu/menu 'tour' entry if grep finds one (may already be absent — document either way). (3) Wizard UI: delete frontend/app/onboarding/wizard/**, frontend/components/wizard/**, frontend/hooks/use-wizard-api.ts (and the now-relocated use-wizard-progress.ts original); BACKEND intake pipeline + api/wizard.py endpoints STAY (tool substrate). (4) 4-agent machinery: delete orchestrator/core/seeds/seed_onboarding_agents.py + its boot call (main.py ~:213-215 + import) + lazy re-seed _ensure_onboarding_agents (api/wizard.py ~:556, ~:636-656); in services/coordinator_service.py delete _clone_onboarding_agents (~:486), _cleanup_ephemeral_agents (~:566), the source=='mission_zero' branches (~:1580-1583, ~:1682) and roster injection (~:2464 block); remove the four agents' SYSTEM_BYPASS_ALLOWLIST entries (grep the allowlist for the four names case-insensitively — location was NOT pinned at kit time; if entries are already absent, document). Keep handlers_missions.py's source field itself (only the mission_zero consumption dies). (5) Admin surface: delete frontend/components/settings/OnboardingAgentsTab.tsx + its SystemSettingsTab.tsx mount, orchestrator/api/onboarding_agents.py + its main.py import/mount + router_manifest.py entry + committed route-manifest rows (hand-edit + count bump DOWN — never regenerate). (6) THE ONE MIGRATION of this wave: deactivate/remove the seeded required_role='onboarding' system agents from live DBs — idempotent, guarded (no-op when rows absent), and it must NOT touch agents created by any other path. (7) Org-chart empty state (frontend/components/agents/org-chart-tab.tsx): re-point 'Mission Zero' copy to asking Auto. (8) Update or delete superseded tests (tests/api/test_onboarding_journey.py and any wizard/shepherd component tests) — deleting a dead surface's tests WITH the surface is correct here, not a coverage loss. Grep-clean at the end: shepherd, use-auto-tour, mission_zero, OnboardingAgentsTab, seed_onboarding_agents return ZERO hits in code dirs (orchestrator/ frontend/ excluding docs/, reports/, alembic history).",
+   "acceptanceCriteria": [
+    "Intake progress card works off frontend/hooks/use-intake-progress.ts; its tests green; no file imports use-wizard-progress (grep zero)",
+    "Shepherd fully gone: lib dir, both components + tests, use-auto-tour, css, both package.json deps, zero data-tour attributes in frontend (grep -c == 0); frontend builds and suite green",
+    "Wizard UI gone (app route + components + use-wizard-api); backend intake endpoints in api/wizard.py still present and their tests green; committed route manifest count bumped DOWN for the removed route(s)",
+    "4-agent machinery gone from coordinator_service.py, main.py boot, api/wizard.py re-seed; allowlist entries for the four names gone-or-documented-absent; api/onboarding_agents.py + OnboardingAgentsTab + mounts deleted; org-chart copy re-pointed",
+    "EXACTLY ONE new alembic revision: idempotent cleanup of seeded required_role='onboarding' agents, scoped so non-seeded agents are untouched (test with a fixture agent)",
+    "Repo-wide grep-clean (code dirs): shepherd|use-auto-tour|mission_zero|OnboardingAgentsTab|seed_onboarding_agents == 0 hits; no orphan imports (frontend build + vitest + orchestrator suite all green — the LX-wave lesson: browser ESM never link-checks)",
+    "Wave-1 surfaces PROVABLY intact: onboarding-opener, power-up-card, trial pill, exhausted banner, intake card, reset endpoint + dev page all still present with green tests"
+   ],
+   "files": [
+    "frontend/",
+    "orchestrator/services/coordinator_service.py",
+    "orchestrator/main.py",
+    "orchestrator/api/wizard.py",
+    "orchestrator/api/onboarding_agents.py",
+    "orchestrator/core/seeds/seed_onboarding_agents.py",
+    "orchestrator/alembic/versions/",
+    "orchestrator/reports/route-manifest.json",
+    "orchestrator/router_manifest.py"
+   ]
+  },
+  {
+   "id": "US-022",
+   "title": "W2·S6 — is_new_workspace consumers migrated to the stage machine",
+   "description": "Verified 2026-08-27: consumers are orchestrator/api/workspaces.py (producer), frontend/components/workspace-provider.tsx, plus first-login-guard.tsx and use-auto-tour.ts which US-021 deletes. EXTERNAL check done at kit time: zero hits in automatos-widget-sdk and automatos-shopify — the field has NO external consumers, so REMOVE it outright (no deprecation shim; the repo's no-shims rule). After US-021, migrate workspace-provider.tsx to read onboarding.stage (it already receives the onboarding doc since US-002/wave-1b), delete the is_new_workspace computation from api/workspaces.py's response, and update the route-contract/manifest artifacts + tests that pin the response shape. Any remaining grep hit for is_new_workspace/isNewWorkspace in code dirs is a failure.",
+   "acceptanceCriteria": [
+    "api/workspaces.py response no longer computes or returns is_new_workspace; workspace-provider reads onboarding.stage; contract tests updated and green",
+    "grep is_new_workspace|isNewWorkspace == 0 hits in orchestrator/ + frontend/ code dirs (docs excluded)",
+    "External-consumer verification documented in the commit body (widget-sdk + shopify greps, zero hits, checked 2026-08-27)",
+    "Full suites green (orchestrator at documented baseline; frontend strict)"
+   ],
+   "files": [
+    "orchestrator/api/workspaces.py",
+    "frontend/components/workspace-provider.tsx",
+    "orchestrator/tests/",
+    "frontend/"
+   ]
+  }
+ ]
+}
