@@ -503,10 +503,10 @@ def test_cost_source_is_pinned_in_source():
 
 def test_agent_population_mirrors_roster_exclusions():
     """P228-RVW-1: the agent query hides the two categories the canonical roster
-    hides — Mission Zero ephemeral clones and the per-workspace system agent
-    (Auto) — so the fleet tab and roster tab on the same page show the same set.
-    Structural guard against silent removal; behavioural proof is in the realdb
-    suite (``test_roster_hidden_agents_excluded``).
+    hides from a per-workspace view — Mission Zero ephemeral clones and the
+    per-workspace system agent (Auto). Structural guard against silent removal;
+    behavioural proof is in the realdb suite (``test_roster_hidden_agents_excluded``).
+    (Admin/super_admin parity is a separate matter — see P228-RVW-3.)
     """
     # Ephemeral clones excluded (mirrors api/agents.py:538).
     assert re.search(r'agent_type\s*!=\s*"ephemeral"', _SVC_SRC)
@@ -514,6 +514,27 @@ def test_agent_population_mirrors_roster_exclusions():
     assert "~and_(" in _SVC_SRC
     assert "Agent.is_system_agent.is_(True)" in _SVC_SRC
     assert "Agent.workspace_id.isnot(None)" in _SVC_SRC
+
+
+def test_agent_population_docstring_is_honest_about_admin_global_system_agents():
+    """P228-RVW-3: the fleet is the workspace's OWN floor, not an exact copy of
+    every roster viewer's tab. For admin/super_admin callers api/agents.py ALSO
+    surfaces GLOBAL system agents (workspace_id=None, e.g. Auto CTO) via its
+    workspace-OR-system scope; the fleet omits those (they own no per-workspace
+    floor state). The docs must NOT claim exact / same-set parity, and must
+    record the intentional divergence so a future reader reads it as deliberate,
+    not an oversight. Behavioural proof is in the realdb suite
+    (``test_global_system_agent_absent_from_fleet``).
+    """
+    lowered = _SVC_SRC.lower()
+    # The overstated claims are gone.
+    assert "mirrors the canonical roster exactly" not in lowered
+    assert "show the same set" not in lowered
+    # The real scope + the intentional global-system-agent divergence are documented.
+    assert "workspace_id=none" in lowered          # the global persona shape
+    assert "auto cto" in lowered                    # the concrete live example
+    assert "per-workspace floor state" in lowered   # why it is omitted
+    assert "admin" in lowered                       # names who sees the divergence
 
 
 def test_reuses_canonical_busy_derivation_no_rival():

@@ -282,10 +282,11 @@ def roster_mix(engine, new_session):
 
 
 def test_roster_hidden_agents_excluded(roster_mix, new_session):
-    """P228-RVW-1: the fleet mirrors the roster exactly — the per-workspace Auto
-    and the ephemeral clone are absent; only the normal agent appears. Without
-    the exclusions the fleet tab would list agents the roster tab hides (Auto
-    lists itself; onboarding clones appear during Mission Zero).
+    """P228-RVW-1: the fleet hides the same per-workspace categories the roster
+    hides — the per-workspace Auto and the ephemeral clone are absent; only the
+    normal agent appears. Without the exclusions the fleet tab would list agents
+    the roster tab hides (Auto lists itself; onboarding clones appear during
+    Mission Zero). (Global system agents are a separate case — P228-RVW-3.)
     """
     s = new_session()
     result = get_fleet_state(s, roster_mix["ws"])
@@ -295,3 +296,63 @@ def test_roster_hidden_agents_excluded(roster_mix, new_session):
     assert ids == {roster_mix["normal"]}
     assert roster_mix["auto"] not in ids
     assert roster_mix["ephemeral"] not in ids
+
+
+@pytest.fixture
+def global_system_mix(engine, new_session):
+    """A workspace with one normal agent, plus a GLOBAL platform system agent
+    (``workspace_id=None`` — the *Auto CTO* shape from
+    ``core/seeds/seed_cto_agent.py``: ``is_system_agent=True``,
+    ``required_role='admin'``, ``status='active'``). api/agents.py surfaces such
+    global system agents to admin/super_admin roster viewers via its
+    ``workspace OR system`` scope; the per-workspace fleet read-model omits them
+    (they own no per-workspace floor state). The global row is deleted by id on
+    teardown (the workspace-scoped sweep can never reach a ``workspace_id=None``
+    row).
+    """
+    ws = str(uuid.uuid4())
+    s = new_session()
+    s.execute(
+        text("INSERT INTO workspaces (id, name) "
+             "VALUES (CAST(:id AS uuid), :n) ON CONFLICT (id) DO NOTHING"),
+        {"id": ws, "n": "prd228-global-system-mix"},
+    )
+    s.commit()
+
+    normal = Agent(name="Builder", agent_type="custom", workspace_id=ws, status="active")
+    # Mirrors the live Auto CTO seed: a global (workspace_id=None) system agent.
+    global_cto = Agent(name="Auto CTO", agent_type="system", workspace_id=None,
+                       status="active", is_system_agent=True, required_role="admin")
+    s.add_all([normal, global_cto])
+    s.flush()
+    ids = {"ws": ws, "normal": normal.id, "global_cto": global_cto.id}
+    s.commit()
+    s.close()
+
+    yield ids
+
+    s = new_session.sweep()
+    s.execute(text("DELETE FROM agents WHERE workspace_id = CAST(:ws AS uuid)"), {"ws": ws})
+    s.execute(text("DELETE FROM agents WHERE id = :id"), {"id": ids["global_cto"]})
+    s.execute(text("DELETE FROM workspaces WHERE id = CAST(:ws AS uuid)"), {"ws": ws})
+    s.commit()
+    s.close()
+
+
+def test_global_system_agent_absent_from_fleet(global_system_mix, new_session):
+    """P228-RVW-3: a GLOBAL platform system agent (``is_system_agent=True``,
+    ``workspace_id=None``, ``required_role='admin'``, ``status='active'`` — the
+    Auto CTO shape) is ABSENT from get_fleet_state for the workspace, even though
+    api/agents.py lists it in an ADMIN's Roster tab (its workspace-OR-system
+    scope, api/agents.py:525-530). The divergence is intentional, not an
+    oversight: a ``workspace_id=None`` persona owns no per-workspace floor state,
+    so surfacing it in a per-workspace read-model would be permanently-idle
+    noise; admin parity would be a product call (fleet_state.py module docstring).
+    """
+    s = new_session()
+    result = get_fleet_state(s, global_system_mix["ws"])
+    s.close()
+
+    ids = {e["agent_id"] for e in result["agents"]}
+    assert ids == {global_system_mix["normal"]}
+    assert global_system_mix["global_cto"] not in ids

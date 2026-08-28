@@ -6,12 +6,23 @@ now*. Every input already exists, scattered across board leases, mission-task
 state, watches, pending asks, and usage telemetry; this composes them, per
 agent, into a deterministic shape.
 
-Agent population mirrors the canonical roster exactly (``api/agents.py``): the
-workspace's own agents *minus* the two categories the roster deliberately hides
-— Mission Zero **ephemeral** clones (``agent_type='ephemeral'``) and the
+Agent population = the workspace's **own** roster agents (rows with this
+``workspace_id``) *minus* the two categories the roster deliberately hides —
+Mission Zero **ephemeral** clones (``agent_type='ephemeral'``) and the
 **per-workspace system agent Auto** (``is_system_agent=True`` with a
-``workspace_id``). So the fleet TAB and the roster TAB on the same Agents page
-show the same set, and Auto never lists itself when asked how the team is doing.
+``workspace_id``) — mirroring ``api/agents.py``'s per-workspace roster
+exclusions (``:538``, ``:545-547``). So Auto never lists itself when asked how
+the team is doing, and onboarding clones stay out of the count.
+
+This is the workspace's own floor — *not* an exact copy of what every roster
+viewer sees. For an **admin/super_admin** caller ``api/agents.py`` additionally
+surfaces the **global** platform system agents (``workspace_id=None`` — e.g.
+*Auto CTO*, seeded by ``core/seeds/seed_cto_agent.py``) through its
+``workspace OR system`` scope. The fleet intentionally omits those: a
+``workspace_id=None`` persona owns no per-workspace floor state (no workspace
+board task, mission task, or cost), so listing it would be permanently-idle
+noise in a "what's the team doing?" answer. Surfacing global system agents here
+would be a product call, not a silent default (P228-RVW-3).
 
 Design invariants (PRD-228 §5, binding rules):
 
@@ -464,8 +475,10 @@ def get_fleet_state(db: Session, workspace_id: UUID) -> Dict[str, Any]:
     """Compose the fleet read-model for one workspace.
 
     Bounded query set (six reads, independent of agent count):
-      1. the workspace's roster agents — non-ephemeral and non-per-workspace-
-         system (Auto excluded), mirroring api/agents.py's roster exclusions
+      1. the workspace's OWN roster agents — non-ephemeral, non-per-workspace-
+         system (Auto excluded); global system agents (workspace_id=None, e.g.
+         Auto CTO) that api/agents.py surfaces to admins are omitted too (no
+         per-workspace floor state) — see the module docstring (P228-RVW-3)
       2. their live board tasks (on-board statuses or flagged blocked)
       3. their busy mission tasks (assigned/running — the matcher's derivation)
       4. live watches in the workspace (fail-soft → defaulted on failure)
@@ -478,16 +491,19 @@ def get_fleet_state(db: Session, workspace_id: UUID) -> Dict[str, Any]:
         db.query(Agent)
         .filter(
             Agent.workspace_id == workspace_id,
-            # Mirror the canonical roster's exclusions (api/agents.py:538,545-547)
-            # so the fleet TAB and the roster TAB on the same Agents page show the
-            # SAME agent set. Two categories the roster deliberately hides:
+            # Mirror the canonical roster's per-workspace exclusions
+            # (api/agents.py:538,545-547). Two categories the roster hides from a
+            # per-workspace view:
             #   * Mission Zero ephemeral clones (agent_type='ephemeral'), present
             #     only during an onboarding run; and
             #   * the per-workspace system agent Auto (is_system_agent=True with a
             #     workspace_id) — the very agent asking "how's the team doing?",
             #     which must not list itself as a team member.
-            # Global system agents (workspace_id=None) are already excluded by the
-            # workspace filter above.
+            # GLOBAL system agents (workspace_id=None, e.g. Auto CTO) that
+            # api/agents.py surfaces to admin/super_admin roster viewers are
+            # omitted too: the workspace_id filter above never matches them and
+            # they own no per-workspace floor state. Deliberate, not incidental
+            # (see the module docstring / P228-RVW-3).
             Agent.agent_type != "ephemeral",
             ~and_(Agent.is_system_agent.is_(True), Agent.workspace_id.isnot(None)),
         )
