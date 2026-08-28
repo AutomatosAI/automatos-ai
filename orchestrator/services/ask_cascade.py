@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 # this many downstream tasks bypasses quiet hours.
 URGENT_CASCADE_THRESHOLD = 3
 
+# A finished task is NOT blocked behind the ask and does not propagate blocking,
+# so terminal descendants are excluded from the cascade (P225-RVW-4). Canonical
+# board-task terminals are done/failed (api/board_tasks.py VALID_STATUSES);
+# 'cancelled' is included defensively.
+_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled"})
+
 
 def reachable_from(adjacency: Mapping[Any, Iterable[Any]], root: Any) -> list:
     """Every distinct node reachable from ``root`` (excluding ``root``), in BFS
@@ -70,6 +76,12 @@ def _board_children(db: Any, workspace_id: Any, parent: Any) -> list:
 
     def _add(task: Any) -> None:
         if task is None:
+            return
+        # A terminal (done/failed/cancelled) descendant isn't blocked behind the
+        # ask, and doesn't propagate blocking — skip it AND its subtree so a
+        # mission-level ask over N finished steps + 1 live one counts 1, not N
+        # (P225-RVW-4). Flat mission siblings make this the common case.
+        if getattr(task, "status", None) in _TERMINAL_STATUSES:
             return
         tid = str(task.id)
         if tid not in seen_ids:
@@ -169,6 +181,9 @@ def board_task_cascade_detail(
 
     Order is preserved from the cycle-safe BFS; the tab renders the first ``cap``
     and shows "+N more". Never raises — a fault degrades to an empty cascade.
+
+    The shown tasks load in ONE ``id.in_(...)`` query, not a per-id loop — this
+    runs per question row (up to 200) on the 30s-polled grants list (P225-RVW-4).
     """
     from core.models.core import BoardTask
 
@@ -181,18 +196,30 @@ def board_task_cascade_detail(
         )
         return {"total": 0, "tasks": []}
 
+    shown = ids[: max(0, cap)]
     tasks: list = []
-    for tid in ids[: max(0, cap)]:
+    if shown:
         try:
-            t = (
+            int_ids = [int(t) for t in shown]
+            rows = (
                 db.query(BoardTask)
-                .filter(BoardTask.id == int(tid), BoardTask.workspace_id == workspace_id)
-                .first()
+                .filter(
+                    BoardTask.workspace_id == workspace_id,
+                    BoardTask.id.in_(int_ids),
+                )
+                .all()
             )
-        except (TypeError, ValueError):
-            t = None
-        if t is not None:
-            tasks.append({"id": t.id, "title": t.title, "status": t.status})
+            by_id = {str(r.id): r for r in rows}
+            for tid in shown:  # preserve the cascade (BFS) order
+                r = by_id.get(tid)
+                if r is not None:
+                    tasks.append({"id": r.id, "title": r.title, "status": r.status})
+        except Exception:  # noqa: BLE001 — display detail must never break the list
+            logger.warning(
+                "[ask_cascade] cascade detail load failed for board_task %s", task_id,
+                exc_info=True,
+            )
+            return {"total": len(ids), "tasks": []}
     return {"total": len(ids), "tasks": tasks}
 
 

@@ -29,19 +29,28 @@ from core.models.core import BoardTask
 
 
 class _Query:
-    def __init__(self, rows):
+    def __init__(self, rows, stats=None):
         self._rows = list(rows)
+        self._stats = stats if stats is not None else {}
 
     def filter(self, *conds):
         rows = self._rows
         for cond in conds:
             key = cond.left.key
+            op = getattr(getattr(cond, "operator", None), "__name__", "")
             value = getattr(cond.right, "value", None)
-            rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
-        return _Query(rows)
+            if op == "in_op":
+                # Batched id.in_([...]) — record it so a test can prove the
+                # display loads in ONE query, not a per-id loop (P225-RVW-4).
+                self._stats["in_filters"] = self._stats.get("in_filters", 0) + 1
+                allowed = {str(v) for v in (value or [])}
+                rows = [r for r in rows if str(getattr(r, key, None)) in allowed]
+            else:
+                rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
+        return _Query(rows, self._stats)
 
     def order_by(self, *a):
-        return _Query(list(reversed(self._rows)))
+        return _Query(list(reversed(self._rows)), self._stats)
 
     def limit(self, *a):
         return self
@@ -56,6 +65,7 @@ class _Query:
 class _FakeSession:
     def __init__(self):
         self.rows = []
+        self.stats = {}
 
     def add(self, obj):
         if getattr(obj, "id", None) is None:
@@ -63,7 +73,7 @@ class _FakeSession:
         self.rows.append(obj)
 
     def query(self, model):
-        return _Query([r for r in self.rows if isinstance(r, model)])
+        return _Query([r for r in self.rows if isinstance(r, model)], self.stats)
 
 
 def _task(ws, tid, *, parent=None, status="assigned", title=None):
@@ -113,6 +123,56 @@ def test_cascade_detail_is_cycle_safe_and_transitive():
     db.add(_task(ws, 3, parent=2))  # transitive grandchild
     detail = board_task_cascade_detail(db, ws, 1)
     assert detail["total"] == 2  # both 2 and 3, no loop
+
+
+# ===========================================================================
+# P225-RVW-4 — terminal descendants excluded; the display is ONE batched query
+# ===========================================================================
+
+def test_terminal_children_excluded_from_cascade():
+    """A mission-level ask over 7 done + 1 blocked flat sibling steps counts the
+    ONE live task, not 8 — so it does NOT trip the urgent bypass (P225-RVW-4)."""
+    from services.ask_cascade import (
+        board_task_cascade,
+        board_task_cascade_detail,
+        count_downstream_blocked,
+        is_urgent_cascade,
+    )
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_task(ws, 100, status="in_progress"))  # the mission board task (asked)
+    for tid in range(2, 9):  # 7 finished siblings under the mission
+        db.add(_task(ws, tid, parent=100, status="done"))
+    db.add(_task(ws, 9, parent=100, status="blocked"))  # the one live one
+
+    assert board_task_cascade(db, ws, 100) == ["9"]
+
+    count = count_downstream_blocked(db, ws, "board_task", 100)
+    assert count == 1  # not 8
+    assert is_urgent_cascade(count) is False  # 8 would have tripped it
+
+    detail = board_task_cascade_detail(db, ws, 100)
+    assert detail["total"] == 1
+    assert [t["id"] for t in detail["tasks"]] == [9]
+    assert detail["tasks"][0]["status"] == "blocked"
+
+
+def test_cascade_detail_loads_shown_tasks_in_one_query():
+    """The shown tasks load via a single ``id.in_([...])`` batch, not a per-id
+    loop — this runs per question row on the 30s-polled grants list (P225-RVW-4).
+    The traversal uses equality filters, so exactly ONE ``in_`` query fires."""
+    from services.ask_cascade import board_task_cascade_detail
+
+    db = _FakeSession()
+    ws = uuid.uuid4()
+    db.add(_task(ws, 1))
+    for cid in (2, 3, 4):
+        db.add(_task(ws, cid, parent=1))
+
+    detail = board_task_cascade_detail(db, ws, 1)
+    assert [t["id"] for t in detail["tasks"]] == [2, 3, 4]  # BFS order preserved
+    assert db.stats["in_filters"] == 1  # one batched load, not three point reads
 
 
 # ===========================================================================

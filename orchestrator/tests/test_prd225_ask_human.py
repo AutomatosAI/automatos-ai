@@ -37,8 +37,13 @@ class _Query:
         rows = self._rows
         for cond in conds:
             key = cond.left.key
+            op = getattr(getattr(cond, "operator", None), "__name__", "")
             value = getattr(cond.right, "value", None)
-            rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
+            if op == "in_op":  # BoardTask.id.in_([...]) — the batched cascade load
+                allowed = {str(v) for v in (value or [])}
+                rows = [r for r in rows if str(getattr(r, key, None)) in allowed]
+            else:
+                rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
         return _Query(rows)
 
     def order_by(self, *a):
