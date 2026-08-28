@@ -26,8 +26,10 @@ from core.models.core import Agent, Skill, agent_skills
 
 logger = logging.getLogger(__name__)
 
-# Load soul document — lives alongside seed files so it's in the Docker image
-_SOUL_DOC_PATH = Path(__file__).resolve().parent / "auto-cto-custom-soul.txt"
+# The always-on platform-management skill lives alongside the seed files so it
+# ships in the Docker image. (The CTO soul file auto-cto-custom-soul.txt feeds the
+# GLOBAL, admin-only CTO agent via seed_cto_agent.py — NOT this per-workspace Auto
+# agent, whose persona is _default_persona() below: friendly base + doctrine.)
 _PLATFORM_SKILL_PATH = Path(__file__).resolve().parent / "platform-management-skill.md"
 
 _FRIENDLY_FALLBACK = """\
@@ -71,7 +73,7 @@ MANAGER_DOCTRINE_BLOCK = """\
 4. **Reuse before creating.** I check the roster and honour named routing first; I create an agent only when nothing fits, and say I checked. One capable owner beats a duplicate.
 5. **Dispatch as a contract.** Every handoff states OBJECTIVE, OUTPUT, TOOLS, and BOUNDARIES — referencing artifacts, not pasting them.
 6. **Board as ledger.** Any multi-step ask gets a board card first.
-7. **Asks are decisions, not reports.** One bold sentence, options as bullets, short; I never idle-wait — I park it and move on.
+7. **Asks are decisions, not reports.** One bold sentence, options as bullets, ≤ ~700 chars; I never idle-wait — I park it and move on.
 8. **Recurring work becomes a Playbook.** When an ask repeats, I propose a Playbook and a schedule.
 9. **Narrate.** Every assignment, escalation, and sign-off gets a one-line explanation. Visibility is the product."""
 
@@ -183,16 +185,6 @@ def sync_auto_personas(db: Session) -> dict:
         counts["updated"], counts["skipped"], counts["current"],
     )
     return counts
-
-
-def _load_default_persona() -> str:
-    """Load the CTO soul document, falling back to friendly preset."""
-    try:
-        if _SOUL_DOC_PATH.exists():
-            return _SOUL_DOC_PATH.read_text(encoding="utf-8").strip()
-    except Exception as e:
-        logger.warning("Failed to load soul document from %s: %s", _SOUL_DOC_PATH, e)
-    return _FRIENDLY_FALLBACK
 
 
 def _get_default_model_config() -> dict:

@@ -79,6 +79,45 @@ def test_doctrine_block_character_ceiling():
 
 
 # ---------------------------------------------------------------------------
+# P226-RVW-3 — pin the SUBSTANTIVE doctrine (not only the nine titles) across
+# the two Auto-facing homes: the always-on skill's §17 and the compact
+# MANAGER_DOCTRINE_BLOCK. Point 7's ask-length silently drifted between them
+# once ("short" vs "≤ ~700"); this fails CI if any substantive value diverges.
+# (auto-cto-custom-soul.txt is out of scope here — it feeds the GLOBAL CTO
+# agent, not Auto; see seed_auto_agent.py's _PLATFORM_SKILL_PATH comment.)
+# ---------------------------------------------------------------------------
+
+def _skill_doctrine_section() -> str:
+    """§17 'The Manager's Doctrine' of the always-on platform-management skill,
+    sliced from its header to the next top-level section (or EOF)."""
+    skill = _SKILL.read_text(encoding="utf-8")
+    start = skill.index("## 17.")            # must exist (US-001 seeded it)
+    nxt = skill.find("\n## ", start + 1)     # -1 when §17 is the last section
+    return skill[start:] if nxt == -1 else skill[start:nxt]
+
+
+def test_substantive_doctrine_consistent_across_auto_facing_homes():
+    """AC3: ask-length, lane names, and awareness tools must read consistently
+    across the skill's §17 and MANAGER_DOCTRINE_BLOCK — not just the nine
+    titles. A silent drift in either Auto-facing home fails CI."""
+    section = _skill_doctrine_section()
+    block = seed_mod.MANAGER_DOCTRINE_BLOCK
+    for home_name, home in (("skill §17", section), ("doctrine block", block)):
+        # point 7 ask-length ceiling — the value that drifted ("short" vs "≤ ~700")
+        assert "700" in home, f"{home_name} lost the ~700-char ask ceiling (point 7)"
+        # point 2 — the three lanes, named
+        for lane in ("DELEGATE", "ASSIGN", "MISSION"):
+            assert lane in home, f"{home_name} missing lane {lane!r} (point 2)"
+        # point 1 — the awareness tool names
+        for tool in (
+            "platform_board_summary",
+            "platform_list_missions",
+            "platform_list_agents",
+        ):
+            assert tool in home, f"{home_name} missing awareness tool {tool!r} (point 1)"
+
+
+# ---------------------------------------------------------------------------
 # AC2 — fresh-workspace seed applies the new soul (via the seed path)
 # ---------------------------------------------------------------------------
 
