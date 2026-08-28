@@ -22,7 +22,7 @@ from services.onboarding_state import public_snapshot
 
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
-from core.auth.workspace_permission import require_workspace_permission
+from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
 from config import config
 
@@ -124,10 +124,19 @@ async def get_current_workspace(
 # ── Onboarding reset (PRD-222 W1·S10 / D9) — DEV/OPS ONLY, TEMPORARY ──────────
 
 
-def _require_admin(ctx: RequestContext) -> None:
-    """Workspace-admin gate — same bucket as ``api/onboarding_agents._require_admin``."""
-    if not ctx.user or ctx.user.system_role not in ("admin", "super_admin"):
-        raise HTTPException(status_code=403, detail="Admin access required")
+def _require_admin(ctx: RequestContext, db) -> None:
+    """Workspace-admin gate for the dev reset.
+
+    FIX (2026-08-28 test round 1, su-lock class 3rd sighting): the original check
+    read the PLATFORM ``system_role`` only, so a normal user could never reset a
+    workspace they own/administer — Gerard's alias got 403 on its own workspace.
+    Correct contract: the caller holds ``workspace:manage`` on the CURRENT
+    workspace (roles matrix), with platform admins passing through."""
+    if ctx.user and getattr(ctx.user, "system_role", None) in ("admin", "super_admin"):
+        return
+    if ctx.user and workspace_permission_granted(db, ctx, "workspace:manage"):
+        return
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 class OnboardingResetRequest(BaseModel):
@@ -153,7 +162,7 @@ async def reset_current_onboarding(
     """
     if not config.ONBOARDING_RESET_ENABLED:
         raise HTTPException(status_code=404, detail="Not Found")
-    _require_admin(ctx)
+    _require_admin(ctx, db)
 
     workspace = db.query(Workspace).get(ctx.workspace_id)
     if not workspace:
