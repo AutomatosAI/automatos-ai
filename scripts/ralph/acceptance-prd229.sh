@@ -8,7 +8,9 @@ ANSWERS="orchestrator/services/orchestrator_answers.py"
 CFG="orchestrator/config.py"
 DEAD="orchestrator/modules/agents/communication/inter_agent.py"
 AGENTS_INIT="orchestrator/modules/agents/__init__.py"
-BASE_BR="ralph/prd-228-fleet-state"
+# Chain parent PRD-228 is MERGED (#638); diff base is main. The stale local
+# parent branch would mis-flag now-merged upstream migrations as "new".
+BASE_BR="origin/main"
 check() {
   local name="$1"; shift
   echo ""
