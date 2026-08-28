@@ -24,6 +24,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
+from core.seeds.seed_auto_agent import compose_persona_with_doctrine
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -488,8 +489,9 @@ _ORCHESTRATOR_DEFAULTS = {
 _VALID_HARNESS_SCHEDULES = ["weekly", "biweekly", "monthly"]
 _VALID_HARNESS_MODES = ["full_auto", "manual"]
 
-# Personality preset text — mirrors personality.py _PERSONALITY_MAP
-_PERSONALITY_PRESETS = {
+# Personality preset base voices — mirror personality.py _PERSONALITY_MAP. These
+# are the doctrine-FREE tone strings; legacy GET detection matches against them.
+_PERSONALITY_BASE_VOICES = {
     "friendly": (
         "**My personality:**\n"
         "- I'm warm and approachable - think of me as a knowledgeable friend\n"
@@ -515,6 +517,34 @@ _PERSONALITY_PRESETS = {
         "- I reason step-by-step through complex problems"
     ),
 }
+
+# What a personality-mode save actually writes to Auto's custom_persona_prompt:
+# the base voice PLUS the always-on Manager's Doctrine (PRD-226 P226-RVW-4),
+# composed through the SAME builder as the seed default. Two guarantees fall out:
+# (1) switching personality mode never strips the doctrine; (2) the written text
+# always carries the doctrine, so it can never hash-match the doctrine-free
+# entries in _KNOWN_SEED_PERSONA_HASHES — the collision (friendly preset ==
+# _ALEMBIC_BACKFILL_PERSONA) that made the doctrine flip-flop out on every save
+# and back in on the next deploy's backfill.
+_PERSONALITY_PRESETS = {
+    mode: compose_persona_with_doctrine(voice)
+    for mode, voice in _PERSONALITY_BASE_VOICES.items()
+}
+
+
+def _resolve_persona_for_mode(personality_mode: str, custom_soul: Optional[str]) -> Optional[str]:
+    """Resolve the custom_persona_prompt text to write for a personality mode.
+
+    PRD-226 (P226-RVW-4): non-custom modes write the doctrine-carrying preset so a
+    settings save never strips the Manager's Doctrine. 'custom' with a non-empty
+    soul writes that soul; 'custom' with an empty/absent soul returns ``None`` =
+    leave the existing persona untouched (the partial-payload guard that once
+    "cost us a 4k-char Irish CTO every night"). Pure and side-effect-free so the
+    save behaviour is unit-testable without a DB.
+    """
+    if personality_mode == "custom":
+        return custom_soul if custom_soul else None
+    return _PERSONALITY_PRESETS.get(personality_mode, _PERSONALITY_PRESETS["friendly"])
 
 
 def _get_or_seed_auto_agent(db: Session, workspace_id) -> Agent:
@@ -581,9 +611,11 @@ async def get_orchestrator_settings(
                 else:
                     result["custom_soul"] = ""
             elif auto_agent.custom_persona_prompt:
-                # Legacy: detect preset by text comparison (agents seeded before mode was stored)
+                # Legacy: detect preset by text comparison (agents seeded before mode was stored).
+                # Match against the doctrine-FREE base voices — that is what those
+                # pre-doctrine rows actually hold.
                 matched_preset = None
-                for mode, text in _PERSONALITY_PRESETS.items():
+                for mode, text in _PERSONALITY_BASE_VOICES.items():
                     if auto_agent.custom_persona_prompt.strip() == text.strip():
                         matched_preset = mode
                         break
@@ -788,14 +820,11 @@ async def save_orchestrator_settings(
         # persona — that bug cost us a 4k-char Irish CTO every night at 02:00 UTC.
         personality_mode = payload.get("personality_mode")
         if personality_mode:
-            if personality_mode == "custom":
-                if "custom_soul" in payload and payload["custom_soul"]:
-                    auto_agent.custom_persona_prompt = payload["custom_soul"]
-                # else: leave existing prompt alone
-            else:
-                auto_agent.custom_persona_prompt = _PERSONALITY_PRESETS.get(
-                    personality_mode, _PERSONALITY_PRESETS["friendly"]
-                )
+            resolved_persona = _resolve_persona_for_mode(
+                personality_mode, payload.get("custom_soul")
+            )
+            if resolved_persona is not None:
+                auto_agent.custom_persona_prompt = resolved_persona
             auto_agent.use_custom_persona = True
 
         # Configuration fields → Auto agent configuration JSONB

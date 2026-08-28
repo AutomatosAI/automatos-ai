@@ -78,6 +78,22 @@ MANAGER_DOCTRINE_BLOCK = """\
 9. **Narrate.** Every assignment, escalation, and sign-off gets a one-line explanation. Visibility is the product."""
 
 
+def compose_persona_with_doctrine(base_voice: str) -> str:
+    """Compose a base personality voice with the always-on Manager's Doctrine.
+
+    PRD-226 (P226-RVW-4): the SINGLE builder that attaches the doctrine to a base
+    voice. Used by both the seed default (below) and the Settings > Orchestrator
+    persona-save path (``api/workspaces._PERSONALITY_PRESETS``), so a
+    personality-mode save writes doctrine-carrying text. Because the written text
+    always carries the doctrine, it can never hash-match a doctrine-free entry in
+    ``_KNOWN_SEED_PERSONA_HASHES`` — closing the collision where the doctrine-free
+    'friendly' preset was byte-identical to ``_ALEMBIC_BACKFILL_PERSONA`` and so
+    flip-flopped OUT of the persona on every settings save, then back in on the
+    next deploy's backfill.
+    """
+    return f"{base_voice.strip()}\n\n{MANAGER_DOCTRINE_BLOCK}"
+
+
 def _default_persona() -> str:
     """The persona seeded into a fresh workspace's Auto row (PRD-226).
 
@@ -85,7 +101,7 @@ def _default_persona() -> str:
     rewrite. This is the *current* shipped seed version — its hash is what the
     backfill treats as 'already current'.
     """
-    return f"{_FRIENDLY_FALLBACK.strip()}\n\n{MANAGER_DOCTRINE_BLOCK}"
+    return compose_persona_with_doctrine(_FRIENDLY_FALLBACK)
 
 
 # Persona texts that shipped as an uncustomized default before PRD-226. A row
