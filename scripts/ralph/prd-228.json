@@ -1,0 +1,75 @@
+{
+ "project": "Automatos AI Platform — PRD-228 Fleet State (Auto-as-Manager wave, chain 5/6)",
+ "branchName": "ralph/prd-228-fleet-state",
+ "description": "STACKED branch: ralph/prd-228-fleet-state ← ralph/prd-225-ask-me (chain 5/6; 227+224+226+225 are IN your tree — the read-model should surface 224's ticket watches and 225's open asks; diff scope = merge-base vs the 225 branch). Spec seeded at docs/PRDS/PRD-228-FLEET-STATE.md; wave map docs/PRDS/PRD-WAVE-AUTO-MANAGER.md. SCOPE = one read-model over existing state (NO new writes, NO new state semantics): per-agent current work, leases, queue depth, blocked+open asks, active watches, last activity, period cost; a GET /api/v1/fleet route; a platform_fleet_status tool (included in the heartbeat orchestrator context); a live fleet view in the Agents surface. BAKED DECISIONS (Gerard 2026-08-27, from PRD-228 §8 proposals): the fleet view lives as a TAB inside the Agents page (agent-management.tsx tab set — roster|org-chart|configuration|skills gains 'fleet'); cost source = the SAME canonical source the existing credit/usage surfaces read — pin it during US-001 by grepping what the billing/usage UI queries, record the choice in the PR body, and if two genuinely rival sources exist reply RALPH_BLOCKED naming both (do NOT invent a new store or pick blind); period = ROLLING 24H, labeled as such in the UI. ANCHORS (verified 2026-08-27 — RE-VERIFY by grep): board leases/status core/models/core.py:1558-1643 (lease_until :1592-1597, assigned_agent_id, blocked_at/blocked_reason) + services/board_dispatcher.py (claim :64, renew :272); mission tasks core/models/orchestration.py:156 (state per agent) + the matcher's busy filter modules/coordination/agent_matcher.py:459 (shows how 'busy' is derived today — reuse the derivation); heartbeat state services/heartbeat_service.py:126; watches core/models/watches.py (active by target; 224's board_task type in tree); open asks = approval_grants pending by subject (hot index :97; 225's kind column in tree); frontend agents surface frontend/components/agents/agent-management.tsx:244-276 (tab set), roster frontend/components/agents/agent-roster.tsx; hooks family frontend/hooks/ (extend the EXISTING agents hooks — house rule: no duplicate hooks, no V2 names); route conventions orchestrator/router_manifest.py:50-70 (RouterSpec — new router file needs an entry; PREFER mounting on an existing suitable router if one fits, else one RouterSpec) + orchestrator/reports/route-manifest.json + orchestrator/scripts/dump_routes.py + frontend/scripts/check-route-contract.js (reads frontend/lib/api-client.ts only); heartbeat orchestrator context modules/context/modes.py:66-73 (HEARTBEAT_ORCHESTRATOR, tool_loading='dispatcher_only' — verify how a tool becomes visible there). BINDING RULES: READ-ONLY — the fleet service performs zero writes (grep-enforced: no session.add/commit in the service); NO N+1 (one query set; a query-count assertion test); fail-soft per source (an unavailable source omits its fields, never 500s — clone the channels sender posture); workspace-scoped + permission-checked like the board endpoints (require_workspace_permission read scope — re-verify the exact dependency used by api/board_tasks.py list); ZERO new alembic revisions; NO new tables; ONE new route (GET /api/v1/fleet) with the full manifest procedure (RouterSpec if new router file, regenerate + COMMIT route-manifest.json with bumped count, api-client.ts parity); no os.getenv outside orchestrator/config.py; canonical terms; PURE tests; NEVER 'git add -A'/'git add .'/'-u'; never 'git stash -u'. Frontend gate: cd frontend && npm run -s test green after US-004.",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "The fleet read-model service",
+   "description": "orchestrator/services/fleet_state.py: get_fleet_state(db, workspace_id) → deterministic dict, per active agent: {agent_id, name, current: {kind: 'board_task'|'mission_task'|null, id, title, since} (board task via active lease/status in_progress, else running orchestration task — reuse the matcher's busy derivation, don't invent a rival), queue_depth (assigned-not-started board tasks), blocked: {count, open_asks: [...ids]} (pending question-kind grants against the agent's tasks), watches: {active count}, last_activity_at (max of task activity timestamps — pick cheap existing columns, no new tracking), cost_24h: {tokens, usd} from the pinned canonical source (see baked decision — pin it FIRST, record in the PR body)}. Single query set — no per-agent loops hitting the DB (query-count assertion test with a multi-agent fixture). Fail-soft per source: cost source unavailable → cost fields omitted, everything else intact (test). Zero writes (test greps the service for session mutation calls).",
+   "acceptanceCriteria": [
+    "Fixtures: agent with leased board task; agent with running mission task; idle agent; agent with blocked task + open ask — each renders the documented shape (parametrized test)",
+    "Query-count assertion: fleet for N agents uses a bounded query set (no per-agent N+1; test)",
+    "Cost-source pin recorded (comment in fleet_state.py naming the source and why) OR the run declared RALPH_BLOCKED naming two rivals",
+    "Fail-soft: monkeypatched cost failure omits cost fields, response still 200-shaped (test); zero writes in the service (grep test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/services/fleet_state.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "GET /api/v1/fleet — the one new route",
+   "description": "Expose US-001 at GET /api/v1/fleet, workspace-scoped, guarded by the same read-permission dependency the board list uses (re-verify api/board_tasks.py's list guard and mirror it). PREFER mounting on an existing suitable router; if a new router file is genuinely required, add its RouterSpec to orchestrator/router_manifest.py (fails loud on import error). ROUTE MANIFEST: regenerate + commit orchestrator/reports/route-manifest.json with the bumped count; add the api-client.ts call.",
+   "acceptanceCriteria": [
+    "Route returns the US-001 shape for the caller's workspace only (cross-workspace fixture test); unauthorized denied (test)",
+    "route-manifest.json committed with bumped count; tests/test_route_manifest.py green; api-client.ts carries the path; node frontend/scripts/check-route-contract.js green",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/api/",
+    "orchestrator/router_manifest.py",
+    "orchestrator/reports/route-manifest.json",
+    "frontend/lib/api-client.ts",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "platform_fleet_status — Auto reads the floor",
+   "description": "3-file platform-tool: platform_fleet_status() → a compact rendering of US-001 (one line per agent: name — current work or idle — queue depth — cost_24h; then an ANOMALIES section: stalled (no activity beyond a threshold constant in config.py), over-budget watches, blocked-with-open-ask). Make it visible in the heartbeat orchestrator context (modes.py HEARTBEAT_ORCHESTRATOR — re-verify how dispatcher_only tool loading admits a tool; follow the existing pattern for tools the heartbeat can call) so the standing loop can flag anomalies at its existing proactive dial. Also reachable from normal chat (it's a read tool — permission_level read).",
+   "acceptanceCriteria": [
+    "Tool registered (3-file grep); returns the compact form from a fixture fleet (test)",
+    "Anomaly section flags the stalled + blocked-with-ask fixtures (test); threshold constant in config.py (no os.getenv elsewhere)",
+    "Tool visible in the heartbeat orchestrator tool surface (test per the existing context-mode test pattern)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/",
+    "orchestrator/modules/context/modes.py",
+    "orchestrator/config.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-004",
+   "title": "The fleet view — a live tab in the Agents surface",
+   "description": "agent-management.tsx tab set gains 'fleet' (roster|org-chart|configuration|skills|fleet): per-agent row = avatar/name, live line ('working: <title>' | 'idle' | 'blocked: awaiting answer'), queue depth, cost 24h (labeled 'last 24h'), watch badge; row click opens the existing agent details modal (reuse — no new modal). Data: EXTEND the existing agents hook family with a useFleetState hook wrapping GET /api/v1/fleet (poll 10s, matching missions detail; ALSO refetch on the existing board-event stream CustomEvent so agent moves from 227 appear sooner where the stream is mounted). No duplicate hooks (house rule) — if an agents-data hook already fits, extend it instead of adding one.",
+   "acceptanceCriteria": [
+    "Fleet tab renders the fixture states (working/idle/blocked rows; component tests)",
+    "Poll interval 10s + refetch on the board-event CustomEvent (test with dispatched event)",
+    "Row click opens the EXISTING details modal (no new modal component in the diff)",
+    "No duplicate hook names (grep: exactly one fleet hook, no V2 suffixes anywhere in the diff)",
+    "cd frontend && npm run -s test green"
+   ],
+   "files": [
+    "frontend/components/agents/agent-management.tsx",
+    "frontend/components/agents/",
+    "frontend/hooks/",
+    "frontend/"
+   ]
+  }
+ ]
+}
