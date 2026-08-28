@@ -244,6 +244,26 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("LinkedIn credential type update: %s", e)
 
+        # PRD-226: bring existing workspaces' Auto persona up to the current
+        # doctrine-carrying seed. Hash-guarded — a customized soul is left
+        # untouched and the skip is reported; brand-new workspaces already carry
+        # the doctrine via the seed CREATE path. This is the ONLY reachable
+        # production home for the backfill: every lazy-seed caller (chat.py,
+        # workspaces.py, hybrid.py) reaches seed_auto_agent only when the Auto
+        # row is ABSENT, so its existing-row backfill branch never fires for the
+        # rows that need it. Leader-gated + idempotent, so it is a cheap no-op on
+        # every boot after the one that first lands a new doctrine version.
+        try:
+            from core.seeds.seed_auto_agent import sync_auto_personas
+            with get_db_session() as db:
+                counts = sync_auto_personas(db)  # get_db_session commits on exit
+            logger.info(
+                "Auto doctrine backfill: %s updated, %s skipped (customized), %s current",
+                counts["updated"], counts["skipped"], counts["current"],
+            )
+        except Exception as e:
+            logger.warning("Auto persona doctrine backfill: %s", e)
+
         logger.info("Boot seeds completed (leader worker)")
 
         # ── Orphaned-run reaper (PRD-142 Wave 1 · WS-C · W1-S6) ──

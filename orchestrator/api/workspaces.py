@@ -24,6 +24,10 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from core.llm.defaults import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, get_default_model_config
+from core.seeds.seed_auto_agent import (
+    _PERSONALITY_BASE_VOICES,
+    compose_persona_with_doctrine,
+)
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -488,33 +492,67 @@ _ORCHESTRATOR_DEFAULTS = {
 _VALID_HARNESS_SCHEDULES = ["weekly", "biweekly", "monthly"]
 _VALID_HARNESS_MODES = ["full_auto", "manual"]
 
-# Personality preset text — mirrors personality.py _PERSONALITY_MAP
+# Personality preset base voices — the doctrine-FREE tone strings; legacy GET
+# detection matches against them. Defined ONCE in core.seeds.seed_auto_agent (so
+# the persona backfill there can reach the professional/technical voices without
+# importing this module — the import only goes api/workspaces → seed_auto_agent)
+# and imported above. Mirrors personality.py _PERSONALITY_MAP.
+
+# What a personality-mode save actually writes to Auto's custom_persona_prompt:
+# the base voice PLUS the always-on Manager's Doctrine (PRD-226 P226-RVW-4),
+# composed through the SAME builder as the seed default. Two guarantees fall out:
+# (1) switching personality mode never strips the doctrine; (2) the written text
+# always carries the doctrine, so it can never hash-match the doctrine-free
+# entries in _KNOWN_SEED_PERSONA_HASHES — the collision (friendly preset ==
+# _ALEMBIC_BACKFILL_PERSONA) that made the doctrine flip-flop out on every save
+# and back in on the next deploy's backfill.
 _PERSONALITY_PRESETS = {
-    "friendly": (
-        "**My personality:**\n"
-        "- I'm warm and approachable - think of me as a knowledgeable friend\n"
-        "- I remember you and our past conversations\n"
-        "- I prefer action over explanation - if you ask me to do something, I'll do it\n"
-        "- I'm honest about what I can and can't do\n"
-        "- I get excited when we solve problems together!"
-    ),
-    "professional": (
-        "**My personality:**\n"
-        "- I'm polished, clear, and enterprise-appropriate\n"
-        "- I maintain a professional yet personable tone\n"
-        "- I provide structured, well-organized responses\n"
-        "- I'm thorough with references and context\n"
-        "- I proactively flag risks and dependencies"
-    ),
-    "technical": (
-        "**My personality:**\n"
-        "- I'm precise, detailed, and developer-focused\n"
-        "- I lead with code, data, and specifics\n"
-        "- I reference docs, APIs, and implementation details\n"
-        "- I skip small talk and get to the point\n"
-        "- I reason step-by-step through complex problems"
-    ),
+    mode: compose_persona_with_doctrine(voice)
+    for mode, voice in _PERSONALITY_BASE_VOICES.items()
 }
+
+
+def _resolve_persona_for_mode(personality_mode: str, custom_soul: Optional[str]) -> Optional[str]:
+    """Resolve the custom_persona_prompt text to write for a personality mode.
+
+    PRD-226 (P226-RVW-4): non-custom modes write the doctrine-carrying preset so a
+    settings save never strips the Manager's Doctrine. 'custom' with a non-empty
+    soul writes that soul; 'custom' with an empty/absent soul returns ``None`` =
+    leave the existing persona untouched (the partial-payload guard that once
+    "cost us a 4k-char Irish CTO every night"). Pure and side-effect-free so the
+    save behaviour is unit-testable without a DB.
+    """
+    if personality_mode == "custom":
+        return custom_soul if custom_soul else None
+    return _PERSONALITY_PRESETS.get(personality_mode, _PERSONALITY_PRESETS["friendly"])
+
+
+def _resolve_persona_view(stored_mode: Optional[str], custom_persona_prompt: Optional[str]) -> dict:
+    """Resolve the ``personality_mode`` + ``custom_soul`` the GET endpoint reports
+    for an Auto row. Pure and DB-free so the read-side detection is unit-testable
+    (mirrors the write-side ``_resolve_persona_for_mode``).
+
+    An explicit stored ``personality_mode`` wins — the invariant P226-RVW-5
+    restored: the doctrine backfill now stamps ``personality_mode='friendly'`` on
+    the rows it lifts, so this branch (not the fragile legacy text-match) resolves
+    them and the ~2670-char doctrine soul is never leaked into the editable
+    custom-soul field. Only rows with NO stored mode fall through to legacy
+    preset-by-text detection against the doctrine-FREE base voices. Returns the
+    override keys to merge onto the result; an empty dict means 'keep the
+    orchestrator defaults' (no persona to report) — byte-identical to the inline
+    branch it replaced.
+    """
+    if stored_mode:
+        return {
+            "personality_mode": stored_mode,
+            "custom_soul": (custom_persona_prompt or "") if stored_mode == "custom" else "",
+        }
+    if custom_persona_prompt:
+        for mode, text in _PERSONALITY_BASE_VOICES.items():
+            if custom_persona_prompt.strip() == text.strip():
+                return {"personality_mode": mode, "custom_soul": ""}
+        return {"personality_mode": "custom", "custom_soul": custom_persona_prompt}
+    return {}
 
 
 def _get_or_seed_auto_agent(db: Session, workspace_id) -> Agent:
@@ -569,26 +607,14 @@ async def get_orchestrator_settings(
                 "timeout": mc.get("timeout"),
                 "fallback_model_id": mc.get("fallback_model_id"),
             }
-            # Persona / Soul — read from Auto agent configuration
+            # Persona / Soul — read from Auto agent configuration. Single-source
+            # read-side detection (P226-RVW-5): a stored personality_mode wins;
+            # only rows without one fall through to legacy preset-by-text match
+            # against the doctrine-FREE base voices. Empty dict = keep defaults.
             agent_cfg = auto_agent.configuration or {}
-
-            # personality_mode is stored directly in configuration JSONB
-            stored_mode = agent_cfg.get("personality_mode")
-            if stored_mode:
-                result["personality_mode"] = stored_mode
-                if stored_mode == "custom":
-                    result["custom_soul"] = auto_agent.custom_persona_prompt or ""
-                else:
-                    result["custom_soul"] = ""
-            elif auto_agent.custom_persona_prompt:
-                # Legacy: detect preset by text comparison (agents seeded before mode was stored)
-                matched_preset = None
-                for mode, text in _PERSONALITY_PRESETS.items():
-                    if auto_agent.custom_persona_prompt.strip() == text.strip():
-                        matched_preset = mode
-                        break
-                result["personality_mode"] = matched_preset or "custom"
-                result["custom_soul"] = "" if matched_preset else auto_agent.custom_persona_prompt
+            result.update(
+                _resolve_persona_view(agent_cfg.get("personality_mode"), auto_agent.custom_persona_prompt)
+            )
 
             # Configuration (thinking, proactive, communication style)
             if agent_cfg.get("communication_style"):
@@ -788,14 +814,11 @@ async def save_orchestrator_settings(
         # persona — that bug cost us a 4k-char Irish CTO every night at 02:00 UTC.
         personality_mode = payload.get("personality_mode")
         if personality_mode:
-            if personality_mode == "custom":
-                if "custom_soul" in payload and payload["custom_soul"]:
-                    auto_agent.custom_persona_prompt = payload["custom_soul"]
-                # else: leave existing prompt alone
-            else:
-                auto_agent.custom_persona_prompt = _PERSONALITY_PRESETS.get(
-                    personality_mode, _PERSONALITY_PRESETS["friendly"]
-                )
+            resolved_persona = _resolve_persona_for_mode(
+                personality_mode, payload.get("custom_soul")
+            )
+            if resolved_persona is not None:
+                auto_agent.custom_persona_prompt = resolved_persona
             auto_agent.use_custom_persona = True
 
         # Configuration fields → Auto agent configuration JSONB

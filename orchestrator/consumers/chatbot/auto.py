@@ -32,6 +32,10 @@ from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
+# PRD-226 US-003: the ASSIGN lane's ticket description and the planner's task
+# descriptions share ONE dispatch-contract fragment (single source, never copied).
+from modules.coordination.dispatch_contract import DISPATCH_CONTRACT_FRAGMENT
+
 logger = logging.getLogger(__name__)
 
 # Tier-3 classification uses a cheap active-agent roster (not the planners'
@@ -112,15 +116,17 @@ def build_assign_directive(
             f"The user wants the agent '{target_agent_name}' to do this off-thread "
             "on the board, NOT an inline answer. Do this now; do not answer the "
             "request yourself:\n"
-            "1. platform_create_task with a clear title and a SELF-CONTAINED "
-            "description (everything the assigned agent needs to do the work "
-            "without reading this conversation), "
+            "1. platform_create_task with a clear title and a self-contained "
+            "description written as the 4-part dispatch contract below (the "
+            "assigned agent must do the work from it alone, without reading this "
+            "conversation), "
             f"assigned_agent_name=\"{target_agent_name}\".\n"
             f"2. {start}\n"
             f"3. Confirm in ONE line with the task id and that it is {confirm_word}, "
             "then state its supervision status by echoing the platform_create_task "
             "result's 'supervision' field (set honestly from the AUTO_TICKET_WATCH "
             "outcome). Do NOT claim it is supervised unless that field says so.\n"
+            f"\n{DISPATCH_CONTRACT_FRAGMENT}\n"
         )
     return (
         "\n\n## Manager directive — confirm the agent first\n"
@@ -128,8 +134,10 @@ def build_assign_directive(
         "resolved to your roster. Do NOT guess or auto-pick an agent. Call "
         "platform_list_agents, then ask the user which agent should own it — name "
         "2-3 plausible candidates from the roster. Once they choose, file the "
-        "ticket (platform_create_task with assigned_agent_name), start it unless "
-        "they deferred, and confirm in one line with the task id.\n"
+        "ticket (platform_create_task with assigned_agent_name), written as the "
+        "4-part dispatch contract below, start it unless they deferred, and "
+        "confirm in one line with the task id.\n"
+        f"\n{DISPATCH_CONTRACT_FRAGMENT}\n"
     )
 
 
@@ -712,7 +720,7 @@ Conversation turn: {conversation_length}
 
 ## Routing lanes (the `action`):
 
-Three lanes decide WHERE the work happens. Pick deliberately:
+Three lanes decide WHERE the work happens. Pick deliberately, and state which lane and why in one line in `reasoning` (Auto narrates every routing decision):
 
 - **delegate**: a specialist agent answers THIS conversation, inline, and it's over. The user wants an answer in the chat now. (Most molecule/cell/organ work.)
 - **assign**: a named or single agent does work OFF-THREAD, on the board, to a deliverable — not an inline answer. Choose assign when there are ANY of these signals:
@@ -723,6 +731,14 @@ Three lanes decide WHERE the work happens. Pick deliberately:
 - **mission**: a multi-agent PROJECT (organ/organism) — several specializations coordinating in phases. Reserved for genuinely multi-agent work.
 
 A single named agent doing one piece of work is **assign**, NOT mission. Missions are for multi-agent projects.
+
+## Reuse before creating (manager doctrine):
+
+Prefer an agent that already exists. Before an **assign** or **mission** implies a new agent, check the roster shown above:
+- **Honour named routing**: when the user names an agent or role ("have Jim…", "the researcher"), that agent owns the work — never silently substitute another.
+- Prefer an existing roster agent whose role fits; one capable owner beats a duplicate.
+- Treat the work as needing a NEW agent ONLY when nothing on the roster fits — and even then the first step is to check the roster (platform_list_agents) and say you checked, not to create one blind.
+- Steer `tool_hints` toward "platform" (roster/board reads) rather than agent creation whenever an existing owner is plausible.
 
 ## Examples:
 

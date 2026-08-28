@@ -2891,7 +2891,13 @@ class CoordinatorService:
                 state=TaskState.PENDING.value,
                 state_type="initial",
                 verification_criteria=planned.verification_criteria or None,
-                input_context={"required_tools": planned.required_tools} if planned.required_tools else None,
+                # PRD-226 US-003: definition_of_done rides the EXISTING input_context
+                # JSONB (no schema change) — verification consumes it when present.
+                input_context={
+                    **({"required_tools": planned.required_tools} if planned.required_tools else {}),
+                    **({"definition_of_done": planned.definition_of_done}
+                       if getattr(planned, "definition_of_done", None) else {}),
+                } or None,
                 max_retries=run.max_retries,
                 complexity=getattr(planned, "complexity", "moderate"),
                 parallel_group=getattr(planned, "parallel_group", None),
@@ -3008,6 +3014,8 @@ class CoordinatorService:
                 dependencies=[str(d) for d in (t.get("dependencies") or [])],
                 complexity=str(t.get("complexity") or "moderate"),
                 parallel_group=t.get("parallel_group"),
+                definition_of_done=(str(t.get("definition_of_done")).strip()
+                                    if t.get("definition_of_done") else None),
             ))
 
         valid_ids = {pt.temp_id for pt in planned_tasks}
