@@ -260,10 +260,17 @@ def recommend_plan(segment: Optional[dict], team_size=None, tiers: Optional[dict
     or multi-team language) → business; a small team, technical comfort, or
     code/data needs → pro; a solo operator → basic. Returns ``(plan, reason)``
     where reason is a short plain-language phrase for the proposal copy.
+
+    ``team_size`` is read from the STORED segment (``segment['team_size']``, the
+    key Auto captures through the tool) when not passed explicitly — so the two
+    real callers, the proposal display and the ``plan_recommended`` funnel stamp,
+    which both pass only the segment, always agree (an explicit arg still wins,
+    for direct/unit use).
     """
     seg = segment or {}
     text = " ".join(str(seg.get(k) or "") for k in ("business", "goal", "comfort")).lower()
-    size = team_size if isinstance(team_size, int) and team_size > 0 else None
+    raw_size = team_size if team_size is not None else seg.get("team_size")
+    size = raw_size if isinstance(raw_size, int) and not isinstance(raw_size, bool) and raw_size > 0 else None
 
     if (size is not None and size >= 6) or any(s in text for s in _BUSINESS_SIGNALS):
         return "business", "you're running multiple teams or pods"

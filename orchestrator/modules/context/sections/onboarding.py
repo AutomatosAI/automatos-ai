@@ -264,9 +264,11 @@ class OnboardingSection(BaseSection):
         try:
             from services.plan_tiers import plan_proposal_copy
 
+            # Pass ONLY the segment — recommend_plan reads segment['team_size']
+            # itself, so this display and the handler's plan_recommended funnel
+            # stamp (which also passes only the segment) use identical inputs.
             segment = onboarding.get("segment") or {}
-            team_size = segment.get("team_size") if isinstance(segment.get("team_size"), int) else None
-            return plan_proposal_copy(segment, team_size)
+            return plan_proposal_copy(segment)
         except Exception:  # noqa: BLE001 — guidance must never blank on a helper error
             logger.warning("OnboardingSection._plan_recommendation failed", exc_info=True)
             return (

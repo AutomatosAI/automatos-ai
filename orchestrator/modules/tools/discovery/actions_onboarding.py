@@ -37,10 +37,11 @@ def register_onboarding_actions(registry: ActionRegistry) -> None:
         name="platform_update_onboarding",
         description=(
             "Advance the workspace's Auto-led onboarding spine, record the user's "
-            "three segment answers, and/or set the plan the user accepted at the "
+            "segment answers, and/or set the plan the user accepted at the "
             "proposal. This is the ONLY way onboarding state moves — never assume a "
             "stage changed, call this after each step. Provide advance_to (the next "
-            "stage), segment (business/goal/comfort), or plan (the accepted tier) — "
+            "stage), segment (business/goal/comfort/team_size), or plan (the "
+            "accepted tier) — "
             "AT LEAST ONE is required; passing none returns a clear error. Stages "
             "move forward only: questions -> teach -> proposal -> building -> boom "
             "-> powerup -> completed; 'skipped' ends the flow from any stage. A "
@@ -79,10 +80,20 @@ def register_onboarding_actions(registry: ActionRegistry) -> None:
                                 "'novice' .. 'very technical'."
                             ),
                         },
+                        "team_size": {
+                            "type": "integer",
+                            "description": (
+                                "How many people are on the user's team (seats), if "
+                                "stated. Drives the plan recommendation — solo -> "
+                                "Basic, a small team -> Pro, an org -> Business. Omit "
+                                "if the user hasn't said."
+                            ),
+                        },
                     },
                     "description": (
-                        "The three onboarding answers. Any subset may be supplied; "
-                        "keys are merged into onboarding state. Omit to only advance."
+                        "The onboarding answers — business, goal, comfort, and "
+                        "optional team_size. Any subset may be supplied; keys are "
+                        "merged into onboarding state. Omit to only advance."
                     ),
                 },
                 "plan": {

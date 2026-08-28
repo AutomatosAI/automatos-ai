@@ -51,15 +51,30 @@ def _db_returning(workspace):
         ({}, None, "basic"),
         ({"comfort": "very technical"}, None, "pro"),
         ({"goal": "automate our data pipeline with sql"}, None, "pro"),
-        ({"business": "small marketing team"}, 3, "pro"),
+        # team_size lives in the STORED segment (arg=None) — the REAL path the
+        # display + funnel use. Without the number these two are 'basic' (the text
+        # alone matches no signal), so they prove the stored-size branch fires.
+        ({"business": "small marketing team", "team_size": 3}, None, "pro"),
         ({"business": "a creative agency with several teams"}, None, "business"),
-        ({"business": "consultancy"}, 8, "business"),
+        ({"business": "consultancy", "team_size": 8}, None, "business"),
     ],
 )
 def test_recommend_plan_rules(segment, team_size, expected):
     plan, reason = pt.recommend_plan(segment, team_size)
     assert plan == expected
     assert isinstance(reason, str) and reason  # explainable, non-empty
+
+
+def test_recommend_plan_reads_team_size_from_stored_segment():
+    # The real product path: team_size is a stored segment field, not a separate
+    # injected arg. size>=6 → business, size>=2 → pro, solo → basic.
+    assert pt.recommend_plan({"business": "a consultancy", "team_size": 8})[0] == "business"
+    assert pt.recommend_plan({"business": "a small shop", "team_size": 3})[0] == "pro"
+    assert pt.recommend_plan({"business": "just me", "team_size": 1})[0] == "basic"
+    # An explicit arg still overrides the stored field (direct/unit use).
+    assert pt.recommend_plan({"team_size": 1}, 8)[0] == "business"
+    # A non-int stray value degrades safely to the text signals (here: solo).
+    assert pt.recommend_plan({"business": "solo", "team_size": "lots"})[0] == "basic"
 
 
 def test_recommend_plan_only_returns_assignable_tiers():
@@ -82,6 +97,14 @@ def test_section_proposal_injects_recommendation():
     sec = OnboardingSection()
     copy = sec._plan_recommendation({"segment": {"business": "solo barber", "comfort": "brand new"}})
     assert "Basic" in copy and "$19" in copy
+
+
+def test_section_proposal_reads_stored_team_size():
+    # The display passes ONLY the segment to plan_proposal_copy; recommend_plan
+    # reads segment['team_size'] — an 8-person org is recommended Business.
+    sec = OnboardingSection()
+    copy = sec._plan_recommendation({"segment": {"business": "a consultancy", "team_size": 8}})
+    assert "Business plan — $99/mo" in copy
 
 
 # --------------------------------------------------------------------------- #
@@ -147,6 +170,23 @@ def test_handler_proposal_advance_records_recommendation():
     assert res["success"] is True
     assert ws.onboarding["stage"] == "proposal"
     # The recommendation (from the stored segment) is stamped as a funnel event.
+    assert ws.onboarding["funnel"]["plan_recommended"]["plan"] == "business"
+
+
+def test_handler_proposal_uses_stored_team_size_for_recommendation():
+    # team_size flows end-to-end: tool segment schema → SEGMENT_KEYS persistence →
+    # funnel recommend_plan. The plan_recommended stamp reflects the SAME stored
+    # segment the display reads, so shown tier and recorded tier agree (RVW-3 AC2).
+    ws = _FakeWorkspace(onboarding={"stage": "teach"})
+    res = _run(
+        update_onboarding(
+            _db_returning(ws),
+            uuid4(),
+            {"advance_to": "proposal", "segment": {"business": "a consultancy", "team_size": 8}},
+        )
+    )
+    assert res["success"] is True
+    assert ws.onboarding["segment"]["team_size"] == 8  # persisted via SEGMENT_KEYS
     assert ws.onboarding["funnel"]["plan_recommended"]["plan"] == "business"
 
 

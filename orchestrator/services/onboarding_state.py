@@ -25,7 +25,7 @@ Document shape::
     {
       "stage": "not_started",              # current stage (one of ALL_STAGES)
       "stages": {"questions": "<iso>"},    # per-stage funnel timestamps (W1S1)
-      "segment": {"business", "goal", "comfort"},
+      "segment": {"business", "goal", "comfort", "team_size"},
       "started_at": "<iso>",               # first advance away from not_started
       "updated_at": "<iso>",               # every write
       "completed_at": "<iso>",             # set when reaching completed/skipped
@@ -58,7 +58,7 @@ SKIPPED = "skipped"
 INITIAL_STAGE = "not_started"
 ALL_STAGES: frozenset[str] = frozenset(STAGE_ORDER) | {SKIPPED}
 TERMINAL_STAGES: frozenset[str] = frozenset({"completed", SKIPPED})
-SEGMENT_KEYS: tuple[str, ...] = ("business", "goal", "comfort")
+SEGMENT_KEYS: tuple[str, ...] = ("business", "goal", "comfort", "team_size")
 
 
 class InvalidStageTransition(ValueError):
