@@ -58,11 +58,11 @@
    "title": "The fleet view — a live tab in the Agents surface",
    "description": "agent-management.tsx tab set gains 'fleet' (roster|org-chart|configuration|skills|fleet): per-agent row = avatar/name, live line ('working: <title>' | 'idle' | 'blocked: awaiting answer'), queue depth, cost 24h (labeled 'last 24h'), watch badge; row click opens the existing agent details modal (reuse — no new modal). Data: EXTEND the existing agents hook family with a useFleetState hook wrapping GET /api/v1/fleet (poll 10s, matching missions detail; ALSO refetch on the existing board-event stream CustomEvent so agent moves from 227 appear sooner where the stream is mounted). No duplicate hooks (house rule) — if an agents-data hook already fits, extend it instead of adding one.",
    "acceptanceCriteria": [
-    "Fleet tab renders the fixture states (working/idle/blocked rows; component tests)",
-    "Poll interval 10s + refetch on the board-event CustomEvent (test with dispatched event)",
-    "Row click opens the EXISTING details modal (no new modal component in the diff)",
-    "No duplicate hook names (grep: exactly one fleet hook, no V2 suffixes anywhere in the diff)",
-    "cd frontend && npm run -s test green"
+    "Fleet tab renders the fixture states (working/idle/blocked rows; component tests) DONE — fleet-tab.tsx new tab (tabDefs gains 'fleet', Activity icon); fleet-tab.test.tsx 7 passed: working/idle/blocked live lines, blocked-wins-over-working, queue+watch badge, cost-n/a, empty, loading",
+    "Poll interval 10s + refetch on the board-event CustomEvent (test with dispatched event) DONE — useFleetState: refetchInterval=FLEET_POLL_MS (10000, mission-detail cadence) + window listener on 'automatos:board-changed' → invalidate; use-board-event-stream.ts now fans board_changed out as that CustomEvent (keeps board-query invalidation). use-fleet-state.test.tsx: FLEET_POLL_MS===10000, dispatched board-changed → 2nd fetch, listener removed on unmount",
+    "Row click opens the EXISTING details modal (no new modal component in the diff) DONE — FleetTab calls onViewDetails(String(agent_id)); AgentManagement passes handleViewDetails (drives the existing AgentDetailsModal). Test: row click → onViewDetails('42'). No modal file added/changed in the diff",
+    "No duplicate hook names (grep: exactly one fleet hook, no V2 suffixes anywhere in the diff) DONE — useFleetState added to the EXISTING agents family (hooks/use-agent-api.ts); frontend/hooks/ files matching 'fleet' = 2 (≤2), no V2 files anywhere",
+    "cd frontend && npm run -s test green DONE — full vitest suite 52 files / 306 tests passed (incl. the 12 new fleet tests + the 7 board-event-stream tests after the CustomEvent addition)"
    ],
    "files": [
     "frontend/components/agents/agent-management.tsx",

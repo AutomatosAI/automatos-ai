@@ -35,6 +35,7 @@ import { WorkspaceSkillsTab } from './skills/workspace-skills-tab'
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
 import { OrgChartTab } from './org-chart-tab'
+import { FleetTab } from './fleet-tab'
 
 // API hooks for real data
 import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
@@ -131,6 +132,7 @@ export function AgentManagement() {
 
   const tabDefs = [
     { value: 'roster', label: 'Agent Roster', icon: Users },
+    { value: 'fleet', label: 'Fleet', icon: Activity },
     { value: 'org-chart', label: 'Org Chart', icon: Network },
     { value: 'configuration', label: 'Configuration', icon: Settings },
     { value: 'skills', label: 'Skills', icon: Brain },
@@ -256,6 +258,10 @@ export function AgentManagement() {
                 viewMode={viewMode}
               />
             </div>
+          </TabsContent>
+
+          <TabsContent value="fleet" className="space-y-6">
+            <FleetTab onViewDetails={handleViewDetails} />
           </TabsContent>
 
           <TabsContent value="org-chart" className="space-y-6">
