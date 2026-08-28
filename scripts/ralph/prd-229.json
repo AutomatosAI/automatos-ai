@@ -229,6 +229,25 @@
     "orchestrator/modules/tools/discovery/handlers_clarify.py",
     "orchestrator/tests/test_prd229_orchestrator_answers.py"
    ]
+  },
+  {
+   "id": "US-005",
+   "title": "Wire the resume loop end-to-end: park → human answers → task resumes",
+   "description": "GERARD AUTHORIZED 2026-08-28 (§12 boundary surfaced by the US-003 builder and confirmed by the targeted security review: `apply_answered_clarification` in services/clarification_ladder.py:147-173 has ZERO production callers, so `render_resume_block` at modules/coordination/dispatcher.py:936-943 is a permanent no-op — an agent can ask, a human can answer, and the work NEVER resumes. PRD-229 §6 Wave 1's own acceptance criterion is unmet without this). His words: 'we need to wire it or it's pointless — pause the work, question gets answered, resume'. THREE PARTS. (1) HOLD: the dispatch loop must not re-dispatch a task carrying PENDING_KEY in input_context — it is parked awaiting a human, not ready work. Add the guard where ready tasks are selected (dispatcher.py dispatch_ready path) so a parked task is skipped without being failed or counted as stalled, and its run stays alive rather than completing/failing around it. (2) BRIDGE: when a question-kind ask is ANSWERED (PRD-225's answer path in api/approval_grants.py, which already calls _requeue_subject/_resume_tool_call), detect that the subject is an orchestration task carrying PENDING_KEY and call apply_answered_clarification so RESUME_KEY is set with the Q&A — this is the missing production caller. Reuse 225's existing resume machinery; do NOT build a parallel path. (3) RESUME: the held task becomes dispatchable again once RESUME_KEY is set, and its next run's prompt carries render_resume_block's Q&A block plus the preserved draft (Gerard's baked draft-on-park decision). Interacts with P229-RVW-5: the park write MUST be committed for the hold to survive, so build RVW-5 first or in the same story. Keep the ladder VERTICAL — no lateral agent messaging. ZERO new alembic revisions, no new tables, no new routes (state rides the existing task JSONB, rebuild-don't-mutate).",
+   "acceptanceCriteria": [
+    "Parked task is HELD: a task with PENDING_KEY is not re-dispatched by dispatch_ready, is not failed, and does not stall its run (test over the ready-selection path)",
+    "Answering a question-kind ask on an orchestration-task subject sets RESUME_KEY via apply_answered_clarification — call-site grep proves the production caller now exists on 225's answer path (no parallel resume implementation)",
+    "FULL LOOP test: ask_orchestrator escalates → task parked+held → human answers via the 225 answer endpoint → task becomes dispatchable → its next prompt contains the Q&A (render_resume_block) AND the preserved draft",
+    "Run-level behaviour: a run with one parked task and one runnable sibling keeps making progress; the parked task resumes after the answer without a duplicate execution",
+    "ZERO new alembic files; route manifest untouched",
+    "cd orchestrator && python3 -m pytest -q tests/test_prd229_escalation_ladder.py tests/test_prd229_ask_orchestrator.py green"
+   ],
+   "files": [
+    "orchestrator/modules/coordination/dispatcher.py",
+    "orchestrator/services/clarification_ladder.py",
+    "orchestrator/api/approval_grants.py",
+    "orchestrator/tests/"
+   ]
   }
  ]
 }
