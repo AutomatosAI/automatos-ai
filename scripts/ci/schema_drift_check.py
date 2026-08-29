@@ -65,7 +65,6 @@ RAW_DDL_EXTRAS: Set[str] = {
     # PRD-209 drift orphans, ported from the retired init SQL (live readers exist):
     "knowledge_items",
     "tool_usage_logs",
-    "learning_outcomes",
     "kb_types",
     "agent_tool_assignments",
 }
@@ -211,12 +210,30 @@ def altered_tables(versions_dir: pathlib.Path) -> Set[str]:
     return _clean(found)
 
 
+def dropped_tables(versions_dir: pathlib.Path) -> Set[str]:
+    """Tables some migration DROPs in its upgrade — including the loop form
+    ``for table in [...]: op.execute(f'DROP TABLE IF EXISTS {table} CASCADE')`` used
+    by the cleanup migrations (quoted names listed one per line)."""
+    found: Set[str] = set()
+    for text in _iter_migration_text(versions_dir):
+        up = text.split("def downgrade")[0]
+        found |= {m.group(1) for m in re.finditer(r"op\.drop_table\(\s*['\"]([A-Za-z_]\w*)['\"]", up)}
+        found |= {m.group(1) for m in re.finditer(r"DROP TABLE\s+(?:IF EXISTS\s+)?[\"']?([A-Za-z_]\w*)", up, re.I)}
+        if re.search(r"DROP TABLE IF EXISTS \{", up):
+            found |= {m.group(1) for m in re.finditer(r"^\s*['\"]([a-z_]{3,})['\"],\s*$", up, re.M)}
+    return _clean(found)
+
+
 # --------------------------------------------------------------- the wired check
 def orphan_alter_tables(versions_dir: pathlib.Path, orch_root: pathlib.Path) -> Set[str]:
     """Tables ALTERed by a migration but CREATEd by no writer the fresh path can see
     (not by any migration, not by a model, not in RAW_DDL_EXTRAS). Baseline not applied."""
     created = created_tables(versions_dir) | model_declared_tables(orch_root) | RAW_DDL_EXTRAS
-    altered = altered_tables(versions_dir)
+    # A table a cleanup migration DROPs for good (prd135 buckets, prd142 wave5,
+    # prd187 s5, prd195 …) is a relic: ALTERs that predate the drop are history,
+    # not orphans. (Live code still referencing a relic is a different bug class —
+    # see the PRD-209 addendum.)
+    altered = altered_tables(versions_dir) - dropped_tables(versions_dir)
     # Expressed through the shared diff core: the "missing" (altered-but-not-created)
     # tables are exactly the orphans. Column sets are empty here (table-level check).
     report = diff_schemas(

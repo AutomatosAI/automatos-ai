@@ -107,6 +107,49 @@ def _rerun_upgrade(engine, script: ScriptDirectory, rev: str) -> None:
             module.upgrade()
 
 
+def _final_state_dropped(script: ScriptDirectory) -> set[str]:
+    """Tables whose LAST touch in topological forest order is a DROP — relics that a
+    cleanup migration retired for good (prd135 drop buckets, prd142 wave5, prd187 s5,
+    prd195 …). A table dropped and later re-created is NOT a relic (final state =
+    created). Static text parse over upgrade() bodies only."""
+    state: dict[str, str] = {}
+    for rev in reversed(list(script.walk_revisions("base", "heads"))):
+        src = open(rev.path, encoding="utf-8", errors="replace").read()
+        up = src.split("def downgrade")[0]
+        for m in re.finditer(r"op\.create_table\(\s*['\"]([A-Za-z_]\w*)['\"]|CREATE TABLE\s+(?:IF NOT EXISTS\s+)?[\"']?([A-Za-z_]\w*)", up, re.I):
+            state[(m.group(1) or m.group(2))] = "created"
+        for m in re.finditer(r"op\.drop_table\(\s*['\"]([A-Za-z_]\w*)['\"]|DROP TABLE\s+(?:IF EXISTS\s+)?[\"']?([A-Za-z_]\w*)", up, re.I):
+            state[(m.group(1) or m.group(2))] = "dropped"
+        # f-string / loop drops: `for table in [...]: op.execute(f'DROP TABLE IF EXISTS {table} CASCADE')`
+        if re.search(r"DROP TABLE IF EXISTS \{", up):
+            for m in re.finditer(r"^\s*['\"]([a-z_]{3,})['\"],\s*$", up, re.M):
+                state[m.group(1)] = "dropped"
+    return {t for t, st in state.items() if st == "dropped"}
+
+
+def _drop_relics(engine, script: ScriptDirectory) -> list[str]:
+    """Post-replay parity pass: drop tables whose final forest state is 'dropped' and
+    that neither a model nor RAW-DDL extras (init_test_db) legitimately own. Without
+    this the never-drop replay policy leaves stale-shaped zombies that live code
+    (written against the pre-drop shape) then trips over."""
+    from sqlalchemy import inspect as _inspect
+    from core.database.database import Base
+    protected = set(Base.metadata.tables) | {
+        "document_chunks", "codegraph_projects", "codegraph_files", "codegraph_symbols",
+        "codegraph_relationships", "codegraph_query_logs", "knowledge_items", "kb_types",
+        "tool_usage_logs", "agent_tool_assignments",
+    }
+    relics = sorted(_final_state_dropped(script) - protected)
+    dropped: list[str] = []
+    with engine.begin() as conn:
+        existing = set(_inspect(conn).get_table_names())
+        for t in relics:
+            if t in existing:
+                conn.execute(text(f'DROP TABLE IF EXISTS "{t}" CASCADE'))
+                dropped.append(t)
+    return dropped
+
+
 def build_schema(engine) -> int:
     """Build the complete fresh schema on an EMPTY database and leave alembic at
     heads. Returns the table count. Used by scripts/init_fresh_db.py (the boot
@@ -161,8 +204,10 @@ def build_schema(engine) -> int:
     # Re-assert the model layer + raw-DDL extras: a migration's raw
     # `conn.execute(text("DROP ..."))` bypasses alembic ops and can remove an extra;
     # create_all is checkfirst and the extras are IF NOT EXISTS, so this is idempotent.
-    print("== 3/3 re-asserting the model layer + raw-DDL extras")
+    print("== 3/4 re-asserting the model layer + raw-DDL extras")
     init_db()
+    relics = _drop_relics(engine, script)
+    print(f"== 4/4 relic parity pass: dropped {len(relics)} table(s) whose final forest state is DROP: {relics}")
     with engine.begin() as conn:
         total = conn.execute(text("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")).scalar()
     print(f"== done: {applied} revisions applied, {skipped} stamped past; {total} tables")

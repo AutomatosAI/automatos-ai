@@ -169,9 +169,10 @@ def init_db():
         # Model-less tables migrations ALTER but nothing CREATEs (PRD-209
         # schema-drift orphans, 2026-08-29) + kb_types (their FK target; live
         # readers in RAG ingestion / tool registry): live code reads all three
-        # (team_access/analytics/knowledge_multimodal · workspace_purge ·
-        # nl2sql schema provider). DDL ported verbatim from the retired
-        # init_complete_schema.sql. Keep scripts/ci/schema_drift_check.py's
+        # (team_access/analytics/knowledge_multimodal · nl2sql schema provider).
+        # DDL ported verbatim from the retired init_complete_schema.sql.
+        # (learning_outcomes was NOT ported: prd187_s5 dropped it as a relic —
+        # workspace_purge's reference to it is dangling in prod too.) Keep scripts/ci/schema_drift_check.py's
         # RAW_DDL_EXTRAS in sync with this block.
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS kb_types (
@@ -252,16 +253,6 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW(),   -- api/marketplace.py INSERTs created_at
                 updated_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(agent_id, tool_id)
-            )
-        """))
-        conn.execute(_raw_sql("""
-            CREATE TABLE IF NOT EXISTS learning_outcomes (
-                id SERIAL PRIMARY KEY,
-                agent_id INTEGER REFERENCES agents(id),
-                outcome_type VARCHAR(100),
-                outcome_data JSONB,
-                success_rate FLOAT,
-                created_at TIMESTAMP DEFAULT NOW()
             )
         """))
 
