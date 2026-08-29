@@ -927,12 +927,13 @@ class SkillLoader:
     # Builtin-core runtime freshness
     # ========================================================================
 
-    # Map builtin-core skill names to their on-disk .md paths. PRD-231 adds
-    # platform-operations so _refresh_builtin_if_stale propagates ops edits to
-    # existing workspaces exactly as it does for the charter.
+    # Map builtin-core skill names to their on-disk .md paths (under
+    # orchestrator/core/seeds/). PRD-231 adds platform-operations so
+    # _refresh_builtin_if_stale propagates ops edits to existing workspaces
+    # exactly as it does for the charter.
     _BUILTIN_PATHS: Dict[str, Path] = {
-        "platform-management": Path(__file__).resolve().parents[3] / "core" / "seeds" / "platform-management-skill.md",
-        "platform-operations": Path(__file__).resolve().parents[3] / "core" / "seeds" / "platform-operations-skill.md",
+        "platform-management": Path(__file__).resolve().parents[3] / "core/seeds/platform-management-skill.md",
+        "platform-operations": Path(__file__).resolve().parents[3] / "core/seeds/platform-operations-skill.md",
     }
 
     def _refresh_builtin_if_stale(self, skill, db: Session) -> Optional[str]:
