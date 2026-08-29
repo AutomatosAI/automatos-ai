@@ -649,6 +649,22 @@ class UnifiedToolExecutor:
             if _policy_block is not None:
                 return _policy_block
 
+            # PRD-233 S2: ONE Composio availability seam for EVERY caller. The
+            # router refuses routed calls; agent_factory and approval-grant
+            # replays call this executor directly and used to fall through to
+            # the executor's misleading composio_not_connected error. Without
+            # a key ⇒ explicit integrations_unavailable, never a fall-through;
+            # with a key ⇒ one cached boolean check.
+            from core.composio.client import composio_available
+            from modules.tools.tool_router import (
+                _integrations_unavailable_result,
+                _is_composio_tool_name,
+            )
+            if (
+                _is_composio_tool_name(tool_name) or tool_name in self.composio_actions
+            ) and not composio_available():
+                return _integrations_unavailable_result(tool_name, trace)
+
             # PRD-64: Single dispatcher for platform actions
             if tool_name == "platform_execute":
                 action_name = (parameters.get("action") or "").strip()

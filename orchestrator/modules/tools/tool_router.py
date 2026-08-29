@@ -31,6 +31,7 @@ from modules.tools.execution import UnifiedToolExecutor
 from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.tools.discovery.signal_recorder import ToolSignal, get_tool_signal_recorder
 from core.database.database import SessionLocal
+from core.composio.client import composio_available, composio_unavailable_reason
 
 # Capability-based filtering imports (PRD-37)
 try:
@@ -113,6 +114,73 @@ def _is_fatal_dependency_error(error: Optional[str]) -> bool:
         return False
     lowered = error.lower()
     return "composio openai sdk not available" in lowered or "composio-openai" in lowered
+
+
+# =============================================================================
+# PRD-233 S2: Composio degrade seam — honest without a key
+# =============================================================================
+#
+# One predicate (core.composio.client.composio_available), one discovery
+# exclusion point (_offerable_candidates, called from _get_tools_for_agent_core
+# before any access check) and one refusal shape (_integrations_unavailable_result,
+# returned by the execution entries below before any session/executor work).
+# With a key configured every helper here is a pass-through — SaaS unchanged.
+# This is deliberately NOT fail-open: an unavailable integration is refused
+# with an explicit error, never re-routed to another tool.
+
+INTEGRATIONS_UNAVAILABLE = "integrations_unavailable"
+_composio_exclusion_logged = False
+
+
+def _is_composio_tool_name(tool_name: Optional[str]) -> bool:
+    name = tool_name or ""
+    return name == "composio_execute" or name.startswith("composio_")
+
+
+def _is_composio_tool(tool: Any) -> bool:
+    if _is_composio_tool_name(getattr(tool, "name", None)):
+        return True
+    meta = getattr(tool, "metadata", None)
+    return isinstance(meta, dict) and meta.get("integration_type") == "composio"
+
+
+def _offerable_candidates(candidates: List[Any], trace_id: str) -> List[Any]:
+    """Drop every Composio tool from the offered candidates when Composio is
+    unavailable. Returns the SAME list object when it is available."""
+    global _composio_exclusion_logged
+    if composio_available():
+        return candidates
+    kept = [t for t in candidates if not _is_composio_tool(t)]
+    dropped = len(candidates) - len(kept)
+    if dropped:
+        message = (
+            f"[tool-trace {trace_id}] {dropped} Composio tool(s) not offered — "
+            f"integrations unavailable: {composio_unavailable_reason()}"
+        )
+        if _composio_exclusion_logged:
+            logger.debug(message)
+        else:
+            logger.info(message)
+            _composio_exclusion_logged = True
+    return kept
+
+
+def _integrations_unavailable_result(tool_name: str, trace: str) -> Dict[str, Any]:
+    """The explicit refusal for a direct Composio call without Composio."""
+    reason = composio_unavailable_reason()
+    logger.warning(f"[tool-trace {trace}] {tool_name} refused — integrations unavailable: {reason}")
+    return {
+        "success": False,
+        "error": (
+            f"Integrations are disabled on this server ({reason}). "
+            "Configure COMPOSIO_API_KEY and restart the backend — the catalogue "
+            "syncs automatically on boot."
+        ),
+        "error_type": INTEGRATIONS_UNAVAILABLE,
+        "error_code": INTEGRATIONS_UNAVAILABLE,
+        "tool": tool_name,
+        "data": None,
+    }
 
 
 # =============================================================================
@@ -623,6 +691,9 @@ def _get_tools_for_agent_core(
     try:
         registry = registry_get_tool_registry(db_session=session_used)
         all_candidates = registry.get_all_tools(active_only=True)
+        # PRD-233 S2: without Composio its tools are not offered at all —
+        # excluded here, ahead of access checks — never offered-then-erroring.
+        all_candidates = _offerable_candidates(all_candidates, trace_id)
         filtered_tools = all_candidates
         denied: List[Dict[str, Any]] = []
 
@@ -1068,6 +1139,10 @@ async def execute_tool(
     from core.database.database import SessionLocal
 
     trace = trace_id or _new_trace_id()
+    # PRD-233 S2: a direct Composio call without Composio is refused here —
+    # explicit error, no session, no executor, no re-route to another tool.
+    if _is_composio_tool_name(tool_name) and not composio_available():
+        return _integrations_unavailable_result(tool_name, trace)
     db_session = SessionLocal()
     try:
         if workspace_id is None and agent_id:
@@ -1467,6 +1542,18 @@ async def get_filtered_composio_actions(
     Returns:
         Dict with filtered actions and metadata
     """
+    # PRD-233 S2: without Composio there is nothing to filter — say why.
+    if not composio_available():
+        reason = composio_unavailable_reason()
+        logger.info(f"Capability filter skipped — integrations unavailable: {reason}")
+        return {
+            "success": False,
+            "error": reason,
+            "error_code": INTEGRATIONS_UNAVAILABLE,
+            "actions": [],
+            "capabilities": [],
+        }
+
     if not CAPABILITY_FILTER_AVAILABLE:
         logger.warning("Capability filter not available, returning empty result")
         return {
@@ -1666,6 +1753,12 @@ async def execute_tool_with_validation(
 
     # Only validate Composio actions
     is_composio = tool_name.startswith("composio_") or tool_name == "composio_execute"
+
+    # PRD-233 S2: nothing to validate when the integration cannot run at all —
+    # refused ahead of the F018 gate (strictly more closed; the gate itself is
+    # untouched and still fails closed for destructive intent when Composio is up).
+    if is_composio and not composio_available():
+        return _integrations_unavailable_result(tool_name, trace_id)
 
     if is_composio and original_intent:
         # Extract action ID from tool name or args

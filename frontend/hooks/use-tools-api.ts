@@ -81,3 +81,23 @@ export function useSyncToolsCache() {
   })
 }
 
+export type IntegrationsStatus = Awaited<ReturnType<typeof apiClient.getIntegrationsStatus>>
+
+/**
+ * PRD-233 S2 — can Composio integrations run on this server? Drives the
+ * "integrations disabled" card on the Tools page; `available` is the same
+ * predicate the backend tool router uses, so the UI never claims more than
+ * the agents can actually reach.
+ */
+export function useIntegrationsStatus() {
+  const { isLoaded, isSignedIn } = useAuth()
+  return useQuery({
+    queryKey: ['tools', 'integrations-status'],
+    queryFn: () => apiClient.getIntegrationsStatus(),
+    staleTime: 5 * 60 * 1000, // 5 minutes — flips only on a backend restart
+    enabled: isLoaded && isSignedIn,
+    retry: (failureCount, error) => shouldRetry(error) && failureCount < 1,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+}
