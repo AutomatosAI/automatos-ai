@@ -6,6 +6,9 @@ Ephemeral attachments live under:
 
 A 7-day S3 lifecycle rule handles garbage collection — no cron, no DB cleanup.
 
+Storage is the platform object store through ``core.storage`` (PRD-233 S4):
+AWS S3 in SaaS, MinIO locally — one code path, no filesystem fallback.
+
 This module has NO imports from modules/rag/ or DocumentManager.
 """
 
@@ -13,23 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import pathlib
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-try:
-    import boto3
-    from botocore.config import Config as BotoConfig
-    from botocore.exceptions import ClientError
-except ImportError:
-    boto3 = None
-    BotoConfig = None
-    ClientError = Exception
+from botocore.exceptions import ClientError
 
 from config import config
+from core.storage import ensure_bucket, get_public_s3_client, get_s3_client
 from modules.attachments.validation import validate_upload
 
 logger = logging.getLogger(__name__)
@@ -80,46 +75,15 @@ class AttachmentStore:
 
     def __init__(self, bucket: Optional[str] = None):
         self._bucket = bucket or config.S3_DOCUMENTS_BUCKET
-        self._client = None
-        self._local_dir: Optional[pathlib.Path] = None
-        self._init_backend()
 
-    def _init_backend(self) -> None:
-        """Initialize S3 client or fall back to local filesystem."""
-        use_s3 = (
-            boto3 is not None
-            and getattr(config, "AWS_ACCESS_KEY_ID", None)
-            and getattr(config, "AWS_SECRET_ACCESS_KEY", None)
-        )
-        if use_s3:
-            boto_cfg = BotoConfig(
-                region_name=config.AWS_REGION or "eu-west-1",
-                signature_version="v4",
-                retries={"max_attempts": 3, "mode": "adaptive"},
-            )
-            self._client = boto3.client(
-                "s3",
-                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-                config=boto_cfg,
-            )
-            logger.info("AttachmentStore: S3 (bucket=%s)", self._bucket)
-        else:
-            self._local_dir = pathlib.Path(
-                os.path.expanduser("~/.automatos/ephemeral-attachments")
-            )
-            self._local_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            logger.info("AttachmentStore: local filesystem at %s", self._local_dir)
+    @property
+    def _client(self):
+        """The process-wide S3 client — lazy, no network at construction."""
+        return get_s3_client()
 
     def _s3_key(self, workspace_id: UUID, attachment_id: UUID, filename: str) -> str:
         """Build the S3 key for an attachment."""
         return f"workspaces/{workspace_id}/ephemeral-attachments/{attachment_id}/{filename}"
-
-    def _local_path(
-        self, workspace_id: UUID, attachment_id: UUID, filename: str
-    ) -> pathlib.Path:
-        """Build local filesystem path for dev fallback."""
-        return self._local_dir / str(workspace_id) / str(attachment_id) / filename
 
     async def put(
         self,
@@ -154,41 +118,29 @@ class AttachmentStore:
         mime = validated["mime"]
         media_type = MediaType.IMAGE if mime.startswith("image/") else MediaType.DOCUMENT
 
-        if self._client:
-            key = self._s3_key(workspace_id, attachment_id, safe_filename)
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: self._client.put_object(
-                    Bucket=self._bucket,
-                    Key=key,
-                    Body=content,
-                    ContentType=mime,
-                    Metadata={
-                        "uploaded-by": uploaded_by,
-                        "original-filename": filename[:200],
-                    },
-                ),
-            )
-            logger.info(
-                "Attachment stored: %s (%d bytes, %s) by %s",
-                key,
-                len(content),
-                mime,
-                uploaded_by,
-            )
-        else:
-            # Local filesystem fallback
-            path = self._local_path(workspace_id, attachment_id, safe_filename)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-            key = str(path.relative_to(self._local_dir))
-            logger.info(
-                "Attachment stored locally: %s (%d bytes, %s)",
-                key,
-                len(content),
-                mime,
-            )
+        key = self._s3_key(workspace_id, attachment_id, safe_filename)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: ensure_bucket(self._bucket))
+        await loop.run_in_executor(
+            None,
+            lambda: self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=content,
+                ContentType=mime,
+                Metadata={
+                    "uploaded-by": uploaded_by,
+                    "original-filename": filename[:200],
+                },
+            ),
+        )
+        logger.info(
+            "Attachment stored: %s (%d bytes, %s) by %s",
+            key,
+            len(content),
+            mime,
+            uploaded_by,
+        )
 
         return AttachmentRef(
             attachment_id=attachment_id,
@@ -207,56 +159,38 @@ class AttachmentStore:
         Raises:
             AttachmentNotFoundError: If expired or doesn't exist
         """
-        if self._client:
-            # List objects under the attachment_id prefix to find the filename
-            prefix = f"workspaces/{workspace_id}/ephemeral-attachments/{attachment_id}/"
-            loop = asyncio.get_running_loop()
-            try:
-                resp = await loop.run_in_executor(
-                    None,
-                    lambda: self._client.list_objects_v2(
-                        Bucket=self._bucket, Prefix=prefix, MaxKeys=1
-                    ),
-                )
-                contents = resp.get("Contents", [])
-                if not contents:
-                    raise AttachmentNotFoundError(
-                        f"Attachment {attachment_id} not found or expired"
-                    )
-                key = contents[0]["Key"]
-                filename = key.split("/")[-1]
-
-                # HeadObject for metadata
-                head = await loop.run_in_executor(
-                    None,
-                    lambda: self._client.head_object(Bucket=self._bucket, Key=key),
-                )
-                mime = head.get("ContentType", "application/octet-stream")
-                size = head.get("ContentLength", 0)
-
-            except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == "404":
-                    raise AttachmentNotFoundError(
-                        f"Attachment {attachment_id} not found or expired"
-                    )
-                raise
-        else:
-            # Local filesystem
-            ws_dir = self._local_dir / str(workspace_id) / str(attachment_id)
-            if not ws_dir.exists():
+        # List objects under the attachment_id prefix to find the filename
+        prefix = f"workspaces/{workspace_id}/ephemeral-attachments/{attachment_id}/"
+        loop = asyncio.get_running_loop()
+        try:
+            resp = await loop.run_in_executor(
+                None,
+                lambda: self._client.list_objects_v2(
+                    Bucket=self._bucket, Prefix=prefix, MaxKeys=1
+                ),
+            )
+            contents = resp.get("Contents", [])
+            if not contents:
                 raise AttachmentNotFoundError(
                     f"Attachment {attachment_id} not found or expired"
                 )
-            files = list(ws_dir.iterdir())
-            if not files:
+            key = contents[0]["Key"]
+            filename = key.split("/")[-1]
+
+            # HeadObject for metadata
+            head = await loop.run_in_executor(
+                None,
+                lambda: self._client.head_object(Bucket=self._bucket, Key=key),
+            )
+            mime = head.get("ContentType", "application/octet-stream")
+            size = head.get("ContentLength", 0)
+
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "404":
                 raise AttachmentNotFoundError(
                     f"Attachment {attachment_id} not found or expired"
                 )
-            path = files[0]
-            filename = path.name
-            size = path.stat().st_size
-            mime = _guess_mime(filename)
-            key = str(path.relative_to(self._local_dir))
+            raise
 
         media_type = MediaType.IMAGE if mime.startswith("image/") else MediaType.DOCUMENT
 
@@ -279,28 +213,20 @@ class AttachmentStore:
         """
         ref = await self.get(attachment_id, workspace_id)
 
-        if self._client:
-            loop = asyncio.get_running_loop()
-            try:
-                obj = await loop.run_in_executor(
-                    None,
-                    lambda: self._client.get_object(Bucket=self._bucket, Key=ref.s3_key),
-                )
-                body = await loop.run_in_executor(None, lambda: obj["Body"].read())
-                return body
-            except ClientError as e:
-                if e.response.get("Error", {}).get("Code") == "NoSuchKey":
-                    raise AttachmentNotFoundError(
-                        f"Attachment {attachment_id} not found or expired"
-                    )
-                raise
-        else:
-            path = self._local_dir / ref.s3_key
-            if not path.exists():
+        loop = asyncio.get_running_loop()
+        try:
+            obj = await loop.run_in_executor(
+                None,
+                lambda: self._client.get_object(Bucket=self._bucket, Key=ref.s3_key),
+            )
+            body = await loop.run_in_executor(None, lambda: obj["Body"].read())
+            return body
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "NoSuchKey":
                 raise AttachmentNotFoundError(
                     f"Attachment {attachment_id} not found or expired"
                 )
-            return path.read_bytes()
+            raise
 
     async def sign_url(
         self, attachment_id: UUID, workspace_id: UUID, ttl_seconds: int = 900
@@ -308,34 +234,32 @@ class AttachmentStore:
         """
         Generate a presigned GET URL for image_url parts.
 
+        The URL leaves the backend (the LLM provider fetches it), so it is
+        minted against the public endpoint (PRD-151 US-006).
+
         Args:
             attachment_id: The attachment UUID
             workspace_id: Owning workspace (for isolation check)
             ttl_seconds: URL validity period (default 15 minutes)
 
         Returns:
-            Presigned S3 URL or file:// URL for local dev
+            Presigned S3 URL
 
         Raises:
             AttachmentNotFoundError: If expired or doesn't exist
         """
         ref = await self.get(attachment_id, workspace_id)
 
-        if self._client:
-            loop = asyncio.get_running_loop()
-            url = await loop.run_in_executor(
-                None,
-                lambda: self._client.generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": self._bucket, "Key": ref.s3_key},
-                    ExpiresIn=ttl_seconds,
-                ),
-            )
-            return url
-        else:
-            # Local dev: return file:// URL
-            path = self._local_dir / ref.s3_key
-            return f"file://{path.absolute()}"
+        loop = asyncio.get_running_loop()
+        url = await loop.run_in_executor(
+            None,
+            lambda: get_public_s3_client().generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket, "Key": ref.s3_key},
+                ExpiresIn=ttl_seconds,
+            ),
+        )
+        return url
 
     async def delete(self, attachment_id: UUID, workspace_id: UUID) -> None:
         """
@@ -345,46 +269,12 @@ class AttachmentStore:
         """
         ref = await self.get(attachment_id, workspace_id)
 
-        if self._client:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: self._client.delete_object(Bucket=self._bucket, Key=ref.s3_key),
-            )
-            logger.info("Attachment deleted: %s", ref.s3_key)
-        else:
-            path = self._local_dir / ref.s3_key
-            if path.exists():
-                path.unlink()
-                # Clean up empty parent dirs
-                try:
-                    path.parent.rmdir()
-                    path.parent.parent.rmdir()
-                except OSError:
-                    pass
-            logger.info("Attachment deleted locally: %s", ref.s3_key)
-
-
-def _guess_mime(filename: str) -> str:
-    """Guess MIME type from filename extension."""
-    ext = pathlib.Path(filename).suffix.lower()
-    return {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-        ".pdf": "application/pdf",
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".txt": "text/plain",
-        ".md": "text/markdown",
-        ".csv": "text/csv",
-        ".json": "application/json",
-        ".py": "text/x-python",
-        ".js": "text/javascript",
-        ".ts": "text/typescript",
-    }.get(ext, "application/octet-stream")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: self._client.delete_object(Bucket=self._bucket, Key=ref.s3_key),
+        )
+        logger.info("Attachment deleted: %s", ref.s3_key)
 
 
 # Singleton

@@ -74,23 +74,50 @@ def _service(template=None):
     return svc
 
 
+@pytest.fixture(autouse=True)
+def _fresh_storage_factory():
+    """PRD-233 S4: clients are memoized in core.storage — never leak a mock."""
+    import core.storage.s3 as s3mod
+
+    s3mod.reset_s3_client()
+    yield
+    s3mod.reset_s3_client()
+
+
+def _storage_config(monkeypatch, gs, *, configured: bool):
+    """Point BOTH the service's and the factory's config at the same S3 shape."""
+    import core.storage.s3 as s3mod
+
+    for cfg in {id(gs.config): gs.config, id(s3mod.config): s3mod.config}.values():
+        monkeypatch.setattr(cfg, "S3_ENDPOINT_URL", "", raising=False)
+        monkeypatch.setattr(cfg, "S3_USE_PATH_STYLE", False, raising=False)
+        monkeypatch.setattr(cfg, "AWS_ACCESS_KEY_ID", "test-key" if configured else None, raising=False)
+        monkeypatch.setattr(cfg, "AWS_SECRET_ACCESS_KEY", "test-secret" if configured else None, raising=False)
+        monkeypatch.setattr(cfg, "S3_DOCUMENTS_BUCKET", "test-bucket", raising=False)
+
+
 def _mock_s3(monkeypatch, gs):
-    """Mock boto3 at the module boundary so the S3 upload SUCCEEDS in-process.
+    """Mock boto3 at the core.storage boundary so the S3 upload SUCCEEDS in-process.
 
     The presign the client *would* mint is a realistic expiring URL, so a
     regression back to persisting it fails these tests loudly.
     """
+    import boto3
+
     fake_boto = MagicMock()
     client = fake_boto.client.return_value
     client.generate_presigned_url.return_value = (
         "https://test-bucket.s3.amazonaws.com/workspaces/x/generated-documents/f.pdf"
         "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=3600&X-Amz-Signature=deadbeef"
     )
-    monkeypatch.setattr(gs, "boto3", fake_boto)
-    monkeypatch.setattr(gs.config, "AWS_ACCESS_KEY_ID", "test-key")
-    monkeypatch.setattr(gs.config, "AWS_SECRET_ACCESS_KEY", "test-secret")
-    monkeypatch.setattr(gs.config, "S3_DOCUMENTS_BUCKET", "test-bucket")
+    monkeypatch.setattr(boto3, "client", fake_boto.client)
+    _storage_config(monkeypatch, gs, configured=True)
     return fake_boto
+
+
+def _no_s3(monkeypatch, gs):
+    """Boundary: object storage unconfigured ⇒ the upload is skipped."""
+    _storage_config(monkeypatch, gs, configured=False)
 
 
 # --------------------------------------------------------------------------- #
@@ -138,7 +165,7 @@ def test_download_url_stable_when_s3_unconfigured(tmp_path, monkeypatch):
     """No S3 at all (local/OSS edition) → same stable app path, served locally."""
     import modules.documents.generation_service as gs
 
-    monkeypatch.setattr(gs, "boto3", None)
+    _no_s3(monkeypatch, gs)
     doc = tmp_path / "20260710_090000_Export.xlsx"
     doc.write_bytes(b"xlsx test")
 
@@ -215,7 +242,7 @@ def _gated_service(tmp_path, monkeypatch, template):
     import modules.documents.generation_service as gs
 
     monkeypatch.setattr(gs, "GENERATED_DIR", str(tmp_path))
-    monkeypatch.setattr(gs, "boto3", None)  # boundary: no S3 in tests
+    _no_s3(monkeypatch, gs)  # boundary: no S3 in tests
     return _service(template=template)
 
 

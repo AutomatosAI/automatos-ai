@@ -37,8 +37,9 @@ from langchain_text_splitters import (
 from langchain_core.documents import Document
 # OpenAI embeddings handled by centralized manager
 import psycopg2
-import boto3
 from botocore.exceptions import ClientError
+
+from core.storage import FAST_FAIL, ensure_bucket, get_s3_client
 
 # Use SemanticChunker from RAG module
 try:
@@ -417,35 +418,15 @@ class DocumentManager:
         self.use_s3_vectors = use_s3_vectors
         self._s3_backend = None
 
-        # S3 configuration for document storage
+        # S3 configuration for document storage. The client comes from the
+        # core.storage factory (PRD-233 S4; honours S3_ENDPOINT_URL for MinIO)
+        # on FIRST USE — constructing a DocumentManager performs no network I/O.
+        # The FAST_FAIL profile keeps the PRD-164 contract: bounded timeouts and
+        # a single attempt, so a slow/unreachable/unconfigured object store
+        # fails a document op in seconds instead of hanging the process (this
+        # was a 90s faulthandler hang in CI when no creds were present).
         from config import config as app_config
         self.s3_bucket = s3_bucket or app_config.S3_DOCUMENTS_BUCKET
-        self.s3_region = app_config.AWS_REGION or 'us-east-1'
-        # PRD-176 F089: honor S3_ENDPOINT_URL so a local MinIO (S3-compatible)
-        # object store is used when set. None => boto default (real AWS S3), so
-        # prod is unchanged. MinIO needs path-style addressing.
-        s3_endpoint = app_config.S3_ENDPOINT_URL or None
-        # Bounded so a slow/unreachable/unconfigured S3 fails FAST (≤~5s) instead
-        # of hanging the whole process. A DocumentManager must never block document
-        # ops on S3 latency (PRD-164: this was a 90s faulthandler hang in CI when
-        # no creds were present). retries=0 so no-creds/endpoint errors surface now.
-        from botocore.config import Config as _BotoConfig
-        self.s3_client = boto3.client(
-            's3',
-            region_name=self.s3_region,
-            endpoint_url=s3_endpoint,
-            aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
-            config=_BotoConfig(
-                connect_timeout=3,
-                read_timeout=5,
-                retries={"max_attempts": 1},
-                s3={"addressing_style": "path"} if s3_endpoint else {},
-            ),
-        )
-
-        # Ensure S3 bucket exists (create if needed)
-        self._ensure_s3_bucket_exists()
 
         logger.info(f"✅ DocumentManager initialized with S3 document storage: bucket={self.s3_bucket}")
 
@@ -467,35 +448,23 @@ class DocumentManager:
         
         # Don't initialize database at import time - do it lazily on first use
 
+    @property
+    def s3_client(self):
+        """The process-wide fast-fail S3 client (core.storage) — built on first use."""
+        return get_s3_client(FAST_FAIL)
+
     def _ensure_s3_bucket_exists(self):
-        """Create S3 bucket if it doesn't exist"""
+        """Self-create the documents bucket before the first write.
+
+        Runs lazily (first upload), not at construction. Only creates against a
+        configured endpoint (MinIO); on AWS the bucket is infrastructure and
+        ``ensure_bucket`` is a no-op. A failed check must NOT crash the write
+        path here — the put that follows surfaces the precise error itself.
+        """
         try:
-            # Check if bucket exists
-            self.s3_client.head_bucket(Bucket=self.s3_bucket)
-            logger.info(f"✅ S3 bucket '{self.s3_bucket}' exists")
+            ensure_bucket(self.s3_bucket, self.s3_client)
         except Exception as e:
-            if 'NoSuchBucket' in str(e) or '404' in str(e):
-                logger.info(f"📦 Creating S3 bucket '{self.s3_bucket}' in region '{self.s3_region}'...")
-                try:
-                    if self.s3_region == 'us-east-1':
-                        # us-east-1 doesn't accept LocationConstraint
-                        self.s3_client.create_bucket(Bucket=self.s3_bucket)
-                    else:
-                        self.s3_client.create_bucket(
-                            Bucket=self.s3_bucket,
-                            CreateBucketConfiguration={'LocationConstraint': self.s3_region}
-                        )
-                    logger.info(f"✅ Created S3 bucket '{self.s3_bucket}'")
-                except Exception as create_error:
-                    # S3 is optional infra — a failed create must NOT crash
-                    # DocumentManager construction. DB-backed ops (list/grep over
-                    # document_chunks) work without S3; an S3-backed op will surface
-                    # a precise error at its own call site if S3 is truly required.
-                    logger.warning(f"⚠️ Could not create S3 bucket '{self.s3_bucket}' (S3 unavailable — continuing): {create_error}")
-            else:
-                # Missing creds / unreachable endpoint / permission error: degrade,
-                # never hang or crash. Same rationale as above.
-                logger.warning(f"⚠️ S3 bucket check skipped (S3 unavailable — continuing): {e}")
+            logger.warning(f"⚠️ S3 bucket check skipped (S3 unavailable — continuing): {e}")
 
     def _extract_pdf_with_tables(self, file_path: str) -> tuple:
         """
@@ -683,6 +652,7 @@ class DocumentManager:
         # S3 key with workspace isolation
         s3_key = f"workspaces/{self.workspace_id}/documents/{document_id}_{filename}"
 
+        self._ensure_s3_bucket_exists()
         try:
             with open(file_path, 'rb') as f:
                 self.s3_client.put_object(
