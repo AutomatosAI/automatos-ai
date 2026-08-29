@@ -21,24 +21,26 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document covers the containerization, orchestration, and deployment infrastructure for Automatos AI. It explains the Docker multi-stage build process, the modular Docker Compose architecture mirroring a 19-service production topology, environment variable configuration, and production deployment strategies on platforms like Railway.
+This document covers the containerization, orchestration, and deployment infrastructure for Automatos AI. It explains the Docker multi-stage build process, the Docker Compose stack that is the local edition, environment variable configuration, and the hosted deployment on Railway.
+
+> **Running it yourself?** [Self-hosting — the local edition](../getting-started/self-hosting.md) is the reference for the compose stack: services and ports, the three required secrets, the worker's host directory, object storage, the optional Composio key, updating, resetting and troubleshooting. The pages under this section describe the containers and the hosted topology; they point at the guide rather than repeating it.
 
 **Related Pages:**
-- For Dockerfiles of specific components, see [Docker Containerization](#20.1)
-- For modular service definitions and health checks, see [Docker Compose Setup](#20.2)
-- For required secrets and API keys, see [Environment Variables](#20.3)
-- For pgvector and migrations, see [Database Setup](#20.4)
-- For pub/sub and session storage, see [Redis Configuration](#20.5)
-- For scaling and monitoring, see [Production Deployment](#20.6)
+- For Dockerfiles of specific components, see [Docker Containerization](docker-containerization.md)
+- For the compose services, volumes and profiles, see [Docker Compose Setup](docker-compose-setup.md)
+- For where configuration lives and what each variable does, see [Environment Variables](environment-variables.md)
+- For pgvector and migrations, see [Database Setup](database-setup.md)
+- For pub/sub and session storage, see [Redis Configuration](redis-configuration.md)
+- For the hosted (Railway) deployment, see [Production Deployment](production-deployment.md)
 
 ---
 
 ## System Overview
 
-Automatos AI uses a highly modular, containerized architecture. While a single `docker-compose.yml` exists for quick starts, the production infrastructure is divided into functional groups to allow independent scaling. The backend services utilize a `boot_leader_lock` via PostgreSQL advisory locks to coordinate database migrations across multiple worker replicas [orchestrator/core/database/boot_lock.py:25-34]().
+One codebase ships as two editions behind a runtime flag: the **local edition** (`AUTH_EDITION=local` — the `docker-compose.yml` stack: no login, one workspace, MinIO + pgvector) and the **hosted edition** (`AUTH_EDITION=saas` on Railway — Clerk accounts, AWS S3 + S3 Vectors, mem0/Qdrant memory, telemetry). The hosted deployment sets each service's environment itself and never reads the compose file or `envs/*.defaults`; the compose defaults therefore cost it nothing. The backend services utilize a `boot_leader_lock` via PostgreSQL advisory locks to coordinate database migrations across multiple worker replicas [orchestrator/core/database/boot_lock.py:25-34]().
 
 ### Infrastructure Topology
-The following diagram maps the production service groups to their respective code entities and data stores.
+The following diagram maps the **hosted** service groups to their respective code entities and data stores. Locally, `agent-opt-worker`, Qdrant and S3 Vectors are absent (MinIO stands in for S3; RAG runs on pgvector) and Composio is only reachable with your own key.
 
 ```mermaid
 graph TB
@@ -102,35 +104,37 @@ For details, see [Docker Containerization](#20.1).
 
 ## Docker Compose Setup
 
-The system provides a unified `docker-compose.yml` for local development.
+The unified `docker-compose.yml` is the local edition and the development environment.
 
-- **Service Orchestration**: It defines `postgres`, `redis`, `backend`, and `frontend` as core services [docker-compose.yml:18-170]().
-- **Profiles**: Services like `workspace-worker` are gated behind the `workers` profile to save resources during standard development [docker-compose.yml:184]().
-- **Health Checks**: All services include robust health checks (e.g., `pg_isready` for Postgres [docker-compose.yml:36-41](), `redis-cli ping` for Redis [docker-compose.yml:66-71]()).
-- **Volume Mounting**: The backend mounts the `orchestrator/` directory for hot-reloading and has read-only access to `workspace_data` for the code viewer widget [docker-compose.yml:126-130]().
+- **Default profile**: `postgres` (pgvector), `redis`, `minio` (+ the one-shot `minio-init`), `backend`, `frontend` and `workspace-worker` [docker-compose.yml]().
+- **`--profile all`**: adds `adminer` (database GUI, :8080) and `gotenberg` (document conversion, :3001). There is no `workers` profile any more — the workspace-worker runs by default.
+- **Health Checks**: every long-running service has one (`pg_isready`, `redis-cli ping`, `mc ready`, `curl /health`); the frontend starts only after the backend is healthy.
+- **Mounts**: the backend and frontend bind-mount their source directories for hot reload. The worker's files live in the host directory `AUTOMATOS_WORKSPACE_DIR` (default `./workspaces`), bind-mounted at `/workspaces` — read-write for the worker, read-only for the backend. This is a bind mount, not a named volume.
 
-For details, see [Docker Compose Setup](#20.2).
+For details, see [Docker Compose Setup](docker-compose-setup.md).
 
-**Sources:** [docker-compose.yml:1-190]()
+**Sources:** [docker-compose.yml]()
 
 ---
 
 ## Environment Variables
 
-Configuration is driven by environment variables. A template is provided in `.env.example`.
+Configuration is layered: `.env` (from `.env.example`) holds the secrets and is read by compose for substitution only; `envs/api.defaults` and `envs/frontend.defaults` carry the committed local topology; `envs/*.local` are gitignored overrides; `orchestrator/config.py` holds every code default and is the only module that reads the environment.
 
 ### Variable Categories
 | Category | Key Variables |
 | :--- | :--- |
-| **Databases** | `DATABASE_URL`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD` [docker-compose.yml:94-102]() |
-| **Auth** | `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` [docker-compose.yml:118-121]() |
-| **Security** | `API_KEY` (Required for backend/worker communication) [docker-compose.yml:116]() |
-| **LLM Providers** | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` [docker-compose.yml:105-106]() |
-| **Integrations** | `GOTENBERG_URL` (PDF Generation) [docker-compose.yml:109]() |
+| **Required (compose refuses to start without them)** | `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY` [docker-compose.yml]() |
+| **Edition** | `AUTH_EDITION` (`local` / `saas`) and its frontend mirror `NEXT_PUBLIC_AUTH_EDITION` [envs/api.defaults](), [envs/frontend.defaults]() |
+| **LLM Providers** | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` — or keys stored under Settings → API Keys [docker-compose.yml]() |
+| **Object storage** | `S3_ENDPOINT_URL` (MinIO locally), `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` (mapped to the backend's `AWS_*`), `S3_PUBLIC_ENDPOINT_URL` [docker-compose.yml](), [envs/api.defaults]() |
+| **Workspace worker** | `AUTOMATOS_WORKSPACE_DIR`, `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` (Canvas sessions), `WORKER_CONCURRENCY`, `WORKER_INTERNAL_TOKEN` [docker-compose.yml]() |
+| **Integrations** | `COMPOSIO_API_KEY` (bring your own; optional), `GOTENBERG_URL` [docker-compose.yml]() |
+| **Auth (hosted edition only)** | `CLERK_SECRET_KEY`, `CLERK_JWKS_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` — `:-` defaults in compose, so their absence never blocks a local boot [docker-compose.yml]() |
 
-For details, see [Environment Variables](#20.3).
+For details, see [Environment Variables](environment-variables.md).
 
-**Sources:** [docker-compose.yml:26-121]()
+**Sources:** [docker-compose.yml](), [envs/api.defaults](), [envs/frontend.defaults]()
 
 ---
 
@@ -139,8 +143,8 @@ For details, see [Environment Variables](#20.3).
 The platform is optimized for cloud deployment with a focus on reliability and security.
 
 - **Railway Deployment**: The `railway.json` file configures the production build target and restart policies [railway.json:1-13]().
-- **Database Migrations**: The production command `alembic upgrade heads && uvicorn ...` ensures that the schema is always synchronized with the code before the server starts [orchestrator/Dockerfile:140]().
-- **Redis Hardening**: Production Redis is configured to rename/disable dangerous commands like `FLUSHDB` and `FLUSHALL` [docker-compose.yml:59-60]().
+- **Database Migrations**: The entrypoint runs `alembic upgrade heads` before `uvicorn` on every boot, in both editions; a failing migration stops the boot [docker-entrypoint.sh](), [orchestrator/Dockerfile:140]().
+- **Redis Hardening**: The compose Redis is configured to rename/disable dangerous commands like `FLUSHDB` and `FLUSHALL` [docker-compose.yml]().
 - **Real-time Events**: The `RedisClient` manages workflow event publishing to channels like `workflow:{id}:execution:{id}` for frontend streaming [orchestrator/core/redis/client.py:110-119]().
 
 For details, see [Production Deployment](#20.6).
