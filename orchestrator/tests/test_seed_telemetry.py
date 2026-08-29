@@ -82,11 +82,12 @@ class TestRowGeneration:
     def test_all_eval_queries_represented(
         self, eval_set: List[Dict[str, Any]], synthetic_rows: List[Dict[str, Any]]
     ):
-        """Every eval query appears in the synthetic data."""
-        query_ids_expected = {e["query_id"] for e in eval_set}
-        # Extract query_id from the turn_id pattern (query_id is the user_query match)
+        """Every NON-abstain eval query appears in the synthetic data.
+
+        PRD-232 US-012A: abstain rows (no applicable tool) intentionally produce
+        no synthetic tool-execution telemetry, so they are excluded here."""
         queries_in_rows = {r["user_query"] for r in synthetic_rows}
-        queries_expected = {e["query"] for e in eval_set}
+        queries_expected = {e["query"] for e in eval_set if not e.get("abstain")}
         assert queries_expected == queries_in_rows
 
     def test_rows_per_query_roughly_correct(

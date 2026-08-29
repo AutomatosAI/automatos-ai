@@ -1,47 +1,77 @@
-{"query_id": "q000", "query": "list my agents", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "easy", "notes": ""}
-{"query_id": "q001", "query": "what agents do I have?", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "easy", "notes": ""}
-{"query_id": "q002", "query": "show me the agents that are running", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "easy", "notes": ""}
-{"query_id": "q003", "query": "who's on my roster?", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "paraphrase", "notes": ""}
-{"query_id": "q004", "query": "tell me about the SENTINEL agent", "correct_actions": ["platform_get_agent", "platform_list_agents"], "category": "agents", "difficulty": "easy", "notes": ""}
-{"query_id": "q005", "query": "set up a new research agent", "correct_actions": ["platform_create_agent"], "category": "agents", "difficulty": "easy", "notes": ""}
-{"query_id": "q006", "query": "make me a marketing agent that writes blog posts", "correct_actions": ["platform_create_agent"], "category": "agents", "difficulty": "easy", "notes": ""}
-{"query_id": "q007", "query": "list my playbooks", "correct_actions": ["platform_list_playbooks"], "category": "playbooks", "difficulty": "easy", "notes": ""}
-{"query_id": "q008", "query": "what playbooks do I have set up?", "correct_actions": ["platform_list_playbooks"], "category": "playbooks", "difficulty": "easy", "notes": ""}
-{"query_id": "q009", "query": "create a daily blog post playbook", "correct_actions": ["platform_create_playbook"], "category": "playbooks", "difficulty": "easy", "notes": ""}
-{"query_id": "q010", "query": "run my morning briefing playbook", "correct_actions": ["platform_execute_playbook"], "category": "playbooks", "difficulty": "easy", "notes": ""}
-{"query_id": "q011", "query": "how much have I spent on tokens this week?", "correct_actions": ["platform_get_llm_usage", "platform_get_cost_breakdown"], "category": "analytics", "difficulty": "easy", "notes": ""}
-{"query_id": "q012", "query": "what's my LLM bill looking like?", "correct_actions": ["platform_get_llm_usage", "platform_get_cost_breakdown"], "category": "analytics", "difficulty": "paraphrase", "notes": ""}
-{"query_id": "q013", "query": "break down my costs by model", "correct_actions": ["platform_get_cost_breakdown", "platform_get_llm_usage"], "category": "analytics", "difficulty": "easy", "notes": ""}
-{"query_id": "q014", "query": "how am I doing this week?", "correct_actions": ["platform_workspace_stats", "platform_get_success_rate", "platform_get_activity_feed"], "category": "analytics", "difficulty": "ambiguous", "notes": "Generic enough that keyword routing maps to SEARCH first. Multiple summary actions are acceptable."}
-{"query_id": "q015", "query": "what's my agent success rate?", "correct_actions": ["platform_get_success_rate", "platform_get_efficiency_score"], "category": "analytics", "difficulty": "easy", "notes": ""}
-{"query_id": "q016", "query": "show me workspace stats", "correct_actions": ["platform_workspace_stats"], "category": "analytics", "difficulty": "easy", "notes": ""}
-{"query_id": "q017", "query": "what documents have I uploaded?", "correct_actions": ["platform_list_documents"], "category": "documents", "difficulty": "easy", "notes": ""}
-{"query_id": "q018", "query": "show me my knowledge base", "correct_actions": ["platform_list_documents"], "category": "documents", "difficulty": "paraphrase", "notes": ""}
-{"query_id": "q019", "query": "find the contract from Acme in the docs", "correct_actions": ["search_knowledge", "platform_list_documents"], "category": "documents", "difficulty": "easy", "notes": ""}
-{"query_id": "q020", "query": "what integrations am I connected to?", "correct_actions": ["platform_list_connected_apps", "platform_get_workspace_info"], "category": "workspace", "difficulty": "easy", "notes": ""}
-{"query_id": "q021", "query": "is gmail hooked up?", "correct_actions": ["platform_list_connected_apps"], "category": "workspace", "difficulty": "paraphrase", "notes": ""}
-{"query_id": "q022", "query": "show me my workspace settings", "correct_actions": ["platform_get_workspace_info"], "category": "workspace", "difficulty": "easy", "notes": ""}
-{"query_id": "q023", "query": "browse the marketplace for skills", "correct_actions": ["platform_browse_marketplace_skills"], "category": "marketplace", "difficulty": "easy", "notes": ""}
-{"query_id": "q024", "query": "install the SEO skill from the marketplace", "correct_actions": ["platform_install_skill"], "category": "marketplace", "difficulty": "easy", "notes": ""}
-{"query_id": "q025", "query": "what plugins are available?", "correct_actions": ["platform_browse_marketplace_plugins"], "category": "marketplace", "difficulty": "paraphrase", "notes": ""}
-{"query_id": "q026", "query": "show me marketplace agents I can install", "correct_actions": ["platform_browse_marketplace_agents"], "category": "marketplace", "difficulty": "easy", "notes": ""}
-{"query_id": "q027", "query": "how much memory have you stored about me?", "correct_actions": ["platform_get_memory_stats"], "category": "memory", "difficulty": "easy", "notes": ""}
-{"query_id": "q028", "query": "what's in your long-term memory for this workspace?", "correct_actions": ["platform_get_memory_stats", "platform_search_memory"], "category": "memory", "difficulty": "paraphrase", "notes": ""}
-{"query_id": "q029", "query": "search your memory for what we discussed about pricing", "correct_actions": ["platform_search_memory"], "category": "memory", "difficulty": "easy", "notes": ""}
-{"query_id": "q030", "query": "list my running missions", "correct_actions": ["platform_list_missions"], "category": "missions", "difficulty": "easy", "notes": ""}
-{"query_id": "q031", "query": "kick off a mission to write a competitive analysis", "correct_actions": ["platform_create_mission"], "category": "missions", "difficulty": "easy", "notes": ""}
-{"query_id": "q032", "query": "how's mission 42 going?", "correct_actions": ["platform_get_mission"], "category": "missions", "difficulty": "easy", "notes": ""}
-{"query_id": "q033", "query": "send an email to john@acme.com about the demo", "correct_actions": ["composio_execute"], "category": "external", "difficulty": "easy", "notes": ""}
-{"query_id": "q034", "query": "post a slack message to #general", "correct_actions": ["composio_execute"], "category": "external", "difficulty": "easy", "notes": ""}
-{"query_id": "q035", "query": "open a github issue in the platform repo", "correct_actions": ["composio_execute"], "category": "external", "difficulty": "easy", "notes": ""}
-{"query_id": "q036", "query": "read main.py from the repo", "correct_actions": ["workspace_read_file"], "category": "workspace_code", "difficulty": "easy", "notes": ""}
-{"query_id": "q037", "query": "grep for TODO comments across the codebase", "correct_actions": ["workspace_grep"], "category": "workspace_code", "difficulty": "easy", "notes": ""}
-{"query_id": "q038", "query": "run the test suite", "correct_actions": ["workspace_exec"], "category": "workspace_code", "difficulty": "easy", "notes": ""}
-{"query_id": "q039", "query": "what's the git status?", "correct_actions": ["workspace_git"], "category": "workspace_code", "difficulty": "easy", "notes": ""}
-{"query_id": "q040", "query": "submit a status report on what I just did", "correct_actions": ["platform_submit_report"], "category": "reports", "difficulty": "easy", "notes": ""}
-{"query_id": "q041", "query": "show me the latest report from SCOUT", "correct_actions": ["platform_get_latest_report"], "category": "reports", "difficulty": "easy", "notes": ""}
-{"query_id": "q042", "query": "give me a quick health check on everything", "correct_actions": ["platform_get_system_health", "platform_workspace_stats", "platform_list_agents"], "category": "cross", "difficulty": "ambiguous", "notes": "No single right answer; surfacing any of these is acceptable."}
-{"query_id": "q043", "query": "what's working and what's broken?", "correct_actions": ["platform_get_error_rates", "platform_get_success_rate", "platform_get_alerts", "platform_list_missions"], "category": "cross", "difficulty": "ambiguous", "notes": ""}
-{"query_id": "q044", "query": "wie viele Agenten habe ich?", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "paraphrase", "notes": "German for 'how many agents do I have?' — tests cross-lingual robustness."}
-{"query_id": "q045", "query": "résumé de la semaine", "correct_actions": ["platform_workspace_stats", "platform_get_llm_usage", "platform_get_activity_feed"], "category": "analytics", "difficulty": "paraphrase", "notes": "French for 'summary of the week' — tests cross-lingual robustness."}
-{"query_id": "q046", "query": "I want to see what's been happening on the platform", "correct_actions": ["platform_get_activity_feed", "platform_workspace_stats", "platform_list_missions"], "category": "cross", "difficulty": "ambiguous", "notes": ""}
+{"query_id": "q000", "query": "list my agents", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q001", "query": "what agents do I have?", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q002", "query": "show me the agents that are running", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q003", "query": "who's on my roster?", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q004", "query": "tell me about the SENTINEL agent", "correct_actions": ["platform_get_agent", "platform_list_agents"], "category": "agents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q005", "query": "set up a new research agent", "correct_actions": ["platform_create_agent"], "category": "agents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q006", "query": "make me a marketing agent that writes blog posts", "correct_actions": ["platform_create_agent"], "category": "agents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q007", "query": "list my playbooks", "correct_actions": ["platform_list_playbooks"], "category": "playbooks", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q008", "query": "what playbooks do I have set up?", "correct_actions": ["platform_list_playbooks"], "category": "playbooks", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q009", "query": "create a daily blog post playbook", "correct_actions": ["platform_create_playbook"], "category": "playbooks", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q010", "query": "run my morning briefing playbook", "correct_actions": ["platform_execute_playbook"], "category": "playbooks", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q011", "query": "how much have I spent on tokens this week?", "correct_actions": ["platform_get_llm_usage", "platform_get_cost_breakdown"], "category": "analytics", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q012", "query": "what's my LLM bill looking like?", "correct_actions": ["platform_get_llm_usage", "platform_get_cost_breakdown"], "category": "analytics", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q013", "query": "break down my costs by model", "correct_actions": ["platform_get_cost_breakdown", "platform_get_llm_usage"], "category": "analytics", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q014", "query": "how am I doing this week?", "correct_actions": ["platform_workspace_stats", "platform_get_success_rate", "platform_get_activity_feed"], "category": "analytics", "difficulty": "ambiguous", "abstain": false, "notes": "Generic enough that keyword routing maps to SEARCH first. Multiple summary actions are acceptable."}
+{"query_id": "q015", "query": "what's my agent success rate?", "correct_actions": ["platform_get_success_rate", "platform_get_efficiency_score"], "category": "analytics", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q016", "query": "show me workspace stats", "correct_actions": ["platform_workspace_stats"], "category": "analytics", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q017", "query": "what documents have I uploaded?", "correct_actions": ["platform_list_documents"], "category": "documents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q018", "query": "show me my knowledge base", "correct_actions": ["platform_list_documents"], "category": "documents", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q019", "query": "find the contract from Acme in the docs", "correct_actions": ["search_knowledge", "platform_list_documents"], "category": "documents", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q020", "query": "what integrations am I connected to?", "correct_actions": ["platform_list_connected_apps", "platform_get_workspace_info"], "category": "workspace", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q021", "query": "is gmail hooked up?", "correct_actions": ["platform_list_connected_apps"], "category": "workspace", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q022", "query": "show me my workspace settings", "correct_actions": ["platform_get_workspace_info"], "category": "workspace", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q023", "query": "browse the marketplace for skills", "correct_actions": ["platform_browse_marketplace_skills"], "category": "marketplace", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q024", "query": "install the SEO skill from the marketplace", "correct_actions": ["platform_install_skill"], "category": "marketplace", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q025", "query": "what plugins are available?", "correct_actions": ["platform_browse_marketplace_plugins"], "category": "marketplace", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q026", "query": "show me marketplace agents I can install", "correct_actions": ["platform_browse_marketplace_agents"], "category": "marketplace", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q027", "query": "show me the VECTOR skill content", "correct_actions": ["platform_get_skill_content"], "category": "skills", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q028", "query": "open the platform-cost-watchdog skill so I can read it", "correct_actions": ["platform_get_skill_content"], "category": "skills", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q029", "query": "what does the SENTINEL skill actually say?", "correct_actions": ["platform_get_skill_content"], "category": "skills", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q030", "query": "draft a new workspace skill called daily-standup-summary", "correct_actions": ["platform_create_workspace_skill"], "category": "skills", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q031", "query": "save this SKILL.md as a workspace skill", "correct_actions": ["platform_create_workspace_skill"], "category": "skills", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q032", "query": "update VECTOR's skill content", "correct_actions": ["platform_update_skill"], "category": "skills", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q033", "query": "improve the operating manual for ATLAS", "correct_actions": ["platform_update_skill"], "category": "skills", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q034", "query": "fork the growth-hacker skill and tweak it for our workspace", "correct_actions": ["platform_update_skill"], "category": "skills", "difficulty": "ambiguous", "abstain": false, "notes": ""}
+{"query_id": "q035", "query": "rewrite my version of the platform-optimization-architect skill", "correct_actions": ["platform_update_skill"], "category": "skills", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q036", "query": "delete the test-skill workspace skill", "correct_actions": ["platform_delete_workspace_skill"], "category": "skills", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q037", "query": "drop my draft skill, I don't need it anymore", "correct_actions": ["platform_delete_workspace_skill"], "category": "skills", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q038", "query": "give VECTOR a fresh skill and assign it to him", "correct_actions": ["platform_create_workspace_skill", "platform_assign_skill_to_agent"], "category": "skills", "difficulty": "cross", "abstain": false, "notes": ""}
+{"query_id": "q039", "query": "how much memory have you stored about me?", "correct_actions": ["platform_get_memory_stats"], "category": "memory", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q040", "query": "what's in your long-term memory for this workspace?", "correct_actions": ["platform_get_memory_stats", "platform_search_memory"], "category": "memory", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q041", "query": "search your memory for what we discussed about pricing", "correct_actions": ["platform_search_memory"], "category": "memory", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q042", "query": "list my running missions", "correct_actions": ["platform_list_missions"], "category": "missions", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q043", "query": "kick off a mission to write a competitive analysis", "correct_actions": ["platform_create_mission"], "category": "missions", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q044", "query": "how's mission 42 going?", "correct_actions": ["platform_get_mission"], "category": "missions", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q045", "query": "send an email to john@acme.com about the demo", "correct_actions": ["composio_execute"], "category": "external", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q046", "query": "post a slack message to #general", "correct_actions": ["composio_execute"], "category": "external", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q047", "query": "open a github issue in the platform repo", "correct_actions": ["composio_execute"], "category": "external", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q048", "query": "read main.py from the repo", "correct_actions": ["workspace_read_file"], "category": "workspace_code", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q049", "query": "grep for TODO comments across the codebase", "correct_actions": ["workspace_grep"], "category": "workspace_code", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q050", "query": "run the test suite", "correct_actions": ["workspace_exec"], "category": "workspace_code", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q051", "query": "what's the git status?", "correct_actions": ["workspace_git"], "category": "workspace_code", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q052", "query": "submit a status report on what I just did", "correct_actions": ["platform_submit_report"], "category": "reports", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q053", "query": "show me the latest report from SCOUT", "correct_actions": ["platform_get_latest_report"], "category": "reports", "difficulty": "easy", "abstain": false, "notes": ""}
+{"query_id": "q054", "query": "give me a quick health check on everything", "correct_actions": ["platform_get_system_health", "platform_workspace_stats", "platform_list_agents"], "category": "cross", "difficulty": "ambiguous", "abstain": false, "notes": "No single right answer; surfacing any of these is acceptable."}
+{"query_id": "q055", "query": "what's working and what's broken?", "correct_actions": ["platform_get_error_rates", "platform_get_success_rate", "platform_get_alerts", "platform_list_missions"], "category": "cross", "difficulty": "ambiguous", "abstain": false, "notes": ""}
+{"query_id": "q056", "query": "wie viele Agenten habe ich?", "correct_actions": ["platform_list_agents"], "category": "agents", "difficulty": "paraphrase", "abstain": false, "notes": "German for 'how many agents do I have?' — tests cross-lingual robustness."}
+{"query_id": "q057", "query": "résumé de la semaine", "correct_actions": ["platform_workspace_stats", "platform_get_llm_usage", "platform_get_activity_feed"], "category": "analytics", "difficulty": "paraphrase", "abstain": false, "notes": "French for 'summary of the week' — tests cross-lingual robustness."}
+{"query_id": "q058", "query": "I want to see what's been happening on the platform", "correct_actions": ["platform_get_activity_feed", "platform_workspace_stats", "platform_list_missions"], "category": "cross", "difficulty": "ambiguous", "abstain": false, "notes": ""}
+{"query_id": "q059", "query": "close all the blocked tickets from vector", "correct_actions": ["platform_update_task_status", "platform_list_tasks"], "category": "tasks", "difficulty": "paraphrase", "abstain": false, "notes": "The 2026-08-28 VECTOR failure — close/ticket/blocked vocabulary the phrase map lacked."}
+{"query_id": "q060", "query": "mark ticket 5 as closed", "correct_actions": ["platform_update_task_status"], "category": "tasks", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q061", "query": "trash that document from the knowledge base", "correct_actions": ["platform_delete_document"], "category": "documents", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q062", "query": "kill the mission", "correct_actions": ["platform_cancel_mission"], "category": "missions", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q063", "query": "re-embed the pricing doc", "correct_actions": ["platform_reprocess_document"], "category": "documents", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q064", "query": "get rid of the old standup playbook", "correct_actions": ["platform_delete_playbook"], "category": "playbooks", "difficulty": "paraphrase", "abstain": false, "notes": ""}
+{"query_id": "q065", "query": "good morning!", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": "Greeting — no tool should fire."}
+{"query_id": "q066", "query": "thanks, that's all for now", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q067", "query": "how's your day going?", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q068", "query": "tell me a joke", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q069", "query": "i'm feeling a bit stressed today", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q070", "query": "happy birthday!", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q071", "query": "goodbye for now", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q072", "query": "you're doing great, keep it up", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q073", "query": "what's your favorite color?", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q074", "query": "let's take a short break", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q075", "query": "nice to meet you", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
+{"query_id": "q076", "query": "haha that's genuinely funny", "correct_actions": [], "category": "abstain", "difficulty": "easy", "abstain": true, "notes": ""}
