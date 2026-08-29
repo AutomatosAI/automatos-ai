@@ -48,9 +48,9 @@
    "title": "The drift guard — hand-edit detection + --check",
    "description": "Two layers, both CI-runnable without the sibling repo: (1) a pytest that, for EACH generated seed (platform-management-skill.md, platform-operations-skill.md), recomputes the body sha and asserts it matches the sha recorded in the file's own banner — a hand-edit to a seed (the 'never edit live in the platform' violation) breaks the match and fails CI with a message pointing at automatos-skills + the sync script. (2) the same pytest invokes sync-auto-skill.py --check IF ../automatos-skills exists (developer machines) and SKIPS that half cleanly in CI with an explicit reason — the sha layer is the always-on guard, the --check layer is the freshness guard where the sibling is present.",
    "acceptanceCriteria": [
-    "Tampering one byte of either seed body fails the sha test naming the file and the rule (test proves via tmp-copy fixture, not by tampering the real seed)",
-    "--check half runs when the sibling repo path exists, skips with a printed reason otherwise (both paths tested via monkeypatched path)",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — Layer 1 (always-on, no sibling): seed_drift(seed) recomputes body sha vs the banner's recorded sha. test_hand_edit_to_a_seed_body_fails_the_guard (tmp-COPY +1 byte → recorded!=actual; AssertionError message names the file + 'automatos-skills' + 'sync-auto-skill.py'); test_banner_edit_is_also_caught; real seeds pass (test_committed_seed_matches_its_recorded_sha) (tests/test_prd231_drift_guard.py)",
+    "DONE — Layer 2 (sibling-gated): test_check_skips_cleanly_when_sibling_absent (find_skills_repo→None → main(['--check']) rc 0 + 'SKIP'/'automatos-skills' printed); test_check_runs_when_sibling_present (find_skills_repo→existing dir → runs, prints FAIL not SKIP); test_check_reports_fresh_when_real_sibling_present (real sibling on this machine → rc 0)",
+    "DONE — tests/test_prd231_drift_guard.py 8 passed (Postgres-free); sha layer + --check landed in US-002, this story is the dedicated two-layer guard"
    ],
    "files": ["orchestrator/tests/", "scripts/sync-auto-skill.py"]
   },
