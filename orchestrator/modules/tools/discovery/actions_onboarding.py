@@ -9,6 +9,24 @@ the at-least-one rule is stated in the description AND enforced by the handler.
 
 from .action_registry import ActionDefinition, ActionRegistry
 
+# The onboarding spine's tool surface (PRD-222, live-test 2026-08-29): while a
+# workspace is mid-onboarding these actions must SURVIVE semantic narrowing —
+# the OnboardingSection instructs Auto to call them by name, but the top-K
+# ranking keys on the user's latest text, and onboarding turns are exactly the
+# ones with no tool-shaped text ("Yes please."). Ranked out ⇒ Auto narrates the
+# action it cannot take and the flow dead-ends. tool_router folds this list
+# into the dispatcher enum (the PRD-221 page-prior mechanism) while
+# ``onboarding_state.is_onboarding_active`` holds. Every name is guarded
+# against the registry by test_prd222_onboarding_tool_prior.
+ONBOARDING_PRIOR_ACTIONS = [
+    "platform_update_onboarding",      # the spine — every stage advance
+    "platform_scan_business_site",     # teach: site scan
+    "platform_search_packages",        # proposal: match a package (PRD-230)
+    "platform_install_package",        # building: install the accepted package
+    "platform_install_marketplace_agent",  # building: custom-design staffing
+    "platform_submit_report",          # powerup: the onboarding summary Deliverable
+]
+
 # Stages Auto may advance TO. Deliberately excludes ``not_started`` (the initial
 # state — you never advance back to it); mirrors services.onboarding_state.
 _ADVANCE_TARGETS = [
