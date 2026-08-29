@@ -93,9 +93,15 @@ def _tool(name):
 
 @pytest.fixture
 def graph_env(monkeypatch):
-    """Force semantic routing on and inject fake GraphRouter + telemetry modules."""
+    """Force graph routing on and inject fake GraphRouter + telemetry modules.
+
+    PRD-232 US-002: route()'s GraphRouter read moved from SEMANTIC_TOOL_ROUTING
+    (default on) to TOOL_ROUTING_GRAPH (default off). The graph-branch tests here
+    therefore set TOOL_ROUTING_GRAPH; SEMANTIC stays on too (it still gates the
+    embedding narrowing on the other surface)."""
     from config import config as real_config
     monkeypatch.setattr(real_config, "SEMANTIC_TOOL_ROUTING", True)
+    monkeypatch.setattr(real_config, "TOOL_ROUTING_GRAPH", True)
 
     recorder = {"errors": [], "rank_calls": []}
 
@@ -275,10 +281,12 @@ async def test_graph_router_fallback_on_failure(graph_env):
 
 
 @pytest.mark.asyncio
-async def test_semantic_off_skips_graph_router(graph_env, monkeypatch):
-    """With SEMANTIC_TOOL_ROUTING off, GraphRouter is never called."""
+async def test_graph_flag_off_skips_graph_router(graph_env, monkeypatch):
+    """With TOOL_ROUTING_GRAPH off, GraphRouter is never called — PRD-232 US-002
+    moved the gate here from SEMANTIC_TOOL_ROUTING. SEMANTIC stays ON (via the
+    fixture) to prove the graph read is gated ONLY by the graph flag now."""
     from config import config as real_config
-    monkeypatch.setattr(real_config, "SEMANTIC_TOOL_ROUTING", False)
+    monkeypatch.setattr(real_config, "TOOL_ROUTING_GRAPH", False)
 
     called = {"n": 0}
 
@@ -294,5 +302,5 @@ async def test_semantic_off_skips_graph_router(graph_env, monkeypatch):
 
     result = await r.route(query="anything", available_tools=tools, agent_id=3)
 
-    assert called["n"] == 0  # delegation gated off → straight to category filtering
+    assert called["n"] == 0  # graph gated off → straight to category filtering
     assert result.should_include_tools is True

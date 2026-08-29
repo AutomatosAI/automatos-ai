@@ -246,8 +246,19 @@ class SmartToolRouter:
         # is empty. An empty result or any failure drops through to category
         # filtering below. CORE_TOOLS / always-include pins / classifier-suggested
         # tools are always kept so the graph path never strips a tool the agent needs.
+        #
+        # PRD-232 US-002: this GraphRouter read is gated on TOOL_ROUTING_GRAPH
+        # (default OFF), NOT SEMANTIC_TOOL_ROUTING (default ON). C2 found the
+        # inversion — the graph read Gerard held dark for PRD-177 S4/S6 governance
+        # ran on every turn under the always-on flag, while TOOL_ROUTING_GRAPH
+        # (its intended gate) only reached the prompt catalog. Now: graph OFF =
+        # zero GraphRouter queries on either surface; graph ON = both the schema
+        # path (here) and the catalog path (PlatformActionsSection) consult it.
+        # SEMANTIC_TOOL_ROUTING continues to gate the embedding narrowing of the
+        # dispatcher enum (modules/tools/tool_router.py) and the catalog embedding
+        # path — a graph-off turn still narrows semantically.
         from config import config
-        if config.SEMANTIC_TOOL_ROUTING:
+        if config.TOOL_ROUTING_GRAPH:
             try:
                 from modules.tools.discovery.graph_router import get_graph_router
 
