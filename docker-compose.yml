@@ -11,8 +11,11 @@
 # All LLM credentials managed via the Settings UI.
 #
 # Profiles:
-#   - Default: Core services (postgres, redis, backend, frontend)
-#   - All: Add --profile all (includes admin tools)
+#   - Default: postgres, redis, minio (+ minio-init), backend, frontend and the
+#     workspace-worker (Code Canvas runtime). The worker's files live in a host
+#     directory bind-mounted at /workspaces — AUTOMATOS_WORKSPACE_DIR in .env,
+#     default ./workspaces next to this file, created on first boot (PRD-233 S1).
+#   - All: Add --profile all (adminer database GUI, gotenberg document conversion)
 # =============================================================================
 
 services:
@@ -190,6 +193,10 @@ services:
       
       # Security
       API_KEY: ${API_KEY:?API_KEY is required - set in .env file}
+      # Optional shared secret for the workspace-worker's internal HTTP API —
+      # sent as X-Internal-Token; must match the worker's value (empty = none,
+      # the worker port is never published outside the compose network).
+      WORKER_INTERNAL_TOKEN: ${WORKER_INTERNAL_TOKEN:-}
       
       # Clerk Authentication — SaaS-only. `:-` (not `:?`) so their ABSENCE never
       # blocks `docker compose up` in local mode; when set (saas) they resolve
@@ -207,8 +214,11 @@ services:
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
       - backend_logs:/app/logs
-      # PRD-66: Read-only access to workspace files for code viewer widget
-      - workspace_data:/workspaces:ro
+      # The workspace-worker's host directory, read-only (PRD-233 S1): the
+      # backend's WORKSPACE_VOLUME_PATH view of agent deliverables. The file
+      # browser and Code Canvas go through the worker's HTTP API instead
+      # (WORKER_INTERNAL_URL in envs/api.defaults).
+      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -261,10 +271,16 @@ services:
       - automatos
 
   # ===========================================================================
-  # Workspace Worker (PRD-56 Phase 2: Physical Workspaces)
+  # Workspace Worker — the Code Canvas runtime (PRD-56 Phase 2 · PRD-170 · PRD-233 S1)
   # ===========================================================================
-  # Agent task execution in isolated workspace directories.
-  # Enable with: --profile workers
+  # Runs in the DEFAULT profile: agents act on files that live on YOUR machine.
+  # The host directory ${AUTOMATOS_WORKSPACE_DIR:-./workspaces} is bind-mounted
+  # at /workspaces (created on first boot). Each workspace gets
+  # /workspaces/<workspace_id>/; every Code Canvas tool call is confined to it
+  # (canvas_confinement.py) and mutations still need approval
+  # (canvas_approvals.py) — local is not unguarded. AUTOMATOS_WORKSPACE_DIR in
+  # .env is the ONE dial that widens host access. The backend reaches this
+  # service over the compose network at WORKER_INTERNAL_URL (envs/api.defaults).
   # ===========================================================================
   workspace-worker:
     build:
@@ -272,7 +288,6 @@ services:
       dockerfile: Dockerfile
     container_name: automatos_workspace_worker
     restart: unless-stopped
-    profiles: ["workers"]
     depends_on:
       redis:
         condition: service_healthy
@@ -283,7 +298,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
       # Redis
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      # Workspace config
+      # Workspace config — the IN-CONTAINER mount root (worker_config.workspace_root);
+      # the host side is the bind mount under `volumes:` below.
       WORKSPACE_VOLUME_PATH: /workspaces
       WORKSPACE_DEFAULT_QUOTA_GB: ${WORKSPACE_DEFAULT_QUOTA_GB:-5}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
@@ -293,11 +309,15 @@ services:
       # Set the same value on the Railway workspace-worker service.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Optional shared secret for this service's internal HTTP API (the
+      # backend sends the same value as X-Internal-Token; empty = no token).
+      WORKER_INTERNAL_TOKEN: ${WORKER_INTERNAL_TOKEN:-}
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
-      - workspace_data:/workspaces
+      # Host directory (bind mount, read-write) — the ONE host-access dial.
+      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces
     deploy:
       resources:
         limits:
@@ -365,9 +385,6 @@ volumes:
   backend_logs:
     driver: local
     name: automatos_backend_logs
-  workspace_data:
-    driver: local
-    name: automatos_workspace_data
 
 # =============================================================================
 # Networks

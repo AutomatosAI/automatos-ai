@@ -64,6 +64,23 @@ DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 LOCAL_OPERATOR_EMAIL=local@automatos.local
 
 # -----------------------------------------------------------------------------
+# Workspace worker — the Code Canvas runtime, in the default compose profile
+# -----------------------------------------------------------------------------
+# [ACTIVE] Where the backend reaches the worker's internal HTTP API (file
+# browser, Code Canvas sessions, sandboxed exec — core/workspace_client.py).
+# config.py's code default is http://localhost:8081, which inside the backend
+# container reaches nothing; the compose service name is the answer (PRD-233 S1).
+WORKER_INTERNAL_URL=http://workspace-worker:8081
+# WORKER_INTERNAL_TOKEN -> root .env (optional; compose passes it to both services)
+
+# [ACTIVE] The worker's files live on YOUR machine: compose bind-mounts the host
+# directory ${AUTOMATOS_WORKSPACE_DIR:-./workspaces} (root .env dial) at
+# /workspaces in both containers — read-write for the worker, read-only here.
+# This is the in-container path; it stays fixed when you move the host directory.
+# The worker reads the same variable through worker_config.workspace_root().
+WORKSPACE_VOLUME_PATH=/workspaces
+
+# -----------------------------------------------------------------------------
 # Object storage — MinIO (S3-compatible, ships in the compose stack)
 # -----------------------------------------------------------------------------
 # [PRD-151] One S3 code path; these point it at the local MinIO container.
