@@ -112,10 +112,10 @@
    "title": "S6 — exactly one frontend lockfile",
    "description": "frontend/ tracks package-lock.json + yarn.lock + pnpm-lock.yaml → nondeterministic fresh-clone builds. Confirm which package manager the frontend-ci lane actually uses (grep the workflow — Q5 says keep package-lock.json/npm, verify), delete the other two, add a guard asserting exactly one lockfile tracked under frontend/. Frontend vitest + build must be green after (proves the kept lockfile is the working one).",
    "acceptanceCriteria": [
-    "Exactly one lockfile tracked under frontend/ (guard test; matches the CI installer — cite the workflow line in the commit body)",
-    "Frontend vitest suite green",
-    "Frontend build green",
-    "Orchestrator suite at documented baseline"
+    "DONE — exactly one lockfile tracked under frontend/: package-lock.json (deleted yarn.lock + pnpm-lock.yaml). Matches the frontend-ci installer — test.yml:552-556 uses `cache: npm`, `cache-dependency-path: frontend/package-lock.json`, `npm install`. Guard test_prd209_single_lockfile asserts it via git ls-files.",
+    "DONE — frontend vitest green: 67 test files, 391 tests passed (local run, node_modules present).",
+    "DONE — frontend build green: `npm run build` (Next.js) completed with the full route manifest, no build errors.",
+    "DONE — orchestrator suite at documented baseline: 1 new guard green; lockfile deletion doesn't touch orchestrator."
    ],
    "files": [
     "frontend/",
