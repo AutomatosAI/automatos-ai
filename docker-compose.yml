@@ -160,9 +160,10 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       
-      # LLM API Keys (optional)
+      # LLM API Keys (optional — any ONE unlocks AI features; QUICKSTART step 1)
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
 
       # Object storage — local MinIO via the S3 seam (PRD-176 F089).
       # S3_ENDPOINT_URL points boto at MinIO; the AWS_* creds are the MinIO

@@ -78,13 +78,13 @@ S3_VECTORS_ENABLED=false
 # -----------------------------------------------------------------------------
 # Memory & vectors
 # -----------------------------------------------------------------------------
-# [ACTIVE] mem0 long-term memory (L3) — compose service DNS, port 8765.
-# Overrides the Railway-internal default in config.py (removed by PRD-152).
+# HONEST NOTE: neither mem0 nor Qdrant ships in the default compose stack today,
+# so durable (L3) memory and field memory are OFF in the local edition — the
+# backend degrades gracefully (these DNS names simply never resolve). Adding
+# both as optional compose profiles is PRD-233 territory. If you run your own
+# instances, point these at them and the features light up.
 MEM0_API_URL=http://mem0-server:8765
 # MEM0_API_KEY -> root .env
-
-# [ACTIVE] Qdrant field memory (PRD-108). Service lands in the consolidated
-# compose (PRD-153); the backend boots gracefully if it is absent.
 QDRANT_URL=http://qdrant:6333
 
 # -----------------------------------------------------------------------------
