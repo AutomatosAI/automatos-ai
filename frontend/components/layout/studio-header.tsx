@@ -5,6 +5,8 @@ import { Search, BookOpen, HelpCircle, ExternalLink, Code2 } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 import { ProfileMenu } from '@/components/auth/profile-menu';
+import { UserProfileButton } from '@/components/auth/user-profile-button';
+import { isSaaS } from '@/lib/auth-edition';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -99,8 +101,9 @@ export function StudioHeader() {
         {/* Theme toggle */}
         <ThemeToggle />
 
-        {/* Profile menu */}
-        <ProfileMenu />
+        {/* Profile menu — hosted edition only (PRD-233 S7): signed-out it is a
+            sign-in affordance, and the local edition has no accounts. */}
+        {isSaaS ? <ProfileMenu /> : <UserProfileButton />}
       </div>
     </header>
   );

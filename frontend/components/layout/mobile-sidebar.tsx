@@ -25,6 +25,7 @@ import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useSystemRole } from '@/contexts/role-context'
 import { useWorkspace } from '@/components/workspace-provider'
 import { isNavItemVisible } from '@/lib/nav-exposure'
+import { filterNavForEdition, navExposureForEdition } from '@/lib/auth-edition'
 
 interface MobileSidebarProps {
   onNavigate: () => void
@@ -120,14 +121,17 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
   const { isAdmin } = useSystemRole()
   const { data: iconMappings = {} } = useSystemIcons()
   const { workspace } = useWorkspace()
+  const navExposure = navExposureForEdition(workspace?.exposure)
 
-  // System-role gate (admin) + plan-tier exposure gate (US-024). A gated
-  // surface is hidden from the rail but its route still resolves (D5).
-  const filteredNavItems = navigationItems.filter(item => {
+  // PRD-233 S7: SaaS-only surfaces are absent in local by the seam's explicit
+  // list (not by role). Then the system-role gate (admin) + plan-tier exposure
+  // gate (US-024). A gated surface is hidden from the rail but its route still
+  // resolves (D5). Exposure is unknown in local, so it fails open there.
+  const filteredNavItems = filterNavForEdition(navigationItems).filter(item => {
     if ((item as any).requiredRole) {
       return (item as any).requiredRole === 'admin' && isAdmin
     }
-    return isNavItemVisible((item as any).requiredExposure, workspace?.exposure)
+    return isNavItemVisible((item as any).requiredExposure, navExposure)
   })
 
   return (

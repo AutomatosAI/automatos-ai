@@ -28,6 +28,7 @@ import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useSystemRole } from '@/contexts/role-context'
 import { useWorkspace } from '@/components/workspace-provider'
 import { isNavItemVisible } from '@/lib/nav-exposure'
+import { filterNavForEdition, navExposureForEdition } from '@/lib/auth-edition'
 
 interface SidebarProps {
   collapsed: boolean
@@ -134,15 +135,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { systemRole, isAdmin } = useSystemRole()
   const { data: iconMappings = {} } = useSystemIcons()
   const { workspace } = useWorkspace()
+  const navExposure = navExposureForEdition(workspace?.exposure)
 
-  // Filter nav items by system role (admin gate) AND plan-tier exposure
-  // (US-024): a tier-gated surface is absent from the rail but its route still
-  // resolves (D5 — hidden ≠ deleted). Exposure fails open while unknown.
-  const filteredNavItems = navigationItems.filter(item => {
+  // PRD-233 S7: SaaS-only surfaces are absent in the local edition by the seam's
+  // explicit list (not by role — the local operator is super_admin). Then filter
+  // by system role (admin gate) AND plan-tier exposure (US-024): a tier-gated
+  // surface is absent from the rail but its route still resolves (D5 — hidden ≠
+  // deleted). Exposure fails open while unknown — and is unknown in local.
+  const filteredNavItems = filterNavForEdition(navigationItems).filter(item => {
     if (item.requiredRole) {
       return item.requiredRole === 'admin' && isAdmin
     }
-    return isNavItemVisible((item as { requiredExposure?: string }).requiredExposure, workspace?.exposure)
+    return isNavItemVisible((item as { requiredExposure?: string }).requiredExposure, navExposure)
   })
 
   return (

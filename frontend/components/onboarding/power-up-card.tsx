@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
+import { isSaaS } from '@/lib/auth-edition'
 
 /**
  * PRD-222 US-013 (W1·S3) — the power-up card.
@@ -57,6 +58,8 @@ export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
 
   // In chat the card only appears at the powerup stage; the exhausted banner
   // (US-014) renders it embedded regardless of stage.
+  // PRD-233 S7: the power-up / plan pitch is a hosted-edition surface.
+  if (!isSaaS) return null
   if (!embedded && workspace?.onboarding?.stage !== 'powerup') return null
   if (dismissed) return null
 

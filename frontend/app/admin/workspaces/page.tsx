@@ -26,6 +26,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { apiClient } from '@/lib/api-client'
+import { SaasOnlyNotice } from '@/components/local/saas-only-notice'
+import { isRouteAvailableInEdition } from '@/lib/auth-edition'
 
 // ===================================================================
 // Types
@@ -108,7 +110,7 @@ function stateBadge(w: WorkspaceRow) {
 // Page
 // ===================================================================
 
-export default function AdminWorkspacesPage() {
+function AdminWorkspacesConsole() {
   usePageAPI('admin')
 
   const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([])
@@ -654,4 +656,20 @@ export default function AdminWorkspacesPage() {
       </div>
     </MainLayout>
   )
+}
+
+// PRD-233 S7: Workspace Admin is a hosted-edition surface (cross-tenant
+// administration). The console above is untouched; in local the route renders
+// the shared notice instead — before any of the console's hooks or admin
+// fetches run. Hidden by the seam's explicit list, not by role (the local
+// operator is super_admin by design).
+export default function AdminWorkspacesPage() {
+  if (!isRouteAvailableInEdition('/admin/workspaces')) {
+    return (
+      <MainLayout>
+        <SaasOnlyNotice surface="Workspace Admin" />
+      </MainLayout>
+    )
+  }
+  return <AdminWorkspacesConsole />
 }

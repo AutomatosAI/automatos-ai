@@ -6,6 +6,8 @@ import { useAuth, useUser, SignIn, SignUp } from '@clerk/nextjs'
 import { apiClient } from '@/lib/api-client'
 import { CheckCircle2, AlertCircle, Loader2, Mail } from 'lucide-react'
 import Link from 'next/link'
+import { SaasOnlyNotice } from '@/components/local/saas-only-notice'
+import { isRouteAvailableInEdition } from '@/lib/auth-edition'
 
 interface InvitationInfo {
     email: string
@@ -233,6 +235,15 @@ function ErrorState({ title, detail, cta }: { title: string; detail: string; cta
 }
 
 export default function AcceptInvitationPage() {
+    // PRD-233 S7: invitations are a hosted-edition flow (Clerk-bound). Local
+    // renders the notice; the Clerk hooks inside AcceptInvitationInner never run.
+    if (!isRouteAvailableInEdition('/accept-invitation')) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-background">
+                <SaasOnlyNotice surface="Invitations" />
+            </div>
+        )
+    }
     return (
         <Suspense fallback={<Shell><Loader2 className="w-8 h-8 animate-spin text-[hsl(var(--info))] mx-auto" /></Shell>}>
             <AcceptInvitationInner />
