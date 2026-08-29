@@ -7,8 +7,23 @@ Wraps ActionSemanticIndex.rank_actions() for entry node selection -- does NOT
 reimplement embedding search. Falls back to pure embedding ranking when the graph
 is empty or unavailable.
 
+PRD-232 §6.5 — the TWO-LAYER graph (RVW-2, Gerard's ruling, amending PRD-177's
+per-tenant lock): every edge/affinity/failed_after read returns two layers —
+  * the tenant's OWN rows (workspace_id == X) at full weight, and
+  * a TEXT-FREE GLOBAL prior (workspace_id IS NULL, aggregated across tenants)
+    at reduced weight (TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR),
+so a zero-telemetry tenant still routes (rides the global prior) while a tenant's
+own learned signal always dominates it. The moat holds for tenant-SPECIFIC rows —
+workspace B's rows never surface for A; only the deliberately-global aggregate
+crosses. The global layer is TEXT-FREE by construction (edges/affinities carry only
+action names; global intent-cluster rows carry no raw user query — organic cluster
+sample_query is redacted to an action-name label, seeded rows carry a synthetic
+utterance), so PRD-181 (GDPR erasure) scope stays per-tenant rows ONLY — nothing in
+the global layer identifies a user. A None (system/eval) read sees the global layer
+at full weight (there is no tenant layer to prefer).
+
 Cache: traversal results cached in CacheService for 5 minutes keyed on
-(query_embedding_hash, agent_id, top_k).
+(query_embedding_hash, agent_id, top_k, workspace_id).
 """
 from __future__ import annotations
 
@@ -83,6 +98,19 @@ class GraphRouter:
             return float(getattr(config, "TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY", 1.0))
         except Exception:
             return 1.0
+
+    @staticmethod
+    def _global_prior_factor() -> float:
+        # PRD-232 §6.5 (RVW-2): the two-layer graph. Weight applied to a GLOBAL
+        # (workspace_id IS NULL) edge/affinity/failed_after row's contribution when a
+        # TENANT reads it — a text-free cross-tenant prior the tenant's own rows
+        # override. A system/eval read (workspace_id=None) sees the global layer at
+        # full weight (factor is not applied — there is no tenant layer to prefer).
+        try:
+            from config import config
+            return float(getattr(config, "TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR", 0.5))
+        except Exception:
+            return 0.5
 
     # ------------------------------------------------------------------
     # Cache helpers
@@ -164,13 +192,14 @@ class GraphRouter:
     ) -> List[Tuple[str, float, List[str]]]:
         """Rank tool chains by combining embedding similarity with graph edges.
 
-        PRD-177 S5: ``workspace_id`` is a REQUIRED keyword. The learned operating
-        graph is per-tenant (owner decision) — edge/affinity reads are filtered
-        to this workspace, and there is no unfiltered global-read fallback that
-        would bleed one tenant's edges into another's routing. Pass the caller's
-        workspace id, or ``None`` explicitly for a genuinely unscoped read (the
-        offline eval harness); the keyword is required so no caller can silently
-        reintroduce a global read.
+        PRD-177 S5 + PRD-232 §6.5: ``workspace_id`` is a REQUIRED keyword. Reads are
+        TWO-LAYER — this tenant's own rows at full weight PLUS the text-free global
+        prior at reduced weight (see the module docstring). A tenant-specific row of
+        one workspace never bleeds into another's routing; only the deliberately
+        cross-tenant, text-free global aggregate is shared. Pass the caller's
+        workspace id, or ``None`` explicitly for a genuinely unscoped system/eval read
+        (the global layer at full weight); the keyword is required so no caller can
+        silently pick the wrong tenant.
 
         PRD-143: fail-closed — super_admin_only actions are excluded from
         entry nodes AND from edge-expansion targets unless
@@ -332,6 +361,13 @@ class GraphRouter:
 
         failed_weight = self._failed_after_penalty_weight()
 
+        # PRD-232 §6.5: on a TENANT read, a global (workspace_id IS NULL) edge is a
+        # prior — discount its confidence so a tenant's own edge of equal-or-higher
+        # confidence outranks it (they dedup to one chain, highest score wins). A
+        # None/system read sees the global layer at full weight (no tenant to prefer).
+        tenant_read = workspace_id is not None
+        prior_factor = self._global_prior_factor()
+
         # Build chains from edges (depth 1 only -- _MAX_DEPTH = 2 means
         # chains of length 2: [entry, next])
         expanded = 0
@@ -342,6 +378,8 @@ class GraphRouter:
             to_action = edge["to_action"]
             cosine = cosine_by_name.get(from_action, 0.0)
             edge_confidence = edge["confidence"]
+            if tenant_read and edge.get("is_global"):
+                edge_confidence *= prior_factor
 
             # Affinity boosts (succeeds/prefers) lift the chain; negative
             # penalties (fails_for_intent) lower it — PRD-141 US-017.
@@ -413,6 +451,20 @@ class GraphRouter:
 
         best: Optional[Tuple[int, List[str], float]] = None
         for r in rows:
+            sample_count = getattr(r, "sample_count", None)
+            if sample_count is not None and sample_count == 0:
+                # Skip ONLY a true k-means empty-cluster artifact (zero members, its
+                # centroid COPIED from a real point when k exceeds the distinct-query
+                # count). Such a copied centroid can tie (or beat, by a float ULP) the
+                # populated cluster that shares the intent, so matching it would merge
+                # nothing AND scope the affinity read to a cluster with no rows,
+                # starving the real per-intent boost. Gate on sample_count, NOT on
+                # empty action_names_hot: a POPULATED cluster (sample_count > 0) can
+                # legitimately have empty hot when all its members are non-'success'
+                # (e.g. a __tool_gap__-dominated intent) — that cluster must still
+                # match on its centroid so US-011(c)'s gap→resolution affinity, scoped
+                # to its id, is reachable by a live query re-expressing the intent.
+                continue
             centroid = r.centroid_embedding or []
             if len(centroid) != len(query_vec):
                 continue  # dimension mismatch — not comparable
@@ -474,17 +526,20 @@ class GraphRouter:
         agent_id: Optional[int],
         workspace_id: Optional[str],
     ) -> List[dict]:
-        """Query tool_routing_edges for used_after edges from entry nodes.
+        """Query tool_routing_edges for used_after/meta_sibling edges from entry nodes.
 
-        PRD-177 S5 + PRD-232 US-004: reconcile the global bootstrap seeds with
-        the per-tenant lock. The learned graph is per-tenant, so a read for
-        workspace A returns workspace A's edges EXACTLY — plus the genuinely
-        unscoped (``workspace_id IS NULL``) ``meta_sibling`` cold-start seeds
-        PRD-143's metadata_graph_seed writes globally, so a zero-telemetry tenant
-        is still graph-reachable. An unscoped ``used_after`` row is NEVER admitted
-        for a tenant (that would bleed one tenant's learned co-occurrence into
-        another's routing). A None caller (system/global read) sees only the
-        unscoped meta_sibling seeds. There is no cross-tenant global-read fallback.
+        PRD-232 §6.5 (RVW-2 — the two-layer graph, amending US-004's meta_sibling-only
+        NULL admission): a read for workspace A returns TWO layers —
+          * the tenant's OWN rows (``workspace_id == A``) at full weight, and
+          * the text-free GLOBAL layer (``workspace_id IS NULL``, aggregated across
+            tenants) at reduced weight — admitted for EVERY edge type now, not just
+            ``meta_sibling``. Its confidence is discounted by ``_global_prior_factor()``
+            in ``_expand_with_graph`` (flagged here via ``is_global``), so a tenant's
+            own learned co-occurrence always dominates the borrowed cross-tenant prior.
+        The moat still holds for tenant-SPECIFIC rows: workspace B's ``workspace_id == B``
+        rows are NEVER admitted for A. Only the deliberately-global, text-free aggregate
+        crosses tenants — that is the cold-start prior a zero-telemetry tenant rides.
+        A None caller (system/eval read) sees the global layer at FULL weight.
         """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingEdge
@@ -492,17 +547,16 @@ class GraphRouter:
         if not from_actions:
             return []
 
-        # US-004: NULL-workspace rows are admissible ONLY for meta_sibling (the
-        # global cold-start seeds). Every other edge type requires an exact
-        # workspace match.
-        meta_global = and_(
-            ToolRoutingEdge.workspace_id.is_(None),
-            ToolRoutingEdge.edge_type == "meta_sibling",
-        )
+        # §6.5 two-layer: a tenant read admits its own rows PLUS every global
+        # (workspace_id IS NULL) row as a prior; a None (system) read sees the
+        # global layer alone. No edge_type coupling on the NULL admission anymore.
         if workspace_id is not None:
-            workspace_filter = or_(ToolRoutingEdge.workspace_id == workspace_id, meta_global)
+            workspace_filter = or_(
+                ToolRoutingEdge.workspace_id == workspace_id,
+                ToolRoutingEdge.workspace_id.is_(None),
+            )
         else:
-            workspace_filter = meta_global
+            workspace_filter = ToolRoutingEdge.workspace_id.is_(None)
 
         filters = [
             ToolRoutingEdge.from_action.in_(from_actions),
@@ -542,6 +596,9 @@ class GraphRouter:
                 "confidence": r.confidence,
                 "weight": r.weight,
                 "agent_id": r.agent_id,
+                # §6.5: a NULL-workspace row is the global prior — discounted on a
+                # tenant read (never on a None/system read) in _expand_with_graph.
+                "is_global": getattr(r, "workspace_id", None) is None,
             }
             for r in rows
         ]
@@ -565,17 +622,21 @@ class GraphRouter:
         * ``fails_for_intent`` -> negative_penalties[action] += weight*confidence,
           recorded as a POSITIVE magnitude (the caller subtracts it).
 
-        PRD-177 S5: filtered to ``workspace_id`` — affinities are per-tenant, so a
-        succeeds/fails-for-intent signal learned in one workspace never boosts or
-        penalizes another's routing.
+        PRD-232 §6.5 (RVW-2 — two-layer graph): a tenant read admits its OWN affinities
+        (``workspace_id == X``) at full weight PLUS the text-free GLOBAL layer
+        (``workspace_id IS NULL``) as a cross-tenant prior, discounted by
+        ``_global_prior_factor()``. A tenant-SPECIFIC affinity never crosses to another
+        tenant. A None (system/eval) read sees the global layer at full weight.
 
         PRD-232 US-010(b): when ``intent_cluster_id`` is given (a live query matched
         a cluster), read PER-INTENT rows (``intent_cluster_id ==`` the match) at full
         weight PLUS cluster-blind rows (``intent_cluster_id IS NULL``) as a weak
-        global prior, discounted by ``_global_affinity_discount()``. This is the fix
+        prior, discounted by ``_global_affinity_discount()``. This is the fix
         for C4: previously affinities were summed across EVERY intent, so an action
         that fails for intent X but succeeds for intent Y looked neutral. When no
         cluster matched, only the cluster-blind rows apply (exact legacy behaviour).
+        The two discounts COMPOUND: a global, cluster-blind row on a tenant read with a
+        matched cluster is the weakest prior (prior_factor * cluster_blind_discount).
         """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingAffinity
@@ -583,13 +644,19 @@ class GraphRouter:
         if not action_names:
             return {}, {}
 
+        # §6.5 two-layer: a tenant read admits its own rows + the global (IS NULL)
+        # prior; a None (system) read sees the global layer alone.
+        if workspace_id is not None:
+            workspace_filter = or_(
+                ToolRoutingAffinity.workspace_id == workspace_id,
+                ToolRoutingAffinity.workspace_id.is_(None),
+            )
+        else:
+            workspace_filter = ToolRoutingAffinity.workspace_id.is_(None)
+
         filters = [
             ToolRoutingAffinity.action_name.in_(action_names),
-            # Per-tenant isolation (moat): scope to this workspace exactly.
-            # None reads only the unscoped rows (IS NULL), never a tenant's.
-            ToolRoutingAffinity.workspace_id == workspace_id
-            if workspace_id is not None
-            else ToolRoutingAffinity.workspace_id.is_(None),
+            workspace_filter,
         ]
 
         if agent_id is not None:
@@ -622,11 +689,20 @@ class GraphRouter:
         )
 
         discount = GraphRouter._global_affinity_discount() if intent_cluster_id is not None else 1.0
+        # §6.5: a global (workspace_id IS NULL) row is a cross-tenant prior on a
+        # tenant read — discounted so a tenant's own affinity dominates. Not applied
+        # on a None/system read (no tenant layer to prefer). Compounds with the
+        # cluster-blind discount above.
+        tenant_read = workspace_id is not None
+        prior_factor = GraphRouter._global_prior_factor() if tenant_read else 1.0
 
         positive_boosts: dict = {}
         negative_penalties: dict = {}
         for r in rows:
             magnitude = r.weight * r.confidence
+            # A global (cross-tenant) row is a prior on a tenant read.
+            if tenant_read and getattr(r, "workspace_id", None) is None:
+                magnitude *= prior_factor
             # A cluster-blind row is a WEAK global prior when a cluster matched;
             # a per-intent row applies at full weight. (When no cluster matched,
             # discount is 1.0 and every admitted row is cluster-blind anyway.)
@@ -656,12 +732,13 @@ class GraphRouter:
         reliably fails is suppressed. Turns the previously write-only ``failed_after``
         rows into a live signal — no write-only tables (US-010c).
 
-        Scoping mirrors ``_query_edges`` for tenancy, but ``failed_after`` is
-        telemetry-derived (like ``used_after``), so NULL-workspace rows are NOT
-        admitted for a tenant read (only ``meta_sibling`` cold-start seeds cross
-        tenants, per US-004). Defence-in-depth: the ``edge_type`` is re-checked in
-        Python so a permissive fake/DB layer can never mistake a ``used_after`` row
-        for a failure.
+        Scoping follows the PRD-232 §6.5 two-layer model like ``_query_edges``: a
+        tenant read admits its own ``failed_after`` rows at full weight PLUS the global
+        (``workspace_id IS NULL``) failure prior, discounted by ``_global_prior_factor()``
+        so a tenant's own failure evidence dominates the cross-tenant prior. A None
+        (system) read sees the global layer at full weight. Defence-in-depth: the
+        ``edge_type`` is re-checked in Python so a permissive fake/DB layer can never
+        mistake a ``used_after`` row for a failure.
         """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingEdge
@@ -669,13 +746,19 @@ class GraphRouter:
         if not from_actions:
             return {}
 
+        if workspace_id is not None:
+            workspace_filter = or_(
+                ToolRoutingEdge.workspace_id == workspace_id,
+                ToolRoutingEdge.workspace_id.is_(None),
+            )
+        else:
+            workspace_filter = ToolRoutingEdge.workspace_id.is_(None)
+
         filters = [
             ToolRoutingEdge.from_action.in_(from_actions),
             ToolRoutingEdge.edge_type == "failed_after",
             ToolRoutingEdge.confidence >= min_confidence,
-            ToolRoutingEdge.workspace_id == workspace_id
-            if workspace_id is not None
-            else ToolRoutingEdge.workspace_id.is_(None),
+            workspace_filter,
         ]
 
         if agent_id is not None:
@@ -695,13 +778,21 @@ class GraphRouter:
             .all()
         )
 
+        tenant_read = workspace_id is not None
+        prior_factor = GraphRouter._global_prior_factor()
+
         penalties: Dict[Tuple[str, str], float] = {}
         for r in rows:
             if getattr(r, "edge_type", None) != "failed_after":
                 continue  # defence-in-depth against a permissive filter layer
+            conf = float(r.confidence)
+            # §6.5: a global failure row is a discounted cross-tenant prior on a
+            # tenant read (full weight on a None/system read).
+            if tenant_read and getattr(r, "workspace_id", None) is None:
+                conf *= prior_factor
             key = (r.from_action, r.to_action)
             # Keep the strongest failure signal if a pair recurs across scopes.
-            penalties[key] = max(penalties.get(key, 0.0), float(r.confidence))
+            penalties[key] = max(penalties.get(key, 0.0), conf)
         return penalties
 
     # ------------------------------------------------------------------

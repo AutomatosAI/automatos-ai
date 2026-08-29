@@ -12,10 +12,13 @@ C9: two unreconciled defects on the catalog graph path.
 
 (b) PRD-143's metadata_graph_seed writes GLOBAL (workspace_id IS NULL)
     meta_sibling cold-start edges, but PRD-177 S5's per-tenant read lock filtered
-    them out. US-004 reconciles: a tenant read admits its own rows exactly PLUS
-    the unscoped meta_sibling seeds; used_after globals stay excluded. The
-    tenant-isolation coverage for (b) lives in test_prd177_graph_router_tenant.py
-    (extended there); this file covers (a) end-to-end + the no-unfiltered-read grep.
+    them out. US-004 first reconciled this by admitting NULL rows for meta_sibling
+    ONLY. PRD-232 §6.5 (RVW-2, Gerard's ruling) then AMENDED that to the TWO-LAYER
+    graph: a tenant read admits its own rows PLUS the text-free global prior for
+    EVERY edge type, discounted so the tenant's own signal dominates (the AC3 greps
+    below now assert the two-layer shape + the discount). The tenant-isolation
+    coverage for (b) lives in test_prd177_graph_router_tenant.py (extended there);
+    this file covers (a) end-to-end + the two-layer read grep.
 
 The write-seam and grep assertions read source text directly (no heavy import);
 the read-seam test drives the real PlatformActionsSection with a faked GraphRouter.
@@ -101,36 +104,38 @@ async def test_agent_blind_when_kwargs_missing_agent_id(graph_spy):
 # AC3 — no unfiltered global read remains for used_after / failed_after edges
 # ---------------------------------------------------------------------------
 
-def test_query_edges_admits_null_only_for_meta_sibling():
-    """The used_after edge read (_query_edges) reconciles NULL-workspace rows to
-    meta_sibling only; a bare `workspace_id.is_(None)` fallback (the old global
-    read) must be gone."""
+def test_query_edges_two_layer_admits_global_prior():
+    """PRD-232 §6.5 (RVW-2, Gerard's ruling — AMENDS US-004's meta_sibling-only NULL
+    admission): ``_query_edges`` reads TWO layers — a tenant's own rows PLUS the
+    text-free GLOBAL (workspace_id IS NULL) prior for EVERY edge type, not just
+    meta_sibling. A tenant read is ``or_(workspace_id == workspace_id, workspace_id
+    IS NULL)``; each global row is flagged ``is_global`` so the caller can discount
+    it (the next test). The moat for tenant-SPECIFIC rows is proven behaviourally in
+    test_prd177_graph_router_tenant.py::test_null_workspace_used_after_is_a_global_prior_not_a_leak."""
     src = _GRAPH_ROUTER.read_text()
-    # The reconciled filter: meta_global gates the NULL admission on meta_sibling.
-    assert 'edge_type == "meta_sibling"' in src
-    assert "meta_global" in src
-
-    # Isolate _query_edges and assert its NULL handling is meta_sibling-gated,
-    # never a naked global read of used_after.
     m = re.search(r"def _query_edges\(.*?def _query_affinities", src, re.S)
     assert m, "could not isolate _query_edges body"
     body = m.group(0)
-    # A naked `workspace_id.is_(None)` NOT inside the meta_global and_() would be
-    # the unfiltered global read. The only is_(None) here is the meta_global one.
-    isnull_hits = body.count("workspace_id.is_(None)")
-    assert isnull_hits == 1, (
-        f"expected exactly one workspace_id.is_(None) (the meta_global gate), found {isnull_hits}"
-    )
-    # ...and it is co-located with the meta_sibling edge_type predicate.
-    meta_idx = body.find("meta_global = and_(")
-    assert meta_idx != -1
-    meta_block = body[meta_idx: meta_idx + 200]
-    assert "workspace_id.is_(None)" in meta_block and 'edge_type == "meta_sibling"' in meta_block
+    # Two-layer tenant read: own rows OR the global prior, any edge type.
+    assert "workspace_id == workspace_id" in body
+    assert "workspace_id.is_(None)" in body
+    # Each row is tagged global/not so _expand_with_graph can discount the prior.
+    assert "is_global" in body
+    # The meta_sibling-only NULL gate (US-004) is gone under §6.5.
+    assert "meta_global" not in body
 
 
-def test_no_bare_workspace_none_used_after_read():
-    """Grep guard: no edge read ORs an unscoped used_after row in. The single
-    NULL admission is the meta_global and_() (meta_sibling), asserted above."""
+def test_global_prior_is_discounted_not_equal_weight():
+    """§6.5: a global (workspace_id IS NULL) edge IS admitted for a tenant, but as a
+    REDUCED-weight prior — ``_expand_with_graph`` multiplies its confidence by the
+    config prior factor on a tenant read, so a borrowed global edge never routes at
+    the same weight as the tenant's own learned edge (a tenant edge of equal-or-higher
+    confidence wins the dedup). This is what keeps the two-layer admission from being
+    the old unfiltered equal-weight global read US-004 removed."""
     src = _GRAPH_ROUTER.read_text()
-    # There must be no filter that pairs is_(None) with used_after.
-    assert 'edge_type == "used_after"' not in src or "is_(None)" not in src.split('edge_type == "used_after"')[0][-120:]
+    m = re.search(r"def _expand_with_graph\(.*?def _match_query_vector", src, re.S)
+    assert m, "could not isolate _expand_with_graph body"
+    body = m.group(0)
+    assert "_global_prior_factor" in body
+    assert 'edge.get("is_global")' in body
+    assert "prior_factor" in body

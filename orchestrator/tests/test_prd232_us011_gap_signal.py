@@ -351,6 +351,7 @@ def test_build_edges_wires_gap_resolution(monkeypatch):
     monkeypatch.setattr(eb, "get_db_session", _fake_session)
     monkeypatch.setattr(eb, "_load_logs", lambda db, cutoff, workspace_id=None: logs)
     monkeypatch.setattr(eb, "_upsert_edges", lambda db, d: 0)
+    monkeypatch.setattr(eb, "_upsert_global_edges", lambda db, d: 0)  # §6.5 two-layer write
     monkeypatch.setattr(eb, "_upsert_failed_after_edges", lambda db, d: 0)
     monkeypatch.setattr(eb, "_compute_and_upsert_clusters", _fake_clusters)
     monkeypatch.setattr(eb, "_upsert_affinities",

@@ -375,17 +375,25 @@ def test_graph_router_tenant_isolation():
     assert "A_ONLY_FOLLOWUP" not in names_b, "cross-tenant leak: B saw A's edge"
 
 
-def test_null_workspace_rows_never_leak_to_a_tenant():
-    """A pre-tenant / unscoped (workspace_id IS NULL) ``used_after`` edge must not
-    surface for a specific tenant's read — learned co-occurrence is per-tenant,
-    not global (PRD-232 US-004 admits NULL rows only for meta_sibling)."""
+def test_null_workspace_used_after_is_a_global_prior_not_a_leak():
+    """PRD-232 §6.5 (RVW-2, Gerard's ruling — amends US-004's meta_sibling-only NULL
+    admission): a global (workspace_id IS NULL) ``used_after`` edge is the TEXT-FREE
+    cross-tenant PRIOR. It now SURFACES for a tenant read (a zero-telemetry tenant
+    rides it), where US-004 previously excluded it. The MOAT still holds for
+    tenant-SPECIFIC rows: workspace B's own learned ``used_after`` edge never reaches
+    workspace A — only the deliberately-global aggregate crosses tenants."""
     entry = [("send_email", 0.9)]
-    edges = [_edge("send_email", "GLOBAL_FOLLOWUP", None)]  # used_after, unscoped
+    edges = [
+        _edge("send_email", "GLOBAL_PRIOR_FOLLOWUP", None),      # global used_after prior
+        _edge("send_email", "B_PRIVATE_FOLLOWUP", _WS_B),        # WS_B's own learned edge
+    ]
 
-    result_a = _rank(_build_router(entry), workspace_id=_WS_A, edges=edges)
-    names_a = _chain_actions(result_a)
-    assert "GLOBAL_FOLLOWUP" not in names_a, (
-        "unscoped global used_after edge leaked into a tenant read"
+    names_a = _chain_actions(_rank(_build_router(entry), workspace_id=_WS_A, edges=edges))
+    assert "GLOBAL_PRIOR_FOLLOWUP" in names_a, (
+        "the global used_after prior must surface for a tenant (§6.5 two-layer graph)"
+    )
+    assert "B_PRIVATE_FOLLOWUP" not in names_a, (
+        "cross-tenant leak: A saw B's tenant-specific learned edge"
     )
 
 

@@ -1059,6 +1059,16 @@ class Config:
     TOOL_ROUTING_GRAPH: bool = os.getenv("TOOL_ROUTING_GRAPH", "false").lower() == "true"
     TOOL_ROUTING_GRAPH_MIN_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_GRAPH_MIN_CONFIDENCE", "0.6"))
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
+    # PRD-232 §6.5 (RVW-2, Gerard's ruling — the two-layer graph, amending PRD-177's
+    # per-tenant lock): the learned graph reads as TWO layers — a tenant's own rows
+    # (workspace_id == X) at full weight PLUS a text-free GLOBAL prior (workspace_id
+    # IS NULL, aggregated across tenants) at REDUCED weight. This factor (0..1) scales
+    # every global edge/affinity/failed_after row's contribution on a TENANT read, so a
+    # tenant's own learned signal always dominates the borrowed cross-tenant prior — a
+    # tenant edge of equal-or-higher confidence outranks the identical global edge. A
+    # genuinely unscoped (workspace_id=None) system/eval read sees the global layer at
+    # FULL weight (there is no tenant layer to prefer). Never hardcoded in the router.
+    TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR: float = float(os.getenv("TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR", "0.5"))
     # PRD-232 US-010: cluster-aware reads — the graph expresses what it learned.
     # CLUSTER_MATCH_THRESHOLD is the cosine floor for assigning a live query to the
     # nearest ToolRoutingIntentCluster centroid (GraphRouter.rank_chains). Below it,

@@ -10,6 +10,19 @@ Key properties:
 - Deterministic: K-means uses random_state=42
 - Recency: controlled by window parameter only, no continuous time-decay
 - Confidence: Wilson lower bound (95% CI), not raw frequency
+
+PRD-232 §6.5 — the TWO-LAYER graph (RVW-2, Gerard's ruling):
+- used_after edges are written per-tenant (keyed by each log's own workspace_id).
+- On a FULL (all-workspaces) recompute, a TEXT-FREE GLOBAL layer is ALSO written:
+  one aggregated used_after edge per (from,to), summed across tenants, at
+  workspace_id=NULL. GraphRouter reads it as a reduced-weight cross-tenant prior a
+  zero-telemetry tenant rides. A SCOPED (single --workspace-id) run writes NO global
+  rows (a one-tenant aggregate would just be that tenant's data relabeled).
+- PRIVACY / PRD-181 erasure: the global layer is text-free by construction — global
+  edges/affinities carry only action names + counts, and organic intent clusters
+  (which are global — no workspace_id column) redact sample_query to an action-name
+  label (see _redacted_cluster_label). So GDPR erasure scope stays PER-TENANT rows
+  only; nothing in the global layer identifies a user.
 """
 
 from __future__ import annotations
@@ -40,6 +53,12 @@ logger = logging.getLogger(__name__)
 # Floor for computing affinities: ignore agents/clusters with fewer observations
 _SAMPLE_FLOOR = 3
 
+# PRD-232 §6.5: a "global" prior edge is a CROSS-TENANT aggregate — it must draw on
+# at least this many distinct workspaces before it is written, so a pair unique to a
+# single tenant never becomes everyone's prior (the full-run analogue of the
+# scoped-run leak the write guard already prevents).
+_GLOBAL_MIN_TENANTS = 2
+
 # PRD-232 US-011: synthetic telemetry markers on the EXISTING tool_execution_logs
 # table (no new table). A tool_gap row records that the model hunted for a
 # capability (platform_find_tools) or a tool-requiring turn ran zero platform
@@ -64,6 +83,7 @@ class EdgeBuildSummary:
     """Summary returned after an edge-build run."""
 
     edges_built: int = 0
+    global_edges_built: int = 0  # PRD-232 §6.5: text-free cross-tenant used_after prior
     failed_edges_built: int = 0
     affinities_built: int = 0
     intent_clusters: int = 0
@@ -123,6 +143,24 @@ def derive_embedding_model_key(embedding_manager) -> str:
     return f"{provider}:{model}:{dimension}"
 
 
+def _redacted_cluster_label(action_names_hot: List[str]) -> str:
+    """PRD-232 §6.5 (RVW-2, privacy hard rule): organic intent clusters are GLOBAL
+    (the ToolRoutingIntentCluster table has no workspace_id) and cross tenants as a
+    text-free prior — so they must NOT store a raw user query in ``sample_query``.
+
+    Redact to a NON-identifying, action-name label (action names are explicitly
+    allowed in the global layer): the cluster's top hot action, else ``(organic)``.
+    ``sample_query`` is display/debug metadata only — routing matches on the centroid
+    vector + ``action_names_hot``, never on this text — so redaction changes nothing
+    live while keeping the global layer text-free by construction (PRD-181 erasure
+    then never needs to touch a global cluster row). Seeded clusters keep their
+    SYNTHETIC utterance (authored, not user text) — see seed_tool_routing_graph.py.
+    """
+    if action_names_hot:
+        return f"(organic:{action_names_hot[0]})"
+    return "(organic)"
+
+
 def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
     """Wilson lower bound at 95% confidence."""
     if total == 0:
@@ -169,9 +207,21 @@ async def build_edges(
         # _compute_affinities skips them internally to stay index-aligned.)
         real_logs = [l for l in logs if l.get("action_name") not in _SYNTHETIC_ACTIONS]
 
-        # 2. Compute used_after edges from sequences
+        # 2. Compute used_after edges from sequences (keyed by each log's own
+        #    workspace_id — the per-tenant layer of PRD-232 §6.5's two-layer graph).
         edge_data = _compute_used_after_edges(real_logs)
         summary.edges_built = _upsert_edges(db, edge_data)
+
+        # 2a. PRD-232 §6.5 WRITE path: on a FULL (all-workspaces) recompute, also write
+        #     a TEXT-FREE GLOBAL used_after edge per (from,to) — the per-tenant counts
+        #     summed across every workspace. This is the cross-tenant PRIOR a
+        #     zero-telemetry tenant rides (GraphRouter admits it at reduced weight). A
+        #     SCOPED run (a single --workspace-id) writes NO global rows: a one-tenant
+        #     "aggregate" would just be that tenant's data relabeled global (a leak).
+        #     `not workspace_id` matches _load_logs' own scope check (a falsy id — None
+        #     or "" — is the full, all-workspaces recompute).
+        if not workspace_id:
+            summary.global_edges_built = _upsert_global_edges(db, edge_data)
 
         # 2b. Compute failed_after edges (PRD-141 US-018): A succeeded then a
         #     tool within 2 steps errored. Same table, distinct edge_type;
@@ -210,7 +260,8 @@ async def build_edges(
     summary.duration_ms = elapsed_ms
 
     logger.info(
-        f"EdgeBuilder: built {summary.edges_built} used_after edges, "
+        f"EdgeBuilder: built {summary.edges_built} used_after edges "
+        f"(+{summary.global_edges_built} global-prior), "
         f"{summary.failed_edges_built} failed_after edges, "
         f"{summary.affinities_built} affinities across "
         f"{summary.intent_clusters} intent clusters "
@@ -462,6 +513,64 @@ def _upsert_edges(
     return count
 
 
+def _upsert_global_edges(
+    db: Session,
+    edge_data: Dict[Tuple[str, str, Optional[str], Optional[int]], int],
+) -> int:
+    """PRD-232 §6.5 (RVW-2): rebuild the TEXT-FREE GLOBAL used_after layer.
+
+    Sums the per-tenant ``used_after`` counts into one aggregate per ``(from, to)``
+    pair (across every workspace AND agent) and writes it as a global row
+    (``workspace_id = NULL, agent_id = NULL``). A pair that clears the sample floor
+    only in aggregate (sub-floor in each single tenant) still earns a global edge —
+    the point of the cross-tenant cold-start prior — but ONLY if at least
+    ``_GLOBAL_MIN_TENANTS`` distinct workspaces contributed to it, so a pattern unique
+    to one tenant is never relabeled everyone's prior. Global rows carry only action
+    names + counts (no user text): the global layer is text-free by construction.
+
+    IDEMPOTENCY: a plain ON CONFLICT upsert CANNOT work here — ``uq_tre_full_key`` is a
+    normal unique constraint and Postgres treats NULLs as DISTINCT, so a global row's
+    (workspace_id NULL, agent_id NULL) key never matches an existing one and every
+    nightly run would INSERT a duplicate. So this is a DELETE-then-INSERT rebuild of
+    the whole global used_after layer (edges have no inbound FK; meta_sibling globals
+    are a different edge_type, untouched). A pair that later drops below the floor or
+    the tenant threshold correctly disappears from the global layer, never goes stale.
+    """
+    totals: Dict[Tuple[str, str], int] = defaultdict(int)
+    tenants: Dict[Tuple[str, str], set] = defaultdict(set)
+    for (from_action, to_action, ws, _agent), count in edge_data.items():
+        pair = (from_action, to_action)
+        totals[pair] += count
+        if ws is not None:
+            tenants[pair].add(ws)
+
+    # Idempotent rebuild: clear the existing global used_after layer first (the NULL
+    # key defeats ON CONFLICT — see the docstring), then insert the fresh aggregate.
+    db.query(ToolRoutingEdge).filter(
+        ToolRoutingEdge.workspace_id.is_(None),
+        ToolRoutingEdge.agent_id.is_(None),
+        ToolRoutingEdge.edge_type == "used_after",
+    ).delete(synchronize_session=False)
+
+    written = 0
+    now = datetime.utcnow()
+    for (from_action, to_action), sample_count in totals.items():
+        if sample_count < _SAMPLE_FLOOR:
+            continue
+        if len(tenants[(from_action, to_action)]) < _GLOBAL_MIN_TENANTS:
+            continue  # not genuinely cross-tenant — do not leak one tenant's pattern
+        weight = float(sample_count)
+        confidence = wilson_lower_bound(sample_count, sample_count)
+        _upsert_edge_row(
+            db, from_action, to_action, "used_after",
+            None, None, weight, confidence, sample_count, now,
+        )
+        written += 1
+
+    db.flush()
+    return written
+
+
 def _upsert_failed_after_edges(
     db: Session,
     failed_data: Dict[Tuple[str, str, Optional[str], Optional[int]], Tuple[int, int]],
@@ -559,7 +668,9 @@ async def _compute_and_upsert_clusters(
         cluster = ToolRoutingIntentCluster(
             centroid_embedding=cluster_result.centroids[idx],
             embedding_model_key=embedding_model_key,
-            sample_query=cluster_result.sample_queries[idx] or "(empty)",
+            # §6.5 privacy: the global cluster layer is text-free — redact the raw
+            # user query to an action-name label (routing uses centroid + hot only).
+            sample_query=_redacted_cluster_label(cluster_result.action_names_hot[idx]),
             action_names_hot=cluster_result.action_names_hot[idx],
             sample_count=cluster_result.sample_counts[idx],
             provenance="organic",  # US-007: nightly-built rows are organic
