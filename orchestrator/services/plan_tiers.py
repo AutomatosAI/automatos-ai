@@ -320,7 +320,7 @@ def recommend_plan(segment: Optional[dict], team_size=None, tiers: Optional[dict
     which both pass only the segment, always agree (an explicit arg still wins,
     for direct/unit use).
     """
-    seg = segment or {}
+    seg = segment if isinstance(segment, dict) else {}  # LLM may pass a bare string
     text = " ".join(str(seg.get(k) or "") for k in ("business", "goal", "comfort")).lower()
     raw_size = team_size if team_size is not None else seg.get("team_size")
     size = raw_size if isinstance(raw_size, int) and not isinstance(raw_size, bool) and raw_size > 0 else None

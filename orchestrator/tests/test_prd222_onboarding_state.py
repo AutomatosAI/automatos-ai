@@ -253,6 +253,40 @@ def test_set_segment_merges_and_ignores_unknown_keys():
     assert ws.onboarding["segment"] == {"business": "cafe", "goal": "invoicing"}
 
 
+# --------------------------------------------------------------------------- #
+# Boundary hardening (live-test 2026-08-29): the LLM sometimes passes `segment`
+# as a bare STRING through platform_update_onboarding instead of the object the
+# schema asks for. A string used to reach `segment.get(k)` and raise
+# "'str' object has no attribute 'get'", which failed the WHOLE advance and
+# stalled every onboarding at `teach`. A non-dict segment must be IGNORED so the
+# stage advance still lands (the answers were captured on the question turns).
+# --------------------------------------------------------------------------- #
+
+
+def test_advance_to_proposal_with_string_segment_does_not_crash():
+    # The exact live failure: advancing teach -> proposal with a free-text
+    # string segment must succeed, not raise AttributeError.
+    ws = _FakeWorkspace({"stage": "teach", "segment": {"business": "jeweller"}})
+    advance_onboarding_stage(None, ws, "proposal", segment="a jewellery brand on Shopify")
+    assert ws.onboarding["stage"] == "proposal"
+    # The prior real segment is preserved; the junk string contributed nothing.
+    assert ws.onboarding["segment"] == {"business": "jeweller"}
+
+
+@pytest.mark.parametrize("junk", ["a string", 42, ["list"], True])
+def test_clean_segment_ignores_non_dict(junk):
+    from services.onboarding_state import _clean_segment
+
+    assert _clean_segment(junk) == {}
+
+
+def test_recommend_plan_survives_string_segment():
+    from services.plan_tiers import recommend_plan
+
+    plan, _reason = recommend_plan("we're a barber shop")  # bare string, not a dict
+    assert plan in {"basic", "pro", "business"}
+
+
 def test_set_segment_empty_raises():
     ws = _FakeWorkspace(None)
     with pytest.raises(ValueError):
