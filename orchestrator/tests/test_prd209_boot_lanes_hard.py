@@ -59,6 +59,16 @@ def test_alembic_from_zero_steps_are_hard():
     assert not masked, f"alembic-from-zero still masks steps with continue-on-error: {masked}"
 
 
+def test_smoke_asserts_readiness_beyond_liveness():
+    # PRD-209 S5: the smoke lane must prove the clone comes up far enough to SERVE
+    # (the readiness probe), not merely that /health breathes (liveness).
+    text = _SMOKE_SH.read_text(encoding="utf-8")
+    assert "/health/ready" in text, (
+        "smoke-fresh-clone.sh must probe the readiness route /health/ready, not only /health"
+    )
+    assert re.search(r"readiness", text, re.I), "smoke script must assert a readiness signal"
+
+
 def test_smoke_script_exports_default_workspace_id():
     text = _SMOKE_SH.read_text(encoding="utf-8")
     m = re.search(r"^export DEFAULT_WORKSPACE_ID=", text, re.M)

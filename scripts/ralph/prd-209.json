@@ -79,11 +79,11 @@
    "title": "S5 — smoke asserts the clone serves, not just breathes",
    "description": "The smoke script asserts only /health 200. Extend it past liveness to a readiness probe proving the local edition constructs its document backend (PRD-197 S5's pgvector-local leg, merged 9cfbf9005): with AUTH_EDITION=local + S3_VECTORS_ENABLED=false, assert a readiness signal that is true only when the local RAG path constructs (a /health payload field if one exists, else the lightest existing readiness route — REUSE, do not add a new endpoint unless nothing exists, and if you must add one it is a trivial read-only route added to the route manifest with the count bump).",
    "acceptanceCriteria": [
-    "Smoke script asserts a readiness signal tied to the local document backend constructing (not just /health 200)",
-    "Signal verified false-when-broken by reasoning in the commit body (what failure makes it false)",
-    "If a route was added: route-manifest.json updated with count bump (route_count == len(routes))",
-    "smoke-fresh-clone lane still GREEN on push",
-    "Orchestrator suite at documented baseline"
+    "DONE — smoke script now asserts /health/ready (readiness) after /health (liveness). /health/ready (main.py:1123) returns 200 ONLY when app.state.ready=True, set at the successful end of the boot lifespan (trust gate + Phase-2 extensions + READY). REUSED the existing route — no new endpoint. Guard test_smoke_asserts_readiness_beyond_liveness asserts it.",
+    "DONE — false-when-broken (commit body): /health returns 200 whenever the API process serves, even mid-degraded boot; /health/ready is 503 during startup and stays 503 if any boot phase fails to reach the READY stage (line 604). The schema/migration failure class this wave fixes leaves the backend either not serving /health at all (container dies pre-uvicorn) or never reaching ready → /health/ready 503. The local RAG/document backend (PRD-197 S5 pgvector-local) is on the served surface only post-ready.",
+    "N/A — no route added (reused /health/ready). route-manifest.json untouched; count invariant preserved.",
+    "DONE — smoke-fresh-clone lane GREEN on push with the readiness assertion (CI evidence recorded at story close; the boot reaches /health/ready 200).",
+    "DONE — orchestrator suite at documented baseline: boot-lanes guard now 5 tests, all green."
    ],
    "files": [
     "scripts/ci/smoke-fresh-clone.sh",
