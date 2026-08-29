@@ -9,7 +9,6 @@ import json
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import asyncio
-from openai import AsyncOpenAI
 import logging
 
 logger = logging.getLogger(__name__)
@@ -41,8 +40,39 @@ class EntityExtractor:
     """Extract entities and relationships from text"""
     
     def __init__(self):
-        """Initialize entity extractor with LLM client"""
-        self.openai_client = AsyncOpenAI()
+        """Initialize entity extractor.
+
+        Deliberately constructs NO LLM client here. ``AsyncOpenAI()`` raises
+        ``OpenAIError: Missing credentials`` at construction when
+        ``OPENAI_API_KEY`` is unset — and this platform runs on OpenRouter, so
+        that raise fired on EVERY document ingestion (2026-08-29). The caller
+        catches it and logs a warning, so ingestion appeared to succeed while
+        entity extraction was silently disabled and the knowledge graph
+        quietly degraded. Same class as the #645 Harbourline failure: never
+        demand a vendor key that may not exist.
+
+        The manager is built lazily on first use and resolves provider, model
+        and key through the platform's own routing (workspace key first,
+        OpenRouter fallback), so no vendor is hard-coded here.
+        """
+        self._llm_manager = None
+
+    def _manager(self):
+        """The shared LLM manager, created on first use."""
+        if self._llm_manager is None:
+            from core.llm import create_llm_manager
+
+            self._llm_manager = create_llm_manager(
+                service_name="entity_extraction",
+                request_type="entity_extraction",
+            )
+        return self._llm_manager
+
+    @staticmethod
+    def _content_of(response) -> str:
+        """Text of an LLMManager response, whatever shape it arrives in."""
+        content = getattr(response, "content", None)
+        return (content if content is not None else str(response)).strip()
         
     async def extract_entities(
         self, 
@@ -146,15 +176,11 @@ Text to analyze:
 Return ONLY the JSON array, no other text."""
 
         try:
-            from config import config
-            response = await self.openai_client.chat.completions.create(
-                model=config.LLM_MODEL or "gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,  # Low temperature for consistency
-                max_tokens=2000
+            response = await self._manager().generate_response(
+                messages=[{"role": "user", "content": prompt}]
             )
-            
-            content = response.choices[0].message.content.strip()
+
+            content = self._content_of(response)
             
             # Extract JSON from response (in case LLM adds extra text)
             json_match = re.search(r'\[.*\]', content, re.DOTALL)
@@ -232,15 +258,11 @@ Text:
 Return ONLY the JSON array, no other text."""
 
         try:
-            from config import config
-            response = await self.openai_client.chat.completions.create(
-                model=config.LLM_MODEL or "gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=1500
+            response = await self._manager().generate_response(
+                messages=[{"role": "user", "content": prompt}]
             )
-            
-            content = response.choices[0].message.content.strip()
+
+            content = self._content_of(response)
             
             # Extract JSON from response
             json_match = re.search(r'\[.*\]', content, re.DOTALL)
