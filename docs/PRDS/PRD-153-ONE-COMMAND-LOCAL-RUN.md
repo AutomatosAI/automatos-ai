@@ -1,6 +1,6 @@
 # PRD-153: One-Command Local Run — Compose Consolidation & Schema Lifecycle
 
-**Status:** Draft
+**Status:** Superseded — its compose-consolidation slice (delete the six `infrastructure/docker-compose*.yml`) was absorbed and executed by **PRD-209 S9 (US-008, 2026-08-29)**; the local-defaults consumer by PRD-209 S7. This doc's G1/M2 compose-deletion goals are now met on the fresh-clone-boot branch.
 **Author:** Gerard Kavanagh (with Auto)
 **Date:** 2026-06-09
 **Type:** Refactor / Consolidation (one canonical compose; one schema lifecycle; delete six drifted compose files)

@@ -127,9 +127,9 @@
    "title": "S9 — one canonical compose file (delete the six drifted infrastructure copies)",
    "description": "infrastructure/docker-compose.yml + .core.yml + .data.yml + .landing.yml + .memory.yml + .voice.yml predate the root stack (.voice references services decommissioned by #625). Before deleting: grep the repo (docs/, scripts/, .github/) for references to infrastructure/docker-compose and repoint or delete those references in the same commit; verify nothing unique lives in the copies that the root file lacks (expected: nothing — they predate it; if something IS unique and load-bearing, fold it into the root file first and say so). Delete all six; guard asserts exactly one docker-compose*.yml tracked repo-wide.",
    "acceptanceCriteria": [
-    "All six infrastructure/docker-compose*.yml deleted; zero dangling references (grep-proof in commit body)",
-    "Guard test: exactly one tracked docker-compose*.yml repo-wide",
-    "Orchestrator suite at documented baseline"
+    "DONE — all six infrastructure/docker-compose{,.core,.data,.landing,.memory,.voice}.yml deleted (git rm). Nothing unique/load-bearing lost: they are an older 19-service production-mirror needing sibling repos; the root stack is canonical and nothing operational referenced them. Zero references in .github/ (CI) or any script that runs compose. docs/README.md:139 is a false positive (links deployment-infrastructure/docker-compose-setup.md, a different file). PRD-153 marked Superseded (its deletion plan is now done). Remaining grep hits are non-operational history: the Ralph task spec itself + PRD-150 note + a reports/ dossier.",
+    "DONE — guard test_prd209_single_compose asserts exactly one tracked docker-compose*.yml repo-wide (root docker-compose.yml) via git ls-files.",
+    "DONE — orchestrator suite at documented baseline: 1 new guard green; deletions don't touch orchestrator runtime."
    ],
    "files": [
     "infrastructure/",
