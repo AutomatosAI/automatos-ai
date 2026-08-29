@@ -1065,6 +1065,13 @@ class Config:
     # the query matches NO cluster and routing falls back to the embedding floor
     # (per-intent affinities do not apply) — a deliberate miss, never a wrong guess.
     TOOL_ROUTING_GRAPH_CLUSTER_MATCH_THRESHOLD: float = float(os.getenv("TOOL_ROUTING_GRAPH_CLUSTER_MATCH_THRESHOLD", "0.6"))
+    # PRD-232 US-007: confidence stamped on the SEEDED cold-start affinity that the
+    # synthetic-utterance seed writes alongside each seeded intent cluster. Set at the
+    # graph min-confidence floor (matching metadata_graph_seed's meta_sibling floor) so
+    # a seed PASSES the router filter but any organic succeeds_for_intent row of higher
+    # Wilson confidence outranks it as real telemetry accrues — the seed is the floor,
+    # learned usage always wins. Human-applied seed only; never read by a live turn.
+    TOOL_ROUTING_SEED_CLUSTER_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_SEED_CLUSTER_CONFIDENCE", "0.6"))
     # When a cluster matches, per-intent affinity rows (intent_cluster_id == match)
     # apply at full weight; cluster-blind rows (intent_cluster_id IS NULL) still
     # apply as a WEAK global prior, discounted by this factor (0..1). Keeps a

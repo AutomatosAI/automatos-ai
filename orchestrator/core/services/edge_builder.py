@@ -100,6 +100,29 @@ def _affinity_weight_floor() -> float:
         return _AFFINITY_WEIGHT_FLOOR
 
 
+def derive_embedding_model_key(embedding_manager) -> str:
+    """Canonical ``provider:model:dimension`` key for the active embedding model.
+
+    The intent-cluster centroid is only comparable to a query embedded under the
+    SAME model, so every ToolRoutingIntentCluster records this key and the reader
+    (GraphRouter._match_intent_cluster) filters on it. Shared by the nightly
+    recompute and the human-applied corpus seed (PRD-232 US-007) so both stamp an
+    identical key — a seeded centroid and an organic one for the same model are
+    matched against the same live queries.
+    """
+    ensure = getattr(embedding_manager, "_ensure_provider", None)
+    if callable(ensure):
+        ensure()
+    info = embedding_manager.get_provider_info()
+    provider = info.get("provider") or embedding_manager.__class__.__name__
+    model = info.get("model")
+    if model is None:
+        cfg = getattr(embedding_manager.provider, "config", None)
+        model = getattr(cfg, "model", None)
+    dimension = info.get("dimension") or embedding_manager.get_dimension()
+    return f"{provider}:{model}:{dimension}"
+
+
 def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
     """Wilson lower bound at 95% confidence."""
     if total == 0:
@@ -502,27 +525,21 @@ async def _compute_and_upsert_clusters(
     if not cluster_result.centroids:
         return {}
 
-    # Get canonical embedding model key
-    ensure = getattr(embedding_manager, "_ensure_provider", None)
-    if callable(ensure):
-        ensure()
-    info = embedding_manager.get_provider_info()
-    provider = info.get("provider") or embedding_manager.__class__.__name__
-    model = info.get("model")
-    if model is None:
-        cfg = getattr(embedding_manager.provider, "config", None)
-        model = getattr(cfg, "model", None)
-    dimension = info.get("dimension") or embedding_manager.get_dimension()
-    embedding_model_key = f"{provider}:{model}:{dimension}"
+    embedding_model_key = derive_embedding_model_key(embedding_manager)
 
-    # Upsert clusters - delete old ones and insert fresh (idempotent rebuild).
-    # Affinities referencing the doomed clusters go FIRST: the FK has no
-    # cascade, so without this a re-run would either FK-error on the cluster
-    # delete or strand intent affinities under dead cluster ids (duplicating
-    # them under the regenerated ids) — re-runs must converge (PRD-143 S12).
+    # Upsert clusters - delete old ORGANIC ones and insert fresh (idempotent
+    # rebuild). PRD-232 US-007: the delete is provenance-scoped — 'seeded'
+    # cold-start clusters (and their affinities) are NEVER touched by the nightly,
+    # so the synthetic-utterance seed survives 03:00 UTC and the graph routes
+    # day-one. Affinities referencing the doomed organic clusters go FIRST: the FK
+    # (ToolRoutingAffinity.intent_cluster_id → tool_routing_intent_clusters.id, the
+    # ONLY live FK to this table) has no cascade, so without this a re-run would
+    # either FK-error on the cluster delete or strand intent affinities under dead
+    # cluster ids — re-runs must converge (PRD-143 S12).
     existing_clusters = (
         db.query(ToolRoutingIntentCluster)
         .filter(ToolRoutingIntentCluster.embedding_model_key == embedding_model_key)
+        .filter(ToolRoutingIntentCluster.provenance == "organic")
         .all()
     )
     if existing_clusters:
@@ -545,6 +562,7 @@ async def _compute_and_upsert_clusters(
             sample_query=cluster_result.sample_queries[idx] or "(empty)",
             action_names_hot=cluster_result.action_names_hot[idx],
             sample_count=cluster_result.sample_counts[idx],
+            provenance="organic",  # US-007: nightly-built rows are organic
             last_updated=now,
         )
         db.add(cluster)
