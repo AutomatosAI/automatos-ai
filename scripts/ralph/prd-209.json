@@ -96,15 +96,15 @@
    "title": "S4 — schema-drift CI lane (the net for four writers of schema truth)",
    "description": "No lane catches models ↔ migration-head divergence (July's 'ALTER-ed-but-never-CREATE-d table' shipped undetected). Build scripts/ci/schema_drift_check.py + a non-required workflow job: construct the schema two ways (applied-migrations shadow vs declared init_complete_schema.sql, or a fresh Base.metadata.create_all dump — pick the pair that catches the known failure class) and diff; exit non-zero on drift. Pure-testable core: test_schema_drift_detects_divergent_column feeds fixture DDL where a model column is absent from the migration head and asserts drift is reported. Wire the job into CI as its own lane (non-required for now — flipping required is the owner's Q2 action).",
    "acceptanceCriteria": [
-    "schema_drift_check.py exists with the pure diff core + fixture test green",
-    "A CI job runs it (new lane or a test.yml job) and is green on this branch",
-    "Planted-divergence fixture proves the check bites (test)",
-    "Orchestrator suite at documented baseline"
+    "DONE — scripts/ci/schema_drift_check.py exists: PURE static parse (no DB, no Base.metadata import — incomplete without ML deps, no live Alembic — the forest doesn't replay from base). diff_schemas() is the table+column diff CORE; the wired check asserts every table a migration ALTERs/add_columns/indexes/FKs is also CREATE-d by a migration or init_complete_schema.sql. test_prd209_schema_drift.py: 12 guards green (local py3.10). Pair chosen = migration-forest ALTERs vs (migration+init) CREATEs — the ONLY pair that catches the KNOWN class: the three cross-writer table diffs (init↔models 63+72, init↔forest 80) are massively divergent by design (create_all fills the gap), so only the intra-writer 'ALTER-ed-but-never-CREATE-d' invariant is both green-able and the real July crash cause (test.yml:410 'crashes on tables that are ALTER-ed but never CREATE-d in the historical forest').",
+    "DONE — new non-required lane `schema-drift` in test.yml (Schema-drift check (four writers)): checkout + setup-python + `python scripts/ci/schema_drift_check.py`, stdlib-only (no pip/no Postgres → can't flake), HARD (no continue-on-error). Script exits 0 locally: '7 orphan-alter table(s); baseline accepts 7 … OK: no schema drift beyond the documented baseline.' Required lanes untouched (orchestrator-tests present; ioc-scan is a separate file). CI run id recorded at story close.",
+    "DONE — the check bites: test_orphan_alter_check_bites_on_altered_but_never_created feeds a fixture forest where 'ghost_table' is add_column-ed but never created → flagged; a create_table-ed 'real_table' is NOT. test_check_main_returns_nonzero_on_a_planted_orphan monkeypatches the paths to a planted-orphan fixture and asserts main()==1 (end-to-end red path). test_schema_drift_detects_divergent_column (the named S4 test) feeds fixture schemas where a column is absent from one side → diff core reports it. Also proven: init SQL counts as a CREATE writer; create_index/create_foreign_key read the 2nd-arg table not the constraint name.",
+    "DONE — orchestrator suite at documented baseline: 12 new US-006 guards green; all 34 test_prd209_*.py guards green together; nothing else imports schema_drift_check.py; script+lane don't touch orchestrator runtime. Baseline of 7 create_all-only tables (audit_logs, composio_actions_cache, composio_connections, tool_execution_logs, workflow_recipes, workspace_invitations, workspace_members) each verified create_table=0/raw=0/init=0/model=Y; converging the four writers to empty the baseline is PRD-209 Q3."
    ],
    "files": [
-    "scripts/ci/",
-    ".github/workflows/",
-    "orchestrator/tests/"
+    "scripts/ci/schema_drift_check.py",
+    ".github/workflows/test.yml",
+    "orchestrator/tests/test_prd209_schema_drift.py"
    ]
   },
   {

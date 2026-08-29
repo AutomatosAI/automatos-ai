@@ -510,6 +510,44 @@ jobs:
           alembic upgrade heads
           echo "Fresh-clone boot path succeeded: initdb + stamp + upgrade reaches the single head with no forest replay."
 
+  # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
+  # writers of schema truth" (init_complete_schema.sql, the Alembic migration
+  # forest, create_all-at-boot, and inline ALTERs inside migrations). No lane
+  # caught July's ALTER-ed-but-never-CREATE-d table, which crashed a from-base
+  # replay with `relation "..." does not exist` (the very failure the from-zero
+  # lane above sidesteps by booting via init-SQL+stamp instead of a replay).
+  #
+  # This lane runs scripts/ci/schema_drift_check.py — a PURE, static parse (no
+  # database, no Base.metadata import, no live Alembic) asserting that every table
+  # a migration ALTERs / add_columns / indexes / foreign-keys is also CREATE-d by
+  # some migration or by init_complete_schema.sql. Green today (the known
+  # create_all-only orphans are a documented baseline in the script); RED on the
+  # NEXT new orphan. Stdlib only — no pip install, no Postgres service, so it is
+  # fast and cannot flake. The pure diff core and the planted-divergence fixtures
+  # live in orchestrator/tests/test_prd209_schema_drift.py (run by the required
+  # orchestrator-tests lane, so a new orphan also reddens that suite).
+  #
+  # NON-REQUIRED at introduction (the workflow's established posture); flipping it
+  # to a required check once green is the repo admin's call (PRD-209 Q2).
+  schema-drift:
+    name: Schema-drift check (four writers) (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # HARD gate — red on a table ALTER-ed by a migration but CREATE-d by no
+      # migration and not by init_complete_schema.sql (beyond the baseline).
+      - name: Schema-drift check (ALTER-ed-but-never-CREATE-d tables)
+        run: python scripts/ci/schema_drift_check.py
+
   # PRD-182 W12-S1 (F034) + S3 (F044) — the frontend CI lane. 148k lines of TS
   # were entirely ungated: `next.config.js` sets `ignoreBuildErrors:true` /
   # `ignoreDuringBuilds:true`, so `next build` never type-checks or lints, and
