@@ -585,14 +585,14 @@ def _read_ledger(workspace: Workspace) -> dict[str, set[str]]:
 
 def _present_identities(ctx: _SeedContext) -> dict[str, set[str]]:
     db, ws = ctx.db, ctx.workspace_id
-    roster_slugs = [spec["slug"] for spec in ROSTER]
+    roster_slugs = [c for spec in ROSTER for c in _slug_candidates(spec["slug"], ws)]
     agents = {
-        slug for (slug,) in db.query(Agent.slug)
+        _base_slug(slug, ws) for (slug,) in db.query(Agent.slug)
         .filter(Agent.workspace_id == ws, Agent.slug.in_(roster_slugs)).all()
     }
     playbooks = {
-        tid for (tid,) in db.query(WorkflowTemplate.template_id)
-        .filter(WorkflowTemplate.workspace_id == ws, WorkflowTemplate.template_id == PLAYBOOK_TEMPLATE_ID).all()
+        _base_slug(tid, ws) for (tid,) in db.query(WorkflowTemplate.template_id)
+        .filter(WorkflowTemplate.workspace_id == ws, WorkflowTemplate.template_id.in_(_slug_candidates(PLAYBOOK_TEMPLATE_ID, ws))).all()
     }
     posts = {
         slug for (slug,) in db.query(BlogPost.slug)
@@ -620,52 +620,99 @@ def _record_ledger(workspace: Workspace, ctx: _SeedContext) -> bool:
 
 # ── Upserts ──────────────────────────────────────────────────────────────────
 
+# agents.slug is GLOBALLY unique (idx_agents_slug_unique), while the roster's
+# identity is per workspace. One local install has one workspace, so the plain
+# slug is the norm; when another workspace already owns it (the CI seed tests'
+# throwaway workspaces, a second local workspace), THIS workspace stores a
+# suffixed slug. Every lookup and fingerprint maps back to the base slug, so the
+# seed's refresh contract is identical in both cases.
+def _ws_suffix(workspace_id: UUID) -> str:
+    return str(workspace_id).replace("-", "")[:8]
+
+
+def _slug_candidates(base: str, workspace_id: UUID) -> tuple[str, str]:
+    return (base, f"{base}-{_ws_suffix(workspace_id)}")
+
+
+def _base_slug(stored: str, workspace_id: UUID) -> str:
+    suffix = f"-{_ws_suffix(workspace_id)}"
+    return stored[: -len(suffix)] if stored.endswith(suffix) else stored
+
+
+def _free_slug(db, base: str, workspace_id: UUID) -> str:
+    taken_elsewhere = (
+        db.query(Agent.id).filter(Agent.slug == base, Agent.workspace_id != workspace_id).first() is not None
+    )
+    return _slug_candidates(base, workspace_id)[1] if taken_elsewhere else base
+
+
 def _upsert_agent(ctx: _SeedContext, spec: dict[str, Any]) -> str:
     row = (
         ctx.db.query(Agent)
-        .filter(Agent.workspace_id == ctx.workspace_id, Agent.slug == spec["slug"])
+        .filter(
+            Agent.workspace_id == ctx.workspace_id,
+            Agent.slug.in_(_slug_candidates(spec["slug"], ctx.workspace_id)),
+        )
         .first()
     )
     columns = _agent_columns(spec, ctx.workspace_id, ctx.operator)
     if row is None:
         if spec["slug"] in ctx.ledger["agents"]:
             return "deleted_by_user"
+        columns["slug"] = _free_slug(ctx.db, spec["slug"], ctx.workspace_id)
         ctx.db.add(Agent(**columns))
         ctx.db.flush()
         return "created"
+    columns["slug"] = row.slug  # identity is the base slug; the stored one stays
     current = agent_fingerprint(SimpleNamespace(**columns))
     return _refresh(row, columns, _AGENT_CONTENT_FIELDS, agent_fingerprint, current)
 
 
 def _roster_ids(ctx: _SeedContext) -> dict[str, int]:
+    candidates = [c for spec in ROSTER for c in _slug_candidates(spec["slug"], ctx.workspace_id)]
     rows = (
         ctx.db.query(Agent.slug, Agent.id)
-        .filter(Agent.workspace_id == ctx.workspace_id, Agent.slug.in_([s["slug"] for s in ROSTER]))
+        .filter(Agent.workspace_id == ctx.workspace_id, Agent.slug.in_(candidates))
         .all()
     )
-    return {slug: agent_id for slug, agent_id in rows}
+    return {_base_slug(slug, ctx.workspace_id): agent_id for slug, agent_id in rows}
 
 
 def _upsert_playbook(ctx: _SeedContext, spec: dict[str, Any], slug_to_id: dict[str, int]) -> str:
     needed = {step["agent_slug"] for step in spec["steps"]}
     if not needed <= set(slug_to_id):
         return "missing_agent"  # a roster agent it needs is gone — leave it alone
-    # template_id is globally unique (ix_workflow_recipes_template_id), so the
-    # lookup is by template_id; a row owned by another workspace is a conflict.
-    row = ctx.db.query(WorkflowTemplate).filter(WorkflowTemplate.template_id == spec["template_id"]).first()
-    if row is not None and str(row.workspace_id) != str(ctx.workspace_id):
-        logger.warning("PRD-233 S3: template_id %r belongs to workspace %s — not seeding", spec["template_id"], row.workspace_id)
-        return "template_id_taken"
+    # template_id is globally unique (ix_workflow_recipes_template_id) while the
+    # Playbook's identity is per workspace — same rule as the roster slugs: the
+    # plain id is the norm, a workspace suffix only when another workspace owns
+    # the plain one. The ledger and the refresh contract key on the base id.
+    row = (
+        ctx.db.query(WorkflowTemplate)
+        .filter(
+            WorkflowTemplate.workspace_id == ctx.workspace_id,
+            WorkflowTemplate.template_id.in_(_slug_candidates(spec["template_id"], ctx.workspace_id)),
+        )
+        .first()
+    )
     columns = _playbook_columns(spec, ctx.workspace_id, ctx.operator, slug_to_id)
     fingerprint = partial(playbook_fingerprint, id_to_slug={v: k for k, v in slug_to_id.items()})
     if row is None:
         if spec["template_id"] in ctx.ledger["playbooks"]:
             return "deleted_by_user"
+        taken_elsewhere = (
+            ctx.db.query(WorkflowTemplate.id)
+            .filter(WorkflowTemplate.template_id == spec["template_id"], WorkflowTemplate.workspace_id != ctx.workspace_id)
+            .first()
+            is not None
+        )
+        if taken_elsewhere:
+            columns["template_id"] = _slug_candidates(spec["template_id"], ctx.workspace_id)[1]
         recipe = WorkflowTemplate(**columns)
         validate_playbook(recipe)
         ctx.db.add(recipe)
         ctx.db.flush()
         return "created"
+    columns["template_id"] = row.template_id  # identity is the base id; the stored one stays
     return _refresh(row, columns, _PLAYBOOK_REFRESH_FIELDS, fingerprint, fingerprint(SimpleNamespace(**columns)))
 
 

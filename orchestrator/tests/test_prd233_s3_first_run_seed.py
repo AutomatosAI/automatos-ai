@@ -34,6 +34,8 @@ from core.seeds.seed_local_first_run import (
     ROSTER,
     WELCOME_CONTENT,
     WELCOME_SLUG,
+    _base_slug,
+    _slug_candidates,
     WELCOME_TITLE,
     agent_fingerprint,
     current_fingerprints,
@@ -352,8 +354,8 @@ def test_rows_are_workspace_scoped_attributed_and_listable_like_the_api(local_ed
     ).scalar()
     assert operator_id is not None
 
-    roster = s.query(Agent).filter(Agent.workspace_id == ws, Agent.slug.in_(ROSTER_SLUGS)).all()
-    assert sorted(a.slug for a in roster) == sorted(ROSTER_SLUGS)
+    roster = s.query(Agent).filter(Agent.workspace_id == ws, Agent.slug.in_([c for b in ROSTER_SLUGS for c in _slug_candidates(b, ws)])).all()
+    assert sorted(_base_slug(a.slug, ws) for a in roster) == sorted(ROSTER_SLUGS)
     for agent in roster:
         assert agent.is_system_agent is False and agent.owner_type == "workspace"
         assert agent.created_by_user_id == operator_id
@@ -379,7 +381,7 @@ def test_rows_are_workspace_scoped_attributed_and_listable_like_the_api(local_ed
         )
         .all()
     )
-    assert [p.template_id for p in listed] == [PLAYBOOK_TEMPLATE_ID]
+    assert [p.template_id.startswith(PLAYBOOK_TEMPLATE_ID) for p in listed] == [True]
     playbook = listed[0]
     validate_playbook(playbook)
     assert {step["agent_id"] for step in playbook.steps} <= roster_ids
@@ -410,9 +412,9 @@ def test_user_edits_are_never_overwritten(local_edition, new_session):
     _run(s)
     ws = local_edition
 
-    writer = s.query(Agent).filter(Agent.workspace_id == ws, Agent.slug == "local-writer").one()
+    writer = s.query(Agent).filter(Agent.workspace_id == ws, Agent.slug.in_(_slug_candidates("local-writer", ws))).one()
     writer.description = "Writes only haiku now."
-    playbook = s.query(WorkflowTemplate).filter(WorkflowTemplate.template_id == PLAYBOOK_TEMPLATE_ID).one()
+    playbook = s.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ws).one()
     edited_steps = [dict(step) for step in playbook.steps]
     edited_steps[0] = {**edited_steps[0], "prompt_template": "Research {input.topic} my way."}
     playbook.steps = edited_steps
@@ -439,7 +441,7 @@ def test_rows_still_on_a_prior_seed_version_are_refreshed(local_edition, new_ses
     _run(s)
     ws = local_edition
 
-    researcher = s.query(Agent).filter(Agent.workspace_id == ws, Agent.slug == "local-researcher").one()
+    researcher = s.query(Agent).filter(Agent.workspace_id == ws, Agent.slug.in_(_slug_candidates("local-researcher", ws))).one()
     researcher.description = "An older shipped description."
     s.commit()
     older_fingerprint = agent_fingerprint(researcher)
@@ -458,13 +460,15 @@ def test_deleted_seed_rows_are_not_resurrected(local_edition, new_session):
 
     s = new_session()
     _run(s)
-    s.execute(text("DELETE FROM workflow_recipes WHERE template_id = :t"), {"t": PLAYBOOK_TEMPLATE_ID})
+    # Scoped to THIS workspace: template_id is globally unique and another
+    # workspace (the live default one) may own the plain id.
+    s.execute(text("DELETE FROM workflow_recipes WHERE workspace_id = CAST(:w AS uuid)"), {"w": str(local_edition)})
     s.commit()
 
     second = _run(s)
     assert second["playbooks"] == {"deleted_by_user": 1}
     assert s.execute(
-        text("SELECT count(*) FROM workflow_recipes WHERE template_id = :t"), {"t": PLAYBOOK_TEMPLATE_ID}
+        text("SELECT count(*) FROM workflow_recipes WHERE workspace_id = CAST(:w AS uuid)"), {"w": str(local_edition)}
     ).scalar() == 0
 
 
