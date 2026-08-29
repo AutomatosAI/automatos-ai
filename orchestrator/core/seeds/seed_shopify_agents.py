@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy import text
-from core.database import engine
+from core.database.database import engine
 from core.models.core import Agent, Skill, agent_skills
 
 logger = logging.getLogger(__name__)
