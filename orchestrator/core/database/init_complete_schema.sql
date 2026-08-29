@@ -24,6 +24,32 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Workspaces table (PRD-37) — the multi-tenancy root. Columns mirror
+-- core/models/workspaces.py (Base.metadata.create_all also owns this table at
+-- boot, checkfirst-skipped if present). (PRD-209 S2) It was MISSING from this
+-- "complete schema" file, so every downstream `REFERENCES workspaces(id)` (kb_*,
+-- task_executions, pinned_documents, teams) aborted initdb before the stamp at
+-- EOF — a fresh-clone boot blocker. Defined here, before its first reference.
+CREATE TABLE IF NOT EXISTS workspaces (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(255),
+    owner_id INTEGER,
+    clerk_org_id VARCHAR(255),
+    plan VARCHAR(50) DEFAULT 'basic',
+    plan_limits JSONB DEFAULT '{}'::jsonb,
+    settings JSONB DEFAULT '{}'::jsonb,
+    onboarding JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_personal BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    webhook_key VARCHAR(64) UNIQUE,
+    paused_at TIMESTAMP,
+    paused_reason TEXT,
+    deleted_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 -- ================================================================
 -- CHAT TABLES (PRD-27)
 -- ================================================================

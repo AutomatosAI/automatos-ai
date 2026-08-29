@@ -62,6 +62,38 @@ def test_no_ann_index_over_pgvector_dim_cap():
     )
 
 
+_REFERENCES = re.compile(r"\bREFERENCES\s+(\w+)\s*\(", re.I)
+
+
+def test_no_forward_or_missing_fk_targets():
+    """Every ``REFERENCES <table>`` target must be CREATE-d earlier in the file.
+
+    initdb replays the SQL top-to-bottom in one pass, so a FK to a table defined
+    later — or never (e.g. ``workspaces`` was missing entirely) — errors and aborts
+    the schema before the alembic_version stamp at EOF. Comment lines are skipped so
+    prose mentioning ``REFERENCES`` doesn't trip the check.
+    """
+    defined: set[str] = set()
+    offenders = []
+    current = None
+    create_re = re.compile(r"CREATE TABLE(?:\s+IF NOT EXISTS)?\s+(\w+)", re.I)
+    for line in _INIT_SQL.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("--"):
+            continue
+        cm = create_re.search(line)
+        if cm:
+            current = cm.group(1)
+            defined.add(current)  # self-references are legal
+        for rm in _REFERENCES.finditer(line):
+            target = rm.group(1)
+            if target not in defined:
+                offenders.append(f"{current} -> {target}")
+    assert not offenders, (
+        "init_complete_schema.sql has FK targets not defined earlier in the file "
+        f"(forward/missing reference — initdb will abort here): {offenders}"
+    )
+
+
 def test_init_sql_has_the_valid_ann_index_anchor():
     # Non-vacuity: the one legitimate ANN index (kb_images.visual_embedding, a
     # vector(512) column) is still present — proving the check isn't passing simply
