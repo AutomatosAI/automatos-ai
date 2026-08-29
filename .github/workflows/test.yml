@@ -392,21 +392,24 @@ jobs:
         run: |
           python -m evals.retrieval_recall --json
 
-  # PRD-176 F010 — the reliability bar: Alembic replays from zero to exactly
-  # ONE head. NON-REQUIRED (same posture as the test net) until the Step-2
-  # single-baseline squash lands.
+  # PRD-176 F010 / PRD-209 S2 — the reliability bar: a fresh database reaches
+  # exactly ONE head via the SUPPORTED fresh-clone path. NON-REQUIRED (same
+  # posture as the test net) until the owner flips branch protection (Q2).
   #
-  # Two gates, deliberately separated by the review §7 two-step:
+  # Two gates:
   #   1. single-head invariant — asserts `alembic heads` returns exactly one
-  #      revision. Step 1 (the prd176_merge_heads merge revision) delivers this
-  #      NOW, so this step is the permanent regression guard against a new
-  #      divergent head. It needs no database.
-  #   2. from-zero replay — stands up an EMPTY pgvector database and runs
-  #      `alembic upgrade heads`. This is the Step-2 gate: it goes green once the
-  #      single-baseline squash reconciles the tables that today are ALTER-ed but
-  #      never CREATE-d. Runs with continue-on-error until then so the job
-  #      reports the real state without falsely blocking; flip to a hard failure
-  #      (drop continue-on-error) the moment Step 2 merges.
+  #      revision. The 12-head forest was collapsed by prior merge revisions
+  #      (PRD-176/203/204/230 …), so this is the permanent regression guard
+  #      against a new divergent head. It needs no database.
+  #   2. fresh-clone boot path (PRD-209 S2) — the approved shape is merge-to-one-
+  #      head (done) + a stamped initdb, NOT a full-forest squash (deleting
+  #      revision files would strand Railway prod). So this gate reproduces what
+  #      a fresh compose volume actually does: load init_complete_schema.sql
+  #      (which CREATEs the schema AND stamps alembic_version at the head), then
+  #      run `alembic upgrade heads` — a no-op at head. A pure from-base replay
+  #      is NOT the compose path and is deliberately not tested here (it crashes
+  #      on tables that are ALTER-ed but never CREATE-d in the historical forest).
+  #      continue-on-error stays until PRD-209 US-004 de-masks this lane.
   alembic-from-zero:
     name: Alembic from-zero — exactly one head (non-required)
     runs-on: ubuntu-latest
@@ -483,14 +486,29 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U test -d alembic_zero_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-      # Gate 2 — from-zero replay (Step-2 gate). Non-blocking until the
-      # single-baseline squash lands; drop continue-on-error when it does.
-      - name: Replay all migrations from an empty database
+      # Gate 2 — the SUPPORTED fresh-clone boot path (PRD-209 S2): load the
+      # initdb SQL (schema + alembic_version stamp), then `alembic upgrade heads`
+      # must be a no-op at head. This is exactly what a fresh compose volume does.
+      # continue-on-error stays until PRD-209 US-004 de-masks this lane.
+      - name: Fresh-clone boot path — initdb SQL + stamp, then upgrade heads
         continue-on-error: true
+        env:
+          PGPASSWORD: test
         run: |
-          echo "Replaying alembic upgrade heads against an empty pgvector DB..."
+          echo "Loading init_complete_schema.sql into the empty pgvector DB (schema + stamp)..."
+          psql -h 127.0.0.1 -U test -d alembic_zero_db -v ON_ERROR_STOP=1 \
+            -f core/database/init_complete_schema.sql
+          echo "Verifying the initdb stamp equals the single alembic head..."
+          STAMP="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT version_num FROM alembic_version;')"
+          HEAD="$(alembic heads 2>/dev/null | awk 'NR==1{print $1}')"
+          echo "initdb stamp=[${STAMP}] alembic head=[${HEAD}]"
+          if [ "${STAMP}" != "${HEAD}" ]; then
+            echo "::error::initdb stamp '${STAMP}' != alembic head '${HEAD}' — init_complete_schema.sql stamp drifted from the head."
+            exit 1
+          fi
+          echo "Running 'alembic upgrade heads' — must be a no-op at head..."
           alembic upgrade heads
-          echo "From-zero replay succeeded — Step 2 baseline is in place. Remove continue-on-error on this step."
+          echo "Fresh-clone boot path succeeded: initdb + stamp + upgrade reaches the single head with no forest replay."
 
   # PRD-182 W12-S1 (F034) + S3 (F044) — the frontend CI lane. 148k lines of TS
   # were entirely ungated: `next.config.js` sets `ignoreBuildErrors:true` /

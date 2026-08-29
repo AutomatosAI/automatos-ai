@@ -1960,5 +1960,26 @@ CREATE TABLE IF NOT EXISTS teams (
 CREATE INDEX IF NOT EXISTS ix_teams_workspace ON teams(workspace_id);
 
 -- ================================================================
+-- PRD-209 S2: Alembic version stamp (the fresh-clone boot fix)
+-- ----------------------------------------------------------------
+-- This file CREATEs the whole schema directly, so a fresh compose/init
+-- volume already sits AT the current single alembic head. Stamp
+-- alembic_version accordingly, so the entrypoint's fail-closed
+-- `alembic upgrade heads` sees "already at head" and is a no-op instead
+-- of replaying the whole migration forest against tables that already
+-- exist (the crash this wave removes). The value MUST equal `alembic
+-- heads`; the single-head + stamp-parity guards (test_prd209_alembic_single_head)
+-- fail if they drift. version_num is VARCHAR(255) — this repo's revision
+-- ids exceed Alembic's default 32 (longest is 39 chars).
+-- ================================================================
+CREATE TABLE IF NOT EXISTS alembic_version (
+    version_num VARCHAR(255) NOT NULL,
+    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+);
+INSERT INTO alembic_version (version_num)
+VALUES ('prd_workspace_models_backfill')
+ON CONFLICT (version_num) DO NOTHING;
+
+-- ================================================================
 -- SCHEMA INITIALIZATION COMPLETE
 -- ================================================================
