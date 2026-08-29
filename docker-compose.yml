@@ -320,6 +320,10 @@ services:
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The worker's log relay targets Railway's internal Loki push endpoint by
+      # default (automatos_logging.py); off locally, like the backend.
+      LOG_RELAY_ENABLED: "false"
+      SERVICE_NAME: workspace-worker
     volumes:
       # Host directory (bind mount, read-write) — the ONE host-access dial.
       - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces
