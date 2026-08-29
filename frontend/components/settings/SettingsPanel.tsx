@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell } from 'lucide-react'
+import Link from 'next/link'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -12,13 +13,32 @@ import { ApiKeyManager } from './ApiKeyManager'
 import { WidgetSdkTab } from './WidgetSdkTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
 import { useSystemRole } from '@/contexts/role-context'
+import { isLocal } from '@/lib/auth-edition'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
+
+/**
+ * PRD-233 S6/S7 — the settings tabs that exist in the local edition. Profile is
+ * local-only here (saas profiles live under Clerk's own surface); Webhooks,
+ * Channels and Widget SDK are hosted-edition surfaces — inbound webhooks and
+ * channel callbacks need a public URL, the widget embed needs the hosted
+ * loader — so they are hidden by this explicit list, never by role (the local
+ * operator is super_admin by design).
+ */
+export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
+  'profile',
+  'system-settings',
+  'orchestrator',
+  'api-keys',
+  'credentials',
+  'notifications',
+])
 
 export function SettingsPanel() {
   const { isAdmin } = useSystemRole()
   const [activeTab, setActiveTab] = useState(isAdmin ? 'system-settings' : 'orchestrator')
 
-  const tabs = [
+  const allTabs = [
+    ...(isLocal ? [{ value: 'profile', label: 'Profile', icon: UserCircle }] : []),
     ...(isAdmin ? [{ value: 'system-settings', label: 'System Settings', icon: Settings }] : []),
     { value: 'orchestrator', label: 'Orchestrator', icon: Brain },
     { value: 'webhooks', label: 'Webhooks', icon: Webhook },
@@ -28,6 +48,7 @@ export function SettingsPanel() {
     { value: 'notifications', label: 'Notifications', icon: Bell },
     { value: 'widget-sdk', label: 'Widget SDK', icon: Puzzle },
   ]
+  const tabs = isLocal ? allTabs.filter((tab) => LOCAL_EDITION_SETTINGS_TABS.has(tab.value)) : allTabs
 
   return (
     <div className="space-y-6">
@@ -45,6 +66,29 @@ export function SettingsPanel() {
         value={activeTab}
         onValueChange={setActiveTab}
       >
+        {/* PRD-233 S6: local edition — the operator's profile lives at /settings/profile */}
+        {isLocal && (
+          <TabsContent value="profile">
+            <Link
+              href="/settings/profile"
+              className="glass-card flex items-center justify-between rounded-2xl border border-border p-6 transition-colors hover:bg-secondary/40"
+            >
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/15">
+                  <UserCircle className="h-6 w-6 text-primary" />
+                </div>
+                <div>
+                  <p className="text-base font-semibold text-foreground">Your profile</p>
+                  <p className="text-sm text-muted-foreground">
+                    Name, username and avatar for this instance&apos;s operator. Auto greets you by the name you set here.
+                  </p>
+                </div>
+              </div>
+              <ArrowRight className="h-5 w-5 text-muted-foreground" />
+            </Link>
+          </TabsContent>
+        )}
+
         {/* System Settings Tab — Admin only */}
         {isAdmin && (
           <TabsContent value="system-settings">
