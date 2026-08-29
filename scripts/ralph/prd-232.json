@@ -101,7 +101,7 @@
       ],
       "priority": 7,
       "passes": false,
-      "notes": ""
+      "notes": "RALPH_BLOCKED (Gerard's call) — needs a NEW `provenance` column on tool_routing_intent_clusters = a new Alembic migration = Hard NO. Evidence: (1) the model has no provenance/seeded column — core/models/tool_routing.py ToolRoutingIntentCluster columns are id, centroid_embedding, embedding_model_key, sample_query, action_names_hot, sample_count, last_updated (grep 'provenance|seeded' core/models/tool_routing.py -> NONE); (2) no migration adds one (only prd139_tool_routing_graph created the table; 'provenance' migrations are for other tables — prd202/prd205/prd164/prd185); (3) the nightly rebuild's delete is provenance-BLIND, scoped only by embedding_model_key (edge_builder.py:445-457), so seeded clusters — which MUST share the canonical embedding_model_key so US-010's read-side cluster match by _cache_model_key() finds them — are wiped every run. No clean non-schema alternative: a distinct model_key breaks read matching; a sample_count/sample_query sentinel overloads a semantic field (violates CLAUDE.md §4 no-hacks and corrupts the 'seeds never outrank organic' ordering); re-deriving clusters from the corpus inside the nightly would auto-run seeding against prod (violates the human-applied/--yes constraint). Per the PRD ('add the column ONLY if one does not exist ... if a migration is genuinely required, RALPH_BLOCKED with evidence'), the provenance-column decision is Gerard's. US-010 depends on this and is blocked with it."
     },
     {
       "id": "US-008",
