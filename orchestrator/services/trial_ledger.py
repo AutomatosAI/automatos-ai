@@ -258,11 +258,6 @@ class TrialRouting:
     reason: str = ""
 
 
-def _allowlist() -> list[str]:
-    """Parse ``config.TRIAL_MODEL_ALLOWLIST`` into a clean model-id list."""
-    return [m.strip() for m in (config.TRIAL_MODEL_ALLOWLIST or "").split(",") if m.strip()]
-
-
 def _trial_of(workspace: Any) -> Optional[dict[str, Any]]:
     if workspace is None:
         return None
@@ -293,8 +288,8 @@ def resolve_trial_routing(
        ``passthrough``: existing resolution is left exactly as today.
     3. trial ``exhausted`` → ``blocked`` with ``error_code='trial_exhausted'``.
     4. trial ``active``/``warned`` → ``platform_trial``: the request pins to the
-       ``TRIAL_MODEL_ALLOWLIST`` — an off-list model is SUBSTITUTED for the first
-       allowlisted model (chosen behavior: substitute, not error, so a trial
+       requested model passes through unchanged — the trial is a spend cap,
+       not a model gate (2026-08-29).
        never dead-ends on model choice).
     """
     if is_byok:
@@ -309,9 +304,11 @@ def resolve_trial_routing(
             ACTION_BLOCKED, error_code=TRIAL_EXHAUSTED_CODE, reason="trial_exhausted"
         )
 
-    allow = _allowlist()
-    model = requested_model if (not allow or requested_model in allow) else allow[0]
-    return TrialRouting(ACTION_PLATFORM_TRIAL, model=model, reason="trial_active")
+    # 2026-08-29 (Gerard): the trial is a SPEND CAP, not a model gate — "$5 is
+    # $5 no matter what model they choose." Model pinning + TRIAL_MODEL_ALLOWLIST
+    # deleted; an expensive model simply exhausts the credit sooner. Metering,
+    # the 80% warn, the hard stop, and the global daily cap are the controls.
+    return TrialRouting(ACTION_PLATFORM_TRIAL, model=requested_model, reason="trial_active")
 
 
 def compute_trial_state(spent_usd: float, granted_usd: float, *, warn_ratio: float = WARN_THRESHOLD) -> str:

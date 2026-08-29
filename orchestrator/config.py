@@ -1370,8 +1370,6 @@ class Config:
     # today's accumulated trial spend reaches this (US-005's daily counter feeds it).
     TRIAL_GLOBAL_DAILY_USD: float = float(os.getenv("TRIAL_GLOBAL_DAILY_USD", "25.00"))
     # Models a trial workspace may use on the platform key. Reuses the platform's
-    # existing economical model comma-list (BUDGET_MODELS, PRD-54) — no new id invented.
-    TRIAL_MODEL_ALLOWLIST: str = os.getenv("TRIAL_MODEL_ALLOWLIST", BUDGET_MODELS)
 
     # PRD-222 W1·S10 (D9) — DEV/OPS ONLY, TEMPORARY. Arms
     # POST /api/workspaces/current/onboarding/reset so the operator can re-run

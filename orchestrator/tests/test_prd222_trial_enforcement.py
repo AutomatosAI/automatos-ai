@@ -69,18 +69,18 @@ def test_converted_trial_passes_through():
 
 
 def test_active_trial_routes_to_platform(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_MODEL_ALLOWLIST", "modelA,modelB")
     r = resolve_trial_routing(_WS(_trial(TRIAL_ACTIVE)), "modelA", is_byok=False)
     assert r.action == ACTION_PLATFORM_TRIAL
-    assert r.model == "modelA"  # allowlisted request kept as-is
+    assert r.model == "modelA"  # requested model kept as-is (cap-only trial)
 
 
-def test_offlist_model_is_substituted(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_MODEL_ALLOWLIST", "modelA,modelB")
-    r = resolve_trial_routing(_WS(_trial(TRIAL_WARNED)), "expensive-gpt", is_byok=False)
+def test_active_trial_any_model_passes_through(monkeypatch):
+    """2026-08-29 (Gerard): the trial is a SPEND CAP, not a model gate — any
+    requested model rides the platform key unchanged; an expensive model just
+    exhausts the credit sooner."""
+    r = resolve_trial_routing(_WS(_trial(TRIAL_ACTIVE)), "any-expensive-model", is_byok=False)
     assert r.action == ACTION_PLATFORM_TRIAL
-    assert r.model == "modelA"  # off-list → substituted to the first allowlisted
-
+    assert r.model == "any-expensive-model"
 
 def test_exhausted_trial_is_blocked_with_typed_code():
     r = resolve_trial_routing(_WS(_trial(TRIAL_EXHAUSTED)), "m", is_byok=False)
