@@ -3,12 +3,14 @@
 # =============================================================================
 # Quick Start:
 #   1. Copy .env.example to .env and set required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY)
-#   2. Run: docker-compose up --build
+#   2. Run: docker compose up
 #   3. Access: http://localhost:3000
-#   4. Go to Settings > Credentials to add API keys (OpenAI, Anthropic, etc.)
+#   4. Add an LLM key: Settings → API Keys in the UI, or OPENAI_API_KEY /
+#      ANTHROPIC_API_KEY / OPENROUTER_API_KEY in .env (passed through below)
 #
 # A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
-# All LLM credentials managed via the Settings UI.
+# LLM keys live in the database (Settings → API Keys) or in .env; the stored key
+# also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
 #
 # Profiles:
 #   - Default: postgres, redis, minio (+ minio-init), backend, frontend and the
@@ -171,6 +173,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Optional: pin the credential-encryption key instead of the auto-generated
+      # one on the backend_data volume (CREDENTIAL_KEY_FILE in envs/api.defaults).
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       # Composio (hosted tool integrations) — bring your own key; without it the
       # integrations surface stays empty (PRD-233 makes that honest in the UI).
       COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
@@ -183,7 +188,10 @@ services:
       # InvalidAccessKeyId. To use real S3 locally instead: S3_ENDPOINT_URL=
       # (empty) + S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY / S3_REGION in .env.
       # Prod (Railway) never reads this file and keeps its AWS_* env.
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      # `-` (no colon) on purpose: an EMPTY S3_ENDPOINT_URL in .env means 'real S3'
+      # (`:-` would silently put MinIO back). Then also override S3_PUBLIC_ENDPOINT_URL=
+      # and S3_USE_PATH_STYLE=false in envs/api.local.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL-http://minio:9000}
       S3_DOCUMENTS_BUCKET: ${S3_DOCUMENTS_BUCKET:-automatos-ai}
       AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
