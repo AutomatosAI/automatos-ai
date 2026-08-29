@@ -193,6 +193,27 @@ _CTO_SOUL_APR2026_SNAPSHOT_HASH = (
 )
 
 
+# PRD-231 (US-004): the pre-231 FAT CTO soul hash — the soul as it stood BEFORE
+# the context diet slimmed auto-cto-custom-soul.txt to identity-only. The five
+# rulebook sections (Role / Authority / How-I-Think / Operating-Rhythm /
+# Routing-Rules) were removed; their single source is now the platform-management
+# charter. This is that fat-default soul's OWN persona hash, DISTINCT from the
+# April-2026 residue snapshot above and from _default_persona() below (which never
+# read the soul). Pinned as a DEFENSIVE backfill entry, exactly parallel to the
+# April snapshot: the soul file feeds the GLOBAL, admin-only CTO agent
+# (seed_cto_agent.py) — NOT the per-workspace Auto, whose default was already
+# identity-only — so no live auto-% row is known to carry this. But if the fat soul
+# ever leaks onto an auto-% row again the way the April-2026 startup bug did, that
+# row lifts to the slim identity default instead of being misclassified 'customized'
+# and skipped. Frozen (not recomputed) so a later soul edit can never silently move
+# it. Reproduce on the pre-231 tree:
+#   git show <pre-231-commit>:orchestrator/core/seeds/auto-cto-custom-soul.txt \
+#     | python3 -c "import sys,hashlib;print(hashlib.sha256(sys.stdin.read().strip().encode()).hexdigest())"
+_CTO_SOUL_PRE231_FAT_HASH = (
+    "bf73028ef8385e3a6e87c0b7e954dc3b08dfe0eb705e1840aa612bc95889e12e"
+)
+
+
 # ── PRD-226 P226-RVW-6: voice-preserving, mode-aware backfill ────────────────
 # Each doctrine-FREE shipped default lifts to the doctrine-carrying version of
 # ITS OWN voice, and declares the personality_mode that names that voice — so a
@@ -212,6 +233,8 @@ _PERSONA_BACKFILL_LIFTS: dict[str, tuple[str, str]] = {
     _persona_hash(_FRIENDLY_FALLBACK): (_default_persona(), "friendly"),
     _persona_hash(_ALEMBIC_BACKFILL_PERSONA): (_default_persona(), "friendly"),
     _CTO_SOUL_APR2026_SNAPSHOT_HASH: (_default_persona(), "friendly"),
+    # PRD-231 (US-004): the pre-231 fat CTO soul lifts to the slim identity default.
+    _CTO_SOUL_PRE231_FAT_HASH: (_default_persona(), "friendly"),
     _persona_hash(_PERSONALITY_BASE_VOICES["professional"]): (
         compose_persona_with_doctrine(_PERSONALITY_BASE_VOICES["professional"]),
         "professional",
