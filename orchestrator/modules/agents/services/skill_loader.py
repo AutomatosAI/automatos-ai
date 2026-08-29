@@ -939,11 +939,23 @@ class SkillLoader:
     def _refresh_builtin_if_stale(self, skill, db: Session) -> Optional[str]:
         """Check if a builtin-core skill's DB row is stale vs the on-disk .md.
 
-        Compares SHA-256 of the on-disk content against skill.content_hash.
-        If different, updates prompt_template + content_hash inline (~5ms).
-        Returns the (possibly refreshed) prompt_template, or None to fall through.
+        Two independent staleness axes, because a seed carries two live values:
+
+          * the **body** (``prompt_template`` / ``content_hash``) — a SHA-256 over
+            the frontmatter-stripped markdown;
+          * the **L1 trigger** (``description``) — the frontmatter ``description``,
+            which for a NON-core skill (platform-operations) IS the catalog line
+            the model reads to decide whether to ``platform_load_skill`` it.
+
+        PRD-231 RVW-2: a frontmatter-description-only edit changes neither the body
+        nor its hash, so a body-hash-only check early-returns and the live trigger
+        silently freezes at its first-seeded value. So the description is compared
+        independently and refreshed on its own — a body-current row whose trigger
+        drifted is still stale. Updates only the axis that moved.
+        Returns the (possibly refreshed) prompt_template.
         """
         import hashlib
+        import re
 
         disk_path = self._BUILTIN_PATHS.get(skill.name)
         if not disk_path or not disk_path.exists():
@@ -952,21 +964,43 @@ class SkillLoader:
         raw = disk_path.read_text(encoding="utf-8").strip()
         if raw.startswith("---"):
             parts = raw.split("---", 2)
+            frontmatter = parts[1] if len(parts) > 2 else ""
             markdown_body = parts[2].strip() if len(parts) > 2 else raw
         else:
+            frontmatter = ""
             markdown_body = raw
 
         disk_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
+        _dm = re.search(r"^description:\s*(.+)$", frontmatter, re.M)
+        disk_desc = _dm.group(1).strip() if (_dm and _dm.group(1).strip()) else None
 
-        if skill.content_hash == disk_hash:
+        body_stale = skill.content_hash != disk_hash
+        # Only re-sync a trigger that already carries a differing non-empty value:
+        # the authored frontmatter is the truth, and a populated row that no longer
+        # matches it has drifted (the initial fill is the seeder's job, not this).
+        cur_desc = getattr(skill, "description", None)
+        desc_stale = (
+            disk_desc is not None
+            and isinstance(cur_desc, str)
+            and bool(cur_desc)
+            and cur_desc != disk_desc
+        )
+
+        if not body_stale and not desc_stale:
             return skill.prompt_template
 
-        # Stale — update DB inline
-        skill.prompt_template = markdown_body
-        skill.content_hash = disk_hash
+        # Stale — update the moved axis (or both) inline.
+        if body_stale:
+            skill.prompt_template = markdown_body
+            skill.content_hash = disk_hash
+        if desc_stale:
+            skill.description = disk_desc
         try:
             db.commit()
-            logger.info("Refreshed builtin-core skill '%s' from disk (hash=%s…)", skill.name, disk_hash[:12])
+            logger.info(
+                "Refreshed builtin-core skill '%s' from disk (body_stale=%s desc_stale=%s hash=%s…)",
+                skill.name, body_stale, desc_stale, disk_hash[:12],
+            )
         except Exception:
             db.rollback()
             logger.warning("Failed to refresh builtin skill '%s' — using DB version", skill.name, exc_info=True)

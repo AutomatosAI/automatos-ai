@@ -357,6 +357,37 @@ def _get_default_model_config() -> dict:
     return mc
 
 
+def _resync_builtin_description(db: Session, skill: Skill, path: Path) -> None:
+    """Re-sync a builtin-core skill's L1 trigger (``description``) from its seed
+    frontmatter on an already-existing row.
+
+    PRD-231 RVW-2: for a NON-core skill (platform-operations) the frontmatter
+    ``description`` IS the L1 catalog line, re-rendered every turn straight from
+    this row. skill_loader._refresh_builtin_if_stale only heals it on a body-load
+    (``platform_load_skill``) — which a too-weak trigger may never reach — so the
+    trigger is re-synced here, on the lazy get-or-seed path that runs on every
+    chat. The body stays the loader's job; only the trigger text is touched, and
+    only when the authored value actually changed (the common case is unchanged,
+    so this is a bounded read + a string compare with no write).
+    """
+    import re as _re
+
+    if not path.exists():
+        return
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw.startswith("---"):
+        return
+    parts = raw.split("---", 2)
+    if len(parts) <= 2:
+        return
+    _dm = _re.search(r"^description:\s*(.+)$", parts[1], _re.M)
+    resolved = _dm.group(1).strip() if (_dm and _dm.group(1).strip()) else None
+    if resolved and skill.description != resolved:
+        skill.description = resolved
+        db.flush()
+        logger.info("Re-synced L1 trigger for '%s' from seed frontmatter", skill.name)
+
+
 def _upsert_builtin_core_skill(
     db: Session,
     *,
@@ -369,8 +400,11 @@ def _upsert_builtin_core_skill(
 ) -> Skill | None:
     """Create one builtin-core skill from its generated seed if it doesn't exist.
 
-    Create-only at boot time. Runtime freshness is handled by skill_loader.py via
-    the content-hash cache — no need to rewrite prompt_template on every restart.
+    Create-only for the BODY at boot time — runtime body freshness is handled by
+    skill_loader.py via the content-hash cache, so prompt_template is not rewritten
+    on every restart. The existing-row path additionally re-syncs the L1 trigger
+    ``description`` from the seed frontmatter (PRD-231 RVW-2), since that value is
+    rendered live every turn and would otherwise freeze at its first-seeded text.
     PRD-231 generalizes the original single-skill seeder so platform-management
     (the charter) and platform-operations (the on-demand cookbook) share one
     proven path: its own xact-scoped advisory lock (PRD-191 S3, serializes
@@ -397,7 +431,9 @@ def _upsert_builtin_core_skill(
     ).first()
 
     if skill:
-        logger.info("%s skill exists (id=%s), skipping seed", name, skill.id)
+        # Body is create-only (loader owns its freshness); the L1 trigger text is
+        # rendered live, so re-sync it from the seed frontmatter here (RVW-2).
+        _resync_builtin_description(db, skill, path)
         return skill
 
     if not path.exists():
@@ -422,7 +458,9 @@ def _upsert_builtin_core_skill(
 
     # PRD-231: the L1 catalog trigger text is the AUTHORED frontmatter description
     # (single source — no hardcoded drift), with the passed value as a defensive
-    # fallback if the frontmatter carries none.
+    # fallback if the frontmatter carries none. Existing rows are kept in sync by
+    # _resync_builtin_description on the lazy get-or-seed path (RVW-2), so a later
+    # frontmatter edit propagates to live workspaces too, not just fresh seeds.
     resolved_description = description
     _dm = _re.search(r'^description:\s*(.+)$', frontmatter, _re.M)
     if _dm and _dm.group(1).strip():
@@ -552,7 +590,9 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
         # doctrine-carrying soul. Hash-guarded — customized souls are untouched.
         _backfill_auto_persona(agent)
 
-    # Ensure platform-management skill is assigned (refreshes content on every startup)
+    # Ensure the always-on charter is assigned; its L1 trigger is re-synced from
+    # the seed on every call (its body is core full-body, not a trigger, so no
+    # prompt change — RVW-2's re-sync is a no-op for it unless the frontmatter moved).
     platform_skill = _upsert_platform_management_skill(db)
     if platform_skill:
         _assign_skill_to_agent(db, agent, platform_skill)
