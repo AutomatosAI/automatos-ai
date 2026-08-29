@@ -342,6 +342,43 @@ def _apply_page_prior(
     return merged, (reason or "page_prior"), from_pins
 
 
+def _apply_onboarding_prior(
+    narrowing: Tuple[Optional[List[str]], Optional[str], bool],
+    session,
+    workspace_id: Optional[Any],
+    is_admin: bool,
+    is_super_admin: bool,
+) -> Tuple[Optional[List[str]], Optional[str], bool]:
+    """Union the onboarding spine's actions into the narrowed enum while the
+    workspace is mid-onboarding (PRD-222, live-test 2026-08-29).
+
+    The OnboardingSection instructs Auto to call these actions by name, but the
+    semantic ranking keys on the user's latest text — and onboarding turns are
+    exactly the ones with no tool-shaped text ("Yes please."). Same fold, gate
+    filter, and cap as the PRD-221 page prior. Fail-soft: any load error leaves
+    the narrowing untouched.
+    """
+    allowed, _reason, _from_pins = narrowing
+    if allowed is None or not workspace_id or session is None:
+        return narrowing
+    try:
+        from core.models.workspaces import Workspace
+        from services import onboarding_state
+
+        ws = session.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws is None or not onboarding_state.is_onboarding_active(ws):
+            return narrowing
+        from modules.tools.discovery.actions_onboarding import ONBOARDING_PRIOR_ACTIONS
+
+        merged = _apply_page_prior(
+            narrowing, ONBOARDING_PRIOR_ACTIONS, is_admin, is_super_admin
+        )
+        return merged[0], "onboarding_prior", merged[2]
+    except Exception:
+        logger.debug("[tool-router] onboarding prior failed — narrowing unchanged", exc_info=True)
+        return narrowing
+
+
 def _dispatcher_always_include() -> List[str]:
     """Action names the dispatcher_only surface (the heartbeat orchestrator)
     must keep reachable regardless of the semantic top-K ranking (P228-RVW-4).
@@ -861,6 +898,11 @@ async def get_tools_for_agent_async(
         # Gate-filtered by the SAME predicate as ranking — a manifest can never
         # expose an admin/su tool to an unauthorized principal.
         narrowing = _apply_page_prior(narrowing, page_actions, is_admin, is_super_admin)
+        # PRD-222: while onboarding is active, the spine's actions survive
+        # narrowing — the section instructs Auto to call them by name.
+        narrowing = _apply_onboarding_prior(
+            narrowing, session_used, workspace_id, is_admin, is_super_admin
+        )
         tools = _get_tools_for_agent_core(
             agent_id=agent_id,
             session_used=session_used,
