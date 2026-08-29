@@ -853,8 +853,14 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
         # (there is no platform above the operator of a self-hosted instance:
         # system settings, credentials, admin analytics all belong to them).
         # In saas, the anonymous dev-fallback remains a plain user.
-        anon_role = "super_admin" if config.AUTH_EDITION == "local" else "user"
-        result = RequestContext(workspace_id=resolved, user=UserContext(system_role=anon_role), auth_type="anonymous")
+        if config.AUTH_EDITION == "local":
+            # The operator's seeded users row is resolved by email (api/chat.py,
+            # widgets/chat.py); `id` stays unset on purpose — ctx.user.id is a
+            # Clerk-string elsewhere and must never be read as users.id.
+            anon_user = UserContext(email=config.LOCAL_OPERATOR_EMAIL, system_role="super_admin")
+        else:
+            anon_user = UserContext()
+        result = RequestContext(workspace_id=resolved, user=anon_user, auth_type="anonymous")
         _enrich_log_context(result)
         return result
     finally:

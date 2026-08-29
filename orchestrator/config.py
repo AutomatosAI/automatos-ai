@@ -494,6 +494,12 @@ class Config:
     # points this at a named volume (envs/api.defaults) so stored keys survive
     # `docker compose down` / rebuilds. PRD-209 live-test finding.
     CREDENTIAL_KEY_FILE: str = os.getenv("CREDENTIAL_KEY_FILE", "")
+
+    # Local edition: the single operator's identity. The entrypoint seeds a users
+    # row with this email (id 1 — the chat service's own fallback), and the
+    # anonymous local session carries it so chat/attribution resolve a real user.
+    # PRD-233 S6 adds the editable profile on top. Unused in saas.
+    LOCAL_OPERATOR_EMAIL: str = os.getenv("LOCAL_OPERATOR_EMAIL", "local@automatos.local")
     # Workspace whose stored user_api_keys rows act as the platform-level
     # provider keys for background workers (embeddings, system LLM) and the
     # pilot chat fallback. Empty = disabled (legacy credential-store-only).

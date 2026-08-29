@@ -58,6 +58,11 @@ CREDENTIAL_KEY_FILE=/app/data/.credential_key
 # it non-empty in local mode. Fixed well-known UUID (workspaces.id is UUID).
 DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 
+# [ACTIVE] The local operator's identity (users id 1, seeded by the entrypoint);
+# the anonymous local session carries this email so chat and attribution resolve
+# a real user. Editable profile = PRD-233 S6.
+LOCAL_OPERATOR_EMAIL=local@automatos.local
+
 # -----------------------------------------------------------------------------
 # Object storage — MinIO (S3-compatible, ships in the compose stack)
 # -----------------------------------------------------------------------------

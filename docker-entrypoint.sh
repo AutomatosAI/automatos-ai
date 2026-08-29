@@ -109,6 +109,12 @@ ensure_local_workspace() {
     if psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
         "INSERT INTO workspaces (id, name, slug, is_personal, is_active) VALUES ('${DEFAULT_WORKSPACE_ID}', 'Local Workspace', 'local', TRUE, TRUE) ON CONFLICT (id) DO NOTHING;"; then
         echo "✅ Local workspace present"
+        # The single local operator (users id 1 — api/chat.py's own fallback).
+        # Idempotent; PRD-233 S6 makes name/email editable in Settings → Profile.
+        psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO users (id, username, email, name, is_active) VALUES (1, 'local', '${LOCAL_OPERATOR_EMAIL:-local@automatos.local}', 'Local Operator', TRUE) ON CONFLICT (id) DO NOTHING; SELECT setval(pg_get_serial_sequence('users','id'), GREATEST((SELECT max(id) FROM users), 1));" >/dev/null \
+            && echo "✅ Local operator user present" \
+            || { echo "❌ Could not seed the local operator user — refusing to start a shell instance"; unset PGPASSWORD; exit 1; }
         unset PGPASSWORD
     else
         echo "❌ Could not create the local workspace — refusing to start a shell instance"
