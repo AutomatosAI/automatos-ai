@@ -1,0 +1,194 @@
+{
+  "project": "Automatos AI — PRD-232 The Intent Graph",
+  "branchName": "ralph/prd-232-intent-graph",
+  "baseBranch": "fix/main-ci-wave-drift",
+  "description": "Wire the tool-selection pipeline honest, seed the Intent Graph with synthetic utterances, make the learning loop real, prep the eval. Spec: docs/PRDS/PRD-232-INTENT-GRAPH.md (decisions §6 are LOCKED: recorder default ON; promotion-as-prior; corpus committed; flip gate ≥5pt is a POST-MERGE HUMAN step — Ralph never flips TOOL_ROUTING_GRAPH). Review evidence file:line refs are in the spec §2 — RE-VERIFY each anchor by grep before building on it.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "The dispatcher survives every route() branch",
+      "description": "SmartToolRouter.route() strips platform_execute on the graph branch (keep-set at consumers/chatbot/smart_tool_router.py:232-246 omits it; early return :239). Fix: platform_execute (with its narrowed enum) is preserved through EVERY branch — graph, hint, category fallback, intent-no-tools excepted (no tools at all is legitimate). Reuse ONE reserved-slot mechanism (the heartbeat lane's _apply_dispatcher_always_include at modules/tools/tool_router.py:344-355 is the existing pattern — extend/relocate it; do NOT invent a second pins system).",
+      "acceptanceCriteria": [
+        "A new test builds a REALISTIC tool list (dispatcher + promoted + core, as _get_tools_for_agent_core assembles it) and asserts platform_execute present in filtered_tools after route() on: the graph branch, the hint branch, the category fallback branch",
+        "Replay test: the sentence 'close all the blocked tickets from vector' through AutoBrain.assess + route() yields a surface containing platform_execute whose enum (or attached schemas) makes platform_update_task_status callable",
+        "No second always-include mechanism introduced — grep proves one implementation",
+        "cd orchestrator && python3 -m pytest -q tests/<new+touched files> passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Each flag gates its own surface (fix the inversion)",
+      "description": "The GraphRouter call in smart_tool_router.py:224 is gated on config.SEMANTIC_TOOL_ROUTING (default true) — move it behind config.TOOL_ROUTING_GRAPH (default false, currently consumed ONLY at platform_actions.py:135-139). SEMANTIC_TOOL_ROUTING continues to gate embedding narrowing (tool_router.py:88-92) and the catalog embedding path. Result: graph OFF = zero GraphRouter queries anywhere; graph ON = both schema path and catalog path use it.",
+      "acceptanceCriteria": [
+        "With TOOL_ROUTING_GRAPH=false and SEMANTIC_TOOL_ROUTING=true, a test proves route() never calls rank_chains (mock/spy) while embedding narrowing still runs",
+        "With TOOL_ROUTING_GRAPH=true, a test proves both smart_tool_router and PlatformActionsSection consult the graph",
+        "config.py docstrings for both flags state the split; no os.getenv outside config.py",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "One rank_actions pass per turn",
+      "description": "rank_actions runs 4x per turn on the same query: narrowing (modules/tools/tool_router.py:860 via :125-166), shadow log (:873 via :792-841), catalog (platform_actions.py:311), graph entry nodes (graph_router.py:161 _ENTRY_TOP_K=5). Compute ONCE per turn and reuse: a per-request ranked result threaded (or a short-TTL request-scoped memo keyed on (query,workspace,agent,top_k)) — builder picks the least-invasive seam, but the count must provably drop to 1 for the standard chat turn.",
+      "acceptanceCriteria": [
+        "Instrumented test (spy on ActionSemanticIndex.rank_actions) proves exactly 1 embedding-ranking computation for a full-path chat turn assembly including catalog render",
+        "Graph entry nodes and shadow logging consume the shared result (shadow may keep its different cap by slicing, not recomputing)",
+        "No cross-request caching of RESULTS keyed only on query (workspace/agent scope must be in the key) — tenant-isolation test",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Thread the scopes; reconcile global bootstrap edges with per-tenant reads",
+      "description": "(a) smart_orchestrator.py:236-259 never passes agent_id into ctx.kwargs so platform_actions.py:145's graph path is permanently agent-blind — thread the real agent id. (b) PRD-177 S5 mandates workspace_id-filtered edge reads; PRD-143's metadata_graph_seed writes GLOBAL meta_sibling rows. Reconcile per spec §4 US-004: edge reads admit workspace_id IS NULL rows ONLY for edge_type='meta_sibling' at the min-confidence floor; all other edge types require exact workspace match.",
+      "acceptanceCriteria": [
+        "Test: PlatformActionsSection graph path receives a real agent_id from the orchestrator seam",
+        "Tenant-isolation test extended: workspace A's used_after edges never surface for workspace B; global meta_sibling rows surface for both at floor confidence",
+        "grep proves no unfiltered global read remains for used_after/failed_after edge queries",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "The synthetic utterance corpus (you are the generator)",
+      "description": "Author the corpus DIRECTLY — you are an LLM; do not build anything that calls an external LLM API. Files under orchestrator/core/seeds/utterances/<category>.yaml: for EVERY non-super_admin_only registered action (walk the ActionRegistry registration files in modules/tools/discovery/actions_*.py + workspace_actions.py), 15-25 diverse utterances: colloquial/terse/verbose, deliberate register variants (ticket/task/card/item; mail/email/inbox; close/finish/clear/kill/done with), question and imperative forms. Fold in every ActionDefinition.examples entry and every phrase from the AutoBrain _PLATFORM_KEYWORDS map (consumers/chatbot/auto.py:~490-580). Also write scripts/generate_utterance_corpus.py — a REGENERATION AID that validates format/coverage and prints a per-action authoring checklist (it does NOT call an LLM; it is the format contract + coverage linter).",
+      "acceptanceCriteria": [
+        "Coverage linter (in the script, also run as a pytest) proves >=90% of non-su actions have >=15 utterances; platform_update_task_status's set includes close/ticket/blocked vocabulary",
+        "Every _PLATFORM_KEYWORDS phrase and every ActionDefinition.examples string appears in the corpus (provenance-tagged)",
+        "YAML schema documented at the top of each file; su-only actions excluded (fail-closed by reading the registry flag)",
+        "Branch-scoped pytest green (the linter test)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "The corpus reaches the embeddings (+ parameter enums)",
+      "description": "_build_embedding_text (modules/tools/discovery/action_semantic_index.py:88-96) currently embeds name+description+tags+examples+category. Add: the action's corpus utterances (loaded from the seeds/utterances/ files) and parameter enum values (e.g. the status enum inbox/assigned/in_progress/review/done). ensure_indexed re-embeds when the corpus hash changes — hash-keyed like the skill loader pattern; BOTH the per-process dict and the Redis CacheService entries (keyed provider:model:dimension at :98-115) must invalidate on corpus-hash change.",
+      "acceptanceCriteria": [
+        "Ranking test with a real (or recorded) embedding provider fixture: 'close the blocked tickets' ranks platform_update_task_status in the top-5 semantic floor; 'have i any new mail' ranks the mail/inbox action family top-5 if such actions exist, else test uses two other register-variant pairs from the corpus",
+        "Cache-invalidation test: corpus hash change forces re-embed (both layers)",
+        "DeterministicEmbeddingProvider NEVER used outside explicit test fixtures (grep + the PRD-185 S3 rule)",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Seed intent clusters from the corpus — and survive the nightly rebuild",
+      "description": "Extend scripts/seed_tool_routing_graph.py (human-applied, --yes gated — do NOT auto-run against any DB) with an utterances step: corpus utterance embeddings → ToolRoutingIntentCluster rows with provenance='seeded' (add the column ONLY if one does not exist — check the model first; if a migration is genuinely required, RALPH_BLOCKED with evidence, do not create tables silently), action_names_hot = the action + its category family, confidence at the metadata floor. CRITICAL TRAP (spec §7): edge_builder.py:440-470 deletes-and-reinserts clusters per nightly run — seeded clusters must survive (provenance-aware rebuild: nightly rebuild replaces organic clusters only, or merges seeded rows). ToolExecutionLog.intent_cluster_id is a LIVE FK — rebuilds must not orphan it mid-transaction.",
+      "acceptanceCriteria": [
+        "test_seeded_cluster_routes_unseen_phrasing: a phrasing NOT in the corpus (held-out) lands nearest the right seeded cluster",
+        "test_seeded_clusters_survive_nightly: run build_edges (unit-level, fixture DB) and prove seeded rows persist while organic rows rebuild; FK integrity preserved",
+        "Seeds never outrank organic rows of higher Wilson confidence (ordering test)",
+        "Idempotent re-run test; --yes gate intact",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "The phrase map becomes data, not a gate (+ kill the dead field)",
+      "description": "ComplexityAssessment.matched_tools is written (auto.py:873) and read only by a log f-string (api/chat.py:397) — dead. Either consume it as a rank boost in the shared ranking pass (preferred if trivial) or delete the field and its write. _match_platform_query stays as a fast-path booster; its vocabulary is now IN the corpus (US-005), so the hint branch's accidental dispatcher rescue (smart_tool_router.py:181 'platform' substring) must be covered by a PARITY TEST proving US-001's fix keeps the dispatcher present whether or not the phrase map hits.",
+      "acceptanceCriteria": [
+        "grep proves matched_tools is either consumed by ranking or fully deleted (no dead writes)",
+        "Parity test: same query with and without a phrase-map hit → dispatcher present in both surfaces",
+        "Fast-path behaviour parity: existing phrase-map hits still classify MOLECULE with tool_hints=['platform']",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Turn the signal recorder on (decision LOCKED §6.1)",
+      "description": "TOOL_SIGNAL_RECORDER_ENABLED default false→true (config.py:1059; no-op gate at signal_recorder.py:114-120,173-174). Harden restart-safety per PRD-142 W4-S9: the batched drain must not lose queued signals on clean shutdown (flush-on-stop) and must tolerate process restart (queue is in-process; document the bounded-loss window honestly in the module docstring — no fake durability claims). The PRD-141 US-019 contract holds: no per-call sessions, one session per flush.",
+      "acceptanceCriteria": [
+        "Default flip in config.py with docstring; existing recorder tests updated to reflect ON default",
+        "Flush-on-shutdown test (drain task cancellation flushes pending batch)",
+        "Load-shape test: N record() calls produce <= ceil(N/batch) flushes, one session each (existing pattern extended, not duplicated)",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Cluster-aware reads — the graph finally expresses what it learned",
+      "description": "(a) rank_chains: embed query → nearest ToolRoutingIntentCluster by centroid cosine over a threshold (config value, no hardcode); miss = no cluster (embedding floor only). Cluster hit boosts its action_names_hot as entry candidates alongside rank_actions entries. (b) _query_affinities (graph_router.py:314-347) gains the intent_cluster_id predicate so succeeds_for_intent/fails_for_intent apply PER-INTENT (the PRD-141 US-017 promise); cluster-blind global affinity rows (intent_cluster_id IS NULL) still apply as a weak global prior. (c) failed_after: read it as an expansion penalty OR stop writing it — one or the other; no write-only tables remain (currently written at edge_builder.py:217-270, excluded by _query_edges at graph_router.py:281-284).",
+      "acceptanceCriteria": [
+        "Per-cluster affinity test: same action with fails_for_intent in cluster X and succeeds in cluster Y ranks down for X-queries and up for Y-queries",
+        "Cluster-match threshold from config; miss falls back cleanly (test)",
+        "failed_after: grep + test prove it is consumed (penalty) or no longer produced — zero write-only paths",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "The gap signal + shown-vs-used decay + resolution joins",
+      "description": "(a) tool_gap events: recorded when platform_find_tools is called (handlers_capabilities.py:57-127) OR a tool-requiring assessment ends with zero platform tool calls — write on the EXISTING telemetry lane (tool_execution_logs row with a gap marker in its JSONB / a synthetic action_name='__tool_gap__' — builder picks; a NEW TABLE requires RALPH_BLOCKED, not silent creation). (b) record_selection (signal_recorder.py:196-235, currently in-memory FIFO) persists batched through the same recorder so nightly computes shown-vs-used and DECAYS never-used affinities. (c) Nightly resolution join in edge_builder: a gap followed in the same conversation (<=24h) by a successful action writes a positive cluster→action affinity — the ground truth is the action that eventually served the intent.",
+      "acceptanceCriteria": [
+        "Replay fixture of the 2026-08-28 VECTOR transcript produces a tool_gap row",
+        "Scripted gap→resolution fixture produces the cluster→action affinity in a build_edges unit run",
+        "Decay test: an affinity repeatedly shown-not-used across N synthetic turns loses weight; never below the seeded floor",
+        "No new tables (or RALPH_BLOCKED was raised); no per-call DB sessions (recorder contract)",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Promotion-as-prior (decision LOCKED §6.2)",
+      "description": "A config-listed pin set of ~10-13 (start from 122-TOOL-ROUTING-PROMOTION-FIRST-CLASS-SCHEMAS.md:317-331, adjust for shipped reality — keep platform_find_tools pinned) always attaches first-class. Every other promoted=True action: flag becomes a ranking BOOST in the shared ranking pass (alongside PRD-64's intent/CORE boosts); when ranked into the surface it attaches first-class, otherwise reachable via dispatcher enum. to_first_class_schemas call site tool_router.py:713-718 changes from unconditional-47 to pins+ranked. Tier gating (super_admin_only/admin) unchanged, fail-closed.",
+      "acceptanceCriteria": [
+        "Pins list in config.py (no hardcoded list in the router); default documented",
+        "Token measurement: test computes serialized tool-payload tokens before/after on a fixture turn and the PR body records the numbers (target >=2k reduction)",
+        "Boost test: promoted action outranks an equal-cosine unpromoted action; unpinned promoted action absent from surface when unranked but callable via dispatcher (reachability test)",
+        "Tier fail-closed tests still green (test_prd143 authz suites untouched)",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-012A",
+      "title": "Eval set refresh + abstain support (build only — RUNNING the eval is post-merge human op)",
+      "description": "scripts/eval/tool_routing/: regenerate eval_set.jsonl from eval_seed.yaml (stale 47 vs 59 — PRD-223 :188). Add utterance-derived queries (sampled from US-005 corpus incl. the VECTOR case) and ABSTAIN rows (no tool applies — PRD-223 Gap 1: run_eval.py:270 hardcodes tool_choice='required'; make abstain expressible: config/flag or per-row expectation, scorer counts correct abstention). Do NOT run the uplift eval against any real DB — build + unit-test the harness changes only; Wave D execution is human-applied (spec US-012/013).",
+      "acceptanceCriteria": [
+        "eval_set.jsonl regenerated and consistent with eval_seed.yaml (count test)",
+        ">=10 abstain rows exist; scorer unit test proves an abstain row scores correct on no-call and wrong on any call",
+        "The VECTOR query present with expected=platform_update_task_status",
+        "No DB/network required by the new tests; harness runs stay opt-in scripts",
+        "Branch-scoped pytest green"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
