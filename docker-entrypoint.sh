@@ -70,19 +70,12 @@ load_seed_data() {
     # Set PGPASSWORD for psql commands
     export PGPASSWORD="$POSTGRES_PASSWORD"
     
-    # Check if seed data is already loaded
-    CREDENTIAL_COUNT=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "SELECT COUNT(*) FROM credential_types;" 2>/dev/null || echo "0")
-    
-    # Clean up whitespace
-    CREDENTIAL_COUNT=$(echo "$CREDENTIAL_COUNT" | tr -d ' ')
-    
-    if [ "$CREDENTIAL_COUNT" -gt 0 ] 2>/dev/null; then
-        echo "✅ Seed data already loaded ($CREDENTIAL_COUNT credential types found)"
-        unset PGPASSWORD
-        return 0
-    fi
-    
-    echo "📥 Loading seed data..."
+    # No shell-level "already loaded" gate: every section of the loader is
+    # idempotent on its own (credential types insert-if-missing, models/skills/
+    # personas/categories upsert, marketplace catalog checks by name/slug).
+    # The old credential_types>0 early-return silently skipped every LATER
+    # section (marketplace catalog, packages) on any pre-seeded database.
+    echo "📥 Loading seed data (idempotent)..."
     
     # Run seed data loader AS A MODULE — script-mode sets sys.path[0] to the
     # script's own dir, so its `from config import config` (line 23) can never

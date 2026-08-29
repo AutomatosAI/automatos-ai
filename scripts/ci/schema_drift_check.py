@@ -67,6 +67,7 @@ RAW_DDL_EXTRAS: Set[str] = {
     "tool_usage_logs",
     "learning_outcomes",
     "kb_types",
+    "agent_tool_assignments",
 }
 
 # A schema is table name -> set of column names. Column sets may be empty when a
@@ -153,7 +154,10 @@ def model_declared_tables(orch_root: pathlib.Path) -> Set[str]:
     scan, mirroring what ``Base.metadata.create_all`` builds on the fresh path
     without importing the model tree (which needs the optional ML deps)."""
     found: Set[str] = set()
-    pattern = re.compile(r"__tablename__\s*(?::\s*[\w\[\]\"'. ]+)?=\s*['\"]([A-Za-z_]\w*)['\"]")
+    pattern = re.compile(
+        r"__tablename__\s*(?::\s*[\w\[\]\"'. ]+)?=\s*['\"]([A-Za-z_]\w*)['\"]"
+        r"|\bTable\(\s*['\"]([A-Za-z_]\w*)['\"]"  # SQLAlchemy Core association tables
+    )
     for path in orch_root.rglob("*.py"):
         rel = path.relative_to(orch_root).as_posix()
         if rel.startswith(("alembic/", "tests/", "scripts/")) or "__pycache__" in rel:
@@ -162,8 +166,8 @@ def model_declared_tables(orch_root: pathlib.Path) -> Set[str]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if "__tablename__" in text:
-            found |= {m.group(1) for m in pattern.finditer(text)}
+        if "__tablename__" in text or "Table(" in text:
+            found |= {(m.group(1) or m.group(2)) for m in pattern.finditer(text)}
     return _clean(found)
 
 

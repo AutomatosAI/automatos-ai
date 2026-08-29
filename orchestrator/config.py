@@ -488,6 +488,12 @@ class Config:
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+    # Where the auto-generated Fernet key is persisted when CREDENTIAL_ENCRYPTION_KEY
+    # is unset. Default = the historical location (core/.credential_key, inside the
+    # image's writable layer — lost on container recreate). The local edition
+    # points this at a named volume (envs/api.defaults) so stored keys survive
+    # `docker compose down` / rebuilds. PRD-209 live-test finding.
+    CREDENTIAL_KEY_FILE: str = os.getenv("CREDENTIAL_KEY_FILE", "")
     # Workspace whose stored user_api_keys rows act as the platform-level
     # provider keys for background workers (embeddings, system LLM) and the
     # pilot chat fallback. Empty = disabled (legacy credential-store-only).

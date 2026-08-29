@@ -848,7 +848,13 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
             )
         _assert_workspace_usable(db, resolved, is_admin=False)
-        result = RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
+        # PRD-209 local edition: there is exactly one operator and it is their
+        # machine — the anonymous local session is the instance's SUPER admin
+        # (there is no platform above the operator of a self-hosted instance:
+        # system settings, credentials, admin analytics all belong to them).
+        # In saas, the anonymous dev-fallback remains a plain user.
+        anon_role = "super_admin" if config.AUTH_EDITION == "local" else "user"
+        result = RequestContext(workspace_id=resolved, user=UserContext(system_role=anon_role), auth_type="anonymous")
         _enrich_log_context(result)
         return result
     finally:

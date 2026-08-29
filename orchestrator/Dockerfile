@@ -69,6 +69,9 @@ RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports && \
     useradd -m -u 1000 automatos && \
     chown -R automatos:automatos /app
 
+# PRD-209: persisted credential-encryption key dir (compose mounts the backend_data
+# volume here; ownership set BEFORE the USER switch so a fresh named volume inherits it).
+RUN mkdir -p /app/data && chown -R automatos:automatos /app/data
 USER automatos
 
 # Expose port
@@ -117,6 +120,9 @@ RUN pip uninstall -y pytest pytest-asyncio black isort 2>/dev/null || true && \
 RUN useradd -m -u 1000 automatos && \
     chown -R automatos:automatos /app
 
+# PRD-209: persisted credential-encryption key dir (compose mounts the backend_data
+# volume here; ownership set BEFORE the USER switch so a fresh named volume inherits it).
+RUN mkdir -p /app/data && chown -R automatos:automatos /app/data
 USER automatos
 
 # Expose port

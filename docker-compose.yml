@@ -201,6 +201,8 @@ services:
       # Mount source for hot-reload in development
       - ./orchestrator:/app
       - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+      # Persists the auto-generated credential-encryption key (see envs/api.defaults).
+      - backend_data:/app/data
       - backend_logs:/app/logs
       # PRD-66: Read-only access to workspace files for code viewer widget
       - workspace_data:/workspaces:ro
@@ -343,6 +345,7 @@ services:
 # Volumes - Persistent Data Storage
 # =============================================================================
 volumes:
+  backend_data:
   postgres_data:
     driver: local
     name: automatos_postgres_data

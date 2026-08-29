@@ -144,7 +144,7 @@ export function useChat({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            ...(token ? { ...(token ? { Authorization: `Bearer ${token}` } : {}),} : {}),
             ...(apiKey ? { 'x-api-key': apiKey } : {}),
             // Ensure backend gets the correct workspace context (prevents dev fallback UUID)
             ...(typeof window !== 'undefined' && localStorage.getItem('last_active_workspace')

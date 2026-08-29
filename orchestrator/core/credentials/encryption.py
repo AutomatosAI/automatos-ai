@@ -76,8 +76,10 @@ class EncryptionService:
                 raise EncryptionKeyError("Invalid CREDENTIAL_ENCRYPTION_KEY in environment")
         
         # Try key file
-        key_file = Path(__file__).parent.parent / ".credential_key"
-        
+        # Configurable so the local edition can persist the key on a volume
+        # (config.CREDENTIAL_KEY_FILE); default keeps the historical location.
+        key_file = Path(config.CREDENTIAL_KEY_FILE) if config.CREDENTIAL_KEY_FILE else (Path(__file__).parent.parent / ".credential_key")
+        key_file.parent.mkdir(parents=True, exist_ok=True)
         if key_file.exists():
             logger.info(f"Loading encryption key from {key_file}")
             try:

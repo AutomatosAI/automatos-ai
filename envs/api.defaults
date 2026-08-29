@@ -46,6 +46,12 @@ GOTENBERG_URL=http://gotenberg:3000
 # own env per service and never reads this file).
 AUTH_EDITION=local
 
+# [ACTIVE] Persist the auto-generated credential-encryption key on the backend_data
+# volume (compose) — inside the image it would vanish on the next recreate and every
+# stored API key would become undecryptable. Set CREDENTIAL_ENCRYPTION_KEY in .env
+# to pin your own key instead.
+CREDENTIAL_KEY_FILE=/app/data/.credential_key
+
 # [ACTIVE] The single local workspace every anonymous request resolves to.
 # This exact id is what the CI seed (orchestrator/scripts/init_test_db.py) and
 # the entrypoint seed create; validate_auth_edition() (config.py) hard-requires

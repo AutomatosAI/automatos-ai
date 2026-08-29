@@ -2,6 +2,7 @@
 
 import { createContext, useContext, ReactNode } from 'react'
 import { useSession } from '@/lib/auth-hooks'
+import { isSaaS } from '@/lib/auth-edition'
 
 /**
  * System Role Context
@@ -57,7 +58,10 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     const isElevated = roleFromToken === 'admin' || roleFromToken === 'super_admin'
     const effectiveRole = isElevated && !isAutomatosStaff ? 'user' : roleFromToken
 
-    const systemRole = (effectiveRole || 'user') as SystemRole
+    // Local edition: there is exactly one operator and it is their machine — the
+    // anonymous local session is the instance's super admin (backend mirrors
+    // this in hybrid.py's anonymous lane; no platform exists above the operator).
+    const systemRole = (!isSaaS ? 'super_admin' : (effectiveRole || 'user')) as SystemRole
 
     return (
         <RoleContext.Provider value={{

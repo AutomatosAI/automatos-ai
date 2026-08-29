@@ -164,6 +164,39 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             except Exception as e:
                 print(f"  ⚠️  Error loading personas: {e}")
 
+            # Marketplace catalog (PRD-209 local first-run; PRD-233 S3 owns the
+            # curated refresh). All idempotent: v2 agents check by name, Shopify
+            # agents + packages upsert by slug. Starter agents DELETE+reinsert the
+            # 'Automatos Team' items (would churn ids that marketplace_installs
+            # reference) — so they run only into an EMPTY catalog.
+            print("\n📂 Loading marketplace catalog...")
+            try:
+                from database.database import get_db_session as _mk_session
+                from sqlalchemy import text as _sql
+                with _mk_session() as db:
+                    catalog_rows = db.execute(_sql("SELECT count(*) FROM marketplace_items")).scalar() or 0
+                if catalog_rows == 0:
+                    from scripts.seed_starter_agents import seed_starter_agents
+                    seed_starter_agents()
+                    print("  ✅ Starter agents seeded (empty catalog)")
+                from scripts.seed_marketplace_agents_v2 import seed_marketplace_agents_v2
+                seed_marketplace_agents_v2()
+                print("  ✅ Marketplace agents v2 seeded")
+            except Exception as e:
+                print(f"  ⚠️  Error loading marketplace agents: {e}")
+            try:
+                from seeds.seed_shopify_agents import seed_shopify_agents
+                seed_shopify_agents()
+                print("  ✅ Shopify agents seeded")
+            except Exception as e:
+                print(f"  ⚠️  Error loading Shopify agents: {e}")
+            try:
+                from seeds.seed_packages import seed_packages
+                created, updated = seed_packages()
+                print(f"  ✅ Packages: {created} created, {updated} updated")
+            except Exception as e:
+                print(f"  ⚠️  Error loading packages: {e}")
+
             # Load Plugin Categories
             print("\n📂 Loading plugin categories...")
             try:

@@ -142,7 +142,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 `${process.env.NEXT_PUBLIC_API_URL}/api/workspaces/current`,
                 {
                     headers: {
-                        'Authorization': `Bearer ${token}`,
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
                         'Content-Type': 'application/json',
                     },
                 }

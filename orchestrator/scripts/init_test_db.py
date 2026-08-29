@@ -233,6 +233,27 @@ def init_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """))
+        # agent_tool_assignments — the agent↔tool assignment table the marketplace
+        # API reads AND writes (api/marketplace.py, cascade_installer, provisioning)
+        # yet no model and no migration creates it: it lived only in the retired
+        # hand-written init SQL (PRD-209 live-test finding, 2026-08-29) — and even
+        # that snapshot was stale: live code uses a TEXT tool_id (app slug) and a
+        # created_at column. Shape derived from the code's actual reads/writes.
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS agent_tool_assignments (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE NOT NULL,
+                tool_id VARCHAR(255) NOT NULL,  -- app slug ('gmail'); api/marketplace.py LOWER()s it
+                credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL,
+                enabled BOOLEAN DEFAULT TRUE,
+                permissions JSON DEFAULT '{}',
+                configuration JSON DEFAULT '{}',
+                assigned_at TIMESTAMP DEFAULT NOW(),
+                created_at TIMESTAMP DEFAULT NOW(),   -- api/marketplace.py INSERTs created_at
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(agent_id, tool_id)
+            )
+        """))
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS learning_outcomes (
                 id SERIAL PRIMARY KEY,
