@@ -1,6 +1,9 @@
 # MCP config (contains API keys)
 .mcp.json
 
+# Personal local env overrides (compose env_file, optional — may hold secrets)
+envs/*.local
+
 # Claude Code agent worktrees (per-project, not for VCS)
 .claude/worktrees/
 
