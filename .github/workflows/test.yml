@@ -521,6 +521,24 @@ jobs:
               exit 1
             fi
           done
+          echo "Asserting what orphan-root ORDERING used to lose on a fresh path (PRD-233 live-test finding)..."
+          # prd82a (a root) adds agent_reports.orchestration_task_id before agent_reports exists in the
+          # replay; prd133b (another root) builds v_workspace_outputs on it. The generator's
+          # model-column reconciliation + idempotent raw-SQL re-run passes must leave both present.
+          for chk in "v_workspace_outputs" ; do
+            FOUND="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "SELECT to_regclass('${chk}');" | tr -d ' ')"
+            if [ -z "${FOUND}" ]; then
+              echo "::error::fresh schema is missing '${chk}' — the idempotent raw-SQL (views) pass regressed."
+              exit 1
+            fi
+          done
+          COL="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='agent_reports' AND column_name='orchestration_task_id';" | tr -d ' ')"
+          if [ -z "${COL}" ]; then
+            echo "::error::fresh schema is missing agent_reports.orchestration_task_id — the model-column reconciliation pass regressed."
+            exit 1
+          fi
+          ROWS="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT count(*) FROM v_workspace_outputs;' | tr -d ' ')"
+          echo "v_workspace_outputs answers (rows=${ROWS})"
           echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
 
   # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four

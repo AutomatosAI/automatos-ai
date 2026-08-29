@@ -22,6 +22,7 @@ there is no snapshot artifact that can rot. First boot pays ~2-3 minutes once.
 
 Run against an EMPTY database (DATABASE_URL). Prints the skipped-revision log.
 """
+import pathlib
 import sys
 from alembic import command
 from alembic.config import Config as AlembicConfig
@@ -150,6 +151,123 @@ def _drop_relics(engine, script: ScriptDirectory) -> list[str]:
     return dropped
 
 
+# --------------------------------------------------------------------------- #
+# PRD-233 live-test finding: orphan-root ORDERING loses columns and views.
+# prd82a (a root) adds agent_reports.orchestration_task_id before the revision
+# that creates agent_reports has run; the tolerant replay skips the ALTER and
+# nothing re-tries it, so prd133b's v_workspace_outputs (another root) fails on
+# the missing column and the Deliverables feed 500s on every fresh database.
+# Two idempotent passes close the class: (1) add every model column the DB
+# lacks (create_all never ALTERs); (2) re-run the forest's idempotent raw SQL
+# (IF NOT EXISTS indexes / column adds, DO-block column adds, OR REPLACE views)
+# at the end, views last, until a round adds nothing.
+# --------------------------------------------------------------------------- #
+_IDEMPOTENT_MARKERS = ("create or replace view", "create index if not exists",
+                       "create unique index if not exists", "add column if not exists", "do $$")
+_FORBIDDEN_MARKERS = ("drop table", "drop column", "truncate", "drop view", "drop index")
+
+
+def _model_metadata():
+    try:
+        from core.database.database import Base  # type: ignore
+        return Base.metadata
+    except Exception:  # noqa: BLE001
+        from core.models import Base  # type: ignore
+        return Base.metadata
+
+
+def _reconcile_model_columns(engine) -> list[str]:
+    """ALTER TABLE ... ADD COLUMN for every model column missing from the DB."""
+    from sqlalchemy import inspect as sa_inspect
+    added: list[str] = []
+    meta = _model_metadata()
+    insp = sa_inspect(engine)
+    existing_tables = set(insp.get_table_names())
+    for table in meta.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        have = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in have:
+                continue
+            try:
+                ctype = col.type.compile(dialect=engine.dialect)
+            except Exception:  # noqa: BLE001
+                continue
+            ddl = f'ALTER TABLE "{table.name}" ADD COLUMN IF NOT EXISTS "{col.name}" {ctype}'
+            if col.server_default is not None and getattr(col.server_default, "arg", None) is not None:
+                arg = col.server_default.arg
+                ddl += f" DEFAULT {getattr(arg, 'text', arg)}"
+            for fk in col.foreign_keys:
+                target = fk.column.table.name
+                if target in existing_tables:
+                    ddl += f' REFERENCES "{target}"("{fk.column.name}")'
+                    if fk.ondelete:
+                        ddl += f" ON DELETE {fk.ondelete}"
+            with engine.begin() as conn:
+                try:
+                    conn.execute(text(ddl))
+                    added.append(f"{table.name}.{col.name}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"   column {table.name}.{col.name}: {str(exc).strip().splitlines()[0][:120]}")
+    return added
+
+
+def _upgrade_raw_sql(script: ScriptDirectory) -> list[tuple[str, str]]:
+    """(revision, sql) for every op.execute string literal inside upgrade()."""
+    import re
+    out: list[tuple[str, str]] = []
+    for rev in script.walk_revisions():
+        try:
+            src = pathlib.Path(rev.path).read_text()
+        except Exception:  # noqa: BLE001
+            continue
+        up = src.split("def downgrade", 1)[0]
+        for m in re.finditer(r'op\.execute\(\s*(?:"""|\'\'\')(.*?)(?:"""|\'\'\')\s*\)', up, re.S):
+            out.append((rev.revision, m.group(1)))
+        for m in re.finditer(r'op\.execute\(\s*"((?:[^"\\]|\\.)*)"\s*\)', up):
+            out.append((rev.revision, m.group(1)))
+    return out
+
+
+def _replay_idempotent_raw_sql(engine, script: ScriptDirectory) -> int:
+    """Re-run the forest's idempotent raw SQL until a round adds nothing; views last."""
+    bodies = []
+    for rev, sql in _upgrade_raw_sql(script):
+        low = sql.lower()
+        if any(f in low for f in _FORBIDDEN_MARKERS):
+            continue
+        if not any(mk in low for mk in _IDEMPOTENT_MARKERS):
+            continue
+        if "do $$" in low and "add column" not in low:
+            continue
+        bodies.append((rev, sql, "create or replace view" in low))
+    applied_total = 0
+    for is_view_pass in (False, True):
+        pending = [(r, q) for r, q, v in bodies if v == is_view_pass]
+        for _round in range(4):
+            progressed = 0
+            still = []
+            for rev, sql in pending:
+                with engine.connect() as conn:
+                    tx = conn.begin()
+                    try:
+                        conn.execute(text(sql))
+                        tx.commit()
+                        progressed += 1
+                    except Exception:  # noqa: BLE001
+                        tx.rollback()
+                        still.append((rev, sql))
+            applied_total += progressed
+            pending = still
+            if not still or progressed == 0:
+                break
+        for rev, sql in pending:
+            head = " ".join(sql.split())[:90]
+            print(f"   raw-sql still failing ({rev}): {head}")
+    return applied_total
+
+
 def build_schema(engine) -> int:
     """Build the complete fresh schema on an EMPTY database and leave alembic at
     heads. Returns the table count. Used by scripts/init_fresh_db.py (the boot
@@ -204,10 +322,14 @@ def build_schema(engine) -> int:
     # Re-assert the model layer + raw-DDL extras: a migration's raw
     # `conn.execute(text("DROP ..."))` bypasses alembic ops and can remove an extra;
     # create_all is checkfirst and the extras are IF NOT EXISTS, so this is idempotent.
-    print("== 3/4 re-asserting the model layer + raw-DDL extras")
+    print("== 3/6 re-asserting the model layer + raw-DDL extras")
     init_db()
+    added = _reconcile_model_columns(engine)
+    print(f"== 4/6 model-column reconciliation: added {len(added)} column(s) create_all could not: {added}")
+    raw = _replay_idempotent_raw_sql(engine, script)
+    print(f"== 5/6 idempotent raw-SQL re-run (indexes, column adds, views last): {raw} statement(s) applied")
     relics = _drop_relics(engine, script)
-    print(f"== 4/4 relic parity pass: dropped {len(relics)} table(s) whose final forest state is DROP: {relics}")
+    print(f"== 6/6 relic parity pass: dropped {len(relics)} table(s) whose final forest state is DROP: {relics}")
     with engine.begin() as conn:
         total = conn.execute(text("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")).scalar()
     print(f"== done: {applied} revisions applied, {skipped} stamped past; {total} tables")
