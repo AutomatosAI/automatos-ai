@@ -122,14 +122,14 @@
       "title": "Turn the signal recorder on (decision LOCKED §6.1)",
       "description": "TOOL_SIGNAL_RECORDER_ENABLED default false→true (config.py:1059; no-op gate at signal_recorder.py:114-120,173-174). Harden restart-safety per PRD-142 W4-S9: the batched drain must not lose queued signals on clean shutdown (flush-on-stop) and must tolerate process restart (queue is in-process; document the bounded-loss window honestly in the module docstring — no fake durability claims). The PRD-141 US-019 contract holds: no per-call sessions, one session per flush.",
       "acceptanceCriteria": [
-        "Default flip in config.py with docstring; existing recorder tests updated to reflect ON default",
-        "Flush-on-shutdown test (drain task cancellation flushes pending batch)",
-        "Load-shape test: N record() calls produce <= ceil(N/batch) flushes, one session each (existing pattern extended, not duplicated)",
-        "Branch-scoped pytest green"
+        "DONE — config.py TOOL_SIGNAL_RECORDER_ENABLED default 'false'->'true' with a §6.1-locked docstring (default ON; rollback = one env var; honest bounded-loss note). test_recorder_enabled_by_default asserts config.TOOL_SIGNAL_RECORDER_ENABLED is True AND _enabled()==True. No existing test assumed OFF (the two flag-referencing tests in test_graph_router_negative set it explicitly); acceptance grep sees the '\"true\"' default.",
+        "DONE — test_stop_flushes_queued_signals_no_loss: 3 queued signals all flush exactly once on stop() (no loss, no double-write), queue empties, drain task cleared. test_stop_flushes_in_flight_batch_even_if_drain_blocked: the sentinel wakes a drain blocked mid-collect so its in-flight 'first' still flushes. NOTE: raw task.cancel() CANNOT flush (CancelledError interrupts the await and drops the batch) — so shutdown uses a graceful stop() (a _stopping guard + a _STOP_SENTINEL that returns _collect_batch at once + a final one-session flush of the queue remainder), which is what actually persists the pending batch. Module docstring documents the honest bounded-loss window (a HARD crash drops the in-process queue; nightly edge_builder recomputes from durable tool_execution_logs).",
+        "DONE — test_load_shape_one_session_per_flush: 30 signals @ batch 10 -> exactly 3 flushes, factory.opens==3 (ONE DB session per flush — the PRD-141 US-019 invariant), stats['flushes']==3, and flushes <= ceil(N/batch). Extends the hardening suite's _aggregate/flush tests; no rival recorder or session path.",
+        "DONE — cd orchestrator && python3 -m pytest -q tests/test_prd232_us009_recorder_on.py -> 5 passed; recorder-adjacent regression (us009 + tool_routing_hardening + graph_router_negative + prd143_selection_metric + tool_router_semantic + harness_api) = 60 passed."
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "config default flipped false->true (§6.1). signal_recorder.py gained stop(): sets _stopping, wakes the drain loop with a _STOP_SENTINEL so _collect_batch returns immediately (flushing its in-flight batch), awaits the loop's exit, then flushes the queue remainder in ONE final session — a clean shutdown loses nothing. _collect_batch now breaks on the sentinel (as first, or mid-collect) so stop() never waits out the flush interval. _drain_loop guards on `while not self._stopping`. The PRD-141 US-019 one-session-per-flush contract is preserved (never a session/task per call). Module + config docstrings state the honest bounded-loss window (HARD crash drops the in-process queue; the durable tool_execution_logs + nightly recompute make it a freshness delay, never corruption)."
     },
     {
       "id": "US-010",

@@ -39,6 +39,17 @@ is NULL and would insert a duplicate. The recorder always writes a NULL
 DISTINCT FROM :col`` (NULL-safe equality) and only ``INSERT``s when no row
 matched — guaranteeing "increment, no duplicate rows".
 
+Clean shutdown & the bounded-loss window (PRD-232 US-009, PRD-142 W4-S9)
+-----------------------------------------------------------------------
+``stop()`` is the clean-shutdown path: it halts the drain loop and flushes every
+signal still queued (the in-flight batch AND anything left in the queue) in one
+final session, so a graceful stop loses NOTHING. The honest bound: the queue is
+an in-process ``asyncio.Queue`` — a HARD crash (SIGKILL / OOM), not a clean
+stop(), drops whatever it holds. That is acceptable BY DESIGN and is not a fake
+durability claim: ``tool_execution_logs`` is the durable ground truth, and the
+nightly ``edge_builder`` RECOMPUTES authoritative edges/affinities from it, so a
+lost intra-day batch only delays freshness — it never corrupts the learned graph.
+
 Leaf-loadable: module-top imports are stdlib-only; config / DB / wilson are
 imported lazily inside methods so this module can be unit-tested under a
 synthetic package without the DB-backed executor chain (matches graph_router.py).
@@ -53,6 +64,10 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Sentinel enqueued by stop() to wake a drain loop blocked on an empty queue so
+# it can flush its in-flight batch and exit (never persisted).
+_STOP_SENTINEL = object()
 
 
 @dataclass(frozen=True)
@@ -82,6 +97,9 @@ class ToolSignalRecorder:
     def __init__(self) -> None:
         self._queue: Optional[asyncio.Queue] = None
         self._drain_task: Optional[asyncio.Task] = None
+        # PRD-232 US-009: set by stop() so the drain loop exits after flushing
+        # its in-flight batch (clean-shutdown flush, no lost queued signals).
+        self._stopping: bool = False
         # Process-lifetime observability counters for the self-learning tile.
         # Restart note: these and the queue are in-memory, so a restart loses any
         # *queued* signals — safe by design: the nightly edge_builder RECOMPUTES
@@ -260,9 +278,12 @@ class ToolSignalRecorder:
     # ------------------------------------------------------------------
 
     async def _drain_loop(self) -> None:
-        while True:
+        while not self._stopping:
             try:
                 batch = await self._collect_batch()
+                # A stop() sentinel may ride in the batch — flush the real
+                # signals beside it, then the while-guard exits the loop.
+                batch = [s for s in batch if s is not _STOP_SENTINEL]
                 if batch:
                     await self._flush(batch)
             except asyncio.CancelledError:
@@ -271,6 +292,43 @@ class ToolSignalRecorder:
                 self._record_flush_error(e)
                 await asyncio.sleep(1)
 
+    async def stop(self) -> None:
+        """Clean-shutdown flush (US-009): stop the drain loop and flush every
+        still-queued signal — the in-flight batch and the queue remainder — in
+        one final session, so a graceful stop loses nothing.
+
+        Idempotent and safe if the recorder never started (no queue/task). See
+        the module docstring for the honest bounded-loss window (a HARD crash,
+        not stop(), drops the in-process queue)."""
+        self._stopping = True
+        task = self._drain_task
+        self._drain_task = None
+        if task is not None and not task.done():
+            # Wake _collect_batch if it is blocked on an empty queue so it can
+            # flush its in-flight batch and see the stop guard.
+            if self._queue is not None:
+                try:
+                    self._queue.put_nowait(_STOP_SENTINEL)
+                except asyncio.QueueFull:
+                    pass
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        # Flush anything the loop left queued (drain to empty, ONE session).
+        if self._queue is not None:
+            remaining: List[ToolSignal] = []
+            while True:
+                try:
+                    item = self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if item is not _STOP_SENTINEL:
+                    remaining.append(item)
+            if remaining:
+                await self._flush(remaining)
+        self._stopping = False
+
     async def _collect_batch(self) -> List[ToolSignal]:
         """Block for the first signal, then drain up to batch_size or until
         interval seconds elapse — whichever comes first."""
@@ -278,6 +336,10 @@ class ToolSignalRecorder:
         interval = self._interval_seconds()
 
         first = await self._queue.get()
+        # PRD-232 US-009: stop()'s sentinel returns the loop to its guard at once
+        # (as first, or mid-collect) instead of waiting out the flush interval.
+        if first is _STOP_SENTINEL:
+            return [first]
         batch: List[ToolSignal] = [first]
 
         loop = asyncio.get_running_loop()
@@ -288,9 +350,11 @@ class ToolSignalRecorder:
                 break
             try:
                 item = await asyncio.wait_for(self._queue.get(), timeout=remaining)
-                batch.append(item)
             except asyncio.TimeoutError:
                 break
+            if item is _STOP_SENTINEL:
+                break  # flush the real batch now; don't wait for more
+            batch.append(item)
         return batch
 
     # ------------------------------------------------------------------

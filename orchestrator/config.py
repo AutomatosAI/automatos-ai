@@ -1071,9 +1071,15 @@ class Config:
     COMPOSIO_SYNC_ENABLED: bool = os.getenv("COMPOSIO_SYNC_ENABLED", "true").lower() == "true"
     COMPOSIO_SYNC_HOUR_UTC: int = int(os.getenv("COMPOSIO_SYNC_HOUR_UTC", "4"))
     # PRD-141 US-019: batched incremental tool-execution signal recorder.
-    # Opt-in (default off). Drains an in-process queue with ONE DB session per
-    # flush — never a DB session or task per tool call.
-    TOOL_SIGNAL_RECORDER_ENABLED: bool = os.getenv("TOOL_SIGNAL_RECORDER_ENABLED", "false").lower() == "true"
+    # PRD-232 US-009 (decision LOCKED §6.1): default ON. The write side of the
+    # learning loop ships from day one — signals flow so harness stats are
+    # non-zero within a day of deploy; rollback is this one env var. Drains an
+    # in-process queue with ONE DB session per flush (never a DB session or task
+    # per tool call), and flushes the pending batch on clean shutdown (stop()).
+    # Bounded-loss window is honest: a HARD crash drops the in-process queue, but
+    # the nightly edge_builder RECOMPUTES authoritative edges from the durable
+    # tool_execution_logs, so only intra-day freshness is ever at risk.
+    TOOL_SIGNAL_RECORDER_ENABLED: bool = os.getenv("TOOL_SIGNAL_RECORDER_ENABLED", "true").lower() == "true"
     TOOL_SIGNAL_FLUSH_BATCH_SIZE: int = int(os.getenv("TOOL_SIGNAL_FLUSH_BATCH_SIZE", "50"))
     TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS: float = float(os.getenv("TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS", "5.0"))
     TOOL_SIGNAL_QUEUE_MAXSIZE: int = int(os.getenv("TOOL_SIGNAL_QUEUE_MAXSIZE", "10000"))
