@@ -392,7 +392,13 @@ CREATE TABLE IF NOT EXISTS document_chunks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);
-CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 200);
+-- (PRD-209 S2) No pgvector ANN index on embedding: pgvector's hnsw/ivfflat cap at
+-- 2000 dimensions and these embedding columns are vector(4096), so `CREATE INDEX
+-- USING hnsw/ivfflat` errors ("cannot have more than 2000 dimensions") and aborts
+-- initdb before the schema completes — the fresh-clone boot bug this wave fixes.
+-- Prod vector search runs on S3 Vectors (pgvector is the legacy/local path); the
+-- local edition does an exact scan over small data. Re-adding an ANN index here
+-- requires a <=2000-dim column (or halfvec) — do not restore the 4096-dim index.
 
 -- Document Usage Tracking
 CREATE TABLE IF NOT EXISTS document_usage (
@@ -471,7 +477,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_items_status ON knowledge_items(status)
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_owner ON knowledge_items(owner_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_quality ON knowledge_items(quality_score DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_importance ON knowledge_items(importance_score DESC);
-CREATE INDEX IF NOT EXISTS idx_knowledge_items_embedding ON knowledge_items USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- (PRD-209 S2) ANN index omitted — vector(4096) exceeds pgvector's 2000-dim cap. See document_chunks note above.
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_metadata ON knowledge_items USING GIN (metadata);
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_content_fts ON knowledge_items USING GIN (to_tsvector('english', content));
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_title_fts ON knowledge_items USING GIN (to_tsvector('english', title));
@@ -665,7 +671,7 @@ CREATE TABLE IF NOT EXISTS memory_items (
 
 CREATE INDEX IF NOT EXISTS idx_memory_items_agent ON memory_items(agent_id);
 CREATE INDEX IF NOT EXISTS idx_memory_items_memory_level ON memory_items(memory_level);
-CREATE INDEX IF NOT EXISTS idx_memory_items_embedding ON memory_items USING ivfflat (embedding vector_cosine_ops);
+-- (PRD-209 S2) ANN index omitted — vector(4096) exceeds pgvector's 2000-dim cap. See document_chunks note above.
 
 -- Knowledge Nodes table
 CREATE TABLE IF NOT EXISTS knowledge_nodes (
@@ -682,7 +688,7 @@ CREATE TABLE IF NOT EXISTS knowledge_nodes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_agent_id ON knowledge_nodes(agent_id);
-CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_embedding ON knowledge_nodes USING ivfflat (embedding vector_cosine_ops);
+-- (PRD-209 S2) ANN index omitted — vector(4096) exceeds pgvector's 2000-dim cap. See document_chunks note above.
 
 -- Knowledge Edges table
 CREATE TABLE IF NOT EXISTS knowledge_edges (
@@ -717,7 +723,7 @@ CREATE TABLE IF NOT EXISTS kb_entities (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_entities_canonical ON kb_entities(LOWER(canonical_name));
 CREATE INDEX IF NOT EXISTS idx_kb_entities_type ON kb_entities(entity_type);
 CREATE INDEX IF NOT EXISTS idx_kb_entities_importance ON kb_entities(importance_score DESC);
-CREATE INDEX IF NOT EXISTS idx_kb_entities_embedding ON kb_entities USING ivfflat (embedding vector_cosine_ops);
+-- (PRD-209 S2) ANN index omitted — vector(4096) exceeds pgvector's 2000-dim cap. See document_chunks note above.
 CREATE INDEX IF NOT EXISTS idx_kb_entities_name_fts ON kb_entities USING gin(to_tsvector('english', entity_name || ' ' || COALESCE(description, '')));
 
 -- Knowledge Entity Mentions (links entities to knowledge items)
