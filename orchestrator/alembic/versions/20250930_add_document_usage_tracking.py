@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column('query', sa.Text(), nullable=True),
         sa.Column('results_count', sa.Integer(), server_default='0', nullable=True),
         sa.Column('execution_time_ms', sa.Integer(), nullable=True),
-        sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), server_default="'{}'::jsonb", nullable=True),
+        sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=True),
         sa.Column('timestamp', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('user_id', sa.String(length=255), nullable=True),
         sa.Column('session_id', sa.String(length=255), nullable=True),

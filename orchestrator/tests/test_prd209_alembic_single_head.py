@@ -139,10 +139,13 @@ def test_prd209_fresh_path_is_wired_and_stale_sql_is_gone():
     # (a) The fresh initializer exists and stamps at heads (never a literal revision —
     # stamping "heads" tracks the single head as it moves).
     fresh = _INIT_FRESH.read_text(encoding="utf-8")
-    assert 'command.stamp(cfg, "heads")' in fresh, (
-        "init_fresh_db.py must stamp alembic at 'heads' after building the schema"
+    assert "build_schema(engine)" in fresh, (
+        "init_fresh_db.py must build via generate_schema_baseline.build_schema (models + tolerant replay)"
     )
-    assert "init_db()" in fresh, "init_fresh_db.py must build via init_test_db.init_db (the CI-proven schema)"
+    gen = (_ORCH / "scripts" / "generate_schema_baseline.py").read_text(encoding="utf-8")
+    assert "init_db()" in gen and "command.upgrade(cfg, rev)" in gen, (
+        "the generator must run the model layer (init_db) AND replay the migration forest"
+    )
 
     # (b) The entrypoint routes empty databases through it, fail-closed.
     entry = _ENTRYPOINT.read_text(encoding="utf-8")

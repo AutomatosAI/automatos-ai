@@ -30,7 +30,7 @@ if [ -n "$BASE" ]; then
   if [ "$DELMIG" = "0" ]; then echo "   ✅ PASS"; else echo "   ❌ FAIL: $DELMIG revision files deleted"; FAIL=1; fi
 else echo "   ⚠️  SKIP: no merge base"; fi
 check "US-002 fresh path: init_fresh_db exists, stamps heads, entrypoint wired, stale SQL gone" \
-  'grep -q "command.stamp(cfg, \"heads\")" orchestrator/scripts/init_fresh_db.py && grep -q "init_fresh_if_empty" docker-entrypoint.sh && [ ! -f orchestrator/core/database/init_complete_schema.sql ] && ! grep -q "init_complete_schema" docker-compose.yml'
+  'grep -q "build_schema(engine)" orchestrator/scripts/init_fresh_db.py && grep -q "command.upgrade(cfg, rev)" orchestrator/scripts/generate_schema_baseline.py && grep -q "init_fresh_if_empty" docker-entrypoint.sh && [ ! -f orchestrator/core/database/init_complete_schema.sql ] && ! grep -q "init_complete_schema" docker-compose.yml'
 
 # US-003 — compose local defaults
 check "US-003 compose consumes envs/api.defaults via env_file" \

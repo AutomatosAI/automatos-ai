@@ -167,11 +167,30 @@ def init_db():
         """))
 
         # Model-less tables migrations ALTER but nothing CREATEs (PRD-209
-        # schema-drift orphans, 2026-08-29): live code reads all three
+        # schema-drift orphans, 2026-08-29) + kb_types (their FK target; live
+        # readers in RAG ingestion / tool registry): live code reads all three
         # (team_access/analytics/knowledge_multimodal · workspace_purge ·
         # nl2sql schema provider). DDL ported verbatim from the retired
         # init_complete_schema.sql. Keep scripts/ci/schema_drift_check.py's
         # RAW_DDL_EXTRAS in sync with this block.
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS kb_types (
+                id SERIAL PRIMARY KEY,
+                type_name VARCHAR(100) UNIQUE NOT NULL,
+                display_name VARCHAR(255) NOT NULL,
+                description TEXT,
+                icon VARCHAR(50),
+                processor_class VARCHAR(255),
+                storage_strategy VARCHAR(100),
+                supports_embedding BOOLEAN DEFAULT true,
+                supports_search BOOLEAN DEFAULT true,
+                supports_relationships BOOLEAN DEFAULT false,
+                enabled BOOLEAN DEFAULT true,
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS knowledge_items (
                 id SERIAL PRIMARY KEY,
@@ -202,9 +221,9 @@ def init_db():
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS tool_usage_logs (
                 id SERIAL PRIMARY KEY,
-                execution_id INTEGER REFERENCES workflow_executions(id),
+                execution_id INTEGER,  -- legacy workflow_executions ref; no FK on the fresh path
                 agent_id INTEGER REFERENCES agents(id) NOT NULL,
-                tool_id INTEGER REFERENCES mcp_tools(id) NOT NULL,
+                tool_id INTEGER NOT NULL,  -- legacy mcp_tools ref (dead table); no FK on the fresh path
                 method_called VARCHAR(255),
                 input_data JSONB,
                 output_data JSONB,

@@ -66,6 +66,7 @@ RAW_DDL_EXTRAS: Set[str] = {
     "knowledge_items",
     "tool_usage_logs",
     "learning_outcomes",
+    "kb_types",
 }
 
 # A schema is table name -> set of column names. Column sets may be empty when a
