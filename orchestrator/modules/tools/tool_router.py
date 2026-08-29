@@ -342,6 +342,56 @@ def _apply_page_prior(
     return merged, (reason or "page_prior"), from_pins
 
 
+def _dispatcher_always_include() -> List[str]:
+    """Action names the dispatcher_only surface (the heartbeat orchestrator)
+    must keep reachable regardless of the semantic top-K ranking (P228-RVW-4).
+
+    CSV in config (``HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE``), whitespace-safe —
+    the same shape as ``_fallback_pins``. Empty/unset → no always-include.
+    """
+    try:
+        from config import config
+        raw = str(getattr(config, "HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE", "") or "")
+    except Exception:
+        raw = ""
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _apply_dispatcher_always_include(
+    allowed: Optional[List[str]],
+) -> Optional[List[str]]:
+    """Union the always-include set onto a NARROWED dispatcher allow-list so
+    heartbeat-critical read tools survive the semantic top-K narrowing
+    (P228-RVW-4 — the signal-tool-routing-drop class).
+
+    - ``allowed is None`` (open-full / flag-off / fallback): returned unchanged —
+      the full enum already exposes every action.
+    - A narrowed list: each always-include name that is registered AND clears the
+      non-admin role gate (``_page_action_passes_gate``, the same fail-closed
+      check page-prior uses) is appended (dedup, order-stable). A gated or
+      unknown name is never forced in. Reachability then no longer depends on an
+      unasserted ranking result: the tool is in the enum every tick.
+    """
+    if allowed is None:
+        return allowed
+    pins = _dispatcher_always_include()
+    if not pins:
+        return allowed
+    merged = list(allowed)
+    seen = set(merged)
+    for name in pins:
+        if name in seen:
+            continue
+        # The dispatcher_only surface always resolves as non-admin
+        # (_load_dispatcher_only passes is_admin=False), so gate on that — a
+        # gated/unregistered name can never be forced into the enum.
+        if not _page_action_passes_gate(name, is_admin=False, is_super_admin=False):
+            continue
+        merged.append(name)
+        seen.add(name)
+    return merged
+
+
 def _narrow_dispatcher_actions_sync(
     query: Optional[str],
     is_admin: bool,

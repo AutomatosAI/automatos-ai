@@ -47,7 +47,7 @@ from config import Config
 from core.models.composio_cache import AgentAppAssignment
 from core.models.core import Agent
 from core.models.orchestration import OrchestrationEvent, OrchestrationTask
-from core.models.orchestration_enums import EventType, TaskState
+from core.models.orchestration_enums import BUSY_TASK_STATES, EventType, TaskState
 from modules.coordination.match_signals import (
     SemanticSignals,
     compute_semantic_signals_sync,
@@ -470,10 +470,7 @@ def _get_busy_agent_ids(
         .filter(
             and_(
                 OrchestrationTask.assigned_agent_id.in_(agent_ids),
-                OrchestrationTask.state.in_([
-                    TaskState.ASSIGNED.value,
-                    TaskState.RUNNING.value,
-                ]),
+                OrchestrationTask.state.in_(BUSY_TASK_STATES),
             )
         )
         .distinct()

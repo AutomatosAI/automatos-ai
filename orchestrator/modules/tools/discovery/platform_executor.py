@@ -206,6 +206,7 @@ from modules.tools.discovery.handlers_watches import (  # PRD-204 S9
     get_watch,
     cancel_watch,
 )
+from modules.tools.discovery.handlers_fleet import fleet_status  # PRD-228
 from modules.tools.discovery.handlers_missions import (
     create_mission,
     list_missions,
@@ -227,6 +228,7 @@ from modules.tools.discovery.handlers_governance import (
     check_budget_handler,
 )
 from modules.tools.discovery.handlers_asks import ask_human  # PRD-225
+from modules.tools.discovery.handlers_clarify import ask_orchestrator  # PRD-229
 from modules.tools.discovery.handlers_graph import (
     handle_query_graph,
     handle_graph_neighbors,
@@ -384,6 +386,34 @@ def _human_directed_admin(db, workspace_id, caller_context) -> bool:
         return False
     role = _workspace_role_for_clerk(db, workspace_id, clerk_id)
     return role in ("owner", "admin")
+
+
+def _bind_ask_orchestrator_context(
+    params: Dict[str, Any],
+    caller_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Bind ``platform_ask_orchestrator`` to the SERVER-threaded clarification
+    subject, never a tool parameter (P229-RVW-2).
+
+    STRIP any client/LLM-supplied ``_run_id`` / ``_task_id`` / ``_field_id`` FIRST
+    — mirroring the ``_agent_id`` hardening in ``exec_platform`` — THEN inject the
+    server ``field_context`` values. A prompt-injected tool call therefore cannot
+    smuggle a FOREIGN task id past the binding: with an empty field_context (the
+    non-mission lanes — channels, webhooks, board, scheduled — where
+    agent_factory defaults the mode to TASK_EXECUTION but threads no run) the keys
+    stay ABSENT and the handler fails closed to proceed-with-assumption; with a
+    real field_context only the server values survive. Rebuild-don't-mutate.
+    """
+    bound = {
+        k: v for k, v in params.items()
+        if k not in ("_run_id", "_task_id", "_field_id")
+    }
+    fctx = (caller_context or {}).get("field_context") or {}
+    for src, dst in (("run_id", "_run_id"), ("task_id", "_task_id"), ("field_id", "_field_id")):
+        val = fctx.get(src)
+        if val is not None:
+            bound[dst] = val
+    return bound
 
 
 class PlatformActionExecutor:
@@ -546,6 +576,8 @@ class PlatformActionExecutor:
             "platform_list_watches": list_watches,
             "platform_get_watch": get_watch,
             "platform_cancel_watch": cancel_watch,
+            # PRD-228: live floor read-model in one call
+            "platform_fleet_status": fleet_status,
             # PRD-163 S1: mission lifecycle control
             "platform_approve_mission": approve_mission,
             "platform_reject_mission": reject_mission,
@@ -563,6 +595,10 @@ class PlatformActionExecutor:
             "platform_check_budget": check_budget_handler,
             # PRD-225: agent → human question (park, notify, return)
             "platform_ask_human": ask_human,
+            # PRD-229: agent → orchestrator clarification (answer inline / escalate).
+            # Dispatch key carries the platform_ prefix (namespace invariant); the
+            # handler function keeps its bare name.
+            "platform_ask_orchestrator": ask_orchestrator,
             # Enhanced Analytics (dashboard + performance)
             "platform_get_success_rate": get_success_rate,
             "platform_get_completion_time": get_completion_time,
@@ -1093,6 +1129,15 @@ class PlatformActionExecutor:
                     "[PRD-178 S1] Bound field_id %s to calling task for %s",
                     field_id, action_name,
                 )
+
+        # PRD-229 / P229-RVW-2: bind ask_orchestrator to the CALLING task/run from
+        # the server-threaded field_context (never a tool param). The binding
+        # STRIPS any smuggled _run_id/_task_id/_field_id BEFORE injecting the
+        # server values, so a prompt-injected call in a non-mission lane cannot
+        # point Auto at a foreign task. _agent_id is already server-minted above
+        # (exec_platform). Only the server context wins.
+        if action_name == "platform_ask_orchestrator":
+            params = _bind_ask_orchestrator_context(params, caller_context)
 
         # PRD-163 S1/Q56: attribute mission create + lifecycle to the chatting
         # user. The chat path threads the driving user's clerk id via

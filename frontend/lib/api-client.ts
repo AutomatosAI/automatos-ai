@@ -320,6 +320,40 @@ export interface WatchesResponse {
   total: number
 }
 
+// ===== PRD-228 Fleet State: live floor read-model =====
+export interface FleetCurrentWork {
+  kind: 'board_task' | 'mission_task'
+  id: number | string
+  title: string
+  since: string | null
+}
+
+export interface FleetAgentRow {
+  agent_id: number
+  name: string
+  current: FleetCurrentWork | null
+  queue_depth: number
+  blocked: { count: number; open_asks: Array<number | string> }
+  watches: { active: number; needs_attention: number }
+  last_activity_at: string | null
+  // Omitted when the cost source is unavailable (fail-soft).
+  cost_24h?: { tokens: number; usd: number }
+}
+
+export interface FleetStateResponse {
+  version: number
+  generated_at: string | null
+  window_hours: number
+  cost_available: boolean
+  cost_source: string | null
+  // Source-availability flags (mirror cost_available): false means the source
+  // failed and its fields carry fail-soft defaults, not real values — so a
+  // degraded source is distinguishable from a genuine zero (P228-RVW-6).
+  watches_available: boolean
+  asks_available: boolean
+  agents: FleetAgentRow[]
+}
+
 export interface WatchDetailResponse {
   watch: WatchRow
   recent_events: WatchEventRow[]
@@ -2309,6 +2343,11 @@ class ApiClient {
 
   async cancelWatch(watchId: string): Promise<{ watch: WatchRow }> {
     return this.request(`/api/v1/watches/${watchId}/cancel`, { method: 'POST' })
+  }
+
+  // ===== PRD-228 Fleet State: live floor read-model =====
+  async getFleetState(): Promise<FleetStateResponse> {
+    return this.request<FleetStateResponse>('/api/v1/fleet')
   }
 }
 

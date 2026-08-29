@@ -122,7 +122,15 @@ export function useBoardEventStream(enabled: boolean = true): void {
           const { events, rest } = parseSSEFrames(buffer)
           buffer = rest
           for (const evt of events) {
-            if (evt.event === 'board_changed') invalidateBoard()
+            if (evt.event === 'board_changed') {
+              invalidateBoard()
+              // PRD-228: fan the same signal out as a window event so views
+              // that aren't on the board query cache — the Agents fleet tab —
+              // can refetch on an agent move without owning an SSE connection.
+              window.dispatchEvent(
+                new CustomEvent('automatos:board-changed', { detail: evt.data }),
+              )
+            }
             // PRD-205 S7: a background message landed in a chat. Fan out as a
             // window event — the open conversation (useChat) merges it in and
             // history surfaces refresh. Payload carries user_id; consumers

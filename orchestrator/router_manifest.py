@@ -81,6 +81,8 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.governance"),
     # PRD-204 S11 -- watchlist read/cancel surface over the watch registry.
     RouterSpec("api.watches"),
+    # PRD-228 -- the one new fleet-state route (GET /api/v1/fleet).
+    RouterSpec("api.fleet"),
 )
 
 
