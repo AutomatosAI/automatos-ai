@@ -115,44 +115,42 @@ _CORE_PACKAGES = ["core", "core.database", "core.cache", "core.models"]
 # Predicate evaluation — the crux of tenant isolation testing.
 # ---------------------------------------------------------------------------
 
-def _collect_predicates(pred, out: List[tuple]) -> None:
-    """Flatten an and_/or_ predicate tree into leaf tuples."""
-    if isinstance(pred, tuple) and pred and pred[0] in ("and_", "or_"):
-        for sub in pred[1]:
-            _collect_predicates(sub, out)
-    elif isinstance(pred, tuple):
-        out.append(pred)
+def _eval_pred(pred: Any, row: Any) -> bool:
+    """Recursively evaluate an and_/or_ predicate TREE against a stub row.
 
-
-def _row_matches(row: Any, predicates: List[tuple]) -> bool:
-    """Evaluate a subset of the filter predicates against a stub row.
-
-    Only the workspace_id predicate is enforced here (the dimension under test);
-    other predicates (edge_type, confidence, from_action.in_) are treated as
-    satisfied so the test stays focused on tenant isolation.
+    Enforces the two dimensions under test — ``workspace_id`` AND ``edge_type``
+    (PRD-232 US-004 admits NULL-workspace rows ONLY for ``meta_sibling``) — and
+    treats every other leaf (from_action.in_, confidence, agent_id) as satisfied
+    so the test stays focused on the tenant + type reconciliation. Honouring real
+    OR/AND semantics is the point: a flatten-to-AND pass (the earlier
+    ``_row_matches``) would reject workspace A's own row against the US-004
+    ``or_(ws == A, and_(ws IS NULL, meta_sibling))`` filter.
     """
-    for p in predicates:
-        op, name = p[0], p[1]
-        if name != "workspace_id":
-            continue
-        row_val = getattr(row, "workspace_id", None)
+    if isinstance(pred, tuple) and pred:
+        if pred[0] == "and_":
+            return all(_eval_pred(s, row) for s in pred[1])
+        if pred[0] == "or_":
+            return any(_eval_pred(s, row) for s in pred[1])
+        op, name = pred[0], pred[1]
+        if name not in ("workspace_id", "edge_type"):
+            return True  # not under test — treat as satisfied
+        row_val = getattr(row, name, None)
         if op == "eq":
-            if row_val != p[2]:
-                return False
-        elif op == "is":
-            if row_val is not p[2] and row_val != p[2]:
-                return False
+            return row_val == pred[2]
+        if op == "is":
+            return row_val is pred[2] or row_val == pred[2]
+        if op == "in":
+            return row_val in pred[2]
     return True
 
 
 class _FakeQuery:
     def __init__(self, rows):
         self._rows = list(rows)
-        self._predicates: List[tuple] = []
+        self._filters: List[Any] = []
 
     def filter(self, *args, **kw):
-        for a in args:
-            _collect_predicates(a, self._predicates)
+        self._filters.extend(args)
         return self
 
     def order_by(self, *a, **kw):
@@ -165,7 +163,7 @@ class _FakeQuery:
         return 0
 
     def all(self):
-        return [r for r in self._rows if _row_matches(r, self._predicates)]
+        return [r for r in self._rows if all(_eval_pred(f, r) for f in self._filters)]
 
 
 class _FakeDBSession:
@@ -262,11 +260,11 @@ _WS_A = "11111111-1111-1111-1111-111111111111"
 _WS_B = "22222222-2222-2222-2222-222222222222"
 
 
-def _edge(from_action, to_action, workspace_id, confidence=0.8):
+def _edge(from_action, to_action, workspace_id, confidence=0.8, edge_type="used_after"):
     return _StubEdge(
         from_action=from_action,
         to_action=to_action,
-        edge_type="used_after",
+        edge_type=edge_type,
         confidence=confidence,
         weight=5.0,
         agent_id=None,
@@ -377,13 +375,45 @@ def test_graph_router_tenant_isolation():
 
 
 def test_null_workspace_rows_never_leak_to_a_tenant():
-    """A pre-tenant / unscoped (workspace_id IS NULL) edge must not surface for
-    a specific tenant's read — the moat is per-tenant, not global."""
+    """A pre-tenant / unscoped (workspace_id IS NULL) ``used_after`` edge must not
+    surface for a specific tenant's read — learned co-occurrence is per-tenant,
+    not global (PRD-232 US-004 admits NULL rows only for meta_sibling)."""
     entry = [("send_email", 0.9)]
-    edges = [_edge("send_email", "GLOBAL_FOLLOWUP", None)]
+    edges = [_edge("send_email", "GLOBAL_FOLLOWUP", None)]  # used_after, unscoped
 
     result_a = _rank(_build_router(entry), workspace_id=_WS_A, edges=edges)
     names_a = _chain_actions(result_a)
     assert "GLOBAL_FOLLOWUP" not in names_a, (
-        "unscoped global edge leaked into a tenant read"
+        "unscoped global used_after edge leaked into a tenant read"
     )
+
+
+# ---------------------------------------------------------------------------
+# PRD-232 US-004 — reconcile global meta_sibling bootstrap seeds with the lock
+# ---------------------------------------------------------------------------
+
+def test_global_meta_sibling_seed_surfaces_for_every_tenant():
+    """PRD-143's metadata_graph_seed writes GLOBAL (workspace_id IS NULL)
+    meta_sibling cold-start edges. US-004 admits those for EVERY tenant read at
+    the confidence floor, so a zero-telemetry workspace is still graph-reachable —
+    while used_after globals stay excluded (previous test)."""
+    entry = [("send_email", 0.9)]
+    edges = [_edge("send_email", "META_COLD_START", None, edge_type="meta_sibling")]
+
+    for ws in (_WS_A, _WS_B):
+        names = _chain_actions(_rank(_build_router(entry), workspace_id=ws, edges=edges))
+        assert "META_COLD_START" in names, (
+            f"global meta_sibling seed did not surface for {ws} (cold-start unreachable)"
+        )
+
+
+def test_tenant_scoped_meta_sibling_stays_tenant_scoped():
+    """A meta_sibling edge that DOES carry a workspace_id is still tenant-scoped —
+    only the unscoped (NULL) meta_sibling globals cross tenants."""
+    entry = [("send_email", 0.9)]
+    edges = [_edge("send_email", "A_META_ONLY", _WS_A, edge_type="meta_sibling")]
+
+    names_a = _chain_actions(_rank(_build_router(entry), workspace_id=_WS_A, edges=edges))
+    names_b = _chain_actions(_rank(_build_router(entry), workspace_id=_WS_B, edges=edges))
+    assert "A_META_ONLY" in names_a
+    assert "A_META_ONLY" not in names_b, "tenant-scoped meta_sibling leaked to another tenant"

@@ -297,16 +297,33 @@ class GraphRouter:
     ) -> List[dict]:
         """Query tool_routing_edges for used_after edges from entry nodes.
 
-        PRD-177 S5: filtered to ``workspace_id``. The learned graph is per-tenant,
-        so a read for workspace A returns ONLY workspace A's edges (or the
-        genuinely unscoped ``workspace_id IS NULL`` rows when the caller passes
-        None). There is no cross-tenant global-read fallback.
+        PRD-177 S5 + PRD-232 US-004: reconcile the global bootstrap seeds with
+        the per-tenant lock. The learned graph is per-tenant, so a read for
+        workspace A returns workspace A's edges EXACTLY — plus the genuinely
+        unscoped (``workspace_id IS NULL``) ``meta_sibling`` cold-start seeds
+        PRD-143's metadata_graph_seed writes globally, so a zero-telemetry tenant
+        is still graph-reachable. An unscoped ``used_after`` row is NEVER admitted
+        for a tenant (that would bleed one tenant's learned co-occurrence into
+        another's routing). A None caller (system/global read) sees only the
+        unscoped meta_sibling seeds. There is no cross-tenant global-read fallback.
         """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingEdge
 
         if not from_actions:
             return []
+
+        # US-004: NULL-workspace rows are admissible ONLY for meta_sibling (the
+        # global cold-start seeds). Every other edge type requires an exact
+        # workspace match.
+        meta_global = and_(
+            ToolRoutingEdge.workspace_id.is_(None),
+            ToolRoutingEdge.edge_type == "meta_sibling",
+        )
+        if workspace_id is not None:
+            workspace_filter = or_(ToolRoutingEdge.workspace_id == workspace_id, meta_global)
+        else:
+            workspace_filter = meta_global
 
         filters = [
             ToolRoutingEdge.from_action.in_(from_actions),
@@ -316,12 +333,7 @@ class GraphRouter:
             # real usage (higher Wilson confidence) outranks metadata edges.
             ToolRoutingEdge.edge_type.in_(("used_after", "meta_sibling")),
             ToolRoutingEdge.confidence >= min_confidence,
-            # Per-tenant isolation (moat): scope to this workspace exactly. A
-            # None workspace_id reads only the unscoped rows (IS NULL — e.g. the
-            # global meta_sibling cold-start seeds), never a tenant's rows.
-            ToolRoutingEdge.workspace_id == workspace_id
-            if workspace_id is not None
-            else ToolRoutingEdge.workspace_id.is_(None),
+            workspace_filter,
         ]
 
         if agent_id is not None:

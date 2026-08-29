@@ -51,14 +51,14 @@
       "title": "Thread the scopes; reconcile global bootstrap edges with per-tenant reads",
       "description": "(a) smart_orchestrator.py:236-259 never passes agent_id into ctx.kwargs so platform_actions.py:145's graph path is permanently agent-blind — thread the real agent id. (b) PRD-177 S5 mandates workspace_id-filtered edge reads; PRD-143's metadata_graph_seed writes GLOBAL meta_sibling rows. Reconcile per spec §4 US-004: edge reads admit workspace_id IS NULL rows ONLY for edge_type='meta_sibling' at the min-confidence floor; all other edge types require exact workspace match.",
       "acceptanceCriteria": [
-        "Test: PlatformActionsSection graph path receives a real agent_id from the orchestrator seam",
-        "Tenant-isolation test extended: workspace A's used_after edges never surface for workspace B; global meta_sibling rows surface for both at floor confidence",
-        "grep proves no unfiltered global read remains for used_after/failed_after edge queries",
-        "Branch-scoped pytest green"
+        "DONE — write seam: smart_orchestrator build_context() now passes agent_id=self.agent_id (test_prd232_us004::test_orchestrator_seam_passes_agent_id_into_build_context reads the call). read seam: test_build_graph_filtered_threads_agent_id_from_ctx_kwargs drives the real PlatformActionsSection._build_graph_filtered with ctx.kwargs={'agent_id':4242} and asserts rank_chains received agent_id=4242 (+ a regression guard proving it was None/agent-blind before).",
+        "DONE — test_prd177_graph_router_tenant.py extended: test_global_meta_sibling_seed_surfaces_for_every_tenant (NULL meta_sibling surfaces for WS_A AND WS_B at the floor) + test_tenant_scoped_meta_sibling_stays_tenant_scoped; existing A/B used_after isolation + test_null_workspace_rows_never_leak_to_a_tenant (NULL used_after excluded) still pass. Required upgrading two fake DBs (this file + test_prd177_chain_hints_learned_edges.py) from flatten-OR-to-AND to a faithful and_/or_ tree evaluator so the US-004 OR filter is correctly exercised.",
+        "DONE — _query_edges reconciled: NULL admission gated to and_(workspace_id IS NULL, edge_type=='meta_sibling'); exact ws match for all else; no bare workspace_id.is_(None) fallback. test_query_edges_admits_null_only_for_meta_sibling + test_no_bare_workspace_none_used_after_read grep-assert it. failed_after is not read by _query_edges (edge_type filter = used_after/meta_sibling only) — US-010 owns it.",
+        "DONE — cd orchestrator && python3 -m pytest -q: US-004 file 5 passed; graph/edge/affinity batch 105 passed; full branch-scoped changed-test set 74 passed in acceptance order."
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "graph_router._query_edges: workspace_filter = or_(workspace_id==ws, meta_global) for a tenant / meta_global for None, where meta_global=and_(workspace_id IS NULL, edge_type=='meta_sibling'). smart_orchestrator threads agent_id=self.agent_id into build_context kwargs → ctx.kwargs['agent_id'] → _build_graph_filtered. _query_affinities untouched (its intent_cluster_id IS NULL global-prior is US-010's scope, not the meta_sibling edge reconciliation)."
     },
     {
       "id": "US-005",
