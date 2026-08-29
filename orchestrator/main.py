@@ -34,6 +34,7 @@ from core.database.database import init_database, get_db, SessionLocal
 from core.models import Base
 
 # Import API routers
+import integrations.budstacks  # noqa: F401 — self-registers the budstacks VerticalProvisioner
 from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router
@@ -59,7 +60,6 @@ from api.credentials import router as credentials_router  # PRD-18: Enhanced cre
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
 from api.wizard import router as wizard_router  # PRD-130: Business Intake Wizard (PoC)
-from api.onboarding_agents import router as onboarding_agents_router
 from api.statistics import router as statistics_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
@@ -208,15 +208,6 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("System prompts seed: %s", e)
 
-        # Seed onboarding agents (personas/configs may change per release)
-        try:
-            from core.seeds.seed_onboarding_agents import seed_onboarding_agents
-            with get_db_session() as db:
-                seed_onboarding_agents(db)
-            logger.info("Onboarding agents seeded")
-        except Exception as e:
-            logger.warning("Onboarding agent seed: %s", e)
-
         # Seed system settings (new setting keys may ship with code changes)
         try:
             from core.seeds.seed_system_settings import seed_system_settings
@@ -252,6 +243,42 @@ async def _boot_phase_1_core():
                 conn.commit()
         except Exception as e:
             logger.warning("LinkedIn credential type update: %s", e)
+
+        # PRD-226: bring existing workspaces' Auto persona up to the current
+        # doctrine-carrying seed. Hash-guarded — a customized soul is left
+        # untouched and the skip is reported; brand-new workspaces already carry
+        # the doctrine via the seed CREATE path. This is the ONLY reachable
+        # production home for the backfill: every lazy-seed caller (chat.py,
+        # workspaces.py, hybrid.py) reaches seed_auto_agent only when the Auto
+        # row is ABSENT, so its existing-row backfill branch never fires for the
+        # rows that need it. Leader-gated + idempotent, so it is a cheap no-op on
+        # every boot after the one that first lands a new doctrine version.
+        try:
+            from core.seeds.seed_auto_agent import sync_auto_personas
+            with get_db_session() as db:
+                counts = sync_auto_personas(db)  # get_db_session commits on exit
+            logger.info(
+                "Auto doctrine backfill: %s updated, %s skipped (customized), %s current",
+                counts["updated"], counts["skipped"], counts["current"],
+            )
+        except Exception as e:
+            logger.warning("Auto persona doctrine backfill: %s", e)
+
+        # PRD-230 (live-test 2026-08-29): the packages seed existed only as a
+        # manual script, so prod carried ZERO packages — the Packages tab was
+        # empty and onboarding's proposal silently fell back to custom-design
+        # (D10 masked the gap). CREATE-only here: missing packages land on the
+        # next deploy; existing rows are never touched, so live curation of
+        # package content survives redeploys. Full refresh stays a deliberate
+        # manual run of core/seeds/seed_packages.py.
+        try:
+            from core.seeds.seed_packages import seed_packages
+            with get_db_session() as db:
+                pkg_created, _ = seed_packages(db, create_only=True)
+            if pkg_created:
+                logger.info("Marketplace packages seeded: %d created", pkg_created)
+        except Exception as e:
+            logger.warning("Marketplace packages seed: %s", e)
 
         logger.info("Boot seeds completed (leader worker)")
 
@@ -999,7 +1026,6 @@ app.include_router(credentials_router)  # PRD-18: Enhanced credentials with mana
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(wizard_router)  # PRD-130: Business Intake Wizard (PoC)
-app.include_router(onboarding_agents_router)
 app.include_router(statistics_router)
 app.include_router(skills_router)
 app.include_router(templates_router)

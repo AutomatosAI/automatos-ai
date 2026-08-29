@@ -200,7 +200,7 @@ export function ActivityPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div data-tour="activity-page-header">
+      <div>
         <PageHeader
           title="Command"
           titleAccent="Centre"
@@ -230,18 +230,18 @@ export function ActivityPage() {
         />
       </div>
 
-      <div data-tour="activity-stats">
+      <div>
         <StatsBar stats={stats} className="grid gap-3 md:gap-4" />
       </div>
 
-      <div data-tour="activity-vitals">
+      <div>
         <StatsBar stats={vitals} glow={false} className="grid gap-3 md:gap-4 lg:grid-cols-5" />
       </div>
 
       <div>
-        <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab} dataTour="activity-tabs">
+        <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab}>
           <TabsContent value="summary">
-            <div data-tour="activity-summary" className="space-y-4">
+            <div className="space-y-4">
               <AutosRead period={period} />
               <CommandCentreDashboard
                 period={period}
@@ -252,19 +252,19 @@ export function ActivityPage() {
           </TabsContent>
 
           <TabsContent value="board">
-            <div data-tour="activity-board">
+            <div>
               <BoardView period={period} />
             </div>
           </TabsContent>
 
           <TabsContent value="calendar">
-            <div data-tour="activity-calendar">
+            <div>
               <CalendarTab />
             </div>
           </TabsContent>
 
           <TabsContent value="feed">
-            <div data-tour="activity-feed">
+            <div>
               <ActivityFeed
                 period={period}
                 openExecution={openExecution}
@@ -274,7 +274,7 @@ export function ActivityPage() {
           </TabsContent>
 
           <TabsContent value="history">
-            <div data-tour="activity-history">
+            <div>
               <CommandCenterHistory period={period} />
             </div>
           </TabsContent>

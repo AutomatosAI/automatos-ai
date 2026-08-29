@@ -64,14 +64,10 @@ _AGENT_TARGETS = frozenset({TARGET_AGENT, TARGET_HEARTBEAT, TARGET_TOOL_ASSIGNME
 # actors bypass the hierarchy. ``is_system_agent=True`` is necessary but not
 # sufficient; the name must also match. Adding to this list is a
 # security-sensitive change. Keep in sync with the seeds in ``core/seeds/``
-# (seed_auto_agent, seed_cto_agent, seed_onboarding_agents).
+# (seed_auto_agent, seed_cto_agent).
 SYSTEM_BYPASS_ALLOWLIST: frozenset = frozenset({
     "Auto",            # workspace orchestrator (seed_auto_agent)
     "Auto CTO",        # platform CTO agent (seed_cto_agent)
-    "VOYAGER",         # Mission Zero onboarding (seed_onboarding_agents)
-    "BLUEPRINT",       # Mission Zero onboarding
-    "SCRIBE",          # Mission Zero onboarding
-    "FORGE",           # Mission Zero onboarding (builds agents/org)
     "HARNESS",         # weekly self-optimisation service actor
     "platform-admin",  # explicit admin agent
     "platform-system", # internal service actor

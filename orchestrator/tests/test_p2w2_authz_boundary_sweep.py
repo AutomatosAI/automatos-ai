@@ -90,6 +90,7 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/verticals/{vertical}/gdpr/erase"),
     ("POST", "/api/verticals/{vertical}/gdpr/erase-subject"),
     ("POST", "/api/verticals/{vertical}/provision"),
+    ("PATCH", "/api/verticals/{vertical}/provision/domains"),
     ("POST", "/api/shopify/connect"),
     ("POST", "/api/shopify/deactivate"),
     ("POST", "/api/shopify/events"),
@@ -143,6 +144,10 @@ ADMIN_GATED_IN_HANDLER = {
     # PRD-207 S7: one-click arming — platform-admin gate in the handler body
     # (`_is_platform_admin(ctx)` → 403), not a shared dependency.
     ("POST", "/api/voice/arm"),
+    # PRD-222 US-016 (W1·S10 / D9): the DEV onboarding-reset route gates in the
+    # handler body (`_require_admin(ctx)` → 403, super-admin-inclusive) after a
+    # feature-flag 404, not via a shared dependency. TEMPORARY, off by default.
+    ("POST", "/api/workspaces/current/onboarding/reset"),
 }
 
 # (g) Own explicit in-handler gate.

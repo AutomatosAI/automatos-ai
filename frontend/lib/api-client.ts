@@ -155,6 +155,17 @@ export interface ApprovalGrantOversight {
   requires_approval: boolean
 }
 
+// PRD-225: the cascade of downstream work parked behind a question.
+export interface QuestionCascadeTask {
+  id: number
+  title: string
+  status: string
+}
+export interface QuestionCascade {
+  total: number
+  tasks: QuestionCascadeTask[]
+}
+
 export interface ApprovalGrant {
   id: number
   workspace_id: string | null
@@ -173,6 +184,19 @@ export interface ApprovalGrant {
   revoked_at: string | null
   revoked_by: string | null
   oversight?: ApprovalGrantOversight
+  /** PRD-193 S4: params snapshot + executed_result land here on resume. */
+  details?: Record<string, unknown>
+  // PRD-225: a grant is a question when its decision is words, not a boolean.
+  kind?: 'approval' | 'question' | string
+  question_md?: string | null
+  options?: string[] | null
+  answer_text?: string | null
+  answered_by?: string | null
+  answered_at?: string | null
+  asked_by_agent_id?: number | null
+  channel_refs?: Record<string, unknown>
+  /** Downstream tasks blocked behind a question (question rows only). */
+  cascade?: QuestionCascade
 }
 
 export interface ApprovalGrantsResponse {
@@ -294,6 +318,40 @@ export interface WatchEventRow {
 export interface WatchesResponse {
   watches: WatchRow[]
   total: number
+}
+
+// ===== PRD-228 Fleet State: live floor read-model =====
+export interface FleetCurrentWork {
+  kind: 'board_task' | 'mission_task'
+  id: number | string
+  title: string
+  since: string | null
+}
+
+export interface FleetAgentRow {
+  agent_id: number
+  name: string
+  current: FleetCurrentWork | null
+  queue_depth: number
+  blocked: { count: number; open_asks: Array<number | string> }
+  watches: { active: number; needs_attention: number }
+  last_activity_at: string | null
+  // Omitted when the cost source is unavailable (fail-soft).
+  cost_24h?: { tokens: number; usd: number }
+}
+
+export interface FleetStateResponse {
+  version: number
+  generated_at: string | null
+  window_hours: number
+  cost_available: boolean
+  cost_source: string | null
+  // Source-availability flags (mirror cost_available): false means the source
+  // failed and its fields carry fail-soft defaults, not real values — so a
+  // degraded source is distinguishable from a genuine zero (P228-RVW-6).
+  watches_available: boolean
+  asks_available: boolean
+  agents: FleetAgentRow[]
 }
 
 export interface WatchDetailResponse {
@@ -2178,9 +2236,15 @@ class ApiClient {
   }
 
   // ===== PRD-196 S1/S2 governance: approval grants (ws-admin gated) =====
-  async listApprovalGrants(status?: string): Promise<ApprovalGrantsResponse> {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-    return this.request<ApprovalGrantsResponse>(`/api/v1/approval-grants${qs}`)
+  async listApprovalGrants(status?: string, kind?: string): Promise<ApprovalGrantsResponse> {
+    // PRD-225: the Questions tab reuses this route with kind=question.
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (kind) params.set('kind', kind)
+    const qs = params.toString()
+    return this.request<ApprovalGrantsResponse>(
+      `/api/v1/approval-grants${qs ? `?${qs}` : ''}`,
+    )
   }
 
   async grantApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
@@ -2193,6 +2257,18 @@ class ApiClient {
 
   async revokeApproval(grantId: number): Promise<{ grant: ApprovalGrant }> {
     return this.request(`/api/v1/approval-grants/${grantId}/revoke`, { method: 'POST' })
+  }
+
+  // PRD-225: answer a pending question — records the answer and resumes the
+  // parked subject through the grant resume machinery.
+  async answerQuestion(
+    grantId: number,
+    body: { answer_text?: string; option?: string }
+  ): Promise<{ grant: ApprovalGrant }> {
+    return this.request(`/api/v1/approval-grants/${grantId}/answer`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
   }
 
   // ===== PRD-196 S3 governance: status + audit log (ws-admin gated) =====
@@ -2267,6 +2343,11 @@ class ApiClient {
 
   async cancelWatch(watchId: string): Promise<{ watch: WatchRow }> {
     return this.request(`/api/v1/watches/${watchId}/cancel`, { method: 'POST' })
+  }
+
+  // ===== PRD-228 Fleet State: live floor read-model =====
+  async getFleetState(): Promise<FleetStateResponse> {
+    return this.request<FleetStateResponse>('/api/v1/fleet')
   }
 }
 

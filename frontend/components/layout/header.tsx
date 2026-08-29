@@ -47,7 +47,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         </div>
 
         {/* Right side */}
-        <div data-tour="header-actions" className="flex items-center space-x-2 md:space-x-4">
+        <div className="flex items-center space-x-2 md:space-x-4">
           {/* Help & Docs */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

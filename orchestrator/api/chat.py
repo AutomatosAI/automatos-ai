@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService
-from consumers.chatbot.auto import AutoBrain, Action
+from consumers.chatbot.auto import Action, AutoBrain, apply_assign_bias
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
@@ -403,7 +403,20 @@ async def stream_chat(
         # all its platform tools (create agents, read workspace, plan, etc.)
         _platform_hints = "platform" in (complexity_assessment.tool_hints or [])
 
-        if complexity_assessment.action == Action.RESPOND or _platform_hints:
+        if complexity_assessment.action == Action.ASSIGN:
+            # PRD-224 US-004: the middle lane — Auto files a board ticket for a
+            # named single agent using its platform tools, then confirms in one
+            # line. Not an inline answer, not a mission. Checked BEFORE the
+            # platform-hint reroute so a "platform" tool_hint can't collapse it
+            # into RESPOND. effective agent = Auto (it owns the filing).
+            effective_agent_id = _fallback_agent_id
+            _deferred = apply_assign_bias(complexity_assessment, message_text)
+            logger.info(
+                f"[Auto] ASSIGN lane — agent={complexity_assessment.target_agent_name!r} "
+                f"resolved={complexity_assessment.target_agent_id is not None} "
+                f"deferred={_deferred}: agent_id={effective_agent_id}"
+            )
+        elif complexity_assessment.action == Action.RESPOND or _platform_hints:
             # Auto handles directly — no routing, no delegation.
             # Auto uses its own agent model (not orchestrator LLM).
             effective_agent_id = _fallback_agent_id

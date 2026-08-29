@@ -1,0 +1,445 @@
+"""PRD-225 US-003 — answer → resume, dismiss, and the approve/answer split.
+
+Pure tests over a fake session (the test_p2w2_grant_resume pattern), calling the
+endpoint functions directly with monkeypatched board-dispatch + chat seams:
+
+  - answering a board-task question re-queues the parked task and lands the Q&A
+    in planning_data.human_qa (rebuild-don't-mutate);
+  - answering a tool_call question runs the _resume_tool_call path with the Q&A
+    on the resume payload;
+  - dismissing (deny) a question leaves the subject BLOCKED, trail intact;
+  - approving a question is rejected — /answer is its only completion path;
+  - the chat confirmation fires via deliver_background_message.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import uuid
+from types import SimpleNamespace
+
+import pytest
+
+os.environ.setdefault("POSTGRES_USER", "test")
+os.environ.setdefault("POSTGRES_PASSWORD", "test")
+os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
+os.environ.setdefault("POSTGRES_PORT", "59432")
+os.environ.setdefault("POSTGRES_DB", "test")
+
+from pathlib import Path
+
+_ORCH = Path(__file__).resolve().parents[1]
+if str(_ORCH) not in sys.path:
+    sys.path.insert(0, str(_ORCH))
+
+from fastapi import HTTPException
+
+from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_APPROVAL, KIND_QUESTION
+from core.models.core import BoardTask
+
+
+# ---------------------------------------------------------------------------
+# Fake session — .filter().first() (for _load_grant) + .get(pk) (board task).
+# ---------------------------------------------------------------------------
+
+class _Query:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def get(self, pk):
+        for r in self._rows:
+            if getattr(r, "id", None) == pk:
+                return r
+        return None
+
+    def filter(self, *conds):
+        rows = self._rows
+        for cond in conds:
+            key = cond.left.key
+            value = getattr(cond.right, "value", None)
+            if isinstance(value, (list, tuple, set)):
+                # column.in_([...]) — the P225-RVW-18 revoke CAS guard
+                # (status IN ('pending','granted')). Emulate set membership.
+                allowed = {str(v) for v in value}
+                rows = [r for r in rows if str(getattr(r, key, None)) in allowed]
+            else:
+                rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
+        return _Query(rows)
+
+    def order_by(self, *a):
+        return _Query(list(reversed(self._rows)))
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+    def all(self):
+        return list(self._rows)
+
+    def update(self, values, synchronize_session=False):
+        """Emulate a filtered UPDATE (the P225-RVW-14 compare-and-swap): mutate
+        the already-filtered rows and return the affected count."""
+        n = 0
+        for r in self._rows:
+            for col, val in values.items():
+                setattr(r, getattr(col, "key", col), val)
+            n += 1
+        return n
+
+
+class _FakeSession:
+    def __init__(self):
+        self.rows = []
+        self.commits = 0
+
+    def add(self, obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = len(self.rows) + 1
+        self.rows.append(obj)
+
+    def flush(self):
+        pass
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def refresh(self, obj):
+        pass
+
+    def query(self, model):
+        return _Query([r for r in self.rows if isinstance(r, model)])
+
+
+@pytest.fixture()
+def ws():
+    return uuid.uuid4()
+
+
+@pytest.fixture()
+def ctx(ws):
+    return SimpleNamespace(workspace_id=ws, user_id=5, internal_user_id=5)
+
+
+@pytest.fixture()
+def confirmed(monkeypatch):
+    """Capture the chat confirmation without touching the DB."""
+    calls = []
+    monkeypatch.setattr(
+        "services.chat_messenger.deliver_background_message",
+        lambda db, **kw: calls.append(kw),
+    )
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def _no_board_notify(monkeypatch):
+    """The board re-queue's NOTIFY is infra — stub it for the pure test."""
+    monkeypatch.setattr(
+        "services.board_dispatcher.notify_task_available",
+        lambda *a, **k: None,
+    )
+
+
+def _question(db, ws, *, subject_type, subject_id, question="Ship A or B?", options=None):
+    g = ApprovalGrant(
+        workspace_id=ws, subject_type=subject_type, subject_id=str(subject_id),
+        kind=KIND_QUESTION, question_md=question, options=options,
+        status=GrantStatus.PENDING.value,
+    )
+    db.add(g)
+    return g
+
+
+# ===========================================================================
+# 1. Answer a board-task question → re-queue + Q&A in planning_data
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_answer_requeues_board_task_and_records_qa(ws, ctx, confirmed):
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    task = BoardTask(
+        id=42, workspace_id=ws, title="T", status="blocked",
+        blocked_reason="Awaiting human answer (ask #1)",
+    )
+    task.blocked_at = None
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="42")
+
+    res = await answer_question(grant.id, AnswerRequest(answer_text="Ship A"), ctx, db)
+
+    assert grant.status == GrantStatus.GRANTED.value
+    assert grant.answer_text == "Ship A"
+    assert grant.answered_by == "user:5"
+    assert grant.answered_at is not None
+    # The parked task is re-queued.
+    assert task.status == "assigned"
+    assert task.blocked_reason is None
+    # The Q&A landed in the run context (rebuild-don't-mutate).
+    qa = task.planning_data["human_qa"]
+    assert qa == [{"q": "Ship A or B?", "a": "Ship A", "answered_by": "user:5", "at": qa[0]["at"]}]
+    assert res["grant"]["status"] == GrantStatus.GRANTED.value
+
+
+@pytest.mark.asyncio
+async def test_answer_appends_to_existing_human_qa(ws, ctx, confirmed):
+    """A re-ask appends — the prior Q&A is preserved, not overwritten."""
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    task = BoardTask(id=7, workspace_id=ws, title="T", status="blocked")
+    task.planning_data = {"human_qa": [{"q": "old", "a": "prior", "answered_by": "user:1", "at": "t0"}]}
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="7", question="new?")
+
+    await answer_question(grant.id, AnswerRequest(answer_text="fresh"), ctx, db)
+    qa = task.planning_data["human_qa"]
+    assert len(qa) == 2
+    assert qa[0]["a"] == "prior" and qa[1]["a"] == "fresh"
+
+
+# ===========================================================================
+# 2. Answer a tool_call question → _resume_tool_call path + Q&A on payload
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_answer_resumes_tool_call(ws, ctx, confirmed):
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    grant = _question(db, ws, subject_type="tool_call", subject_id="call-1")
+
+    await answer_question(grant.id, AnswerRequest(answer_text="use vendor X"), ctx, db)
+
+    assert grant.status == GrantStatus.GRANTED.value
+    # The Q&A rode the resume payload (details), rebuild-don't-mutate.
+    assert grant.details["human_qa"][0]["a"] == "use vendor X"
+    # _resume_tool_call ran (no stored action ⇒ an honest no-op summary).
+    assert "executed_result" in grant.details
+
+
+# ===========================================================================
+# 3. Chosen option must be a real choice; option answers work
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_option_answer_and_validation(ws, ctx, confirmed):
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    grant = _question(db, ws, subject_type="tool_call", subject_id="c2", options=["A", "B"])
+
+    ok = await answer_question(grant.id, AnswerRequest(option="B"), ctx, db)
+    assert ok["grant"]["answer_text"] == "B"
+
+    db2 = _FakeSession()
+    g2 = _question(db2, ws, subject_type="tool_call", subject_id="c3", options=["A", "B"])
+    with pytest.raises(HTTPException) as ei:
+        await answer_question(g2.id, AnswerRequest(option="Z"), ctx, db2)
+    assert ei.value.status_code == 422
+    assert "option" in ei.value.detail
+
+
+@pytest.mark.asyncio
+async def test_empty_answer_rejected(ws, ctx, confirmed):
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    grant = _question(db, ws, subject_type="tool_call", subject_id="c4")
+    with pytest.raises(HTTPException) as ei:
+        await answer_question(grant.id, AnswerRequest(answer_text="   "), ctx, db)
+    assert ei.value.status_code == 422
+
+
+# ===========================================================================
+# 4. Dismiss (deny) a question → subject stays BLOCKED, trail intact
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_dismiss_leaves_subject_blocked(ws, ctx):
+    from api.approval_grants import deny_approval
+
+    db = _FakeSession()
+    task = BoardTask(id=99, workspace_id=ws, title="T", status="blocked",
+                     blocked_reason="Awaiting human answer (ask #1)")
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="99")
+
+    res = await deny_approval(grant.id, ctx, db)
+
+    assert grant.status == GrantStatus.DENIED.value
+    # Baked decision: dismiss does NOT fail the subject — it stays blocked.
+    assert task.status == "blocked"
+    assert task.blocked_reason == "Awaiting human answer (ask #1)"
+    # Trail intact: the question row survives with no fabricated answer.
+    assert grant.question_md == "Ship A or B?"
+    assert grant.answer_text is None
+    assert res["grant"]["status"] == GrantStatus.DENIED.value
+
+
+# ===========================================================================
+# 5. Approve on a question is rejected — /answer is the only completion path
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_grant_rejects_question(ws, ctx):
+    from api.approval_grants import grant_approval
+
+    db = _FakeSession()
+    grant = _question(db, ws, subject_type="tool_call", subject_id="c5")
+    with pytest.raises(HTTPException) as ei:
+        await grant_approval(grant.id, ctx, db)
+    assert ei.value.status_code == 422
+    assert "question" in ei.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_answer_rejects_non_question(ws, ctx, confirmed):
+    """Answering an approval-kind grant is a 422 — the split holds both ways."""
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    approval = ApprovalGrant(
+        workspace_id=ws, subject_type="board_task", subject_id="1",
+        status=GrantStatus.PENDING.value,  # kind defaults to 'approval'
+    )
+    db.add(approval)
+    with pytest.raises(HTTPException) as ei:
+        await answer_question(approval.id, AnswerRequest(answer_text="x"), ctx, db)
+    assert ei.value.status_code == 422
+
+
+# ===========================================================================
+# 6. Chat confirmation fires via deliver_background_message
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_answer_confirms_into_chat(ws, ctx, confirmed):
+    """A board-task answer genuinely resumes the parked task, so the confirmation
+    says 'resuming' and carries the question link."""
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    task = BoardTask(id=6, workspace_id=ws, title="T", status="blocked")
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="6")
+    await answer_question(grant.id, AnswerRequest(answer_text="go"), ctx, db)
+
+    assert len(confirmed) == 1
+    call = confirmed[0]
+    assert call["link_type"] == "question"
+    assert call["link_id"] == str(grant.id)
+    assert "resuming" in call["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_is_honest_when_no_resume(ws, ctx, confirmed):
+    """A channel trust-gate hold has NO resume path: answering it records the
+    answer, but the chat confirmation must NOT claim the work is 'resuming' —
+    it says the answer was recorded with nothing to auto-resume (P225-RVW-11)."""
+    from api.approval_grants import answer_question, AnswerRequest
+
+    db = _FakeSession()
+    grant = _question(db, ws, subject_type="channel", subject_id="chan-1")
+    await answer_question(grant.id, AnswerRequest(answer_text="route it"), ctx, db)
+
+    assert grant.status == GrantStatus.GRANTED.value  # the answer is recorded
+    assert len(confirmed) == 1
+    text = confirmed[0]["text"].lower()
+    assert "resuming" not in text     # never a false resume claim
+    assert "recorded" in text         # honest: recorded, nothing to auto-resume
+
+
+# ===========================================================================
+# 7. P225-RVW-14 — the pending→granted flip is atomic (compare-and-swap), so
+# two concurrent answers to the same question apply exactly once.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_concurrent_answers_apply_once(ws, ctx, confirmed):
+    """Two near-simultaneous answers (both having passed the pending pre-check)
+    reach the CAS in apply_question_answer: the first flips pending→granted and
+    applies; the second's UPDATE...WHERE status='pending' matches 0 rows and is a
+    safe no-op — one human_qa entry, one resume, one confirmation (P225-RVW-14)."""
+    from api.approval_grants import apply_question_answer
+
+    db = _FakeSession()
+    task = BoardTask(id=42, workspace_id=ws, title="T", status="blocked")
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="42")
+
+    # First answer wins the CAS and applies.
+    await apply_question_answer(db, grant, answer_text="Ship A", answered_by="user:1")
+    # Second concurrent answer to the SAME question is a safe no-op.
+    await apply_question_answer(db, grant, answer_text="Ship B", answered_by="user:2")
+
+    assert grant.status == GrantStatus.GRANTED.value
+    assert grant.answer_text == "Ship A"          # the first answer won
+    assert grant.answered_by == "user:1"
+    qa = task.planning_data["human_qa"]
+    assert len(qa) == 1 and qa[0]["a"] == "Ship A"  # exactly one Q&A entry
+    assert len(confirmed) == 1                       # exactly one confirmation
+
+
+# ===========================================================================
+# 8. P225-RVW-18 — deny/revoke flip status via the SAME compare-and-swap, so a
+# /deny (or /revoke) racing a just-applied /answer cannot overwrite the resolved
+# grant, leaving a self-contradictory audited row.
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_deny_racing_answer_is_a_noop(ws, ctx, confirmed):
+    """A dismiss (/deny) racing a just-applied /answer: the answer flips
+    pending→granted, so deny's CAS (UPDATE ... WHERE status='pending') matches 0
+    rows → 422, and the row STAYS granted with answer_text intact — never a grant
+    that reads BOTH answered and denied for one id (P225-RVW-18)."""
+    from api.approval_grants import apply_question_answer, deny_approval
+
+    db = _FakeSession()
+    task = BoardTask(id=42, workspace_id=ws, title="T", status="blocked")
+    db.rows.append(task)
+    grant = _question(db, ws, subject_type="board_task", subject_id="42")
+
+    # The answer wins first (pending→granted, Q&A recorded, task re-queued).
+    await apply_question_answer(db, grant, answer_text="Ship A", answered_by="user:1")
+    assert grant.status == GrantStatus.GRANTED.value
+
+    # The racing dismiss loses the CAS — 422, and it overwrites NOTHING.
+    with pytest.raises(HTTPException) as ei:
+        await deny_approval(grant.id, ctx, db)
+    assert ei.value.status_code == 422
+    assert grant.status == GrantStatus.GRANTED.value      # not flipped to denied
+    assert grant.answer_text == "Ship A"                  # answer intact
+    assert grant.revoked_by is None                       # no dismiss actor recorded
+
+
+@pytest.mark.asyncio
+async def test_revoke_racing_resolution_is_a_noop(ws, ctx):
+    """Two /revoke calls (or a revoke racing a deny) apply exactly once: the first
+    flips granted→revoked; the second's CAS (WHERE status IN ('pending','granted'))
+    matches 0 rows → 422, leaving the FIRST revoker's resolution intact — the
+    RVW-14 pattern extended to revoke (P225-RVW-18)."""
+    from api.approval_grants import revoke_approval
+
+    db = _FakeSession()
+    grant = ApprovalGrant(
+        workspace_id=ws, subject_type="tool_call", subject_id="call-9",
+        kind=KIND_APPROVAL, status=GrantStatus.GRANTED.value,
+    )
+    db.add(grant)
+
+    # First revoke wins (granted→revoked).
+    res = await revoke_approval(grant.id, ctx, db)
+    assert grant.status == GrantStatus.REVOKED.value
+    assert res["grant"]["status"] == GrantStatus.REVOKED.value
+    first_revoker = grant.revoked_by
+
+    # The racing second revoke loses the CAS — 422, resolution unchanged.
+    with pytest.raises(HTTPException) as ei:
+        await revoke_approval(grant.id, ctx, db)
+    assert ei.value.status_code == 422
+    assert grant.status == GrantStatus.REVOKED.value      # still revoked, once
+    assert grant.revoked_by == first_revoker              # loser did not overwrite

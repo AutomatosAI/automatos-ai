@@ -6,6 +6,8 @@ ONLY PLACE where os.getenv() is called for configuration.
 All other files import from here.
 """
 
+import copy
+import json
 import os
 import logging
 from pathlib import Path
@@ -563,6 +565,9 @@ class Config:
     WIDGET_CHAT_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CHAT_IP_LIMIT_PER_WINDOW", "30"))
     WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW: int = int(os.getenv("WIDGET_CALLBACK_IP_LIMIT_PER_WINDOW", "10"))
     SHOPIFY_INTERNAL_API_KEY: str = os.getenv("SHOPIFY_INTERNAL_API_KEY", "")
+    # BudStacks vertical (api/verticals.py) — same fail-closed posture: unset ⇒
+    # the budstacks provision surface answers 503, never open.
+    BUDSTACKS_INTERNAL_API_KEY: str = os.getenv("BUDSTACKS_INTERNAL_API_KEY", "")
     # PRD-189 S3: per-workspace debounce window (seconds) for catalog-webhook
     # re-syncs. A merchant bulk edit emits a burst of products/update webhooks;
     # /events coalesces the burst into ONE full Bulk-Op re-sync once it has
@@ -606,6 +611,9 @@ class Config:
     # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
     # connection-liveness heartbeat cadence (a ':hb' comment), not a refresh tick.
     BOARD_SSE_HEARTBEAT_SECONDS: float = float(os.getenv("BOARD_SSE_HEARTBEAT_SECONDS", "20"))
+    # PRD-228: an agent shown as "working" whose last task activity is older than
+    # this is flagged STALLED by the fleet-status anomaly surface (default 30 min).
+    FLEET_STALL_SECONDS: int = int(os.getenv("FLEET_STALL_SECONDS", "1800"))
 
     # =============================================================================
     # AUTO WATCHER (PRD-204: persistent supervision of launched work)
@@ -619,6 +627,11 @@ class Config:
     # Sweep cadence. The S3 hooks are the fast path; the tick is the
     # fallback and the missed-run/trend brain, so 5 minutes is plenty.
     WATCHER_TICK_SECONDS: int = int(os.getenv("WATCHER_TICK_SECONDS", "300"))
+    # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
+    # board ticket Auto files, so an assigned ticket reports its verdict back
+    # into the originating thread. Default ON — an unsupervised assigned ticket
+    # is the current failure mode, not a feature (Gerard, 2026-08-27).
+    AUTO_TICKET_WATCH: bool = os.getenv("AUTO_TICKET_WATCH", "true").lower() in ("true", "1", "yes")
 
     WORKER_INTERNAL_URL: str = os.getenv("WORKER_INTERNAL_URL", "http://localhost:8081")
     WORKER_INTERNAL_TOKEN: str = os.getenv("WORKER_INTERNAL_TOKEN", "")
@@ -916,9 +929,40 @@ class Config:
     COORDINATOR_COST_PER_1K_TOKENS: float = float(os.getenv("COORDINATOR_COST_PER_1K_TOKENS", "0.003"))
     # Replanning limits (PRD-82B US-005)
     COORDINATOR_MAX_REPLANS: int = int(os.getenv("COORDINATOR_MAX_REPLANS", "2"))
+    # PRD-227 US-002: mission-narration throttle. A mission narrates its lifecycle
+    # back into the launching chat (approved → task done/failed → completed/failed/
+    # cancelled). Run-level lines always send; task-level lines are SUPPRESSED for
+    # runs with more than this many tasks, to keep large plans readable. Default 8
+    # (Gerard, 2026-08-27). Narration itself is on for all missions.
+    MISSION_NARRATION_TASK_CAP: int = int(os.getenv("MISSION_NARRATION_TASK_CAP", "8"))
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
+    # PRD-229: mid-run clarifications (ask_orchestrator). CLARIFICATION_BUDGET
+    # caps how many questions Auto ANSWERS per run from retrievable context;
+    # once spent, everything escalates (escalations are never budget-limited —
+    # they are visible and cheap by design). Default 3 (Gerard, 2026-08-27).
+    CLARIFICATION_BUDGET: int = int(os.getenv("CLARIFICATION_BUDGET", "3"))
+    # PRD-229: hard time-box for ONE ask_orchestrator answer round (retrieval +
+    # one composition call). It runs INSIDE the executing task's asyncio.wait_for
+    # envelope (coordinator_service._run_agent_io), whose timeout is the power
+    # mode's timeout_seconds (_POWER_MODE_DEFAULTS: light=120s, standard=240s,
+    # max=600s). 30s sits well inside the SMALLEST (light, 120s) envelope; the
+    # cumulative N-round bound is CLARIFICATION_MAX_ROUNDS_PER_TASK below (this
+    # constant only bounds a SINGLE round). On time-box expiry the tool takes the
+    # cannot_answer path.
+    CLARIFICATION_ANSWER_TIMEOUT: int = int(os.getenv("CLARIFICATION_ANSWER_TIMEOUT", "30"))
+    # PRD-229 (P229-RVW-8): CLARIFICATION_ANSWER_TIMEOUT bounds ONE round and
+    # CLARIFICATION_BUDGET caps ANSWERED rounds per RUN — but neither bounds the
+    # CUMULATIVE answer-round time a SINGLE task can spend (N rounds ×
+    # CLARIFICATION_ANSWER_TIMEOUT could approach the task envelope, then the outer
+    # asyncio.wait_for hard-cancels the WHOLE task — lost work + retry). This caps
+    # the answer rounds one task may ENTER: worst-case clarification time =
+    # CLARIFICATION_MAX_ROUNDS_PER_TASK × CLARIFICATION_ANSWER_TIMEOUT (2 × 30s =
+    # 60s) — half the smallest (light, 120s) envelope, leaving ~60s for the task's
+    # own LLM turns. The (cap+1)th ask_orchestrator call short-circuits to
+    # escalation (park + human) WITHOUT entering a 30s round.
+    CLARIFICATION_MAX_ROUNDS_PER_TASK: int = int(os.getenv("CLARIFICATION_MAX_ROUNDS_PER_TASK", "2"))
     # Note: synthesis-task model selection is now driven by power_mode +
     # the agent's own configured model — no synthesis-specific override.
     # System LLM (gemini-2.5-flash) is reserved for codegraph / memory / planner.
@@ -971,6 +1015,19 @@ class Config:
     TOOL_FALLBACK_PINS: str = os.getenv(
         "TOOL_FALLBACK_PINS",
         "platform_find_tools,platform_search_memory,platform_store_memory,platform_resume_context",
+    )
+    # PRD-228 (P228-RVW-4): actions the dispatcher_only surface (the heartbeat
+    # orchestrator) MUST keep reachable regardless of the semantic top-K ranking
+    # outcome, so the standing health loop can always read live floor state.
+    # Unioned onto the NARROWED enum only (an open-full/None surface already
+    # exposes every action). CSV of action names; each is role-gate-checked
+    # before admission, so a gated/unknown name can never be forced in. Default
+    # pins platform_fleet_status (PRD-228 US-003 fleet read-model tool) — without
+    # a reserved slot it can rank out of the top-15 on any given tick and the
+    # loop silently loses situational awareness (signal-tool-routing-drop class).
+    HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE: str = os.getenv(
+        "HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE",
+        "platform_fleet_status",
     )
     # Shadow telemetry: log (never ship) what the PR-C relevance-gated surface
     # WOULD have been for each turn — the eval data for the flip.
@@ -1313,8 +1370,6 @@ class Config:
     # today's accumulated trial spend reaches this (US-005's daily counter feeds it).
     TRIAL_GLOBAL_DAILY_USD: float = float(os.getenv("TRIAL_GLOBAL_DAILY_USD", "25.00"))
     # Models a trial workspace may use on the platform key. Reuses the platform's
-    # existing economical model comma-list (BUDGET_MODELS, PRD-54) — no new id invented.
-    TRIAL_MODEL_ALLOWLIST: str = os.getenv("TRIAL_MODEL_ALLOWLIST", BUDGET_MODELS)
 
     # PRD-207 S4: Auto Live tuning constants. These are NUMERIC dials only —
     # the ON-switch (`voice.live_enabled`) and the Retell credentials live in
@@ -1631,9 +1686,149 @@ COMPLEXITY_TOKEN_BUDGET: dict[str, int] = {
 # Backward compatibility alias
 orchestrator_config = config
 
+# ---------------------------------------------------------------------------
+# PRD-222 W2·S1 (US-023): PLAN_TIERS — the v1 tier contract (approved strawman,
+# 2026-08-28). DISPLAY PRICING ONLY — no billing or commerce is wired anywhere
+# (PRD §12 Q5); ``display_price_usd`` sources an EARLY-ACCESS label, never a
+# charge. Capability families (codegraph/nl2sql/team/voice) and the quota limits
+# both derive from here: US-024 reads them for exposure profiles, and US-025's
+# assignment helper (services/plan_tiers.py) writes the limits into
+# ``workspaces.plan_limits`` under the keys live code already reads
+# (seats→max_members, max_agents, budget). ``enterprise`` is a COMING-SOON
+# display entry only — never assignable.
+#
+# Every number is env-overridable WITHOUT a redeploy via
+# ``AUTOMATOS_PLAN_TIERS_JSON`` (a JSON object deep-merged onto these defaults)
+# so tiers can be tuned live while testing. ``0`` means "unlimited" for
+# max_agents / watcher_limit, and "no ceiling / custom" for budget_usd.
+# ---------------------------------------------------------------------------
+_PLAN_TIERS_DEFAULTS: dict[str, dict] = {
+    "basic": {
+        "display_name": "Basic",
+        "display_price_usd": 19,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 1,
+        "max_agents": 5,
+        "mission_concurrency": 1,
+        "watcher_limit": 1,
+        "marketplace_depth": 1,
+        "budget_usd": 25,
+        "families": {"codegraph": False, "nl2sql": False, "team": False, "voice": False},
+    },
+    "pro": {
+        "display_name": "Pro",
+        "display_price_usd": 49,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 5,
+        "max_agents": 20,
+        "mission_concurrency": 3,
+        "watcher_limit": 5,
+        "marketplace_depth": 2,
+        "budget_usd": 100,
+        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": False},
+    },
+    "business": {
+        "display_name": "Business",
+        "display_price_usd": 99,
+        "price_label": "early access",
+        "assignable": True,
+        "seats": 25,
+        "max_agents": 0,
+        "mission_concurrency": 10,
+        "watcher_limit": 0,
+        "marketplace_depth": 3,
+        "budget_usd": 0,
+        "families": {"codegraph": True, "nl2sql": True, "team": True, "voice": True},
+    },
+    "enterprise": {
+        # Coming-soon placeholder — no ``families`` key on purpose. A tier
+        # RESTRICTS only by declaring families, so a tier with none is treated as
+        # UNRESTRICTED by both enforcement layers (nav + Auto's tool surface) —
+        # see services/plan_tiers.exposure_for_plan / filter_tools_by_plan
+        # (RVW-5). When enterprise is promoted assignable via
+        # AUTOMATOS_PLAN_TIERS_JSON, add a ``families`` map to gate it; without
+        # one it correctly exposes the FULL surface (top tier ≥ business).
+        "display_name": "Enterprise",
+        "assignable": False,
+        "coming_soon": True,
+    },
+}
+
+
+def load_plan_tiers(env_override=None) -> dict:
+    """Resolve PLAN_TIERS from the defaults + an optional JSON env override.
+
+    The override (``AUTOMATOS_PLAN_TIERS_JSON`` by default, or an explicit string
+    for tests) is a JSON object of ``{tier: {field: value}}`` deep-merged onto
+    the defaults — so one env var can reprice or re-gate any tier with no code
+    change or redeploy. Malformed JSON is ignored (defaults stand) and logged.
+    Returns a fresh deep copy so callers can never mutate the module constant.
+    """
+    tiers = copy.deepcopy(_PLAN_TIERS_DEFAULTS)
+    raw = env_override if env_override is not None else os.getenv("AUTOMATOS_PLAN_TIERS_JSON", "")
+    raw = (raw or "").strip()
+    if not raw:
+        return tiers
+    try:
+        override = json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("[config] AUTOMATOS_PLAN_TIERS_JSON is not valid JSON — using tier defaults")
+        return tiers
+    if not isinstance(override, dict):
+        return tiers
+    for name, fields in override.items():
+        if not isinstance(fields, dict):
+            continue
+        merged = dict(tiers.get(name, {}))
+        for key, value in fields.items():
+            if key == "families" and isinstance(value, dict):
+                fam = dict(merged.get("families", {}))
+                fam.update(value)
+                merged["families"] = fam
+            else:
+                merged[key] = value
+        tiers[name] = merged
+    return tiers
+
+
+PLAN_TIERS: dict[str, dict] = load_plan_tiers()
+
+# ---------------------------------------------------------------------------
+# PRD-222 W2·S1b (US-024): tool-name → capability-family map. A platform tool
+# whose name matches an entry belongs to that family; a family DISABLED for the
+# workspace's tier (PLAN_TIERS[plan]["families"]) is trimmed from Auto's per-turn
+# tool surface at the single assembly seam
+# (modules/tools/tool_router.get_tools_for_agent_async → services.plan_tiers.
+# filter_tools_by_plan). Tools in NO family are CORE — always present. This map
+# is config-side (the filter itself hardcodes no family names) so re-gating is a
+# config/env change, and its keys MUST be the family names used in
+# PLAN_TIERS[*]["families"]. Match semantics: exact name, OR prefix when the
+# entry ends in '_'. ``voice`` gates nav/exposure only — Retell (PRD-207) is a
+# separate lane with no platform_execute tools — so it maps to an empty list.
+# Note: ``platform_get_activity_feed`` is deliberately NOT in nl2sql — the
+# Command Center is available to every tier (only NL2SQL/analytics is gated).
+TOOL_FAMILIES: dict[str, list] = {
+    "codegraph": ["platform_codegraph_"],  # prefix — all 9 first-class CodeGraph tools
+    "nl2sql": [
+        "platform_query_data",              # the NL2SQL data query
+        "platform_get_llm_usage", "platform_get_cost_breakdown", "platform_workspace_stats",
+        "platform_get_success_rate", "platform_get_completion_time", "platform_get_error_rates",
+        "platform_get_queue_depth", "platform_get_efficiency_score", "platform_get_cost_per_execution",
+        "platform_get_peak_hours", "platform_get_bottlenecks", "platform_get_predictive_alerts",
+        "platform_get_agent_ranking",
+    ],
+    "team": [
+        "platform_list_members", "platform_invite_member",
+        "platform_set_member_role", "platform_remove_member",
+    ],
+    "voice": [],
+}
+
 # Validate on import (non-blocking)
 # if not config.validate():
 #     logger.warning("⚠️  WARNING: Configuration validation failed")
 
 # Export for easy import
-__all__ = ['config', 'Config', 'orchestrator_config']
+__all__ = ['config', 'Config', 'orchestrator_config', 'PLAN_TIERS', 'load_plan_tiers', 'TOOL_FAMILIES']

@@ -98,7 +98,6 @@ export default function DeliverablesPage() {
             ]}
             value={activeTab}
             onValueChange={handleTabChange}
-            dataTour="deliverables-tabs"
           >
             <TabsContent value="outputs">
               <div className="mx-auto max-w-[1600px]">

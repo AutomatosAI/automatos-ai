@@ -25,6 +25,7 @@ import { MarketplaceLlmsTab } from './marketplace-llms-tab'
 import { MarketplacePlaybooksTab } from './marketplace-playbooks-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
+import { MarketplacePackagesTab } from './marketplace-packages-tab'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { useFeaturedItems, useToggleFeatured } from '@/hooks/use-marketplace-api'
@@ -206,6 +207,7 @@ function RecommendationsRail({ items, onItemClick }: { items: MarketplaceItem[];
 // ── Main Page ───────────────────────────────────────────────────────
 
 const TAB_ICONS: Record<string, any> = {
+  packages: Store,
   tools: Package,
   agents: Bot,
   recipes: BookOpen,
@@ -217,7 +219,8 @@ export function MarketplaceHomepage() {
   const { workspaceId } = useWorkspace()
   const { isAdmin } = useSystemRole()
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedTab, setSelectedTab] = useState('tools')
+  // PRD-230: Packages lead the marketplace — the curated starter teams are the answer.
+  const [selectedTab, setSelectedTab] = useState('packages')
   const [stats, setStats] = useState({ totalItems: 0, totalInstalls: 0 })
   const { data: featuredItems, isLoading: featuredLoading } = useFeaturedItems(5)
 
@@ -310,7 +313,7 @@ export function MarketplaceHomepage() {
         }
       />
 
-      <div data-tour="marketplace-search" className="max-w-lg">
+      <div className="max-w-lg">
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
@@ -333,8 +336,9 @@ export function MarketplaceHomepage() {
         transition={{ duration: 0.5, delay: 0.3 }}
       >
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
-          <TabsList data-tour="marketplace-tabs" className="bg-secondary/50">
+          <TabsList className="bg-secondary/50">
             {[
+              { value: 'packages', label: 'Packages' },
               { value: 'tools', label: 'Applications' },
               { value: 'agents', label: 'Agents' },
               { value: 'recipes', label: 'Playbooks' },
@@ -351,7 +355,11 @@ export function MarketplaceHomepage() {
             })}
           </TabsList>
 
-          <TabsContent value="tools" className="mt-0" data-tour="marketplace-content">
+          <TabsContent value="packages" className="mt-0">
+            <MarketplacePackagesTab searchQuery={searchQuery} />
+          </TabsContent>
+
+          <TabsContent value="tools" className="mt-0">
             <MarketplaceToolsTab searchQuery={searchQuery} />
           </TabsContent>
 

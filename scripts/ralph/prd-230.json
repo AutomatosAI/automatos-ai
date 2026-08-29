@@ -1,0 +1,160 @@
+{
+ "project": "Automatos AI Platform — PRD-230 Packages & Vertical Onboarding (+ two W0 PRD-222 fixes)",
+ "branchName": "ralph/prd-230-packages",
+ "description": "Cut from origin/main AFTER PR #633 (test-round-1 fixes) is merged — launch preflight verifies the veteran-backfill migration exists on origin/main and ABORTS otherwise. SCOPE = docs/PRDS/PRD-230-PACKAGES-VERTICAL-ONBOARDING.md (seeded on this branch) — read its §2 decision record FIRST: D1 registration invariant, D2 full dependency closure (agent A: 3 tools+2 skills+1 LLM ⇒ 7 registrations), D3 workspace-owned/editable, D6 ONE package during onboarding, D7 three-step guide. Plus two W0 PRD-222 fixes (US-001 chat trial metering, US-002 doctrine v2) committed with fix(prd-222) prefixes. BINDING RULES: exactly ONE new alembic revision (US-003 marketplace_packages; additive DDL only — the workspaces_plan_check prod-drift incident is the cautionary tale); REUSE existing registration patterns (workspace_enabled_skills/plugins, marketplace install rows, content-hash) — new registration surfaces ONLY where a type has none, and cite the reuse in commit bodies; no auto-connecting apps (required_connects surface as guided steps); tools follow the 3-file pattern and the walker must stay green; JSONB rebuild-don't-mutate; no os.getenv outside config.py; never weaken test_prd222_trust_guards.py or advance_onboarding_stage's validator; PRD-222 surfaces are load-bearing (opener, power-up, pill, banner, intake card, connect card, checklist, reset, v2 section, PLAN_TIERS/exposure); public repo — seeds contain no customer data; PURE tests locally (@integration skips; real-Postgres in CI per-story push); NEVER git add -A/./-u; never git stash -u. Frontend gate: vitest + build green after every frontend story; orchestrator gate: documented env baseline (prd172|dr_restore|composio flakes only). RESOLVED 2026-08-28 (PRD §10 D9/D10/D11 — binding): ALL tiers see/use ALL packages (over-quota install = honest plan conversation, NEVER a silent block or partial closure install); no-match fallback = Auto custom-designs (no generic fallback package tonight); tab name = 'Packages', showcase row copy 'Starter teams for your business'.",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "W0 fix(prd-222) — chat trial metering: thread workspace identity to the factory",
+   "description": "The trial choke point (agent_factory._create_llm_manager / resolve_trial_routing, modules/agents/factory/agent_factory.py:506/:546) NO-OPS when workspace_id is None — and the chatbot pipeline (consumers/chatbot/service.py imports the factory) builds Auto without passing it, so CHAT — the primary surface — is unmetered, unpinned, and can never exhaust ($0.00 observed after a full onboarding conversation). FIND the chatbot→factory call site(s), thread the conversation's workspace identity through, and verify accrual end-to-end: manager.py:~718 gates record_trial_spend on self._tracking_ctx['trial'] which the factory sets. Do NOT touch BYOK behavior. Commit prefix fix(prd-222).",
+   "acceptanceCriteria": [
+    "DONE — consumers/chatbot/service.py:2143 passes workspace_id=self.workspace_id into activate_agent; agent_factory.activate_agent gains a workspace_id param and threads effective_ws_id (conversation ws || db_agent.workspace_id) into key resolution + trial gate + LLMManager. Chatbot factory call passes the real workspace_id (grep-proof call site in commit body)",
+    "DONE — test_prd230_chat_trial_metering.py: active trial → _resolve_trial_decision returns (True, pinned-to-allowlist); BYOK → (False,None) with a Boom session proving no ws read; warned still meters. Shared gate _resolve_trial_decision called by BOTH _create_llm_manager and activate_agent (count>=2). Regression test: a chat-path turn on an active-trial workspace accrues spend (record_trial_spend called) AND pins to TRIAL_MODEL_ALLOWLIST; a BYOK workspace bypasses untouched",
+    "DONE — test_exhausted_trial_raises_typed_error_on_chat_path asserts TrialExhaustedError(error_code='trial_exhausted'); activate_agent re-raises it past the generic except so it is not swallowed to None. Exhausted trial workspace gets the typed trial_exhausted error on the chat path (test)",
+    "DONE — local full suite 4749 passed; only non-flake failures (test_p2w2_authz_boundary_sweep, test_prd222_w2s1 head-pin) are byte-identical to origin/main and present in main's OWN red CI run 33214280416/33212994947 (2 failed, 4847 passed) — inherited baseline, zero new failures from US-001. Full orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "orchestrator/consumers/chatbot/",
+    "orchestrator/modules/agents/factory/agent_factory.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "W0 fix(prd-222) — onboarding doctrine v2: Auto learns its own shop",
+   "description": "Rewrite the capability guidance in modules/context/sections/onboarding.py per PRD-230 §5 US-002 (seeded): (1) apps connect via Composio through the chat connect card — Shopify FIRST-CLASS; never apologize for a missing connect tool, route to the card; (2) the Shopify two-step truth: Composio connect gives store data NOW; installing the Automatos Shopify app makes a Site appear in Settings→Widget SDK, unlocking sync config → knowledge graph + widgets — present as tiered, honestly; (3) a received URL means CALL platform_scan_business_site immediately (Firecrawl is configured in prod), honest degrade if not; (4) marketplace-first staffing doctrine: search prebuilt (agents/tools/playbooks) before creating custom — 'use what's there if it suits, build new if not, import and tweak'; (5) honest widget line: 'no CSVs — we sync directly, and our Shopify package includes widgets and agents'; (6) Basic-plan comms: 'you're on Basic while we set up — we'll pick your plan together shortly' early in the flow; (7) stage-name hardening: the section lists the EXACT platform_update_onboarding stage vocabulary so Auto never invents a stage (the live 'snag'). Re-measure the largest variant; budget discipline per Q7. Commit prefix fix(prd-222).",
+   "acceptanceCriteria": [
+    "DONE — new _CAPABILITY_DOCTRINE block rendered on every active stage (in _compose after _COMMON_RULES). All 7 points present + grep-locked by test_doctrine_point_1..7 + test_doctrine_present_in_source_for_grep_gate: (1) Composio + connect card routing, (2) Shopify two-step sync truth (Settings → Widget SDK → sync → Knowledge Graph + widgets), (3) URL → platform_scan_business_site now (Firecrawl degrade), (4) marketplace-first staffing, (5) 'no CSVs — we sync directly, and our Shopify package includes widgets and agents', (6) 'you're on Basic while we set up — we'll pick your plan together shortly', (7) EXACT stage list from onboarding_state.ALL_STAGES + 'never invent'. Section carries all 7 doctrine points",
+    "DONE — test_prd222_onboarding_section.py +15 tests (58 passed). Largest rendered variant = 673 tokens (powerup) vs 800 cap (was 444 pre-doctrine; doctrine block = 224 tokens); test_largest_variant_within_budget still green with max_tokens==800 unchanged. Section tests updated + green; largest-variant measurement recorded in commit body",
+    "DONE — only onboarding.py (content) + its test changed; zero tool schema files touched; walker test_prd222_tool_schema_walker.py green (69 passed with onboarding_tool/state). No tool schemas changed by this story; walker green",
+    "DONE — PRD-222 suite 325 passed, only the inherited-baseline test_prd222_w2s1 head-pin fails (byte-identical to origin/main, main CI run 33212994947). Orchestrator baseline"
+   ],
+   "files": [
+    "orchestrator/modules/context/sections/onboarding.py",
+    "orchestrator/tests/test_prd222_onboarding_section.py"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "Packages data model — marketplace_packages (the ONE migration)",
+   "description": "PRD-230 §4 Data. ONE new table marketplace_packages: slug (unique), name, description, vertical_tags (JSONB array), matching (JSONB), members (JSONB typed refs {type: agent|tool|skill|plugin|playbook|llm, ref}), setup_manifest (JSONB: questions, required_connects, guide_steps, report_templates), showcase (bool), timestamps. SQLAlchemy model beside the marketplace models; CRUD service (list/showcased/get_by_slug/match_by_signals — pure matching helper, tested). The wave's ONLY migration; additive DDL only (the workspaces_plan_check incident — no constraint assumptions on existing tables).",
+   "acceptanceCriteria": [
+    "DONE — alembic/versions/prd230_marketplace_packages.py: CREATE TABLE IF NOT EXISTS marketplace_packages (down_revision=prd225_s1_asks_on_grants, gen_random_uuid default, additive/idempotent). `alembic heads`=prd230_marketplace_packages (SINGLE head). test_exactly_one_new_migration_creates_the_table asserts exactly one creating migration + chain + IF NOT EXISTS. Also fixed test_prd225_revision_chains_onto_prior_head (was pinned to 'prd225 is head'; now asserts len(heads)==1 per its own 'assert intent not literal parent' philosophy — my migration legitimately moved the single head). Exactly one new alembic revision creating marketplace_packages; single head preserved",
+    "DONE — core/models/marketplace_packages.py MarketplacePackage (slug uniq, vertical_tags/matching/members/setup_manifest JSONB, showcase, timestamps, to_dict, MEMBER_TYPES) registered in core/models/__init__.py; services/marketplace_packages.py list/list_showcased/get_by_slug + PURE match_by_signals(signals, packages)→ranked PackageMatch. test_prd230_packages_model.py 11 passed incl. shopify signals → both shopify packages ranked, support-desk excluded; management outranks dev on run-the-store vocab; deterministic/pure; url-pattern-alone; showcase tie-break. Model + CRUD + pure matcher with tests",
+    "DONE — CI creates the table via Base.metadata.create_all (model imported). Full suite 4774 passed; only the 2 inherited-baseline failures remain (test_p2w2_authz_boundary_sweep + test_prd222_w2s1 head-pin, byte-identical to origin/main, main CI 33212994947) — ZERO new failures. No other schema change; orchestrator baseline"
+   ],
+   "files": [
+    "orchestrator/alembic/versions/",
+    "orchestrator/core/models/",
+    "orchestrator/services/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-004",
+   "title": "Dependency-closure resolver (pure)",
+   "description": "closure(ref) -> ordered typed set. Walk: agent → model_config LLM + agent_skills + agent_assigned_plugins (marketplace_plugins.py:243) + agent_app_assignments (composio_cache.py:171 — these become required_connects, not installs); playbook → member agents → recurse; skill/plugin/tool/llm → self. Cycle-safe, deterministic, db-read-only. THE CANONICAL TEST: agent A with 3 tools + 2 skills + 1 LLM ⇒ closure of exactly 7 typed entries (Gerard's example, D2).",
+   "acceptanceCriteria": [
+    "DONE — services/dependency_closure.py resolve_closure(root, reader) is a PURE BFS over a DependencyReader (cycle-safe visited-set, deterministic, dedup) + resolve_many for whole packages + DbDependencyReader (agent→model_config LLM, agent_skills, agent_assigned_plugins; playbook→WorkflowTemplate steps[].agent_id + template_definition.agents). test_prd230_closure_resolver.py 12 passed: canonical agent-A (llm+2 skills+3 plugins/tools + itself = 7 members, root first), playbook recursion pulls member-agent closures, mutual + self playbook cycles terminate deduped, leaves resolve to self, determinism, resolve_many shared-dep dedup. Pure resolver with agent-A canonical + playbook-recursion + cycle tests",
+    "DONE — agent_app_assignments surface as ClosureResult.required_connects (RequiredConnect app_name/app_type/via_agent), NEVER as installable members (FR-4). test_agent_apps_become_required_connects_not_members: apps do not inflate members; test_required_connects_deduped_case_insensitively (keyed by app_name.upper()). App assignments surface as required_connects entries, distinct from installable members",
+    "DONE — additive-only (2 new files: service + test). Full suite 4786 passed (+12 US-004), only the 2 inherited-baseline failures remain (byte-identical to origin/main, main CI 33212994947). DbDependencyReader lazy imports verified (Agent, AgentAppAssignment, WorkflowTemplate). Orchestrator baseline"
+   ],
+   "files": [
+    "orchestrator/services/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-005",
+   "title": "Workspace registration installer — D1/D2/D3 enforced",
+   "description": "install_package(ws, slug) / install_marketplace_agent(ws, ref): resolve closure → register EVERY member to the workspace using the EXISTING per-type patterns (workspace_enabled_skills / workspace_enabled_plugins rows; skills content-hash conventions) — add NEW registration surfaces ONLY where a type has none (agents: workspace-owned editable copy rows — re-verify how marketplace agents install today via 20260131_add_marketplace_to_agents; LLM: workspace availability via the 20260214 llm marketplace tables — re-verify their shape). Idempotent (re-install = zero dupes). Returns a manifest listing every registration by type. Every installed artifact marked workspace-owned/editable (D3). required_connects returned for the guide step, never auto-connected (FR-4).",
+   "acceptanceCriteria": [
+    "DONE — services/package_installer.py install_marketplace_agent + install_package. test_prd230_package_installer.py 16 passed: test_install_agent_registers_full_closure_of_seven (agent + 1 LLM + 2 skills + 3 plugins = 7, by_type counts), test_two_agent_package_registers_both_closures_deduped (both agents, shared llm deduped once). Full-closure registration + 2-agent package",
+    "DONE — test_reinstall_reuses_clone_and_adds_nothing: _existing_workspace_clone returns the prior clone → agent status=already_installed, clone_agent_to_workspace asserted NOT called, cascade re-run reports already_installed, manifest.added==[]. Per-type installers are idempotent (already_enabled/already_installed). Second install adds nothing",
+    "DONE — every Registration carries workspace_owned=True (agents via owner_type='workspace' clone; skills/plugins/llm via workspace_enabled_*/workspace_models rows keyed by workspace_id). test_every_registration_is_workspace_owned + to_dict shape. Ownership (D3)",
+    "DONE — REUSES existing patterns, zero new registration mechanism: clone_agent_to_workspace + cascade_agent_dependencies (workspace_models, workspace_enabled_skills, workspace_enabled_plugins, agent_assigned_plugins, agent_app_assignments), cascade_recipe_dependencies, install_skill/install_plugin/install_model. Only new code = the orchestration/manifest wrapper + a reflective recipe-clone helper (no shared one existed; cascade IS reused). No parallel registration mechanism; reused tables cited",
+    "DONE — additive-only (2 new files). Full suite 4803 passed; only the 2 inherited-baseline failures (byte-identical to origin/main, main CI 33212994947). required_connects (FR-4): test_oauth_tool_becomes_required_connect surfaces apps as guided connects, never auto. Orchestrator baseline"
+   ],
+   "files": [
+    "orchestrator/services/",
+    "orchestrator/core/models/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-006",
+   "title": "Platform tools — search/install packages + install marketplace agent",
+   "description": "3-file pattern: platform_search_packages (signals → ranked matches w/ contents summary), platform_install_package, platform_install_marketplace_agent. Onboarding restriction (D6/FR-3): while the workspace's onboarding is non-terminal, a second platform_install_package call returns honest copy ('one package during onboarding — more any time after setup'); unrestricted when terminal. All installs via US-005 (invariant inherited). Walker/schema-truth green; either-of conventions followed. D9: over-quota package install returns honest copy + the plan recommendation — never a partial install (closure is atomic).",
+   "acceptanceCriteria": [
+    "DONE — 3-file pattern: actions_packages.py (register_package_actions wired into platform_actions.register_all_actions) + handlers_packages.py + platform_executor._handlers ('platform_search_packages','platform_install_package','platform_install_marketplace_agent'). test_prd222_tool_schema_walker 18 passed (live-registry sweep includes the 3); test_tool_registered_and_dispatched (registry+handler), required=['slug'] (walker C), either-of agent_id/agent_name documented (walker B). Three tools registered, schemas match handlers, walker green",
+    "DONE — test_second_package_during_onboarding_is_rejected (funnel.package_installed present + non-terminal → onboarding_restricted, honest copy, install spy calls==0); test_first_package_during_onboarding_installs_and_records (records package_installed); test_post_onboarding_install_is_unrestricted (terminal stage → installs despite prior package). Restriction via new onboarding_state.record_package_event/onboarding_package_installed (reused by US-009). Onboarding one-package restriction",
+    "DONE — install responses spread manifest.to_dict() (registrations + required_connects + added_count); test_response_carries_the_registration_manifest. Tool responses carry the registration manifest",
+    "DONE — full suite 4816 passed (+14 US-006), only the 2 inherited-baseline failures. Tools not routes (no route-manifest bump). Orchestrator baseline",
+    "DONE — test_over_quota_returns_plan_conversation_with_zero_installs: basic tier (max_agents=5, from PLAN_TIERS read-only), 6-agent package → over_quota:True + plan_recommendation (pro/business via recommend_plan) + package_agents=6/max_agents=5, install spy calls==0 (quota checked BEFORE any registration → atomic). Over-quota returns honest plan-conversation copy with zero partial registrations"
+   ],
+   "files": [
+    "orchestrator/modules/tools/discovery/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-007",
+   "title": "Marketplace Packages tab + detail popup + showcase",
+   "description": "marketplace-grid.tsx already takes type/category — add the Packages tab; package cards open a DETAIL POPUP: description, members grouped by type with per-member descriptions, setup summary (apps to connect incl. the Shopify two-step, reports you'll get), install CTA; showcased packages row on top. Plan-label chips consistent with W2b marketplace_depth semantics (default: visible to all). Follow the existing marketplace visual language — no new design system.",
+   "acceptanceCriteria": [
+    "DONE — marketplace-packages-tab.tsx (new tab, wired into marketplace-homepage.tsx as the first + default 'Packages' tab per PRD 'packages are the answer') reads GET /api/marketplace/packages (new read route on the existing marketplace router; reuses to_dict()). package-detail-modal.tsx popup groups members by type (groupMembersByType, member-group-<type> testids) with per-member name+description, and a setup summary (required_connects incl. the Shopify two-step note + report_templates). test_prd230_packages_api.py 3 passed (routes registered GET/GET/POST, install carries agents:create perm dep, PackageOut validates to_dict 1:1). marketplace-packages.test.tsx: 'shows members grouped by type with per-member descriptions + setup summary' green. Packages tab renders from the API; popup shows grouped members + setup summary",
+    "DONE — tab renders a 'packages-showcase-row' (D11 copy 'Starter teams for your business') filtering showcase=true, ABOVE the full 'All packages' grid; API + tab both order showcase-first. test 'lists showcase=true packages first, under the D11 copy' passes with the non-showcased pack placed FIRST in the input array yet excluded from the showcase row (within(row).queryByText('Support Desk') absent). Showcase row lists showcase=true first",
+    "DONE — Install CTA POSTs /api/marketplace/packages/{slug}/install (route delegates to US-006 install_package_tool → D6/D9 + manifest, one install path), renders manifest via 'install-result'/'install-registrations' (added_count + registrations + required_connects as guided next step) and the honest over_quota/onboarding_restricted copy. tests 'install CTA calls the install path and renders the returned manifest' + 'renders the honest over-quota conversation without a manifest (D9)' green. Install CTA calls the install path and renders the manifest",
+    "DONE — frontend vitest 65 files/376 passed (incl. 6 new package tests); next build exit 0 ('✓ Compiled successfully', /marketplace 30.4 kB) — pre-existing lucide 'Route' warning only, not mine. route-manifest.json hand-added the 3 package routes + count 769→772 (sorted, count==len; local-regen corruption avoided per the documented gotcha). Orchestrator PURE suite: 4819 passed; the only non-excluded failures are the 2 inherited-RED-baseline (test_p2w2_authz_boundary_sweep flags onboarding/reset NOT my gated install route; test_prd222_w2s1 head-pin) — 46 errors are local-Postgres-down DB-connection errors in unrelated modules, green in CI. Zero new failures from this additive story. Frontend vitest + build green"
+   ],
+   "files": [
+    "frontend/components/marketplace/",
+    "frontend/",
+    "orchestrator/api/"
+   ]
+  },
+  {
+   "id": "US-008",
+   "title": "Seed packages — Shopify Management + Shopify Development",
+   "description": "Data seed (seed-script pattern, e.g. beside seed_models.py — NOT hardcoded config): curate from the EXISTING marketplace inventory (the ~12 Shopify agents + related tools/playbooks — enumerate what actually exists at build time and cite it). Management = run-the-store (reports incl. a weekly-numbers report template, inventory, customer service). Development = build/theme/dev. Both showcase=true, vertical_tags ['shopify','ecommerce',…], matching signals (platform mentions, store URLs, commerce vocabulary), setup_manifest with the Shopify two-step required_connects + D7 guide steps. Curation is v1 — Gerard edits content post-install/later; keep member picks defensible and cited.",
+   "acceptanceCriteria": [
+    "DONE — core/seeds/seed_packages.py seed_packages(db) idempotently upserts BOTH packages into marketplace_packages keyed by slug (create-or-refresh; JSONB rebuilt not mutated), CLI __main__ mirrors seed_shopify_agents (marketplace seeds are manual seed-runs — load_seed_data does credentials/platform-defaults only, not marketplace; packages hold data refs resolved at INSTALL time so no seed-order dependency). test_seed_is_idempotent_no_duplicates: run1=(2 created,0), run2=(0,2 updated), store stays 2 — no dupes. Contents curated from the REAL 12-agent roster (SHOPIFY_AGENTS): Management (run-the-store, all SHOPIFY) = shopify-ops, shopify-support, shopify-inventory-watchdog, shopify-business-analyst; Development (build/theme, all GITHUB) = shopify-app-dev, shopify-storefront-dev, shopify-extension-dev. Seed idempotent; contents cited against real inventory",
+    "DONE — both showcase=True, vertical_tags ⊇ {shopify,ecommerce}. test_matcher_returns_both_for_shopify_signals runs the SHARED matcher over the ACTUAL seed rows (MarketplacePackage instances, not fixtures): platforms:['shopify']+myshopify url → both ranked. Plus test_management_outranks_development_on_run_the_store_signals + test_development_outranks_management_on_dev_signals (D5 defer-pick support). Both showcased; matcher returns them for shopify signals",
+    "DONE — members built from _AGENTS_BY_SLUG so a curated slug that drifts fails at IMPORT (structural guarantee). test_every_agent_member_ref_resolves_to_real_inventory (every agent ref ∈ roster slugs AND name ∈ roster names); test_no_customer_data_in_seed (no @/password/secret/api_key/token/PII in the JSON). No invented playbook member — no Shopify recipe exists in inventory, so weekly-numbers is a report_template (test_management_carries_weekly_numbers_report_and_shopify_two_step: SHOPIFY connect note carries Site/Settings/sync). Prereq bug fix: seed_shopify_agents.py:23 'from core.database import engine' (broken — core/database/__init__.py is empty, seed unimportable) → 'from core.database.database import engine' (SAME engine object, behavior-preserving); sibling seed_skills.py:15 has the identical latent bug (flagged, left untouched — not in this story's path). Every member ref resolves; no customer data",
+    "DONE — full orchestrator suite 4830 passed (+11 US-008 seed tests, all green); the only non-excluded failures are the 2 inherited-RED-baseline (test_p2w2_authz_boundary_sweep — flags POST /onboarding/reset, NOT packages; test_prd222_w2s1 head-pin), byte-identical to origin/main. 46 errors = local-Postgres-down (pg_dump 14.20 vs server 18.3) DB-connection errors in unrelated modules, green in CI. Zero new failures — the seed_shopify_agents import fix is imported by nothing in the test tree and is behavior-preserving. Orchestrator baseline"
+   ],
+   "files": [
+    "orchestrator/core/seeds/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-009",
+   "title": "Onboarding integration — offer ONE package, then the three-step guide",
+   "description": "Proposal stage (v2 section + US-002 doctrine): platform_search_packages on the segment → offer the top match BY NAME with contents ('four agents, the weekly-numbers playbook, store connect — want it?'); user defers → Auto picks per D5 (store OWNER → Management). Acceptance → platform_install_package → D7 three steps: ① install manifest narrated; ② guided connects from required_connects (chat connect card; widget/app-install instructions incl. Settings→Widget SDK Site truth); ③ activation — first playbook + the checklist card carries the remaining steps. Funnel: package_offered / package_accepted / package_installed (trial_* event pattern). Manual route (no match/declined) keeps today's flow and still gets steps ②③. D10: when platform_search_packages returns no match, the section's guidance is the CUSTOM-DESIGN route (Auto designs the team with marketplace-first for individual artifacts) — never a forced generic package.",
+   "acceptanceCriteria": [
+    "DONE — _STAGE_PROPOSAL now opens with platform_search_packages on the segment (business/goal/store URL), offers ONE match BY NAME with contents ('Shopify Management: four agents (Operations, Support, Inventory, Business Analyst), a weekly-numbers report, and your store connect — want it?'), carries the D5 defer-pick rule (store OWNER → Management, builder → Development) and the D10 no-match route ('don't force a package — custom-design … marketplace-first'). Approval gate preserved (nothing built before explicit yes). test_prd230_onboarding_integration.py: test_proposal_searches_and_offers_one_package_by_name / _carries_defer_pick_rule_owner_to_management / _no_match_custom_designs_marketplace_first / _keeps_the_approval_gate_intact — green. Section proposal carries the package offer + defer-pick rule",
+    "DONE — D7 three-step wired across stages: ① _STAGE_BUILDING installs via platform_install_package and narrates the manifest (agents/skills/tools/Playbooks registered to THEIR workspace, theirs to edit); ② guided connects through the chat connect card, never auto-connect (FR-4), Shopify Settings → Widget SDK → sync two-step told honestly; ③ _STAGE_BOOM activates (first Playbook/report) and hands the rest to the setup checklist card. test_building_installs_package_and_narrates_manifest / _building_guided_connects_are_the_shopify_two_step_never_auto / _boom_activates_with_first_playbook_and_checklist — green. Three-step guide present, stage-consistent, checklist carries step ③",
+    "DONE — handlers_packages.py emits the funnel REUSING US-006 onboarding_state.record_package_event/PACKAGE_FUNNEL_EVENTS: search DURING onboarding stamps package_offered (top-match slug, no-op once terminal); install stamps package_accepted before the closure then package_installed on success (order asserted). Side channel is best-effort — a _load_workspace fault never breaks the search the user is running. test_search_during_onboarding_stamps_package_offered / _search_after_onboarding_stamps_no_offer / _search_with_no_match_stamps_no_offer / _install_during_onboarding_stamps_accepted_then_installed / _funnel_side_channel_never_breaks_search — green. Budget re-measured: proposal is now the largest variant at 763 tokens vs the 800 cap (was powerup ~664; test_proposal_variant_stays_within_the_token_budget locks it). Funnel events emitted; budget re-measured",
+    "DONE — US-009 is PURE (section content + funnel stamps + one pure test file); no frontend touched. Full suite 4843 passed (+13 US-009 integration tests over US-008's 4830), 176 skipped; the ONLY FAILED are the 2 inherited-RED-baseline (test_p2w2_authz_boundary_sweep + test_prd222_w2s1 head-pin, byte-identical to origin/main, main CI 33212994947 — US-009 adds no routes/migration so both are unchanged) plus the 3 acceptance-excluded env flakes (prd172/dr_restore/composio); 46 errors = local-Postgres-down in unrelated modules (green in CI). Zero new failures. Orchestrator baseline; frontend untouched"
+   ],
+   "files": [
+    "orchestrator/modules/context/sections/onboarding.py",
+    "orchestrator/services/onboarding_state.py",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-010",
+   "title": "Invariant guards — the tests that keep D1/D2/D3 true",
+   "description": "A dedicated guard test file (test_prd230_invariants.py) locking: (1) the agent-A closure example end-to-end through the INSTALLER (not just the resolver); (2) workspace-owned/editable marking on every artifact type the installer touches; (3) one-package-during-onboarding enforcement at the TOOL layer; (4) idempotent re-install; (5) zero platform-dangling members after a package install (every member ref registered or reported as required_connect). Self-check that the guard bites (mutate a fixture → guard fails).",
+   "acceptanceCriteria": [
+    "DONE — tests/test_prd230_invariants.py: 12 tests, all FIVE locks green, each paired with a self-check that mutates a fixture and proves the lock would fire. Lock 1 (D2) agent-A 3 tools+2 skills+1 LLM ⇒ 7 registrations THROUGH install_marketplace_agent (test_lock1_agent_a_closure_of_seven_through_the_installer) + bite (drop a skill → 6). Lock 2 (D3) every installer registration workspace_owned across agent/llm/skill/plugin/tool in one run + the leaf/playbook construction sites (test_lock2_*) + bite (a non-owned reg makes all() fail). Lock 3 (D6) a second package during onboarding blocked at the TOOL layer with spy calls==0 (test_lock3_second_package_during_onboarding_blocked_at_tool_layer) + bite (first-package AND terminal-stage both install → the block is D6-conditional, not blanket). Lock 4 idempotent re-install adds nothing (test_lock4_reinstall_adds_nothing, clone asserted NOT re-called) + bite (first install adds the full 7). Lock 5 no platform-dangling: every member registered OR a required_connect, warnings empty (test_lock5_every_package_member_is_accounted_for + test_lock5_closure_apps_are_never_dropped) + bite (a dropped plugin is absent from registrations∪connects). Reuses the US-005 installer + US-006 tool fixtures (no re-invented stubs). Guard file exists, five locks green, self-check bites",
+    "DONE — full orchestrator suite 4855 passed (+12 US-010 over US-009's 4843), 176 skipped; the ONLY FAILED are the 2 inherited-RED baseline (test_p2w2_authz_boundary_sweep — flags an inherited onboarding/reset route, NOT a package route — + test_prd222_w2s1 head-pin), byte-identical to origin/main (main CI 33212994947), plus the 3 acceptance-excluded env flakes (prd172/dr_restore/composio); 46 errors = local-Postgres-down (pg_dump 14.20 vs server 18.3), green in CI. Zero new failures. US-010 adds one PURE test file — no frontend touched (frontend last verified green at US-007; the acceptance gate re-runs vitest + build). Documented baseline; frontend green"
+   ],
+   "files": [
+    "orchestrator/tests/test_prd230_invariants.py"
+   ]
+  }
+ ]
+}

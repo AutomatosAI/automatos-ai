@@ -827,6 +827,27 @@ async def reject_task(
     }
 
 
+def _redispatch_task(db: Session, task: BoardTask) -> None:
+    """Reset a task to a fresh ``assigned`` claim and wake the dispatch loop.
+
+    The shared core of the Run-Now route and the PRD-224 US-003 watch
+    corrective re-run: clears the lease, attempt count, and lifecycle
+    timestamps, commits, then NOTIFYs the committed row so the dispatch loop
+    claims it. Recipe-mirror rows are driven by the recipe executor, never
+    board-dispatched. Caller guarantees the task is not already in_progress.
+    """
+    task.status = "assigned"
+    task.lease_until = None
+    task.attempts = 0
+    task.completed_at = None
+    task.started_at = None
+    db.commit()
+    db.refresh(task)
+
+    if task.source_type != "recipe":
+        notify_task_available(db, workspace_id=task.workspace_id, task_id=task.id)
+
+
 @router.post("/{task_id}/run-now", dependencies=[Depends(require_workspace_permission("missions:execute"))])
 async def run_task_now(
     task_id: int,
@@ -850,16 +871,7 @@ async def run_task_now(
     if task.status == "in_progress":
         raise HTTPException(status_code=409, detail="Task is already running")
 
-    task.status = "assigned"
-    task.lease_until = None
-    task.attempts = 0
-    task.completed_at = None
-    task.started_at = None
-    db.commit()
-    db.refresh(task)
-
-    if task.source_type != "recipe":
-        notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
+    _redispatch_task(db, task)
 
     logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s",
                 task.id, task.assigned_agent_id)

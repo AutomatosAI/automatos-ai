@@ -330,7 +330,7 @@ def _provision_new_user_workspace(
             db.execute(
                 text(
                     "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits, webhook_key) "
-                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'starter', :plan_limits, :webhook_key)"
+                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'basic', :plan_limits, :webhook_key)"  # PRD-222 W2·S1: entry tier (renamed from 'starter')
                 ),
                 {
                     "id": str(ws_id),
@@ -379,6 +379,17 @@ def _provision_new_user_workspace(
         db.commit()
     except Exception:
         logger.exception("Failed to seed document templates for workspace %s — non-fatal", ws_id)
+
+    # 5.5) 2026-08-29 (the Harbourline failure): every workspace starts with
+    # WORKING models — base OpenRouter set in workspace_models + the primary in
+    # settings.orchestrator. Zero-model workspaces broke Settings → Orchestrator
+    # ("Failed to load LLM settings") and left chat with no sane default.
+    try:
+        from services.workspace_model_seeding import seed_workspace_models
+        if seed_workspace_models(db, ws_id) is not None:
+            db.commit()
+    except Exception:
+        logger.exception("Base-model seed failed for workspace %s — non-fatal", ws_id)
 
     # 6) PRD-222 US-004 (W1·S9): grant the one-time $5 onboarding trial credit so
     # the value moment lands before the BYOK ask. One per Clerk user; paused by

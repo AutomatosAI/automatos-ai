@@ -398,7 +398,6 @@ export function AssignmentsPage() {
         tabs={TAB_CONFIG}
         value={activeTab}
         onValueChange={handleTabChange}
-        dataTour="assignments-tabs"
       >
         <TabsContent value="playbooks" className="mt-0">
           <AssignmentsPlaybooksGrid />

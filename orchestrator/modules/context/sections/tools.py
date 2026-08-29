@@ -138,7 +138,10 @@ class ToolsSection(BaseSection):
         awaited on this loop — never bridged through a helper thread.
         """
         from modules.tools.discovery.action_registry import get_action_registry
-        from modules.tools.tool_router import _narrow_dispatcher_actions_async
+        from modules.tools.tool_router import (
+            _apply_dispatcher_always_include,
+            _narrow_dispatcher_actions_async,
+        )
 
         registry = get_action_registry()
         # Shared narrowing contract (PR-B): ranking when possible, and the
@@ -147,6 +150,13 @@ class ToolsSection(BaseSection):
         allowed_names, _reason, from_pins = await _narrow_dispatcher_actions_async(
             query, is_admin=False, is_super_admin=False
         )
+        # P228-RVW-4: on a real heartbeat tick the enum is the ranked semantic
+        # top-K (SEMANTIC_TOOL_ROUTING on), where platform_fleet_status has no
+        # reserved slot — so the standing loop could silently lose its live
+        # floor-state read. Union the always-include set onto any narrowed list
+        # (open-full/None already exposes everything). Mirrors the page-prior
+        # union; gated/unknown names can never be forced in.
+        allowed_names = _apply_dispatcher_always_include(allowed_names)
         schema = registry.to_dispatcher_schema(
             exclude_admin=True,
             allowed_names=allowed_names,

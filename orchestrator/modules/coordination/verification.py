@@ -168,8 +168,14 @@ def _build_judge_prompt(
     output: str,
     verification_criteria: Optional[List[Dict[str, Any]]],
     deterministic_result: DeterministicResult,
+    definition_of_done: Optional[str] = None,
 ) -> str:
-    """Build the user prompt for the LLM judge."""
+    """Build the user prompt for the LLM judge.
+
+    PRD-226 US-003: when a task carries a definition of done (from the 4-part
+    dispatch contract), the judge scores against it. When absent, the prompt is
+    byte-for-byte identical to before — ``dod_section`` is the empty string.
+    """
     criteria_text = "None specified."
     if verification_criteria:
         criteria_lines = []
@@ -179,6 +185,16 @@ def _build_judge_prompt(
                 f"  {i}. {c.get('type', 'unknown')}: {c.get('value', '')}{must}"
             )
         criteria_text = "\n".join(criteria_lines)
+
+    # Absent DoD ⇒ empty string ⇒ prompt unchanged (verification back-compat).
+    dod_section = ""
+    if definition_of_done and str(definition_of_done).strip():
+        dod_section = (
+            "\n\n## Definition of Done\n"
+            "The task is finished only if the output satisfies this. Weigh "
+            "`completeness` and `format_compliance` primarily against it:\n"
+            f"{str(definition_of_done).strip()}"
+        )
 
     det_text = "All passed." if deterministic_result.passed else (
         "Failures:\n" + "\n".join(
@@ -248,7 +264,7 @@ def _build_judge_prompt(
 **Description:** {task_description}
 {media_note}{research_note}
 ## Verification Criteria
-{criteria_text}
+{criteria_text}{dod_section}
 
 ## Deterministic Check Results
 {det_text}
@@ -363,6 +379,7 @@ class VerificationService:
         *,
         run_id: Optional[UUID] = None,
         task_id: Optional[UUID] = None,
+        definition_of_done: Optional[str] = None,
     ) -> VerificationResult:
         """
         Verify a task's output.
@@ -375,6 +392,8 @@ class VerificationService:
             executor_model: Model used by the executing agent (for cross-model selection).
             run_id: Orchestration run ID (for caching scope).
             task_id: Task ID (for cache key).
+            definition_of_done: PRD-226 US-003 — the task's DoD from the 4-part
+                dispatch contract. Scored against when present; None ⇒ unchanged.
 
         Returns:
             VerificationResult with verdict, scores, and reasoning.
@@ -432,6 +451,7 @@ class VerificationService:
             executor_model=executor_model,
             deterministic_result=det_result,
             deterministic_failures=det_failure_descriptions,
+            definition_of_done=definition_of_done,
         )
 
         # Store in cache
@@ -449,6 +469,7 @@ class VerificationService:
         executor_model: Optional[str],
         deterministic_result: DeterministicResult,
         deterministic_failures: List[str],
+        definition_of_done: Optional[str] = None,
     ) -> VerificationResult:
         """Run the cross-model LLM judge with retry logic."""
         verifier_model = _select_verifier_model(executor_model)
@@ -460,6 +481,7 @@ class VerificationService:
             output=output,
             verification_criteria=verification_criteria,
             deterministic_result=deterministic_result,
+            definition_of_done=definition_of_done,
         )
 
         messages = [

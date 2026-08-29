@@ -1,0 +1,221 @@
+"""Fleet-status handler for PlatformActionExecutor — PRD-228 US-003.
+
+``platform_fleet_status`` renders the US-001 read-model
+(:func:`services.fleet_state.get_fleet_state`) into a compact, token-cheap form
+Auto can read in one call: one line per agent (name — current work, blocked, or
+idle — queue depth — 24h cost) plus an ANOMALIES section (stalled, over-budget
+watches, blocked-with-open-ask, blocked-with-no-ask). It writes nothing — it
+reads the floor and summarises it.
+
+A blocked agent is never rendered as ``idle``: ``blocked.count`` (any board task
+flagged ``blocked_at`` — approval-pending or manually blocked) is surfaced even
+when there is no outstanding question, so "is anyone stuck?" catches the
+approval-/manually-blocked case the ``open_asks`` signal alone would miss
+(P228-RVW-5).
+
+The rendering + anomaly detection live in the pure :func:`_render_fleet` so they
+are unit-testable against a fixture fleet with an injected clock and threshold.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from config import config
+from services.fleet_state import get_fleet_state
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_cost(entry: Dict[str, Any]) -> str:
+    cost = entry.get("cost_24h")
+    if cost is None:
+        return "cost n/a"
+    tokens = int(cost.get("tokens", 0) or 0)
+    usd = float(cost.get("usd", 0.0) or 0.0)
+    return f"{tokens:,} tok / ${usd:,.2f}"
+
+
+def _work_phrase(entry: Dict[str, Any]) -> str:
+    """The agent's live line: blocked > working > idle.
+
+    An agent counts as blocked either because it has an open question ask
+    (``blocked: awaiting answer``) or because one of its board tasks is flagged
+    blocked with no outstanding question — approval-pending or manually blocked
+    (``blocked``). Both supersede working, and both reuse the already-emitted
+    ``blocked.count`` so an approval-/manually-blocked agent never reads as
+    ``idle`` (P228-RVW-5).
+    """
+    blocked = entry["blocked"]
+    if blocked["open_asks"]:
+        return "blocked: awaiting answer"
+    if blocked.get("count", 0) > 0:
+        return "blocked"
+    current = entry.get("current")
+    if current:
+        return f"working: {current['title']}"
+    return "idle"
+
+
+def _render_fleet(
+    state: Dict[str, Any],
+    *,
+    now: datetime,
+    stall_seconds: int,
+) -> Dict[str, Any]:
+    """Compact rendering + anomaly detection over a fleet-state dict (pure).
+
+    Anomalies:
+      * **stalled** — an agent shown as working whose last activity is older
+        than ``stall_seconds``.
+      * **over_budget_watches** — an agent with one or more watches that hit
+        their action budget (``watches.needs_attention``).
+      * **blocked_with_open_ask** — an agent with a pending question ask.
+      * **blocked_no_ask** — an agent with a board task flagged blocked
+        (``blocked.count > 0``) but no outstanding question (approval-pending /
+        manually blocked). Disjoint from ``blocked_with_open_ask``; together they
+        are the complete "who is stuck" set (P228-RVW-5).
+    """
+    lines: List[str] = []
+    stalled: List[Dict[str, Any]] = []
+    over_budget: List[Dict[str, Any]] = []
+    blocked_with_ask: List[Dict[str, Any]] = []
+    blocked_no_ask: List[Dict[str, Any]] = []
+
+    for entry in state.get("agents", []):
+        name = entry["name"]
+        queue = entry["queue_depth"]
+        lines.append(
+            f"{name} — {_work_phrase(entry)} — queue {queue} — {_format_cost(entry)}"
+        )
+
+        # Stalled: claims to be working, but no recent activity.
+        if entry.get("current") is not None:
+            last = _parse_iso(entry.get("last_activity_at"))
+            if last is not None and (now - last).total_seconds() > stall_seconds:
+                stalled.append({
+                    "agent_id": entry["agent_id"],
+                    "agent": name,
+                    "last_activity_at": entry.get("last_activity_at"),
+                })
+
+        na = entry["watches"].get("needs_attention", 0)
+        if na:
+            over_budget.append({
+                "agent_id": entry["agent_id"], "agent": name, "watches": na,
+            })
+
+        blocked = entry["blocked"]
+        open_asks = blocked["open_asks"]
+        if open_asks:
+            blocked_with_ask.append({
+                "agent_id": entry["agent_id"], "agent": name, "open_asks": open_asks,
+            })
+        elif blocked.get("count", 0) > 0:
+            # Flagged blocked (approval-pending / manually blocked) with no open
+            # question — the case the open_asks signal alone misses (P228-RVW-5).
+            blocked_no_ask.append({
+                "agent_id": entry["agent_id"], "agent": name,
+                "count": blocked["count"],
+            })
+
+    anomalies = {
+        "stalled": stalled,
+        "over_budget_watches": over_budget,
+        "blocked_with_open_ask": blocked_with_ask,
+        "blocked_no_ask": blocked_no_ask,
+    }
+    # Source-availability (mirrors cost_available): a defaulted zero from a
+    # degraded watches/asks source must not read as a clean "no anomalies"
+    # (P228-RVW-6). Absent keys default to available (older shape / no failure).
+    watches_available = state.get("watches_available", True)
+    asks_available = state.get("asks_available", True)
+    return {
+        "as_of": state.get("generated_at"),
+        "window": "last 24h",
+        "cost_available": state.get("cost_available", False),
+        "watches_available": watches_available,
+        "asks_available": asks_available,
+        "agent_count": len(state.get("agents", [])),
+        "lines": lines,
+        "anomalies": anomalies,
+        "text": _as_text(
+            lines, anomalies,
+            watches_available=watches_available,
+            asks_available=asks_available,
+        ),
+    }
+
+
+def _as_text(
+    lines: List[str],
+    anomalies: Dict[str, List[Dict[str, Any]]],
+    *,
+    watches_available: bool = True,
+    asks_available: bool = True,
+) -> str:
+    """The single-string compact rendering (agent lines + ANOMALIES section).
+
+    When the watches or asks source is unavailable its anomaly bucket is a
+    fail-soft zero (defaulted, not real), so an empty ANOMALIES block could be
+    misread as a clean bill of health. A SOURCES DEGRADED notice states which
+    source was down and which signal is therefore uncounted this tick, so "is
+    anyone stuck / over budget?" is never answered with a confident false "none"
+    (P228-RVW-6).
+    """
+    body = "\n".join(lines) if lines else "(no agents)"
+    flagged: List[str] = []
+    for agent in anomalies["stalled"]:
+        flagged.append(f"STALLED: {agent['agent']} (no activity since {agent['last_activity_at']})")
+    for agent in anomalies["over_budget_watches"]:
+        flagged.append(f"OVER-BUDGET WATCH: {agent['agent']} ({agent['watches']} need attention)")
+    for agent in anomalies["blocked_with_open_ask"]:
+        flagged.append(f"BLOCKED (awaiting answer): {agent['agent']} — asks {agent['open_asks']}")
+    for agent in anomalies["blocked_no_ask"]:
+        flagged.append(f"BLOCKED (no open ask): {agent['agent']} ({agent['count']} task(s) blocked)")
+    anomaly_block = "\n".join(flagged) if flagged else "none"
+    text = f"{body}\n\nANOMALIES:\n{anomaly_block}"
+
+    notices: List[str] = []
+    if not watches_available:
+        notices.append(
+            "watches: source unavailable — over-budget watches not counted this tick"
+        )
+    if not asks_available:
+        notices.append(
+            "asks: source unavailable — awaiting-answer blocks not counted this tick"
+        )
+    if notices:
+        text += "\n\nSOURCES DEGRADED:\n" + "\n".join(notices)
+    return text
+
+
+async def fleet_status(
+    db: Session, workspace_id: UUID, params: Dict[str, Any]
+) -> Dict[str, Any]:
+    """platform_fleet_status — a compact, one-call read of live floor state."""
+    try:
+        state = get_fleet_state(db, workspace_id)
+    except Exception as e:  # noqa: BLE001 — a read tool degrades to an honest error
+        logger.error("[Fleet] fleet_status failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to read fleet state: {str(e)[:300]}"}
+
+    rendered = _render_fleet(
+        state,
+        now=datetime.now(timezone.utc),
+        stall_seconds=config.FLEET_STALL_SECONDS,
+    )
+    return {"success": True, **rendered}

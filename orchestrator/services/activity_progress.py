@@ -52,6 +52,9 @@ _LABELS = {
     EventType.TASK_CANCELLED.value: "A step was cancelled",
     EventType.TASK_STALLED.value: "A step stalled",
     EventType.STALL_DETECTED.value: "Progress stalled",
+    # PRD-229: mid-run clarifications (ask_orchestrator ladder).
+    EventType.CLARIFICATION_ANSWERED.value: "Auto answered a question",
+    EventType.CLARIFICATION_ESCALATED.value: "A question needs your answer",
 }
 
 # Events that should visibly flag the item as needing a human look.
@@ -65,6 +68,8 @@ _ATTENTION = {
     EventType.TASK_FAILED.value,
     EventType.TASK_STALLED.value,
     EventType.STALL_DETECTED.value,
+    # PRD-229: an escalated clarification is parked on a human answer.
+    EventType.CLARIFICATION_ESCALATED.value,
 }
 
 

@@ -38,8 +38,14 @@ import {
  * Derive the in-app route for a notification based on its ``link_type`` /
  * ``link_id``. Returns ``null`` when there is no meaningful destination, in
  * which case the row still marks itself read but does not navigate.
+ *
+ * Exported for the PRD-227 US-003 drift guard: a unit test enumerates every
+ * ``link_type`` the backend writes to a notification row and asserts each
+ * resolves here, so a future producer without a case fails CI instead of
+ * navigating nowhere. ``governance`` / ``watchlist`` are real Command Center
+ * tab keys the shell reads (command-center-shell.tsx VALID_TABS).
  */
-function linkFor(row: NotificationRow): string | null {
+export function linkFor(row: NotificationRow): string | null {
   const { link_type, link_id } = row
   if (!link_type) return null
 
@@ -58,6 +64,15 @@ function linkFor(row: NotificationRow): string | null {
       return '/command-center?tab=feed'
     case 'agent':
       return link_id ? `/agents?agent=${link_id}` : '/agents'
+    // PRD-227 US-003: approval grants → the Command Center Governance pane
+    // (its ws-admin-gated approvals surface); watches → the Watchlist tab.
+    case 'approval_grant':
+      return '/command-center?tab=governance'
+    case 'watch':
+      return '/command-center?tab=watchlist'
+    // PRD-225: an agent question → the Questions tab (answer resumes the work).
+    case 'question':
+      return '/command-center?tab=questions'
     default:
       return null
   }

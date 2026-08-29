@@ -42,19 +42,37 @@ export interface WorkspaceOnboarding {
     trial: WorkspaceTrial | null
 }
 
+/**
+ * PRD-222 W2·S1b (US-024): the exposure profile, derived server-side from the
+ * workspace's plan tier (PLAN_TIERS) and returned on GET /api/workspaces/current.
+ * Drives progressive disclosure — which nav items show, which capability
+ * families are on, and the marketplace depth. Hidden ≠ deleted (D5): the client
+ * trims presentation only; routes and data are untouched.
+ */
+export interface WorkspaceExposure {
+    plan: string
+    display_name?: string
+    display_price_usd?: number
+    price_label?: string
+    families: Record<string, boolean>
+    marketplace_depth: number
+    /** Visibility per gated nav key (e.g. { analytics: false, team: false }). */
+    nav: Record<string, boolean>
+}
+
 export interface Workspace {
     id: string
     name: string
     slug: string
-    plan: 'starter' | 'business' | 'enterprise'
+    plan: 'basic' | 'pro' | 'business' | 'enterprise'
     role: 'owner' | 'admin' | 'editor' | 'viewer' | 'member'
-    isNewWorkspace: boolean
     planLimits: {
         max_agents: number
         max_workflows: number
         max_documents: number
         max_members: number
     }
+    exposure?: WorkspaceExposure
     onboarding?: WorkspaceOnboarding
     webhookUrl?: string
     webhookKey?: string
@@ -86,6 +104,17 @@ export function useWorkspace() {
         throw new Error('useWorkspace must be used within a WorkspaceProvider')
     }
     return context
+}
+
+/**
+ * Non-throwing variant for components that may legitimately render outside the
+ * provider (e.g. the studio shell rendered in isolation, or a preview surface).
+ * Returns null when no provider is present so callers fail open rather than
+ * crash. Prefer `useWorkspace()` inside the app shell where the provider is
+ * guaranteed.
+ */
+export function useWorkspaceOptional() {
+    return useContext(WorkspaceContext)
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -150,8 +179,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 slug: data.slug,
                 plan: data.plan,
                 role: data.role,
-                isNewWorkspace: data.is_new_workspace ?? false,
                 planLimits: data.plan_limits,
+                exposure: data.exposure ?? undefined,
                 onboarding: data.onboarding ?? undefined,
                 webhookUrl: data.webhook_url,
                 webhookKey: data.webhook_key,

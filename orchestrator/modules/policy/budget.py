@@ -186,6 +186,11 @@ def set_budget(
     existing ``plan_limits`` JSONB). Validates ONLY the documented keys; an
     invalid value raises ``ValueError`` (the API surfaces it as 422). Only
     provided fields change. Caller owns the transaction (flushes here).
+
+    An explicit admin write makes the budget ADMIN-owned: any tier provenance
+    marker is stripped so a later plan change never treats it as a tier ceiling
+    to clear (PRD-222 RVW-4). Because an unmarked budget serialises exactly as
+    before, this writer's on-disk shape is unchanged.
     """
     from core.models.workspaces import Workspace
     from sqlalchemy.orm.attributes import flag_modified
@@ -211,6 +216,9 @@ def set_budget(
         budget["max_total_tokens"] = int(max_total_tokens)
     if window is not None:
         budget["window"] = window
+    # An admin write is admin-owned — drop any inherited tier provenance so a
+    # later plan change can't clear this ceiling as if the tier had set it (RVW-4).
+    budget.pop("source", None)
     plan_limits["budget"] = budget
     ws.plan_limits = plan_limits
     flag_modified(ws, "plan_limits")

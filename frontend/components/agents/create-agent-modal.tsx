@@ -403,7 +403,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                 value={agentData.category}
                                 onValueChange={(value) => setAgentData(prev => ({ ...prev, category: value }))}
                               >
-                                <SelectTrigger id="agent-category" data-tour="agent-category-select" className="bg-secondary/50">
+                                <SelectTrigger id="agent-category" className="bg-secondary/50">
                                   {agentData.category ? (
                                     <div className="flex items-center gap-2">
                                       {(() => {
@@ -452,7 +452,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                               <Label htmlFor="agent-name">Agent Name <span className="text-[hsl(var(--destructive))]">*</span></Label>
                               <Input
                                 id="agent-name"
-                                data-tour="agent-name-input"
                                 placeholder="Enter agent name..."
                                 value={agentData.name}
                                 onChange={(e) => setAgentData(prev => ({ ...prev, name: e.target.value }))}
@@ -464,7 +463,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                               <Label htmlFor="agent-description">Description</Label>
                               <Textarea
                                 id="agent-description"
-                                data-tour="agent-description-input"
                                 placeholder="Describe the agent's purpose and capabilities..."
                                 value={agentData.description}
                                 onChange={(e) => setAgentData(prev => ({ ...prev, description: e.target.value }))}
@@ -526,7 +524,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 2: Persona Selection (US-021) */}
-                  <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-persona-section">
+                  <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base">Agent Persona</CardTitle>
@@ -735,7 +733,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 3: Model Configuration (PRD-15) */}
-                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-model-section">
+                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base">Model Configuration</CardTitle>
@@ -862,7 +860,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 4: Tool Selection */}
-                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-tools-section">
+                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base">Select Tools</CardTitle>
@@ -923,7 +921,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 5: Plugins */}
-                  <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-plugins-section">
+                  <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base">Agent Capabilities</CardTitle>
@@ -1043,7 +1041,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   ) : (
                     <Button
                       onClick={handleCreate}
-                      data-tour="save-agent-btn"
                       disabled={!agentData.name || !agentData.category || (createAgentMutation as any).isLoading}
                       variant="outline"
                     >

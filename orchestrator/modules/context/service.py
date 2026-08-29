@@ -32,7 +32,13 @@ from modules.context.budget import (
     TokenBudgetManager,
 )
 from core.context_guard import count_tokens, get_context_window
-from modules.context.modes import MODE_CONFIGS, ContextMode, ModeConfig
+from modules.context.modes import (
+    MODE_CONFIGS,
+    ContextMode,
+    ModeConfig,
+    excluded_tool_names,
+    strip_actions_from_surface,
+)
 from modules.context.planning import (
     PACK_HEADER,
     PlanningContextPack,
@@ -73,6 +79,8 @@ VOLATILE_SECTIONS = frozenset(
         "conversation",
     }
 )
+
+
 
 
 class ContextService:
@@ -141,6 +149,9 @@ class ContextService:
             complexity_assessment=complexity_assessment,
             tool_hints=tool_hints,
             widget_mode=widget_mode,
+            # PRD-229: carry the mode so tool loading + the action catalog can
+            # apply mode-scoped admission (ask_orchestrator is execution-only).
+            context_mode=mode.value if isinstance(mode, ContextMode) else str(mode),
             kwargs=extra_kwargs,
         )
 
@@ -603,7 +614,12 @@ class ContextService:
         config: ModeConfig,
         ctx: SectionContext,
     ) -> tuple[list[dict[str, Any]], str]:
-        """Load tools using the strategy declared by the mode config."""
+        """Load tools using the strategy declared by the mode config.
+
+        PRD-229: after loading, execution-only tools (ask_orchestrator) are
+        stripped from the surface unless the mode is a worker execution lane —
+        see ``excluded_tool_names`` and ``_strip_actions_from_surface``.
+        """
         strategy_str = config.tool_loading
         try:
             strategy = ToolLoadingStrategy(strategy_str)
@@ -620,7 +636,7 @@ class ContextService:
         tools_section = ToolsSection()
         agent_id = getattr(ctx.agent, "id", None) if ctx.agent else None
 
-        return await tools_section.load_tools(
+        tools, tool_choice = await tools_section.load_tools(
             agent_id=agent_id,
             workspace_id=ctx.workspace_id,
             strategy=strategy,
@@ -634,6 +650,14 @@ class ContextService:
             # rebuilding blind.
             prebuilt_tools=ctx.kwargs.get("prebuilt_tools"),
         )
+        # PRD-229: mode-scoped admission — strip execution-only tools (e.g.
+        # ask_orchestrator) from the callable surface outside the execution
+        # lanes. This is the AUTHORITATIVE gate (what the LLM can select); the
+        # action catalog mirrors it and the handler refuses without run context.
+        excluded = excluded_tool_names(ctx.context_mode)
+        if excluded:
+            tools = strip_actions_from_surface(tools, excluded)
+        return tools, tool_choice
 
     @staticmethod
     def _format_messages(

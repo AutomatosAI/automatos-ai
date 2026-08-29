@@ -38,6 +38,12 @@ from core.models.workspaces import Workspace
 logger = logging.getLogger(__name__)
 
 
+class VerticalConfigError(ValueError):
+    """A provision request that is malformed for the vertical's own rules
+    (e.g. a missing origin allowlist) — distinct from ``ValueError`` for an
+    unregistered vertical so the HTTP layer can answer 422, not 404."""
+
+
 @runtime_checkable
 class VerticalProvisioner(Protocol):
     """Everything the generic provision flow needs to stand up a vertical.
@@ -60,6 +66,12 @@ class VerticalProvisioner(Protocol):
     # this key AND the canonical ``source_external_id`` so lookups either way
     # resolve. Defaults to the canonical key when a vertical does not override.
     external_id_key: str
+    # When True, re-provisioning a workspace that already holds an active
+    # public key returns it un-rotated (``api_key: None`` in the response)
+    # instead of minting a replacement. Verticals whose partner app persists
+    # the key (BudStacks) set this; Shopify keeps the default False because
+    # its runbook uses re-provision AS the key-recovery path.
+    reuse_existing_key: bool
 
     def allowed_domains(self, external_id: str, metadata: Dict[str, Any]) -> List[str]:
         """Origins permitted to use the minted public widget key."""
@@ -223,8 +235,11 @@ def provision_vertical(
     """Provision a workspace for any registered vertical.
 
     Idempotent: an existing active workspace for ``external_id`` is returned
-    (roster not re-seeded); the widget key is regenerated each call. Raises
-    ``ValueError`` for an unregistered vertical.
+    (roster not re-seeded). The widget key is regenerated each call UNLESS the
+    vertical declares ``reuse_existing_key`` and an active public key already
+    exists — then ``api_key`` is ``None`` and the caller keeps its stored copy.
+    Raises ``ValueError`` for an unregistered vertical and
+    :class:`VerticalConfigError` for a request the vertical's own rules reject.
     """
     provisioner = PROVISIONER_REGISTRY.get(vertical)
     if provisioner is None:
@@ -258,7 +273,7 @@ def provision_vertical(
             id=uuid4(),
             name=name,
             slug=_slugify(external_id),
-            plan="starter",
+            plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
             is_personal=False,
             is_active=True,
             webhook_key=uuid4().hex,
@@ -281,14 +296,35 @@ def provision_vertical(
     if existing_agent_count == 0:
         agents_installed = _seed_roster(db, workspace.id, provisioner)
 
-    key_result = _create_widget_key(
-        db=db,
-        workspace_id=workspace.id,
-        name=f"{vertical.title()} Widget Key ({external_id})",
-        key_type=getattr(provisioner, "key_type", "public"),
-        permissions=list(provisioner.key_permissions),
-        allowed_domains=provisioner.allowed_domains(external_id, metadata),
-    )
+    # Resolve the allowlist BEFORE any key decision so a malformed request
+    # (VerticalConfigError) rejects without side effects either way.
+    domains = provisioner.allowed_domains(external_id, metadata)
+
+    existing_key = None
+    if getattr(provisioner, "reuse_existing_key", False):
+        from core.models.sdk_api_keys import SdkApiKey
+
+        existing_key = (
+            db.query(SdkApiKey)
+            .filter(
+                SdkApiKey.workspace_id == workspace.id,
+                SdkApiKey.key_type == "public",
+                SdkApiKey.is_active.is_(True),
+            )
+            .order_by(SdkApiKey.created_at.desc())
+            .first()
+        )
+
+    key_result = None
+    if existing_key is None:
+        key_result = _create_widget_key(
+            db=db,
+            workspace_id=workspace.id,
+            name=f"{vertical.title()} Widget Key ({external_id})",
+            key_type=getattr(provisioner, "key_type", "public"),
+            permissions=list(provisioner.key_permissions),
+            allowed_domains=domains,
+        )
 
     # Optional vertical-specific post-provision step (e.g. ensure a Site).
     hook = getattr(provisioner, "on_provisioned", None)
@@ -304,7 +340,8 @@ def provision_vertical(
         "id": str(workspace.id),
         "public_id": str(workspace.id),
         "name": workspace.name,
-        "api_key": key_result["key"],
+        "api_key": key_result["key"] if key_result else None,
+        "key_minted": key_result is not None,
         "agents_installed": agents_installed,
         "is_new": is_new,
     }
@@ -321,6 +358,7 @@ def _slugify(external_id: str) -> str:
 
 __all__ = [
     "VerticalProvisioner",
+    "VerticalConfigError",
     "PROVISIONER_REGISTRY",
     "GRAPH_SOURCE_MAPPERS",
     "register_graph_source_mappers",

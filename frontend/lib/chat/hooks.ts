@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import type { PageContext } from '@/lib/page-context'
+import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import { toast } from 'sonner'
 
 export function useChat({
@@ -35,6 +36,10 @@ export function useChat({
   const [usage, setUsage] = useState<AppUsage | undefined>()
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState<'idle' | 'streaming' | 'error'>('idle')
+  // PRD-222 US-014: a stable error code the surfaces can render deterministically.
+  // Set to 'trial_exhausted' when a send is blocked by a spent trial (pre-stream
+  // non-ok body or a mid-stream error line); reset at the start of every send.
+  const [errorCode, setErrorCode] = useState<string | null>(null)
   const [chatId, setChatId] = useState(id)
   const abortControllerRef = useRef<AbortController | null>(null)
 
@@ -108,6 +113,7 @@ export function useChat({
       setMessages(prev => [...prev, userMessage])
       setIsLoading(true)
       setStatus('streaming')
+      setErrorCode(null) // clear any prior block before this attempt
 
       const assistantMessageId = crypto.randomUUID()
       const assistantMessage: ChatMessage = {
@@ -178,6 +184,10 @@ export function useChat({
           setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId))
           setIsLoading(false)
           setStatus('error')
+          // PRD-222 US-014: a spent trial is blocked with a typed code — surface
+          // it so the exhausted banner appears immediately (before the snapshot
+          // refreshes). The gate can trip pre-stream (this non-ok body).
+          if (errorText.includes(TRIAL_EXHAUSTED_CODE)) setErrorCode(TRIAL_EXHAUSTED_CODE)
           toast.error(`Chat request failed (${response.status})${errorText ? `: ${errorText}` : ''}`)
           return
         }
@@ -393,6 +403,15 @@ export function useChat({
                   if (onData) onData({ type: 'mission-suggestion', data: payload.data })
                 } else if (payload.type === 'error') {
                   setStatus('error')
+                  // PRD-222 US-014: mid-stream trial block carries the typed code.
+                  if (
+                    payload.error_code === TRIAL_EXHAUSTED_CODE ||
+                    payload.code === TRIAL_EXHAUSTED_CODE ||
+                    (typeof payload.error === 'string' &&
+                      payload.error.includes(TRIAL_EXHAUSTED_CODE))
+                  ) {
+                    setErrorCode(TRIAL_EXHAUSTED_CODE)
+                  }
                 } else if (payload.type === 'done') {
                   setStatus('idle')
                 }
@@ -401,8 +420,11 @@ export function useChat({
               }
             } else if (line.startsWith('e:')) {
               // Error
-              console.error('[Chat] Error:', line.slice(2))
+              const errLine = line.slice(2)
+              console.error('[Chat] Error:', errLine)
               setStatus('error')
+              // PRD-222 US-014: mid-stream trial block → typed code for the banner.
+              if (errLine.includes(TRIAL_EXHAUSTED_CODE)) setErrorCode(TRIAL_EXHAUSTED_CODE)
             }
           }
         }
@@ -432,5 +454,8 @@ export function useChat({
     stop,
     isLoading,
     usage,
+    // PRD-222 US-014: 'trial_exhausted' when the last send was blocked by a
+    // spent trial; null otherwise. Drives the deterministic exhausted banner.
+    errorCode,
   }
 }

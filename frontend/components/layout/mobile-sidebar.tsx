@@ -23,6 +23,8 @@ import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { useSystemRole } from '@/contexts/role-context'
+import { useWorkspace } from '@/components/workspace-provider'
+import { isNavItemVisible } from '@/lib/nav-exposure'
 
 interface MobileSidebarProps {
   onNavigate: () => void
@@ -100,6 +102,7 @@ const navigationItems = [
     iconColor: 'text-[hsl(var(--info))]',
     navIconKey: 'nav_team',
     description: 'Manage workspace members',
+    requiredExposure: 'team' as const,
   },
   {
     name: 'Analytics',
@@ -108,6 +111,7 @@ const navigationItems = [
     iconColor: 'text-cyan-400',
     navIconKey: 'nav_analytics',
     description: 'Performance, costs & insights',
+    requiredExposure: 'analytics' as const,
   },
 ]
 
@@ -115,10 +119,15 @@ export function MobileSidebar({ onNavigate }: MobileSidebarProps) {
   const pathname = usePathname()
   const { isAdmin } = useSystemRole()
   const { data: iconMappings = {} } = useSystemIcons()
+  const { workspace } = useWorkspace()
 
+  // System-role gate (admin) + plan-tier exposure gate (US-024). A gated
+  // surface is hidden from the rail but its route still resolves (D5).
   const filteredNavItems = navigationItems.filter(item => {
-    if (!(item as any).requiredRole) return true
-    return (item as any).requiredRole === 'admin' && isAdmin
+    if ((item as any).requiredRole) {
+      return (item as any).requiredRole === 'admin' && isAdmin
+    }
+    return isNavItemVisible((item as any).requiredExposure, workspace?.exposure)
   })
 
   return (

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-_VALID_TARGET_TYPES = ("mission", "playbook_execution", "scheduled_playbook")
+_VALID_TARGET_TYPES = ("mission", "playbook_execution", "scheduled_playbook", "board_task")
 _MAX_LIST_LIMIT = 50
 _RECENT_EVENT_LIMIT = 10
 
@@ -153,6 +153,37 @@ def _resolve_target(
             return {
                 "title": f"Watch: {recipe.name[:70]} (schedule)",
                 "criteria": f"Scheduled playbook '{recipe.name}' keeps running on time.",
+            }
+
+        if target_type == "board_task":
+            # PRD-224 US-002: supervise an assigned ticket. target_id is the
+            # integer BoardTask id; a non-integer or cross-workspace/unknown id
+            # is refused here so the watch is never created on a phantom target.
+            from core.models.core import BoardTask
+
+            try:
+                task_id = int(target_id)
+            except (TypeError, ValueError):
+                return None
+            task = (
+                db.query(BoardTask)
+                .filter(
+                    BoardTask.id == task_id,
+                    BoardTask.workspace_id == workspace_id,
+                )
+                .first()
+            )
+            if task is None:
+                return None
+            label = (task.title or "").strip()
+            criteria = (task.description or "").strip() or (
+                f"Board task '{label}' is completed to standard."
+                if label
+                else f"Board task {target_id} is completed to standard."
+            )
+            return {
+                "title": f"Watch: {label[:80]}" if label else f"Watch: task {target_id}",
+                "criteria": criteria,
             }
     except Exception:
         logger.warning(
@@ -436,6 +467,69 @@ def auto_create_watch(
             "[Watches] auto-create failed for %s:%s -- launch unaffected",
             target_type,
             target_id,
+            exc_info=True,
+        )
+        return None
+
+
+def auto_create_ticket_watch(
+    db: Session,
+    workspace_id: UUID,
+    *,
+    task_id: int,
+    title: str,
+    success_criteria: str,
+    created_by: Optional[str] = None,
+    owner_agent_id: Optional[int] = None,
+    origin_chat_id: Optional[UUID] = None,
+):
+    """PRD-224 US-005: auto-attach a run_and_report watch to an ASSIGN-lane board
+    ticket so its verdict reports back into the originating thread.
+
+    Gated on ``config.AUTO_TICKET_WATCH`` (default ON) — its OWN dial, distinct
+    from the mission/playbook ``watch_auto_create`` setting. Idempotent (one live
+    watch per board_task, via the partial unique index) and fail-soft: NEVER
+    raises into the create handler — a broken watcher must not break a ticket.
+    Returns the Watch, or None when the dial is off / a live watch already
+    exists / creation failed.
+    """
+    try:
+        from config import config
+        from services.watch_service import WatchService
+
+        if not config.AUTO_TICKET_WATCH:
+            return None
+        if WatchService.find_live_watch(
+            db,
+            workspace_id=workspace_id,
+            target_type="board_task",
+            target_id=str(task_id),
+        ) is not None:
+            return None
+
+        watch = WatchService.create_watch(
+            db,
+            workspace_id=workspace_id,
+            watch_type="board_task",
+            target_type="board_task",
+            target_id=str(task_id),
+            title=(title or f"Ticket {task_id}")[:500],
+            created_by=created_by,
+            owner_agent_id=owner_agent_id,
+            success_criteria=success_criteria,
+            origin_chat_id=origin_chat_id,
+        )
+        logger.info(
+            "[Watches] auto-created ticket watch %s on board_task:%s",
+            watch.id,
+            task_id,
+        )
+        return watch
+    except Exception:
+        logger.warning(
+            "[Watches] ticket-watch auto-create failed for board_task:%s -- "
+            "ticket unaffected",
+            task_id,
             exc_info=True,
         )
         return None

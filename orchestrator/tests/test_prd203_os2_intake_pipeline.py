@@ -11,7 +11,7 @@ Covers:
   (c) the no-Redis degrade path (progress.py fallback emitter + stream);
   (d) the boot reaper sweeping a stranded ``scraping`` profile to ``failed``;
   (e) the payoff contract: ``/plan`` renders ``build_mission_goal()`` and calls
-      ``coordinator.create_mission()`` with ``source=mission_zero``, ``auto_approve``.
+      ``coordinator.create_mission()`` with an honest, verified config (W2·S5).
 """
 from __future__ import annotations
 
@@ -253,11 +253,13 @@ def test_boot_reaper_sweeps_stranded_scraping_profile(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# (e) /plan payoff contract — build_mission_goal + create_mission(source=mission_zero)
+# (e) /plan payoff contract — build_mission_goal + create_mission (honest config)
+# PRD-222 W2·S5 retired the Mission Zero source-tag + auto_approve/skip_verification;
+# /plan now launches a NORMAL verified mission that defaults to awaiting_approval.
 # ---------------------------------------------------------------------------
 
 
-def test_generate_plan_calls_create_mission_with_mission_zero_config(monkeypatch):
+def test_generate_plan_launches_an_honest_verified_mission(monkeypatch):
     from api import wizard as wiz_mod
 
     # Fake coordinator + planner (local imports inside generate_plan).
@@ -290,7 +292,6 @@ def test_generate_plan_calls_create_mission_with_mission_zero_config(monkeypatch
         status="profiled",
     )
     monkeypatch.setattr(wiz_mod, "_get_profile_or_404", lambda db, pid, ws: profile)
-    monkeypatch.setattr(wiz_mod, "_ensure_onboarding_agents", lambda db: None)
     monkeypatch.setattr(wiz_mod, "progress_emit", AsyncMock())
 
     ctx = SimpleNamespace(workspace_id=uuid4(), user=SimpleNamespace(id="user-1"))
@@ -301,9 +302,12 @@ def test_generate_plan_calls_create_mission_with_mission_zero_config(monkeypatch
     coordinator.create_mission.assert_awaited_once()
     kwargs = coordinator.create_mission.await_args.kwargs
     cfg = kwargs["config"]
-    assert cfg["source"] == "mission_zero"
-    assert cfg["auto_approve"] is True
-    assert cfg["default_team"], "Mission Zero got an empty default_team"
-    assert "Mission Zero" in kwargs["goal"]
+    # Honest config (D1/D7): the retired source-tag + trust-bypass flags are gone,
+    # so the coordinator defaults auto_approve→False and verifies the build.
+    assert "source" not in cfg
+    assert "auto_approve" not in cfg
+    assert "skip_verification" not in cfg
+    assert cfg["default_team"], "the build got an empty default_team"
+    assert "Acme" in kwargs["goal"]
     assert result.mission_id == "mission-123"
     assert profile.status == "planned"

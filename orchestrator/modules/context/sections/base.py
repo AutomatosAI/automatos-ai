@@ -36,6 +36,9 @@ class SectionContext:
     complexity_assessment: Any = None
     tool_hints: Optional[list[str]] = None
     widget_mode: bool = False
+    # PRD-229: the ContextMode value being assembled, so sections/tool loading can
+    # apply mode-scoped admission (e.g. strip execution-only tools from chat).
+    context_mode: Optional[str] = None
     kwargs: dict = field(default_factory=dict)
 
 

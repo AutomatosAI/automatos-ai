@@ -6,8 +6,10 @@
  * Provides React Query integration with automatic caching, retries, and real-time updates
  */
 
+import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import type { FleetStateResponse } from '@/lib/api-client'
 
 // API client - you'll need to adjust the import path based on your project structure
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
@@ -68,6 +70,9 @@ export const agentQueryKeys = {
   agentLogs: (id: string) => ['agents', id, 'logs'] as const,
   agentMetrics: (id: string) => ['agents', id, 'metrics'] as const,
   agentPerformance: (id: string) => ['agents', id, 'performance'] as const,
+
+  // Fleet (PRD-228): live floor read-model
+  fleet: ['agents', 'fleet'] as const,
 
   // Skills
   skills: ['skills'] as const,
@@ -168,6 +173,34 @@ export function useAgentTypes() {
     queryFn: () => agentApiClient.getAgentTypes(),
     staleTime: 5 * 60 * 1000, // Agent types don't change often
   })
+}
+
+// PRD-228: live fleet state. Polls on the same 10s cadence as mission detail,
+// and ALSO refetches immediately when the board stream fans out an agent move
+// (`automatos:board-changed`) so a pickup/handoff shows without waiting a tick.
+export const FLEET_POLL_MS = 10000
+
+export function useFleetState(enabled: boolean = true) {
+  const queryClient = useQueryClient()
+
+  const query = useQuery<FleetStateResponse>({
+    queryKey: agentQueryKeys.fleet,
+    queryFn: () => apiClient.getFleetState(),
+    refetchInterval: FLEET_POLL_MS,
+    staleTime: FLEET_POLL_MS / 2,
+    enabled,
+  })
+
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return
+    const onBoardChanged = () => {
+      void queryClient.invalidateQueries({ queryKey: agentQueryKeys.fleet })
+    }
+    window.addEventListener('automatos:board-changed', onBoardChanged)
+    return () => window.removeEventListener('automatos:board-changed', onBoardChanged)
+  }, [enabled, queryClient])
+
+  return query
 }
 
 // Get all skills

@@ -9,7 +9,6 @@ import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
-import { FirstLoginGuard } from './onboarding/first-login-guard'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { useStudioThemeFlag } from '../hooks/use-studio-theme'
@@ -100,7 +99,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
               <Suspense fallback={null}>
                 <StudioThemeFlag />
               </Suspense>
-              <FirstLoginGuard />
+              {/* PRD-222: a new workspace lands directly in the conversation
+                  where Auto opens (OnboardingOpener) — no first-login modal or
+                  guided tour (both retired in W2·S5). */}
               {children}
               <GlobalSearch />
               <Toaster position="top-right" richColors closeButton />

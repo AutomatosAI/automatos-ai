@@ -9,7 +9,7 @@ PRD-130: Business Intake Wizard API
   POST   /api/wizard/scrape/{profile_id}→ 202 + background pipeline
   GET    /api/wizard/progress/{profile_id} → SSE live progress feed
   PATCH  /api/wizard/profile/{profile_id}→ user edits to the profile
-  POST   /api/wizard/plan/{profile_id}  → generate Mission Zero draft plan
+  POST   /api/wizard/plan/{profile_id}  → launch the onboarding build from the profile
 
 The scrape endpoint returns 202 immediately and runs the pipeline in the
 background so Railway's edge proxy cannot kill long-running intake jobs
@@ -37,7 +37,6 @@ from core.auth.workspace_permission import require_workspace_permission
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db, get_db_session
 from core.models.business_profiles import BusinessProfile
-from core.models.core import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 
@@ -530,7 +529,7 @@ async def generate_plan(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ) -> PlanResponse:
-    """Launch Mission Zero as a real mission in the Coordinator.
+    """Launch the onboarding build as a real mission in the Coordinator.
 
     Converts the scraped business profile into a rich natural-language
     goal and hands it to ``CoordinatorService.create_mission()``. The
@@ -544,16 +543,11 @@ async def generate_plan(
     profile = _get_profile_or_404(db, profile_id, ctx.workspace_id)
 
     await progress_emit(
-        profile_id, STAGE_PLAN, "Launching Mission Zero…"
+        profile_id, STAGE_PLAN, "Launching the onboarding build…"
     )
 
     archetype = ARCHETYPES.get(profile.archetype or "")
     default_team = list(archetype.default_team) if archetype else []
-
-    # Mission Zero uses global onboarding agents (VOYAGER, BLUEPRINT,
-    # SCRIBE, FORGE) seeded at startup.  Verify they exist; if the seed
-    # didn't run for some reason, seed them now.
-    _ensure_onboarding_agents(db)
 
     profile_dict = {
         "domain": profile.domain,
@@ -568,10 +562,12 @@ async def generate_plan(
 
     goal = build_mission_goal(profile_dict, archetype_default_team=default_team)
 
+    # PRD-222 W2·S5 (D1/D7): the retired Mission Zero source-tag + auto_approve +
+    # skip_verification are gone — this launches a NORMAL, verified mission that
+    # defaults to awaiting_approval (the coordinator reads
+    # ``mission_config.get("auto_approve", False)``), so onboarding builds are
+    # user-approved and judged like any other.
     mission_config = {
-        "source": "mission_zero",
-        "auto_approve": True,
-        "skip_verification": True,  # Onboarding tasks don't need LLM judge — saves ~50% cost
         "profile_id": str(profile.id),
         "domain": profile.domain,
         "archetype": profile.archetype,
@@ -617,7 +613,7 @@ async def generate_plan(
         raise HTTPException(status_code=500, detail=f"Mission launch failed: {exc}")
 
     await progress_emit(
-        profile_id, STAGE_PLAN, "Mission Zero launched",
+        profile_id, STAGE_PLAN, "Onboarding build launched",
         meta={"mission_id": str(run.id)},
     )
 
@@ -628,33 +624,6 @@ async def generate_plan(
     )
 
 
-# ===========================================================================
-# Mission Zero onboarding agents — verification helper
-# ===========================================================================
-
-
-def _ensure_onboarding_agents(db: Session) -> None:
-    """Verify the global onboarding agents exist; lazy-seed if missing.
-
-    The 4 onboarding agents (VOYAGER, BLUEPRINT, SCRIBE, FORGE) are seeded
-    at startup by ``seed_onboarding_agents``. This is a safety net for the
-    rare case where the seed didn't run (e.g. first deploy before restart).
-    """
-    count = (
-        db.query(Agent)
-        .filter(
-            Agent.is_system_agent.is_(True),
-            Agent.required_role == "onboarding",
-            Agent.status == "active",
-        )
-        .count()
-    )
-    if count >= 4:
-        return
-
-    logger.warning("Only %d onboarding agents found — lazy-seeding", count)
-    from core.seeds.seed_onboarding_agents import seed_onboarding_agents
-    seed_onboarding_agents(db)
 
 
 # ===========================================================================

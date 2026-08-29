@@ -266,10 +266,23 @@ class WatchTicker:
                 task_id = int(watch.target_id)
             except (TypeError, ValueError):
                 return None
-            row = db.query(BoardTask.status).filter(BoardTask.id == task_id).first()
+            row = (
+                db.query(BoardTask.status, BoardTask.review_feedback)
+                .filter(BoardTask.id == task_id)
+                .first()
+            )
             if row is None:
                 return None
-            return _BOARD_TERMINAL.get(row[0], "running")
+            status, review_feedback = row
+            # PRD-224 US-002: 'done'/'failed' are the plain terminals; a task
+            # parked in 'review' WITH recorded review_feedback has produced
+            # scorable output (a reviewer has weighed in), so it counts as a
+            # completed output to score. Everything else (assigned/in_progress/
+            # bare review/blocked) is still running -- the watch stays live and
+            # the generic deadline sweep owns 'blocked past the deadline'.
+            if status == "review" and review_feedback:
+                return "completed"
+            return _BOARD_TERMINAL.get(status, "running")
 
         logger.warning(
             "[WatchTicker] unknown target_type %r on watch %s",

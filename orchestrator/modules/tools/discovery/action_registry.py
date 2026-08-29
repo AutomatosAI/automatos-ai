@@ -283,6 +283,7 @@ class ActionRegistry:
         exclude_admin: bool = False,
         exclude_promoted: bool = False,
         include_super_admin: bool = False,
+        exclude_names: Optional[List[str]] = None,
     ) -> str:
         """
         Build a markdown summary of all platform actions for injection
@@ -296,6 +297,8 @@ class ActionRegistry:
                 "Direct Tools" section with call-directly instructions.
             include_super_admin: Fail-closed — super_admin_only actions are
                 excluded unless this is explicitly True.
+            exclude_names: PRD-229 — action names to omit entirely (mode-scoped
+                admission, e.g. ask_orchestrator outside execution lanes).
         """
         self._ensure_initialized()
         return self._format_actions_summary(
@@ -303,6 +306,7 @@ class ActionRegistry:
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
+            exclude_names=exclude_names,
         )
 
     def build_filtered_prompt_summary(
@@ -311,6 +315,7 @@ class ActionRegistry:
         exclude_admin: bool = False,
         exclude_promoted: bool = False,
         include_super_admin: bool = False,
+        exclude_names: Optional[List[str]] = None,
     ) -> str:
         """
         Build a markdown summary of only the named subset of platform actions,
@@ -342,6 +347,7 @@ class ActionRegistry:
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
+            exclude_names=exclude_names,
         )
 
     @staticmethod
@@ -361,6 +367,7 @@ class ActionRegistry:
         exclude_admin: bool,
         exclude_promoted: bool,
         include_super_admin: bool = False,
+        exclude_names: Optional[List[str]] = None,
     ) -> str:
         """
         Render a list of ActionDefinitions as the canonical markdown summary
@@ -374,11 +381,17 @@ class ActionRegistry:
         to call them directly by name (they have first-class tool schemas).
         Non-promoted actions are rendered with ``platform_execute`` calling
         instructions.
+
+        PRD-229: ``exclude_names`` drops actions by name entirely (mode-scoped
+        admission), mirroring the callable-surface gate.
         """
+        blocked = set(exclude_names or ())
         promoted_by_cat: Dict[str, List[ActionDefinition]] = {}
         dispatcher_by_cat: Dict[str, List[ActionDefinition]] = {}
 
         for action in actions:
+            if action.name in blocked:
+                continue
             if action.super_admin_only and not include_super_admin:
                 continue
             if exclude_admin and action.admin_only:

@@ -28,8 +28,8 @@ def register_report_actions(registry: ActionRegistry) -> None:
                 },
                 "report_type": {
                     "type": "string",
-                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit"],
-                    "description": "Category: standup (routine check), research (deep-dive), incident (problem), summary (rollup), delivery (completed work), audit (compliance).",
+                    "enum": ["standup", "research", "incident", "summary", "delivery", "audit", "onboarding"],
+                    "description": "Category: standup (routine check), research (deep-dive), incident (problem), summary (rollup), delivery (completed work), audit (compliance), onboarding (Mission Zero founding-document summary).",
                 },
                 "status": {
                     "type": "string",
@@ -96,7 +96,10 @@ def register_report_actions(registry: ActionRegistry) -> None:
                     "description": "Set to true when the report's recommendations need a human decision before any action. Surfaces in the 'Decisions Needed' queue.",
                 },
             },
-            "required": ["title", "content", "report_type", "status"],
+            # report_type defaults to 'standup' and status to 'ok' in the
+            # handler (handlers_reports.submit_report) — a caller can omit both,
+            # so neither belongs in required[]. See the tool-schema walker guard.
+            "required": ["title", "content"],
         },
         permission_level="write",
         requires_confirmation=False,
@@ -236,7 +239,8 @@ def register_report_actions(registry: ActionRegistry) -> None:
         description=(
             "Read the most recent report from a specific agent. Use to check another "
             "agent's latest output before taking action (e.g. reading research before "
-            "writing a newsletter). For historical reports, this returns only the latest one."
+            "writing a newsletter). For historical reports, this returns only the latest one. "
+            "Provide agent_name or agent_id."
         ),
         category="reports",
         parameters={

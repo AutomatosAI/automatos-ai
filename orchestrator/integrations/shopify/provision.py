@@ -73,6 +73,9 @@ class ShopifyProvisioner:
     # workspace by settings.shopify_domain, so the generic flow must stamp that
     # key too — not only the canonical source_external_id.
     external_id_key = "shopify_domain"
+    # Rotate-on-reprovision is Shopify's documented key-recovery path
+    # (runbooks/client-onboarding) — keep minting a fresh key every call.
+    reuse_existing_key = False
 
     def allowed_domains(self, external_id: str, metadata: Dict[str, Any]) -> List[str]:
         """Origins permitted to use the minted widget key.

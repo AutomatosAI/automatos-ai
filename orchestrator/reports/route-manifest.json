@@ -1551,6 +1551,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/marketplace/packages"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/packages/{slug}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/packages/{slug}/install"
+    },
+    {
+      "method": "GET",
       "path": "/api/marketplace/plugins"
     },
     {
@@ -1906,14 +1918,6 @@
       "path": "/api/routing/triggers/setup"
     },
     {
-      "method": "GET",
-      "path": "/api/settings/onboarding-agents"
-    },
-    {
-      "method": "PUT",
-      "path": "/api/settings/onboarding-agents/{slug}"
-    },
-    {
       "method": "POST",
       "path": "/api/shopify/connect"
     },
@@ -2211,6 +2215,10 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/approval-grants/{grant_id}/answer"
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/deny"
     },
     {
@@ -2220,6 +2228,10 @@
     {
       "method": "POST",
       "path": "/api/v1/approval-grants/{grant_id}/revoke"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/fleet"
     },
     {
       "method": "POST",
@@ -2864,6 +2876,18 @@
     {
       "method": "GET",
       "path": "/api/workspaces/current/memory-stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/current/onboarding/checklist"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspaces/current/onboarding/checklist"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/current/onboarding/reset"
     },
     {
       "method": "GET",

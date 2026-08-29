@@ -48,7 +48,6 @@ const BASE_RESPONSE = {
   slug: 'acme',
   plan: 'starter',
   role: 'owner',
-  is_new_workspace: true,
   plan_limits: {},
   webhook_url: null,
   webhook_key: null,

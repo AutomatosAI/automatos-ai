@@ -342,6 +342,93 @@ def _apply_page_prior(
     return merged, (reason or "page_prior"), from_pins
 
 
+def _apply_onboarding_prior(
+    narrowing: Tuple[Optional[List[str]], Optional[str], bool],
+    session,
+    workspace_id: Optional[Any],
+    is_admin: bool,
+    is_super_admin: bool,
+) -> Tuple[Optional[List[str]], Optional[str], bool]:
+    """Union the onboarding spine's actions into the narrowed enum while the
+    workspace is mid-onboarding (PRD-222, live-test 2026-08-29).
+
+    The OnboardingSection instructs Auto to call these actions by name, but the
+    semantic ranking keys on the user's latest text — and onboarding turns are
+    exactly the ones with no tool-shaped text ("Yes please."). Same fold, gate
+    filter, and cap as the PRD-221 page prior. Fail-soft: any load error leaves
+    the narrowing untouched.
+    """
+    allowed, _reason, _from_pins = narrowing
+    if allowed is None or not workspace_id or session is None:
+        return narrowing
+    try:
+        from core.models.workspaces import Workspace
+        from services import onboarding_state
+
+        ws = session.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if ws is None or not onboarding_state.is_onboarding_active(ws):
+            return narrowing
+        from modules.tools.discovery.actions_onboarding import ONBOARDING_PRIOR_ACTIONS
+
+        merged = _apply_page_prior(
+            narrowing, ONBOARDING_PRIOR_ACTIONS, is_admin, is_super_admin
+        )
+        return merged[0], "onboarding_prior", merged[2]
+    except Exception:
+        logger.debug("[tool-router] onboarding prior failed — narrowing unchanged", exc_info=True)
+        return narrowing
+
+
+def _dispatcher_always_include() -> List[str]:
+    """Action names the dispatcher_only surface (the heartbeat orchestrator)
+    must keep reachable regardless of the semantic top-K ranking (P228-RVW-4).
+
+    CSV in config (``HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE``), whitespace-safe —
+    the same shape as ``_fallback_pins``. Empty/unset → no always-include.
+    """
+    try:
+        from config import config
+        raw = str(getattr(config, "HEARTBEAT_DISPATCHER_ALWAYS_INCLUDE", "") or "")
+    except Exception:
+        raw = ""
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _apply_dispatcher_always_include(
+    allowed: Optional[List[str]],
+) -> Optional[List[str]]:
+    """Union the always-include set onto a NARROWED dispatcher allow-list so
+    heartbeat-critical read tools survive the semantic top-K narrowing
+    (P228-RVW-4 — the signal-tool-routing-drop class).
+
+    - ``allowed is None`` (open-full / flag-off / fallback): returned unchanged —
+      the full enum already exposes every action.
+    - A narrowed list: each always-include name that is registered AND clears the
+      non-admin role gate (``_page_action_passes_gate``, the same fail-closed
+      check page-prior uses) is appended (dedup, order-stable). A gated or
+      unknown name is never forced in. Reachability then no longer depends on an
+      unasserted ranking result: the tool is in the enum every tick.
+    """
+    if allowed is None:
+        return allowed
+    pins = _dispatcher_always_include()
+    if not pins:
+        return allowed
+    merged = list(allowed)
+    seen = set(merged)
+    for name in pins:
+        if name in seen:
+            continue
+        # The dispatcher_only surface always resolves as non-admin
+        # (_load_dispatcher_only passes is_admin=False), so gate on that — a
+        # gated/unregistered name can never be forced into the enum.
+        if not _page_action_passes_gate(name, is_admin=False, is_super_admin=False):
+            continue
+        merged.append(name)
+        seen.add(name)
+    return merged
+
+
 def _narrow_dispatcher_actions_sync(
     query: Optional[str],
     is_admin: bool,
@@ -811,6 +898,11 @@ async def get_tools_for_agent_async(
         # Gate-filtered by the SAME predicate as ranking — a manifest can never
         # expose an admin/su tool to an unauthorized principal.
         narrowing = _apply_page_prior(narrowing, page_actions, is_admin, is_super_admin)
+        # PRD-222: while onboarding is active, the spine's actions survive
+        # narrowing — the section instructs Auto to call them by name.
+        narrowing = _apply_onboarding_prior(
+            narrowing, session_used, workspace_id, is_admin, is_super_admin
+        )
         tools = _get_tools_for_agent_core(
             agent_id=agent_id,
             session_used=session_used,
@@ -822,6 +914,7 @@ async def get_tools_for_agent_async(
             trace_id=trace_id,
             start_time=start_time,
         )
+        tools = _apply_tier_exposure(session_used, workspace_id, tools, trace_id)
         await _maybe_log_shadow_surface(query, is_admin, is_super_admin, tools, trace_id)
         return tools
     except Exception as e:
@@ -830,6 +923,48 @@ async def get_tools_for_agent_async(
     finally:
         if db_session is None:
             session_used.close()
+
+
+def _apply_tier_exposure(
+    session, workspace_id: Optional[Any], tools: List[Dict[str, Any]], trace_id: str
+) -> List[Dict[str, Any]]:
+    """Trim the assembled tool surface to the workspace tier's capability
+    families (PRD-222 US-024). The single seam where per-turn platform tool
+    schemas are gated by plan.
+
+    FAIL-OPEN, enforced at every step: a missing workspace_id or an empty plan
+    returns the surface unchanged here; a NON-EMPTY but unresolvable plan (a
+    stale/renamed/stray value such as a legacy 'starter' row) is failed open by
+    ``filter_tools_by_plan`` itself, which trims only KNOWN tiers — so a lookup
+    fault can never HIDE a tool. Any exception below is likewise swallowed to the
+    full surface. Only a CONFIRMED gated tier trims. This also keeps the
+    mock-based unit suite (no real workspace row) on the full surface.
+    """
+    if not tools or workspace_id is None:
+        return tools
+    try:
+        from core.models.workspaces import Workspace
+        from services.plan_tiers import filter_tools_by_plan
+
+        ws = session.query(Workspace).filter(Workspace.id == workspace_id).first()
+        plan = getattr(ws, "plan", None)
+        if not plan:
+            return tools
+        # A non-empty but unresolvable plan does NOT reach a trim: filter_tools_by_plan
+        # returns the surface unchanged for any plan not in PLAN_TIERS (true fail-open).
+        trimmed = filter_tools_by_plan(tools, plan)
+        if len(trimmed) != len(tools):
+            logger.info(
+                f"[tool-trace {trace_id}] tier exposure: {len(tools)}→{len(trimmed)} "
+                f"tool schemas for plan={plan} (families trimmed)"
+            )
+        return trimmed
+    except Exception:
+        logger.warning(
+            f"[tool-trace {trace_id}] tier exposure filter failed — full surface kept",
+            exc_info=True,
+        )
+        return tools
 
 
 get_tools_for_agent.__doc__ = (

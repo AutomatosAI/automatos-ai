@@ -34,6 +34,12 @@ from channels.drivers import (
     get_driver,
     list_platforms,
 )
+from services.ingress_gate import (  # PRD-225 US-006: per-channel trust gate
+    TRIGGER_MODES,
+    normalize_trigger_mode,
+    trigger_mode_of,
+    with_trigger_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +192,7 @@ async def list_channels(
     rows = db.execute(
         text("""
             SELECT id, platform, status, mode, webhook_url, last_verified, last_error,
-                   metadata, default_agent_id, message_count, last_activity_at, created_at
+                   metadata, config, default_agent_id, message_count, last_activity_at, created_at
             FROM channel_connections
             WHERE workspace_id = :ws_id
             ORDER BY created_at DESC
@@ -218,6 +224,9 @@ async def list_channels(
                 "last_verified": r.last_verified.isoformat() if r.last_verified else None,
                 "last_error": r.last_error,
                 "metadata": r.metadata or {},
+                # PRD-225 US-006: the ingress trust gate mode. Surface only this
+                # one config key — never the whole config (it holds credentials).
+                "trigger_mode": trigger_mode_of(r.config),
                 "default_agent_id": r.default_agent_id,
                 "message_count": r.message_count or 0,
                 "last_activity_at": r.last_activity_at.isoformat() if r.last_activity_at else None,
@@ -421,6 +430,20 @@ async def connect_channel_for_workspace(
     }
 
 
+def _current_channel_config(db: Session, channel_id: str) -> Dict[str, Any]:
+    """The channel row's stored config JSONB (``{}`` if absent/non-dict).
+
+    Read-only helper so both the trigger_mode-only update and the config-only
+    update (which must preserve the stored mode, P225-RVW-7) read the current
+    config from one place.
+    """
+    existing = db.execute(
+        text("SELECT config FROM channel_connections WHERE id = :id"),
+        {"id": channel_id},
+    ).fetchone()
+    return existing.config if existing and isinstance(existing.config, dict) else {}
+
+
 @router.put("/{channel_id}", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def update_channel(
     channel_id: str,
@@ -440,9 +463,34 @@ async def update_channel(
     updates = []
     params: Dict[str, Any] = {"id": channel_id}
 
+    # PRD-225 US-006: trigger_mode rides the config JSONB (no new column). Merge
+    # it into the config being written — rebuild-don't-mutate — so a mode update
+    # never clobbers credentials and a config update never drops the mode.
+    new_config: Optional[Dict[str, Any]] = None
     if "config" in payload:
+        new_config = dict(payload["config"]) if isinstance(payload["config"], dict) else {}
+    if "trigger_mode" in payload:
+        mode = normalize_trigger_mode(payload["trigger_mode"])
+        if mode is None:
+            raise HTTPException(400, f"trigger_mode must be one of {list(TRIGGER_MODES)}")
+        if new_config is None:
+            new_config = with_trigger_mode(_current_channel_config(db, channel_id), mode)
+        else:
+            new_config = with_trigger_mode(new_config, mode)
+    elif new_config is not None and "trigger_mode" not in new_config:
+        # P225-RVW-7: a config-only edit (e.g. rotating a bot_token) REPLACES the
+        # whole config JSONB. list_channels never surfaces the raw config (it
+        # holds creds), so the client can't round-trip trigger_mode itself —
+        # carry the stored mode across, or the operator's allow_all /
+        # communication_only choice silently reverts to the strict default.
+        stored = normalize_trigger_mode(
+            _current_channel_config(db, channel_id).get("trigger_mode")
+        )
+        if stored is not None:
+            new_config = with_trigger_mode(new_config, stored)
+    if new_config is not None:
         updates.append("config = :config")
-        params["config"] = __import__('json').dumps(payload["config"])
+        params["config"] = _json.dumps(new_config)
     if "default_agent_id" in payload:
         updates.append("default_agent_id = :agent_id")
         params["agent_id"] = payload["default_agent_id"]

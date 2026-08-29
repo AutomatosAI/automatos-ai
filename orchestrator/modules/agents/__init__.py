@@ -2,7 +2,7 @@
 Agents Module
 =============
 
-Agent lifecycle, factory, registry, and communication.
+Agent lifecycle, factory, and registry.
 
 Usage:
     from modules.agents import AgentService, AgentFactory, AgentRegistry
@@ -31,15 +31,6 @@ from .registry import (
     AgentCapabilities,
 )
 
-# Communication exports
-from .communication import (
-    AgentCommunicationProtocol,
-    Message,
-    MessageType,
-    MessagePriority,
-    SharedContext,
-)
-
 __all__ = [
     # Main Service
     "AgentService",
@@ -55,11 +46,4 @@ __all__ = [
     # Registry
     "AgentRegistry",
     "AgentCapabilities",
-
-    # Communication
-    "AgentCommunicationProtocol",
-    "Message",
-    "MessageType",
-    "MessagePriority",
-    "SharedContext",
 ]

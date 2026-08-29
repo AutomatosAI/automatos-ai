@@ -20,7 +20,7 @@ import { Check, ShieldAlert, ShieldCheck, X } from 'lucide-react'
 import { WidgetBase } from '../WidgetBase'
 import { registerWidget } from '../registry'
 import { Button } from '@/components/ui/button'
-import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants-api'
+import { useDenyApproval, useGrantApproval } from '@/hooks/use-approval-grants'
 import type { ToolApprovalWidgetData, WidgetBaseProps, WidgetDefinition } from '../types'
 import { toast } from 'sonner'
 
@@ -83,7 +83,7 @@ export function ToolApprovalWidget({
 
   const handleApprove = async () => {
     try {
-      const res = await grantApproval.mutateAsync({ id: data.grant_id })
+      const res = await grantApproval.mutateAsync(data.grant_id)
       const executed = (res?.grant?.details as { executed_result?: ExecutedResult } | undefined)
         ?.executed_result
       const line = executedOutcomeLine(executed)
@@ -101,7 +101,7 @@ export function ToolApprovalWidget({
 
   const handleDeny = async () => {
     try {
-      await denyApproval.mutateAsync({ id: data.grant_id })
+      await denyApproval.mutateAsync(data.grant_id)
       setOutcome('Denied — the action will not run.')
       setDone('denied')
       toast.info('Action denied')

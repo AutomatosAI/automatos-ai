@@ -110,6 +110,7 @@ def build_tool_caller_context(
     model_id: Optional[str] = None,
     est_input_tokens: int = 0,
     est_output_tokens: int = 0,
+    assign_lane: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Build the caller_context threaded into every chat tool execution (PRD-177 S2 / F017).
 
@@ -149,6 +150,11 @@ def build_tool_caller_context(
         ctx["model_id"] = model_id
         ctx["est_input_tokens"] = int(est_input_tokens or 0)
         ctx["est_output_tokens"] = int(est_output_tokens or 0)
+    # PRD-224 US-005: a routing flag (not telemetry) — True when Auto's turn
+    # routed the ASSIGN lane, so the executor injects _assign_lane and the
+    # create-task handler auto-attaches supervision. The LLM cannot set this.
+    if assign_lane:
+        ctx["assign_lane"] = True
     return ctx or None
 
 
@@ -440,7 +446,7 @@ class ChatService:
                     id=workspace_id,
                     name="Dev Workspace",
                     slug="dev",
-                    plan="starter",
+                    plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
                     plan_limits={},
                     settings={},
                     is_personal=True,
@@ -1413,6 +1419,7 @@ class StreamingChatService:
         composio_result: Any = None,
         user_id: Optional[int] = None,
         conversation_id: Optional[str] = None,
+        assign_lane: bool = False,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1564,6 +1571,7 @@ class StreamingChatService:
                     model_id=_turn_budget.get("model_id"),
                     est_input_tokens=_turn_budget.get("est_input_tokens", 0),
                     est_output_tokens=_turn_budget.get("est_output_tokens", 0),
+                    assign_lane=assign_lane,
                 ),
             )
             # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
@@ -2131,9 +2139,17 @@ class StreamingChatService:
             if fresh_start:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
 
-            # Start agent activation (concurrent with chat-id emission)
+            # Start agent activation (concurrent with chat-id emission).
+            # PRD-230 US-001: thread the CONVERSATION's workspace so the trial gate
+            # meters + pins chat turns (Auto the system agent carries no workspace
+            # of its own — without this, chat ran unmetered/unpinned on the primary
+            # surface). self.workspace_id is resolved above.
             agent_task = asyncio.create_task(
-                self.agent_factory.activate_agent(agent_id, use_orchestrator_llm=use_orchestrator_llm)
+                self.agent_factory.activate_agent(
+                    agent_id,
+                    use_orchestrator_llm=use_orchestrator_llm,
+                    workspace_id=self.workspace_id,
+                )
             )
 
             # Send chat_id to frontend
@@ -2303,6 +2319,19 @@ class StreamingChatService:
                 else:
                     llm_messages.insert(0, {"role": "system", "content": _mission_directive})
 
+            # PRD-224 US-004: inject the ASSIGN-lane manager directive into the
+            # system prompt (same seam as the mission suggestion, set per-turn by
+            # api/chat.py) so Auto files the board ticket instead of answering inline.
+            _assign_directive = (
+                getattr(complexity_assessment, "context_directive", None)
+                if complexity_assessment else None
+            )
+            if _assign_directive and llm_messages:
+                if llm_messages[0].get("role") == "system":
+                    llm_messages[0]["content"] = llm_messages[0].get("content", "") + _assign_directive
+                else:
+                    llm_messages.insert(0, {"role": "system", "content": _assign_directive})
+
             # US-015: Emit memory-injected SSE event
             if orchestrated and orchestrated.memory_context:
                 smart_chat = getattr(self, '_smart_chat', None)
@@ -2365,11 +2394,19 @@ class StreamingChatService:
             if response.tool_calls:
                 logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
                 final_response = None
+                # PRD-224 US-005: mark the ASSIGN lane so the create-task tool
+                # auto-attaches supervision (the flag rides caller_context, never
+                # a tool arg — the LLM cannot forget it or fake it).
+                _assign_lane = bool(
+                    complexity_assessment is not None
+                    and getattr(getattr(complexity_assessment, "action", None), "value", None) == "assign"
+                )
                 async for chunk in self._stream_tool_loop(
                     response, llm_messages, agent_runtime, tool_data, use_tools,
                     composio_result=_composio_result,
                     user_id=user_id,
                     conversation_id=chat_id,
+                    assign_lane=_assign_lane,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']

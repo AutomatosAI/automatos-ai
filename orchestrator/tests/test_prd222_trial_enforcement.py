@@ -69,18 +69,18 @@ def test_converted_trial_passes_through():
 
 
 def test_active_trial_routes_to_platform(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_MODEL_ALLOWLIST", "modelA,modelB")
     r = resolve_trial_routing(_WS(_trial(TRIAL_ACTIVE)), "modelA", is_byok=False)
     assert r.action == ACTION_PLATFORM_TRIAL
-    assert r.model == "modelA"  # allowlisted request kept as-is
+    assert r.model == "modelA"  # requested model kept as-is (cap-only trial)
 
 
-def test_offlist_model_is_substituted(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_MODEL_ALLOWLIST", "modelA,modelB")
-    r = resolve_trial_routing(_WS(_trial(TRIAL_WARNED)), "expensive-gpt", is_byok=False)
+def test_active_trial_any_model_passes_through(monkeypatch):
+    """2026-08-29 (Gerard): the trial is a SPEND CAP, not a model gate — any
+    requested model rides the platform key unchanged; an expensive model just
+    exhausts the credit sooner."""
+    r = resolve_trial_routing(_WS(_trial(TRIAL_ACTIVE)), "any-expensive-model", is_byok=False)
     assert r.action == ACTION_PLATFORM_TRIAL
-    assert r.model == "modelA"  # off-list → substituted to the first allowlisted
-
+    assert r.model == "any-expensive-model"
 
 def test_exhausted_trial_is_blocked_with_typed_code():
     r = resolve_trial_routing(_WS(_trial(TRIAL_EXHAUSTED)), "m", is_byok=False)
@@ -257,9 +257,16 @@ def test_daily_increment_pushes_grant_into_pause():
 
 
 def test_gate_wired_at_choke_point_and_bypasses_byok():
+    # PRD-230 US-001 refactor: the gate is now a shared helper
+    # (_resolve_trial_decision) called by BOTH the mission path
+    # (_create_llm_manager) and the chat path (activate_agent). BYOK still
+    # provably bypasses — the helper short-circuits on the is_byok flag, which
+    # each seam passes as resolved.is_byok.
     src = (REPO / "modules" / "agents" / "factory" / "agent_factory.py").read_text()
-    assert "resolve_trial_routing" in src              # gate called at the seam
-    assert "not resolved.is_byok" in src               # BYOK provably bypasses it
+    assert "resolve_trial_routing" in src              # gate logic at the seam
+    assert "_resolve_trial_decision(" in src           # shared gate invoked
+    assert "if not workspace_id or is_byok" in src     # BYOK provably bypasses it
+    assert "resolved.is_byok" in src                   # the BYOK flag flows into the gate
     assert "TrialExhaustedError" in src                # exhausted → typed error
 
 

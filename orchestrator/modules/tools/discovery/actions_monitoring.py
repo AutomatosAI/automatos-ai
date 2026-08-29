@@ -85,7 +85,8 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
                         "Presets: 'health' (all services up/down), 'error_rate' (HTTP 5xx rate), "
                         "'latency' (p95 response time), 'postgres' (DB connections + cache hit), "
                         "'redis' (memory + clients + latency), 'all' (full health dashboard). "
-                        "Or provide raw PromQL like 'rate(automatos_http_requests_total[5m])'."
+                        "Or provide raw PromQL like 'rate(automatos_http_requests_total[5m])'. "
+                        "Optional — defaults to the 'health' preset when omitted."
                     ),
                 },
                 "range_minutes": {
@@ -93,7 +94,10 @@ def register_monitoring_actions(registry: ActionRegistry) -> None:
                     "description": "Time range for range queries in minutes (default 15).",
                 },
             },
-            "required": ["query"],
+            # query defaults to the 'health' preset in the handler
+            # (handlers_monitoring.query_prometheus) — omitting it is valid, so it
+            # is not required. See the tool-schema walker guard.
+            "required": [],
         },
         permission_level="read",
         super_admin_only=True,

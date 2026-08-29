@@ -23,7 +23,10 @@ class ChannelConnection(Base):
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     workspace_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
     platform = Column(String(50), nullable=False)  # telegram, slack, discord
-    config = Column(JSON, server_default="{}")  # encrypted credentials
+    # Credentials + settings. PRD-225 US-006 adds ``trigger_mode``
+    # ('strict' | 'communication_only' | 'allow_all', default strict) here —
+    # the ingress trust gate reads it; no new column (services/ingress_gate.py).
+    config = Column(JSON, server_default="{}")
     status = Column(String(20), server_default="'inactive'")  # active, inactive, error
     # PRD-008-A.4: per-channel connectivity mode ('webhook' | 'polling')
     # and the URL the platform POSTs inbound traffic to (when in

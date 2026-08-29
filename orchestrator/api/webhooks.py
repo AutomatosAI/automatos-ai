@@ -17,7 +17,9 @@ import asyncio
 import hashlib
 import hmac
 import logging
+import re
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
 
@@ -29,7 +31,7 @@ from core.database.database import get_db
 from core.models.workspaces import Workspace
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
-from core.routing.ingestors.webhook import WebhookIngestor
+from core.routing.ingestors.webhook import WebhookIngestor, extract_inbound_text
 from services import webhook_dedup
 from config import config
 
@@ -191,6 +193,13 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
         msg = body.get("message", {})
         ctx["chat_id"] = msg.get("chat", {}).get("id")
         ctx["from_user"] = msg.get("from", {}).get("first_name", "")
+        # P225-RVW-1: the STABLE numeric sender id (Telegram-assigned, not the
+        # self-chosen first_name) — used for answer attribution, never for auth.
+        ctx["from_id"] = msg.get("from", {}).get("id")
+        # PRD-225: reply correlation — the id of THIS message and the id of the
+        # message it replies to (a reply to a correlated question answers it).
+        ctx["message_id"] = msg.get("message_id")
+        ctx["reply_to_message_id"] = (msg.get("reply_to_message") or {}).get("message_id")
 
     elif platform == "slack":
         event = body.get("event", {})
@@ -211,6 +220,393 @@ def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any
         ctx["to_phone"] = body.get("To")
 
     return ctx
+
+
+# =============================================================================
+# PRD-225 US-005 — Telegram answer bridge (reply / /answer correlation)
+# =============================================================================
+
+_ANSWER_CMD = re.compile(r"^/answer\s+(\d+)\s+(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _pending_questions(db: Session, workspace_id: Any) -> list:
+    """The workspace's open (pending) question-kind grants."""
+    from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_QUESTION
+
+    return (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.workspace_id == workspace_id,
+            ApprovalGrant.kind == KIND_QUESTION,
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+        )
+        .all()
+    )
+
+
+def _find_pending_question(db: Session, workspace_id: Any, ask_id: int):
+    """A pending question by id, scoped to the workspace. None if absent —
+    wrong-workspace / already-answered targets simply aren't found (no leak)."""
+    for g in _pending_questions(db, workspace_id):
+        if g.id == ask_id:
+            return g
+    return None
+
+
+def _telegram_ref(grant: Any) -> Optional[Dict[str, Any]]:
+    """The grant's stored Telegram delivery ref ``{chat_id, message_id}`` (the
+    chat the question was delivered to), or None. That chat is the ONLY one
+    authorized to answer the question (P225-RVW-1)."""
+    refs = grant.channel_refs if isinstance(grant.channel_refs, dict) else {}
+    tg = refs.get("telegram") if isinstance(refs, dict) else None
+    return tg if isinstance(tg, dict) else None
+
+
+def _find_answerable_question(
+    db: Session, workspace_id: Any, ask_id: int, reply_chat_id: Any,
+):
+    """A pending question the replying chat is AUTHORIZED to answer by id.
+
+    Telegram routes EVERY bot update to the one workspace webhook, so scoping the
+    lookup to (workspace, id) alone lets any reachable chat inject an answer
+    against the global auto-increment grant id. Authorization additionally binds
+    the sending chat to the question's stored delivery chat
+    (``channel_refs.telegram.chat_id``) (P225-RVW-1).
+
+    Every failure — wrong id, wrong-workspace id, already-answered, no delivery
+    ref, or an unauthorized chat — returns None so the caller emits ONE identical
+    'isn't open' reply (no existence leak)."""
+    grant = _find_pending_question(db, workspace_id, ask_id)
+    if grant is None:
+        return None
+    tg = _telegram_ref(grant)
+    if tg is None or str(tg.get("chat_id")) != str(reply_chat_id):
+        return None
+    return grant
+
+
+def _find_question_by_telegram_message(
+    db: Session, workspace_id: Any, message_id: str, reply_chat_id: Any,
+):
+    """The pending question whose stored Telegram delivery matches BOTH the target
+    ``message_id`` AND the replying ``chat_id``. Binding the chat stops a
+    same-workspace but unauthorized chat from reply-colliding on a per-chat
+    sequential ``reply_to_message_id`` (P225-RVW-1). Python-side filter over the
+    few open asks (JSONB-portable)."""
+    for g in _pending_questions(db, workspace_id):
+        tg = _telegram_ref(g)
+        if (
+            tg is not None
+            and str(tg.get("message_id")) == str(message_id)
+            and str(tg.get("chat_id")) == str(reply_chat_id)
+        ):
+            return g
+    return None
+
+
+async def _maybe_answer_question(
+    db: Session,
+    workspace: Any,
+    body: Dict[str, Any],
+    reply_ctx: Dict[str, Any],
+    integrations: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """If this inbound Telegram message answers a pending question — a reply to a
+    correlated message, or ``/answer <id> <text>`` — apply it through the SHARED
+    answer service (never an HTTP self-call) and confirm into the same thread.
+
+    Returns a response dict when handled (short-circuits routing AND the trust
+    gate — an answer is a response, not a directive), or None to fall through.
+    A wrong-workspace / already-answered target gets a safe reply and changes
+    nothing (no information leak).
+    """
+    if reply_ctx.get("platform") != "telegram":
+        return None
+    msg = body.get("message") if isinstance(body, dict) else None
+    text = (msg.get("text") or "").strip() if isinstance(msg, dict) else ""
+    if not text:
+        return None
+
+    # 1. Explicit fallback: /answer <id> <text> — applied ONLY from the chat the
+    #    question was delivered to (P225-RVW-1: the id is a global auto-increment,
+    #    so id-scope alone lets any reachable chat inject an answer).
+    m = _ANSWER_CMD.match(text)
+    if m:
+        ask_id = int(m.group(1))
+        answer_text = m.group(2).strip()
+        grant = _find_answerable_question(db, workspace.id, ask_id, reply_ctx.get("chat_id"))
+        if grant is None:
+            await _deliver_reply(
+                f"Question #{ask_id} isn't open in this workspace.",
+                reply_ctx, integrations, workspace_id=workspace.id,
+            )
+            return {"status": "received", "routed": False, "reason": "answer_target_not_found"}
+        return await _apply_telegram_answer(db, workspace, grant, answer_text, reply_ctx, integrations)
+
+    # 2. A reply to a correlated question message answers it — the reply must come
+    #    from the delivery chat too (P225-RVW-1), not merely target the message id.
+    reply_to = reply_ctx.get("reply_to_message_id")
+    if reply_to is not None:
+        grant = _find_question_by_telegram_message(
+            db, workspace.id, str(reply_to), reply_ctx.get("chat_id"),
+        )
+        if grant is not None:
+            return await _apply_telegram_answer(db, workspace, grant, text, reply_ctx, integrations)
+
+    return None
+
+
+async def _apply_telegram_answer(
+    db: Session,
+    workspace: Any,
+    grant: Any,
+    answer_text: str,
+    reply_ctx: Dict[str, Any],
+    integrations: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply a Telegram-sourced answer via the shared service, then confirm back
+    into the same thread through the existing ``_deliver_reply`` path."""
+    from api.approval_grants import apply_question_answer
+
+    # P225-RVW-1 AC3: attribute to the STABLE numeric telegram id, never the
+    # self-chosen first_name (which is trivially spoofable, e.g. 'telegram:CEO').
+    answered_by = f"telegram:{reply_ctx.get('from_id') or reply_ctx.get('chat_id') or 'user'}"
+    outcome = await apply_question_answer(
+        db, grant, answer_text=answer_text, answered_by=answered_by
+    )
+    # Confirm HONESTLY, mirroring the in-app _confirm_answer_into_chat (P225-RVW-17):
+    # this second confirmation channel must never claim 'resuming' for an answer
+    # that lost the compare-and-swap race (applied False) or resumed nothing.
+    if not outcome.applied:
+        reply = f"Question #{grant.id} was already answered."
+    elif outcome.resumed:
+        reply = f"Answered #{grant.id} — the agent is resuming."
+    else:
+        reply = f"Answer recorded for #{grant.id} — nothing to auto-resume."
+    await _deliver_reply(reply, reply_ctx, integrations, workspace_id=workspace.id)
+    return {
+        "status": "completed",
+        "routed": True,
+        "route_type": "question_answer",
+        "ask_id": grant.id,
+    }
+
+
+# =============================================================================
+# PRD-225 US-006 — the per-channel ingress trust gate
+# =============================================================================
+
+def _channel_for_platform(db: Session, workspace_id: Any, platform: str):
+    """The workspace's channel connection for this platform (None if none)."""
+    from core.models.channels import ChannelConnection
+
+    return (
+        db.query(ChannelConnection)
+        .filter(
+            ChannelConnection.workspace_id == workspace_id,
+            ChannelConnection.platform == platform,
+        )
+        .first()
+    )
+
+
+def _gated_channel_for_platform(db: Session, workspace: Any, platform: str):
+    """The channel this inbound is gated against — a ``ChannelConnection`` row if
+    one exists, else a synthetic channel for a Telegram/Slack bot that is LIVE
+    via the legacy ``settings.integrations`` bag (no channel_connections row).
+
+    Both the sender and the answer bridge honour a legacy-configured bot
+    (channels/sender.py ``_legacy_integration_config``), so both MUST be gated:
+    without this, ``strict`` (the advertised default) silently did NOT apply to
+    any workspace whose bot predates the Channels UI — plausibly most existing
+    pilots — leaving the new control with a coverage hole on the public-ingress
+    surface (P225-RVW-12). Resolving the mode from the bag (default strict) also
+    covers those EXISTING workspaces with no schema change — the wave's one
+    migration is already spent.
+
+    Returns None only when the platform is not live at all (truly no channel →
+    no gate, legacy inbound unchanged). A legacy channel's trigger_mode rides the
+    bag under ``{platform}_trigger_mode`` (settable via Settings→Integrations),
+    defaulting to strict when unset — the same default a ChannelConnection uses.
+    """
+    channel = _channel_for_platform(db, workspace.id, platform)
+    if channel is not None:
+        return channel
+
+    settings = getattr(workspace, "settings", None)
+    integrations = settings.get("integrations") or {} if isinstance(settings, dict) else {}
+    if not integrations.get(f"{platform}_bot_token"):
+        return None  # not live via legacy integrations either → no gate
+
+    mode = integrations.get(f"{platform}_trigger_mode")
+    return SimpleNamespace(
+        id=f"legacy:{platform}",
+        config=({"trigger_mode": mode} if mode else {}),
+    )
+
+
+def _inbound_text(body: Dict[str, Any]) -> str:
+    """The inbound message text the router would act on, across platforms.
+
+    Delegates to ``extract_inbound_text`` (core/routing/ingestors/webhook.py) —
+    the SAME function ``WebhookIngestor.ingest`` uses to build the routable
+    content — so the gate scores exactly the text the router would route and the
+    two can never drift into independent per-field allowlists (P225-RVW-2 /
+    P225-RVW-9 / P225-RVW-16). Covers Telegram text/caption/media-and-service
+    subfields (incl. ``edited_message``, ``new_chat_title``, a joiner's name),
+    Slack ``event.text`` and file titles, Meta-WhatsApp text and media captions /
+    filenames, Twilio ``Body``, and top-level string fields.
+
+    A genuinely content-less update (a status / delivery-receipt callback, a bare
+    membership change) scores empty and is left to route as today — but its
+    ``json.dumps`` fallback blob never reaches AutoBrain's platform-keyword
+    matcher (guarded at the call site), so an unrecognised subfield cannot smuggle
+    a keyword past the gate.
+    """
+    return extract_inbound_text(body)
+
+
+def _fence_untrusted(text: str) -> str:
+    """Wrap untrusted inbound text as an inert fenced code block (P225-RVW-6).
+
+    Channel-sourced directive text is shown in the admin Questions tab, which
+    renders ``question_md`` as GFM markdown. Interpolated raw, an attacker's
+    ``[click me](https://evil.example)`` — or a bare URL that GFM autolinks —
+    becomes a CLICKABLE anchor next to copy priming the operator to act: a
+    phishing vector inside a trusted surface. Inside a code fence nothing renders
+    as markdown (no links, no autolinks, no emphasis) and the operator still
+    reads the literal text. The fence is one backtick longer than the longest
+    backtick run in the body, so the content cannot break out of the fence.
+    """
+    body = text.strip()
+    longest = run = 0
+    for ch in body:
+        if ch == "`":
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{body}\n{fence}"
+
+
+async def _apply_trust_gate(
+    db: Session,
+    workspace: Any,
+    platform: str,
+    body: Dict[str, Any],
+    reply_ctx: Dict[str, Any],
+    integrations: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Hold inbound directives per the channel's ``trigger_mode``.
+
+    Returns a response dict when the message is HELD (short-circuits ALL routing),
+    or None to let it route. No channel row ⇒ no gate (legacy-integration inbound
+    is unchanged). Correlated answers already returned upstream, so they bypass
+    the gate in every mode.
+    """
+    from services.ingress_gate import (
+        should_hold, trigger_mode_of, TRIGGER_MODE_ALLOW_ALL,
+    )
+
+    channel = _gated_channel_for_platform(db, workspace, platform)
+    if channel is None:
+        return None  # platform not live here → the gate does not apply
+
+    # A channel exists, so this inbound IS gated. From here ANY failure must
+    # fail CLOSED — return a hold, never fall through to routing — so an internal
+    # gate error can't silently open a strict / communication_only channel
+    # (P225-RVW-5). ``allow_all`` is resolved first: it legitimately routes
+    # everything, so an error on that path is a harmless no-op, not a bypass.
+    ask_id = None
+    try:
+        mode = trigger_mode_of(channel.config)
+        if mode == TRIGGER_MODE_ALLOW_ALL:
+            return None
+
+        text_in = _inbound_text(body)
+        if not text_in.strip():
+            return None  # nothing to hold (non-text update)
+        if not should_hold(mode, text_in):
+            # NOTE: never log the message body — only the gate decision.
+            logger.info(
+                "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=route",
+                workspace.id, channel.id, platform, mode,
+            )
+            return None
+
+        # HELD — record a question-kind row against the channel; nothing executes.
+        from core.models.approval_grants import KIND_QUESTION
+        from core.services.approval_grants import create_grant
+
+        grant = create_grant(
+            db, workspace.id,
+            subject_type="channel", subject_id=str(channel.id),
+            kind=KIND_QUESTION,
+            # Honest copy: answering a channel hold records a note but does NOT
+            # auto-route the directive — there is no channel resume path, so the
+            # old "answer 'route it' to let it proceed" promised something the
+            # answer never did (P225-RVW-11). The gate's value is that the
+            # directive was held and NOT executed; the operator acts on it.
+            question_md=(
+                "**Inbound directive held for review**\n\n"
+                f"{_fence_untrusted(text_in)}\n\n"
+                "_This message was held and NOT executed. Dismiss it once you've "
+                "handled it — answering here records a note but does not auto-route "
+                "the directive._"
+            ),
+            reason="Inbound directive held by the channel trust gate",
+        )
+        db.commit()
+        ask_id = grant.id
+        logger.info(
+            "[trust-gate] ws=%s channel=%s platform=%s mode=%s verdict=hold ask=%s",
+            workspace.id, channel.id, platform, mode, ask_id,
+        )
+    except Exception:
+        # Fail CLOSED: a gated channel errored — refuse to route. No message body
+        # in the log (only the gate decision), consistent with the hold path.
+        logger.error(
+            "[trust-gate] ws=%s channel=%s platform=%s verdict=hold-on-error — failing closed",
+            workspace.id, channel.id, platform, exc_info=True,
+        )
+
+    try:
+        await _deliver_reply(
+            "Received — this needs an operator's approval before I act on it.",
+            reply_ctx, integrations, workspace_id=workspace.id,
+        )
+    except Exception:  # noqa: BLE001 — the ack is best-effort
+        logger.debug("[trust-gate] ack reply failed", exc_info=True)
+    return {
+        "status": "held", "routed": False,
+        "reason": "trust_gate_hold" if ask_id is not None else "trust_gate_error",
+        "ask_id": ask_id,
+    }
+
+
+def _channel_is_allow_all(db: Session, workspace: Any, platform: str) -> bool:
+    """True only when the channel is provably ``allow_all`` — including a legacy
+    integrations-configured bot (P225-RVW-12), resolved the same way the gate is.
+
+    Any lookup failure — or no channel at all — returns False, so a trust-gate
+    error fails CLOSED (P225-RVW-5): the outer handler holds rather than silently
+    opening a strict / communication_only channel. ``allow_all`` routes
+    everything anyway, so this is the one mode where a gate error is a safe no-op.
+    """
+    try:
+        from services.ingress_gate import trigger_mode_of, TRIGGER_MODE_ALLOW_ALL
+
+        channel = _gated_channel_for_platform(db, workspace, platform)
+        if channel is None:
+            return False
+        return trigger_mode_of(channel.config) == TRIGGER_MODE_ALLOW_ALL
+    except Exception:  # noqa: BLE001 — unknown mode ⇒ treat as gated (fail closed)
+        logger.warning(
+            "[trust-gate] allow_all resolution failed for ws=%s — treating as gated",
+            getattr(workspace, "id", None), exc_info=True,
+        )
+        return False
 
 
 # =============================================================================
@@ -313,20 +709,40 @@ def _extract_response_text(result: Any) -> str:
 # =============================================================================
 
 def _persist_integration_default(db: Session, workspace, key: str, value: str):
-    """Store a platform default (e.g. telegram_default_chat_id) in workspace
-    settings.integrations if not already set or changed."""
+    """Seed a platform delivery default (e.g. telegram_default_chat_id) in
+    workspace settings.integrations — SET ONCE, never silently retargeted.
+
+    This value is the delivery target for agent-initiated questions
+    (``platform_ask_human`` → ``channels.sender._resolve_target``) AND the chat
+    the answer path binds a reply to (P225-RVW-1). Telegram/Slack deliver every
+    inbound update for the bot to the one workspace webhook, so overwriting the
+    anchor from arbitrary inbound senders let any user who can message the bot
+    repoint the operator's questions to their own chat and answer them —
+    re-opening the RVW-1 answer-injection class through the mutable anchor
+    (P225-RVW-10). We therefore write the default only when it is UNSET:
+    first-inbound seeds it as a convenience, later senders cannot move it. An
+    operator changes it explicitly via Settings→Integrations
+    (api/workspaces.save_integrations), never inbound traffic.
+    """
     try:
         settings = dict(workspace.settings or {})
         integrations = dict(settings.get("integrations", {}))
-        if integrations.get(key) == value:
-            return  # already correct
+        existing = integrations.get(key)
+        if existing:
+            # Already anchored — never silently retarget from inbound traffic.
+            if str(existing) != str(value):
+                logger.info(
+                    "[webhook] %s already anchored for ws=%s — ignoring inbound retarget",
+                    key, workspace.id,
+                )
+            return
         integrations[key] = value
         settings["integrations"] = integrations
         workspace.settings = settings
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(workspace, "settings")
         db.commit()
-        logger.info("[webhook] Persisted %s=%s for workspace %s", key, value, workspace.id)
+        logger.info("[webhook] Seeded %s for workspace %s (set-once)", key, workspace.id)
     except Exception as e:
         logger.debug("[webhook] Failed to persist %s: %s", key, e)
 
@@ -485,6 +901,46 @@ async def general_workspace_webhook(
     elif platform == "slack" and reply_ctx.get("channel"):
         _persist_integration_default(db, workspace, "slack_default_channel", reply_ctx["channel"])
 
+    # 2c. PRD-225 US-005: a reply / `/answer` to a pending question is a
+    # RESPONSE, not a directive — correlate it BEFORE any routing (this also
+    # bypasses the ingress trust gate, since answers are always allowed).
+    if platform == "telegram":
+        try:
+            answered = await _maybe_answer_question(db, workspace, body, reply_ctx, integrations)
+            if answered is not None:
+                return answered
+        except Exception:
+            logger.exception(
+                "[webhook/ws] question-answer correlation failed for ws=%s — "
+                "falling through to routing", workspace.id,
+            )
+
+    # 2d. PRD-225 US-006: the ingress trust gate. Per the channel's trigger_mode,
+    # hold inbound directives as pending questions instead of routing them.
+    # Runs AFTER correlation (answers already returned) and BEFORE any routing or
+    # platform-tool interception. Fail CLOSED on gate error (P225-RVW-5): a
+    # strict / communication_only channel must never be opened by an internal
+    # gate error — only a provably-allow_all channel falls through to routing.
+    if platform:
+        try:
+            held = await _apply_trust_gate(db, workspace, platform, body, reply_ctx, integrations)
+            if held is not None:
+                return held
+        except Exception:
+            logger.error(
+                "[webhook/ws] trust gate errored for ws=%s — failing closed",
+                workspace.id, exc_info=True,
+            )
+            if not _channel_is_allow_all(db, workspace, platform):
+                try:
+                    await _deliver_reply(
+                        "Received — an internal check must clear before I can act on it.",
+                        reply_ctx, integrations, workspace_id=workspace.id,
+                    )
+                except Exception:  # noqa: BLE001 — best-effort ack
+                    logger.debug("[trust-gate] fail-closed ack failed", exc_info=True)
+                return {"status": "held", "routed": False, "reason": "trust_gate_error"}
+
     # 3. Build RequestEnvelope via WebhookIngestor
     ingestor = WebhookIngestor()
     envelope = ingestor.ingest(
@@ -496,9 +952,24 @@ async def general_workspace_webhook(
     # route to Auto (CTO agent) which has all platform tools, instead of going
     # through UniversalRouter. This lets Telegram/Slack users trigger missions,
     # create tasks, check stats, etc. just like they can from the chat UI.
+    #
+    # ONLY when the inbound carries RECOGNISED message text. A content-less update
+    # (delivery/status callback, a bare membership change, arbitrary JSON) whose
+    # only "content" is the ingestor's ``json.dumps(body)`` fallback must NOT be
+    # scanned: AutoBrain._match_platform_query is UNANCHORED and would match a
+    # platform keyword buried anywhere in the serialised blob — a caption /
+    # filename / new_chat_title / file title the scorer never surfaced (P225-RVW-16).
+    # Such updates still reach UniversalRouter below for rule-based routing; they
+    # just cannot silently invoke a platform tool via a keyword the gate couldn't
+    # see. When real text IS present, envelope.content IS that text (both come from
+    # extract_inbound_text), so this changes nothing for genuine commands.
+    has_recognised_text = bool(extract_inbound_text(body).strip())
     try:
         from consumers.chatbot.auto import AutoBrain
-        platform_tool = AutoBrain._match_platform_query(envelope.content.lower())
+        platform_tool = (
+            AutoBrain._match_platform_query(envelope.content.lower())
+            if has_recognised_text else None
+        )
         if platform_tool:
             logger.info(
                 "[webhook/ws] Platform tool detected: %s — routing to Auto",

@@ -91,7 +91,7 @@ SHOP = "demo.myshopify.com"
 
 
 def test_gdpr_endpoints_use_internal_key_dep():
-    """Every GDPR route depends on ``_verify_internal_key`` (the machine key),
+    """Every GDPR route depends on ``_verify_vertical_internal_key`` (the machine key),
     NOT the user-facing GDPR admin guard. Proven structurally: the dependency the
     routes carry is exactly the internal-key verifier the provision/events routes
     use."""
@@ -103,7 +103,7 @@ def test_gdpr_endpoints_use_internal_key_dep():
     ):
         assert path in routes, f"missing route {path}"
         deps = [d.call for d in routes[path].dependant.dependencies]
-        assert verticals._verify_internal_key in deps, f"{path} not internal-key authed"
+        assert verticals._verify_vertical_internal_key in deps, f"{path} not internal-key authed"
 
 
 def test_missing_internal_key_is_rejected():
@@ -114,12 +114,12 @@ def test_missing_internal_key_is_rejected():
     if not (config.SHOPIFY_INTERNAL_API_KEY or "").strip():
         # Key unset in the test env → dep fail-closes with 503 for any token.
         with pytest.raises(HTTPException) as ei:
-            verticals._verify_internal_key(authorization="Bearer whatever")
+            verticals._verify_vertical_internal_key("shopify", authorization="Bearer whatever")
         assert ei.value.status_code in (401, 403, 503)
     else:
         # Key set → a wrong token is rejected 401.
         with pytest.raises(HTTPException) as ei:
-            verticals._verify_internal_key(authorization="Bearer definitely-wrong-key")
+            verticals._verify_vertical_internal_key("shopify", authorization="Bearer definitely-wrong-key")
         assert ei.value.status_code == 401
 
 
