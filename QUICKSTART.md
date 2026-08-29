@@ -67,9 +67,15 @@ backend has constructed).
 - **MinIO object storage.** An S3-compatible store (ports 9000 / 9001) holds
   generated outputs so nothing is lost between runs.
 - **The core stack:** Postgres (5432), Redis (6379), backend API (8000),
-  frontend (3000), and MinIO (9000/9001). Optional profiles add more:
-  `docker compose --profile workers up` includes the workspace worker, and
-  `--profile all` adds Gotenberg document rendering (3001) and Adminer (8080).
+  frontend (3000), MinIO (9000/9001) and the **workspace worker** — the Code
+  Canvas runtime that lets agents act on files on *your* machine. It keeps
+  those files in `./workspaces` next to `docker-compose.yml`
+  (`AUTOMATOS_WORKSPACE_DIR` in `.env` points it elsewhere); every tool call
+  is confined to that directory and mutations still need your approval.
+  Canvas sessions need `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in
+  `.env` (the SDK subprocess reads env only, not Settings → Credentials).
+  `docker compose --profile all up` adds Gotenberg document rendering (3001)
+  and Adminer (8080).
 
 ## What does *not* work out of the box
 
