@@ -255,6 +255,7 @@ async def handle_request(
             }.get(file_type, DocumentType.TEXT)
             
             # Process document directly
+            processing_error = None
             document.status = "processing"
             db.commit()
 
@@ -270,13 +271,20 @@ async def handle_request(
         except Exception as e:
             logger.error(f"Error processing document {document.id}: {e}")
             document.status = "failed"
+            processing_error = str(e)[:200]
             db.commit()
         
         return DocumentUploadResponse(
             document_id=document.id,
             filename=document.filename,
             status=document.status,
-            message="Document uploaded successfully"
+            # PRD-233: never say "successfully" over a failed pipeline — every local
+            # upload had ended status=failed (no embedding provider) behind this text.
+            message=(
+                "Document uploaded successfully"
+                if document.status != "failed"
+                else f"Uploaded, but processing failed: {processing_error or 'see backend logs'}"
+            ),
         )
         
     except HTTPException:

@@ -63,6 +63,14 @@ DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 # a real user. Editable profile = PRD-233 S6.
 LOCAL_OPERATOR_EMAIL=local@automatos.local
 
+# [ACTIVE] Embeddings (RAG, memory, semantic routing) resolve their provider key
+# from the PLATFORM key slot — core/llm/workspace_keys.py reads the key row of
+# THIS workspace (the PR #610 'read the key where it lives' seam). Locally that
+# is the single default workspace, so the OpenRouter/OpenAI key you add in
+# Settings → API Keys powers embeddings too. Unset, every document upload ends
+# 'failed' (no embedding provider) while the API still says 'uploaded'.
+PLATFORM_KEY_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+
 # -----------------------------------------------------------------------------
 # Workspace worker — the Code Canvas runtime, in the default compose profile
 # -----------------------------------------------------------------------------
