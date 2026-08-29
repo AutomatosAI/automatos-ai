@@ -119,22 +119,48 @@ class SmartToolRouter:
         "platform_field_inject",
     })
 
+    # The platform_execute dispatcher — the single door to every non-promoted
+    # platform action via its (narrowed) action enum (~136 actions).
+    # It is NOT an ActionDefinition, NOT registry-``promoted``, and NOT a
+    # CORE_TOOL, so before PRD-232 US-001 route()'s graph and category keep-sets
+    # silently stripped it (C1): a turn whose phrasing missed AutoBrain's phrase
+    # map got no ``tool_hints=["platform"]`` substring rescue, so the graph
+    # branch removed the dispatcher and the capability became unreachable — the
+    # 2026-08-28 VECTOR "close the blocked tickets" failure. Pinning it into the
+    # ONE always-include set (`_always_include_names`) keeps it reachable on
+    # every branch that ships tools — whenever the agent actually carries it.
+    _DISPATCHER_PINS = frozenset({
+        "platform_execute",
+    })
+
     def __init__(self):
         self.classifier = get_intent_classifier()
 
     def _always_include_names(self) -> Set[str]:
         """Tool names that bypass intent filtering.
 
-        Signal pins + core platform pins + every registry-``promoted`` action.
-        Reading ``promoted`` here is what makes a tool marked ``promoted=True``
-        surface in chat with no edit to this router (PRD-122 US-010) — e.g. the
-        full-autonomy dial (``platform_set/get_autonomy_level``), whose
-        ``settings`` category is intentionally unmapped.
+        Dispatcher pin + signal pins + core platform pins + every
+        registry-``promoted`` action. This is the SINGLE always-include
+        mechanism — every ``route()`` branch that ships tools (hint, graph,
+        category fallback) unions this set into its keep-set, so a name added
+        here survives on all of them with no per-branch edit (PRD-232 US-001).
+
+        The ``platform_execute`` dispatcher (`_DISPATCHER_PINS`) is folded in
+        here rather than via a second pins pass so there is exactly one door
+        list to reason about. Reading ``promoted`` here is what makes a tool
+        marked ``promoted=True`` surface in chat with no edit to this router
+        (PRD-122 US-010) — e.g. the full-autonomy dial
+        (``platform_set/get_autonomy_level``), whose ``settings`` category is
+        intentionally unmapped.
 
         Fail-safe: a registry import/lookup error degrades to the static pins,
         never crashes routing.
         """
-        names: Set[str] = set(self._SIGNAL_TOOL_PINS) | set(self._CORE_PLATFORM_PINS)
+        names: Set[str] = (
+            set(self._DISPATCHER_PINS)
+            | set(self._SIGNAL_TOOL_PINS)
+            | set(self._CORE_PLATFORM_PINS)
+        )
         try:
             from modules.tools.discovery.action_registry import get_action_registry
 
