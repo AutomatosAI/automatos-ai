@@ -189,3 +189,35 @@ def test_seed_is_idempotent_no_duplicates():
     created2, updated2 = seed_packages(db)
     assert (created2, updated2) == (0, 2)
     assert len(db.store) == 2  # no dupes
+
+
+# --------------------------------------------------------------------------- #
+# Boot posture (live-test 2026-08-29: prod had ZERO packages — the seed was a
+# manual script nobody ran; the proposal silently fell back to custom-design)
+# --------------------------------------------------------------------------- #
+
+
+def test_create_only_seeds_missing_and_never_touches_existing_rows():
+    db = _FakeSession()
+
+    created, updated = seed_packages(db, create_only=True)
+    assert (created, updated) == (2, 0)
+
+    # Simulate Gerard's live curation of a row, then a redeploy's boot seed:
+    # the curated row must survive byte-identical.
+    db.store["shopify-management"].description = "hand-tuned copy"
+    created2, updated2 = seed_packages(db, create_only=True)
+    assert (created2, updated2) == (0, 0)
+    assert db.store["shopify-management"].description == "hand-tuned copy"
+    assert len(db.store) == 2
+
+
+def test_boot_lane_runs_the_packages_seed_create_only():
+    # The seed only exists in prod if something calls it — the boot leader
+    # block must carry it, in the create-only posture (grep-proof, the
+    # established wiring-test style).
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "main.py").read_text()
+    assert "from core.seeds.seed_packages import seed_packages" in src
+    assert "seed_packages(db, create_only=True)" in src
