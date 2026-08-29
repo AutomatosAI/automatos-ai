@@ -66,9 +66,10 @@ backend has constructed).
   Postgres (`S3_VECTORS_ENABLED=false`) — no AWS needed.
 - **MinIO object storage.** An S3-compatible store (ports 9000 / 9001) holds
   generated outputs so nothing is lost between runs.
-- **The full stack:** Postgres (5432), Redis (6379), backend API (8000),
-  frontend (3000), a workspace worker, MinIO (9000/9001), and Gotenberg for
-  document rendering (3001).
+- **The core stack:** Postgres (5432), Redis (6379), backend API (8000),
+  frontend (3000), and MinIO (9000/9001). Optional profiles add more:
+  `docker compose --profile workers up` includes the workspace worker, and
+  `--profile all` adds Gotenberg document rendering (3001) and Adminer (8080).
 
 ## What does *not* work out of the box
 
