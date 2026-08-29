@@ -987,6 +987,14 @@ class Config:
     COORDINATOR_ARCHIVE_AFTER_DAYS: int = int(os.getenv("COORDINATOR_ARCHIVE_AFTER_DAYS", "30"))
     COORDINATOR_ARCHIVE_BATCH_SIZE: int = int(os.getenv("COORDINATOR_ARCHIVE_BATCH_SIZE", "50"))
     CHANNELS_ENABLED: bool = os.getenv("CHANNELS_ENABLED", "true").lower() == "true"
+    # SEMANTIC_TOOL_ROUTING (default ON) and TOOL_ROUTING_GRAPH (default OFF, below)
+    # gate DIFFERENT surfaces — PRD-232 US-002 split them after C2 found the
+    # inversion. SEMANTIC_TOOL_ROUTING gates EMBEDDING narrowing everywhere:
+    # the platform_execute dispatcher's action-enum narrowing (tool_router.py
+    # _semantic_routing_enabled) and PlatformActionsSection's embedding catalog
+    # (_build_filtered). It does NOT gate the learned tool-routing GRAPH reads —
+    # those are TOOL_ROUTING_GRAPH's job. A graph-off turn still narrows
+    # semantically; it just never queries GraphRouter.rank_chains.
     SEMANTIC_TOOL_ROUTING: bool = os.getenv("SEMANTIC_TOOL_ROUTING", "true").lower() == "true"
     SEMANTIC_TOOL_ROUTING_TOP_K: int = int(os.getenv("SEMANTIC_TOOL_ROUTING_TOP_K", "15"))
     # PRD-221 S4: ceiling on the narrowed dispatcher enum after the current
@@ -1039,6 +1047,15 @@ class Config:
     PLAYBOOK_CONTEXT_MAX_TOKENS: int = int(os.getenv("PLAYBOOK_CONTEXT_MAX_TOKENS", "2000"))
     MEMORY_SECTION_MAX_TOKENS: int = int(os.getenv("MEMORY_SECTION_MAX_TOKENS", "1500"))
     COMPOSIO_SECTION_MAX_TOKENS: int = int(os.getenv("COMPOSIO_SECTION_MAX_TOKENS", "1000"))
+    # TOOL_ROUTING_GRAPH (default OFF) gates the learned tool-routing GRAPH reads
+    # — GraphRouter.rank_chains on BOTH surfaces: the schema path
+    # (SmartToolRouter.route, PRD-232 US-002) and the prompt catalog
+    # (PlatformActionsSection._build_graph_filtered). OFF = zero GraphRouter
+    # queries anywhere (the PRD-177 S4/S6 governance posture Gerard holds until
+    # the uplift number clears the flip gate). ON = both surfaces consult the
+    # graph. Distinct from SEMANTIC_TOOL_ROUTING (above), which gates embedding
+    # narrowing and stays ON independently. The flip is a POST-MERGE HUMAN step
+    # (PRD-232 US-013), never toggled by the build loop.
     TOOL_ROUTING_GRAPH: bool = os.getenv("TOOL_ROUTING_GRAPH", "false").lower() == "true"
     TOOL_ROUTING_GRAPH_MIN_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_GRAPH_MIN_CONFIDENCE", "0.6"))
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
