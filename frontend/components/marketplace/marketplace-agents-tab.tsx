@@ -22,7 +22,7 @@ import { useMarketplaceItems, useInstallMarketplaceItem } from '@/hooks/use-mark
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { AGENT_CATEGORIES as UNIFIED_CATEGORIES, LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
 import { MarketplaceItemModal } from './marketplace-item-modal'
-import { useUser } from '@clerk/nextjs'
+import { useUser } from '@/lib/auth-hooks'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 

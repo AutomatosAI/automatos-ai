@@ -6,7 +6,7 @@
  * Uses the rewrite `/api/tools/*` endpoints (DB-backed cache + connections).
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useAuth } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth-hooks'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 

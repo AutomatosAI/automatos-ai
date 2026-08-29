@@ -84,15 +84,42 @@ load_seed_data() {
     
     echo "📥 Loading seed data..."
     
-    # Run seed data loader
-    if python database/load_seed_data.py; then
+    # Run seed data loader (real path: core/database/ — the old `database/`
+    # path never existed in the image, so this step silently failed on every
+    # boot since PRD-176; fail-open hid it. PRD-209 local-run finding.)
+    if python core/database/load_seed_data.py; then
         echo "✅ Seed data loaded successfully!"
     else
         echo "⚠️  Warning: Seed data loading failed (will continue anyway)"
     fi
-    
+
     # Unset PGPASSWORD
     unset PGPASSWORD
+}
+
+# =============================================================================
+# Function: Ensure the local-edition workspace exists (PRD-209)
+# =============================================================================
+# In local mode every anonymous request resolves to DEFAULT_WORKSPACE_ID; a
+# boot that "succeeds" without that row is a shell that 500s on first use.
+# Same idempotent shape as the CI seed (scripts/init_test_db.py). FAILS CLOSED
+# in local mode — SaaS never enters this branch (AUTH_EDITION defaults saas).
+ensure_local_workspace() {
+    if [ "${AUTH_EDITION:-saas}" != "local" ] || [ -z "${DEFAULT_WORKSPACE_ID:-}" ]; then
+        return 0
+    fi
+    echo ""
+    echo "🏠 Ensuring local workspace ${DEFAULT_WORKSPACE_ID} exists..."
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    if psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        "INSERT INTO workspaces (id, name, slug, is_personal, is_active) VALUES ('${DEFAULT_WORKSPACE_ID}', 'Local Workspace', 'local', TRUE, TRUE) ON CONFLICT (id) DO NOTHING;"; then
+        echo "✅ Local workspace present"
+        unset PGPASSWORD
+    else
+        echo "❌ Could not create the local workspace — refusing to start a shell instance"
+        unset PGPASSWORD
+        exit 1
+    fi
 }
 
 # =============================================================================
@@ -132,6 +159,9 @@ run_migrations
 
 # Load seed data (idempotent)
 load_seed_data
+
+# Local edition: the anonymous workspace must exist (fail-closed; no-op in saas)
+ensure_local_workspace
 
 echo ""
 echo "========================================="

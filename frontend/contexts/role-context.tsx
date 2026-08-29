@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, ReactNode } from 'react'
-import { useSession } from '@clerk/nextjs'
+import { useSession } from '@/lib/auth-hooks'
 
 /**
  * System Role Context
@@ -10,6 +10,11 @@ import { useSession } from '@clerk/nextjs'
  * aligned to the backend's system_role set (PRD-195 S8 — the legacy ghost
  * role that existed in no backend role set is deleted).
  * This is separate from workspace roles (owner/admin/editor/viewer).
+ *
+ * Edition safety (PRD-209): useSession comes from the edition-aware seam
+ * (lib/auth-hooks) — in local mode it returns a fixed anonymous session
+ * (null user ⇒ system role 'user'), so no Clerk hook ever executes without
+ * a ClerkProvider.
  */
 
 type SystemRole = 'super_admin' | 'admin' | 'user'

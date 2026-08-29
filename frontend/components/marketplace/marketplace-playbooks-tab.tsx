@@ -19,7 +19,7 @@ import { Separator } from '@/components/ui/separator'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
-import { useUser } from '@clerk/nextjs'
+import { useUser } from '@/lib/auth-hooks'
 import { useInstallPlaybookFromMarketplace } from '@/hooks/use-playbook-api'
 import { ViewPlaybookModal } from '@/components/workflows/view-playbook-modal'
 

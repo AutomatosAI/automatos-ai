@@ -14,7 +14,7 @@ import { updateChatTitle } from '@/lib/chat/api'
 import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, DocumentReference, DatabaseResult, RoutingInfo } from '@/types'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
-import { useUser } from '@clerk/nextjs'
+import { useUser } from '@/lib/auth-hooks'
 import { useRouter } from 'next/navigation'
 
 // Widget Architecture (PRD-38.1)

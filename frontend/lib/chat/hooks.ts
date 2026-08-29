@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useAuth } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth-hooks'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import type { PageContext } from '@/lib/page-context'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'

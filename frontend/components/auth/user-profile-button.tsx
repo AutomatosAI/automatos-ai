@@ -1,7 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { UserButton, useUser } from '@clerk/nextjs'
+import { UserButton } from '@clerk/nextjs'
+import { useUser } from '@/lib/auth-hooks'
+import { isSaaS } from '@/lib/auth-edition'
+import { Settings } from 'lucide-react'
 
 /**
  * PRD-37: User Profile Button Component
@@ -20,6 +23,20 @@ export function UserProfileButton({
     afterSignUpUrl = '/chat',
 }: UserProfileButtonProps) {
     const { isSignedIn, isLoaded } = useUser()
+
+    // Local edition: no Clerk, no account — the profile slot links to settings.
+    // (UserButton is a Clerk COMPONENT and would throw without ClerkProvider.)
+    if (!isSaaS) {
+        return (
+            <Link
+                href="/settings"
+                aria-label="Settings"
+                className="flex items-center justify-center w-9 h-9 rounded-full bg-muted hover:bg-secondary transition-colors"
+            >
+                <Settings className="w-4 h-4 text-muted-foreground" />
+            </Link>
+        )
+    }
 
     if (!isLoaded) {
         // Loading skeleton
