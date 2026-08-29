@@ -1,0 +1,262 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: blog)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: blog                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: blog
+actions:
+  platform_create_blog_post:
+  - text: create a blog post about multi-agent AI
+    source: example
+  - text: write a new blog on Shopify automation
+    source: example
+  - text: 'create blog post topic: AI agents for SaaS'
+    source: example
+  - text: start a blog mission about LLM observability
+    source: example
+  - text: create blog post about
+    source: phrase_map
+  - text: write a blog about
+    source: phrase_map
+  - text: new blog post
+    source: phrase_map
+  - text: start blog mission
+    source: phrase_map
+  - text: blog post topic
+    source: phrase_map
+  - text: create blog on
+    source: phrase_map
+  - text: research and write blog
+    source: phrase_map
+  - text: produce blog post
+    source: phrase_map
+  - text: spin up a full blog post on serverless costs
+    source: authored
+  - text: produce a complete article about agent orchestration end to end
+    source: authored
+  - text: write me a whole blog post on prompt caching, research and all
+    source: authored
+  - text: generate a finished blog post about vector databases
+    source: authored
+  - text: do the full blog treatment on multi-tenant security
+    source: authored
+  - text: create an end-to-end post about rag pipelines
+    source: authored
+  - text: build a complete blog on ai code review from scratch
+    source: authored
+  platform_generate_cover_image:
+  - text: generate a cover image for the latest draft
+    source: example
+  - text: create cover art for post abc123
+    source: example
+  - text: make a blog cover image
+    source: example
+  - text: add a cover image to my blog post
+    source: example
+  - text: generate cover image
+    source: phrase_map
+  - text: create cover art
+    source: phrase_map
+  - text: blog cover image
+    source: phrase_map
+  - text: make a cover for
+    source: phrase_map
+  - text: design cover image
+    source: phrase_map
+  - text: add cover to post
+    source: phrase_map
+  - text: generate cover for blog
+    source: phrase_map
+  - text: give post def456 a cover image
+    source: authored
+  - text: make some cover art for the rag article
+    source: authored
+  - text: attach a header image to the latest post
+    source: authored
+  - text: generate the cover for my published blog
+    source: authored
+  - text: create a hero image for that draft
+    source: authored
+  - text: the post needs a cover, generate one
+    source: authored
+  - text: put a cover image on the serverless article
+    source: authored
+  - text: render a cover for blog post 22
+    source: authored
+  platform_get_blog_post:
+  - text: read blog post
+    source: example
+  - text: get blog post content
+    source: example
+  - text: show blog draft
+    source: example
+  - text: fetch article
+    source: example
+  - text: get blog post
+    source: phrase_map
+  - text: read article
+    source: phrase_map
+  - text: blog content
+    source: phrase_map
+  - text: show post content
+    source: phrase_map
+  - text: get draft
+    source: phrase_map
+  - text: show me the full text of the serverless post
+    source: authored
+  - text: pull up the content of post abc123
+    source: authored
+  - text: read me the draft about vector search
+    source: authored
+  - text: open the article on prompt caching
+    source: authored
+  - text: what does the rag blog post say?
+    source: authored
+  - text: get the markdown for that published post
+    source: authored
+  - text: let me see the whole draft
+    source: authored
+  - text: fetch the content of the latest blog
+    source: authored
+  - text: display the full post body for slug ai-agents
+    source: authored
+  - text: read back the article i wrote on security
+    source: authored
+  platform_list_blog_posts:
+  - text: list my blog posts
+    source: example
+  - text: what blog posts have been published?
+    source: example
+  - text: show me draft blog posts
+    source: example
+  - text: check what articles exist
+    source: example
+  - text: list blog posts
+    source: phrase_map
+  - text: show blog posts
+    source: phrase_map
+  - text: what blog posts
+    source: phrase_map
+  - text: published articles
+    source: phrase_map
+  - text: blog articles
+    source: phrase_map
+  - text: my blog
+    source: phrase_map
+  - text: check blog
+    source: phrase_map
+  - text: existing posts
+    source: phrase_map
+  - text: which posts are still drafts?
+    source: authored
+  - text: show me everything that's been published
+    source: authored
+  - text: any archived blog posts?
+    source: authored
+  - text: give me the list of all articles with their status
+    source: authored
+  - text: what drafts do i have sitting around?
+    source: authored
+  - text: run down the published posts with dates
+    source: authored
+  - text: list every blog post in the workspace
+    source: authored
+  platform_publish_blog_post:
+  - text: publish a blog post about our findings
+    source: example
+  - text: write an article about AI automation
+    source: example
+  - text: create a blog post summarising the research
+    source: example
+  - text: publish article about market trends
+    source: example
+  - text: blog
+    source: phrase_map
+  - text: publish post
+    source: phrase_map
+  - text: blog post
+    source: phrase_map
+  - text: write article
+    source: phrase_map
+  - text: publish article
+    source: phrase_map
+  - text: write blog
+    source: phrase_map
+  - text: create blog post
+    source: phrase_map
+  - text: publish blog
+    source: phrase_map
+  - text: write a post
+    source: phrase_map
+  - text: post this writeup to the blog
+    source: authored
+  - text: publish these findings as an article
+    source: authored
+  - text: put this summary up on the blog
+    source: authored
+  - text: take this draft content and publish it
+    source: authored
+  - text: push this markdown out as a blog post
+    source: authored
+  - text: publish the research i just did as a post
+    source: authored
+  platform_update_blog_post:
+  - text: update blog post
+    source: example
+  - text: edit blog post
+    source: example
+  - text: revise article
+    source: example
+  - text: improve draft
+    source: example
+  - text: set cover image on blog post
+    source: example
+  - text: edit article
+    source: phrase_map
+  - text: update post
+    source: phrase_map
+  - text: change blog post
+    source: phrase_map
+  - text: set cover image
+    source: phrase_map
+  - text: fix the typo in the serverless post
+    source: authored
+  - text: tweak the intro of that draft
+    source: authored
+  - text: change the category on post abc123 to engineering
+    source: authored
+  - text: add some tags to the rag article
+    source: authored
+  - text: rewrite the conclusion of the published post
+    source: authored
+  - text: update the title of my latest blog
+    source: authored
+  - text: polish the draft about vector databases
+    source: authored
+  - text: point the post's cover image at that url
+    source: authored
+  - text: revise the second section of the article
+    source: authored
+  - text: amend the blog post with the new numbers
+    source: authored

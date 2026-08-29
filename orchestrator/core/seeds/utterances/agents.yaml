@@ -1,0 +1,567 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: agents)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: agents                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: agents
+actions:
+  platform_assign_plugin_to_agent:
+  - text: assign the code review plugin to my dev agent
+    source: example
+  - text: add plugin testing to agent 5
+    source: example
+  - text: give the devops plugin to the deployment agent
+    source: example
+  - text: assign plugin to agent
+    source: phrase_map
+  - text: add plugin to agent
+    source: phrase_map
+  - text: give agent a plugin
+    source: phrase_map
+  - text: attach plugin to agent
+    source: phrase_map
+  - text: hook the seo plugin up to atlas
+    source: authored
+  - text: enable the analytics plugin on my research agent
+    source: authored
+  - text: can you attach the slack-notify plugin to agent 7
+    source: authored
+  - text: wire the pdf-export plugin into the docs agent
+    source: authored
+  - text: put the web-scraper plugin on vector
+    source: authored
+  - text: agent 12 needs the crm plugin
+    source: authored
+  - text: install the reporting plugin on the finance agent
+    source: authored
+  - text: grant the code review plugin to sentinel
+    source: authored
+  - text: add plugin marketing-suite to my growth agent
+    source: authored
+  - text: connect the calendar plugin to the scheduling agent
+    source: authored
+  - text: please set up the data-viz plugin for agent 3
+    source: authored
+  - text: give my qa agent the test-runner plugin
+    source: authored
+  - text: attach plugin slug email-blast to the outreach agent
+    source: authored
+  platform_assign_skill_to_agent:
+  - text: assign the summarization skill to my research agent
+    source: example
+  - text: add code review skill to agent 3
+    source: example
+  - text: give the analysis skill to the data agent
+    source: example
+  - text: assign skill to agent
+    source: phrase_map
+  - text: add skill to agent
+    source: phrase_map
+  - text: give agent a skill
+    source: phrase_map
+  - text: attach skill to agent
+    source: phrase_map
+  - text: teach vector the growth-hacker skill
+    source: authored
+  - text: add the copywriting skill to my marketing agent
+    source: authored
+  - text: give agent 8 the data-analysis skill
+    source: authored
+  - text: equip sentinel with the threat-detection skill
+    source: authored
+  - text: assign skill 42 to the research agent
+    source: authored
+  - text: put the seo-audit skill on atlas
+    source: authored
+  - text: can my dev agent get the debugging skill
+    source: authored
+  - text: attach the translation skill to the support agent
+    source: authored
+  - text: grant the forecasting skill to the finance agent
+    source: authored
+  - text: hook up the email-drafting skill to agent 5
+    source: authored
+  - text: load the summarization skill onto my note-taker agent
+    source: authored
+  - text: add skill name outreach-writer to the sales agent
+    source: authored
+  - text: give the qa agent a test-writing skill
+    source: authored
+  platform_assign_tool_to_agent:
+  - text: assign GMAIL to my email agent
+    source: example
+  - text: add GITHUB tool to the dev agent
+    source: example
+  - text: give agent 5 access to SLACK
+    source: example
+  - text: assign tool to agent
+    source: phrase_map
+  - text: add tool to agent
+    source: phrase_map
+  - text: give agent a tool
+    source: phrase_map
+  - text: connect tool to agent
+    source: phrase_map
+  - text: connect NOTION to my docs agent
+    source: authored
+  - text: let vector use LINEAR
+    source: authored
+  - text: give the marketing agent access to HUBSPOT
+    source: authored
+  - text: hook up JIRA to agent 9
+    source: authored
+  - text: add the GOOGLECALENDAR tool to my scheduling agent
+    source: authored
+  - text: wire TWITTER into the social agent
+    source: authored
+  - text: grant agent 3 access to the STRIPE app
+    source: authored
+  - text: enable ASANA for the project agent
+    source: authored
+  - text: plug DISCORD into the community agent
+    source: authored
+  - text: my sales agent needs SALESFORCE access
+    source: authored
+  - text: connect the composio_search tool to atlas
+    source: authored
+  - text: add TRELLO to the planning agent
+    source: authored
+  - text: give sentinel the GITHUB app
+    source: authored
+  platform_configure_agent_heartbeat:
+  - text: enable heartbeat for the communication agent every 30 minutes
+    source: example
+  - text: set agent heartbeat to check calendar every hour
+    source: example
+  - text: disable heartbeat for agent 5
+    source: example
+  - text: configure sentinel to run every 15 minutes with auto_act
+    source: example
+  - text: set active hours 9am to 6pm for the monitoring agent
+    source: example
+  - text: configure heartbeat
+    source: phrase_map
+  - text: configure heartbeats
+    source: phrase_map
+  - text: set heartbeat
+    source: phrase_map
+  - text: agent heartbeat
+    source: phrase_map
+  - text: heartbeat schedule
+    source: phrase_map
+  - text: enable heartbeat
+    source: phrase_map
+  - text: disable heartbeat
+    source: phrase_map
+  - text: heartbeat interval
+    source: phrase_map
+  - text: set active hours
+    source: phrase_map
+  - text: heartbeat config
+    source: phrase_map
+  - text: set vector's heartbeat to autonomous mode every 10 minutes
+    source: authored
+  - text: turn on atlas heartbeat but keep it silent, no notifications
+    source: authored
+  - text: make the monitoring agent check every 2 hours and just notify me
+    source: authored
+  - text: set sentinel to act_notify on its hourly heartbeat
+    source: authored
+  - text: change agent 5's heartbeat to run only on weekdays 8 to 5
+    source: authored
+  - text: bump the research agent's heartbeat to fully autonomous
+    source: authored
+  - text: configure the email agent to poll the inbox every 20 minutes and notify
+    source: authored
+  platform_create_agent:
+  - text: create an agent called DevOps Bot
+    source: example
+  - text: make a new researcher agent
+    source: example
+  - text: create a support agent using claude sonnet with a helpful persona
+    source: example
+  - text: create agent
+    source: phrase_map
+  - text: create an agent
+    source: phrase_map
+  - text: build agent
+    source: phrase_map
+  - text: build an agent
+    source: phrase_map
+  - text: make agent
+    source: phrase_map
+  - text: make an agent
+    source: phrase_map
+  - text: set up agent
+    source: phrase_map
+  - text: setup agent
+    source: phrase_map
+  - text: new agent
+    source: phrase_map
+  - text: create a new agent
+    source: phrase_map
+  - text: build me an agent
+    source: phrase_map
+  - text: spin up a coder agent named CodeSmith
+    source: authored
+  - text: set up a new chatbot agent for customer support
+    source: authored
+  - text: I need a worker agent to handle background jobs
+    source: authored
+  - text: build me a researcher agent that tracks competitors
+    source: authored
+  - text: create a coder agent using claude opus
+    source: authored
+  - text: add a new worker agent called PipelineRunner
+    source: authored
+  - text: make a researcher named MarketScout
+    source: authored
+  platform_delete_agent:
+  - text: delete the test agent
+    source: example
+  - text: remove agent 12
+    source: example
+  - text: get rid of the old marketing agent
+    source: authored
+  - text: delete agent 7 permanently
+    source: authored
+  - text: kill the duplicate researcher agent
+    source: authored
+  - text: remove the DevOps Bot agent for good
+    source: authored
+  - text: drop agent 23 from the workspace
+    source: authored
+  - text: wipe out the demo agent
+    source: authored
+  - text: delete VECTOR, we don't need it anymore
+    source: authored
+  - text: trash the unused support agent
+    source: authored
+  - text: please permanently remove agent 15
+    source: authored
+  - text: nuke the test-bot agent
+    source: authored
+  - text: delete the agent named OldScout
+    source: authored
+  - text: can you remove agent 88
+    source: authored
+  - text: scrap the outdated finance agent
+    source: authored
+  - text: delete that broken chatbot agent
+    source: authored
+  - text: remove the ATLAS agent entirely
+    source: authored
+  - text: get rid of agent number 4
+    source: authored
+  - text: delete my leftover qa agent
+    source: authored
+  - text: erase the sandbox agent
+    source: authored
+  platform_fleet_status:
+  - text: how's the team doing?
+    source: example
+  - text: what is everyone working on right now?
+    source: example
+  - text: is anyone stuck or stalled?
+    source: example
+  - text: who's free to take this on?
+    source: example
+  - text: give me a rundown of what the whole team is up to
+    source: authored
+  - text: any agents blocked or waiting on an answer?
+    source: authored
+  - text: show me the floor, who's busy and who's idle
+    source: authored
+  - text: what's the queue depth across all my agents
+    source: authored
+  - text: is anyone stalled right now?
+    source: authored
+  - text: how much have we spent on agents in the last 24 hours
+    source: authored
+  - text: who's got capacity to pick up a new task
+    source: authored
+  - text: team status check please
+    source: authored
+  - text: are any of my agents stuck on something
+    source: authored
+  - text: what is each agent doing at the moment
+    source: authored
+  - text: show fleet activity and any anomalies
+    source: authored
+  - text: which agents are working and which are sitting idle
+    source: authored
+  - text: quick pulse on the team, everyone ok?
+    source: authored
+  - text: did any watches blow through their action budget
+    source: authored
+  - text: who is currently free and who is overloaded
+    source: authored
+  - text: give me the live status of all agents
+    source: authored
+  platform_get_agent:
+  - text: tell me about the DevOps agent
+    source: example
+  - text: what model does agent 5 use?
+    source: example
+  - text: what tools does VECTOR have?
+    source: authored
+  - text: show me atlas's configuration
+    source: authored
+  - text: what's the system prompt for agent 8
+    source: authored
+  - text: give me the details on the research agent
+    source: authored
+  - text: which model is the support agent running
+    source: authored
+  - text: what temperature is agent 3 set to
+    source: authored
+  - text: show the setup for SENTINEL
+    source: authored
+  - text: what skills does my marketing agent have
+    source: authored
+  - text: pull up agent 12's config
+    source: authored
+  - text: who does the finance agent report to
+    source: authored
+  - text: what's agent 5's job title
+    source: authored
+  - text: tell me everything about the ATLAS agent
+    source: authored
+  - text: show recent activity for the devops agent
+    source: authored
+  - text: what team is agent 7 on
+    source: authored
+  - text: describe the coder agent's settings
+    source: authored
+  - text: what's the description of agent 19
+    source: authored
+  - text: show me how VECTOR is configured
+    source: authored
+  - text: which tools and skills does agent 42 use
+    source: authored
+  platform_get_agent_heartbeat:
+  - text: show me VECTOR's heartbeat config
+    source: example
+  - text: what's SENTINEL's heartbeat schedule?
+    source: example
+  - text: read the heartbeat for agent 188
+    source: example
+  - text: is ATLAS heartbeat enabled?
+    source: example
+  - text: show heartbeat
+    source: phrase_map
+  - text: read heartbeat
+    source: phrase_map
+  - text: view heartbeat
+    source: phrase_map
+  - text: what's the heartbeat
+    source: phrase_map
+  - text: show agent heartbeat
+    source: phrase_map
+  - text: current heartbeat
+    source: phrase_map
+  - text: heartbeat for agent
+    source: phrase_map
+  - text: is heartbeat enabled
+    source: phrase_map
+  - text: how often does atlas run its heartbeat?
+    source: authored
+  - text: what are the active hours on VECTOR's heartbeat
+    source: authored
+  - text: does the monitoring agent have a heartbeat set up
+    source: authored
+  - text: show me the checklist for sentinel's heartbeat
+    source: authored
+  - text: what proactive level is agent 5's heartbeat on
+    source: authored
+  - text: when is the research agent's next heartbeat check
+    source: authored
+  - text: read out the heartbeat settings for agent 42
+    source: authored
+  - text: is the email agent's heartbeat on or off
+    source: authored
+  platform_list_agents:
+  - text: what agents do I have?
+    source: example
+  - text: list my agents
+    source: example
+  - text: show all agents
+    source: example
+  - text: what agents do i have
+    source: phrase_map
+  - text: show my agents
+    source: phrase_map
+  - text: how many agents do i have
+    source: phrase_map
+  - text: show me my agents
+    source: phrase_map
+  - text: show me all my active agents
+    source: authored
+  - text: list the inactive agents
+    source: authored
+  - text: give me a roster of every agent, active or not
+    source: authored
+  - text: what agents are currently active in this workspace
+    source: authored
+  - text: pull up the full agent list including inactive ones
+    source: authored
+  - text: which agents do i have set up
+    source: authored
+  - text: display all agents and their status
+    source: authored
+  - text: show me the agents that are switched off
+    source: authored
+  - text: run through my agent lineup
+    source: authored
+  - text: who's on my agent roster
+    source: authored
+  - text: list every agent in the workspace
+    source: authored
+  - text: what's my current set of agents
+    source: authored
+  - text: gimme the list of active agents only
+    source: authored
+  platform_unassign_skill_from_agent:
+  - text: unassign the code-review skill from VECTOR
+    source: example
+  - text: remove skill 42 from agent 188
+    source: example
+  - text: drop the growth-hacker skill from ATLAS
+    source: example
+  - text: unassign skill from agent
+    source: phrase_map
+  - text: remove skill from agent
+    source: phrase_map
+  - text: drop skill from agent
+    source: phrase_map
+  - text: detach skill from agent
+    source: phrase_map
+  - text: take skill off agent
+    source: phrase_map
+  - text: delete skill assignment
+    source: phrase_map
+  - text: pull the summarization skill off my research agent
+    source: authored
+  - text: atlas doesn't need the seo-audit skill anymore, remove it
+    source: authored
+  - text: unassign the copywriting skill from agent 5
+    source: authored
+  - text: strip the debugging skill from the dev agent
+    source: authored
+  - text: get rid of vector's translation skill
+    source: authored
+  - text: remove skill 17 from the marketing agent
+    source: authored
+  - text: take the forecasting skill away from the finance agent
+    source: authored
+  - text: detach the outreach-writer skill from sentinel
+    source: authored
+  - text: clear the wrong analysis skill off agent 8
+    source: authored
+  - text: drop the test-writing skill from my qa agent
+    source: authored
+  - text: un-assign the data-analysis skill from atlas
+    source: authored
+  platform_unassign_tool_from_agent:
+  - text: unassign GMAIL from agent 188
+    source: example
+  - text: remove the github tool from VECTOR
+    source: example
+  - text: deactivate composio_search on the marketing agent
+    source: example
+  - text: unassign tool from agent
+    source: phrase_map
+  - text: remove tool from agent
+    source: phrase_map
+  - text: drop tool from agent
+    source: phrase_map
+  - text: detach tool from agent
+    source: phrase_map
+  - text: take tool off agent
+    source: phrase_map
+  - text: deactivate tool on agent
+    source: phrase_map
+  - text: remove app from agent
+    source: phrase_map
+  - text: unassign app from agent
+    source: phrase_map
+  - text: take SLACK access away from the dev agent
+    source: authored
+  - text: vector doesn't need JIRA anymore, unassign it
+    source: authored
+  - text: revoke the NOTION tool from agent 9
+    source: authored
+  - text: disconnect HUBSPOT from the marketing agent
+    source: authored
+  - text: drop the LINEAR app from atlas
+    source: authored
+  - text: remove STRIPE from agent 3
+    source: authored
+  - text: deactivate the TWITTER tool on the social agent
+    source: authored
+  - text: strip GOOGLECALENDAR off the scheduling agent
+    source: authored
+  - text: cut SALESFORCE access from the sales agent
+    source: authored
+  platform_update_agent:
+  - text: rename agent 5 to CodeReview Bot
+    source: example
+  - text: deactivate the DevOps agent
+    source: example
+  - text: change the support agent's model to claude sonnet
+    source: example
+  - text: update agent 3's system prompt to be more formal
+    source: example
+  - text: update agent
+    source: phrase_map
+  - text: modify agent
+    source: phrase_map
+  - text: change agent
+    source: phrase_map
+  - text: edit agent
+    source: phrase_map
+  - text: configure agent
+    source: phrase_map
+  - text: reconfigure agent
+    source: phrase_map
+  - text: reactivate the marketing agent
+    source: authored
+  - text: set agent 7 to inactive
+    source: authored
+  - text: bump vector's temperature down to 0.2
+    source: authored
+  - text: rename atlas to Growth Scout
+    source: authored
+  - text: change the research agent's team to Marketing
+    source: authored
+  - text: give agent 5 the job title Lead Engineer
+    source: authored
+  - text: make the support agent report to VECTOR
+    source: authored
+  - text: update the dev agent's model to claude opus
+    source: authored
+  - text: add the tags urgent and beta to agent 9
+    source: authored
+  - text: switch the finance agent's description to something clearer
+    source: authored

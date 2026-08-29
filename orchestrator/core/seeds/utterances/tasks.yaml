@@ -1,0 +1,286 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: tasks)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: tasks                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: tasks
+actions:
+  platform_assign_task:
+  - text: assign task 12 to the researcher
+    source: example
+  - text: give task 5 to devops
+    source: example
+  - text: assign task
+    source: phrase_map
+  - text: give task to
+    source: phrase_map
+  - text: assign to agent
+    source: phrase_map
+  - text: hand off task
+    source: phrase_map
+  - text: delegate task
+    source: phrase_map
+  - text: reassign task
+    source: phrase_map
+  - text: assign this ticket to Auto
+    source: authored
+  - text: hand task 9 over to the analyst
+    source: authored
+  - text: delegate the login bug to devops
+    source: authored
+  - text: put task 4 on the researcher's plate
+    source: authored
+  - text: reassign task 8 to me
+    source: authored
+  - text: give task 3 to sentinel
+    source: authored
+  - text: move this card to the writer
+    source: authored
+  - text: let the qa agent handle task 15
+    source: authored
+  - text: who should own task 11? give it to the backend agent
+    source: authored
+  platform_board_summary:
+  - text: how's the board looking?
+    source: example
+  - text: give me a board summary
+    source: example
+  - text: daily standup
+    source: example
+  - text: how many tasks are in progress?
+    source: example
+  - text: which agent is busiest?
+    source: example
+  - text: any failed tasks?
+    source: example
+  - text: board summary
+    source: phrase_map
+  - text: how's the board
+    source: phrase_map
+  - text: board overview
+    source: phrase_map
+  - text: standup summary
+    source: phrase_map
+  - text: how many tasks
+    source: phrase_map
+  - text: task summary
+    source: phrase_map
+  - text: busiest agent
+    source: phrase_map
+  - text: who's busiest
+    source: phrase_map
+  - text: any failed tasks
+    source: phrase_map
+  - text: task stats
+    source: phrase_map
+  - text: board status
+    source: phrase_map
+  - text: how are we doing
+    source: phrase_map
+  - text: team status
+    source: phrase_map
+  - text: workload
+    source: phrase_map
+  - text: what's the state of the board?
+    source: authored
+  - text: run me through today's standup
+    source: authored
+  - text: how much is on everyone's plate?
+    source: authored
+  - text: give me the board health at a glance
+    source: authored
+  platform_create_task:
+  - text: create a task to fix the login bug
+    source: example
+  - text: raise a task for the researcher to check competitor pricing
+    source: example
+  - text: create sub-tasks for each test failure
+    source: example
+  - text: create a task
+    source: phrase_map
+  - text: add a task
+    source: phrase_map
+  - text: raise a task
+    source: phrase_map
+  - text: new task
+    source: phrase_map
+  - text: create board task
+    source: phrase_map
+  - text: add to board
+    source: phrase_map
+  - text: create a bug report
+    source: phrase_map
+  - text: create sub-task
+    source: phrase_map
+  - text: create follow-up task
+    source: phrase_map
+  - text: task for
+    source: phrase_map
+  - text: raise a bug
+    source: phrase_map
+  - text: create work item
+    source: phrase_map
+  - text: open a ticket to chase the failing test
+    source: authored
+  - text: put a card on the board for the redesign
+    source: authored
+  - text: 'log a bug: checkout throws a 500'
+    source: authored
+  - text: spin up a follow-up item for next week
+    source: authored
+  platform_get_task:
+  - text: show me task 42
+    source: example
+  - text: what's the status of task 15?
+    source: example
+  - text: get details for task 7
+    source: example
+  - text: show task
+    source: phrase_map
+  - text: get task
+    source: phrase_map
+  - text: task details
+    source: phrase_map
+  - text: task info
+    source: phrase_map
+  - text: what's task
+    source: phrase_map
+  - text: status of task
+    source: phrase_map
+  - text: details for task
+    source: phrase_map
+  - text: pull up task 42
+    source: authored
+  - text: what's going on with task 15?
+    source: authored
+  - text: open ticket 7 and show me the details
+    source: authored
+  - text: read me the description for task 9
+    source: authored
+  - text: did task 5 error out? show the result
+    source: authored
+  - text: who's task 12 assigned to?
+    source: authored
+  - text: show the full history of task 3
+    source: authored
+  platform_list_tasks:
+  - text: what tasks are on the board?
+    source: example
+  - text: show me in-progress tasks
+    source: example
+  - text: what's assigned to the researcher?
+    source: example
+  - text: list urgent tasks
+    source: example
+  - text: list tasks
+    source: phrase_map
+  - text: show tasks
+    source: phrase_map
+  - text: what tasks
+    source: phrase_map
+  - text: board tasks
+    source: phrase_map
+  - text: tasks on the board
+    source: phrase_map
+  - text: my tasks
+    source: phrase_map
+  - text: show the board
+    source: phrase_map
+  - text: what's in progress
+    source: phrase_map
+  - text: in progress tasks
+    source: phrase_map
+  - text: assigned tasks
+    source: phrase_map
+  - text: inbox tasks
+    source: phrase_map
+  - text: review tasks
+    source: phrase_map
+  - text: tasks for agent
+    source: phrase_map
+  - text: what's assigned to
+    source: phrase_map
+  - text: what's on the board right now?
+    source: authored
+  - text: show me everything in review
+    source: authored
+  - text: which tickets are still open?
+    source: authored
+  - text: list the cards waiting on the researcher
+    source: authored
+  platform_update_task_status:
+  - text: move task 8 to in progress
+    source: example
+  - text: mark task 3 as done
+    source: example
+  - text: start task 12
+    source: example
+  - text: run task 5 now
+    source: example
+  - text: move task
+    source: phrase_map
+  - text: start task
+    source: phrase_map
+  - text: run task now
+    source: phrase_map
+  - text: mark task as
+    source: phrase_map
+  - text: complete task
+    source: phrase_map
+  - text: finish task
+    source: phrase_map
+  - text: task to done
+    source: phrase_map
+  - text: task to in progress
+    source: phrase_map
+  - text: trigger task
+    source: phrase_map
+  - text: execute task
+    source: phrase_map
+  - text: kick off task
+    source: phrase_map
+  - text: close all the blocked tickets from vector
+    source: authored
+  - text: close the blocked tickets
+    source: authored
+  - text: close ticket 12
+    source: authored
+  - text: mark ticket 5 as closed
+    source: authored
+  - text: clear all the blocked items
+    source: authored
+  - text: kill task 9
+    source: authored
+  - text: close out task 3
+    source: authored
+  - text: move the card to done
+    source: authored
+  - text: set task 7 to review
+    source: authored
+  - text: push task 4 back to inbox
+    source: authored
+  - text: reopen task 6
+    source: authored
+  - text: wrap up task 22 and mark it done
+    source: authored

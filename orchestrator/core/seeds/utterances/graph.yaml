@@ -1,0 +1,294 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: graph)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: graph                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: graph
+actions:
+  platform_graph_communities:
+  - text: list graph communities
+    source: example
+  - text: what business domains exist in the graph?
+    source: example
+  - text: show community details for cluster 3
+    source: example
+  - text: how is our knowledge organized?
+    source: example
+  - text: what areas
+    source: phrase_map
+  - text: departments
+    source: phrase_map
+  - text: clusters
+    source: phrase_map
+  - text: domains
+    source: phrase_map
+  - text: groups of
+    source: phrase_map
+  - text: categories of
+    source: phrase_map
+  - text: themes in
+    source: phrase_map
+  - text: knowledge domains
+    source: phrase_map
+  - text: graph communities
+    source: phrase_map
+  - text: topic clusters
+    source: phrase_map
+  - text: what clusters did the graph find?
+    source: authored
+  - text: break the knowledge base into business domains
+    source: authored
+  - text: which areas group together in the graph?
+    source: authored
+  - text: show me the members of cluster 5
+    source: authored
+  - text: what are the main themes in our knowledge base?
+    source: authored
+  - text: give me the high-level domain groupings
+    source: authored
+  platform_graph_impact:
+  - text: what happens if we change pricing?
+    source: example
+  - text: analyze impact of removing the referral program
+    source: example
+  - text: show downstream effects of changing the API
+    source: example
+  - text: what would break if we removed the notification system?
+    source: example
+  - text: what if we change
+    source: phrase_map
+  - text: impact of
+    source: phrase_map
+  - text: what breaks
+    source: phrase_map
+  - text: affects
+    source: phrase_map
+  - text: downstream
+    source: phrase_map
+  - text: upstream
+    source: phrase_map
+  - text: dependencies of
+    source: phrase_map
+  - text: depends on
+    source: phrase_map
+  - text: consequences of
+    source: phrase_map
+  - text: ripple effect
+    source: phrase_map
+  - text: what would happen
+    source: phrase_map
+  - text: risk of changing
+    source: phrase_map
+  - text: blast radius
+    source: phrase_map
+  - text: if we kill the free tier, what's affected?
+    source: authored
+  - text: blast radius of changing the checkout flow
+    source: authored
+  - text: what breaks downstream if i change the login system?
+    source: authored
+  - text: how far does removing coupons ripple?
+    source: authored
+  - text: assess the risk of deprecating the old api
+    source: authored
+  - text: downstream effects of retiring the legacy dashboard
+    source: authored
+  platform_graph_neighbors:
+  - text: what is connected to the pricing concept?
+    source: example
+  - text: show neighbors of customer onboarding
+    source: example
+  - text: get connections for revenue model
+    source: example
+  - text: what depends on the authentication module?
+    source: example
+  - text: related to
+    source: phrase_map
+  - text: associated with
+    source: phrase_map
+  - text: linked to
+    source: phrase_map
+  - text: touches
+    source: phrase_map
+  - text: involves
+    source: phrase_map
+  - text: neighbors of
+    source: phrase_map
+  - text: connections of
+    source: phrase_map
+  - text: what links to
+    source: phrase_map
+  - text: what's directly linked to billing?
+    source: authored
+  - text: show me everything touching the signup flow
+    source: authored
+  - text: immediate connections of the pricing model
+    source: authored
+  - text: what nodes connect straight to churn?
+    source: authored
+  - text: give me the direct neighbors of the payment gateway
+    source: authored
+  - text: what's one hop from customer support?
+    source: authored
+  - text: list what's directly related to the referral program
+    source: authored
+  platform_graph_path:
+  - text: how is pricing connected to customer churn?
+    source: example
+  - text: what links authentication and billing?
+    source: example
+  - text: find the path between onboarding and retention
+    source: example
+  - text: shortest path from product to revenue
+    source: example
+  - text: how does marketing connect to revenue?
+    source: authored
+  - text: trace the link from signup to churn
+    source: authored
+  - text: what's the chain between support and retention?
+    source: authored
+  - text: how many hops from pricing to referrals?
+    source: authored
+  - text: connect the dots between onboarding and upsell
+    source: authored
+  - text: path from the api to customer satisfaction
+    source: authored
+  - text: how is data collection related to compliance?
+    source: authored
+  - text: what connects the free trial and paid conversion?
+    source: authored
+  - text: shortest route from the search feature to engagement
+    source: authored
+  - text: how do payments and fraud detection relate?
+    source: authored
+  - text: link between email campaigns and engagement
+    source: authored
+  - text: what's the connection from product usage to renewals?
+    source: authored
+  - text: how far apart are security and user trust in the graph?
+    source: authored
+  - text: trace a path between the mobile app and revenue
+    source: authored
+  - text: how does customer feedback tie to the roadmap?
+    source: authored
+  platform_graph_stats:
+  - text: how big is the knowledge graph?
+    source: example
+  - text: graph health check
+    source: example
+  - text: show graph statistics
+    source: example
+  - text: when was the knowledge graph last updated?
+    source: example
+  - text: what are the most connected concepts?
+    source: example
+  - text: graph health
+    source: phrase_map
+  - text: knowledge coverage
+    source: phrase_map
+  - text: how complete
+    source: phrase_map
+  - text: graph size
+    source: phrase_map
+  - text: how connected
+    source: phrase_map
+  - text: graph stats
+    source: phrase_map
+  - text: graph status
+    source: phrase_map
+  - text: how many nodes
+    source: phrase_map
+  - text: when was the graph built
+    source: phrase_map
+  - text: how many edges are in the graph?
+    source: authored
+  - text: how many communities does the graph have?
+    source: authored
+  - text: what are the god nodes right now?
+    source: authored
+  - text: does the knowledge graph need a rebuild?
+    source: authored
+  - text: give me the node and edge counts
+    source: authored
+  - text: how well covered is our knowledge base?
+    source: authored
+  platform_query_graph:
+  - text: query the knowledge graph about our pricing strategy
+    source: example
+  - text: what does the graph say about customer onboarding?
+    source: example
+  - text: search graph for marketing dependencies
+    source: example
+  - text: how are authentication and user management connected?
+    source: example
+  - text: what processes depend on the payment system?
+    source: example
+  - text: how does
+    source: phrase_map
+  - text: connected to
+    source: phrase_map
+  - text: relationship between
+    source: phrase_map
+  - text: relate to
+    source: phrase_map
+  - text: end to end
+    source: phrase_map
+  - text: flow
+    source: phrase_map
+  - text: process for
+    source: phrase_map
+  - text: overview of
+    source: phrase_map
+  - text: map of
+    source: phrase_map
+  - text: what connects
+    source: phrase_map
+  - text: trace from
+    source: phrase_map
+  - text: path between
+    source: phrase_map
+  - text: knowledge graph
+    source: phrase_map
+  - text: query graph
+    source: phrase_map
+  - text: search graph
+    source: phrase_map
+  - text: graph query
+    source: phrase_map
+  - text: what do we know about
+    source: phrase_map
+  - text: according to the graph
+    source: phrase_map
+  - text: how are.*connected
+    source: phrase_map
+  - text: find in graph
+    source: phrase_map
+  - text: what does the graph know about our onboarding process?
+    source: authored
+  - text: trace the dependency chain from billing end to end
+    source: authored
+  - text: give me a broad map of everything around retention
+    source: authored
+  - text: search the graph for what feeds our revenue metrics
+    source: authored

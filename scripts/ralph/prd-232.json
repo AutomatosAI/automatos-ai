@@ -65,14 +65,14 @@
       "title": "The synthetic utterance corpus (you are the generator)",
       "description": "Author the corpus DIRECTLY — you are an LLM; do not build anything that calls an external LLM API. Files under orchestrator/core/seeds/utterances/<category>.yaml: for EVERY non-super_admin_only registered action (walk the ActionRegistry registration files in modules/tools/discovery/actions_*.py + workspace_actions.py), 15-25 diverse utterances: colloquial/terse/verbose, deliberate register variants (ticket/task/card/item; mail/email/inbox; close/finish/clear/kill/done with), question and imperative forms. Fold in every ActionDefinition.examples entry and every phrase from the AutoBrain _PLATFORM_KEYWORDS map (consumers/chatbot/auto.py:~490-580). Also write scripts/generate_utterance_corpus.py — a REGENERATION AID that validates format/coverage and prints a per-action authoring checklist (it does NOT call an LLM; it is the format contract + coverage linter).",
       "acceptanceCriteria": [
-        "Coverage linter (in the script, also run as a pytest) proves >=90% of non-su actions have >=15 utterances; platform_update_task_status's set includes close/ticket/blocked vocabulary",
-        "Every _PLATFORM_KEYWORDS phrase and every ActionDefinition.examples string appears in the corpus (provenance-tagged)",
-        "YAML schema documented at the top of each file; su-only actions excluded (fail-closed by reading the registry flag)",
-        "Branch-scoped pytest green (the linter test)"
+        "DONE — scripts/generate_utterance_corpus.validate() + test_coverage_at_least_90_percent: 183/183 non-su actions carry >=15 utterances (100.0%, floor 90%); 39 category files, 3532 utterances (582 example + 634 phrase_map + 2316 authored). test_update_task_status_has_close_ticket_blocked asserts 'close'/'ticket'/'blocked' AND the canonical VECTOR sentence 'close all the blocked tickets from vector' are in platform_update_task_status's set.",
+        "DONE — test_every_registry_example_present (all 582 ActionDefinition.examples present, source: example) + test_every_phrase_map_phrase_present (every mappable _PLATFORM_KEYWORDS phrase present, source: phrase_map). 4 su-only phrase keys skipped + 4 legacy recipe keys remapped to canonical playbook actions (PHRASE_MAP_LEGACY_REMAP), asserted by test_phrase_map_skips_are_only_su_or_unregistered; test_no_mistagged_provenance guards tag truthfulness.",
+        "DONE — test_each_file_documents_schema asserts every file's header documents 'Schema:' + source provenance + 'version: 1' + 'category: <stem>'. test_super_admin_only_actions_excluded reads the LIVE registry super_admin_only flag (7 su actions) and proves the corpus is disjoint from it (report.su_present==[]); test_no_unknown_or_stale_action_names guards against stale names.",
+        "DONE — cd orchestrator && python3 -m pytest -q tests/test_prd232_us005_utterance_corpus.py -> 11 passed; US-001..005 together = 33 passed. test_registry_load_is_lightweight (subprocess) proves the leaf-load imports NO torch/sentence_transformers, and DeterministicEmbeddingProvider appears nowhere (PRD-185 S3)."
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Generator scripts/generate_utterance_corpus.py is validate-ONLY (no LLM/network/os.getenv): leaf-loads the discovery ActionRegistry under a synthetic package (dodging modules/tools/__init__'s transformers/torch chain), AST-parses _PLATFORM_KEYWORDS out of auto.py, parses the corpus, and prints a per-action authoring checklist. Corpus is 39 hand-authored core/seeds/utterances/<category>.yaml files (committed as seed data, decision §6.3) — schema: version/category/actions[name]->[{text,source}] with source in {authored,example,phrase_map}. Coverage 100% of the 183 non-su actions; median 19 utterances/action; only 3 phrase-rich actions exceed 25 (inherent — every phrase must appear). su-only exclusion is fail-closed on the registry flag. The scratchpad merge aid (deterministic examples+phrases + authored lists -> YAML) stays OUT of the repo; the committed artifact is the YAML."
     },
     {
       "id": "US-006",

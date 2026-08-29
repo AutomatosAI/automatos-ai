@@ -1,0 +1,330 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: documents)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: documents                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: documents
+actions:
+  platform_delete_document:
+  - text: delete document 5
+    source: example
+  - text: remove that document from the knowledge base
+    source: example
+  - text: delete document
+    source: phrase_map
+  - text: remove document
+    source: phrase_map
+  - text: delete from knowledge base
+    source: phrase_map
+  - text: get rid of document 8
+    source: authored
+  - text: drop the onboarding pdf from the kb
+    source: authored
+  - text: trash document 22 permanently
+    source: authored
+  - text: can you delete the old pricing doc?
+    source: authored
+  - text: wipe that file out of the knowledge base
+    source: authored
+  - text: kill document 14
+    source: authored
+  - text: please remove the outdated policy doc
+    source: authored
+  - text: delete the invoice template notes doc
+    source: authored
+  - text: purge document 3 from the kb
+    source: authored
+  - text: nuke the duplicate contract file
+    source: authored
+  - text: i want to delete the meeting notes document
+    source: authored
+  - text: clear out document 99 for good
+    source: authored
+  - text: remove the stale readme from knowledge base
+    source: authored
+  - text: delete the file i uploaded yesterday
+    source: authored
+  platform_get_template_schema:
+  - text: what fields does the Branded Letter template need?
+    source: example
+  - text: show the schema for that template
+    source: example
+  - text: what data does the invoice template expect?
+    source: authored
+  - text: which variables does the report template use?
+    source: authored
+  - text: show me the fields for template 4
+    source: authored
+  - text: what do i need to fill in for the branded report?
+    source: authored
+  - text: list the data fields the letter template wants
+    source: authored
+  - text: what chips does that template have?
+    source: authored
+  - text: what placeholders are in the contract template?
+    source: authored
+  - text: tell me what the quote template requires
+    source: authored
+  - text: what inputs does the newsletter template need?
+    source: authored
+  - text: give me the sample data for the invoice template
+    source: authored
+  - text: what variables must i supply for template 7?
+    source: authored
+  - text: show the expected structure for the proposal template
+    source: authored
+  - text: what fields are required to generate this report?
+    source: authored
+  - text: which data fields does the branded letter use?
+    source: authored
+  - text: what does the receipt template need from me?
+    source: authored
+  - text: spell out the schema for the offer letter template
+    source: authored
+  platform_grep_documents:
+  - text: grep the docs for ERR_TIMEOUT
+    source: example
+  - text: find where the docs mention 'rate limit'
+    source: example
+  - text: search documents for the exact phrase 'service level agreement'
+    source: example
+  - text: search the knowledge base for the config key DATABASE_URL
+    source: authored
+  - text: which document mentions error code 502?
+    source: authored
+  - text: grep the docs for the string api_key
+    source: authored
+  - text: find the exact phrase net 30 in my documents
+    source: authored
+  - text: look through the docs for any mention of gdpr
+    source: authored
+  - text: search my knowledge base for the term chargeback
+    source: authored
+  - text: where do the documents say maximum retries?
+    source: authored
+  - text: pattern match ERR_[A-Z]+ across the docs
+    source: authored
+  - text: find every doc that contains the word refund
+    source: authored
+  - text: grep knowledge base for the ticket id JIRA-4821
+    source: authored
+  - text: which uploaded doc references the sha256 hash?
+    source: authored
+  - text: search document text for the phrase force majeure
+    source: authored
+  - text: hunt through the docs for the endpoint /v2/orders
+    source: authored
+  - text: find literal matches of TODO in my documents
+    source: authored
+  - text: look for the exact string timeout=30 in the kb
+    source: authored
+  platform_list_documents:
+  - text: what documents have I uploaded?
+    source: example
+  - text: list my files
+    source: example
+  - text: show knowledge base documents
+    source: example
+  - text: list my documents
+    source: phrase_map
+  - text: what documents do i have
+    source: phrase_map
+  - text: show my documents
+    source: phrase_map
+  - text: how many documents do i have
+    source: phrase_map
+  - text: what files have i uploaded
+    source: phrase_map
+  - text: show my uploaded files
+    source: phrase_map
+  - text: pull up everything in my knowledge base
+    source: authored
+  - text: what's in the knowledge base right now?
+    source: authored
+  - text: give me a list of uploaded documents
+    source: authored
+  - text: which files are stored in the workspace?
+    source: authored
+  - text: browse my knowledge base docs
+    source: authored
+  - text: show the processing status of my documents
+    source: authored
+  - text: how many files are in the kb?
+    source: authored
+  - text: display all documents in the workspace
+    source: authored
+  - text: what have i got uploaded so far?
+    source: authored
+  - text: list out the docs and their types
+    source: authored
+  platform_list_templates:
+  - text: what document templates do we have?
+    source: example
+  - text: list invoice templates
+    source: example
+  - text: show me the branded report templates
+    source: example
+  - text: what templates can i use?
+    source: authored
+  - text: show me all the document templates
+    source: authored
+  - text: which report templates are available?
+    source: authored
+  - text: list the letter templates in this workspace
+    source: authored
+  - text: what invoice formats do we have?
+    source: authored
+  - text: browse the available templates
+    source: authored
+  - text: do we have any proposal templates?
+    source: authored
+  - text: pull up the template library
+    source: authored
+  - text: what categories of templates exist here?
+    source: authored
+  - text: show me templates i can generate from
+    source: authored
+  - text: give me the list of branded templates
+    source: authored
+  - text: which templates are set up for this workspace?
+    source: authored
+  - text: what document templates are on offer?
+    source: authored
+  - text: list every template with its format
+    source: authored
+  - text: any receipt or quote templates available?
+    source: authored
+  platform_read_document:
+  - text: read the rest of that document
+    source: example
+  - text: show me page 2 of document 12
+    source: example
+  - text: read document 7 in full
+    source: example
+  - text: open document 15 and read it to me
+    source: authored
+  - text: show me the full text of the pricing doc
+    source: authored
+  - text: read page 3 of document 20
+    source: authored
+  - text: give me the next page of that document
+    source: authored
+  - text: read the whole onboarding guide
+    source: authored
+  - text: show the complete contents of document 9
+    source: authored
+  - text: keep reading document 12 from where we left off
+    source: authored
+  - text: read past the snippet for document 4
+    source: authored
+  - text: pull the full text of the policy document
+    source: authored
+  - text: display page 5 of the report doc
+    source: authored
+  - text: read all of document 33
+    source: authored
+  - text: show me the rest of the sla document
+    source: authored
+  - text: let me see the entire faq document
+    source: authored
+  - text: read document 6 page by page
+    source: authored
+  - text: continue reading the contract from page 2
+    source: authored
+  platform_reprocess_document:
+  - text: reprocess document 3
+    source: example
+  - text: re-embed document 7
+    source: example
+  - text: reindex that document
+    source: example
+  - text: regenerate chunks for document 10
+    source: example
+  - text: reprocess document
+    source: phrase_map
+  - text: re-embed document
+    source: phrase_map
+  - text: reindex document
+    source: phrase_map
+  - text: regenerate chunks
+    source: phrase_map
+  - text: rebuild embeddings
+    source: phrase_map
+  - text: re-index document 5 please
+    source: authored
+  - text: rebuild the embeddings for the pricing doc
+    source: authored
+  - text: reprocess the onboarding document
+    source: authored
+  - text: regenerate the vectors for document 18
+    source: authored
+  - text: re-embed the whole policy doc
+    source: authored
+  - text: reindex document 21 again
+    source: authored
+  - text: chunk and embed document 9 fresh
+    source: authored
+  - text: run the document through processing again
+    source: authored
+  - text: refresh the embeddings on that file
+    source: authored
+  - text: reprocess document 2 from scratch
+    source: authored
+  platform_upload_document:
+  - text: add this FAQ to the knowledge base
+    source: example
+  - text: upload these notes as a document
+    source: example
+  - text: save this policy as knowledge
+    source: example
+  - text: store this summary in the knowledge base
+    source: authored
+  - text: save these meeting notes as a document
+    source: authored
+  - text: add this markdown to the kb
+    source: authored
+  - text: upload the text you just wrote as knowledge
+    source: authored
+  - text: capture this policy in the knowledge base
+    source: authored
+  - text: put this faq into the workspace docs
+    source: authored
+  - text: save this as a document for the agents to use
+    source: authored
+  - text: add these guidelines to our knowledge base
+    source: authored
+  - text: keep this write-up as a knowledge doc
+    source: authored
+  - text: upload this json as a document
+    source: authored
+  - text: file this summary into the kb
+    source: authored
+  - text: save what you generated as a knowledge base entry
+    source: authored
+  - text: add this troubleshooting guide to the docs
+    source: authored
+  - text: persist these notes as a workspace document
+    source: authored
+  - text: commit this text to the knowledge base
+    source: authored

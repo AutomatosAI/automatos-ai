@@ -1,0 +1,307 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: skills)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: skills                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: skills
+actions:
+  platform_create_workspace_skill:
+  - text: create a new skill called daily-standup
+    source: example
+  - text: draft a workspace skill from this content
+    source: example
+  - text: save this SKILL.md as a workspace skill
+    source: example
+  - text: make a new skill for VECTOR
+    source: example
+  - text: create skill
+    source: phrase_map
+  - text: create a new skill
+    source: phrase_map
+  - text: new skill
+    source: phrase_map
+  - text: draft a skill
+    source: phrase_map
+  - text: make a skill
+    source: phrase_map
+  - text: build a skill
+    source: phrase_map
+  - text: save this as a skill
+    source: phrase_map
+  - text: create workspace skill
+    source: phrase_map
+  - text: spin up a skill called invoice-parser
+    source: authored
+  - text: author a new workspace skill for lead scoring
+    source: authored
+  - text: create a skill from this SKILL.md i'm pasting
+    source: authored
+  - text: i want a new skill named report-writer
+    source: authored
+  - text: set up a workspace skill for pdf extraction
+    source: authored
+  - text: build me a skill that handles email drafting
+    source: authored
+  - text: make a fresh skill called data-cleaner
+    source: authored
+  platform_delete_workspace_skill:
+  - text: delete the workspace skill called test-skill
+    source: example
+  - text: remove skill 142
+    source: example
+  - text: drop my draft skill
+    source: example
+  - text: delete skill
+    source: phrase_map
+  - text: remove skill
+    source: phrase_map
+  - text: drop skill
+    source: phrase_map
+  - text: delete workspace skill
+    source: phrase_map
+  - text: remove my skill
+    source: phrase_map
+  - text: get rid of the invoice-parser skill
+    source: authored
+  - text: delete skill 88 from my workspace
+    source: authored
+  - text: trash my old report-writer skill
+    source: authored
+  - text: remove the skill named data-cleaner
+    source: authored
+  - text: nuke the draft skill i made yesterday
+    source: authored
+  - text: wipe out skill 205
+    source: authored
+  - text: delete the forked growth-hacker skill
+    source: authored
+  - text: can you drop the lead-scoring skill
+    source: authored
+  - text: get rid of that broken skill i created
+    source: authored
+  - text: delete my custom pdf-extraction skill
+    source: authored
+  - text: remove workspace skill number 60
+    source: authored
+  - text: scrap the test skill i was playing with
+    source: authored
+  platform_get_skill_content:
+  - text: show me the VECTOR skill content
+    source: example
+  - text: read the platform-cost-watchdog skill
+    source: example
+  - text: what does the sentinel skill say
+    source: example
+  - text: open skill 42 for editing
+    source: example
+  - text: show skill content
+    source: phrase_map
+  - text: read skill
+    source: phrase_map
+  - text: open skill
+    source: phrase_map
+  - text: view skill content
+    source: phrase_map
+  - text: get skill content
+    source: phrase_map
+  - text: what does the skill say
+    source: phrase_map
+  - text: show me the skill
+    source: phrase_map
+  - text: inspect skill
+    source: phrase_map
+  - text: read SKILL.md
+    source: phrase_map
+  - text: let me see the raw content of the sentinel skill
+    source: authored
+  - text: print the SKILL.md for skill 88
+    source: authored
+  - text: what's written in the growth-hacker skill
+    source: authored
+  - text: show me the frontmatter and body of the sql skill
+    source: authored
+  - text: pull up the source of the report-writer skill before i edit it
+    source: authored
+  - text: display the full text of skill 42
+    source: authored
+  platform_load_skill:
+  - text: load the growth-hacker skill
+    source: example
+  - text: load_skill data-analysis
+    source: example
+  - text: pull the full instructions for the sql skill
+    source: example
+  - text: use the data-analysis skill for this
+    source: authored
+  - text: follow the growth-hacker skill, load it up
+    source: authored
+  - text: apply the sql skill to my question
+    source: authored
+  - text: load up the docx skill instructions
+    source: authored
+  - text: bring in the sentinel skill for this task
+    source: authored
+  - text: use your report-writer skill here
+    source: authored
+  - text: pull in the full growth-hacker instructions
+    source: authored
+  - text: load the marketing-copy skill and use it
+    source: authored
+  - text: i want you to use the data-cleaner skill
+    source: authored
+  - text: activate the pdf-extraction skill for this
+    source: authored
+  - text: load the scout skill's instructions
+    source: authored
+  - text: reference the sql skill while you answer
+    source: authored
+  - text: go ahead and load the analytics skill
+    source: authored
+  - text: use the lead-scoring skill on this list
+    source: authored
+  - text: load the full body of the vector skill
+    source: authored
+  - text: tap the growth-hacker skill for this one
+    source: authored
+  - text: load the email-drafting skill instructions
+    source: authored
+  platform_run_skill_script:
+  - text: run the convert.py script from the docx skill
+    source: example
+  - text: run_skill_script skill=analytics script=summarize.py args='--period 7d'
+    source: example
+  - text: run the summarize.py helper from the analytics skill
+    source: authored
+  - text: execute the parse.py script in the invoice skill
+    source: authored
+  - text: run generate.py from the report-writer skill
+    source: authored
+  - text: run the clean.py script from data-cleaner with these args
+    source: authored
+  - text: execute the chart.py helper in the viz skill
+    source: authored
+  - text: run extract.py from the pdf skill on this file
+    source: authored
+  - text: kick off the export.py script in the analytics skill
+    source: authored
+  - text: run the skill script convert.py with --format csv
+    source: authored
+  - text: run the validate.py helper from the qa skill
+    source: authored
+  - text: execute transform.py in the etl skill
+    source: authored
+  - text: run the benchmark.py script from the perf skill
+    source: authored
+  - text: run scrape.py from the crawler skill
+    source: authored
+  - text: fire the summarize.py script in the digest skill
+    source: authored
+  - text: run the analytics skill's aggregate.py helper
+    source: authored
+  - text: execute the resize.py script from the image skill
+    source: authored
+  - text: run render.py from the slides skill
+    source: authored
+  - text: run the data-cleaner dedupe.py script
+    source: authored
+  platform_set_skill_script_execution:
+  - text: enable script execution for the analytics skill
+    source: example
+  - text: turn off L3 scripts for skill 42
+    source: example
+  - text: allow the analytics skill to run its scripts
+    source: authored
+  - text: enable l3 scripts for the report-writer skill
+    source: authored
+  - text: turn on script execution for skill 88
+    source: authored
+  - text: disable scripts for the invoice skill
+    source: authored
+  - text: let the etl skill run its bundled scripts
+    source: authored
+  - text: block script execution on skill 42
+    source: authored
+  - text: switch on l3 for the data-cleaner skill
+    source: authored
+  - text: stop the pdf skill from running scripts
+    source: authored
+  - text: enable running scripts for the viz skill
+    source: authored
+  - text: turn off l3 script execution for skill 205
+    source: authored
+  - text: make the analytics skill's scripts runnable
+    source: authored
+  - text: revoke script permissions from the crawler skill
+    source: authored
+  - text: grant script execution to the qa skill
+    source: authored
+  - text: flip on scripts for the report-writer skill
+    source: authored
+  - text: deactivate l3 scripts for skill 60
+    source: authored
+  - text: permit the slides skill to execute its helpers
+    source: authored
+  - text: disable the data-cleaner skill's script running
+    source: authored
+  platform_update_skill:
+  - text: edit the VECTOR skill
+    source: example
+  - text: update the platform-cost-watchdog skill content
+    source: example
+  - text: fork-and-edit the growth-hacker skill
+    source: example
+  - text: improve my workspace skill
+    source: example
+  - text: update skill
+    source: phrase_map
+  - text: edit skill
+    source: phrase_map
+  - text: modify skill
+    source: phrase_map
+  - text: change skill
+    source: phrase_map
+  - text: improve skill
+    source: phrase_map
+  - text: rewrite skill
+    source: phrase_map
+  - text: fork and edit skill
+    source: phrase_map
+  - text: update SKILL.md
+    source: phrase_map
+  - text: edit the workspace skill
+    source: phrase_map
+  - text: change skill content
+    source: phrase_map
+  - text: tweak the growth-hacker skill's instructions
+    source: authored
+  - text: revise the SKILL.md for the report-writer skill
+    source: authored
+  - text: make some edits to the analytics skill
+    source: authored
+  - text: polish up the vector skill content
+    source: authored
+  - text: adjust the sql skill and save it
+    source: authored
+  - text: fork the sentinel skill and change the body
+    source: authored

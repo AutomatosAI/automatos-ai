@@ -1,0 +1,69 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: integrations)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: integrations                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: integrations
+actions:
+  platform_list_connected_apps:
+  - text: what apps are connected?
+    source: example
+  - text: list my integrations
+    source: example
+  - text: show connected services
+    source: example
+  - text: what apps are connected
+    source: phrase_map
+  - text: show my integrations
+    source: phrase_map
+  - text: list my connected apps
+    source: phrase_map
+  - text: what integrations do i have
+    source: phrase_map
+  - text: is my gmail hooked up
+    source: authored
+  - text: which external services are linked to the workspace
+    source: authored
+  - text: show me my composio connections
+    source: authored
+  - text: is slack connected yet
+    source: authored
+  - text: check my github integration status
+    source: authored
+  - text: what third party apps are wired in
+    source: authored
+  - text: do i have any apps connected
+    source: authored
+  - text: list the services i've authorized
+    source: authored
+  - text: are my integrations active
+    source: authored
+  - text: which apps has this workspace connected
+    source: authored
+  - text: show connection status for my linked apps
+    source: authored
+  - text: is my calendar connected
+    source: authored
+  - text: what accounts are linked here
+    source: authored

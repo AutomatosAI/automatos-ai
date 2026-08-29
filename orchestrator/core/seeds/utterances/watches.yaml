@@ -1,0 +1,184 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: watches)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: watches                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: watches
+actions:
+  platform_cancel_watch:
+  - text: stop watching that mission
+    source: example
+  - text: cancel the watch on the nightly report
+    source: example
+  - text: stop supervising that run
+    source: authored
+  - text: drop the watch on the mission
+    source: authored
+  - text: quit watching the nightly report
+    source: authored
+  - text: cancel the supervision but let the work continue
+    source: authored
+  - text: end the watch, i don't need updates
+    source: authored
+  - text: call off the watch
+    source: authored
+  - text: remove the watch on that playbook
+    source: authored
+  - text: stop keeping an eye on it
+    source: authored
+  - text: turn off the watch for the deploy mission
+    source: authored
+  - text: no need to watch that anymore, cancel it
+    source: authored
+  - text: cancel my watch on task 12
+    source: authored
+  - text: stop monitoring that mission
+    source: authored
+  - text: kill the watch, not the mission
+    source: authored
+  - text: let go of the watch on the report
+    source: authored
+  - text: close out the watch on that run
+    source: authored
+  - text: unwatch the pricing mission
+    source: authored
+  - text: cancel that supervision
+    source: authored
+  platform_create_watch:
+  - text: keep an eye on that mission and tell me how it went
+    source: example
+  - text: watch this playbook run and make sure the output is good
+    source: example
+  - text: make sure the nightly report actually runs
+    source: example
+  - text: supervise the launch and improve it if the result is weak
+    source: example
+  - text: watch that mission and just report back when it's done
+    source: authored
+  - text: keep tabs on the playbook execution and score the result
+    source: authored
+  - text: supervise this board task to completion
+    source: authored
+  - text: monitor the scheduled playbook and tell me if it fails
+    source: authored
+  - text: watch the run and improve it if the score is low
+    source: authored
+  - text: put a persistent watch on the nightly job
+    source: authored
+  - text: babysit that mission and fix it if it goes wrong
+    source: authored
+  - text: keep watching until the output looks good
+    source: authored
+  - text: track this playbook run and grade the deliverable
+    source: authored
+  - text: make sure that board task actually gets finished
+    source: authored
+  - text: oversee the mission and step in if needed
+    source: authored
+  - text: watch for changes and let me know
+    source: authored
+  - text: supervise the deploy and report the verdict
+    source: authored
+  - text: keep an eye on the scheduled report every night
+    source: authored
+  - text: set up a watch that scores and improves the output
+    source: authored
+  platform_get_watch:
+  - text: how is that watch doing?
+    source: example
+  - text: show me the watch verdict
+    source: example
+  - text: what happened on the report watch?
+    source: example
+  - text: what's the score on that watch?
+    source: authored
+  - text: show me the timeline for the mission watch
+    source: authored
+  - text: how many corrective actions has that watch taken?
+    source: authored
+  - text: pull up the verdict for the nightly report watch
+    source: authored
+  - text: what's the status of the deploy watch?
+    source: authored
+  - text: give me the full detail on watch 5
+    source: authored
+  - text: did that watch pass or fail?
+    source: authored
+  - text: show the event log for the pricing watch
+    source: authored
+  - text: what's the action budget left on that watch?
+    source: authored
+  - text: how did the watch on the audit turn out?
+    source: authored
+  - text: open the watch on the blog mission
+    source: authored
+  - text: what reruns did that watch follow?
+    source: authored
+  - text: detail the watch on the scheduled report
+    source: authored
+  - text: walk me through what that watch has done
+    source: authored
+  - text: what verdict did the playbook watch reach?
+    source: authored
+  - text: show me watch number 3
+    source: authored
+  platform_list_watches:
+  - text: what are you watching right now?
+    source: example
+  - text: list my watches
+    source: example
+  - text: any watches that need attention?
+    source: example
+  - text: show me all my watches
+    source: authored
+  - text: which watches need attention?
+    source: authored
+  - text: list the watches that failed
+    source: authored
+  - text: any watches currently acting?
+    source: authored
+  - text: what watches passed?
+    source: authored
+  - text: show watches awaiting approval
+    source: authored
+  - text: list all the mission watches
+    source: authored
+  - text: any escalated watches?
+    source: authored
+  - text: what am i supervising right now?
+    source: authored
+  - text: pull up the playbook watches
+    source: authored
+  - text: show watches that expired
+    source: authored
+  - text: list every active watch
+    source: authored
+  - text: which watches are still watching?
+    source: authored
+  - text: any watches on scheduled playbooks?
+    source: authored
+  - text: show me the watches that got cancelled
+    source: authored
+  - text: give me the full list of watches
+    source: authored

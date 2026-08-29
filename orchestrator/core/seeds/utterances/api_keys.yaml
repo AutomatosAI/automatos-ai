@@ -1,0 +1,139 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: api_keys)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: api_keys                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: api_keys
+actions:
+  platform_create_api_key:
+  - text: create a server API key for our CI
+    source: example
+  - text: make a public widget key for acme.com
+    source: example
+  - text: generate an SDK key with chat permission
+    source: example
+  - text: spin up a new server key for our backend
+    source: authored
+  - text: generate a public key for widget.example.com
+    source: authored
+  - text: i need an api key with agents:execute scope
+    source: authored
+  - text: make me a server sdk key for the pipeline
+    source: authored
+  - text: create a widget key restricted to shop.acme.io
+    source: authored
+  - text: issue a new key with blog and documents:read
+    source: authored
+  - text: set up a public browser key for our site
+    source: authored
+  - text: give me a fresh server key for integrations
+    source: authored
+  - text: create an sdk key that can only do chat
+    source: authored
+  - text: make a new public key for embedding the widget
+    source: authored
+  - text: provision a server key with agents:execute
+    source: authored
+  - text: new api key please, server type
+    source: authored
+  - text: generate a key for our staging backend
+    source: authored
+  - text: mint a public widget key for demo.acme.com
+    source: authored
+  - text: create an api key scoped to documents:read
+    source: authored
+  platform_list_api_keys:
+  - text: list our API keys
+    source: example
+  - text: what SDK keys exist for this workspace?
+    source: example
+  - text: show API key usage
+    source: example
+  - text: show me all our sdk keys
+    source: authored
+  - text: which api keys are active right now?
+    source: authored
+  - text: audit our api key access
+    source: authored
+  - text: what public and server keys do we have?
+    source: authored
+  - text: list the keys and when they were last used
+    source: authored
+  - text: display our api keys with their scopes
+    source: authored
+  - text: any keys about to expire?
+    source: authored
+  - text: pull up the workspace api keys
+    source: authored
+  - text: show masked prefixes for all our keys
+    source: authored
+  - text: what integrations have keys here?
+    source: authored
+  - text: give me a rundown of our api keys
+    source: authored
+  - text: which keys have chat permission?
+    source: authored
+  - text: list every sdk key and its type
+    source: authored
+  - text: when was each api key last used?
+    source: authored
+  - text: review the api keys we've issued
+    source: authored
+  platform_revoke_api_key:
+  - text: revoke the old CI key
+    source: example
+  - text: disable that leaked API key
+    source: example
+  - text: deactivate the staging api key
+    source: authored
+  - text: kill the key that got exposed
+    source: authored
+  - text: turn off the widget key for old-site.com
+    source: authored
+  - text: revoke the server key we don't use anymore
+    source: authored
+  - text: disable api key ending in 4f2a
+    source: authored
+  - text: shut down that compromised sdk key
+    source: authored
+  - text: invalidate the CI pipeline key
+    source: authored
+  - text: cut off access for the leaked public key
+    source: authored
+  - text: deactivate the key named legacy-integration
+    source: authored
+  - text: revoke access for that old backend key
+    source: authored
+  - text: please disable the demo widget key
+    source: authored
+  - text: pull the plug on the exposed api key
+    source: authored
+  - text: retire the key we rotated away from
+    source: authored
+  - text: revoke the key with id 9c31
+    source: authored
+  - text: turn off the sdk key for the deprecated app
+    source: authored
+  - text: kill that api key immediately, it leaked
+    source: authored

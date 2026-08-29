@@ -1,0 +1,422 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: missions)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: missions                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: missions
+actions:
+  platform_approve_mission:
+  - text: approve that mission
+    source: example
+  - text: go ahead and run the plan
+    source: example
+  - text: yes, start the mission
+    source: example
+  - text: yep, the plan looks good, run it
+    source: authored
+  - text: approved, let's go
+    source: authored
+  - text: sounds good, kick it off
+    source: authored
+  - text: green light on that plan
+    source: authored
+  - text: go for it
+    source: authored
+  - text: ship it
+    source: authored
+  - text: yes proceed with the mission
+    source: authored
+  - text: that plan works, start executing
+    source: authored
+  - text: ok go ahead
+    source: authored
+  - text: lgtm, launch it
+    source: authored
+  - text: approve and start
+    source: authored
+  - text: yeah do it
+    source: authored
+  - text: confirm the plan and run
+    source: authored
+  - text: looks great, begin the mission
+    source: authored
+  - text: give it the go-ahead
+    source: authored
+  - text: accept the plan and start running
+    source: authored
+  platform_cancel_mission:
+  - text: cancel that mission
+    source: example
+  - text: stop the mission
+    source: example
+  - text: kill the mission
+    source: authored
+  - text: abort the mission
+    source: authored
+  - text: shut down that mission for good
+    source: authored
+  - text: terminate the running mission
+    source: authored
+  - text: scrap the whole mission
+    source: authored
+  - text: call off the mission
+    source: authored
+  - text: end the mission now
+    source: authored
+  - text: drop the current mission
+    source: authored
+  - text: cancel the research mission entirely
+    source: authored
+  - text: just kill it, we don't need it
+    source: authored
+  - text: abandon that mission
+    source: authored
+  - text: stop and cancel the mission permanently
+    source: authored
+  - text: wipe out the mission
+    source: authored
+  - text: cancel mission 42
+    source: authored
+  - text: no longer need that mission, cancel it
+    source: authored
+  - text: trash the mission
+    source: authored
+  - text: halt the mission for good
+    source: authored
+  platform_create_mission:
+  - text: launch a mission to research and write a blog post about AI agents
+    source: example
+  - text: start a mission to audit our API security
+    source: example
+  - text: create a mission to build a landing page
+    source: example
+  - text: run a deep research mission on competitor pricing
+    source: example
+  - text: launch a mission
+    source: phrase_map
+  - text: start a mission
+    source: phrase_map
+  - text: create a mission
+    source: phrase_map
+  - text: run a mission
+    source: phrase_map
+  - text: new mission
+    source: phrase_map
+  - text: kick off a mission
+    source: phrase_map
+  - text: deep research
+    source: phrase_map
+  - text: multi-agent research
+    source: phrase_map
+  - text: research mission
+    source: phrase_map
+  - text: launch mission to
+    source: phrase_map
+  - text: start mission to
+    source: phrase_map
+  - text: spin up a mission to migrate our docs to the new format
+    source: authored
+  - text: orchestrate a team to analyze the customer churn data
+    source: authored
+  - text: set up a multi-agent mission to refactor the auth module
+    source: authored
+  - text: coordinate agents to write full api documentation
+    source: authored
+  - text: assemble a mission to gather and summarize industry reports
+    source: authored
+  - text: get a crew of agents on redesigning our onboarding flow
+    source: authored
+  platform_get_mission:
+  - text: show me that mission
+    source: example
+  - text: what's the status of the pricing-research mission?
+    source: example
+  - text: get mission details
+    source: example
+  - text: show mission
+    source: phrase_map
+  - text: get mission
+    source: phrase_map
+  - text: mission details
+    source: phrase_map
+  - text: mission info
+    source: phrase_map
+  - text: how is mission
+    source: phrase_map
+  - text: check mission
+    source: phrase_map
+  - text: how far along is the blog mission?
+    source: authored
+  - text: pull up the details for mission 17
+    source: authored
+  - text: what's happening inside the audit mission?
+    source: authored
+  - text: show me the task breakdown for that mission
+    source: authored
+  - text: which step is the landing-page mission on?
+    source: authored
+  - text: give me the full rundown on the security mission
+    source: authored
+  - text: what did each task in that mission produce?
+    source: authored
+  - text: how long has the migration mission been running?
+    source: authored
+  - text: open the pricing research mission and show its steps
+    source: authored
+  - text: status of the onboarding mission please
+    source: authored
+  platform_list_missions:
+  - text: what missions are running?
+    source: example
+  - text: list my missions
+    source: example
+  - text: show completed missions
+    source: example
+  - text: any failed missions?
+    source: example
+  - text: list missions
+    source: phrase_map
+  - text: show missions
+    source: phrase_map
+  - text: what missions
+    source: phrase_map
+  - text: running missions
+    source: phrase_map
+  - text: mission status
+    source: phrase_map
+  - text: my missions
+    source: phrase_map
+  - text: any missions
+    source: phrase_map
+  - text: active missions
+    source: phrase_map
+  - text: completed missions
+    source: phrase_map
+  - text: show me everything that's planning right now
+    source: authored
+  - text: any paused missions hanging around?
+    source: authored
+  - text: give me a rundown of all my missions
+    source: authored
+  - text: which missions are still pending?
+    source: authored
+  - text: pull up all missions from this week
+    source: authored
+  - text: list everything in the running state
+    source: authored
+  platform_pause_mission:
+  - text: pause that mission
+    source: example
+  - text: hold the running mission
+    source: example
+  - text: pause the mission for now
+    source: authored
+  - text: put the mission on hold
+    source: authored
+  - text: hold off on the mission for a bit
+    source: authored
+  - text: freeze the running mission
+    source: authored
+  - text: temporarily halt the mission
+    source: authored
+  - text: pause execution, i need to check something
+    source: authored
+  - text: suspend the mission
+    source: authored
+  - text: hit pause on that mission
+    source: authored
+  - text: let's pause the audit mission
+    source: authored
+  - text: hold the mission until i say go
+    source: authored
+  - text: pause the current run
+    source: authored
+  - text: put a pin in the mission for now
+    source: authored
+  - text: stop dispatching new tasks, pause it
+    source: authored
+  - text: pause mission 8
+    source: authored
+  - text: take a break on that mission
+    source: authored
+  - text: wait, pause the mission
+    source: authored
+  - text: pause the research for a moment
+    source: authored
+  platform_reject_mission:
+  - text: reject that plan
+    source: example
+  - text: no, don't run that mission
+    source: example
+  - text: cancel the proposed plan
+    source: example
+  - text: no, scrap that plan
+    source: authored
+  - text: i don't like this plan, reject it
+    source: authored
+  - text: nope, don't go with that plan
+    source: authored
+  - text: decline the proposed mission
+    source: authored
+  - text: throw out that plan
+    source: authored
+  - text: no thanks, don't run it
+    source: authored
+  - text: reject the plan, it's not right
+    source: authored
+  - text: not approving that, drop it
+    source: authored
+  - text: toss that plan out
+    source: authored
+  - text: no, that's not what i want, cancel the plan
+    source: authored
+  - text: veto that mission plan
+    source: authored
+  - text: kill the proposed plan
+    source: authored
+  - text: don't proceed with this plan
+    source: authored
+  - text: reject it, i'll rethink
+    source: authored
+  - text: pass on that plan
+    source: authored
+  - text: nah, don't run that proposed mission
+    source: authored
+  platform_replan_mission:
+  - text: replan that failed mission
+    source: example
+  - text: try the mission again with a different approach
+    source: example
+  - text: the mission failed, come up with a new plan
+    source: authored
+  - text: regenerate the plan for the parts that failed
+    source: authored
+  - text: rework the failed steps and continue
+    source: authored
+  - text: redo the mission plan from where it broke
+    source: authored
+  - text: generate new tasks for the failed branch
+    source: authored
+  - text: fix the plan and retry the failed mission
+    source: authored
+  - text: replan around the failure
+    source: authored
+  - text: the mission broke, plan a new path forward
+    source: authored
+  - text: recover the mission with a fresh approach
+    source: authored
+  - text: keep the finished work but replan the rest
+    source: authored
+  - text: retry that mission with a revised plan
+    source: authored
+  - text: the audit mission failed, replan it
+    source: authored
+  - text: come up with replacement tasks for the failed mission
+    source: authored
+  - text: re-plan the broken mission
+    source: authored
+  - text: salvage the mission, redo the failed parts
+    source: authored
+  - text: give the failed mission another plan
+    source: authored
+  - text: rebuild the plan for the failed subtree
+    source: authored
+  platform_resume_mission:
+  - text: resume that mission
+    source: example
+  - text: continue the paused mission
+    source: example
+  - text: unpause the mission
+    source: authored
+  - text: start the mission back up
+    source: authored
+  - text: pick the mission back up
+    source: authored
+  - text: let's continue the mission
+    source: authored
+  - text: get the paused mission going again
+    source: authored
+  - text: resume execution
+    source: authored
+  - text: continue where the mission left off
+    source: authored
+  - text: un-hold the mission
+    source: authored
+  - text: keep the mission going
+    source: authored
+  - text: restart the paused mission
+    source: authored
+  - text: carry on with the mission
+    source: authored
+  - text: back to work on that mission
+    source: authored
+  - text: resume the audit mission
+    source: authored
+  - text: wake the mission back up
+    source: authored
+  - text: proceed with the paused mission
+    source: authored
+  - text: kick the mission back into gear
+    source: authored
+  - text: resume mission 8
+    source: authored
+  platform_update_mission_plan:
+  - text: have the researcher handle step 2 instead
+    source: example
+  - text: reassign that first task to the writer agent
+    source: example
+  - text: rename task 3 to 'draft the summary'
+    source: example
+  - text: swap the agent on step 1 to the analyst
+    source: authored
+  - text: change task 2's description before we run
+    source: authored
+  - text: put the coder on the third task instead
+    source: authored
+  - text: 'edit the plan: give step 4 to the designer'
+    source: authored
+  - text: rename the first task to something clearer
+    source: authored
+  - text: reword task 5 in the plan
+    source: authored
+  - text: assign the reviewer to the last step
+    source: authored
+  - text: tweak the plan, move step 2 to the researcher
+    source: authored
+  - text: update task 3's title in the plan
+    source: authored
+  - text: have a different agent do the final task
+    source: authored
+  - text: revise the second task before approval
+    source: authored
+  - text: change who handles step 1
+    source: authored
+  - text: adjust the plan so the writer does task 4
+    source: authored
+  - text: modify task 2's goal in the proposed plan
+    source: authored
+  - text: reassign step 3 and rename it
+    source: authored
+  - text: before running, hand task 1 to the auditor
+    source: authored
