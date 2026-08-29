@@ -110,6 +110,11 @@ class ActionSemanticIndex:
         self._registry = get_action_registry()
         self._action_embeddings: Dict[str, List[float]] = {}
         self._indexed: bool = False
+        # PRD-232 US-006: corpus content hash the per-process dict was built
+        # under. When the seeded utterance corpus changes (a deploy swaps the
+        # YAMLs), ensure_indexed drops the name-keyed dict so stale vectors don't
+        # persist; Redis re-embeds only the texts that actually changed.
+        self._corpus_hash: Optional[str] = None
         self._lock: Optional[asyncio.Lock] = None
         # In-flight live query embeds, keyed by (loop id, model_key, query):
         # concurrent same-query callers (enum narrowing + the prompt catalog
@@ -124,12 +129,41 @@ class ActionSemanticIndex:
         return self._lock
 
     @staticmethod
+    def _collect_enum_values(parameters: Optional[Dict]) -> List[str]:
+        """Flatten every parameter enum value (e.g. the task-status enum
+        inbox/assigned/in_progress/review/done). These are the vocabulary a user
+        speaks ("mark it done", "anything in review?") that name+description never
+        surface — PRD-232 C6. Order-preserving, deduped."""
+        values: List[str] = []
+        props = (parameters or {}).get("properties", {}) or {}
+        for spec in props.values():
+            if not isinstance(spec, dict):
+                continue
+            enum = spec.get("enum")
+            if isinstance(enum, list):
+                values.extend(str(v) for v in enum)
+            items = spec.get("items")  # array-of-enum params (items.enum)
+            if isinstance(items, dict) and isinstance(items.get("enum"), list):
+                values.extend(str(v) for v in items["enum"])
+        seen: set = set()
+        return [v for v in values if not (v in seen or seen.add(v))]
+
+    @staticmethod
     def _build_embedding_text(action: ActionDefinition) -> str:
+        # PRD-232 US-006: fold the seeded utterance corpus (US-005) and the
+        # parameter enum values into the embedded text, so a query phrased like
+        # any seeded utterance — or naming an enum value — lands near the action.
+        # Local import keeps the module import cheap and lets tests monkeypatch.
+        from .utterance_corpus import utterances_for
+
         tags = ", ".join(action.tags) if action.tags else ""
         examples = "; ".join(action.examples) if action.examples else ""
+        options = ", ".join(ActionSemanticIndex._collect_enum_values(getattr(action, "parameters", None)))
+        utterances = "; ".join(utterances_for(action.name))
         return (
             f"{action.name}: {action.description} | Tags: {tags} | "
-            f"Examples: {examples} | Category: {action.category}"
+            f"Examples: {examples} | Category: {action.category} | "
+            f"Options: {options} | Utterances: {utterances}"
         )
 
     def _cache_model_key(self) -> str:
@@ -173,6 +207,20 @@ class ActionSemanticIndex:
         include_super_admin: bool = False,
     ) -> None:
         async with self._get_lock():
+            # PRD-232 US-006 — corpus-hash guard. The per-process dict is keyed by
+            # action NAME (not text), so a corpus change would otherwise leave
+            # stale vectors indexed forever. If the hash moved, drop the dict and
+            # re-embed; the Redis layer is text-addressed so unchanged texts stay
+            # cache hits and only the changed actions embed upstream.
+            from .utterance_corpus import corpus_hash
+
+            current_hash = corpus_hash()
+            prev_hash = getattr(self, "_corpus_hash", None)
+            if prev_hash is not None and prev_hash != current_hash:
+                self._action_embeddings = {}
+                self._indexed = False
+            self._corpus_hash = current_hash
+
             actions = self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
             missing = [a for a in actions if a.name not in self._action_embeddings]
             if not missing:

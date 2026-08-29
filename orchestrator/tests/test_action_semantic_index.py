@@ -297,6 +297,11 @@ def test_promoted_excluded_by_default():
 
 
 def test_build_embedding_text_format():
+    # PRD-232 US-006: the embedded text now also carries parameter enum values
+    # (Options:, from the action's own schema) and the seeded utterance corpus
+    # (Utterances:). "platform_x" is a test-only name with no corpus entry, so its
+    # utterance section is empty here; the populated path is covered by
+    # tests/test_prd232_us006_corpus_embeddings.py.
     action = _make(
         "platform_x",
         category="agents",
@@ -304,8 +309,12 @@ def test_build_embedding_text_format():
         tags=["t1", "t2"],
         examples=["ex1", "ex2"],
     )
+    action.parameters["properties"]["mode"] = {"type": "string", "enum": ["fast", "slow"]}
     text = ActionSemanticIndex._build_embedding_text(action)
-    assert text == "platform_x: Do the thing | Tags: t1, t2 | Examples: ex1; ex2 | Category: agents"
+    assert text == (
+        "platform_x: Do the thing | Tags: t1, t2 | Examples: ex1; ex2 | "
+        "Category: agents | Options: fast, slow | Utterances: "
+    )
 
 
 def test_factory_returns_singleton():
