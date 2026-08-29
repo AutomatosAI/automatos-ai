@@ -84,15 +84,7 @@ def test_trial_config_defaults():
     assert isinstance(config.TRIAL_ENABLED, bool)
     assert isinstance(config.TRIAL_CREDIT_USD, float)
     assert isinstance(config.TRIAL_GLOBAL_DAILY_USD, float)
-    assert isinstance(config.TRIAL_MODEL_ALLOWLIST, str)
 
-
-def test_trial_model_allowlist_reuses_budget_models():
-    # Reuse the platform's existing economical model comma-list — no new id.
-    if not os.getenv("TRIAL_MODEL_ALLOWLIST"):
-        assert config.TRIAL_MODEL_ALLOWLIST == config.BUDGET_MODELS
-    assert config.TRIAL_MODEL_ALLOWLIST  # non-empty
-    assert "," in config.TRIAL_MODEL_ALLOWLIST or config.TRIAL_MODEL_ALLOWLIST.strip()
 
 
 def test_trial_ledger_uses_no_os_getenv():

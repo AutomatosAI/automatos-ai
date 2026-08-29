@@ -79,26 +79,22 @@ def _factory(ws):
 def test_active_trial_chat_turn_meters_and_pins_offlist_model(monkeypatch):
     # An active-trial workspace: the request is trial-routed (so record_trial_spend
     # fires at the usage seam) and an off-allowlist model is substituted.
-    monkeypatch.setattr(config, "TRIAL_MODEL_ALLOWLIST", "trial-cheap-a,trial-cheap-b")
     f = _factory(_WS(_trial(TRIAL_ACTIVE)))
-    trial_routed, pinned = f._resolve_trial_decision(WS_ID, "expensive-gpt", is_byok=False)
+    trial_routed = f._resolve_trial_decision(WS_ID, "expensive-gpt", is_byok=False)
     assert trial_routed is True
-    assert pinned == "trial-cheap-a"  # off-list → pinned to TRIAL_MODEL_ALLOWLIST[0]
+    # 2026-08-29: pinning deleted — cap-only trial; routing flag is the contract.
 
 
 def test_active_trial_allowlisted_model_is_not_repinned(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_MODEL_ALLOWLIST", "trial-cheap-a,trial-cheap-b")
     f = _factory(_WS(_trial(TRIAL_ACTIVE)))
-    trial_routed, pinned = f._resolve_trial_decision(WS_ID, "trial-cheap-a", is_byok=False)
+    trial_routed = f._resolve_trial_decision(WS_ID, "trial-cheap-a", is_byok=False)
     assert trial_routed is True  # still metered
-    assert pinned is None        # already allowlisted → no substitution
 
 
-def test_warned_trial_still_meters(monkeypatch):
-    monkeypatch.setattr(config, "TRIAL_MODEL_ALLOWLIST", "trial-cheap-a")
+def test_warned_trial_still_meters():
     f = _factory(_WS(_trial(TRIAL_WARNED)))
-    trial_routed, pinned = f._resolve_trial_decision(WS_ID, "expensive-gpt", is_byok=False)
-    assert trial_routed is True and pinned == "trial-cheap-a"
+    trial_routed = f._resolve_trial_decision(WS_ID, "expensive-gpt", is_byok=False)
+    assert trial_routed is True  # warned still meters; no pinning (cap-only trial)
 
 
 # --------------------------------------------------------------------------- #
@@ -115,7 +111,7 @@ def test_byok_chat_turn_bypasses_trial_untouched():
     from modules.agents.factory.agent_factory import AgentFactory
 
     f = AgentFactory(db_session=_Boom())
-    assert f._resolve_trial_decision(WS_ID, "any-model", is_byok=True) == (False, None)
+    assert f._resolve_trial_decision(WS_ID, "any-model", is_byok=True) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -136,17 +132,17 @@ def test_exhausted_trial_raises_typed_error_on_chat_path():
 
 
 def test_no_trial_workspace_passes_through():
-    assert _factory(_WS(None))._resolve_trial_decision(WS_ID, "m", is_byok=False) == (False, None)
+    assert _factory(_WS(None))._resolve_trial_decision(WS_ID, "m", is_byok=False) is False
 
 
 def test_converted_trial_passes_through():
     f = _factory(_WS(_trial(TRIAL_CONVERTED)))
-    assert f._resolve_trial_decision(WS_ID, "m", is_byok=False) == (False, None)
+    assert f._resolve_trial_decision(WS_ID, "m", is_byok=False) is False
 
 
 def test_system_call_without_workspace_is_noop():
     # workspace_id None (a system/non-chat call) → no read, no metering.
-    assert _factory(None)._resolve_trial_decision(None, "m", is_byok=False) == (False, None)
+    assert _factory(None)._resolve_trial_decision(None, "m", is_byok=False) is False
 
 
 # --------------------------------------------------------------------------- #
