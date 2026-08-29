@@ -504,11 +504,14 @@ def test_get_tools_for_agent_no_query_returns_full_enum(caplog):
         )
     dispatcher = _dispatcher_from(tools)
     enum = _enum_of_tool(dispatcher)
-    # Full enum: all non-promoted actions (admin included since is_admin=True)
+    # Full enum: all eligible actions (admin included since is_admin=True)
     assert "platform_list_agents" in enum
     assert "platform_get_workspace_info" in enum
     assert "platform_admin_only_action" in enum  # is_admin=True → admin allowed
-    assert "platform_promoted_thing" not in enum  # promoted excluded
+    # PRD-232 US-014: a promoted action that is NOT a config pin and did NOT rank
+    # (no query) is no longer attached first-class — it is reachable via the
+    # dispatcher enum like any action (promotion-as-prior, not unconditional attach).
+    assert "platform_promoted_thing" in enum
     # Trace log says NOT narrowed
     assert any(
         "dispatcher enum NOT narrowed" in r.message

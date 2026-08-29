@@ -269,14 +269,23 @@ class PlatformActionsSection(BaseSection):
 
     def _build(self, exclude_names: Optional[list] = None) -> str:
         from modules.tools.discovery.action_registry import get_action_registry
+        from modules.tools.tool_router import _promotion_pins
 
         registry = get_action_registry()
-        # PRD-143: Auto context path — su tier pinned out explicitly.
+        # PRD-232 US-014: this is the UNNARROWED catalog, paired with the unnarrowed
+        # platform_execute enum (all eligible actions EXCEPT the first-class pins).
+        # The config PINS attach as their own first-class OpenAI schemas (self-
+        # documenting), so keep them OUT here. But every OTHER promoted action now
+        # lives in the dispatcher enum — so it MUST be documented here, or the model
+        # sees a bare enum name with no description/params (the "reachable like any
+        # action" contract). So: document all eligible actions EXCEPT the pins.
+        # PRD-143: su tier pinned out explicitly (fail-closed).
+        catalog_excludes = list(exclude_names or ()) + sorted(_promotion_pins())
         catalog: str = registry.build_prompt_summary(
-            exclude_promoted=True,
+            exclude_promoted=False,
             exclude_admin=True,
             include_super_admin=False,
-            exclude_names=exclude_names,
+            exclude_names=catalog_excludes,
         )
 
         if not catalog:

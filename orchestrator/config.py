@@ -1072,6 +1072,30 @@ class Config:
     # Wilson confidence outranks it as real telemetry accrues — the seed is the floor,
     # learned usage always wins. Human-applied seed only; never read by a live turn.
     TOOL_ROUTING_SEED_CLUSTER_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_SEED_CLUSTER_CONFIDENCE", "0.6"))
+    # PRD-232 US-014 (§6.2 LOCKED): promotion-as-prior. Only these pins ALWAYS attach
+    # as first-class OpenAI schemas — the list starts from PRD-122's original ~13
+    # promoted actions and adds platform_find_tools (the when-required discovery seam,
+    # which MUST stay pinned). Every OTHER promoted=True action loses unconditional
+    # attachment: its promoted flag becomes a ranking BOOST (below), and it attaches
+    # first-class ONLY when it ranks into the query surface — otherwise it lives in the
+    # platform_execute dispatcher enum like any action. Cuts the per-turn tool payload
+    # from 47 unconditional schemas to ~14 pins + whatever the query ranked in. The
+    # pin set lives HERE, never hardcoded in the router (CLAUDE.md §4). CSV, whitespace-
+    # tolerant; role/tier gating (admin/super_admin_only) still applies to every pin.
+    TOOL_ROUTING_PROMOTION_PINS: str = os.getenv(
+        "TOOL_ROUTING_PROMOTION_PINS",
+        "platform_find_tools,"
+        "platform_list_agents,platform_get_agent,platform_create_agent,platform_update_agent,"
+        "platform_browse_marketplace_agents,platform_browse_marketplace_skills,"
+        "platform_browse_marketplace_plugins,platform_install_skill,platform_install_plugin,"
+        "platform_get_system_health,platform_get_activity_feed,"
+        "platform_search_memory,platform_store_memory",
+    )
+    # The additive ranking boost a promoted action gets in the shared cosine pass, so a
+    # promoted action outranks an equal-cosine unpromoted one and is more likely to rank
+    # into the surface (and thus attach first-class). Small — a PRIOR, not an override:
+    # a strongly-relevant unpromoted action still outranks a barely-relevant promoted one.
+    TOOL_ROUTING_PROMOTION_BOOST: float = float(os.getenv("TOOL_ROUTING_PROMOTION_BOOST", "0.05"))
     # When a cluster matches, per-intent affinity rows (intent_cluster_id == match)
     # apply at full weight; cluster-blind rows (intent_cluster_id IS NULL) still
     # apply as a WEAK global prior, discounted by this factor (0..1). Keeps a

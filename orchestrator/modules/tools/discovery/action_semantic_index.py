@@ -70,6 +70,18 @@ def _relevance_floor_config() -> Tuple[float, float]:
         return 0.0, 0.0
 
 
+def _promotion_boost() -> float:
+    """PRD-232 US-014: the additive ranking boost a promoted action gets in the
+    shared cosine pass (a PRIOR, not an override). Default 0.05; read lazily so
+    pure unit tests need no config. 0 disables it (exact legacy ranking)."""
+    try:
+        from config import config
+
+        return float(getattr(config, "TOOL_ROUTING_PROMOTION_BOOST", 0) or 0)
+    except Exception:
+        return 0.0
+
+
 def _apply_relevance_floor(
     scored: List[Tuple[str, float]],
     floor: float,
@@ -499,13 +511,28 @@ class ActionSemanticIndex:
         q_norm = float(np.linalg.norm(query_vec))
         if q_norm == 0.0:
             return []
+        # PRD-232 US-014: promotion is a PRIOR — a promoted action gets a small
+        # additive boost so it outranks an equal-cosine unpromoted one and is more
+        # likely to rank into the surface (where it attaches first-class). Applied
+        # to the ONE shared ranking so every slice (narrowing, catalog, graph entry)
+        # sees the same prior. A strongly-relevant unpromoted action still outranks
+        # a barely-relevant promoted one — the boost is small, not an override.
+        boost = _promotion_boost()
+        promoted_names = (
+            {a.name for a in self._eligible_actions(False, False, include_super_admin) if a.promoted}
+            if boost
+            else frozenset()
+        )
         scored: List[Tuple[str, float]] = []
         for name in candidate_names:
             vec = np.asarray(self._action_embeddings[name], dtype=float)
             v_norm = float(np.linalg.norm(vec))
             if v_norm == 0.0:
                 continue
-            scored.append((name, float(np.dot(query_vec, vec) / (q_norm * v_norm))))
+            cos = float(np.dot(query_vec, vec) / (q_norm * v_norm))
+            if name in promoted_names:
+                cos += boost
+            scored.append((name, cos))
         scored.sort(key=lambda x: x[1], reverse=True)
         logger.info(
             "[perf] rank_actions: ensure_indexed=%.0fms query_embed=%.0fms cosine=%.0fms n_candidates=%d cache_hit=%d",

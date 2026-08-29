@@ -21,7 +21,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Coroutine, Dict, List, Optional, Tuple
+from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple
 from uuid import UUID, uuid4
 
 # Import from submodules directly to avoid circular import
@@ -231,6 +231,33 @@ def _fallback_pins() -> List[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _promotion_pins() -> Set[str]:
+    """PRD-232 US-014 (§6.2): the config pin set that ALWAYS attaches first-class
+    (CSV, whitespace-safe). The list lives in config, never hardcoded here."""
+    try:
+        from config import config
+        raw = str(getattr(config, "TOOL_ROUTING_PROMOTION_PINS", "") or "")
+    except Exception:
+        raw = ""
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+def _first_class_names(
+    allowed_names: Optional[List[str]],
+    promoted_names: Set[str],
+) -> Set[str]:
+    """PRD-232 US-014: the promoted actions that attach FIRST-CLASS this turn —
+    the config pins PLUS whatever promoted actions ranked into the surface
+    (``allowed_names``, which now includes promoted since narrowing ranks the full
+    set). Intersected with ``promoted_names`` so a pin that is NOT a promoted action
+    is never put in the dispatcher's ``exclude_names`` (which would strand it —
+    excluded from the enum yet with no first-class schema). Every other promoted
+    action stays reachable via the dispatcher enum."""
+    pins = _promotion_pins() & promoted_names
+    ranked_promoted = {n for n in (allowed_names or ()) if n in promoted_names}
+    return pins | ranked_promoted
+
+
 def _fallback_mode_closed() -> bool:
     """True when TOOL_FALLBACK_MODE=closed-pins (PR-B; default open-full)."""
     try:
@@ -280,7 +307,10 @@ async def _narrow_dispatcher_actions_async(
         query=query,
         top_k=_semantic_routing_top_k(),
         exclude_admin=not is_admin,
-        exclude_promoted=True,
+        # PRD-232 US-014: rank the FULL surface (promoted included) so a promoted
+        # action that ranks in can attach first-class; the loader splits allowed
+        # into first-class (pins + ranked promoted) vs the dispatcher enum.
+        exclude_promoted=False,
         include_super_admin=is_super_admin,
         workspace_id=workspace_id,
     )
@@ -417,7 +447,8 @@ def _narrow_dispatcher_actions_sync(
         query=query,
         top_k=_semantic_routing_top_k(),
         exclude_admin=not is_admin,
-        exclude_promoted=True,
+        # PRD-232 US-014: rank the full surface (promoted included) — see the async twin.
+        exclude_promoted=False,
         include_super_admin=is_super_admin,
         workspace_id=workspace_id,
     )
@@ -663,6 +694,10 @@ def _get_tools_for_agent_core(
         # from Phase 1 (prompt-text-only filtering) — same fallback pattern as
         # PlatformActionsSection.
         action_registry = None
+        # PRD-232 US-014: the promoted actions attaching FIRST-CLASS this turn
+        # (pins + ranked promoted). Initialised before the try so the first-class
+        # block below still has a safe value if the dispatcher build raised.
+        first_class_names: Optional[Set[str]] = None
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
@@ -671,18 +706,38 @@ def _get_tools_for_agent_core(
             # native await) BEFORE this loop-free body ran.
             allowed_names, narrow_reason, from_pins = narrowing
 
+            # PRD-232 US-014 (§6.2): promotion-as-prior. First-class = config pins
+            # ∪ the promoted actions that ranked into the surface (allowed_names now
+            # ranks the full set). Everything else promoted lives in the dispatcher
+            # enum (exclude_promoted=False), reachable like any action — instead of
+            # 47 promoted schemas attaching unconditionally every turn.
+            all_actions = action_registry.get_all()
+            promoted_names = {a.name for a in all_actions if a.promoted}
+            first_class_names = _first_class_names(allowed_names, promoted_names)
+
+            # Normally the first-class actions are dropped from the enum (no
+            # duplication). EXCEPTION: the closed-pins fallback (from_pins) — its
+            # curated pin list IS the intended minimal enum surface, and several
+            # pins are promoted config pins; excluding them would collapse the
+            # narrowed enum into the full-enum defensive fallback (the opposite of
+            # the mode's intent). So in that fallback, keep the pins in the enum.
+            enum_exclude_names = first_class_names
+            if from_pins and allowed_names:
+                enum_exclude_names = first_class_names - set(allowed_names)
+
             dispatcher_schema = action_registry.to_dispatcher_schema(
                 exclude_admin=not is_admin,
-                exclude_promoted=True,  # promoted actions have first-class schemas below
+                exclude_promoted=False,  # US-014: non-first-class promoted stay in the enum
                 allowed_names=allowed_names,
                 include_super_admin=is_super_admin,
                 # closed-pins fallback pins include promoted names
                 # (platform_find_tools et al.) — admit them into the enum.
                 allow_promoted_in_allowlist=from_pins,
+                # first-class actions are attached directly, not duplicated in the enum
+                exclude_names=enum_exclude_names,
             )
             openai_tools.append(dispatcher_schema)
-            all_actions = action_registry.get_all()
-            dispatcher_count = len([a for a in all_actions if not a.promoted])
+            dispatcher_count = len([a for a in all_actions if a.name not in first_class_names])
 
             if allowed_names is not None:
                 enum_size = len(
@@ -716,17 +771,19 @@ def _get_tools_for_agent_core(
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 
-        # PRD-122: First-class schemas for promoted actions.
-        # Promoted actions get their own OpenAI tool schemas instead of
-        # going through the platform_execute dispatcher — the LLM can call
-        # them directly. The execution path at unified_executor.py routes
-        # platform_* calls correctly regardless of how the schema was defined.
+        # PRD-122 + PRD-232 US-014: first-class schemas for the PINNED and RANKED
+        # promoted actions only. They get their own OpenAI tool schemas instead of
+        # going through the platform_execute dispatcher — the LLM can call them
+        # directly. Every other promoted action stays reachable via the dispatcher
+        # enum. The execution path at unified_executor.py routes platform_* calls
+        # correctly regardless of how the schema was defined.
         try:
             if not action_registry:
                 raise RuntimeError("action_registry not initialized")
             promoted_schemas = action_registry.to_first_class_schemas(
                 exclude_admin=not is_admin,
                 include_super_admin=is_super_admin,
+                first_class_names=first_class_names,
             )
             openai_tools.extend(promoted_schemas)
             logger.info(f"[tool-trace {trace_id}] Added {len(promoted_schemas)} promoted action schemas")
