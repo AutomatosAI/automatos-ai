@@ -40,6 +40,24 @@ logger = logging.getLogger(__name__)
 # Floor for computing affinities: ignore agents/clusters with fewer observations
 _SAMPLE_FLOOR = 3
 
+# PRD-232 US-011: synthetic telemetry markers on the EXISTING tool_execution_logs
+# table (no new table). A tool_gap row records that the model hunted for a
+# capability (platform_find_tools) or a tool-requiring turn ran zero platform
+# tools; a tool_shown row records the surfaced action set (shown-vs-used decay).
+# These are NOT tool executions, so they are excluded from used_after/failed_after
+# edges and from the normal succeeds/fails/agent_prefers affinities — they are
+# consumed ONLY by the gap-resolution join and the shown-not-used decay. Their
+# QUERIES still cluster (the gap's intent must have a cluster to attribute to);
+# their non-'success' status keeps them out of any cluster's action_names_hot.
+_TOOL_GAP_ACTION = "__tool_gap__"
+_TOOL_SHOWN_ACTION = "__tool_shown__"
+_SYNTHETIC_ACTIONS = frozenset({_TOOL_GAP_ACTION, _TOOL_SHOWN_ACTION})
+
+# Defaults (build_edges overrides from config — never hardcoded at the call site).
+_GAP_RESOLUTION_WINDOW = timedelta(hours=24)  # gap → resolution look-ahead
+_SHOWN_DECAY_FACTOR = 0.9   # geometric erosion per shown-not-used excess
+_AFFINITY_WEIGHT_FLOOR = 0.5  # decay never drives an affinity below this
+
 
 @dataclass
 class EdgeBuildSummary:
@@ -49,8 +67,37 @@ class EdgeBuildSummary:
     failed_edges_built: int = 0
     affinities_built: int = 0
     intent_clusters: int = 0
+    gap_resolutions_built: int = 0  # PRD-232 US-011: gap→resolution affinities
+    affinities_decayed: int = 0     # PRD-232 US-011: shown-not-used decays applied
     logs_processed: int = 0
     duration_ms: int = 0
+
+
+def _gap_resolution_window() -> timedelta:
+    """gap→resolution look-ahead window from config (PRD-232 US-011)."""
+    try:
+        from config import config
+        return timedelta(hours=float(getattr(config, "TOOL_ROUTING_GAP_RESOLUTION_HOURS", 24)))
+    except Exception:
+        return _GAP_RESOLUTION_WINDOW
+
+
+def _shown_decay_factor() -> float:
+    """Geometric shown-not-used decay factor from config (PRD-232 US-011)."""
+    try:
+        from config import config
+        return float(getattr(config, "TOOL_ROUTING_SHOWN_DECAY_FACTOR", _SHOWN_DECAY_FACTOR))
+    except Exception:
+        return _SHOWN_DECAY_FACTOR
+
+
+def _affinity_weight_floor() -> float:
+    """Floor the shown-not-used decay never drops below, from config (US-011)."""
+    try:
+        from config import config
+        return float(getattr(config, "TOOL_ROUTING_AFFINITY_WEIGHT_FLOOR", _AFFINITY_WEIGHT_FLOOR))
+    except Exception:
+        return _AFFINITY_WEIGHT_FLOOR
 
 
 def wilson_lower_bound(successes: int, total: int, z: float = 1.96) -> float:
@@ -93,23 +140,47 @@ async def build_edges(
             logger.info("EdgeBuilder: no logs in window, nothing to build")
             return summary
 
+        # PRD-232 US-011: synthetic gap/shown rows are telemetry markers, not tool
+        # executions — exclude them from co-occurrence edges + normal affinities.
+        # (Clustering still sees the FULL list so a gap's intent gets a cluster;
+        # _compute_affinities skips them internally to stay index-aligned.)
+        real_logs = [l for l in logs if l.get("action_name") not in _SYNTHETIC_ACTIONS]
+
         # 2. Compute used_after edges from sequences
-        edge_data = _compute_used_after_edges(logs)
+        edge_data = _compute_used_after_edges(real_logs)
         summary.edges_built = _upsert_edges(db, edge_data)
 
         # 2b. Compute failed_after edges (PRD-141 US-018): A succeeded then a
         #     tool within 2 steps errored. Same table, distinct edge_type;
-        #     GraphRouter._query_edges only follows used_after, so these are
-        #     recorded for analysis / de-ranking but never expanded into chains.
-        failed_data = _compute_failed_after_edges(logs)
+        #     GraphRouter._query_edges reads these as a de-ranking penalty
+        #     (PRD-232 US-010c) but never expands them into chains.
+        failed_data = _compute_failed_after_edges(real_logs)
         summary.failed_edges_built = _upsert_failed_after_edges(db, failed_data)
 
-        # 3. Compute intent clusters from query embeddings
+        # 3. Compute intent clusters from query embeddings (ALL logs — a tool_gap
+        #    row's query must cluster so the resolution join can attribute to it)
         cluster_map = await _compute_and_upsert_clusters(db, logs)
         summary.intent_clusters = len(cluster_map)
 
         # 4. Compute affinities (succeeds/fails for intent, agent_prefers)
         affinities = _compute_affinities(logs, cluster_map)
+
+        # 4b. PRD-232 US-011(c): gap→resolution join — a tool_gap answered later in
+        #     the same conversation becomes a succeeds_for_intent for the resolving
+        #     action, merged into (not colliding with) the organic affinities.
+        gap_affinities = _compute_gap_resolution_affinities(
+            logs, cluster_map, _gap_resolution_window()
+        )
+        summary.gap_resolutions_built = len(gap_affinities)
+        affinities = _merge_affinities(affinities, gap_affinities)
+
+        # 4c. PRD-232 US-011(b): shown-not-used decay — an action surfaced in an
+        #     intent cluster far more than it was used loses boost (never below
+        #     the floor).
+        affinities, summary.affinities_decayed = _apply_shown_not_used_decay(
+            affinities, logs, cluster_map,
+            _shown_decay_factor(), _affinity_weight_floor(),
+        )
         summary.affinities_built = _upsert_affinities(db, affinities)
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -119,7 +190,9 @@ async def build_edges(
         f"EdgeBuilder: built {summary.edges_built} used_after edges, "
         f"{summary.failed_edges_built} failed_after edges, "
         f"{summary.affinities_built} affinities across "
-        f"{summary.intent_clusters} intent clusters"
+        f"{summary.intent_clusters} intent clusters "
+        f"({summary.gap_resolutions_built} gap→resolution, "
+        f"{summary.affinities_decayed} shown-not-used decayed)"
     )
     return summary
 
@@ -143,6 +216,10 @@ def _load_logs(
     for row in rows:
         # Extract turn_id from router_decision JSONB
         router = row.router_decision or {}
+        # PRD-232 US-011: the surfaced action set (router_decision.candidates) is
+        # the 'shown' half of shown-vs-used decay. Present on execution rows and
+        # on the synthetic __tool_shown__ rows record_selection persists.
+        shown = router.get("candidates")
         results.append({
             "id": row.id,
             "agent_id": row.agent_id,
@@ -154,6 +231,7 @@ def _load_logs(
             "executed_at": row.executed_at,
             "turn_id": router.get("turn_id"),
             "conversation_id": router.get("conversation_id"),
+            "shown_actions": list(shown) if isinstance(shown, (list, tuple)) else [],
         })
     return results
 
@@ -535,6 +613,11 @@ def _compute_affinities(
 
     for idx, log in enumerate(logs):
         action_name = log["action_name"]
+        # PRD-232 US-011: synthetic gap/shown rows are not tool outcomes — they
+        # never earn succeeds/fails/agent_prefers. The index is still consumed so
+        # it stays aligned with cluster_map (built over the SAME full log list).
+        if action_name in _SYNTHETIC_ACTIONS:
+            continue
         agent_id = log.get("agent_id")
         workspace_id = log.get("workspace_id")
         is_success = log["status"] == "success"
@@ -617,6 +700,160 @@ def _compute_affinities(
         })
 
     return results
+
+
+def _compute_gap_resolution_affinities(
+    logs: List[Dict[str, Any]],
+    cluster_map: Dict[int, int],
+    window: timedelta = _GAP_RESOLUTION_WINDOW,
+) -> List[Dict[str, Any]]:
+    """PRD-232 US-011(c): the nightly gap→resolution join.
+
+    A tool_gap row (the model hunted for a capability, or a tool-requiring turn
+    ran zero platform tools) followed IN THE SAME conversation, within ``window``
+    (default 24h), by a SUCCESSFUL real action is ground truth: that action
+    eventually served the intent the gap recorded. Emit a
+    ``succeeds_for_intent(resolving_action, gap's_cluster)`` affinity, so the
+    intent cluster the user actually expressed learns the action that answered it
+    — even though the gap itself executed nothing.
+
+    Pure: the gap's cluster is read from ``cluster_map`` (its own query is
+    clustered alongside every other query), so no embeddings here. No
+    ``_SAMPLE_FLOOR`` — a gap→resolution is a rare, high-signal event, and its
+    Wilson confidence stays conservative (a single resolution ≈ 0.2), so it never
+    outranks a well-established organic affinity.
+    """
+    sessions: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
+    for idx, log in enumerate(logs):
+        sessions[_derive_session_key(log)].append((idx, log))
+
+    accum: Dict[_AffinityKey, _AffinityAccumulator] = defaultdict(_AffinityAccumulator)
+    for _key, items in sessions.items():
+        for i, (gap_idx, gap_log) in enumerate(items):
+            if gap_log.get("action_name") != _TOOL_GAP_ACTION:
+                continue
+            gap_cluster = cluster_map.get(gap_idx)
+            if gap_cluster is None:
+                continue
+            gap_time = gap_log.get("executed_at")
+            # The FIRST successful real action after the gap, within the window,
+            # is the one that served the intent (ordered → break past the window).
+            for _res_idx, res_log in items[i + 1:]:
+                action = res_log.get("action_name")
+                if action in _SYNTHETIC_ACTIONS or res_log.get("status") != "success":
+                    continue
+                res_time = res_log.get("executed_at")
+                if gap_time is not None and res_time is not None and (res_time - gap_time) > window:
+                    break
+                key = _AffinityKey(
+                    action_name=action,
+                    affinity_type="succeeds_for_intent",
+                    workspace_id=gap_log.get("workspace_id"),
+                    agent_id=None,
+                    intent_cluster_id=gap_cluster,
+                )
+                accum[key].success_count += 1
+                accum[key].total_count += 1
+                break  # only the first resolving action is the ground truth
+
+    results: List[Dict[str, Any]] = []
+    for key, acc in accum.items():
+        results.append({
+            "action_name": key.action_name,
+            "affinity_type": key.affinity_type,
+            "workspace_id": key.workspace_id,
+            "agent_id": key.agent_id,
+            "intent_cluster_id": key.intent_cluster_id,
+            "weight": float(acc.total_count),
+            "confidence": wilson_lower_bound(acc.success_count, acc.total_count),
+            "sample_count": acc.total_count,
+        })
+    return results
+
+
+def _merge_affinities(
+    base: List[Dict[str, Any]],
+    extra: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Sum ``sample_count`` for affinities sharing the FULL unique key
+    (action, type, workspace, agent, cluster), recomputing weight + confidence.
+
+    A gap-resolution ``succeeds_for_intent`` REINFORCES an organic one on the same
+    (action, cluster) rather than colliding on ``uq_tra_full_key`` at upsert time
+    (a plain upsert would clobber, not add). Only intent affinities are ever
+    merged — for them weight == sample_count and confidence == wilson(n, n).
+    ``agent_prefers`` (a normalized frequency the nightly owns) is never
+    gap-sourced, so it passes through untouched. Pure — returns new dicts.
+    """
+    merged: Dict[tuple, Dict[str, Any]] = {}
+    order: List[tuple] = []
+    for aff in list(base) + list(extra):
+        k = (
+            aff["action_name"], aff["affinity_type"], aff["workspace_id"],
+            aff["agent_id"], aff["intent_cluster_id"],
+        )
+        if k not in merged:
+            merged[k] = dict(aff)
+            order.append(k)
+        elif aff["affinity_type"] in ("succeeds_for_intent", "fails_for_intent"):
+            existing = merged[k]
+            n = existing["sample_count"] + aff["sample_count"]
+            existing["sample_count"] = n
+            existing["weight"] = float(n)
+            existing["confidence"] = wilson_lower_bound(n, n)
+    return [merged[k] for k in order]
+
+
+def _apply_shown_not_used_decay(
+    affinities: List[Dict[str, Any]],
+    logs: List[Dict[str, Any]],
+    cluster_map: Dict[int, int],
+    decay_factor: float = _SHOWN_DECAY_FACTOR,
+    floor: float = _AFFINITY_WEIGHT_FLOOR,
+) -> List[Dict[str, Any]]:
+    """PRD-232 US-011(b): decay ``succeeds_for_intent`` weight for actions SHOWN in
+    an intent cluster far more often than they were USED.
+
+    ``shown`` per (action, cluster) is counted from every row's surfaced set
+    (``shown_actions`` = router_decision.candidates); ``used`` is the successful
+    real executions in that cluster. When an action is shown MORE than it is used,
+    its intent boost is eroded geometrically by the shown-not-used EXCESS — but
+    never below ``floor`` (a seeded / previously-earned affinity is dialed down,
+    never deleted). Actions used at least as often as shown are untouched.
+
+    Pure — returns new dicts; never mutates the inputs. Returns ``(affinities,
+    n_decayed)``.
+    """
+    if not affinities:
+        return affinities, 0
+    shown: Dict[tuple, int] = defaultdict(int)
+    used: Dict[tuple, int] = defaultdict(int)
+    for idx, log in enumerate(logs):
+        cluster = cluster_map.get(idx)
+        if cluster is None:
+            continue
+        for name in (log.get("shown_actions") or []):
+            shown[(name, cluster)] += 1
+        action = log.get("action_name")
+        if action not in _SYNTHETIC_ACTIONS and log.get("status") == "success":
+            used[(action, cluster)] += 1
+
+    out: List[Dict[str, Any]] = []
+    decayed_count = 0
+    for aff in affinities:
+        if aff["affinity_type"] != "succeeds_for_intent":
+            out.append(aff)
+            continue
+        key = (aff["action_name"], aff["intent_cluster_id"])
+        excess = shown.get(key, 0) - used.get(key, 0)
+        if excess <= 0:
+            out.append(aff)
+            continue
+        new = dict(aff)
+        new["weight"] = max(floor, aff["weight"] * (decay_factor ** excess))
+        out.append(new)
+        decayed_count += 1
+    return out, decayed_count
 
 
 def _upsert_affinities(db: Session, affinities: List[Dict[str, Any]]) -> int:

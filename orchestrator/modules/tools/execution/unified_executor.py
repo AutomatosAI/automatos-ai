@@ -33,7 +33,7 @@ from modules.tools.execution import exec_composio
 from modules.tools.execution import exec_document
 from modules.tools.execution import exec_multimodal
 from modules.tools.execution import exec_workspace
-from modules.tools.execution.telemetry import fire_telemetry
+from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
 
@@ -852,6 +852,36 @@ class UnifiedToolExecutor:
                 execution_time_ms=_exec_ms,
                 caller_context=caller_context,
             )
+            # PRD-232 US-011a: platform_find_tools IS the model hunting for a
+            # capability it wasn't given — a tool_gap. Record it on the same
+            # telemetry lane (fire-and-forget, own session) so the nightly
+            # resolution join can credit whatever action eventually serves the
+            # intent. The turn's real query (caller_context.user_query), not the
+            # model's search string, is the intent that clusters the gap. Catch
+            # BOTH dispatch shapes: the direct promoted call, and the closed-pins
+            # fallback where find_tools rides the platform_execute enum.
+            _params = parameters if isinstance(parameters, dict) else {}
+            _is_find_tools = tool_name == "platform_find_tools" or (
+                tool_name == "platform_execute"
+                and _params.get("action") == "platform_find_tools"
+            )
+            if _is_find_tools:
+                try:
+                    _nested = _params.get("params") if isinstance(_params.get("params"), dict) else {}
+                    _gap_query = (
+                        (caller_context or {}).get("user_query")
+                        or _params.get("query")
+                        or _nested.get("query")
+                    )
+                    fire_tool_gap(
+                        query=_gap_query,
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        gap_source="find_tools",
+                        caller_context=caller_context,
+                    )
+                except Exception:
+                    logger.debug("[tool-gap] find_tools gap write skipped", exc_info=True)
             # PRD-159 S2: capture notable tool outcomes (failures + notable
             # successes) as typed tool_outcome memories — fire-and-forget,
             # content-hash deduped, noise-gated. Never fails the tool call.

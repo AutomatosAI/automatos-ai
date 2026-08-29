@@ -69,6 +69,16 @@ logger = logging.getLogger(__name__)
 # it can flush its in-flight batch and exit (never persisted).
 _STOP_SENTINEL = object()
 
+# PRD-232 US-011b: the synthetic action name for a persisted surfaced-set
+# observation. WIRE PROTOCOL — must match core.services.edge_builder._TOOL_SHOWN_ACTION
+# (the nightly reader) and telemetry.TOOL_GAP_ACTION's sibling. A drift-guard test
+# asserts they agree. Kept as a local literal so this module stays leaf-loadable
+# (stdlib-only top imports; edge_builder pulls numpy).
+_TOOL_SHOWN_ACTION = "__tool_shown__"
+# telemetry_source for the shown row — NOT 'production' (would pollute the
+# success-rate SLO / silence canary). Must match telemetry.SYNTHETIC_SIGNAL_SOURCE.
+_SYNTHETIC_SIGNAL_SOURCE = "synthetic_signal"
+
 
 @dataclass(frozen=True)
 class ToolSignal:
@@ -79,6 +89,23 @@ class ToolSignal:
     agent_id: Optional[int] = None
     workspace_id: Optional[str] = None
     prior_action: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class SelectionSignal:
+    """PRD-232 US-011b: one surfaced-set observation to persist durably.
+
+    Enqueued by ``record_selection`` alongside the in-memory stash, drained by the
+    SAME batched recorder (one DB session per flush — the PRD-141 US-019 contract),
+    and written as a ``__tool_shown__`` row on tool_execution_logs. The nightly
+    edge_builder reads these for the shown-vs-used decay. ``shown_actions`` is a
+    tuple (hashable/frozen); ``query`` is what clusters the observation.
+    """
+
+    query: str
+    shown_actions: tuple
+    workspace_id: Optional[str] = None
+    agent_id: Optional[int] = None
 
 
 def _wilson(successes: int, total: int) -> float:
@@ -225,15 +252,24 @@ class ToolSignalRecorder:
         narrowed: bool,
         reason: Optional[str] = None,
         allowed_names: Optional[List[str]] = None,
+        query: Optional[str] = None,
     ) -> None:
-        """Record one dispatcher-selection outcome (PRD-143 S14).
+        """Record one dispatcher-selection outcome (PRD-143 S14 + PRD-232 US-011b).
 
         Called by ``get_tools_for_agent`` where the tool-trace log used to be
         the only record of narrowed-vs-not-narrowed. Bumps the process-lifetime
         counters and stashes the outcome so the next ``platform_execute``
         dispatch for this (workspace, agent) can attach hit/fallback telemetry.
-        Pure in-memory and never raises — selection telemetry must never break
-        the surface build.
+
+        PRD-232 US-011b: when the surface was NARROWED to a specific set for a
+        ``query``, ALSO persist that surfaced set durably — enqueued to the same
+        batched recorder as a ``SelectionSignal`` (one DB session per flush) so the
+        nightly can compute shown-vs-used and decay never-used affinities. Only the
+        targeted (narrowed) surface is persisted: the full non-narrowed catalog is
+        not a meaningful 'shown' signal and would decay everything.
+
+        Pure in-memory for the stash, best-effort for the durable enqueue; never
+        raises — selection telemetry must never break the surface build.
         """
         try:
             self._stats["selection_narrowed" if narrowed else "selection_fallback"] += 1
@@ -251,6 +287,26 @@ class ToolSignalRecorder:
             stash[key] = entry
         except Exception:  # pragma: no cover - defensive, never blocks the hot path
             logger.debug("ToolSignalRecorder: record_selection failed", exc_info=True)
+
+        # Durable shown-set persistence (US-011b): best-effort, batched.
+        if not (query and allowed_names and self._enabled()):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # off-loop (sync context) — skip the durable half, keep the stash
+        try:
+            self._ensure_started(loop)
+            self._queue.put_nowait(SelectionSignal(
+                query=query,
+                shown_actions=tuple(allowed_names),
+                workspace_id=str(workspace_id) if workspace_id else None,
+                agent_id=int(agent_id) if agent_id else None,
+            ))
+        except asyncio.QueueFull:
+            self._stats["dropped"] += 1
+        except Exception:  # pragma: no cover - defensive, never blocks the hot path
+            logger.debug("ToolSignalRecorder: shown-set enqueue failed", exc_info=True)
 
     def peek_selection(self, *, workspace_id=None, agent_id=None) -> Optional[Dict[str, object]]:
         """Return the last recorded selection outcome for this
@@ -395,10 +451,17 @@ class ToolSignalRecorder:
 
         return edge_counts, aff_counts
 
-    async def _flush(self, batch: List[ToolSignal]) -> None:
-        """Apply one batch with exactly ONE DB session."""
-        edge_counts, aff_counts = self._aggregate(batch)
-        if not edge_counts and not aff_counts:
+    async def _flush(self, batch: List) -> None:
+        """Apply one batch with exactly ONE DB session.
+
+        A batch may mix ``ToolSignal`` (→ edges/affinities) and ``SelectionSignal``
+        (→ ``__tool_shown__`` rows, PRD-232 US-011b). Both are written in the SAME
+        session so the one-session-per-flush contract (PRD-141 US-019) holds.
+        """
+        tool_signals = [s for s in batch if isinstance(s, ToolSignal)]
+        selection_signals = [s for s in batch if isinstance(s, SelectionSignal)]
+        edge_counts, aff_counts = self._aggregate(tool_signals)
+        if not edge_counts and not aff_counts and not selection_signals:
             return
 
         now = datetime.utcnow()
@@ -410,11 +473,45 @@ class ToolSignalRecorder:
                     self._upsert_edge(db, from_action, to_action, edge_type, ws, agent_id, inc, now)
                 for (action_name, affinity_type, agent_id, ws), inc in aff_counts.items():
                     self._upsert_affinity(db, action_name, affinity_type, ws, agent_id, inc, now)
+                for sel in selection_signals:
+                    self._insert_shown_row(db, sel, now)
                 db.flush()
             self._stats["flushes"] += 1
         except Exception as e:
             self._stats["flush_errors"] += 1
             self._record_flush_error(e)
+
+    @staticmethod
+    def _insert_shown_row(db, sel: "SelectionSignal", now: datetime) -> None:
+        """Persist one surfaced-set observation as a __tool_shown__ telemetry row
+        (PRD-232 US-011b) — router_decision.candidates carries the shown action
+        names, user_query clusters it. status='shown' keeps it out of edges and
+        normal affinities; the nightly shown-not-used decay is its only reader."""
+        import json
+        from sqlalchemy import text
+
+        db.execute(
+            text("""
+                INSERT INTO tool_execution_logs
+                    (agent_id, app_name, action_name, workspace_id, user_query,
+                     status, router_decision, telemetry_source, executed_at)
+                VALUES
+                    (:agent_id, 'PLATFORM', :action, :workspace_id, :user_query,
+                     'shown', CAST(:router AS JSONB), :source, :now)
+            """),
+            {
+                "agent_id": sel.agent_id,
+                "action": _TOOL_SHOWN_ACTION,
+                "workspace_id": sel.workspace_id,
+                "user_query": sel.query,
+                "router": json.dumps({"candidates": list(sel.shown_actions or ())}),
+                # NOT 'production' — a shown row is a signal, not a tool execution;
+                # keep it out of the success-rate SLO / silence canary. Must match
+                # telemetry.SYNTHETIC_SIGNAL_SOURCE (leaf-load: kept as a literal).
+                "source": _SYNTHETIC_SIGNAL_SOURCE,
+                "now": now,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Null-safe incremental upserts

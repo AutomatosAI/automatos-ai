@@ -1080,6 +1080,17 @@ class Config:
     TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY: float = float(os.getenv("TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY", "1.0"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
+    # PRD-232 US-011: the learning loop's gap + shown-vs-used signals (nightly).
+    # GAP_RESOLUTION_HOURS: a tool_gap answered by a successful action within this
+    # window in the SAME conversation becomes a succeeds_for_intent for that
+    # action (the ground truth is what eventually served the intent).
+    TOOL_ROUTING_GAP_RESOLUTION_HOURS: float = float(os.getenv("TOOL_ROUTING_GAP_RESOLUTION_HOURS", "24"))
+    # SHOWN_DECAY_FACTOR: geometric erosion applied per shown-not-used excess to an
+    # action's succeeds_for_intent weight (surfaced far more than used = dial down).
+    TOOL_ROUTING_SHOWN_DECAY_FACTOR: float = float(os.getenv("TOOL_ROUTING_SHOWN_DECAY_FACTOR", "0.9"))
+    # AFFINITY_WEIGHT_FLOOR: the shown-not-used decay never drops an affinity's
+    # weight below this — a seeded/earned affinity is dialed down, never deleted.
+    TOOL_ROUTING_AFFINITY_WEIGHT_FLOOR: float = float(os.getenv("TOOL_ROUTING_AFFINITY_WEIGHT_FLOOR", "0.5"))
     # PRD-177 S3 (F018): Composio action-metadata sync scheduler + fail-CLOSED
     # destructive gate. When the metadata table is empty (sync not yet run), a
     # destructive intent is DENIED rather than silently permitted; clearly

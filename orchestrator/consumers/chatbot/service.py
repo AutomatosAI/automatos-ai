@@ -1782,6 +1782,26 @@ class StreamingChatService:
             )}
             return
 
+        # PRD-232 US-011a: a tool-warranted turn (tools were offered) that ran NO
+        # tool at all is a capability gap — the model had tools available and
+        # found nothing to call. Record it on the telemetry lane (fire-and-forget,
+        # own session) so the nightly resolution join can credit whatever
+        # eventually serves the intent. Conservative on purpose: firing only on
+        # ZERO tools (not "zero platform tools while a composio tool ran") avoids
+        # false gaps on turns a non-platform tool already served. Fully guarded —
+        # never affects the streamed response.
+        try:
+            if use_tools and not executor.tracker.tool_counts:
+                from modules.tools.execution.telemetry import fire_tool_gap
+                fire_tool_gap(
+                    query=self._extract_user_text(llm_messages),
+                    workspace_id=self.workspace_id,
+                    gap_source="no_tool_call",
+                    caller_context={"conversation_id": conversation_id, "turn_id": _turn_id},
+                )
+        except Exception:
+            logger.debug("[tool-gap] no-tool-call gap write skipped", exc_info=True)
+
         # Max-iterations reached → emit limit_reached SSE + synthesize.
         if result.max_iterations_reached:
             yield self.streaming_handler.format_aisdk_limit_reached(

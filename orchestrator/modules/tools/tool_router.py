@@ -709,6 +709,9 @@ def _get_tools_for_agent_core(
                 narrowed=allowed_names is not None,
                 reason=narrow_reason,
                 allowed_names=allowed_names,
+                # PRD-232 US-011b: the query lets the recorder persist the narrowed
+                # surface as a __tool_shown__ row for the nightly shown-vs-used decay.
+                query=query,
             )
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
