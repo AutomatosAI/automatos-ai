@@ -168,6 +168,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Composio (hosted tool integrations) — bring your own key; without it the
+      # integrations surface stays empty (PRD-233 makes that honest in the UI).
+      COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
 
       # Object storage — local MinIO via the S3 seam (PRD-176 F089).
       # S3_ENDPOINT_URL points boto at MinIO; the AWS_* creds are the MinIO

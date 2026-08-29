@@ -76,8 +76,12 @@ backend has constructed).
 - **AI features need an LLM key** (above) — without one, agents and chat have no
   model to call.
 - **Composio-powered integrations** (the 1,000+ external-tool marketplace) need a
-  Composio API key added via **Settings → Credentials**; they are not wired on a
-  fresh clone. First-class local Composio setup is tracked in **PRD-233**.
+  Composio API key in `.env` (`COMPOSIO_API_KEY=…`, free tier at app.composio.dev),
+  then `docker compose up -d backend` to apply it, then run the catalogue sync
+  once — the **Sync** action on the Tools page, or
+  `curl -X POST http://localhost:8000/api/tools/sync`. Nothing syncs on boot.
+  Without a key the integrations surface stays empty — an honest
+  "integrations disabled" state and auto-sync-on-first-key are **PRD-233 S2**.
 
 ## Optional: database GUI
 
