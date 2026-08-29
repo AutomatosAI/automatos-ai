@@ -234,7 +234,7 @@ class _FakeSemanticIndex:
         self._entry = entry_nodes
         self._vec = query_vec
         self._model_key = model_key
-        # empty registry -> _drop_super_admin_chains finds no su actions
+        # empty registry -> _drop_ineligible_chains finds no gated actions
         self._registry = SimpleNamespace(get_all=lambda: [])
 
     async def rank_actions(self, query, top_k=5, **kw):
@@ -350,6 +350,8 @@ def _rank(
     discount=0.5,
     failed_weight=1.0,
     top_k=15,
+    exclude_admin=True,
+    include_super_admin=False,
 ):
     @contextmanager
     def patched_db():
@@ -371,7 +373,14 @@ def _rank(
     _fake_db_mod.get_db_session = patched_db
     try:
         return asyncio.run(
-            router.rank_chains(query="q", workspace_id=workspace_id, agent_id=None, top_k=top_k)
+            router.rank_chains(
+                query="q",
+                workspace_id=workspace_id,
+                agent_id=None,
+                top_k=top_k,
+                exclude_admin=exclude_admin,
+                include_super_admin=include_super_admin,
+            )
         )
     finally:
         GraphRouter._min_confidence = orig["min"]
@@ -543,6 +552,48 @@ def test_cluster_hot_actions_enter_the_surface():
 
     assert "platform_update_task_status" in names, "cluster hot action must join the surface"
     assert "control_action" in names
+
+
+def test_cluster_hot_admin_action_dropped_for_operator_but_kept_for_admin():
+    """P232-RVW-4 (fail-closed): a matched cluster's action_names_hot can carry an
+    admin_only action — organic clusters are built from cross-tenant aggregate logs
+    and the US-007 seed excludes su but NOT admin. _merge_cluster_hot_actions adds
+    them with no role check, so the final _drop_ineligible_chains net must enforce
+    the caller's exclude_admin; otherwise rank_chains(exclude_admin=True) leaks an
+    admin tool the moment TOOL_ROUTING_GRAPH flips on. super_admin exclusion stays
+    unchanged."""
+    admin_hot = "platform_admin_only_hot"
+    su_hot = "platform_su_only_hot"
+    op_hot = "platform_operator_hot"
+    # The registry the drop net resolves roles from (the fake index's default is
+    # empty; give it a role-carrying one).
+    registry = SimpleNamespace(get_all=lambda: [
+        SimpleNamespace(name=admin_hot, admin_only=True, super_admin_only=False),
+        SimpleNamespace(name=su_hot, admin_only=False, super_admin_only=True),
+        SimpleNamespace(name=op_hot, admin_only=False, super_admin_only=False),
+        SimpleNamespace(name="platform_entry", admin_only=False, super_admin_only=False),
+    ])
+    # Query vector hits the cluster centroid exactly (cosine 1.0 > threshold 0.6),
+    # so all three hot actions merge into the entry candidates.
+    query_vec = [1.0, 0.0, 0.0]
+    cluster = _cluster(7, [1.0, 0.0, 0.0], [admin_hot, su_hot, op_hot])
+
+    # Operator caller (exclude_admin=True, include_super_admin=False): the admin AND
+    # su hot actions must both be dropped; the operator hot action still surfaces.
+    router = _build_router([("platform_entry", 0.9)], query_vec)
+    router._semantic_index._registry = registry
+    surfaced = {a for _p, _s, actions in _rank(router, clusters=[cluster]) for a in actions}
+    assert admin_hot not in surfaced, "admin_only cluster hot action leaked to an operator (exclude_admin=True)"
+    assert su_hot not in surfaced, "super_admin_only cluster hot action leaked (fail-closed regression)"
+    assert op_hot in surfaced, "operator hot action must still surface"
+
+    # Admin caller (exclude_admin=False): the admin hot action IS allowed; su is
+    # still dropped — proving exclude_admin gates it, not a blanket drop.
+    router2 = _build_router([("platform_entry", 0.9)], query_vec)
+    router2._semantic_index._registry = registry
+    surfaced2 = {a for _p, _s, actions in _rank(router2, clusters=[cluster], exclude_admin=False) for a in actions}
+    assert admin_hot in surfaced2, "admin caller (exclude_admin=False) must see the admin action"
+    assert su_hot not in surfaced2, "su still dropped for a non-su admin caller"
 
 
 # ===========================================================================

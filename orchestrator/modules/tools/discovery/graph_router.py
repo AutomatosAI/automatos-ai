@@ -215,11 +215,15 @@ class GraphRouter:
             logger.warning("GraphRouter: graph expansion failed, falling back to embedding-only: %s", e)
             chains = self._to_single_chains(entry_nodes)
 
-        # Step 2.5 (PRD-143): edges learned from super-admin usage can point
-        # AT su actions even when every entry node is operator-eligible —
-        # drop any chain touching the su tier before it reaches a consumer.
-        if not include_super_admin:
-            chains = self._drop_super_admin_chains(chains)
+        # Step 2.5 (PRD-143 + PRD-232 US-010 P232-RVW-4): the final role net over
+        # the WHOLE expanded surface. Entry nodes are already role-ranked, but two
+        # downstream paths add un-gated names — edge-expansion targets (edges learned
+        # from privileged usage can point AT a gated action) and the cluster
+        # action_names_hot US-010 merges into the entry candidates — so drop any chain
+        # touching an action this caller may not see. The graph layer stays fail-closed
+        # on admin AND su on its own, independent of any downstream re-gate (the
+        # TOOL_ROUTING_GRAPH flip is what this PRD builds toward).
+        chains = self._drop_ineligible_chains(chains, exclude_admin, include_super_admin)
 
         # Step 3: deduplicate by action set, keep highest
         chains = self._deduplicate(chains)
@@ -711,24 +715,42 @@ class GraphRouter:
         """Convert embedding-only results to single-action chains."""
         return [(name, score, [name]) for name, score in entry_nodes]
 
-    def _drop_super_admin_chains(
+    def _drop_ineligible_chains(
         self,
         chains: List[Tuple[str, float, List[str]]],
+        exclude_admin: bool,
+        include_super_admin: bool,
     ) -> List[Tuple[str, float, List[str]]]:
-        """Drop every chain that touches a super_admin_only action (PRD-143).
+        """Drop every chain touching an action the caller is not entitled to
+        (PRD-143 fail-closed; PRD-232 US-010 P232-RVW-4 extends it to admin_only).
 
-        The registry is resolved via the semantic index's reference (always
-        present in production; keeps unit fakes lightweight) with the
-        canonical singleton as fallback.
+        The final role net over the whole expanded surface. Entry nodes are already
+        role-ranked by rank_actions, but two paths add un-gated names downstream:
+        edge-expansion targets (edges learned from privileged usage can point AT a
+        gated action) and the cluster ``action_names_hot`` US-010 merges into the
+        entry candidates. Enforce the SAME eligibility here as organic entry nodes:
+          * super_admin_only chains drop unless include_super_admin=True;
+          * admin_only chains drop when exclude_admin=True (a non-admin caller).
+        So rank_chains' exclude_admin / include_super_admin contract holds for EVERY
+        action it returns, not just the ranked entry nodes.
+
+        The registry is resolved via the semantic index's reference (always present
+        in production; keeps unit fakes lightweight) with the canonical singleton
+        as fallback.
         """
         registry = getattr(self._semantic_index, "_registry", None)
         if registry is None:
             from .action_registry import get_action_registry
             registry = get_action_registry()
-        su_names = {a.name for a in registry.get_all() if a.super_admin_only}
-        if not su_names:
+        blocked = set()
+        for a in registry.get_all():
+            if getattr(a, "super_admin_only", False) and not include_super_admin:
+                blocked.add(a.name)
+            elif getattr(a, "admin_only", False) and exclude_admin:
+                blocked.add(a.name)
+        if not blocked:
             return chains
-        return [c for c in chains if not su_names.intersection(c[2])]
+        return [c for c in chains if not blocked.intersection(c[2])]
 
     @staticmethod
     def _deduplicate(
