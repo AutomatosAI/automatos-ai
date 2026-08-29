@@ -1,5 +1,5 @@
 {
-  "route_count": 773,
+  "route_count": 766,
   "routes": [
     {
       "method": "GET",
@@ -2440,10 +2440,6 @@
     {
       "method": "POST",
       "path": "/api/verticals/{vertical}/provision"
-    },
-    {
-      "method": "PATCH",
-      "path": "/api/verticals/{vertical}/provision/domains"
     },
     {
       "method": "POST",
