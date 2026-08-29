@@ -129,6 +129,39 @@ def test_handler_same_stage_advance_still_records_segment():
     assert ws.onboarding["segment"] == {"goal": "book appts"}
 
 
+def test_same_stage_advance_with_unusable_segment_succeeds():
+    # THE PROD FAILURE (2026-08-29, caught by the persona harness):
+    #   "Tool platform_update_onboarding failed: set_segment requires at least
+    #    one of business/goal/comfort"
+    # A same-stage advance drops to a no-op, then a bare-string segment reached
+    # set_segment and raised, failing the whole call. Must be a benign success.
+    ws = _FakeWorkspace({"stage": "teach", "stages": {"teach": "t"}, "segment": {}})
+    res = _run(update_onboarding(
+        _db_returning(ws), uuid4(),
+        {"advance_to": "teach", "segment": "a barber shop in Leeds"},
+    ))
+    assert res["success"] is True
+    assert ws.onboarding["stage"] == "teach"
+
+
+def test_advance_with_unrecognized_segment_keys_still_advances():
+    ws = _FakeWorkspace({"stage": "teach", "stages": {}, "segment": {}})
+    res = _run(update_onboarding(
+        _db_returning(ws), uuid4(),
+        {"advance_to": "proposal", "segment": {"industry": "dental", "notes": "x"}},
+    ))
+    assert res["success"] is True
+    assert ws.onboarding["stage"] == "proposal"
+
+
+def test_unusable_segment_alone_gets_the_honest_error_not_an_internal_one():
+    ws = _FakeWorkspace({"stage": "teach", "stages": {}, "segment": {}})
+    res = _run(update_onboarding(_db_returning(ws), uuid4(), {"segment": "just prose"}))
+    assert res["success"] is False
+    assert "at least one" in res["error"].lower()
+    assert "set_segment" not in res["error"]  # never leak the internal helper
+
+
 def test_handler_records_segment_only():
     ws = _FakeWorkspace({"stage": "questions", "stages": {}, "segment": {}})
     res = _run(

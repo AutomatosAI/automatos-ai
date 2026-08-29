@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from core.models.workspaces import Workspace
 from services.onboarding_state import (
+    SEGMENT_KEYS,
     InvalidStageTransition,
     advance_onboarding_stage,
     current_stage,
@@ -40,6 +41,26 @@ async def update_onboarding(
     advance_to = params.get("advance_to")
     segment = params.get("segment")
     plan = params.get("plan")
+
+    # Normalize an UNUSABLE segment to absent (live-test 2026-08-29). ``segment``
+    # is LLM-supplied: it arrives as a bare string, or a dict of unrecognized
+    # keys, often enough to matter. ``_clean_segment`` already tolerates that at
+    # the state layer, but ``set_segment`` deliberately RAISES when nothing
+    # recognised survives (so a no-op write can't masquerade as a saved answer) —
+    # and the handler routed such calls straight into it, failing the whole tool
+    # call with "set_segment requires at least one of business/goal/comfort".
+    # Observed in prod paired with a same-stage advance: the advance is dropped
+    # as a no-op, then the junk segment raises, so a benign call errors.
+    # Treating unusable as absent makes each path correct: advance proceeds,
+    # a same-stage no-op returns success, and a call carrying NOTHING usable
+    # gets the honest "at least one is required" message below instead of an
+    # internal function name.
+    if segment is not None and not (
+        isinstance(segment, dict)
+        and any(segment.get(k) is not None for k in SEGMENT_KEYS)
+    ):
+        logger.info("[update_onboarding] segment carries nothing usable — ignoring")
+        segment = None
 
     if not advance_to and not segment and not plan:
         return {
