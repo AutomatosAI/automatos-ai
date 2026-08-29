@@ -184,6 +184,47 @@ def test_unpinned_unranked_promoted_absent_from_first_class_but_in_enum():
     assert pin not in enum
 
 
+def test_narrowed_steady_state_unranked_promoted_reachable_only_via_find_tools():
+    """P232-RVW-1 AC4: the reachability contract in the NARROWED steady state —
+    the case allowed_names=None (test above) cannot exercise.
+
+    With a realistic narrowed allow-list that EXCLUDES a promoted action, that
+    action is absent from BOTH the first-class schemas AND the narrowed dispatcher
+    enum this turn. It is not stranded: it stays reachable via platform_find_tools
+    (a config pin, first-class every turn) — the seam the LLM uses to pull in any
+    action the ranker did not surface. Proves 'no action becomes unreachable' for
+    the narrowed path, not just the un-narrowed full enum."""
+    reg = _registry()
+    victim = "platform_extra_promoted_00"        # promoted, NOT a pin
+    ranked_other = "platform_extra_promoted_07"  # a DIFFERENT promoted action that ranked in
+    # A ranked top-K for some unrelated intent: one plain action + one promoted
+    # action ranked in. The victim did NOT rank.
+    allowed = ["platform_plain_thing", ranked_other]
+    assert victim not in allowed
+
+    # The loader's first_class = config pins ∪ (promoted ∩ allowed_names).
+    first_class = PINS | {ranked_other}
+
+    fc = _fc_names(reg.to_first_class_schemas(first_class_names=first_class))
+    assert victim not in fc, "an unranked non-pin promoted action must NOT be first-class"
+
+    enum = _enum(reg.to_dispatcher_schema(
+        exclude_promoted=False,
+        exclude_names=first_class,
+        allowed_names=allowed,
+    ))
+    assert victim not in enum, (
+        "in the narrowed steady state an unranked promoted action is NOT an enum "
+        "member — it is reachable only via platform_find_tools this turn"
+    )
+    # find_tools is the discovery seam that keeps the victim reachable.
+    assert "platform_find_tools" in PINS
+    assert "platform_find_tools" in fc
+    # Sanity: the ranked promoted DID attach first-class and left the enum.
+    assert ranked_other in fc
+    assert ranked_other not in enum
+
+
 def test_ranked_promoted_attaches_first_class_and_leaves_the_enum():
     reg = _registry()
     ranked = "platform_extra_promoted_07"  # simulate it ranking into the surface

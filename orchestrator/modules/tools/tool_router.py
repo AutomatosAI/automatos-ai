@@ -251,8 +251,18 @@ def _first_class_names(
     (``allowed_names``, which now includes promoted since narrowing ranks the full
     set). Intersected with ``promoted_names`` so a pin that is NOT a promoted action
     is never put in the dispatcher's ``exclude_names`` (which would strand it —
-    excluded from the enum yet with no first-class schema). Every other promoted
-    action stays reachable via the dispatcher enum."""
+    excluded from the enum yet with no first-class schema).
+
+    Every other promoted action stays reachable, but by which path depends on
+    whether the enum is narrowed:
+      * un-narrowed (``allowed_names is None`` — no query / fallback): the enum is
+        the full eligible set (``exclude_promoted=False``), so a non-first-class
+        promoted action IS a dispatcher enum member.
+      * narrowed steady state (``allowed_names`` is the ranked top-K): a promoted
+        action that ranked in becomes first-class (never a bare enum entry); one
+        that did NOT rank in is neither first-class NOR an enum member this turn —
+        it is reachable via ``platform_find_tools`` (a pinned discovery seam), the
+        way the LLM pulls in any action the ranker did not surface."""
     pins = _promotion_pins() & promoted_names
     ranked_promoted = {n for n in (allowed_names or ()) if n in promoted_names}
     return pins | ranked_promoted
