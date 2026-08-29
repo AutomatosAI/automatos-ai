@@ -128,26 +128,38 @@ _NO_SCAN_NOTE = (
 
 _STAGE_PROPOSAL = """\
 ### Now: propose the setup — this is the approval gate
-Present ONE clear proposal: the starter team sized to their business (a barber \
-gets Auto + 1–2 helpers and ~2 Playbooks; a larger company gets more), what each \
-piece does for THEM, the 1–2 apps to connect, and the estimated cost ("this build \
-is covered by your trial credit"). Nothing is built before they say yes. Let them \
-edit conversationally. On an explicit yes, advance_to `building` and start.
+Start by matching a package: call `platform_search_packages` with their segment \
+(business, goal, any store URL). If one matches, offer exactly ONE BY NAME with its \
+contents — e.g. "Shopify Management: four agents (Operations, Support, Inventory, \
+Business Analyst), a weekly-numbers report, and your store connect — want it?" If \
+they defer the pick to you, choose sensibly (a store OWNER → Management, a builder \
+→ Development). If NOTHING matches, don't force a package — custom-design their team, \
+marketplace-first for each agent, tool and Playbook. Either way present ONE proposal \
+sized to their business (a barber gets Auto + 1–2 helpers and ~2 Playbooks; a larger \
+company more), what each piece does for THEM, the 1–2 apps to connect, and the cost \
+("this build is covered by your trial credit"). Nothing is built before they say yes \
+— let them edit conversationally. On an explicit yes, advance_to `building` and start.
 Plan: {plan_recommendation}
 """
 
 _STAGE_BUILDING = """\
 ### Now: build it — narrate every step
-Create the agents, skills and Playbooks and request the 1–2 app connections \
-inline. Narrate as you go ("Created your Marketing helper — it's on your Agents \
-page"). When the build is complete and verified, advance_to `boom`.
+If they accepted a package, install it with `platform_install_package` (its slug) \
+and narrate the manifest — the agents, skills, tools and Playbooks now registered \
+to THEIR workspace, theirs to edit. Otherwise create the pieces directly. Then \
+request the connections the setup needs through the chat connect card (never \
+auto-connect); for Shopify, the two-step honestly — connect now for store data, \
+then the Automatos app adds a Site under Settings → Widget SDK → sync. Narrate as \
+you go ("Created your Marketing helper — it's on your Agents page"). When the build \
+is complete and verified, advance_to `boom`.
 """
 
 _STAGE_BOOM = """\
 ### Now: the payoff moment
 Invite the user to ask you something about THEIR business, and answer it grounded \
 in what you just learned — this is the value moment, still on their trial credit. \
-Once they've seen it, advance_to `powerup`.
+Offer to put the team to work now — run their first Playbook or report; the setup \
+checklist card carries the remaining steps. Once they've seen it, advance_to `powerup`.
 """
 
 _STAGE_POWERUP = """\

@@ -93,6 +93,26 @@ def _match_summary(match: Any) -> Dict[str, Any]:
     }
 
 
+def _record_offer_if_onboarding(db: Any, workspace_id: UUID, slug: str) -> None:
+    """US-009 funnel: a package search DURING onboarding is the offer — stamp
+    ``package_offered`` with the top match's slug. No-op once onboarding is
+    terminal (post-onboarding search is just browsing, not a funnel moment).
+
+    Best-effort: the funnel is a side channel, so a read/record failure is logged
+    and swallowed — it must never break the search the user is actually running."""
+    try:
+        from services import onboarding_state
+
+        workspace = _load_workspace(db, workspace_id)
+        if workspace is None:
+            return
+        if onboarding_state.current_stage(workspace) in onboarding_state.TERMINAL_STAGES:
+            return
+        onboarding_state.record_package_event(db, workspace, "package_offered", slug, commit=True)
+    except Exception as exc:  # noqa: BLE001 — funnel is best-effort, never fatal
+        logger.debug("package_offered funnel record skipped: %s", exc)
+
+
 async def search_packages(db: Any, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """platform_search_packages — rank marketplace packages against business signals."""
     from services.marketplace_packages import list_packages, match_by_signals
@@ -104,6 +124,8 @@ async def search_packages(db: Any, workspace_id: UUID, params: Dict[str, Any]) -
         "vertical_tags": params.get("vertical_tags") or [],
     }
     matches = match_by_signals(signals, list_packages(db))
+    if matches:
+        _record_offer_if_onboarding(db, workspace_id, matches[0].package.slug)
     return {
         "success": True,
         "matches": [_match_summary(m) for m in matches],
@@ -187,6 +209,12 @@ async def install_package_tool(db: Any, workspace_id: UUID, params: Dict[str, An
     quota = _check_quota(db, workspace, workspace_id, package)
     if not quota["ok"]:
         return quota["response"]
+
+    # US-009 funnel: reaching install DURING onboarding means the user accepted.
+    # Stamp package_accepted before the install so an accept→install drop-off (a
+    # failed install) stays visible; package_installed follows on success.
+    if onboarding_active:
+        onboarding_state.record_package_event(db, workspace, "package_accepted", slug, commit=True)
 
     try:
         manifest = await install_package(db, workspace_id, slug, user_id=None)
