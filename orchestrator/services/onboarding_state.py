@@ -144,8 +144,19 @@ def _validate_transition(current: str, target: str) -> None:
 
 
 def _clean_segment(segment: Optional[dict]) -> dict[str, Any]:
-    """Keep only the three known segment keys carrying a non-None value."""
-    if not segment:
+    """Keep only the three known segment keys carrying a non-None value.
+
+    Boundary-hardened (live-test 2026-08-29): ``segment`` is LLM-supplied through
+    the ``platform_update_onboarding`` tool, and the model sometimes passes it as
+    a bare string (a free-text business summary) instead of the
+    ``{business, goal, comfort}`` object the schema asks for. A non-dict value
+    used to reach ``segment.get(k)`` and raise ``'str' object has no attribute
+    'get'`` — which failed the WHOLE advance-to-proposal call and stalled every
+    onboarding at ``teach``. A non-dict segment now cleans to ``{}`` (ignored:
+    the real answers were already captured on the question turns), so the stage
+    advance still lands.
+    """
+    if not isinstance(segment, dict):
         return {}
     return {k: segment[k] for k in SEGMENT_KEYS if segment.get(k) is not None}
 
