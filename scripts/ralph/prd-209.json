@@ -142,15 +142,15 @@
    "title": "S8 — QUICKSTART tells the truth (written last, against the merged reality)",
    "description": "QUICKSTART.md claims 'docker-compose up --build … That's it! No .env file needed' while compose hard-fails on three `:?` secrets. Rewrite against what US-001..008 made true: the 3 required secrets, one optional LLM key (BYOK), `docker compose up`, what you get (no login, single workspace, local RAG on pgvector, MinIO storage, which ports), what does NOT work without extra keys (Composio integrations — one honest line, PRD-233 owns the fix), troubleshooting pointers. Align README.md's quickstart section. Add the doc guard: every `${VAR:?}`-required variable in docker-compose.yml appears in QUICKSTART.md (parse both files; today it fails).",
    "acceptanceCriteria": [
-    "QUICKSTART.md documents the real flow incl. all three `:?` secrets (doc guard test green)",
-    "README quickstart section consistent (no 'no .env needed' claim anywhere — grep)",
-    "Honest Composio limitation line present",
-    "Orchestrator suite at documented baseline"
+    "DONE — QUICKSTART.md rewritten against merged reality: names all three `:?`-required secrets (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY — each literal, 3/3/5 occurrences), `cp .env.example .env`, `docker compose up`, one optional BYOK LLM key (OPENAI/ANTHROPIC/OpenRouter), what you get (no login AUTH_EDITION=local + single default workspace, local RAG on pgvector S3_VECTORS_ENABLED=false, MinIO object storage, port table 3000/8000/9001), readiness (/health/ready), stop/clean-up, troubleshooting. Deleted the dishonest 'No .env needed' line AND the fabricated default-password table (compose uses `:?` — no defaults). Doc guard test_prd209_quickstart_honest.py green (6 tests). Parser reads ${VAR:?} from compose; asserts each in QUICKSTART; pinned to exactly the 3 so a 4th required secret can't go undocumented. Proven to bite: old QUICKSTART named 0 of the 3 → guard FAILED before, PASSES after.",
+    "DONE — README quickstart section aligned: `.env` step now reads 'set the 3 required secrets: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY' (was the misleading '# Add your API keys'), `docker compose up`, notes no-login local edition + optional LLM key, links QUICKSTART.md. No 'no .env needed' claim anywhere — test_no_no_env_needed_claim_in_quickstart_or_readme greps both files with /no .env (file )?needed/i and both are clean (the old claim lived only in QUICKSTART:10, now deleted).",
+    "DONE — honest Composio line present: 'Composio-powered integrations (the 1,000+ external-tool marketplace) need a Composio API key added via Settings → Credentials; they are not wired on a fresh clone. First-class local Composio setup is tracked in PRD-233.' Guard test_quickstart_has_honest_composio_limitation_line asserts both the Composio mention and the PRD-233 pointer (PRD-233 = docs/PRDS/36-COMPOSIO-INTEGRATION-PRD.md).",
+    "DONE — orchestrator suite at documented baseline: 6 new US-009 doc guards green; all 40 test_prd209_*.py guards green together; docs are not imported by any runtime test. QUICKSTART carries no canonical-term drift (old 'Workflows tab' line removed)."
    ],
    "files": [
     "QUICKSTART.md",
     "README.md",
-    "orchestrator/tests/"
+    "orchestrator/tests/test_prd209_quickstart_honest.py"
    ]
   }
  ]

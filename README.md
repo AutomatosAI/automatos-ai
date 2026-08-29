@@ -114,9 +114,15 @@ Upload documents, sync folders from Dropbox and cloud storage, and let the platf
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
-cp .env.example .env    # Add your API keys
-docker-compose up
+cp .env.example .env    # set the 3 required secrets: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
+docker compose up
 ```
+
+The local edition runs with **no login** and a single default workspace. Compose
+needs only those three secrets set; add an LLM key (`OPENAI_API_KEY` /
+`ANTHROPIC_API_KEY` / OpenRouter) when you want AI features. See
+[QUICKSTART.md](QUICKSTART.md) for the full walkthrough and what does / doesn't
+work out of the box.
 
 - **Frontend**: http://localhost:3000
 - **API Docs**: http://localhost:8000/docs
