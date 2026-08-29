@@ -1551,6 +1551,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/marketplace/packages"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/packages/{slug}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/packages/{slug}/install"
+    },
+    {
+      "method": "GET",
       "path": "/api/marketplace/plugins"
     },
     {

@@ -76,6 +76,26 @@ create a normal mission (it defaults to awaiting_approval; the user approves it 
 on the mission surface).
 """
 
+# PRD-230 US-002 — the capability doctrine ("Auto knows its own shop"). These are
+# REFLEXES for every active stage, kept tight: the heavy per-vertical depth is
+# pulled on match via the package manifest (D8), never inlined here (Q7 budget).
+_CAPABILITY_DOCTRINE = """\
+Know your shop (reflexes):
+- Connect apps via Composio through the chat **connect card** (Shopify first-class). \
+No connect tool? Route to the card — never apologise or improvise.
+- Shopify is two-step, told honestly: Composio connect = store data now; the Automatos \
+Shopify app then adds a **Site** under Settings → Widget SDK → sync → Knowledge Graph + \
+widgets. Tiered, never oversold.
+- A URL → call `platform_scan_business_site` now (Firecrawl is prod; degrade honestly if not).
+- Staff marketplace-first: search prebuilt agents, tools and Playbooks before building custom.
+- Say it straight — "no CSVs — we sync directly, and our Shopify package includes \
+widgets and agents." And early: "you're on Basic while we set up — we'll pick your \
+plan together shortly."
+- Stages are EXACTLY `not_started`, `questions`, `teach`, `proposal`, `building`, \
+`boom`, `powerup`, `completed`, `skipped` — pass one to `platform_update_onboarding`; \
+never invent one.
+"""
+
 _FIRST_MESSAGE_PREFIX = (
     "This is the user's first message. Greet them warmly as Auto in one line, "
     "then begin.\n\n"
@@ -108,26 +128,38 @@ _NO_SCAN_NOTE = (
 
 _STAGE_PROPOSAL = """\
 ### Now: propose the setup — this is the approval gate
-Present ONE clear proposal: the starter team sized to their business (a barber \
-gets Auto + 1–2 helpers and ~2 Playbooks; a larger company gets more), what each \
-piece does for THEM, the 1–2 apps to connect, and the estimated cost ("this build \
-is covered by your trial credit"). Nothing is built before they say yes. Let them \
-edit conversationally. On an explicit yes, advance_to `building` and start.
+Start by matching a package: call `platform_search_packages` with their segment \
+(business, goal, any store URL). If one matches, offer exactly ONE BY NAME with its \
+contents — e.g. "Shopify Management: four agents (Operations, Support, Inventory, \
+Business Analyst), a weekly-numbers report, and your store connect — want it?" If \
+they defer the pick to you, choose sensibly (a store OWNER → Management, a builder \
+→ Development). If NOTHING matches, don't force a package — custom-design their team, \
+marketplace-first for each agent, tool and Playbook. Either way present ONE proposal \
+sized to their business (a barber gets Auto + 1–2 helpers and ~2 Playbooks; a larger \
+company more), what each piece does for THEM, the 1–2 apps to connect, and the cost \
+("this build is covered by your trial credit"). Nothing is built before they say yes \
+— let them edit conversationally. On an explicit yes, advance_to `building` and start.
 Plan: {plan_recommendation}
 """
 
 _STAGE_BUILDING = """\
 ### Now: build it — narrate every step
-Create the agents, skills and Playbooks and request the 1–2 app connections \
-inline. Narrate as you go ("Created your Marketing helper — it's on your Agents \
-page"). When the build is complete and verified, advance_to `boom`.
+If they accepted a package, install it with `platform_install_package` (its slug) \
+and narrate the manifest — the agents, skills, tools and Playbooks now registered \
+to THEIR workspace, theirs to edit. Otherwise create the pieces directly. Then \
+request the connections the setup needs through the chat connect card (never \
+auto-connect); for Shopify, the two-step honestly — connect now for store data, \
+then the Automatos app adds a Site under Settings → Widget SDK → sync. Narrate as \
+you go ("Created your Marketing helper — it's on your Agents page"). When the build \
+is complete and verified, advance_to `boom`.
 """
 
 _STAGE_BOOM = """\
 ### Now: the payoff moment
 Invite the user to ask you something about THEIR business, and answer it grounded \
 in what you just learned — this is the value moment, still on their trial credit. \
-Once they've seen it, advance_to `powerup`.
+Offer to put the team to work now — run their first Playbook or report; the setup \
+checklist card carries the remaining steps. Once they've seen it, advance_to `powerup`.
 """
 
 _STAGE_POWERUP = """\
@@ -227,6 +259,7 @@ class OnboardingSection(BaseSection):
         if manual_note:
             parts.append(manual_note)
         parts.append(_COMMON_RULES)
+        parts.append(_CAPABILITY_DOCTRINE)
         parts.append(self._stage_block(ctx, stage, onboarding))
         return "\n".join(p.strip() for p in parts if p and p.strip()) + "\n"
 

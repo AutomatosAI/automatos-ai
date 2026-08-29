@@ -310,6 +310,42 @@ def record_plan_event(
     return doc
 
 
+# PRD-230 US-006/US-009 — package funnel events. Same mechanism as the plan/trial
+# events: a named entry ({slug, at}) under ``onboarding.funnel[event]`` in this
+# onboarding JSONB doc, the Wave-1 funnel record. ``package_installed`` also gates
+# the D6 one-package-during-onboarding restriction (read by the install tool).
+PACKAGE_FUNNEL_EVENTS = ("package_offered", "package_accepted", "package_installed")
+
+
+def record_package_event(
+    db: Any, workspace: Any, event: str, slug: str, *, commit: bool = True
+) -> dict[str, Any]:
+    """Stamp a package funnel event (``package_offered`` / ``package_accepted`` /
+    ``package_installed``). Records ``{slug, at}`` under ``onboarding.funnel[event]``
+    (rebuild-don't-mutate, PRD-220-safe). ``commit=False`` defers so the stamp
+    lands atomically with a preceding write. Raises ``ValueError`` for an unknown
+    event. Returns the new onboarding doc."""
+    if event not in PACKAGE_FUNNEL_EVENTS:
+        raise ValueError(f"unknown package funnel event: {event!r}")
+    doc = get_onboarding(workspace)  # deep copy
+    now = _now_iso()
+    funnel = dict(doc.get("funnel") or {})
+    funnel[event] = {"slug": slug, "at": now}
+    doc["funnel"] = funnel
+    doc["updated_at"] = now
+    _persist(db, workspace, doc, commit=commit)
+    logger.info(
+        "Funnel: %s slug=%s for workspace %s", event, slug, getattr(workspace, "id", None)
+    )
+    return doc
+
+
+def onboarding_package_installed(workspace: Any) -> bool:
+    """True once a package has been installed during THIS onboarding (D6 gate)."""
+    doc = get_onboarding(workspace) or {}
+    return bool((doc.get("funnel") or {}).get("package_installed"))
+
+
 # =========================================================================== #
 # PRD-222 W2·S4 (US-020) — the post-setup "run & learn" CHECKLIST.
 #

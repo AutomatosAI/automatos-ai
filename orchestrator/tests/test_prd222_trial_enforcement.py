@@ -257,9 +257,16 @@ def test_daily_increment_pushes_grant_into_pause():
 
 
 def test_gate_wired_at_choke_point_and_bypasses_byok():
+    # PRD-230 US-001 refactor: the gate is now a shared helper
+    # (_resolve_trial_decision) called by BOTH the mission path
+    # (_create_llm_manager) and the chat path (activate_agent). BYOK still
+    # provably bypasses — the helper short-circuits on the is_byok flag, which
+    # each seam passes as resolved.is_byok.
     src = (REPO / "modules" / "agents" / "factory" / "agent_factory.py").read_text()
-    assert "resolve_trial_routing" in src              # gate called at the seam
-    assert "not resolved.is_byok" in src               # BYOK provably bypasses it
+    assert "resolve_trial_routing" in src              # gate logic at the seam
+    assert "_resolve_trial_decision(" in src           # shared gate invoked
+    assert "if not workspace_id or is_byok" in src     # BYOK provably bypasses it
+    assert "resolved.is_byok" in src                   # the BYOK flag flows into the gate
     assert "TrialExhaustedError" in src                # exhausted → typed error
 
 
