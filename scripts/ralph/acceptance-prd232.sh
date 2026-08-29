@@ -34,6 +34,22 @@ else
   fi
 fi
 
+# ── RVW-5: regression-prone UNCHANGED-file suites ────────────────────────────
+# The changed-file net above cannot see a regression in a test file THIS branch
+# did not touch — the exact trap that hid the P232-RVW-1..3 required-CI reds
+# (test_prd143_graph_seed is unchanged on this branch, so the diff-scoped net
+# skips it while the required orchestrator-tests job is RED on it). Run the four
+# promoted/enum/head-guard contract suites explicitly so an unchanged-file
+# regression cannot pass acceptance green (RVW-5 AC option b, network-free).
+echo ""
+echo "── RVW-5 regression-prone suites (unchanged-file guard for the required-CI contract)"
+RVW5_SUITES="tests/test_prd143_su_surface.py tests/test_prd143_selection_at_scale.py tests/test_prd143_graph_seed.py tests/test_prd225_asks_model.py"
+if ( cd orchestrator && python3 -m pytest --timeout=120 --timeout-method=thread -o faulthandler_timeout=150 -p no:cacheprovider -q $RVW5_SUITES ); then
+  echo "   ✅ PASS: regression-prone suites green: $RVW5_SUITES"
+else
+  echo "   ❌ FAIL: unchanged-file regression on the required-CI contract (RVW-2 §12 block still open): $RVW5_SUITES"; FAIL=1
+fi
+
 # ── #643 files untouched; migrations/manifest frozen ─────────────────────────
 echo ""
 echo "── #643 files untouched; zero migrations; manifest frozen"
@@ -64,8 +80,8 @@ check "US-005 update_task_status carries close/ticket/blocked vocabulary" \
   "grep -rliq 'close' $UTT && grep -rliq 'ticket' $UTT && grep -rliq 'blocked' $UTT"
 check "US-006 embedding text builder references utterances" \
   "grep -qi 'utterance' $IDX"
-check "US-006 no DeterministicEmbeddingProvider outside fixtures" \
-  "! grep -rn 'DeterministicEmbeddingProvider' orchestrator --include='*.py' | grep -v tests | grep -v 'base.py' | grep -q ."
+check "US-006 no DeterministicEmbeddingProvider outside fixtures (branch-scope; embedding_manager's PRE-EXISTING PRD-185 fallback sites are out of 232 scope)" \
+  "! grep -rn 'DeterministicEmbeddingProvider' orchestrator --include='*.py' | grep -v tests | grep -v 'base.py' |  grep -v 'core/llm/embedding_manager.py' | grep -v 'core/llm/clients/__init__.py' | grep -q ."
 
 # ── US-007/009/010/011: seeding + learning ───────────────────────────────────
 check "US-007 seed script gained an utterances step (still --yes gated)" \
