@@ -20,6 +20,9 @@
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 NODE_ENV=development
+# Server-side (Next API routes run INSIDE the frontend container): reach the
+# backend by compose DNS. The browser keeps using NEXT_PUBLIC_API_URL above.
+BACKEND_INTERNAL_URL=http://backend:8000
 
 # -----------------------------------------------------------------------------
 # Edition [ACTIVE] — the ONE shipped flag (PRD-175), mirror of backend AUTH_EDITION

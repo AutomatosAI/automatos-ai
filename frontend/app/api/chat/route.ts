@@ -2,7 +2,10 @@ import { NextRequest } from 'next/server'
 
 export const runtime = 'edge'
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const BACKEND_URL = // Server-side: BACKEND_INTERNAL_URL (container DNS, local edition) beats the
+// browser-facing NEXT_PUBLIC_API_URL — inside the frontend container 'localhost'
+// is the frontend itself. Unset in SaaS ⇒ identical to before. (PRD-209)
+process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 // SECURITY: Allowlist of safe path patterns for PATCH proxy (OWASP A10:2021 - SSRF)
 // Only allows paths like /history/{uuid}, /vote/{uuid}, /{uuid}
@@ -47,7 +50,9 @@ export async function POST(request: NextRequest) {
       headers['Authorization'] = authHeader
     }
     if (apiKey) {
-      headers['x-api-key'] = apiKey
+      // Only when a key exists — an absent key must not become the literal
+      // string 'undefined' (the backend would then reject it as a bad API key).
+      if (apiKey) headers['x-api-key'] = apiKey
     }
     if (workspaceId) {
       headers['X-Workspace-ID'] = workspaceId
@@ -129,7 +134,9 @@ export async function PATCH(request: NextRequest) {
       headers['Authorization'] = authHeader
     }
     if (apiKey) {
-      headers['x-api-key'] = apiKey
+      // Only when a key exists — an absent key must not become the literal
+      // string 'undefined' (the backend would then reject it as a bad API key).
+      if (apiKey) headers['x-api-key'] = apiKey
     }
     if (workspaceId) {
       headers['X-Workspace-ID'] = workspaceId

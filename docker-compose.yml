@@ -239,6 +239,10 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
+      # Deliberately NO API_KEY here: the local edition is anonymous end to end —
+      # the chat proxy forwards the browser's anonymous session (which the local
+      # backend treats as workspace owner / super admin), exactly like direct calls.
+      # An API-key principal would hit the workspace-permission gate instead (403).
       # SaaS-only; `:-` so its absence never blocks local `docker compose up`.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
       NODE_ENV: development

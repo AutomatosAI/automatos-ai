@@ -54,7 +54,10 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const backendUrl = // Server-side: BACKEND_INTERNAL_URL (container DNS, local edition) beats the
+// browser-facing NEXT_PUBLIC_API_URL — inside the frontend container 'localhost'
+// is the frontend itself. Unset in SaaS ⇒ identical to before. (PRD-209)
+process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     const streamUrl = `${backendUrl}/api/workflows/executions/${executionId}/stream/aisdk`
 
     const backendResponse = await fetch(streamUrl, {
