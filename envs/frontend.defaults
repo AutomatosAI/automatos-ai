@@ -22,11 +22,12 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 NODE_ENV=development
 
 # -----------------------------------------------------------------------------
-# Edition [PRD-150]
+# Edition [ACTIVE] — the ONE shipped flag (PRD-175), mirror of backend AUTH_EDITION
 # -----------------------------------------------------------------------------
-# oss  -> no ClerkProvider mounted, no sign-in, no team/billing UI
-# saas -> current Clerk behaviour (requires NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
-NEXT_PUBLIC_EDITION=oss
+# local -> no ClerkProvider mounted, no sign-in, no team/billing UI
+# saas  -> current Clerk behaviour (requires NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
+# Read by frontend/lib/auth-edition.ts (process.env.NEXT_PUBLIC_AUTH_EDITION).
+NEXT_PUBLIC_AUTH_EDITION=local
 
 # Clerk keys are SaaS-only and intentionally absent here.
 # OSS local runs never set them; SaaS gets them from Railway env.

@@ -37,18 +37,20 @@ LOG_LEVEL=INFO
 GOTENBERG_URL=http://gotenberg:3000
 
 # -----------------------------------------------------------------------------
-# Edition & auth
+# Edition & auth [ACTIVE] — the ONE shipped flag (PRD-175)
 # -----------------------------------------------------------------------------
-# [PRD-150] OSS edition: local auth provider, single workspace, no login.
-EDITION=oss
-AUTH_PROVIDER=local
+# local -> no Clerk, no login, single shared workspace. config.py forces
+# REQUIRE_AUTH=false when AUTH_EDITION=local, so operators set ONE flag, not
+# three that can silently contradict. Flip to saas (+ Clerk keys in the root
+# .env) for a Clerk-mode local stack; Railway/SaaS is unaffected (it sets its
+# own env per service and never reads this file).
+AUTH_EDITION=local
 
-# [ACTIVE] Interim no-Clerk mode until PRD-150 lands (anonymous auth path).
-# PRD-150 replaces this with AUTH_PROVIDER=local; flip back to true then.
-REQUIRE_AUTH=false
-
-# [ACTIVE] Leave blank — generated and persisted on first boot (PRD-150 Q3).
-DEFAULT_WORKSPACE_ID=
+# [ACTIVE] The single local workspace every anonymous request resolves to.
+# This exact id is what the CI seed (orchestrator/scripts/init_test_db.py) and
+# the entrypoint seed create; validate_auth_edition() (config.py) hard-requires
+# it non-empty in local mode. Fixed well-known UUID (workspaces.id is UUID).
+DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
 
 # -----------------------------------------------------------------------------
 # Object storage — MinIO (S3-compatible, ships in the compose stack)

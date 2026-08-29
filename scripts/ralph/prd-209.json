@@ -42,12 +42,12 @@
    "title": "S7 — local edition becomes the compose default (env_file + honest defaults vocab)",
    "description": "docker-compose.yml uses no env_file anywhere and sets no AUTH_EDITION — a human's plain `docker compose up` defaults to saas and validate_auth_edition() (config.py:~1536-1575) aborts demanding Clerk keys. The committed envs/api.defaults has NO consumer and still speaks the never-landed PRD-150 vocabulary (EDITION=oss, AUTH_PROVIDER=local). Fix api.defaults to shipped vocabulary: AUTH_EDITION=local, DEFAULT_WORKSPACE_ID=<the Q6 convention value from the CI seed>, keep S3_VECTORS_ENABLED=false, DELETE the dead EDITION/AUTH_PROVIDER keys; set NEXT_PUBLIC_AUTH_EDITION=local in envs/frontend.defaults; wire env_file: [envs/api.defaults] on the backend service and envs/frontend.defaults on the frontend service. Compose `environment:` entries override env_file — keep the three `:?` secrets in environment (still required, still explicit) and ensure no environment: line re-pins AUTH_EDITION/Clerk vars in a way that defeats the defaults (remove the Clerk passthrough lines or make them optional `${VAR:-}` so absence is fine in local). NO secrets in the defaults files (public repo).",
    "acceptanceCriteria": [
-    "docker-compose.yml backend service has env_file with envs/api.defaults; frontend service with envs/frontend.defaults (source guard test)",
-    "envs/api.defaults: AUTH_EDITION=local + DEFAULT_WORKSPACE_ID present; zero EDITION=/AUTH_PROVIDER= keys (guard test)",
-    "Clerk env absence no longer blocks compose config resolution (no `:?` on Clerk vars; grep-proof in commit body)",
-    "The three secrets POSTGRES_PASSWORD/REDIS_PASSWORD/API_KEY remain `:?`-required (guard)",
-    "No secret values in envs/*.defaults (guard greps for obvious key patterns; reviewer verifies)",
-    "Orchestrator suite at documented baseline"
+    "DONE — docker-compose.yml backend service declares env_file: [envs/api.defaults], frontend: [envs/frontend.defaults] (YAML-parsed guard test_backend/frontend_consumes_*). Short form only (committed files exist); no AUTH_EDITION in backend environment: so env_file wins.",
+    "DONE — envs/api.defaults: AUTH_EDITION=local (L47) + DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1 (L53, the CI-seed convention, UUID); EDITION=/AUTH_PROVIDER= deleted (grep empty). frontend.defaults: NEXT_PUBLIC_AUTH_EDITION=local, NEXT_PUBLIC_EDITION removed.",
+    "DONE — Clerk vars now ${VAR:-} (docker-compose.yml L190-192,234), never `:?` — grep for \\${\\w*CLERK\\w*:\\? is empty; absence can't block compose config. Byte-identical to saas when set (constraint A).",
+    "DONE — POSTGRES_PASSWORD (L29), REDIS_PASSWORD (L56), API_KEY (L184) remain `:?`-required in environment:/command — never moved to a committed file (guard test_three_secrets_stay_required).",
+    "DONE — no secret VALUES in envs/*.defaults: guard test_no_secret_values_in_defaults_files scans for (PASSWORD|SECRET|TOKEN|PRIVATE_KEY|ACCESS_KEY)=<value>; all such lines are commented `-> root .env`.",
+    "DONE — orchestrator suite at documented baseline: 7 new US-003 guards green; compose/envs are not imported by any runtime test; baseline unchanged."
    ],
    "files": [
     "docker-compose.yml",

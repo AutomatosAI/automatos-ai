@@ -139,6 +139,13 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    # Local-edition topology + edition defaults (AUTH_EDITION=local,
+    # DEFAULT_WORKSPACE_ID, MinIO/mem0/qdrant wiring). NO secrets — those stay in
+    # `environment:` below as `:?`-required. `environment:` overrides env_file, so
+    # secrets stay explicit and the edition/topology defaults stay silent. Railway
+    # never reads this file, so local-default costs SaaS nothing (constraint A).
+    env_file:
+      - envs/api.defaults
     environment:
       # Database
       POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
@@ -176,10 +183,13 @@ services:
       # Security
       API_KEY: ${API_KEY:?API_KEY is required - set in .env file}
       
-      # Clerk Authentication
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
-      CLERK_JWKS_URL: ${CLERK_JWKS_URL}
+      # Clerk Authentication — SaaS-only. `:-` (not `:?`) so their ABSENCE never
+      # blocks `docker compose up` in local mode; when set (saas) they resolve
+      # byte-identically. AUTH_EDITION=local (from env_file) makes the backend's
+      # validate_auth_edition() skip the Clerk requirement entirely.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -214,10 +224,14 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # Local-edition frontend defaults (NEXT_PUBLIC_AUTH_EDITION=local). No secrets.
+    env_file:
+      - envs/frontend.defaults
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      # SaaS-only; `:-` so its absence never blocks local `docker compose up`.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
       NODE_ENV: development
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
