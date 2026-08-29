@@ -22,7 +22,7 @@ from alembic import op
 
 
 revision = "prd232_cluster_provenance"
-down_revision = "prd225_s1_asks_on_grants"
+down_revision = "prd_workspace_models_backfill"
 branch_labels = None
 depends_on = None
 

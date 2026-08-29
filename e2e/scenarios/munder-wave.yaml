@@ -1,0 +1,171 @@
+# Munder Difflin wave — real-user scenarios for PRD-224..229 (+231/232 canaries).
+# Each scenario: the words a person would type, then what the platform must now show.
+# Assertion kinds the runner implements:
+#   chat_reply_contains / chat_reply_matches — on Auto's reply text
+#   api — GET a platform endpoint, JSONPath-ish expectations
+#   log_marker — a line the Railway API log must emit during the scenario
+#   manual — human step; runner pauses
+pack: munder
+
+scenarios:
+  - id: S01
+    title: Fleet read — "how's the board"
+    status: live
+    turns:
+      - say: "How is the board doing today?"
+        expect:
+          - chat_reply_matches: "(idle|blocked|queued|agents)"
+          - api: { get: "/api/board/summary", expect_status: 200 }
+          - log_marker: "platform_board_summary|platform_fleet_status"
+    notes: Cross-check the counts Auto quotes against the API numbers — a mismatch is a finding (fleet read-model drift, PRD-228).
+
+  - id: S02
+    title: ASSIGN lane, imperative — "have <agent> do X" starts NOW
+    status: live
+    turns:
+      - say: "Have {agent_a} write a one-paragraph summary of our top three open tasks."
+        expect:
+          - api: { get: "/api/board/tasks?assigned={agent_a}&status=in_progress", min_count: 1 }
+          - chat_reply_matches: "(ticket|task).{0,80}(created|filed|started)"
+          - log_marker: "platform_create_task"
+          - log_marker: "platform_update_task_status"
+    notes: PRD-224 imperative-by-default. Auto must report the supervision field from the create result — never assert supervision unconditionally (P224-RVW-3).
+
+  - id: S03
+    title: ASSIGN lane, deferred — "queue it, no rush" does NOT start
+    status: live
+    turns:
+      - say: "Have {agent_a} draft next week's status email — no rush, whenever there's time."
+        expect:
+          - api: { get: "/api/board/tasks?assigned={agent_a}&status=assigned", min_count: 1 }
+          - chat_reply_matches: "queued"
+          - log_marker_absent: "platform_update_task_status.*in_progress"
+    notes: The _DEFER_PHRASES contract (baked decision 2026-08-27).
+
+  - id: S04
+    title: ASSIGN with unknown agent — Auto ASKS, never auto-picks
+    status: live
+    turns:
+      - say: "Get my quantum-blockchain agent to audit the treasury."
+        expect:
+          - chat_reply_matches: "(which agent|don't have|no agent|who should)"
+          - api: { get: "/api/board/tasks?q=treasury", expect_count: 0 }
+    notes: Baked decision — nothing resolved → ask in-thread. A silently created unassigned ticket is a finding.
+
+  - id: S05
+    title: Fleet state detail — blocked agents with reasons
+    status: live
+    turns:
+      - say: "Which agents are blocked right now and why?"
+        expect:
+          - chat_reply_matches: "(blocked|none|no agents blocked)"
+          - log_marker: "platform_fleet_status"
+    notes: PRD-228 read-model. Compare against /api/fleet — stale blocked-counts (the 21-blocked pile from 2026-08-28) are the target regression.
+
+  - id: S06
+    title: ASK ME — agent blocked on a grant raises a question
+    status: live
+    turns:
+      - say: "Have {agent_a} post our weekly update to the #general channel."
+        expect:
+          - api: { get: "/api/questions?status=open", min_count: 1 }
+          - chat_reply_matches: "(ask|question|needs your|approval)"
+      - manual: "Answer the question in the Questions tab (grant or deny)."
+      - expect:
+          - api: { get: "/api/questions?status=open", expect_count: 0 }
+          - log_marker: "resume|grant"
+    notes: PRD-225 — pick a task that genuinely hits a permission the agent lacks. The ask must carry enough context to answer without archaeology.
+
+  - id: S07
+    title: Mid-run clarification — ask_orchestrator inside a run
+    status: live
+    turns:
+      - say: "Have {agent_a} reorganise the project docs — but the ticket description deliberately omits WHERE."
+        expect:
+          - log_marker: "ask_orchestrator"
+          - chat_reply_matches: "(clarif|asked|question)"
+    notes: PRD-229. Budget is CLARIFICATION_BUDGET (default 3) — S14 probes exhaustion.
+
+  - id: S08
+    title: Bell deep-link lands on the right task
+    status: live
+    playwright: true
+    steps:
+      - "Trigger S02 first (a fresh ticket exists)."
+      - "Open the app, click the notification bell, click the newest board notification."
+      - assert: "URL/board focus is the created task's id; the task panel renders."
+    notes: PRD-227 linkFor. UI-only assertion — this is one of the few Playwright cases.
+
+  - id: S09
+    title: Board light-up — SSE move renders without refresh
+    status: live
+    playwright: true
+    steps:
+      - "Open the board view. In parallel, run S02 via API."
+      - assert: "The new ticket appears and moves to in_progress WITHOUT a page reload."
+    notes: PRD-227 agent-move SSE parity.
+
+  - id: S10
+    title: VECTOR canary — "close all the blocked tickets from {agent_b}"
+    status: canary-232
+    turns:
+      - say: "Can you close all the blocked tickets from {agent_b}? I fixed that issue."
+        expect_before_232:
+          - chat_reply_matches: "(can't|cannot|not available|unable)"
+          - log_marker_absent: "platform_update_task_status"
+        expect_after_232:
+          - api: { get: "/api/board/tasks?assigned={agent_b}&status=blocked", expect_count: 0 }
+          - log_marker: "platform_list_tasks"
+          - log_marker: "platform_update_task_status"
+          - log_marker: "tool_gap"  # before 232: the gap row; after: absent is also acceptable
+    notes: The founding failure (2026-08-28 transcript). This scenario flipping green IS PRD-232's acceptance in prod. Auto lying about having closed them in EITHER phase is a CRITICAL finding (honesty doctrine).
+
+  - id: S11
+    title: Supervision honesty — completion verdict references real output
+    status: live
+    turns:
+      - say: "Have {agent_a} produce a 3-line haiku about databases, then tell me when it's done and what you think of it."
+        expect:
+          - chat_reply_matches: "(done|complete)"
+          - log_marker: "watch|supervision"
+    notes: PRD-224 US-005 + 226 doctrine — Auto's verdict must quote/reference the actual deliverable; "looks great" without evidence of reading it = finding (GREEN ≠ RIGHT).
+
+  - id: S12
+    title: Context diet canary — ops skill loads on demand
+    status: post-231
+    turns:
+      - say: "Walk me through exactly how you'd install a marketplace skill for an agent, step by step."
+        expect:
+          - log_marker: "platform_load_skill.*platform-operations"
+          - log_marker: "\\[skills\\] activation"
+    notes: PRD-231 — the charter's L1 trigger must pull the cookbook. If Auto answers thinly WITHOUT loading ops, the trigger text failed (that's the safety-net regression).
+
+  - id: S13
+    title: Telegram answer path
+    status: manual
+    steps:
+      - "Trigger S06 with Telegram configured for the workspace."
+      - manual: "Answer the ask from Telegram."
+      - assert: "Question closes; agent resumes; audit trail shows the Telegram principal."
+    notes: PRD-225 Telegram lane. Needs the bot configured — skip cleanly when absent.
+
+  - id: S14
+    title: Clarification budget exhaustion — hard stop, honest report
+    status: live
+    turns:
+      - say: "Have {agent_a} do this task: 'sort the things by the criteria' (deliberately underspecified, refuse to clarify beyond budget)."
+        expect:
+          - log_marker: "CLARIFICATION_BUDGET|clarification.*exhaust"
+          - chat_reply_matches: "(blocked|stopped|couldn't|gave up|needs)"
+    notes: PRD-229 — after budget exhaustion the run must STOP with an honest report, not loop or hallucinate an answer.
+
+  - id: S15
+    title: Ticket vocabulary robustness — register variants all route
+    status: canary-232
+    turns:
+      - say: "kill the oldest ticket on the board"
+      - say: "what cards are sitting in review?"
+      - say: "mark the summary task finished"
+        expect_after_232:
+          - log_marker: "platform_update_task_status|platform_list_tasks"
+    notes: The synthetic-utterance-seeding proof — three registers (kill/cards/finished) none of which appear in the old literal phrase map.

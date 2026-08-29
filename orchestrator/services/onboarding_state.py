@@ -144,8 +144,19 @@ def _validate_transition(current: str, target: str) -> None:
 
 
 def _clean_segment(segment: Optional[dict]) -> dict[str, Any]:
-    """Keep only the three known segment keys carrying a non-None value."""
-    if not segment:
+    """Keep only the three known segment keys carrying a non-None value.
+
+    Boundary-hardened (live-test 2026-08-29): ``segment`` is LLM-supplied through
+    the ``platform_update_onboarding`` tool, and the model sometimes passes it as
+    a bare string (a free-text business summary) instead of the
+    ``{business, goal, comfort}`` object the schema asks for. A non-dict value
+    used to reach ``segment.get(k)`` and raise ``'str' object has no attribute
+    'get'`` — which failed the WHOLE advance-to-proposal call and stalled every
+    onboarding at ``teach``. A non-dict segment now cleans to ``{}`` (ignored:
+    the real answers were already captured on the question turns), so the stage
+    advance still lands.
+    """
+    if not isinstance(segment, dict):
         return {}
     return {k: segment[k] for k in SEGMENT_KEYS if segment.get(k) is not None}
 
@@ -308,6 +319,42 @@ def record_plan_event(
         "Funnel: %s plan=%s for workspace %s", event, plan, getattr(workspace, "id", None)
     )
     return doc
+
+
+# PRD-230 US-006/US-009 — package funnel events. Same mechanism as the plan/trial
+# events: a named entry ({slug, at}) under ``onboarding.funnel[event]`` in this
+# onboarding JSONB doc, the Wave-1 funnel record. ``package_installed`` also gates
+# the D6 one-package-during-onboarding restriction (read by the install tool).
+PACKAGE_FUNNEL_EVENTS = ("package_offered", "package_accepted", "package_installed")
+
+
+def record_package_event(
+    db: Any, workspace: Any, event: str, slug: str, *, commit: bool = True
+) -> dict[str, Any]:
+    """Stamp a package funnel event (``package_offered`` / ``package_accepted`` /
+    ``package_installed``). Records ``{slug, at}`` under ``onboarding.funnel[event]``
+    (rebuild-don't-mutate, PRD-220-safe). ``commit=False`` defers so the stamp
+    lands atomically with a preceding write. Raises ``ValueError`` for an unknown
+    event. Returns the new onboarding doc."""
+    if event not in PACKAGE_FUNNEL_EVENTS:
+        raise ValueError(f"unknown package funnel event: {event!r}")
+    doc = get_onboarding(workspace)  # deep copy
+    now = _now_iso()
+    funnel = dict(doc.get("funnel") or {})
+    funnel[event] = {"slug": slug, "at": now}
+    doc["funnel"] = funnel
+    doc["updated_at"] = now
+    _persist(db, workspace, doc, commit=commit)
+    logger.info(
+        "Funnel: %s slug=%s for workspace %s", event, slug, getattr(workspace, "id", None)
+    )
+    return doc
+
+
+def onboarding_package_installed(workspace: Any) -> bool:
+    """True once a package has been installed during THIS onboarding (D6 gate)."""
+    doc = get_onboarding(workspace) or {}
+    return bool((doc.get("funnel") or {}).get("package_installed"))
 
 
 # =========================================================================== #

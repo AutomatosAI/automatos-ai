@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -340,6 +341,20 @@ class AgentFactory:
                 self.logger.warning(f"max_output_tokens lookup failed for {model_id}: {e}")
         return DEFAULT_MAX_OUTPUT_TOKENS
 
+    _OPENROUTER_VENDOR_PREFIX = {
+        "openai": "openai/",
+        "anthropic": "anthropic/",
+        "google": "google/",
+        "grok": "x-ai/",
+    }
+
+    def _openrouter_model_id(self, vendor_provider: str, model_id: str) -> str:
+        """Vendor model id -> its OpenRouter form (no-op when already prefixed)."""
+        if "/" in model_id:
+            return model_id
+        prefix = self._OPENROUTER_VENDOR_PREFIX.get(vendor_provider)
+        return f"{prefix}{model_id}" if prefix else model_id
+
     def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> tuple[str, str]:
         """Auto-detect and correct provider-model mismatches.
 
@@ -503,6 +518,36 @@ class AgentFactory:
 
         return None
 
+    def _resolve_trial_decision(self, workspace_id, model_id: str, is_byok: bool) -> bool:
+        """PRD-222 US-005 / PRD-230 US-001 — the trial routing decision at the
+        LLM key-resolution choke point, shared by BOTH the mission factory path
+        (``_create_llm_manager``) and the chat path (``activate_agent``). One gate,
+        no drift.
+
+        Returns ``trial_routed`` — tag the LLMManager so spend accrues to the
+        trial ledger (``manager.py`` gates ``record_trial_spend`` on this flag).
+
+        2026-08-29 (Gerard): model pinning DELETED — the trial is a spend cap,
+        not a model gate. Raises ``TrialExhaustedError`` when the trial is
+        spent. No-op (``False``) for BYOK, non-trial, and system calls.
+        """
+        if not workspace_id or is_byok:
+            return False
+        from services.trial_ledger import (
+            resolve_trial_routing, TrialExhaustedError,
+            ACTION_BLOCKED, ACTION_PLATFORM_TRIAL,
+        )
+        from core.models.workspaces import Workspace
+
+        _ws = self.db_session.query(Workspace).get(workspace_id)
+        routing = resolve_trial_routing(_ws, model_id, is_byok=False)
+        if routing.action == ACTION_BLOCKED:
+            self.logger.info(f"[Trial] Blocking exhausted trial workspace {workspace_id}")
+            raise TrialExhaustedError()
+        if routing.action == ACTION_PLATFORM_TRIAL:
+            return True
+        return False
+
     async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None) -> Tuple[LLMManager, ResolvedKey]:
         """Create LLM manager with API key resolution (PRD-15, PRD-54)."""
         from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
@@ -528,6 +573,22 @@ class AgentFactory:
 
         provider = provider_map[effective_provider]
         resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
+        if not resolved and effective_provider != "openrouter":
+            # 2026-08-29 (Gerard, the Harbourline failure): provider resolution is
+            # KEY-AVAILABILITY-DRIVEN. A vendor model with no direct vendor key
+            # must route via OpenRouter when that key exists — never error while
+            # a capable key sits in the chain. Direct vendor keys, when a user
+            # adds them, still win (this branch only runs when they are absent).
+            or_resolved = await self._resolve_api_key("openrouter", agent_name, workspace_id=workspace_id)
+            if or_resolved:
+                effective_model_id = self._openrouter_model_id(effective_provider, effective_model_id)
+                self.logger.info(
+                    f"[KeyRouting] no {effective_provider} key — routing {effective_model_id} "
+                    f"via OpenRouter (source={or_resolved.source})"
+                )
+                effective_provider = "openrouter"
+                provider = provider_map["openrouter"]
+                resolved = or_resolved
         if not resolved:
             raise ValueError(
                 f"No API key available for {effective_provider}. "
@@ -540,39 +601,10 @@ class AgentFactory:
         # call on a trial workspace: block an exhausted trial with the typed error,
         # else route on the platform key and PIN the model to the trial allowlist.
         # No-op for non-trial workspaces and system calls (workspace_id None).
-        trial_routed = False
-        if workspace_id and not resolved.is_byok:
-            from services.trial_ledger import (
-                resolve_trial_routing, TrialExhaustedError,
-                ACTION_BLOCKED, ACTION_PLATFORM_TRIAL,
-            )
-            from core.models.workspaces import Workspace
-
-            _ws = self.db_session.query(Workspace).get(workspace_id)
-            routing = resolve_trial_routing(_ws, effective_model_id, is_byok=False)
-            if routing.action == ACTION_BLOCKED:
-                self.logger.info(f"[Trial] Blocking exhausted trial workspace {workspace_id}")
-                raise TrialExhaustedError()
-            if routing.action == ACTION_PLATFORM_TRIAL:
-                trial_routed = True
-                if routing.model and routing.model != effective_model_id:
-                    self.logger.info(
-                        f"[Trial] Pinning off-allowlist model {effective_model_id} -> "
-                        f"{routing.model} for workspace {workspace_id}"
-                    )
-                    effective_provider, effective_model_id = self._resolve_provider_for_model(
-                        model_config.provider, routing.model
-                    )
-                    if effective_provider not in provider_map:
-                        raise ValueError(f"Unsupported trial provider: {effective_provider}")
-                    provider = provider_map[effective_provider]
-                    resolved = await self._resolve_api_key(
-                        effective_provider, agent_name, workspace_id=workspace_id
-                    )
-                    if not resolved:
-                        raise ValueError(
-                            f"No platform key available for trial model {effective_model_id}."
-                        )
+        # Shared with the chat path (activate_agent) via _resolve_trial_decision.
+        trial_routed = self._resolve_trial_decision(
+            workspace_id, effective_model_id, resolved.is_byok
+        )
 
         llm_config = LLMConfig(
             provider=provider,
@@ -736,6 +768,7 @@ class AgentFactory:
         workspace_dir: str = "/tmp/automatos_workspace",
         use_orchestrator_llm: bool = False,
         force_llm_tier: Optional[str] = None,
+        workspace_id: Optional[Any] = None,
     ) -> Optional[AgentRuntime]:
         """Load an agent from database and activate it in runtime.
 
@@ -746,7 +779,15 @@ class AgentFactory:
         ``"system_llm"``, overrides the agent's own model with the
         corresponding tier from system_settings. Used by mission
         power modes (Light → system_llm, Max → orchestrator_llm).
+
+        ``workspace_id`` (PRD-230 US-001): the CONVERSATION's workspace, threaded
+        from the chatbot. Auto the system agent carries no ``workspace_id`` of its
+        own, so without this the trial gate and BYOK lookup no-op on chat — the
+        primary surface ran unmetered/unpinned. Falls back to the agent's own
+        workspace for mission and other callers (unchanged behavior there).
         """
+        from services.trial_ledger import TrialExhaustedError
+
         try:
             if agent_id in self.active_agents:
                 self.logger.info(f"Agent {agent_id} already active in runtime")
@@ -758,6 +799,17 @@ class AgentFactory:
             if not db_agent:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
+
+            # PRD-230 US-001 — the effective workspace for key resolution, the trial
+            # gate, and usage tracking. The chat path passes the conversation's
+            # workspace (Auto carries none of its own); every other caller falls back
+            # to the agent's workspace, so their behavior is unchanged.
+            effective_ws_id = workspace_id or getattr(db_agent, "workspace_id", None)
+            if isinstance(effective_ws_id, str):
+                try:
+                    effective_ws_id = uuid.UUID(effective_ws_id)
+                except (ValueError, AttributeError):
+                    effective_ws_id = getattr(db_agent, "workspace_id", None)
 
             # Resolve LLM config: agent's own model_config → orchestrator-tier defaults
             agent_model_config = db_agent.model_config or {}
@@ -860,7 +912,7 @@ class AgentFactory:
                     if original and original != provider_str:
                         model_id_str = f"{original}/{model_id_str}"
                 provider = LLMProvider(provider_str)
-            resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
+            resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=effective_ws_id)
 
             # Fallback: if direct provider has no credential, try OpenRouter
             if (not resolved or not resolved.api_key) and provider_str != "openrouter":
@@ -872,7 +924,16 @@ class AgentFactory:
                     original_provider = llm_config_dict.get("provider", "").lower()
                     model_id_str = f"{original_provider}/{model_id_str}"
                 provider = LLMProvider(provider_str)
-                resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
+                resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=effective_ws_id)
+
+            # PRD-230 US-001 — the SAME trial gate the mission factory uses, on
+            # the chat path (without it Auto ran unmetered). 2026-08-29: model
+            # pinning DELETED (Gerard — the trial is a spend cap, not a model
+            # gate). BYOK bypasses; exhausted trials raise the typed error;
+            # active trials tag the manager so spend accrues.
+            trial_routed = self._resolve_trial_decision(
+                effective_ws_id, model_id_str, resolved.is_byok if resolved else False
+            )
 
             llm_config = LLMConfig(
                 provider=provider,
@@ -888,9 +949,10 @@ class AgentFactory:
             )
             llm_manager = LLMManager(
                 config=llm_config,
-                workspace_id=db_agent.workspace_id,
+                workspace_id=effective_ws_id,
                 agent_id=agent_id,
                 is_byok=resolved.is_byok if resolved else False,
+                trial=trial_routed,
             )
 
             persona_text = ""
@@ -930,6 +992,11 @@ class AgentFactory:
             self.logger.info(f"Activated agent {agent_id} ({db_agent.name}) with {llm_config_dict.get('model')}")
             return agent_runtime
 
+        except TrialExhaustedError:
+            # PRD-230 US-001 — the typed trial-exhausted error must reach the
+            # caller so the chat/mission surface renders the stable error_code.
+            # Never swallow it into a generic "failed to activate" None.
+            raise
         except Exception as e:
             self.logger.error(f"Failed to activate agent {agent_id}: {e}")
             return None

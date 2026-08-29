@@ -256,14 +256,29 @@ def test_migration_chains_onto_current_head():
 
 
 def test_exactly_one_head_after_this_migration():
-    sd = _script_dir()
-    heads = sd.get_heads()
+    heads = _script_dir().get_heads()
     assert len(heads) == 1, f"expected exactly one alembic head, got {heads}"
-    # Later PRDs legitimately stack on top of this revision (PRD-225 already
-    # does) — the invariant is a single head WITH this revision in its
-    # lineage, not that this revision stays the head forever.
-    chain = {rev.revision for rev in sd.walk_revisions(base="base", head=heads[0])}
-    assert NEW_REVISION in chain, f"{NEW_REVISION} missing from head lineage"
+    # FIX (2026-08-29): pinning heads[0] to THIS revision broke the moment the
+    # next migration (prd222_veteran_skip_backfill, PR #633) chained on top —
+    # a guard that fails on every future migration guards nothing. The intent
+    # ("our revision is properly chained into the single-headed graph") is the
+    # ancestry property:
+    sd = _script_dir()
+    chain = set()
+    cursor = [heads[0]]
+    while cursor:
+        rev_id = cursor.pop()
+        if rev_id in chain:
+            continue
+        chain.add(rev_id)
+        rev = sd.get_revision(rev_id)
+        down = rev.down_revision
+        if down is None:
+            continue
+        cursor.extend([down] if isinstance(down, str) else list(down))
+    assert NEW_REVISION in chain, (
+        f"{NEW_REVISION} is not an ancestor of the single head {heads[0]}"
+    )
 
 
 def test_backfill_sql_is_scoped_to_starter():

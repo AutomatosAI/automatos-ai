@@ -259,3 +259,85 @@ def test_largest_variant_within_budget():
     assert worst <= sec.max_tokens, f"largest variant {worst} > cap {sec.max_tokens}"
     # Also assert we did not need to raise the cap above the original 800.
     assert sec.max_tokens == 800
+
+
+# --------------------------------------------------------------------------- #
+# PRD-230 US-002 — capability doctrine v2 ("Auto knows its own shop").
+# The 7 reflexes render on EVERY active stage so Auto never improvises the CSV
+# workaround that motivated this PRD.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("stage", _ACTIVE_STAGES)
+def test_capability_doctrine_renders_on_every_active_stage(stage):
+    low = _render_stage(stage).lower()
+    # (1) Composio + connect-card routing
+    assert "composio" in low and "connect card" in low
+    # (3) scan-on-URL reflex
+    assert "platform_scan_business_site" in low
+    # (4) marketplace-first staffing
+    assert "marketplace-first" in low
+
+
+def test_doctrine_point_1_composio_connect_card_routing():
+    out = _render_stage("teach")
+    assert "Composio" in out
+    assert "connect card" in out.lower()
+    # never apologise / route to the card instead of improvising
+    assert "never apologise" in out.lower() or "route to the card" in out.lower()
+
+
+def test_doctrine_point_2_shopify_two_step_sync_truth():
+    out = _render_stage("proposal")
+    low = out.lower()
+    assert "two-step" in low
+    assert "settings → widget sdk" in low  # the Site appears here
+    assert "knowledge graph" in low        # sync unlocks it (canonical term)
+    assert "sync" in low
+
+
+def test_doctrine_point_3_scan_on_url_immediately():
+    out = _render_stage("questions")
+    assert "platform_scan_business_site" in out
+    assert "url" in out.lower()
+    assert "firecrawl" in out.lower()  # honest-degrade caveat named
+
+
+def test_doctrine_point_4_marketplace_first_staffing():
+    out = _render_stage("building").lower()
+    assert "marketplace-first" in out
+    assert "prebuilt" in out
+    assert "before building custom" in out
+
+
+def test_doctrine_point_5_honest_widget_no_csv_line():
+    out = _render_stage("teach")
+    assert "no CSVs" in out
+    assert "we sync directly" in out
+    assert "widgets and agents" in out
+
+
+def test_doctrine_point_6_basic_plan_comms_early():
+    out = _render_stage("questions").lower()
+    assert "you're on basic while we set up" in out
+    assert "pick your plan together" in out
+
+
+def test_doctrine_point_7_exact_stage_vocabulary_listed():
+    # Auto must never invent a stage — the section names the EXACT vocabulary.
+    from services import onboarding_state
+
+    out = _render_stage("proposal")
+    for stage in onboarding_state.ALL_STAGES:  # the real enum, no drift
+        assert f"`{stage}`" in out, f"stage {stage!r} missing from the doctrine list"
+    assert "never invent" in out.lower()
+
+
+def test_doctrine_present_in_source_for_grep_gate():
+    # The acceptance gate greps the section file directly.
+    for needle in (
+        "connect card", "Composio", "Widget SDK", "Knowledge Graph",
+        "platform_scan_business_site", "marketplace-first", "no CSVs",
+        "you're on Basic while we set up", "not_started", "skipped",
+    ):
+        assert needle in _SOURCE, f"doctrine needle {needle!r} missing from section source"

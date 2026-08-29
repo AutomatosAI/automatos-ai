@@ -1,5 +1,5 @@
 {
-  "route_count": 770,
+  "route_count": 773,
   "routes": [
     {
       "method": "GET",
@@ -1548,6 +1548,18 @@
     {
       "method": "GET",
       "path": "/api/marketplace/llm/providers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/packages"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/packages/{slug}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/packages/{slug}/install"
     },
     {
       "method": "GET",

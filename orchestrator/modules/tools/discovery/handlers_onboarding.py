@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 
 from core.models.workspaces import Workspace
 from services.onboarding_state import (
+    SEGMENT_KEYS,
     InvalidStageTransition,
     advance_onboarding_stage,
+    current_stage,
     get_onboarding,
     public_snapshot,
     record_plan_event,
@@ -40,6 +42,26 @@ async def update_onboarding(
     segment = params.get("segment")
     plan = params.get("plan")
 
+    # Normalize an UNUSABLE segment to absent (live-test 2026-08-29). ``segment``
+    # is LLM-supplied: it arrives as a bare string, or a dict of unrecognized
+    # keys, often enough to matter. ``_clean_segment`` already tolerates that at
+    # the state layer, but ``set_segment`` deliberately RAISES when nothing
+    # recognised survives (so a no-op write can't masquerade as a saved answer) —
+    # and the handler routed such calls straight into it, failing the whole tool
+    # call with "set_segment requires at least one of business/goal/comfort".
+    # Observed in prod paired with a same-stage advance: the advance is dropped
+    # as a no-op, then the junk segment raises, so a benign call errors.
+    # Treating unusable as absent makes each path correct: advance proceeds,
+    # a same-stage no-op returns success, and a call carrying NOTHING usable
+    # gets the honest "at least one is required" message below instead of an
+    # internal function name.
+    if segment is not None and not (
+        isinstance(segment, dict)
+        and any(segment.get(k) is not None for k in SEGMENT_KEYS)
+    ):
+        logger.info("[update_onboarding] segment carries nothing usable — ignoring")
+        segment = None
+
     if not advance_to and not segment and not plan:
         return {
             "success": False,
@@ -51,6 +73,23 @@ async def update_onboarding(
     )
     if not workspace:
         return {"success": False, "error": "workspace not found"}
+
+    # Idempotent same-stage advance (live-test 2026-08-29): the LLM routinely
+    # re-asserts the stage it is already in — e.g. calling advance_to="building"
+    # while building — and the strict monotonic validator raised
+    # "non-forward transition 'building' -> 'building'", which the tool surfaced
+    # as an error. Auto then apologised to the user for a "hiccup" and looped.
+    # Re-asserting the current stage is a benign no-op, not an error: drop the
+    # redundant advance (segment/plan writes below still run). BACKWARD and
+    # UNKNOWN targets are untouched — they still validate-and-error.
+    if advance_to and advance_to == current_stage(workspace):
+        logger.info(
+            "[update_onboarding] advance_to=%s equals current stage — idempotent no-op",
+            advance_to,
+        )
+        advance_to = None
+        if not segment and not plan:
+            return {"success": True, "data": public_snapshot(workspace)}
 
     # Reject a non-assignable plan BEFORE any write — honest coming-soon copy.
     if plan is not None:

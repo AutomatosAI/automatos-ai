@@ -88,10 +88,17 @@ def test_doctrine_block_character_ceiling():
 # ---------------------------------------------------------------------------
 
 def _skill_doctrine_section() -> str:
-    """§17 'The Manager's Doctrine' of the always-on platform-management skill,
-    sliced from its header to the next top-level section (or EOF)."""
+    """'The Manager's Doctrine' section of the always-on platform-management
+    skill, sliced from its header to the next section (or EOF). Located by NAME,
+    not number: v2.3.0 (skills repo) moved it from ops §17 to charter §H, and a
+    literal "## 17." pin would push the next re-organisation into editing this
+    test instead of keeping the doctrine — same lesson as the migration-parent
+    pin. The heading match is apostrophe-agnostic (' vs ’)."""
+    import re
     skill = _SKILL.read_text(encoding="utf-8")
-    start = skill.index("## 17.")            # must exist (US-001 seeded it)
+    m = re.search(r"(?m)^## .*Manager.s Doctrine.*$", skill)
+    assert m, "platform-management skill lost 'The Manager's Doctrine' section"
+    start = m.start()
     nxt = skill.find("\n## ", start + 1)     # -1 when §17 is the last section
     return skill[start:] if nxt == -1 else skill[start:nxt]
 

@@ -120,6 +120,11 @@ from modules.tools.discovery.handlers_marketplace import (
     install_model,
     uninstall_plugin,  # PRD-143 S11
 )
+from modules.tools.discovery.handlers_packages import (  # PRD-230 US-006
+    search_packages,
+    install_package_tool,
+    install_marketplace_agent_tool,
+)
 from modules.tools.discovery.handlers_skills import (
     get_skill_content,
     create_workspace_skill,
@@ -493,6 +498,10 @@ class PlatformActionExecutor:
             "platform_install_plugin": install_plugin,
             "platform_install_skill": install_skill,
             "platform_install_model": install_model,
+            # PRD-230 US-006: package search/install (full-closure, workspace-owned)
+            "platform_search_packages": search_packages,
+            "platform_install_package": install_package_tool,
+            "platform_install_marketplace_agent": install_marketplace_agent_tool,
             # Skill editing (read / create / update / delete)
             "platform_get_skill_content": get_skill_content,
             "platform_create_workspace_skill": create_workspace_skill,
