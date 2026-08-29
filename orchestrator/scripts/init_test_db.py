@@ -20,6 +20,31 @@ from core.models.composio import ComposioConnection, ComposioEntity
 # — the L2 transcript store the memory restart/isolation tests depend on.
 import modules.memory.models  # noqa: F401,E402  (registers MemoryShortTerm on Base)
 
+def _pgvector_available(engine) -> bool:
+    """True when the ``vector`` type exists (after a best-effort CREATE EXTENSION).
+
+    CI's orchestrator-tests job runs on stock postgres:15 (no pgvector package),
+    where CREATE EXTENSION fails; the alembic-from-zero job, the local compose
+    stack (pgvector/pgvector) and prod all have it. The extras below build the
+    vector-free shape on stock postgres — the same doctrine as document_chunks
+    and codegraph_symbols above — and the full shape everywhere else.
+    """
+    from sqlalchemy import text as _sql
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(_sql("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception:  # noqa: BLE001 — extension not installable here
+        pass
+    with engine.connect() as conn:
+        return conn.execute(_sql("SELECT 1 FROM pg_type WHERE typname = 'vector'")).scalar() is not None
+
+
+def _with_embedding(ddl: str, has_vector: bool) -> str:
+    """Fill the ``__EMBEDDING__`` slot: a pgvector column, or nothing on stock postgres."""
+    return ddl.replace("__EMBEDDING__", "embedding vector(4096)," if has_vector else "")
+
+
 def init_db():
     """Create all tables from models."""
     print("🔧 Creating all database tables...")
@@ -60,6 +85,7 @@ def init_db():
     # stock CI service does not have. Tests that exercise that path (full
     # indexing / semantic search) skip when pgvector is unavailable; the
     # table-only tests (list/delete) just need these relations to exist.
+    has_vector = _pgvector_available(engine)
     with engine.begin() as conn:
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS codegraph_projects (
@@ -192,7 +218,7 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT NOW()
             )
         """))
-        conn.execute(_raw_sql("""
+        conn.execute(_raw_sql(_with_embedding("""
             CREATE TABLE IF NOT EXISTS knowledge_items (
                 id SERIAL PRIMARY KEY,
                 kb_type_id INTEGER REFERENCES kb_types(id) ON DELETE CASCADE,
@@ -202,7 +228,7 @@ def init_db():
                 title VARCHAR(500),
                 content TEXT NOT NULL,
                 summary TEXT,
-                embedding vector(4096),
+                __EMBEDDING__
                 metadata JSONB DEFAULT '{}',
                 quality_score FLOAT DEFAULT 0.0,
                 importance_score FLOAT DEFAULT 0.0,
@@ -218,7 +244,7 @@ def init_db():
                 accessed_at TIMESTAMP,
                 indexed_at TIMESTAMP
             )
-        """))
+        """, has_vector)))
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS tool_usage_logs (
                 id SERIAL PRIMARY KEY,
