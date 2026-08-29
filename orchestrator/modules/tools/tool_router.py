@@ -408,9 +408,21 @@ def _apply_onboarding_prior(
         merged = _apply_page_prior(
             narrowing, ONBOARDING_PRIOR_ACTIONS, is_admin, is_super_admin
         )
+        pinned = [a for a in ONBOARDING_PRIOR_ACTIONS if a in (merged[0] or [])]
+        logger.info(
+            "[tool-router] onboarding prior applied — %d/%d spine actions in enum: %s",
+            len(pinned), len(ONBOARDING_PRIOR_ACTIONS), pinned,
+        )
         return merged[0], "onboarding_prior", merged[2]
     except Exception:
-        logger.debug("[tool-router] onboarding prior failed — narrowing unchanged", exc_info=True)
+        # WARNING, not debug (2026-08-29): this handler was invisible in prod,
+        # so a failing prior looked identical to a prior that correctly no-oped
+        # — and onboarding losing its tools is exactly the symptom we then
+        # cannot explain from logs. Fail-soft behaviour is unchanged.
+        logger.warning(
+            "[tool-router] onboarding prior FAILED — onboarding tools not pinned",
+            exc_info=True,
+        )
         return narrowing
 
 
@@ -842,6 +854,19 @@ def get_tools_for_agent(
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
         narrowing = _narrow_dispatcher_actions_sync(query, is_admin, is_super_admin)
+        # PARITY WITH THE ASYNC TWIN (live-test 2026-08-29). The async entry
+        # applies the page prior (PRD-221 S4) and the onboarding prior
+        # (PRD-222/#647) after narrowing; this sync entry applied NEITHER, so
+        # any caller routed here got an unpinned surface — onboarding's own
+        # tools missing from the dispatcher enum while the section was still
+        # telling Auto to call them by name. Two entry points into one
+        # composition, only one hardened, is the same shape as the stripped
+        # dispatcher (#654). Both priors are gate-filtered and capped inside,
+        # and both no-op when their preconditions are absent.
+        narrowing = _apply_page_prior(narrowing, None, is_admin, is_super_admin)
+        narrowing = _apply_onboarding_prior(
+            narrowing, session_used, workspace_id, is_admin, is_super_admin
+        )
         return _get_tools_for_agent_core(
             agent_id=agent_id,
             session_used=session_used,
