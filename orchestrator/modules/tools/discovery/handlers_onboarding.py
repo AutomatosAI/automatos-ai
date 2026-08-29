@@ -15,6 +15,7 @@ from core.models.workspaces import Workspace
 from services.onboarding_state import (
     InvalidStageTransition,
     advance_onboarding_stage,
+    current_stage,
     get_onboarding,
     public_snapshot,
     record_plan_event,
@@ -51,6 +52,23 @@ async def update_onboarding(
     )
     if not workspace:
         return {"success": False, "error": "workspace not found"}
+
+    # Idempotent same-stage advance (live-test 2026-08-29): the LLM routinely
+    # re-asserts the stage it is already in — e.g. calling advance_to="building"
+    # while building — and the strict monotonic validator raised
+    # "non-forward transition 'building' -> 'building'", which the tool surfaced
+    # as an error. Auto then apologised to the user for a "hiccup" and looped.
+    # Re-asserting the current stage is a benign no-op, not an error: drop the
+    # redundant advance (segment/plan writes below still run). BACKWARD and
+    # UNKNOWN targets are untouched — they still validate-and-error.
+    if advance_to and advance_to == current_stage(workspace):
+        logger.info(
+            "[update_onboarding] advance_to=%s equals current stage — idempotent no-op",
+            advance_to,
+        )
+        advance_to = None
+        if not segment and not plan:
+            return {"success": True, "data": public_snapshot(workspace)}
 
     # Reject a non-assignable plan BEFORE any write — honest coming-soon copy.
     if plan is not None:
