@@ -1,6 +1,6 @@
 # PRD-151: Storage Decoupling — One S3 Code Path, MinIO as the Local Default
 
-**Status:** Draft
+**Status:** Draft — **ABSORBED 2026-08-29 into PRD-233 S4** (open-core wave; see `PRD-WAVE-OPEN-CORE.md`). The endpoint seam (`S3_ENDPOINT_URL`) landed via PRD-176 F089; the factory consolidation + deletion of the three bespoke fallbacks builds under PRD-233. Do not build from this doc — the §2 boto3 census remains the reference list (re-verify at build; #625 removed the voice entries).
 **Author:** Gerard Kavanagh (with Auto)
 **Date:** 2026-06-09
 **Type:** Refactor / Consolidation (centralize a scattered dependency; delete bespoke fallbacks)
