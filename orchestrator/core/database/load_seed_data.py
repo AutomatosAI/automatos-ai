@@ -209,6 +209,23 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             except Exception as e:
                 print(f"  ⚠️  Error loading plugin categories: {e}")
 
+            # PRD-233 S3: local-edition first-run content — the workspace +
+            # operator rows, Auto, a starter roster, one demo Playbook and a
+            # welcome Deliverable. Gated INSIDE the seed on AUTH_EDITION=local
+            # + DEFAULT_WORKSPACE_ID (saas ⇒ no-op); idempotent-refresh, never
+            # overwrites edits. Package-qualified imports so the seed shares the
+            # app's ORM session/model objects (module mode: python -m ...).
+            print("\n📂 Loading local-edition first-run content...")
+            try:
+                from core.seeds.seed_local_first_run import seed_local_first_run
+                from core.database.database import get_db_session as _local_session
+
+                with _local_session() as db:
+                    outcome = seed_local_first_run(db)
+                    print(f"  ✅ Local first-run: {outcome}")
+            except Exception as e:
+                print(f"  ⚠️  Error loading local-edition first-run content: {e}")
+
         print("\n" + "=" * 60)
         print("✅ SEED DATA LOADED SUCCESSFULLY!")
         print(f"   {cred_count} credential types + system settings + models + skills")
