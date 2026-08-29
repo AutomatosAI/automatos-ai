@@ -4,6 +4,8 @@ You are executing **PRD-232**, one story per iteration, unattended. Branch **`ra
 
 **CONTEXT.** The 2026-08-29 deep review (spec §2, file:line evidence) found the tool-selection pipeline ~80% built with four wiring inversions: the `platform_execute` dispatcher is STRIPPED on the graph branch; the graph runs under the wrong flag; the signal recorder is dark; intent clusters are write-only and affinities cluster-blind. You fix the wiring, author the synthetic utterance corpus, seed the graph, make learning real, and prep the eval. Decisions §6 are **LOCKED** — do not re-litigate them.
 
+**RVW-2 RULING (2026-08-29 evening):** Gerard chose option (C) — the two-layer graph (global text-free prior + per-tenant overlay), now PRD-232 §6.5, amending PRD-177's per-tenant lock. P232-RVW-2 is UNBLOCKED and rewritten in prd-232.json — build it; do not re-raise the §12 block.
+
 ## Read first, every iteration
 
 1. `scripts/ralph/prd-232.json` — the BINDING contract (anchors, traps, locked decisions). First story with un-DONE ACs.
