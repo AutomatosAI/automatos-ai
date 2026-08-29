@@ -815,6 +815,24 @@ class AutoBrain:
 
         msg_lower = message.lower().strip()
 
+        # ── Tier 0: onboarding pin (PRD-222) ──
+        # The onboarding spine lives ONLY in the full ContextService path (the
+        # OnboardingSection + the platform tools that advance the stage). The
+        # ATOM lane bypasses both, and every tier below is onboarding-blind —
+        # the Tier-3 rubric reads a business intro ("We're X, we sell Y…") as
+        # a greeting and says atom, then Tier 1 caches that verdict for 24h.
+        # While THIS workspace is mid-onboarding, Auto owns the turn with full
+        # context: forced ≥ MOLECULE, RESPOND (never delegate/assign away the
+        # spine), "platform" hint so the onboarding tools survive narrowing.
+        # Checked BEFORE the cache and never cached itself — the stage moves.
+        if self._onboarding_active():
+            return ComplexityAssessment(
+                complexity=Complexity.MOLECULE, action=Action.RESPOND,
+                reasoning="Onboarding active — full context path (spine + platform tools)",
+                confidence=1.0, needs_memory=False, tool_hints=["platform"],
+                needs_multi_agent=False,
+            )
+
         # ── Tier 1: Redis cache lookup (<5ms) ──
         cached = self._cache_lookup(msg_lower)
         if cached:
@@ -830,6 +848,39 @@ class AutoBrain:
         llm_result = await self._llm_classify(message, conversation_length)
         self._cache_store(msg_lower, llm_result)
         return llm_result
+
+    def _onboarding_active(self) -> bool:
+        """True while this workspace's onboarding stage is non-terminal.
+
+        One PK lookup on the already-open session (the OnboardingSection loads
+        the same row later on the full path). Fail-soft False — a load error
+        must never break classification, it just classifies normally.
+        """
+        try:
+            from core.models.workspaces import Workspace
+            from services import onboarding_state
+
+            ws = (
+                self._db.query(Workspace)
+                .filter(Workspace.id == self._workspace_id)
+                .first()
+            )
+            if ws is None:
+                return False
+            # Strict: only a KNOWN non-terminal stage string pins the turn — a
+            # corrupt doc (or a non-Workspace object) classifies normally.
+            stage = onboarding_state.current_stage(ws)
+            return (
+                isinstance(stage, str)
+                and stage in onboarding_state.ALL_STAGES
+                and stage not in onboarding_state.TERMINAL_STAGES
+            )
+        except Exception:
+            logger.debug(
+                "[AutoBrain] onboarding check failed — classifying normally",
+                exc_info=True,
+            )
+            return False
 
     # ------------------------------------------------------------------
     # Tier 2: Fast heuristics
