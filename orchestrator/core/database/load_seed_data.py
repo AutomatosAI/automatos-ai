@@ -122,9 +122,8 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load System Settings (PRD-25)
             print("\n📂 Loading system settings...")
             try:
-                sys.path.insert(0, str(Path(__file__).parent.parent))
-                from seeds.seed_system_settings import seed_system_settings
-                from database.database import get_db_session
+                from core.seeds.seed_system_settings import seed_system_settings
+                from core.database.database import get_db_session
                 
                 with get_db_session() as db:
                     created, updated = seed_system_settings(db)
@@ -136,7 +135,7 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load LLM Models
             print("\n📂 Loading LLM models...")
             try:
-                from seeds.seed_models import seed_models
+                from core.seeds.seed_models import seed_models
                 seed_models()
                 print("  ✅ LLM models seeded")
             except Exception as e:
@@ -145,7 +144,7 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load Skills and Patterns
             print("\n📂 Loading skills and patterns...")
             try:
-                from seeds.seed_skills import seed_skills, seed_patterns
+                from core.seeds.seed_skills import seed_skills, seed_patterns
                 seed_skills()
                 seed_patterns()
                 print("  ✅ Skills and patterns seeded")
@@ -155,8 +154,8 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load Personas
             print("\n📂 Loading personas...")
             try:
-                from seeds.seed_personas import seed_personas
-                from database.database import get_db_session as _get_db_session
+                from core.seeds.seed_personas import seed_personas
+                from core.database.database import get_db_session as _get_db_session
 
                 with _get_db_session() as db:
                     created, updated = seed_personas(db)
@@ -171,7 +170,7 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # reference) — so they run only into an EMPTY catalog.
             print("\n📂 Loading marketplace catalog...")
             try:
-                from database.database import get_db_session as _mk_session
+                from core.database.database import get_db_session as _mk_session
                 from sqlalchemy import text as _sql
                 with _mk_session() as db:
                     catalog_rows = db.execute(_sql("SELECT count(*) FROM marketplace_items")).scalar() or 0
@@ -185,13 +184,13 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             except Exception as e:
                 print(f"  ⚠️  Error loading marketplace agents: {e}")
             try:
-                from seeds.seed_shopify_agents import seed_shopify_agents
+                from core.seeds.seed_shopify_agents import seed_shopify_agents
                 seed_shopify_agents()
                 print("  ✅ Shopify agents seeded")
             except Exception as e:
                 print(f"  ⚠️  Error loading Shopify agents: {e}")
             try:
-                from seeds.seed_packages import seed_packages
+                from core.seeds.seed_packages import seed_packages
                 created, updated = seed_packages()
                 print(f"  ✅ Packages: {created} created, {updated} updated")
             except Exception as e:
@@ -200,8 +199,8 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load Plugin Categories
             print("\n📂 Loading plugin categories...")
             try:
-                from seeds.seed_plugin_categories import seed_plugin_categories
-                from database.database import get_db_session as __get_db_session
+                from core.seeds.seed_plugin_categories import seed_plugin_categories
+                from core.database.database import get_db_session as __get_db_session
 
                 with __get_db_session() as db:
                     created, updated = seed_plugin_categories(db)
