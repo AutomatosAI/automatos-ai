@@ -190,6 +190,84 @@
       "priority": 13,
       "passes": true,
       "notes": "scripts/eval/tool_routing/: eval_set.jsonl regenerated (47->77) from eval_seed.yaml, which gained 6 utterance-derived queries (incl. the VECTOR case) + 12 abstain rows. Abstain is a per-row expectation (abstain: true, empty correct_actions): seed_eval_set validates it (empty correct_actions required), the jsonl row carries `abstain`, run_eval._call_model uses tool_choice='auto' for abstain rows so the model can decline, and score._is_correct counts a no-call correct / any call wrong for abstain (and _is_in_set counts abstain rows in-set so they don't drag the surface metric). seed_telemetry skips abstain rows (no synthetic execution for a no-call). Build+unit only — no DB, no network, no eval run (Wave D is human-applied)."
+    },
+    {
+      "id": "P232-RVW-1",
+      "severity": "CRITICAL",
+      "title": "US-014 regressed 5 PRD-143 surface/scale tests on the REQUIRED CI job (base green, branch red)",
+      "description": "The required orchestrator-tests job is RED on the branch head (gh run 33264107121) while the base fix/main-ci-wave-drift is GREEN (run 33230270680). US-014 promotion-as-prior changed the promoted/enum surface contract platform-wide (tool_router.py:716-737 — narrowing ranks exclude_promoted=False; first_class_names = pins union ranked-promoted; to_dispatcher_schema(exclude_promoted=False, exclude_names=first_class)). 5 pre-existing PRD-143 tests that encode the OLD contract (every promoted attaches first-class; dispatcher enum == exclude-promoted ranked set) now fail. They are UNMODIFIED by the diff, existed and PASSED on base CI (verified in run 33230270680), and are OUTSIDE the acceptance script changed-test scope, so local acceptance exited 0 (false green). §6.2 LOCKED promotion-as-prior AUTHORIZES the new behavior — these are stale tests to reconcile to the new contract, NOT code to revert. su fail-closed is INTACT (the su-not-in-enum assertions still pass; only the promoted-first-class assertions fail). Code-review (HIGH) also found the US-014 reachability AC is untested for the steady state: test_prd232_us014_promotion_prior.py::test_unpinned_unranked_promoted_absent_from_first_class_but_in_enum only runs with allowed_names=None (narrowing OFF); with a realistic narrowed allow-list a promoted-not-pinned-not-ranked action is absent from BOTH first-class schemas and the narrowed enum this turn (reachable only via platform_find_tools), and _first_class_names docstring (tool_router.py:245-256) overstates 'stays reachable via the dispatcher enum'.",
+      "evidence": "FAILED on required orchestrator-tests: tests/test_prd143_su_surface.py::test_su_tool_absent_from_openai_tools_by_default (assert _OPERATOR_PROMOTED in names, L190); ::test_su_tool_present_for_super_admin_principal (assert _SU_PROMOTED in names, L254); tests/test_prd143_selection_at_scale.py::test_dispatcher_enum_matches_ranked_set[create an agent] (assert promoted_name in surface, L545); [invite a member to the workspace] + [show me the logs] (set(enum)==set(ranked_names), L535). Source: orchestrator/modules/tools/tool_router.py:716-737, :245-256; orchestrator/modules/tools/discovery/action_registry.py to_first_class_schemas/to_dispatcher_schema.",
+      "acceptanceCriteria": [
+        "The required orchestrator-tests CI job is GREEN for HEAD, verified via gh run (NOT the local changed-test subset).",
+        "test_prd143_su_surface.py reconciled to the §6.2 contract: promoted-not-pinned actions asserted reachable via the dispatcher enum (not first-class); the su exclusion assertions (su NOT in enum, su NOT in names) PRESERVED byte-for-byte — tier fail-closed must not weaken.",
+        "test_prd143_selection_at_scale.py::test_dispatcher_enum_matches_ranked_set reconciled to the §6.2 contract: enum = narrowed top-K WITH promoted competing, minus first-class; promoted may be first-class (ranked/pinned) OR in the enum. Do NOT change tool_router.py to restore unconditional-all-promoted-first-class (that reverts US-014).",
+        "Add a US-014 reachability test with a REALISTIC narrowed allowed_names that EXCLUDES a promoted action, proving that action stays reachable via platform_find_tools — the allowed_names=None case alone does not satisfy the 'no action becomes unreachable' AC.",
+        "Correct the _first_class_names docstring (tool_router.py:245-256) so it no longer claims non-first-class promoted actions 'stay reachable via the dispatcher enum' in the narrowed steady state."
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "US-004/US-007/US-014 all carry passes:true despite the required job being RED — those flags are inaccurate. The behavior change here is §6.2-LOCKED (authorized); reconcile the stale PRD-143 golden tests to it, do not revert the code."
+    },
+    {
+      "id": "P232-RVW-2",
+      "severity": "HIGH",
+      "title": "US-004 excludes global used_after edges — 2 PRD-143 graph_seed tests RED + the seed writes edges no tenant can read",
+      "description": "US-004 _query_edges (graph_router.py:498-501) admits workspace_id IS NULL rows ONLY for edge_type='meta_sibling'. Spec-compliant, but it makes ALL global (workspace_id IS NULL) used_after edges unreadable — for a tenant read (only exact-ws + meta_sibling) AND for the workspace_id=None system read (only meta_sibling). seed_graph(workspace_id=None) delegates to edge_builder.build_edges(workspace_id=None) (seed_tool_routing_graph.py:65-83), and the passing test_seed_backfills_edges_from_logs shows build_edges(workspace_id=X) stamps the edge workspace_id=X — so a default human-applied seed run with NO --workspace-id produces GLOBAL used_after edges that NO tenant can read post-US-004. Two pre-existing PRD-143 tests exercising global used_after routing now fail on the required CI job (base green). This is not merely stale tests: it is an unreconciled seed/nightly-vs-read gap that can silently make the learned+seeded used_after graph write-only.",
+      "evidence": "FAILED on required orchestrator-tests: tests/test_prd143_graph_seed.py::test_seeded_graph_routes_common_intent (L451-458 — _run_seed() with NO workspace_id, then reads WS_A; get_agent expansion missing); ::test_real_used_after_outranks_meta (L604-610 — global used_after excluded, real_chain missing). Source: orchestrator/modules/tools/discovery/graph_router.py:498-501; orchestrator/scripts/seed_tool_routing_graph.py:65-83; orchestrator/core/services/edge_builder.py build_edges.",
+      "acceptanceCriteria": [
+        "The required orchestrator-tests CI job is GREEN for HEAD.",
+        "Document whether edge_builder.build_edges / seed_graph writes GLOBAL (workspace_id=None) used_after edges when run without a workspace_id, and whether the nightly recompute keys edges by each log's workspace_id or globally.",
+        "Prove seeded/nightly used_after edges are still READABLE after US-004 via a positive read test through the REAL _query_edges — no write-only used_after path may remain.",
+        "Reconcile: either the seed/nightly writes per-tenant used_after edges (so they survive the meta_sibling-only NULL admission), or the two graph_seed tests are moved to tenant-scoped scenarios AND the global-used_after loss is explicitly signed off.",
+        "DECISION (Gerard, §12): if the intended human-applied seed run produces global used_after edges, BLOCK — Gerard decides seed-per-tenant vs accepting the loss of global used_after cold-start (US-007 routing depends on it). Do not silently rewrite the tests to hide the gap."
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "US-004 note claims passes:true; the required job is RED on these two tests. meta_sibling globals still cross tenants correctly; only used_after globals are affected."
+    },
+    {
+      "id": "P232-RVW-3",
+      "severity": "HIGH",
+      "title": "US-007 migration made prd232 the new alembic head — prd225 single-head guard RED on required CI",
+      "description": "The authorized migration prd232_cluster_provenance (down_revision='prd225_s1_asks_on_grants', prd232_cluster_provenance.py:25) correctly chains onto prd225 and is the new single head. But test_prd225_asks_model.py::test_prd225_revision_chains_onto_prior_head hardcodes heads == ('prd225_s1_asks_on_grants',) (L49-52), so any migration on top of prd225 breaks it. This test is unmodified by the diff, PASSED on base CI, is outside the acceptance changed-test scope, and is NOT one of #643's two protected files. alembic heads is still exactly 1 (prd232) — a stale guard, not a rival head. Ironically the test's own docstring warns against hard-coding the head.",
+      "evidence": "FAILED on required orchestrator-tests: tests/test_prd225_asks_model.py::test_prd225_revision_chains_onto_prior_head (assert heads == ('prd225_s1_asks_on_grants',), L50). Source: orchestrator/alembic/versions/prd232_cluster_provenance.py:25.",
+      "acceptanceCriteria": [
+        "The required orchestrator-tests CI job is GREEN for HEAD.",
+        "Update test_prd225_asks_model.py::test_prd225_revision_chains_onto_prior_head to assert the CURRENT single head is prd232_cluster_provenance while proving prd225_s1_asks_on_grants stays on-chain and reachable.",
+        "alembic ScriptDirectory.get_heads() returns exactly ONE head (prd232_cluster_provenance); no new migration is added; none of #643's protected files (test_prd222_w2s1_plan_tiers.py, authz_sweep_probe.py) are touched."
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "US-007's own test_single_alembic_head_at_our_revision (prd232 head) and prd225's guard (prd225 head) are mutually exclusive; the prd225 guard must move to the new head."
+    },
+    {
+      "id": "P232-RVW-4",
+      "severity": "HIGH",
+      "title": "US-010 cluster hot-actions bypass admin-tier gating (fail-closed violation, latent until the flip)",
+      "description": "GraphRouter._merge_cluster_hot_actions (graph_router.py:428-446) appends a matched cluster's action_names_hot into entry_nodes with NO admin/super_admin re-check — unlike organic entry nodes which are role-filtered by rank_actions(exclude_admin, include_super_admin) at graph_router.py:191-198. The only downstream net, _drop_super_admin_chains (graph_router.py:714-731, called at :221-222), filters super_admin_only ONLY — never admin_only. The US-007 seed _load_action_categories (seed_tool_routing_graph.py:126-139) excludes su but NOT admin, and organic clusters are built from cross-tenant aggregate logs, so action_names_hot can legitimately contain admin_only actions. Net: rank_chains(exclude_admin=True) can return an admin_only action to a caller that explicitly excluded admin — violating US-014 AC 'tier gating (super_admin_only, admin) unchanged and fail-closed' (PRD-232 §110). Currently masked because both live consumers re-gate downstream (PlatformActionsSection re-filters exclude_admin=True; smart_tool_router only narrows an already role-gated available_tools) and TOOL_ROUTING_GRAPH is default OFF — but it is a latent fail-open that activates exactly when the flag flips (this PRD's goal) or when any future caller trusts rank_chains' exclude_admin contract.",
+      "evidence": "orchestrator/modules/tools/discovery/graph_router.py:428-446 (_merge_cluster_hot_actions, no role filter), :281 (call site), :714-731 (_drop_super_admin_chains drops super_admin_only only), :221-222; orchestrator/scripts/seed_tool_routing_graph.py:126-139 (admin_only not excluded from seeded clusters).",
+      "acceptanceCriteria": [
+        "Cluster hot actions are filtered through the SAME admin/super_admin eligibility predicate as organic entry nodes (reuse ActionSemanticIndex eligibility / the registry role check), OR _drop_super_admin_chains is generalized to also drop admin_only chains when the caller's exclude_admin=True.",
+        "New test: a matched cluster whose action_names_hot contains an admin_only action does NOT surface that action from rank_chains(..., exclude_admin=True); the existing super_admin exclusion behavior is unchanged (fail-closed).",
+        "The required orchestrator-tests CI job stays GREEN for HEAD."
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Code-review HIGH #1. Defense-in-depth currently holds (no live exploit today), but the graph layer must be fail-closed on admin_only on its own — the flip is what this PRD is building toward."
+    },
+    {
+      "id": "P232-RVW-5",
+      "severity": "MEDIUM",
+      "title": "acceptance-prd232.sh is structurally false-green — its test net cannot see unchanged-file regressions",
+      "description": "The acceptance script backend-test step (scripts/ralph/acceptance-prd232.sh:26-35) runs ONLY the changed test files (CHT = git diff --name-only ...tests/*.py). All 8 required-CI regressions in P232-RVW-1..3 live in UNCHANGED test files (test_prd143_su_surface, test_prd143_selection_at_scale, test_prd143_graph_seed, test_prd225_asks_model), so the script exits 0 while the required orchestrator-tests job is RED. This is the exact 'locally-SKIPPING -> false-green while required CI is RED' trap; it let US-004/US-007/US-014 be marked passes:true against red CI.",
+      "evidence": "scripts/ralph/acceptance-prd232.sh:26-35 (CHT scope); branch run 33264107121 orchestrator-tests=failure vs base run 33230270680=success.",
+      "acceptanceCriteria": [
+        "The acceptance gate additionally asserts the required orchestrator-tests job conclusion is success for HEAD (via gh run) OR explicitly runs the four regression-prone suites (test_prd143_su_surface, test_prd143_selection_at_scale, test_prd143_graph_seed, test_prd225_asks_model), so an unchanged-file regression cannot pass acceptance green.",
+        "A local acceptance PASS can no longer coexist with a RED required CI job for the same HEAD."
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Process hardening — without it the next Ralph wave repeats the same false-green that hid these 8 regressions."
     }
   ]
 }
