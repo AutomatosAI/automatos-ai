@@ -73,6 +73,41 @@ def _summarize_args(args: Any) -> str:
     return f"{type(args).__name__}"
 
 
+# Result keys marking a deliberate STOP rather than a fault. A stop carries its
+# user-facing copy in ``message`` (not ``error``), and that copy is the whole
+# point of the stop — losing it renders the stop as "Unknown error".
+STOP_MARKERS: Tuple[str, ...] = (
+    "requires_confirmation",   # PRD-143 S15 — a confirmation ask
+    "onboarding_restricted",   # PRD-230 D6 — one package during onboarding
+    "over_quota",              # PRD-230 D9 — the honest plan conversation
+)
+
+
+def select_failure_message(result: Dict[str, Any]) -> str:
+    """The message a failed tool result should show the LLM.
+
+    ``error`` wins when present. Otherwise, for a deliberate STOP, the handler's
+    ``message`` is surfaced — gated on an explicit marker so no arbitrary
+    handler text can leak. Everything else stays "Unknown error".
+
+    Live-test 2026-08-29: D6's one-package copy and D9's over-quota plan
+    conversation both live in ``message``, so Auto was handed the literal string
+    "Unknown error" and INVENTED a cause for the user ("I need the Shopify
+    connection active first"). D9's contract is explicitly "never a silent
+    block" — dropping the message made it precisely that.
+    """
+    if not isinstance(result, dict):
+        return "Unknown error"
+    error = result.get("error")
+    if error:
+        return str(error)
+    if any(result.get(marker) for marker in STOP_MARKERS):
+        message = result.get("message")
+        if message:
+            return str(message)
+    return "Unknown error"
+
+
 def _is_fatal_dependency_error(error: Optional[str]) -> bool:
     if not error:
         return False
@@ -422,9 +457,21 @@ def _apply_onboarding_prior(
         merged = _apply_page_prior(
             narrowing, ONBOARDING_PRIOR_ACTIONS, is_admin, is_super_admin
         )
+        pinned = [a for a in ONBOARDING_PRIOR_ACTIONS if a in (merged[0] or [])]
+        logger.info(
+            "[tool-router] onboarding prior applied — %d/%d spine actions in enum: %s",
+            len(pinned), len(ONBOARDING_PRIOR_ACTIONS), pinned,
+        )
         return merged[0], "onboarding_prior", merged[2]
     except Exception:
-        logger.debug("[tool-router] onboarding prior failed — narrowing unchanged", exc_info=True)
+        # WARNING, not debug (2026-08-29): this handler was invisible in prod,
+        # so a failing prior looked identical to a prior that correctly no-oped
+        # — and onboarding losing its tools is exactly the symptom we then
+        # cannot explain from logs. Fail-soft behaviour is unchanged.
+        logger.warning(
+            "[tool-router] onboarding prior FAILED — onboarding tools not pinned",
+            exc_info=True,
+        )
         return narrowing
 
 
@@ -891,6 +938,21 @@ def get_tools_for_agent(
             query, is_admin, is_super_admin,
             workspace_id=str(workspace_id) if workspace_id is not None else None,
         )
+        # PARITY WITH THE ASYNC TWIN (live-test 2026-08-29). The async entry
+        # applies the page prior (PRD-221 S4) and the onboarding prior
+        # (PRD-222/#647) after narrowing; this sync entry applied NEITHER, so
+        # any caller routed here got an unpinned surface — onboarding's own
+        # tools missing from the dispatcher enum while the section was still
+        # telling Auto to call them by name. Two entry points into one
+        # composition, only one hardened, is the same shape as the stripped
+        # dispatcher (#654). Both priors are gate-filtered and capped inside,
+        # and both no-op when their preconditions are absent.
+        # (PRD-232 integration: narrowing stays workspace-keyed — US-003's single
+        # ranking pass is scoped per tenant — and the #662 priors apply on top.)
+        narrowing = _apply_page_prior(narrowing, None, is_admin, is_super_admin)
+        narrowing = _apply_onboarding_prior(
+            narrowing, session_used, workspace_id, is_admin, is_super_admin
+        )
         return _get_tools_for_agent_core(
             agent_id=agent_id,
             session_used=session_used,
@@ -1305,9 +1367,18 @@ class ToolRouter:
             # PRD-143 S15: a confirmation stop is not an opaque failure — the
             # executor's message (action + permission level) must reach the
             # LLM so Auto can relay the ask instead of "Unknown error".
-            error = result.get("error") or (
-                result.get("message") if result.get("requires_confirmation") else None
-            ) or "Unknown error"
+            #
+            # PRD-230 (live-test 2026-08-29): the same is true of the two
+            # package STOPS, which carry their copy in ``message`` and were
+            # therefore rendered to Auto as literally "Unknown error":
+            #   * onboarding_restricted — D6, one package during onboarding
+            #   * over_quota           — D9, the honest plan conversation
+            # D9's whole contract is "never a silent block, always the honest
+            # conversation"; losing the message made it exactly the silent
+            # block it forbids, and Auto — given no reason — invented one for
+            # the user ("I need the Shopify connection active first").
+            # Gated on explicit markers, so no arbitrary handler text leaks.
+            error = select_failure_message(result)
             error_type = result.get("error_type")
             fatal_error = bool(result.get("fatal")) or _is_fatal_dependency_error(error)
             llm_error = (
