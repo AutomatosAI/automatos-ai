@@ -525,7 +525,7 @@ jobs:
   # NEXT new orphan. Stdlib only — no pip install, no Postgres service, so it is
   # fast and cannot flake. The pure diff core and the planted-divergence fixtures
   # live in orchestrator/tests/test_prd209_schema_drift.py (run by the required
-  # orchestrator-tests lane, so a new orphan also reddens that suite).
+  # pytest suite, so a new orphan also reddens that suite).
   #
   # NON-REQUIRED at introduction (the workflow's established posture); flipping it
   # to a required check once green is the repo admin's call (PRD-209 Q2).
