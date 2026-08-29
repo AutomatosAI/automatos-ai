@@ -84,7 +84,9 @@ class PlatformActionsSection(BaseSection):
                         )
                         # Fall through to existing embedding path
 
-                filtered = await self._build_filtered(query, exclude_names=exclude_names)
+                filtered = await self._build_filtered(
+                    query, exclude_names=exclude_names, workspace_id=ctx.workspace_id
+                )
                 if filtered:
                     return filtered
 
@@ -291,13 +293,18 @@ class PlatformActionsSection(BaseSection):
         return content
 
     async def _build_filtered(
-        self, query: str, exclude_names: Optional[list] = None
+        self, query: str, exclude_names: Optional[list] = None,
+        workspace_id: Optional[str] = None,
     ) -> Optional[str]:
         """Render only the top-K actions ranked against ``query``.
 
         Returns the filtered markdown string on success, or ``None`` if any
         step fails so ``render()`` can fall back to the full catalog. Never
         raises.
+
+        ``workspace_id`` scopes the shared per-turn rank_actions memo (PRD-232
+        US-003) so this catalog render reuses the same cosine ranking the
+        dispatcher narrowing already computed for the turn.
         """
         try:
             # Lazy imports avoid a circular dep with the action registrar.
@@ -315,6 +322,7 @@ class PlatformActionsSection(BaseSection):
                 exclude_admin=True,
                 exclude_promoted=True,
                 include_super_admin=False,
+                workspace_id=workspace_id,
             )
             if not ranked:
                 logger.debug(

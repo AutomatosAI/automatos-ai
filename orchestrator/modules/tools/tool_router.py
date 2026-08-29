@@ -128,6 +128,7 @@ async def _rank_actions_for_dispatcher_async(
     exclude_admin: bool,
     exclude_promoted: bool,
     include_super_admin: bool = False,
+    workspace_id: Optional[str] = None,
 ) -> Optional[List[str]]:
     """Return the top-K action names for ``query`` from ActionSemanticIndex,
     or None on any failure (caller falls back to the full enum).
@@ -158,6 +159,7 @@ async def _rank_actions_for_dispatcher_async(
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
+            workspace_id=workspace_id,
         )
         if not ranked:
             return None
@@ -178,6 +180,7 @@ def _rank_actions_for_dispatcher(
     exclude_admin: bool,
     exclude_promoted: bool,
     include_super_admin: bool = False,
+    workspace_id: Optional[str] = None,
 ) -> Optional[List[str]]:
     """Sync compatibility entry — bridges to the async core.
 
@@ -193,6 +196,7 @@ def _rank_actions_for_dispatcher(
                 exclude_admin=exclude_admin,
                 exclude_promoted=exclude_promoted,
                 include_super_admin=include_super_admin,
+                workspace_id=workspace_id,
             )
         )
     except Exception as exc:
@@ -255,6 +259,7 @@ async def _narrow_dispatcher_actions_async(
     query: Optional[str],
     is_admin: bool,
     is_super_admin: bool,
+    workspace_id: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Resolve (allowed_names, narrow_reason, from_pins) for the dispatcher
     enum — async-native (awaits ranking on the caller's loop).
@@ -262,6 +267,9 @@ async def _narrow_dispatcher_actions_async(
     from_pins marks a closed-pins fallback surface: the allow-list may then
     contain promoted names that to_dispatcher_schema should admit. A flag-off
     operator choice is always honored as open-full.
+
+    ``workspace_id`` scopes the shared per-turn rank_actions memo (PRD-232
+    US-003) so this narrowing and the prompt catalog reuse one cosine ranking.
     """
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
     if skip_reason is not None:
@@ -274,6 +282,7 @@ async def _narrow_dispatcher_actions_async(
         exclude_admin=not is_admin,
         exclude_promoted=True,
         include_super_admin=is_super_admin,
+        workspace_id=workspace_id,
     )
     if allowed is None:
         return _fallback_narrowing("rank_actions returned empty or raised")
@@ -396,6 +405,7 @@ def _narrow_dispatcher_actions_sync(
     query: Optional[str],
     is_admin: bool,
     is_super_admin: bool,
+    workspace_id: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Sync twin of _narrow_dispatcher_actions_async (thread bridge)."""
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
@@ -409,6 +419,7 @@ def _narrow_dispatcher_actions_sync(
         exclude_admin=not is_admin,
         exclude_promoted=True,
         include_super_admin=is_super_admin,
+        workspace_id=workspace_id,
     )
     if allowed is None:
         return _fallback_narrowing("rank_actions returned empty or raised")
@@ -769,7 +780,10 @@ def get_tools_for_agent(
     try:
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
-        narrowing = _narrow_dispatcher_actions_sync(query, is_admin, is_super_admin)
+        narrowing = _narrow_dispatcher_actions_sync(
+            query, is_admin, is_super_admin,
+            workspace_id=str(workspace_id) if workspace_id is not None else None,
+        )
         return _get_tools_for_agent_core(
             agent_id=agent_id,
             session_used=session_used,
@@ -795,6 +809,7 @@ async def _maybe_log_shadow_surface(
     is_super_admin: bool,
     shipped_tools: List[Dict[str, Any]],
     trace_id: str,
+    workspace_id: Optional[str] = None,
 ) -> None:
     """PR-C eval data (tool-surface review): log — never ship — what the
     relevance-gated surface WOULD have been for this turn.
@@ -820,6 +835,7 @@ async def _maybe_log_shadow_surface(
             exclude_admin=not is_admin,
             exclude_promoted=False,  # the would-be surface spans promoted too
             include_super_admin=is_super_admin,
+            workspace_id=workspace_id,
         )
         registry = get_action_registry()
         cap = int(getattr(config, "TOOL_SURFACE_HYBRID_CAP", 6))
@@ -855,7 +871,10 @@ async def get_tools_for_agent_async(
     try:
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
-        narrowing = await _narrow_dispatcher_actions_async(query, is_admin, is_super_admin)
+        ws_key = str(workspace_id) if workspace_id is not None else None
+        narrowing = await _narrow_dispatcher_actions_async(
+            query, is_admin, is_super_admin, workspace_id=ws_key
+        )
         # PRD-221 S4: fold the current page's manifest actions into the narrowed
         # enum so page-relevant tools survive even when the query ranks them out.
         # Gate-filtered by the SAME predicate as ranking — a manifest can never
@@ -873,7 +892,9 @@ async def get_tools_for_agent_async(
             start_time=start_time,
         )
         tools = _apply_tier_exposure(session_used, workspace_id, tools, trace_id)
-        await _maybe_log_shadow_surface(query, is_admin, is_super_admin, tools, trace_id)
+        await _maybe_log_shadow_surface(
+            query, is_admin, is_super_admin, tools, trace_id, workspace_id=ws_key
+        )
         return tools
     except Exception as e:
         logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")

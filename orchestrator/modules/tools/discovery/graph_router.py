@@ -155,13 +155,17 @@ class GraphRouter:
         if cached is not None:
             return cached
 
-        # Step 1: entry nodes from ActionSemanticIndex
+        # Step 1: entry nodes from ActionSemanticIndex. PRD-232 US-003: pass
+        # workspace_id so this entry rank reuses the turn's shared cosine
+        # ranking (the graph slices its top-5 from the one computation the
+        # dispatcher narrowing / catalog already ran).
         entry_nodes = await self._semantic_index.rank_actions(
             query,
             top_k=_ENTRY_TOP_K,
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
+            workspace_id=workspace_id,
         )
         if not entry_nodes:
             return []

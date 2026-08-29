@@ -152,15 +152,23 @@ def _install_low_level_stubs():
     # config — singleton with the PRD-138 flags. tool_router reads via
     # `from config import config` lazily, so a module called "config"
     # exposing a `config` attribute is enough.
-    if "config" not in sys.modules or not hasattr(sys.modules["config"], "config"):
-        config_mod = types.ModuleType("config")
+    #
+    # Always shadow with OUR fake — the snapshot above preserves any prior (real)
+    # config for restore. A `not in sys.modules` guard here would bind
+    # _FAKE_CONFIG_CLS to the REAL Config class whenever an earlier-collected
+    # test already imported config (e.g. anything importing a context section);
+    # a later `_FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = ...` toggle would then set
+    # an attribute that `from config import config` never reads back, and the
+    # flag-off tests would see stale values. Same class of leak the
+    # modules.tools.execution stub above documents; fixed the same way.
+    config_mod = types.ModuleType("config")
 
-        class _FakeConfig:
-            SEMANTIC_TOOL_ROUTING = False
-            SEMANTIC_TOOL_ROUTING_TOP_K = 15
+    class _FakeConfig:
+        SEMANTIC_TOOL_ROUTING = False
+        SEMANTIC_TOOL_ROUTING_TOP_K = 15
 
-        config_mod.config = _FakeConfig()
-        sys.modules["config"] = config_mod
+    config_mod.config = _FakeConfig()
+    sys.modules["config"] = config_mod
     global _FAKE_CONFIG_MOD
     _FAKE_CONFIG_MOD = sys.modules["config"]
     fake_config_cls = type(sys.modules["config"].config)
@@ -429,7 +437,7 @@ def test_run_coroutine_blocking_inside_running_loop():
 
 
 def test_rank_actions_for_dispatcher_happy_path():
-    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.91),
             ("platform_create_agent", 0.83),
@@ -513,7 +521,7 @@ def test_get_tools_for_agent_with_query_narrows_enum(caplog):
     """AC: query + flag on → dispatcher enum is the ranked subset."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.95),
             ("platform_create_agent", 0.80),
@@ -594,7 +602,7 @@ def test_get_tools_for_agent_excludes_admin_when_not_admin():
     regardless of query / ranking output."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         # Even if the ranker tried to surface an admin action, the schema
         # builder should drop it.
         return [
@@ -624,7 +632,7 @@ def test_get_tools_for_agent_async_narrows_enum_without_bridge(caplog):
     and the thread-bridge helper is never engaged."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.95),
             ("platform_create_agent", 0.80),
@@ -691,7 +699,7 @@ def test_get_tools_for_agent_async_no_query_full_enum():
 
 
 def test_rank_actions_for_dispatcher_async_happy_path():
-    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.91),
             ("platform_create_agent", 0.83),
