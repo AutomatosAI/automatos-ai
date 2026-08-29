@@ -10,7 +10,7 @@ served route+method with the authorization facts the sweep asserts on:
 - ``wsadmin``  — ``require_workspace_admin`` present (PRD-185 S12)
 - ``perm``     — the ``require_workspace_permission`` marker string, if gated
 - ``admin_in_handler`` — the endpoint body asserts the shared admin check
-  (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx)``)
+  (``assert_admin(ctx)`` / ``_assert_admin(ctx)`` / ``_require_admin(ctx…)``)
 - ``own_gate_in_handler`` — the endpoint body carries its own explicit
   auth-type gate (today: credentials resolve)
 
@@ -82,7 +82,7 @@ def main() -> None:
                     "perm": perm,
                     "admin_in_handler": (
                         "assert_admin(ctx)" in src
-                        or "_require_admin(ctx)" in src
+                        or "_require_admin(ctx" in src
                         # api/gdpr.py's hand-rolled gate — PRD-196 S7 owns its
                         # consolidation; classified, not touched (PRD-195).
                         or "_require_workspace_admin(ctx)" in src
