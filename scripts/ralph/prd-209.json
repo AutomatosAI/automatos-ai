@@ -1,0 +1,157 @@
+{
+ "project": "Automatos AI Platform — PRD-209 Open-Core Phase 0: fresh-clone boot + honest CI",
+ "branchName": "ralph/prd-209-fresh-clone-boot",
+ "description": "SCOPE = docs/PRDS/PRD-209-PHASE2-WAVE-4-FRESH-CLONE-BOOT-HONEST-CI.md (seeded on this branch; program context docs/PRDS/PRD-WAVE-OPEN-CORE.md). Grounded @ origin/main 182cd6739 — re-verify every anchor by grep at build. BAKED OWNER DECISIONS (2026-08-29): Q1 = squash-spirit under FOUR HARD CONSTRAINTS (see US-002 — prod lineage must keep upgrading with NO manual prod step; if full-forest deletion cannot satisfy that, the merge-to-one-head + stamped-initdb variant IS the approved implementation, record which was built); Q6 = DEFAULT_WORKSPACE_ID reuses the EXISTING CI seed convention from orchestrator/tests (init_test_db.py seeds the local-edition workspace — match its id/type exactly; workspaces.id column type is the source of truth). BINDING RULES: SaaS path byte-identical (AUTH_EDITION default stays saas; zero behavioural change when saas — this wave touches compose/envs/docs/workflows/scripts/alembic-lineage/guards ONLY, no runtime code paths beyond the boot guard's existing contract); NEVER strand a stamped database — Railway prod sits at the current 12-head frontier and `alembic upgrade heads` must keep working from there; public repo — NO secrets in any committed file (envs/*.defaults carry only non-secret defaults; compose keeps the three `:?` secrets required); do NOT touch the required lanes' definitions (orchestrator-tests, ioc-scan) — only the named non-required lanes; no os.getenv outside config.py; no new tables/columns (US-002 is lineage-only, schema-shape unchanged); NEVER git add -A/./-u, never git stash -u; PURE tests locally (@integration skips; real-Postgres + boot lanes run in CI per-story push). Commit prefix feat(prd-209).",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "S1 — commit the entrypoint exec bit + tracked-mode guard",
+   "description": "docker-entrypoint.sh is tracked 100644 (verify: git ls-files -s docker-entrypoint.sh); compose bind-mounts it over the image's chmod +x stub (docker-compose.yml:~188) so the backend dies at exec. Flip the tracked mode (git update-index --chmod=+x docker-entrypoint.sh — a mode-only change, no content edit) and add a pure guard test that reads `git ls-files -s docker-entrypoint.sh` and asserts mode 100755 (contrast: services/workspace-worker/entrypoint.sh is already 100755 — the bit commits fine in this repo).",
+   "acceptanceCriteria": [
+    "git ls-files -s docker-entrypoint.sh shows 100755 on the branch",
+    "test_prd209_entrypoint_mode guard exists and passes (fails on 100644 — prove by reasoning in commit body, not by breaking the tree)",
+    "No content change to docker-entrypoint.sh in the diff",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "docker-entrypoint.sh",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "S2 — one clean alembic head; fresh clones boot; stamped databases keep upgrading",
+   "description": "THE WAVE'S ONLY M STORY — read PRD-209 S2 + Q1 first. Today: ~168 files under orchestrator/alembic/versions/ with 12 leaf heads; init_complete_schema.sql seeds compose Postgres with NO alembic_version stamp, so a fresh volume replays the whole forest and crashes (relation marketplace_installs does not exist). Deliver ALL FOUR, mechanism your choice: (1) `alembic heads` == exactly 1; (2) a FRESH EMPTY database reaches the head via the supported path (initdb + stamp + upgrade, or a clean baseline replay — whichever you build, the alembic-from-zero lane in test.yml must exercise exactly that supported path and pass); (3) a database stamped at the CURRENT 12-head frontier (= Railway prod) upgrades to the new head with plain `alembic upgrade heads`, NO manual stamp/step — prove with a lineage test that walks down_revision links from the new head and asserts every current frontier revision id is an ancestor; (4) init_complete_schema.sql gains the alembic_version stamp matching the new head id. A pure AST guard asserts len(heads)==1 over the versions dir. If you delete revision files, constraint (3) fails — so DON'T; the approved shape is a merge revision collapsing the 12 heads + the stamp (record in the commit body which variant you built and why it satisfies all four).",
+   "acceptanceCriteria": [
+    "alembic heads == 1 (AST guard test green; no plural heads anywhere)",
+    "Lineage test: every pre-change frontier head is an ancestor of the new single head (prod upgrade path proven)",
+    "init_complete_schema.sql contains an alembic_version INSERT matching the new head revision id (grep + test)",
+    "alembic-from-zero lane's path is the supported fresh path and passes in CI on this branch's push",
+    "No table/column DDL added or changed by this story (lineage-only — diff proves it)",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "orchestrator/alembic/versions/",
+    "orchestrator/core/database/init_complete_schema.sql",
+    "orchestrator/tests/",
+    ".github/workflows/test.yml"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "S7 — local edition becomes the compose default (env_file + honest defaults vocab)",
+   "description": "docker-compose.yml uses no env_file anywhere and sets no AUTH_EDITION — a human's plain `docker compose up` defaults to saas and validate_auth_edition() (config.py:~1536-1575) aborts demanding Clerk keys. The committed envs/api.defaults has NO consumer and still speaks the never-landed PRD-150 vocabulary (EDITION=oss, AUTH_PROVIDER=local). Fix api.defaults to shipped vocabulary: AUTH_EDITION=local, DEFAULT_WORKSPACE_ID=<the Q6 convention value from the CI seed>, keep S3_VECTORS_ENABLED=false, DELETE the dead EDITION/AUTH_PROVIDER keys; set NEXT_PUBLIC_AUTH_EDITION=local in envs/frontend.defaults; wire env_file: [envs/api.defaults] on the backend service and envs/frontend.defaults on the frontend service. Compose `environment:` entries override env_file — keep the three `:?` secrets in environment (still required, still explicit) and ensure no environment: line re-pins AUTH_EDITION/Clerk vars in a way that defeats the defaults (remove the Clerk passthrough lines or make them optional `${VAR:-}` so absence is fine in local). NO secrets in the defaults files (public repo).",
+   "acceptanceCriteria": [
+    "docker-compose.yml backend service has env_file with envs/api.defaults; frontend service with envs/frontend.defaults (source guard test)",
+    "envs/api.defaults: AUTH_EDITION=local + DEFAULT_WORKSPACE_ID present; zero EDITION=/AUTH_PROVIDER= keys (guard test)",
+    "Clerk env absence no longer blocks compose config resolution (no `:?` on Clerk vars; grep-proof in commit body)",
+    "The three secrets POSTGRES_PASSWORD/REDIS_PASSWORD/API_KEY remain `:?`-required (guard)",
+    "No secret values in envs/*.defaults (guard greps for obvious key patterns; reviewer verifies)",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "docker-compose.yml",
+    "envs/api.defaults",
+    "envs/frontend.defaults",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-004",
+   "title": "S3 — de-mask the boot lanes + fix the smoke script's missing DEFAULT_WORKSPACE_ID",
+   "description": "smoke-fresh-clone.yml runs the smoke script under continue-on-error: true (line ~51) and the alembic-from-zero replay step in test.yml is likewise masked — boot death reports green. Drop continue-on-error from BOTH. Fix scripts/ci/smoke-fresh-clone.sh: it exports AUTH_EDITION=local (line ~41) but NOT DEFAULT_WORKSPACE_ID, which validate_auth_edition() hard-requires in local — export it (same Q6 convention value) so the guard passes; align the script's header comment (it still says 'blocked on W5' — W5 landed). Add a source guard asserting continue-on-error is absent from the smoke boot step and the from-zero step, and that the smoke script exports DEFAULT_WORKSPACE_ID. Sequence note: this story lands AFTER US-001/002/003 so the de-masked lanes go green, not red.",
+   "acceptanceCriteria": [
+    "Zero continue-on-error in smoke-fresh-clone.yml's boot step and test.yml's from-zero step (guard test)",
+    "smoke-fresh-clone.sh exports DEFAULT_WORKSPACE_ID matching the api.defaults value (guard)",
+    "smoke-fresh-clone lane GREEN on this branch's push (CI evidence in commit body — the lane is now unmasked and must actually pass)",
+    "Required lanes' definitions (orchestrator-tests, ioc-scan) untouched (diff proves)",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    ".github/workflows/smoke-fresh-clone.yml",
+    ".github/workflows/test.yml",
+    "scripts/ci/smoke-fresh-clone.sh",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-005",
+   "title": "S5 — smoke asserts the clone serves, not just breathes",
+   "description": "The smoke script asserts only /health 200. Extend it past liveness to a readiness probe proving the local edition constructs its document backend (PRD-197 S5's pgvector-local leg, merged 9cfbf9005): with AUTH_EDITION=local + S3_VECTORS_ENABLED=false, assert a readiness signal that is true only when the local RAG path constructs (a /health payload field if one exists, else the lightest existing readiness route — REUSE, do not add a new endpoint unless nothing exists, and if you must add one it is a trivial read-only route added to the route manifest with the count bump).",
+   "acceptanceCriteria": [
+    "Smoke script asserts a readiness signal tied to the local document backend constructing (not just /health 200)",
+    "Signal verified false-when-broken by reasoning in the commit body (what failure makes it false)",
+    "If a route was added: route-manifest.json updated with count bump (route_count == len(routes))",
+    "smoke-fresh-clone lane still GREEN on push",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "scripts/ci/smoke-fresh-clone.sh",
+    "orchestrator/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-006",
+   "title": "S4 — schema-drift CI lane (the net for four writers of schema truth)",
+   "description": "No lane catches models ↔ migration-head divergence (July's 'ALTER-ed-but-never-CREATE-d table' shipped undetected). Build scripts/ci/schema_drift_check.py + a non-required workflow job: construct the schema two ways (applied-migrations shadow vs declared init_complete_schema.sql, or a fresh Base.metadata.create_all dump — pick the pair that catches the known failure class) and diff; exit non-zero on drift. Pure-testable core: test_schema_drift_detects_divergent_column feeds fixture DDL where a model column is absent from the migration head and asserts drift is reported. Wire the job into CI as its own lane (non-required for now — flipping required is the owner's Q2 action).",
+   "acceptanceCriteria": [
+    "schema_drift_check.py exists with the pure diff core + fixture test green",
+    "A CI job runs it (new lane or a test.yml job) and is green on this branch",
+    "Planted-divergence fixture proves the check bites (test)",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "scripts/ci/",
+    ".github/workflows/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-007",
+   "title": "S6 — exactly one frontend lockfile",
+   "description": "frontend/ tracks package-lock.json + yarn.lock + pnpm-lock.yaml → nondeterministic fresh-clone builds. Confirm which package manager the frontend-ci lane actually uses (grep the workflow — Q5 says keep package-lock.json/npm, verify), delete the other two, add a guard asserting exactly one lockfile tracked under frontend/. Frontend vitest + build must be green after (proves the kept lockfile is the working one).",
+   "acceptanceCriteria": [
+    "Exactly one lockfile tracked under frontend/ (guard test; matches the CI installer — cite the workflow line in the commit body)",
+    "Frontend vitest suite green",
+    "Frontend build green",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "frontend/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-008",
+   "title": "S9 — one canonical compose file (delete the six drifted infrastructure copies)",
+   "description": "infrastructure/docker-compose.yml + .core.yml + .data.yml + .landing.yml + .memory.yml + .voice.yml predate the root stack (.voice references services decommissioned by #625). Before deleting: grep the repo (docs/, scripts/, .github/) for references to infrastructure/docker-compose and repoint or delete those references in the same commit; verify nothing unique lives in the copies that the root file lacks (expected: nothing — they predate it; if something IS unique and load-bearing, fold it into the root file first and say so). Delete all six; guard asserts exactly one docker-compose*.yml tracked repo-wide.",
+   "acceptanceCriteria": [
+    "All six infrastructure/docker-compose*.yml deleted; zero dangling references (grep-proof in commit body)",
+    "Guard test: exactly one tracked docker-compose*.yml repo-wide",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "infrastructure/",
+    "orchestrator/tests/",
+    "docs/"
+   ]
+  },
+  {
+   "id": "US-009",
+   "title": "S8 — QUICKSTART tells the truth (written last, against the merged reality)",
+   "description": "QUICKSTART.md claims 'docker-compose up --build … That's it! No .env file needed' while compose hard-fails on three `:?` secrets. Rewrite against what US-001..008 made true: the 3 required secrets, one optional LLM key (BYOK), `docker compose up`, what you get (no login, single workspace, local RAG on pgvector, MinIO storage, which ports), what does NOT work without extra keys (Composio integrations — one honest line, PRD-233 owns the fix), troubleshooting pointers. Align README.md's quickstart section. Add the doc guard: every `${VAR:?}`-required variable in docker-compose.yml appears in QUICKSTART.md (parse both files; today it fails).",
+   "acceptanceCriteria": [
+    "QUICKSTART.md documents the real flow incl. all three `:?` secrets (doc guard test green)",
+    "README quickstart section consistent (no 'no .env needed' claim anywhere — grep)",
+    "Honest Composio limitation line present",
+    "Orchestrator suite at documented baseline"
+   ],
+   "files": [
+    "QUICKSTART.md",
+    "README.md",
+    "orchestrator/tests/"
+   ]
+  }
+ ]
+}
