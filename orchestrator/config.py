@@ -1059,6 +1059,25 @@ class Config:
     TOOL_ROUTING_GRAPH: bool = os.getenv("TOOL_ROUTING_GRAPH", "false").lower() == "true"
     TOOL_ROUTING_GRAPH_MIN_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_GRAPH_MIN_CONFIDENCE", "0.6"))
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
+    # PRD-232 US-010: cluster-aware reads — the graph expresses what it learned.
+    # CLUSTER_MATCH_THRESHOLD is the cosine floor for assigning a live query to the
+    # nearest ToolRoutingIntentCluster centroid (GraphRouter.rank_chains). Below it,
+    # the query matches NO cluster and routing falls back to the embedding floor
+    # (per-intent affinities do not apply) — a deliberate miss, never a wrong guess.
+    TOOL_ROUTING_GRAPH_CLUSTER_MATCH_THRESHOLD: float = float(os.getenv("TOOL_ROUTING_GRAPH_CLUSTER_MATCH_THRESHOLD", "0.6"))
+    # When a cluster matches, per-intent affinity rows (intent_cluster_id == match)
+    # apply at full weight; cluster-blind rows (intent_cluster_id IS NULL) still
+    # apply as a WEAK global prior, discounted by this factor (0..1). Keeps a
+    # global succeeds/fails signal informative without letting it override the
+    # per-intent evidence the cluster match unlocked.
+    TOOL_ROUTING_GRAPH_GLOBAL_AFFINITY_DISCOUNT: float = float(os.getenv("TOOL_ROUTING_GRAPH_GLOBAL_AFFINITY_DISCOUNT", "0.5"))
+    # failed_after edges (a succeeded→b errored, within 2 steps) are read as an
+    # EXPANSION PENALTY: a chain [a, b] whose transition reliably fails is de-ranked
+    # by penalty = failed_after.confidence (Wilson lower bound of the failure rate)
+    # * this weight. Scales how hard a learned failure suppresses a chain. This is
+    # what turns the previously write-only failed_after rows into a live signal
+    # (PRD-232 US-010c — no write-only tables).
+    TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY: float = float(os.getenv("TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY", "1.0"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
     # PRD-177 S3 (F018): Composio action-metadata sync scheduler + fail-CLOSED

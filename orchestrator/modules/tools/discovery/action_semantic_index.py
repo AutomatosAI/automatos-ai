@@ -323,6 +323,29 @@ class ActionSemanticIndex:
             logger.debug("query-embed cache write failed", exc_info=True)
         return vec, False, False
 
+    async def embed_query(
+        self, query: str, embed_timeout_s: Optional[float] = None
+    ) -> Tuple[Optional[List[float]], str]:
+        """Resolve the query embedding + canonical model key (PRD-232 US-010).
+
+        The GraphRouter uses this to match a live query to the nearest intent
+        cluster centroid. It reuses the SAME bounded/cached embed as
+        ``rank_actions`` (``_embed_query_bounded``), so within a turn — where the
+        entry-node ranking has already embedded this exact query text — this is a
+        Redis cache hit, not a second upstream embed. Returns ``(vector, model_key)``
+        with ``vector`` None on timeout/failure, so the caller falls back to the
+        embedding floor (no cluster) rather than guessing.
+        """
+        model_key = self._cache_model_key()
+        if embed_timeout_s is None:
+            embed_timeout_s = self._embed_timeout_s()
+        elif embed_timeout_s <= 0:
+            embed_timeout_s = None
+        vec, _cache_hit, _timed_out = await self._embed_query_bounded(
+            query, model_key=model_key, timeout_s=embed_timeout_s
+        )
+        return vec, model_key
+
     async def rank_actions(
         self,
         query: str,

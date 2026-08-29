@@ -80,6 +80,7 @@ class _StubAffinity:
     agent_id = _Col("agent_id")
     workspace_id = _Col("workspace_id")
     affinity_type = _Col("affinity_type")
+    intent_cluster_id = _Col("intent_cluster_id")  # PRD-232 US-010b
 
     def __init__(self, **kw):
         for k, v in kw.items():
