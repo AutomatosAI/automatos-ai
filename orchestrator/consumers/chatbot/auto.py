@@ -169,7 +169,6 @@ class ComplexityAssessment:
     reasoning: str
     target_agent_id: Optional[int] = None
     target_agent_name: Optional[str] = None
-    matched_tools: List[str] = field(default_factory=list)
     confidence: float = 0.0
     # PRD-68: Fields consumed by smart_orchestrator.py
     needs_memory: bool = False
@@ -867,10 +866,15 @@ class AutoBrain:
         # MOLECULE: Platform queries
         platform_tool = self._match_platform_query(msg_lower)
         if platform_tool:
+            # PRD-232 US-008: the phrase map is a fast-path BOOSTER, not a gate.
+            # It classifies MOLECULE + tool_hints=["platform"] so the platform
+            # surface is loaded; the specific tool is now chosen by the ranker
+            # from the seeded corpus (US-005/006), not pre-selected here. The
+            # dead ``matched_tools`` field (only ever logged) is gone.
             assessment = ComplexityAssessment(
                 complexity=Complexity.MOLECULE, action=Action.RESPOND,
                 reasoning=f"Platform query ({platform_tool})",
-                matched_tools=[platform_tool], tool_hints=["platform"],
+                tool_hints=["platform"],
                 confidence=0.90, needs_memory=False, needs_multi_agent=False,
             )
             logger.info(

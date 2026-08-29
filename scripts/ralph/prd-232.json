@@ -108,14 +108,14 @@
       "title": "The phrase map becomes data, not a gate (+ kill the dead field)",
       "description": "ComplexityAssessment.matched_tools is written (auto.py:873) and read only by a log f-string (api/chat.py:397) — dead. Either consume it as a rank boost in the shared ranking pass (preferred if trivial) or delete the field and its write. _match_platform_query stays as a fast-path booster; its vocabulary is now IN the corpus (US-005), so the hint branch's accidental dispatcher rescue (smart_tool_router.py:181 'platform' substring) must be covered by a PARITY TEST proving US-001's fix keeps the dispatcher present whether or not the phrase map hits.",
       "acceptanceCriteria": [
-        "grep proves matched_tools is either consumed by ranking or fully deleted (no dead writes)",
-        "Parity test: same query with and without a phrase-map hit → dispatcher present in both surfaces",
-        "Fast-path behaviour parity: existing phrase-map hits still classify MOLECULE with tool_hints=['platform']",
-        "Branch-scoped pytest green"
+        "DONE — matched_tools FULLY DELETED (option b): field removed from ComplexityAssessment (auto.py), the MOLECULE fast-path write dropped (keeps tool_hints=['platform']), the dead api/chat.py log read switched to tool_hints. Chose delete over rank-boost to avoid a second boost mechanism (US-014 owns promotion boost) and because the corpus (US-005/006) now carries the vocabulary. test_matched_tools_field_and_writes_are_gone: not in __dataclass_fields__, and no code-level 'matched_tools='/'.matched_tools' in auto.py/api/chat.py (comments excluded); grep: zero matched_tools= kwargs repo-wide.",
+        "DONE — test_dispatcher_present_on_phrase_map_hit_and_miss: route(tool_hints=['platform']) (hit) AND route(tool_hints=[]) (miss) both keep platform_execute. test_dispatcher_survival_not_a_platform_substring_accident: a NON-platform hint ('email') also keeps the dispatcher — proving US-001's always-include set, not the old \"platform\" substring accident, is what preserves it.",
+        "DONE — test_phrase_map_hit_classifies_molecule_with_platform_hint (_match_platform_query('list my agents') matches; a novel sentence misses -> would fall to the LLM tier live) + test_molecule_fastpath_shape_is_platform_hint_only (the fast-path assessment carries tool_hints=['platform'], no matched_tools). Updated test_w2s9_reasoning_entry + test_golden_journeys to assert the surviving MOLECULE+tool_hints=['platform'] parity (dropping the removed-field assertions incl. the stale platform_list_recipes one).",
+        "DONE — cd orchestrator && python3 -m pytest -q tests/test_prd232_us008_phrase_map_not_a_gate.py -> 5 passed; auto/chat/reasoning/golden/assign-lane regression (us008+golden+w2s9+us001+prd224) = 92 passed, 6 skipped."
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Deleted the dead ComplexityAssessment.matched_tools (written by the MOLECULE fast-path, read only by an api/chat.py log line). The phrase map (_match_platform_query) stays a fast-path BOOSTER — still classifies MOLECULE + tool_hints=['platform'] so the platform surface loads — but no longer pre-selects a specific tool; the ranker chooses it from the seeded corpus. The parity suite proves the dispatcher's survival is US-001's always-include mechanism (present on hit, miss, and non-platform-hint surfaces), not the old accidental 'platform' substring rescue. Files: auto.py (field + write), api/chat.py (log), test_golden_journeys.py + test_w2s9_reasoning_entry.py (assertions updated), new tests/test_prd232_us008_phrase_map_not_a_gate.py."
     },
     {
       "id": "US-009",
