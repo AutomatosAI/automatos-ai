@@ -1,0 +1,69 @@
+{
+ "project": "Automatos AI Platform — PRD-231 Auto's Context Diet (identity/operations split)",
+ "branchName": "ralph/prd-231-context-diet",
+ "description": "STACKED branch: ralph/prd-231-context-diet ← feat/auto-skill-seed-sync (PR #640, unmerged — its sync-auto-skill.py + regenerated v2.3.0 seed are IN your tree; build ON them). Spec seeded at docs/PRDS/PRD-231-AUTO-CONTEXT-DIET.md. CONTEXT: US-001 (the skills-repo split) is ALREADY DONE by the supervisor — automatos-skills PR #38 (branch skill/auto-v2.4.0-context-diet, checked out in the sibling ../automatos-skills working tree): team/auto/SKILL.md is now the CHARTER ONLY (v2.4.0, §A–H + a 10-line cookbook index + the load-trigger instruction) and team/auto-ops/SKILL.md is NEW (name platform-operations, v1.0.0, the whole §0–§19 cookbook; its frontmatter description is the L1 trigger text). Your job is the automatos-ai half: US-002..US-006. MEASURED TARGET: soul+skill standing cost 27,996 tok/turn → ~10,400 (charter ~8.5k always-on + slim soul ~1.3k; the 16.5k cookbook loads only via the EXISTING platform_load_skill trigger). ZERO NEW MACHINERY — the L1 catalog + load_skill (S2) already exist (modules/context/sections/skills.py renders non-core skills as L1 lines; actions_skills.py:30 platform_load_skill; handlers_skill_runtime.py:65). KEY ANCHORS (RE-VERIFY by grep before relying): SKILL_CORE_ALWAYS_ON consumed at modules/context/sections/skills.py:33+155-165 (config override supported) — platform-operations must NEVER be added to it (that is the whole point); _BUILTIN_PATHS map at modules/agents/services/skill_loader.py:931 (gains the second entry); seed_auto_agent.py — _upsert_platform_management_skill (advisory lock + name/builtin-core/workspace-NULL upsert), _assign_skill_to_agent (ON CONFLICT DO NOTHING), and CRITICALLY _default_persona() composition: VERIFY whether it appends MANAGER_DOCTRINE_BLOCK to the soul-file text in code — the 226 tests (test_prd226_doctrine.py) assert the nine doctrine anchors in the PERSONA; the working hypothesis is persona = soul file + doctrine block appended programmatically, so slimming the FILE leaves those tests green. If that hypothesis is WRONG (the doctrine lives in the file), STOP and re-plan the soul slim so 226's tests are updated deliberately in the same story — never weaken them silently. seed_auto_agent is invoked lazily per-workspace (api/chat.py ~:156, api/workspaces.py ~:353, core/auth/hybrid.py ~:370) and its ensure-assignment runs on EVERY call — so adding the second skill's ensure automatically covers EXISTING workspaces on their next chat; no separate backfill. BAKED DECISIONS (Gerard 2026-08-29): one ops skill in v1 (no per-domain split yet); MANAGER_DOCTRINE_BLOCK KEPT as-is (tiny reinforcement; only the SOUL FILE loses its five rulebook sections); customized tenant souls untouched (backfill skips them BY DESIGN — the slim is the new DEFAULT only). BINDING RULES: ZERO new alembic revisions; NO new tables; NO new routes (route manifest untouched); NO edits to ../automatos-skills from this run (supervisor owns that repo; you READ it for sync only); NO edits to SKILL_CORE_ALWAYS_ON; NO direct writes to tenant agent rows (the lazy seed path + hash-guarded backfill are the only writers); no os.getenv outside orchestrator/config.py; PURE tests (@integration skips cleanly; real Postgres in CI per-story push); canonical terms (Auto is a proper noun; Playbook/Mission/Task/Deliverable); NEVER 'git add -A'/'git add .'/'-u' (node_modules untracked, NOT gitignored — stage explicit paths); never 'git stash -u'. Frontend untouched this PRD.",
+ "userStories": [
+  {
+   "id": "US-002",
+   "title": "Sync script handles both files + --check mode; regenerate both seeds",
+   "description": "Extend scripts/sync-auto-skill.py (already in your tree from #640) from one hardcoded pair to a SOURCES table: team/auto/SKILL.md → orchestrator/core/seeds/platform-management-skill.md AND team/auto-ops/SKILL.md → orchestrator/core/seeds/platform-operations-skill.md. Keep the existing behaviour per file: frontmatter-intact copy, generated-file banner as the FIRST BODY LINE (both platform readers strip frontmatter before hashing — preserve that property), per-file self-checks that REFUSE to write on failure (charter: the nine doctrine anchors + the dispatch-contract opener + must NOT contain '# Platform Operations Reference'; ops: must contain '## 0.' and '## 19.' section heads and the name platform-operations in frontmatter). Add to the banner a recorded body sha256 (first 12 hex) so US-005 can detect hand-edits without the sibling repo. Add --check: recompute both targets in memory and exit non-zero listing any file that differs from disk (no writes). Then RUN the sync to regenerate the charter seed (v2.4.0 content — it SHRINKS) and create the new platform-operations seed; commit both.",
+   "acceptanceCriteria": [
+    "sync-auto-skill.py syncs both pairs from a table; per-file self-checks enforced (unit-test the refusal paths with tampered fixtures)",
+    "--check exits 0 on fresh sync, non-zero (naming the file) after any seed byte-flip (test)",
+    "Banner carries source path, source version, and body sha12; both readers' frontmatter-strip hash symmetry preserved (test mirrors seed_auto_agent + _refresh_builtin_if_stale split logic)",
+    "Both seeds regenerated and committed: charter seed contains no '# Platform Operations Reference'; platform-operations-skill.md exists with the cookbook",
+    "cd orchestrator && python3 -m pytest -q green (branch-scoped)"
+   ],
+   "files": ["scripts/sync-auto-skill.py", "orchestrator/core/seeds/platform-management-skill.md", "orchestrator/core/seeds/platform-operations-skill.md", "orchestrator/tests/"]
+  },
+  {
+   "id": "US-003",
+   "title": "Seed + assign platform-operations as a NON-core skill; second _BUILTIN_PATHS entry",
+   "description": "seed_auto_agent.py: generalize the platform-management upsert/assign into a small loop or a second call — upsert Skill(name='platform-operations', skill_source='builtin-core', workspace_id=None, category='agent-role', version from frontmatter, prompt_template = seed body sans frontmatter) under its own advisory lock key, and ensure assignment to Auto with the same ON CONFLICT pattern. Because seed_auto_agent's ensure path runs on every lazy get-or-seed call, EXISTING workspaces receive the assignment on their next chat — assert this in a test (existing agent + existing charter skill → second call adds the ops assignment idempotently). skill_loader._BUILTIN_PATHS gains 'platform-operations' → core/seeds/platform-operations-skill.md so _refresh_builtin_if_stale propagates ops edits identically. VERIFY platform-operations is NOT in SKILL_CORE_ALWAYS_ON (test reads the config + the section's resolved set) — it must render as an L1 catalog line with the frontmatter description as trigger text, and platform_load_skill must return its body (test through the real handler with a seeded row).",
+   "acceptanceCriteria": [
+    "Fresh workspace: both skills seeded + assigned (test); existing workspace: next ensure call adds ops assignment, idempotent twice (test)",
+    "platform-operations absent from the resolved core-always-on set; skills-section render for Auto shows charter FULL BODY + ops as ONE L1 line (component-level test on SkillsSection._build with a fake agent)",
+    "platform_load_skill 'platform-operations' returns the cookbook body (handler test)",
+    "_BUILTIN_PATHS has both entries; _refresh_builtin_if_stale refreshes a stale ops row from disk (test mirrors the existing platform-management refresh test)",
+    "ZERO new alembic files; route manifest untouched",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": ["orchestrator/core/seeds/seed_auto_agent.py", "orchestrator/modules/agents/services/skill_loader.py", "orchestrator/tests/"]
+  },
+  {
+   "id": "US-004",
+   "title": "Slim the soul DEFAULT to identity-only (surgical, hash-guarded)",
+   "description": "FIRST verify the _default_persona() hypothesis (see description) — the plan below assumes persona = soul file + MANAGER_DOCTRINE_BLOCK appended in code. THEN: (1) compute sha256 of the CURRENT _default_persona() output and add it to _KNOWN_SEED_PERSONA_HASHES as a frozen historical constant (comment: 'pre-231 fat default') so fat-default rows lift to the slim default on backfill while customized souls stay skipped. (2) Edit orchestrator/core/seeds/auto-cto-custom-soul.txt surgically: REMOVE exactly five sections — '**My Role:**', '**My Authority:**', '**How I Think:**', '**My Operating Rhythm:**', '**My Routing Rules:**' — each spanning its header line through the line before the next '**' header; every OTHER section stays byte-verbatim (Who I Am, Personality, Architecture Knowledge, How I Treat People, Strong Opinions, Memory & Recall, Under Pressure, My Ambitions, Sacred Ground, My Promise, Override). (3) Insert immediately after the '**Who I Am:**' section: '**How I operate:** My lanes, authority, cadence, and routing live in my platform-management skill — that is the single source. This soul is who I am, not the rulebook.' (4) Anti-duplication guard test: the five removed headers must never reappear in the soul seed (string-absence, mirrors the 226 anchor style).",
+   "acceptanceCriteria": [
+    "_default_persona() composition verified and documented in the commit body (or RALPH_BLOCKED if the hypothesis fails — never silently edit 226's tests)",
+    "Soul seed: five sections gone (absence test), kept sections present verbatim (presence tests incl. Sacred Ground + the Override), cross-reference line present after Who I Am",
+    "Backfill: a row holding the pre-231 fat default updates to the slim default; a customized row stays skipped; idempotent (extends the existing 226 backfill test pattern)",
+    "ALL existing test_prd226_* tests pass UNMODIFIED (their files untouched in the diff — the doctrine anchors live in the appended block and the charter, not the soul file)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": ["orchestrator/core/seeds/auto-cto-custom-soul.txt", "orchestrator/core/seeds/seed_auto_agent.py", "orchestrator/tests/"]
+  },
+  {
+   "id": "US-005",
+   "title": "The drift guard — hand-edit detection + --check",
+   "description": "Two layers, both CI-runnable without the sibling repo: (1) a pytest that, for EACH generated seed (platform-management-skill.md, platform-operations-skill.md), recomputes the body sha and asserts it matches the sha recorded in the file's own banner — a hand-edit to a seed (the 'never edit live in the platform' violation) breaks the match and fails CI with a message pointing at automatos-skills + the sync script. (2) the same pytest invokes sync-auto-skill.py --check IF ../automatos-skills exists (developer machines) and SKIPS that half cleanly in CI with an explicit reason — the sha layer is the always-on guard, the --check layer is the freshness guard where the sibling is present.",
+   "acceptanceCriteria": [
+    "Tampering one byte of either seed body fails the sha test naming the file and the rule (test proves via tmp-copy fixture, not by tampering the real seed)",
+    "--check half runs when the sibling repo path exists, skips with a printed reason otherwise (both paths tested via monkeypatched path)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": ["orchestrator/tests/", "scripts/sync-auto-skill.py"]
+  },
+  {
+   "id": "US-006",
+   "title": "Measure, don't guess — activation + size telemetry",
+   "description": "Extend the existing '[skills] activation' log line (modules/context/sections/skills.py, the logger.info at the end of _build) to also record approximate sizes: core_tokens (sum of rendered core body lengths //4) and l1_count — so a week of production logs yields the real per-turn saving and the ops-skill activation rate with zero new infrastructure. Add a test asserting the log fires with platform-operations in l1_offered and platform-management in core_always_on for a two-skill Auto fixture. Do NOT build dashboards or new telemetry sinks — the log line is the deliverable; reading it after deploy is the human step.",
+   "acceptanceCriteria": [
+    "Activation log carries core_tokens + l1_count (test captures the log record)",
+    "Two-skill fixture logs charter in core, ops in l1 (test)",
+    "cd orchestrator && python3 -m pytest -q green"
+   ],
+   "files": ["orchestrator/modules/context/sections/skills.py", "orchestrator/tests/"]
+  }
+ ]
+}
