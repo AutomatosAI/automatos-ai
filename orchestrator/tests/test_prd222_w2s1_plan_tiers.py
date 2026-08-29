@@ -256,9 +256,14 @@ def test_migration_chains_onto_current_head():
 
 
 def test_exactly_one_head_after_this_migration():
-    heads = _script_dir().get_heads()
+    sd = _script_dir()
+    heads = sd.get_heads()
     assert len(heads) == 1, f"expected exactly one alembic head, got {heads}"
-    assert heads[0] == NEW_REVISION
+    # Later PRDs legitimately stack on top of this revision (PRD-225 already
+    # does) — the invariant is a single head WITH this revision in its
+    # lineage, not that this revision stays the head forever.
+    chain = {rev.revision for rev in sd.walk_revisions(base="base", head=heads[0])}
+    assert NEW_REVISION in chain, f"{NEW_REVISION} missing from head lineage"
 
 
 def test_backfill_sql_is_scoped_to_starter():
