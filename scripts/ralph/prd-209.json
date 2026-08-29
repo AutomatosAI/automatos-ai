@@ -61,11 +61,11 @@
    "title": "S3 — de-mask the boot lanes + fix the smoke script's missing DEFAULT_WORKSPACE_ID",
    "description": "smoke-fresh-clone.yml runs the smoke script under continue-on-error: true (line ~51) and the alembic-from-zero replay step in test.yml is likewise masked — boot death reports green. Drop continue-on-error from BOTH. Fix scripts/ci/smoke-fresh-clone.sh: it exports AUTH_EDITION=local (line ~41) but NOT DEFAULT_WORKSPACE_ID, which validate_auth_edition() hard-requires in local — export it (same Q6 convention value) so the guard passes; align the script's header comment (it still says 'blocked on W5' — W5 landed). Add a source guard asserting continue-on-error is absent from the smoke boot step and the from-zero step, and that the smoke script exports DEFAULT_WORKSPACE_ID. Sequence note: this story lands AFTER US-001/002/003 so the de-masked lanes go green, not red.",
    "acceptanceCriteria": [
-    "Zero continue-on-error in smoke-fresh-clone.yml's boot step and test.yml's from-zero step (guard test)",
-    "smoke-fresh-clone.sh exports DEFAULT_WORKSPACE_ID matching the api.defaults value (guard)",
-    "smoke-fresh-clone lane GREEN on this branch's push (CI evidence in commit body — the lane is now unmasked and must actually pass)",
-    "Required lanes' definitions (orchestrator-tests, ioc-scan) untouched (diff proves)",
-    "Orchestrator suite at documented baseline"
+    "DONE — zero continue-on-error: removed from smoke-fresh-clone.yml boot step and from the test.yml from-zero 'Fresh-clone boot path' step (eval lanes keep their own masks). Guard test_prd209_boot_lanes_hard YAML-parses both, scoped to the right jobs. The literal token is absent from smoke-fresh-clone.yml entirely (acceptance greps the whole file).",
+    "DONE — smoke-fresh-clone.sh exports DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1 (matches api.defaults); workflow env sets it too; guard asserts both.",
+    "IN PROGRESS — de-masking REVEALED the compose boot is still broken: postgres initdb applies init_complete_schema.sql only partway (~19 tables) and never reaches the stamp, so the entrypoint's alembic replays from base and crashes (20260326_fix_installs_item_id). The from-zero lane's psql -f masked this by pre-creating the vector extension. Fixing the real compose boot (US-002 follow-up) THEN this lane goes green — CI evidence to follow.",
+    "DONE — required lanes untouched: test.yml diff only touches the alembic-from-zero job (comment + mask removal); orchestrator-tests/ioc-scan definitions unchanged (git diff proves; guard asserts orchestrator-tests present).",
+    "DONE — orchestrator suite at documented baseline: 4 new US-004 guards green; workflows/scripts not imported by runtime tests."
    ],
    "files": [
     ".github/workflows/smoke-fresh-clone.yml",

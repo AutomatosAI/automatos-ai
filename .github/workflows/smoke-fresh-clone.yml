@@ -1,13 +1,14 @@
 name: smoke-fresh-clone
 
-# PRD-176 Headline B — the deployability bar: a fresh clone boots to a green
-# /health with NO external credentials via `docker compose up`.
+# PRD-176 Headline B / PRD-209 S3 — the deployability bar: a fresh clone boots to
+# a green /health with NO external credentials via `docker compose up`.
 #
-# NON-REQUIRED and BLOCKED ON WAVE 5. Until W5's boot-before-auth lands on main,
-# compose hard-requires Clerk keys, so a no-credential boot cannot reach /health.
-# The job runs the smoke script with continue-on-error so it reports the real
-# state without blocking; drop continue-on-error (and flip to required in branch
-# protection) once W5 is merged and the fresh-clone boot is green.
+# HARD (fails red on boot death) as of PRD-209 US-004: W5 (AUTH_EDITION) has landed,
+# US-001 committed the entrypoint exec bit, US-002 stamped the initdb schema, and
+# US-003 made local the compose default — so the no-credential boot now reaches a
+# green /health and a boot death must fail this lane, not report success. The
+# allowed-to-fail mask is removed. Still NON-REQUIRED in branch protection;
+# flipping it to required is the owner's Q2 action.
 #
 # Runs on manual dispatch and on pushes that touch the boot substrate (compose,
 # entrypoint, this workflow, or the script) — not on every push, since it builds
@@ -36,7 +37,7 @@ concurrency:
 
 jobs:
   fresh-clone-boot:
-    name: Fresh-clone docker compose up -> /health 200 (non-required, blocked on W5)
+    name: Fresh-clone docker compose up -> /health 200 (non-required)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -46,13 +47,14 @@ jobs:
 
       # Local-only secrets — throwaway values for an ephemeral stack. No external
       # SaaS credential (Clerk / AWS / LLM) is provided, on purpose: that is the
-      # bar this test proves.
+      # bar this test proves. DEFAULT_WORKSPACE_ID is the local-mode requirement
+      # validate_auth_edition() enforces — the CI-seed convention value.
       - name: Run fresh-clone smoke test
-        continue-on-error: true
         env:
           POSTGRES_PASSWORD: smoke_pg_pw
           REDIS_PASSWORD: smoke_redis_pw
           API_KEY: smoke_api_key
           AUTH_EDITION: local
           REQUIRE_AUTH: "false"
+          DEFAULT_WORKSPACE_ID: "00000000-0000-0000-0000-0000000000c1"
         run: bash scripts/ci/smoke-fresh-clone.sh

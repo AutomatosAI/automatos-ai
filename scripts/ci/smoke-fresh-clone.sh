@@ -12,11 +12,13 @@
 # entrypoint (F051), local MinIO via S3_ENDPOINT_URL (F089), and the local-safe
 # railway.internal defaults (F068).
 #
-# DEPENDS ON WAVE 5 (auth decoupling). Until W5's boot-before-auth lands on main,
-# compose hard-requires Clerk keys (docker-compose.yml Clerk env) and a
-# no-credential boot cannot reach a green /health. This script sets
-# AUTH_EDITION=local (the W5 flag) so it is correct the moment W5 merges; run it
-# in CI as NON-REQUIRED / allowed-to-fail until then (see the workflow).
+# W5 (auth decoupling) HAS LANDED: AUTH_EDITION=local forces the no-login posture
+# and, together with US-001 (entrypoint exec bit), US-002 (stamped initdb), and
+# US-003 (local is the compose default), a no-credential boot now reaches a green
+# /health. This script sets AUTH_EDITION=local AND DEFAULT_WORKSPACE_ID (the local
+# workspace validate_auth_edition() hard-requires). The lane is now HARD in CI
+# (no continue-on-error, PRD-209 US-004); still non-required in branch protection
+# until the owner flips it (Q2).
 #
 # Exit 0 = /health returned 200 with no external creds. Exit 1 = boot failed.
 set -uo pipefail
@@ -37,15 +39,21 @@ POLL_INTERVAL_SECONDS=5
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-smoke_pg_pw}"
 export REDIS_PASSWORD="${REDIS_PASSWORD:-smoke_redis_pw}"
 export API_KEY="${API_KEY:-smoke_api_key}"
-# W5 flag: run the local no-login edition (auth-optional). Harmless before W5.
+# W5 flag: run the local no-login edition (auth-optional).
 export AUTH_EDITION="${AUTH_EDITION:-local}"
 export REQUIRE_AUTH="${REQUIRE_AUTH:-false}"
+# validate_auth_edition() hard-requires DEFAULT_WORKSPACE_ID in local mode — the
+# CI-seed convention value (matches envs/api.defaults + the entrypoint seed). The
+# backend also receives it from compose env_file; exporting it keeps this script
+# self-sufficient and documents the local-mode contract.
+export DEFAULT_WORKSPACE_ID="${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
 
 echo "========================================="
 echo "PRD-176 fresh-clone smoke test"
 echo "  health url : ${HEALTH_URL}"
 echo "  max wait   : ${MAX_WAIT_SECONDS}s"
 echo "  auth       : AUTH_EDITION=${AUTH_EDITION} REQUIRE_AUTH=${REQUIRE_AUTH}"
+echo "  workspace  : DEFAULT_WORKSPACE_ID=${DEFAULT_WORKSPACE_ID}"
 echo "  external creds: NONE (no Clerk / AWS / LLM keys)"
 echo "========================================="
 
@@ -75,6 +83,8 @@ while [ "$elapsed" -lt "$MAX_WAIT_SECONDS" ]; do
 done
 
 echo "FAIL: /health did not return 200 within ${MAX_WAIT_SECONDS}s (last: ${status})" >&2
+echo "----- postgres logs (tail) — initdb/schema errors surface here -----" >&2
+docker compose -f "$COMPOSE_FILE" logs --tail 200 postgres >&2 || true
 echo "----- backend logs (tail) -----" >&2
 docker compose -f "$COMPOSE_FILE" logs --tail 150 backend >&2 || true
 docker compose -f "$COMPOSE_FILE" down -v || true

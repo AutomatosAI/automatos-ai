@@ -409,7 +409,7 @@ jobs:
   #      run `alembic upgrade heads` — a no-op at head. A pure from-base replay
   #      is NOT the compose path and is deliberately not tested here (it crashes
   #      on tables that are ALTER-ed but never CREATE-d in the historical forest).
-  #      continue-on-error stays until PRD-209 US-004 de-masks this lane.
+  #      Both gates are HARD (no continue-on-error) as of PRD-209 US-004.
   alembic-from-zero:
     name: Alembic from-zero — exactly one head (non-required)
     runs-on: ubuntu-latest
@@ -489,9 +489,9 @@ jobs:
       # Gate 2 — the SUPPORTED fresh-clone boot path (PRD-209 S2): load the
       # initdb SQL (schema + alembic_version stamp), then `alembic upgrade heads`
       # must be a no-op at head. This is exactly what a fresh compose volume does.
-      # continue-on-error stays until PRD-209 US-004 de-masks this lane.
+      # HARD (no continue-on-error) as of PRD-209 US-004 — a broken fresh path
+      # (bad stamp, forest that no longer replays cleanly) now fails this lane.
       - name: Fresh-clone boot path — initdb SQL + stamp, then upgrade heads
-        continue-on-error: true
         env:
           PGPASSWORD: test
         run: |
