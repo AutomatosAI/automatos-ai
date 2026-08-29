@@ -232,13 +232,13 @@
       "description": "The authorized migration prd232_cluster_provenance (down_revision='prd225_s1_asks_on_grants', prd232_cluster_provenance.py:25) correctly chains onto prd225 and is the new single head. But test_prd225_asks_model.py::test_prd225_revision_chains_onto_prior_head hardcodes heads == ('prd225_s1_asks_on_grants',) (L49-52), so any migration on top of prd225 breaks it. This test is unmodified by the diff, PASSED on base CI, is outside the acceptance changed-test scope, and is NOT one of #643's two protected files. alembic heads is still exactly 1 (prd232) — a stale guard, not a rival head. Ironically the test's own docstring warns against hard-coding the head.",
       "evidence": "FAILED on required orchestrator-tests: tests/test_prd225_asks_model.py::test_prd225_revision_chains_onto_prior_head (assert heads == ('prd225_s1_asks_on_grants',), L50). Source: orchestrator/alembic/versions/prd232_cluster_provenance.py:25.",
       "acceptanceCriteria": [
-        "The required orchestrator-tests CI job is GREEN for HEAD.",
-        "Update test_prd225_asks_model.py::test_prd225_revision_chains_onto_prior_head to assert the CURRENT single head is prd232_cluster_provenance while proving prd225_s1_asks_on_grants stays on-chain and reachable.",
-        "alembic ScriptDirectory.get_heads() returns exactly ONE head (prd232_cluster_provenance); no new migration is added; none of #643's protected files (test_prd222_w2s1_plan_tiers.py, authz_sweep_probe.py) are touched."
+        "PENDING (shared CI gate) — this test is reconciled (below) and prd225 no longer breaks HEAD, but orchestrator-tests stays RED until the P232-RVW-2 Test-2 §12 block clears. Local: tests/test_prd225_asks_model.py → 7 passed.",
+        "DONE — test_prd225_revision_chains_onto_prior_head reconciled: keeps prd225's own integrity (down_revision present, up/down callable), asserts the CURRENT single head is prd232_cluster_provenance, and proves prd225 stays on-chain (walk_revisions base→head contains prd225). Docstring notes the head NAME is asserted deliberately (a head guard forces each new migration to be acknowledged; a future wave moves it to the new head — a visible signal, not a silent break).",
+        "DONE — verified via the real machinery: ScriptDirectory.get_heads()==('prd232_cluster_provenance',) (single), prd232.down_revision=='prd225_s1_asks_on_grants', prd225 reachable from head. No new migration added (only the test file changed); #643's protected files (test_prd222_w2s1_plan_tiers.py, authz_sweep_probe.py) untouched — the diff is tests/test_prd225_asks_model.py only."
       ],
       "priority": 16,
       "passes": false,
-      "notes": "US-007's own test_single_alembic_head_at_our_revision (prd232 head) and prd225's guard (prd225 head) are mutually exclusive; the prd225 guard must move to the new head."
+      "notes": "RVW-3 reconciled: the prd225 guard moved off the stale hardcoded head (prd225) onto the current single head (prd232). passes stays FALSE only because the shared 'orchestrator-tests GREEN for HEAD' AC is gated on the P232-RVW-2 Test-2 §12 block; this test itself is green. US-007's test_single_alembic_head_at_our_revision and this guard now agree on the prd232 head."
     },
     {
       "id": "P232-RVW-4",

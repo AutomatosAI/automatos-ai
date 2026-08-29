@@ -31,26 +31,37 @@ def test_alembic_single_head():
 
 
 def test_prd225_revision_chains_onto_prior_head():
-    """The new revision descends from the prior single head and defines both
-    directions — a rival head or a missing downgrade is a hard failure."""
+    """The prd225 revision descends from a prior head (not base) and defines both
+    directions. It is NO LONGER the single head: PRD-232 US-007's authorized
+    prd232_cluster_provenance migration now sits on top (down_revision=prd225), so
+    assert prd225 stays on-chain and reachable from the CURRENT single head.
+
+    Assert the INTENT, not a literal PARENT of prd225: hard-coding prd225's parent
+    SHA-name breaks on every rebase onto a moved main (it did, when the PRD-222
+    merges buried prd185_s1b_toollog_user_nullable mid-chain). The single-head NAME
+    is asserted deliberately — a head guard must force each new migration to be
+    acknowledged here; when a future wave lands a migration on top of prd232, this
+    assertion moves to that new head (a visible signal, not a silent break)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     cfg = Config()
     cfg.set_main_option("script_location", str(_ORCH / "alembic"))
-    rev = ScriptDirectory.from_config(cfg).get_revision("prd225_s1_asks_on_grants")
+    sd = ScriptDirectory.from_config(cfg)
+    rev = sd.get_revision("prd225_s1_asks_on_grants")
 
-    # Assert the INTENT, not a literal parent: this revision must be the single
-    # head and must descend from whatever the prior head was. Hard-coding the
-    # parent SHA-name breaks on every rebase onto a moved main (it did, when the
-    # PRD-222 merges buried prd185_s1b_toollog_user_nullable mid-chain), which
-    # would tempt a future rebase into "fixing" the test instead of the chain.
     assert rev.down_revision, "the revision must descend from the prior head, not sit at base"
-    heads = tuple(ScriptDirectory.from_config(cfg).get_heads())
-    assert heads == ("prd225_s1_asks_on_grants",), (
+    assert callable(rev.module.upgrade) and callable(rev.module.downgrade)
+
+    # Exactly one head, and it is PRD-232 US-007's authorized migration.
+    heads = tuple(sd.get_heads())
+    assert heads == ("prd232_cluster_provenance",), (
         f"must be the SINGLE head (rival heads are the trap this guards): {heads}"
     )
-    assert callable(rev.module.upgrade) and callable(rev.module.downgrade)
+    # prd225 is buried on-chain now — reachable from the current head, not orphaned.
+    (head,) = heads
+    chain = {r.revision for r in sd.walk_revisions(base="base", head=head)}
+    assert "prd225_s1_asks_on_grants" in chain
 
 
 def test_prd225_is_reachable_from_the_head():
