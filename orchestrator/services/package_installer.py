@@ -143,16 +143,53 @@ def _absorb_cascade(manifest: InstallManifest, cascade: Any) -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _is_uuid(value: Any) -> bool:
+    """True when ``value`` parses as a UUID.
+
+    ``Agent.public_id`` is a UUID column: comparing it to a non-UUID string
+    makes Postgres raise ``InvalidTextRepresentation`` at execute time — an
+    error no Python-level guard around the cast can catch, because it happens
+    in the database, not in Python.
+    """
+    try:
+        UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 def _find_marketplace_agent(db: Any, ref: str) -> Any:
+    """Resolve a marketplace agent by integer id, public_id (UUID), slug or name.
+
+    LIVE FAILURE (2026-08-29): package members reference agents by SLUG — the
+    seed builds them that way on purpose — and this fell through the ``int()``
+    guard into a filter that compared ``Agent.public_id`` (uuid) against
+    "shopify-ops". Postgres raised
+
+        invalid input syntax for type uuid: "shopify-ops"
+
+    which escaped as an unhandled exception, so EVERY package install failed.
+    The ``except (ValueError, TypeError)`` above it only ever caught the int
+    cast; the UUID comparison blew up later, inside the driver.
+
+    Each candidate column is now only compared when ``ref`` is the right shape
+    for it.
+    """
     from core.models.core import Agent
 
     q = db.query(Agent).filter(Agent.owner_type == "marketplace")
+
+    # Integer primary key.
     try:
         return q.filter(Agent.id == int(ref)).first()
     except (ValueError, TypeError):
-        return (
-            q.filter((Agent.public_id == ref) | (Agent.slug == ref) | (Agent.name == ref)).first()
-        )
+        pass
+
+    # Text columns are always safe to compare; public_id only when ref IS a UUID.
+    predicate = (Agent.slug == ref) | (Agent.name == ref)
+    if _is_uuid(ref):
+        predicate = predicate | (Agent.public_id == ref)
+    return q.filter(predicate).first()
 
 
 def _existing_workspace_clone(db: Any, workspace_id: UUID, marketplace_agent: Any) -> Any:
