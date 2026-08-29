@@ -114,11 +114,16 @@ class SkillsSection(BaseSection):
             return ""
 
         # Skill-activation signal (S2 measurement): which skills stayed always-on
-        # (core) vs were offered at L1 this turn. The cost delta / activation rate
-        # (§7) is read from these.
+        # (core) vs were offered at L1 this turn. PRD-231 US-006 adds the standing
+        # SIZE so a week of production logs yields the real per-turn saving and the
+        # ops-skill activation rate with zero new infrastructure: core_tokens is the
+        # always-on body cost (sum of rendered core-body lengths // 4 ≈ tokens) and
+        # l1_count is how many skills paid only their one-line L1 tax this turn.
+        core_tokens = sum(len(b) for b in core_bodies) // 4
         logger.info(
-            "[skills] activation: core_always_on=%s l1_offered=%s (ws=%s)",
-            activated_core, offered_l1, getattr(ctx, "workspace_id", None),
+            "[skills] activation: core_always_on=%s l1_offered=%s core_tokens=%s l1_count=%s (ws=%s)",
+            activated_core, offered_l1, core_tokens, len(offered_l1),
+            getattr(ctx, "workspace_id", None),
         )
 
         return "\n\n".join(parts)
