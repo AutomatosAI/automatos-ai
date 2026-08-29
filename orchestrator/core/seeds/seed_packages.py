@@ -227,10 +227,15 @@ PACKAGES: list[dict] = [MANAGEMENT_PACKAGE, DEVELOPMENT_PACKAGE]
 _JSONB_FIELDS = ("vertical_tags", "matching", "members", "setup_manifest")
 
 
-def seed_packages(db=None) -> tuple[int, int]:
+def seed_packages(db=None, create_only: bool = False) -> tuple[int, int]:
     """Idempotently upsert the Shopify packages into ``marketplace_packages``
     (keyed by slug). Re-running is a no-op create-wise: existing rows are
-    refreshed, never duplicated. Returns ``(created, updated)``."""
+    refreshed, never duplicated. Returns ``(created, updated)``.
+
+    ``create_only=True`` (the BOOT posture): missing packages are created,
+    existing rows are left byte-untouched — live curation of package content
+    survives every redeploy. Full refresh stays a deliberate manual run of
+    this script (the skills-repo lesson: seed-vs-row sync is explicit)."""
     from core.models.marketplace_packages import MarketplacePackage
 
     own_session = db is None
@@ -258,6 +263,8 @@ def seed_packages(db=None) -> tuple[int, int]:
                 }))
                 created += 1
                 logger.info("✅ Created package %s", pkg_def["slug"])
+            elif create_only:
+                logger.info("⏭️  Package %s exists — boot posture leaves it untouched", pkg_def["slug"])
             else:
                 # Rebuild JSONB (assign fresh objects — never mutate in place).
                 existing.name = pkg_def["name"]

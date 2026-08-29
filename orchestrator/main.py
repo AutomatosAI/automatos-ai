@@ -264,6 +264,22 @@ async def _boot_phase_1_core():
         except Exception as e:
             logger.warning("Auto persona doctrine backfill: %s", e)
 
+        # PRD-230 (live-test 2026-08-29): the packages seed existed only as a
+        # manual script, so prod carried ZERO packages — the Packages tab was
+        # empty and onboarding's proposal silently fell back to custom-design
+        # (D10 masked the gap). CREATE-only here: missing packages land on the
+        # next deploy; existing rows are never touched, so live curation of
+        # package content survives redeploys. Full refresh stays a deliberate
+        # manual run of core/seeds/seed_packages.py.
+        try:
+            from core.seeds.seed_packages import seed_packages
+            with get_db_session() as db:
+                pkg_created, _ = seed_packages(db, create_only=True)
+            if pkg_created:
+                logger.info("Marketplace packages seeded: %d created", pkg_created)
+        except Exception as e:
+            logger.warning("Marketplace packages seed: %s", e)
+
         logger.info("Boot seeds completed (leader worker)")
 
         # ── Orphaned-run reaper (PRD-142 Wave 1 · WS-C · W1-S6) ──
