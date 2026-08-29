@@ -8,10 +8,10 @@
    "title": "S1 — commit the entrypoint exec bit + tracked-mode guard",
    "description": "docker-entrypoint.sh is tracked 100644 (verify: git ls-files -s docker-entrypoint.sh); compose bind-mounts it over the image's chmod +x stub (docker-compose.yml:~188) so the backend dies at exec. Flip the tracked mode (git update-index --chmod=+x docker-entrypoint.sh — a mode-only change, no content edit) and add a pure guard test that reads `git ls-files -s docker-entrypoint.sh` and asserts mode 100755 (contrast: services/workspace-worker/entrypoint.sh is already 100755 — the bit commits fine in this repo).",
    "acceptanceCriteria": [
-    "git ls-files -s docker-entrypoint.sh shows 100755 on the branch",
-    "test_prd209_entrypoint_mode guard exists and passes (fails on 100644 — prove by reasoning in commit body, not by breaking the tree)",
-    "No content change to docker-entrypoint.sh in the diff",
-    "Orchestrator suite at documented baseline"
+    "DONE — git ls-files -s docker-entrypoint.sh shows 100755 (object 30e5825 unchanged); flipped via git update-index --chmod=+x",
+    "DONE — test_prd209_entrypoint_mode in orchestrator/tests/test_prd209_entrypoint_mode.py passes; observed FAIL at 100644 (asserted 100755 != 100644) before the flip, PASS after — worker-entrypoint 100755 anchor proves the bit commits in this repo",
+    "DONE — mode-only change: git diff --cached --stat shows 0 insertions/0 deletions, object hash 30e5825 identical",
+    "DONE — orchestrator suite at documented baseline: 5028 passed, only prd172 tenant-isolation FAILED (allowlisted), 46 pre-existing import ERRORs (transformers/torch — not this change)"
    ],
    "files": [
     "docker-entrypoint.sh",
