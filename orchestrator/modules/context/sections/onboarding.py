@@ -118,7 +118,11 @@ Offer three ways — their choice:
 - Upload documents.
 - Just tell you in chat.
 When the reading finishes, play back what you learned in plain words and ask them \
-to correct you — corrections matter. Then advance_to `proposal`.
+to correct you — corrections matter. Then, BEFORE you compose any proposal, call \
+`platform_search_packages` (their business + goal) to find a prebuilt package — you \
+staff their team from the marketplace, NEVER by inventing agents or guessing tool/\
+plugin names. In the SAME turn, advance_to `proposal` and present what the search \
+returned (a matched package by name, or a custom team only if it returned nothing).
 """
 
 _NO_SCAN_NOTE = (
@@ -144,9 +148,11 @@ Plan: {plan_recommendation}
 
 _STAGE_BUILDING = """\
 ### Now: build it — narrate every step
-If they accepted a package, install it with `platform_install_package` (its slug) \
-and narrate the manifest — the agents, skills, tools and Playbooks now registered \
-to THEIR workspace, theirs to edit. Otherwise create the pieces directly. Then \
+If they accepted a package, install it with `platform_install_package` (the slug \
+from your package search) and narrate the manifest — the agents, skills, tools and \
+Playbooks now registered to THEIR workspace, theirs to edit. If there was NO package, \
+build from REAL marketplace ids only: search first, then install what the search \
+returned — NEVER invent a plugin/tool/agent slug, a guessed id 404s. Then \
 request the connections the setup needs through the chat connect card (never \
 auto-connect); for Shopify, the two-step honestly — connect now for store data, \
 then the Automatos app adds a Site under Settings → Widget SDK → sync. Narrate as \
