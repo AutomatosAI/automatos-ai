@@ -17,7 +17,11 @@ class MarketplaceWidget(Base):
     display_name = Column(String(200), nullable=False)
     description = Column(Text)
     long_description = Column(Text)
-    developer_id = Column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    # Integer, matching users.id (Integer PK) and the creating migration
+    # (20260225_create_marketplace_widgets: sa.Integer). The old PGUUID here
+    # made the FK impossible — create_all crashed on any fresh database
+    # (DatatypeMismatch); prod never noticed because its table already existed.
+    developer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     developer_name = Column(String(200))
     version = Column(String(20))
     changelog = Column(Text)

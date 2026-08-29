@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""PRD-209 S4 — schema-drift check: the structural net for "four writers of schema truth".
+"""PRD-209 S4 — schema-drift check: the structural net for the writers of schema truth.
 
-Automatos builds its schema four ways — ``init_complete_schema.sql`` (the fresh-clone
-seed), the Alembic migration forest, ``Base.metadata.create_all`` at boot, and inline
-``ALTER``s inside migrations. When those writers disagree, a table or column that one
-writer relies on is silently absent from another. July shipped exactly that: a table
-that migrations ``ALTER``-ed but no writer ``CREATE``-d, so a from-base migration replay
-died with ``relation "..." does not exist`` (see ``.github/workflows/test.yml`` — the
-from-zero lane "crashes on tables that are ALTER-ed but never CREATE-d in the historical
-forest"). No lane caught it.
+Automatos builds its schema three ways — the Alembic migration forest (incremental,
+existing databases), the model layer via ``Base.metadata.create_all`` (the OFFICIAL
+fresh-database path since the 2026-08-29 S2 revision: ``scripts/init_fresh_db.py``
+builds create_all + the raw-DDL extras, then stamps heads), and the handful of raw-DDL
+tables that have no SQLAlchemy model (``RAW_DDL_EXTRAS`` — built by ``init_test_db``).
+The old fourth writer, ``init_complete_schema.sql``, was a stale hand-maintained
+snapshot (fresh clones got 107 of prod's ~152 tables) and is deleted.
 
-This check is that lane. It is deliberately **pure and static** — it parses text
-(migration files + the init SQL), needs no database, no ``Base.metadata`` import (which
-is incomplete without the optional ML deps), and no live Alembic replay (the historical
-forest does not replay from base — that is *why* PRD-209 S2 boots via init-SQL+stamp
-instead). Being static, it runs identically in CI and on a laptop with no services.
+When the writers disagree, a table one writer relies on is silently absent from
+another. July shipped exactly that: a table migrations ``ALTER``-ed but no writer
+``CREATE``-d. This check is the lane that catches the next one. It is deliberately
+**pure and static** — it parses text (migration files + ``__tablename__``
+declarations), needs no database, no ``Base.metadata`` import (incomplete without the
+optional ML deps), and no live Alembic replay (the forest holds 41 orphan-root
+revisions and cannot replay from empty — the recorded lineage-repair follow-on).
 
 What it enforces
 ----------------
 **Every table a migration ``ALTER``s / ``add_column``s / indexes / foreign-keys must
-also be ``CREATE``-d by some migration or by ``init_complete_schema.sql``.** A table that
-is only ever ``ALTER``-ed — never created by any writer the fresh-clone / replay path can
-see — is the July failure class. It "works" today only because ``create_all`` conjures it
-at boot from a model; retire ``create_all`` (PRD-209 Q3) or replay from base and it is a
-hard crash.
+be ``CREATE``-d by some migration, declared as a model (``__tablename__`` — the
+create_all path builds it), or listed in ``RAW_DDL_EXTRAS``.** A table only ever
+``ALTER``-ed — never created by any writer the fresh path can see — crashes a fresh
+database with ``relation "..." does not exist``.
 
 The diff engine (:func:`diff_schemas`) is table- *and* column-granular and general; the
 wired check uses its table dimension. The column dimension is exercised by the guard test
@@ -32,14 +32,11 @@ is reported as drift) and is available for a future column-level writer comparis
 
 Baseline
 --------
-``ORPHAN_ALTER_BASELINE`` records the orphans that already exist on ``main`` today — all
-of them ``create_all``-only model tables — with the reason each is accepted. The check is
-**green** when the live orphan set equals the baseline and goes **red** on the *next* new
-orphan (a fresh ``ALTER``-but-never-``CREATE``). Converging the four writers to one so the
-baseline can be emptied is PRD-209 Q3's follow-on; this check makes that safe by making
-any regression loud. Fix an orphan (add the table to a migration or the init SQL) and its
-baseline entry becomes stale — :func:`stale_baseline_entries` flags it for pruning so the
-baseline can never quietly over-accept.
+``ORPHAN_ALTER_BASELINE`` is **empty**: with models counted as a legitimate writer
+(they are the fresh path now), every previously-accepted create_all-only orphan is
+covered. The check goes red on the next genuine orphan. Should an entry ever be
+added, :func:`stale_baseline_entries` flags it for pruning the moment a writer covers
+it, so the baseline can never quietly over-accept.
 
 Exit code: ``0`` when the live orphan set is within baseline, ``1`` on any new orphan.
 """
@@ -54,7 +51,22 @@ from typing import Dict, List, Set
 # --------------------------------------------------------------------------- paths
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _VERSIONS_DIR = _REPO_ROOT / "orchestrator" / "alembic" / "versions"
-_INIT_SQL = _REPO_ROOT / "orchestrator" / "core" / "database" / "init_complete_schema.sql"
+_ORCH_ROOT = _REPO_ROOT / "orchestrator"
+
+# Tables with NO SQLAlchemy model, built by raw DDL in scripts/init_test_db.py
+# (and therefore by scripts/init_fresh_db.py on the fresh path).
+RAW_DDL_EXTRAS: Set[str] = {
+    "document_chunks",
+    "codegraph_projects",
+    "codegraph_files",
+    "codegraph_symbols",
+    "codegraph_relationships",
+    "codegraph_query_logs",
+    # PRD-209 drift orphans, ported from the retired init SQL (live readers exist):
+    "knowledge_items",
+    "tool_usage_logs",
+    "learning_outcomes",
+}
 
 # A schema is table name -> set of column names. Column sets may be empty when a
 # parser only recovers table identity (the migration-forest parsers below), which is
@@ -64,19 +76,11 @@ Schema = Dict[str, Set[str]]
 
 
 # ------------------------------------------------------------- the accepted baseline
-# Tables the migration forest ALTERs but that NO migration and NO init SQL ever
-# CREATEs — they exist at runtime only because ``create_all`` builds them from a model
-# at boot. Each is the July failure class frozen at today's known set; the check bites
-# on the NEXT such orphan. Converging to one writer (PRD-209 Q3) lets this shrink to {}.
-ORPHAN_ALTER_BASELINE: Dict[str, str] = {
-    "audit_logs": "create_all-only model (core/workspaces/audit.py); migrations index it, no CREATE writer — PRD-209 Q3",
-    "composio_actions_cache": "create_all-only model; migrations ALTER it, no CREATE writer — PRD-209 Q3",
-    "composio_connections": "create_all-only model; migrations ALTER it, no CREATE writer — PRD-209 Q3",
-    "tool_execution_logs": "create_all-only model; migrations ALTER it, no CREATE writer — PRD-209 Q3",
-    "workflow_recipes": "create_all-only model; migrations ALTER it, no CREATE writer — PRD-209 Q3",
-    "workspace_invitations": "create_all-only model; migrations ALTER it, no CREATE writer — PRD-209 Q3",
-    "workspace_members": "create_all-only model; migrations ALTER it, no CREATE writer — PRD-209 Q3",
-}
+# Empty since the 2026-08-29 S2 revision: models are a legitimate writer (the fresh
+# path IS create_all), so the seven previously-accepted create_all-only tables are
+# covered. Any future entry must carry a reason and is auto-flagged for pruning the
+# moment a writer covers it (:func:`stale_baseline_entries`).
+ORPHAN_ALTER_BASELINE: Dict[str, str] = {}
 
 # Regex-parse false positives (SQL keywords a permissive identifier match can capture).
 _NOT_A_TABLE = {"IF", "EXISTS", "ONLY", "TABLE", "NOT"}
@@ -142,6 +146,26 @@ def parse_sql_tables(sql_text: str) -> Set[str]:
     return _clean(found)
 
 
+def model_declared_tables(orch_root: pathlib.Path) -> Set[str]:
+    """Tables declared by any SQLAlchemy model — ``__tablename__ = "x"`` — anywhere
+    under ``orchestrator/`` (excluding the migration forest and tests). Static text
+    scan, mirroring what ``Base.metadata.create_all`` builds on the fresh path
+    without importing the model tree (which needs the optional ML deps)."""
+    found: Set[str] = set()
+    pattern = re.compile(r"__tablename__\s*(?::\s*[\w\[\]\"'. ]+)?=\s*['\"]([A-Za-z_]\w*)['\"]")
+    for path in orch_root.rglob("*.py"):
+        rel = path.relative_to(orch_root).as_posix()
+        if rel.startswith(("alembic/", "tests/", "scripts/")) or "__pycache__" in rel:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "__tablename__" in text:
+            found |= {m.group(1) for m in pattern.finditer(text)}
+    return _clean(found)
+
+
 def _iter_migration_text(versions_dir: pathlib.Path):
     for path in sorted(versions_dir.glob("*.py")):
         if path.name == "__init__.py":
@@ -183,10 +207,10 @@ def altered_tables(versions_dir: pathlib.Path) -> Set[str]:
 
 
 # --------------------------------------------------------------- the wired check
-def orphan_alter_tables(versions_dir: pathlib.Path, init_sql: pathlib.Path) -> Set[str]:
-    """Tables ALTERed by a migration but CREATEd by no writer the fresh-clone / replay
-    path can see (not by any migration, not by the init SQL). Baseline not yet applied."""
-    created = created_tables(versions_dir) | parse_sql_tables(init_sql.read_text(encoding="utf-8"))
+def orphan_alter_tables(versions_dir: pathlib.Path, orch_root: pathlib.Path) -> Set[str]:
+    """Tables ALTERed by a migration but CREATEd by no writer the fresh path can see
+    (not by any migration, not by a model, not in RAW_DDL_EXTRAS). Baseline not applied."""
+    created = created_tables(versions_dir) | model_declared_tables(orch_root) | RAW_DDL_EXTRAS
     altered = altered_tables(versions_dir)
     # Expressed through the shared diff core: the "missing" (altered-but-not-created)
     # tables are exactly the orphans. Column sets are empty here (table-level check).
@@ -197,19 +221,19 @@ def orphan_alter_tables(versions_dir: pathlib.Path, init_sql: pathlib.Path) -> S
     return report.missing_tables
 
 
-def stale_baseline_entries(versions_dir: pathlib.Path, init_sql: pathlib.Path) -> Set[str]:
+def stale_baseline_entries(versions_dir: pathlib.Path, orch_root: pathlib.Path) -> Set[str]:
     """Baseline tables that are NO LONGER orphaned (some writer now CREATEs them). They
     should be pruned so the baseline never over-accepts silently."""
-    return set(ORPHAN_ALTER_BASELINE) - orphan_alter_tables(versions_dir, init_sql)
+    return set(ORPHAN_ALTER_BASELINE) - orphan_alter_tables(versions_dir, orch_root)
 
 
-def new_orphans(versions_dir: pathlib.Path, init_sql: pathlib.Path) -> Set[str]:
+def new_orphans(versions_dir: pathlib.Path, orch_root: pathlib.Path) -> Set[str]:
     """Orphans beyond the accepted baseline — the drift that reddens the check."""
-    return orphan_alter_tables(versions_dir, init_sql) - set(ORPHAN_ALTER_BASELINE)
+    return orphan_alter_tables(versions_dir, orch_root) - set(ORPHAN_ALTER_BASELINE)
 
 
 def main() -> int:
-    orphans = orphan_alter_tables(_VERSIONS_DIR, _INIT_SQL)
+    orphans = orphan_alter_tables(_VERSIONS_DIR, _ORCH_ROOT)
     new = sorted(orphans - set(ORPHAN_ALTER_BASELINE))
     stale = sorted(set(ORPHAN_ALTER_BASELINE) - orphans)
 
@@ -225,9 +249,10 @@ def main() -> int:
     if new:
         print(
             f"\nDRIFT: {len(new)} table(s) are ALTER-ed by a migration but CREATE-d by no "
-            "migration and not by init_complete_schema.sql. A from-base replay (and a "
-            "fresh clone once create_all is retired) crashes with 'relation does not exist'. "
-            "Add each to a migration's create_table or to init_complete_schema.sql:"
+            "migration, declared by no model (__tablename__), and absent from "
+            "RAW_DDL_EXTRAS. A fresh database crashes on these with 'relation does not "
+            "exist'. Add each to a migration's create_table, give it a model, or (raw-DDL "
+            "only) add it to init_test_db + RAW_DDL_EXTRAS:"
         )
         for t in new:
             print(f"  - {t}")

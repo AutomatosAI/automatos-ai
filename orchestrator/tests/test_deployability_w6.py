@@ -79,21 +79,18 @@ def _initdb_mount_source() -> str:
         # bind mounts are "src:dst[:mode]" strings
         if isinstance(vol, str) and "docker-entrypoint-initdb.d" in vol:
             return vol.split(":", 1)[0]
-    raise AssertionError("postgres service has no initdb.d mount")
+    return None
 
 
-def test_initdb_mount_source_exists_on_disk():
-    """F009: the exact regression — a compose mount pointing at a missing file."""
+def test_no_initdb_schema_mount_remains():
+    """PRD-209 S2 revision (2026-08-29): the initdb SQL snapshot is retired — fresh
+    databases are built by scripts/init_fresh_db.py from the entrypoint instead.
+    Postgres must start EMPTY; any initdb.d schema mount reintroduces the stale-copy
+    writer this wave deleted (fresh clones were getting 107 of prod's ~152 tables)."""
     src = _initdb_mount_source()
-    # Source is repo-root-relative (leading ./).
-    resolved = (_REPO_ROOT / src.lstrip("./")).resolve()
-    assert resolved.is_file(), f"initdb mount source does not exist: {src} -> {resolved}"
-
-
-def test_initdb_mount_points_at_core_database_schema():
-    src = _initdb_mount_source()
-    assert src.endswith("orchestrator/core/database/init_complete_schema.sql"), (
-        f"initdb mount should point at the real schema file, got {src!r}"
+    assert src is None, (
+        f"postgres service mounts an initdb.d schema again ({src!r}) — fresh schema "
+        "comes from init_fresh_db via the entrypoint, not an initdb snapshot"
     )
 
 

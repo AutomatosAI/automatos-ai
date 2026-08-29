@@ -166,6 +166,65 @@ def init_db():
             )
         """))
 
+        # Model-less tables migrations ALTER but nothing CREATEs (PRD-209
+        # schema-drift orphans, 2026-08-29): live code reads all three
+        # (team_access/analytics/knowledge_multimodal · workspace_purge ·
+        # nl2sql schema provider). DDL ported verbatim from the retired
+        # init_complete_schema.sql. Keep scripts/ci/schema_drift_check.py's
+        # RAW_DDL_EXTRAS in sync with this block.
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS knowledge_items (
+                id SERIAL PRIMARY KEY,
+                kb_type_id INTEGER REFERENCES kb_types(id) ON DELETE CASCADE,
+                parent_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+                source_type VARCHAR(100),
+                source_id VARCHAR(255),
+                title VARCHAR(500),
+                content TEXT NOT NULL,
+                summary TEXT,
+                embedding vector(4096),
+                metadata JSONB DEFAULT '{}',
+                quality_score FLOAT DEFAULT 0.0,
+                importance_score FLOAT DEFAULT 0.0,
+                complexity_score FLOAT DEFAULT 0.0,
+                confidence_score FLOAT DEFAULT 1.0,
+                visibility VARCHAR(50) DEFAULT 'system',
+                owner_id VARCHAR(255),
+                permissions JSONB DEFAULT '{}',
+                status VARCHAR(50) DEFAULT 'active',
+                version INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                accessed_at TIMESTAMP,
+                indexed_at TIMESTAMP
+            )
+        """))
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS tool_usage_logs (
+                id SERIAL PRIMARY KEY,
+                execution_id INTEGER REFERENCES workflow_executions(id),
+                agent_id INTEGER REFERENCES agents(id) NOT NULL,
+                tool_id INTEGER REFERENCES mcp_tools(id) NOT NULL,
+                method_called VARCHAR(255),
+                input_data JSONB,
+                output_data JSONB,
+                success BOOLEAN,
+                execution_time_ms INTEGER,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS learning_outcomes (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER REFERENCES agents(id),
+                outcome_type VARCHAR(100),
+                outcome_data JSONB,
+                success_rate FLOAT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
     # PRD-175: seed the single local workspace that the AUTH_EDITION=local
     # anonymous session resolves to. The CI test job runs the suite under
     # AUTH_EDITION=local + DEFAULT_WORKSPACE_ID (config.py:422); the endpoint

@@ -126,7 +126,7 @@ sequenceDiagram
     participant BE as "Backend (FastAPI)"
     
     DC->>PG: "Start Container"
-    PG->>PG: "Init Schema (init_complete_schema.sql)"
+    API->>PG: "Init Schema (scripts/init_fresh_db.py — create_all + stamp)"
     PG-->>DC: "Health: pg_isready"
     
     DC->>RD: "Start Container"
@@ -144,7 +144,7 @@ sequenceDiagram
 ```
 
 **Key Initialization Logic:**
-1. **Database Schema**: The `postgres` service mounts `init_complete_schema.sql` for automated table creation [docker-compose.yml:35]().
+1. **Database Schema**: The backend entrypoint initializes empty databases via `scripts/init_fresh_db.py` (create_all + stamp) — automated table creation [docker-compose.yml:35]().
 2. **Migrations**: The backend executes `alembic upgrade heads` before starting `uvicorn` to ensure the schema is current [orchestrator/Dockerfile:90]().
 3. **Boot Locking**: On multi-worker startups, `boot_leader_lock` uses PostgreSQL advisory locks to ensure only one worker runs seed operations [orchestrator/core/database/boot_lock.py:25-40]().
 4. **Redis Security**: Dangerous commands like `FLUSHDB` and `FLUSHALL` are disabled at the command line [docker-compose.yml:59-60]().

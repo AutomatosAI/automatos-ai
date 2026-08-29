@@ -486,29 +486,42 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U test -d alembic_zero_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-      # Gate 2 — the SUPPORTED fresh-clone boot path (PRD-209 S2): load the
-      # initdb SQL (schema + alembic_version stamp), then `alembic upgrade heads`
-      # must be a no-op at head. This is exactly what a fresh compose volume does.
-      # HARD (no continue-on-error) as of PRD-209 US-004 — a broken fresh path
-      # (bad stamp, forest that no longer replays cleanly) now fails this lane.
-      - name: Fresh-clone boot path — initdb SQL + stamp, then upgrade heads
+      # Gate 2 — the SUPPORTED fresh-clone boot path (PRD-209 S2, revised
+      # 2026-08-29): scripts/init_fresh_db.py builds the CI-proven schema
+      # (create_all + raw-DDL extras) on the empty DB and stamps heads; then
+      # `alembic upgrade heads` must be a no-op, and the tables the live local
+      # test found MISSING from the old snapshot must exist. The old
+      # init_complete_schema.sql was a stale hand-maintained copy (fresh DBs
+      # got 107 of prod's ~152 tables); it is deleted — the 41 orphan-root
+      # revisions make a from-empty forest replay impossible until the lineage
+      # is repaired (recorded follow-on in the PRD addendum).
+      # HARD (no continue-on-error) as of PRD-209 US-004.
+      - name: Fresh-clone boot path — init_fresh_db (create_all + stamp), then upgrade heads
         env:
           PGPASSWORD: test
+          DATABASE_URL: postgresql://test:test@127.0.0.1:5432/alembic_zero_db
         run: |
-          echo "Loading init_complete_schema.sql into the empty pgvector DB (schema + stamp)..."
-          psql -h 127.0.0.1 -U test -d alembic_zero_db -v ON_ERROR_STOP=1 \
-            -f core/database/init_complete_schema.sql
-          echo "Verifying the initdb stamp equals the single alembic head..."
+          echo "Building the fresh schema via scripts/init_fresh_db (CI-proven path)..."
+          python -m scripts.init_fresh_db
+          echo "Verifying the stamp equals the single alembic head..."
           STAMP="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT version_num FROM alembic_version;')"
           HEAD="$(alembic heads 2>/dev/null | awk 'NR==1{print $1}')"
-          echo "initdb stamp=[${STAMP}] alembic head=[${HEAD}]"
+          echo "stamp=[${STAMP}] alembic head=[${HEAD}]"
           if [ "${STAMP}" != "${HEAD}" ]; then
-            echo "::error::initdb stamp '${STAMP}' != alembic head '${HEAD}' — init_complete_schema.sql stamp drifted from the head."
+            echo "::error::stamp '${STAMP}' != alembic head '${HEAD}' — init_fresh_db stamped somewhere other than the head."
             exit 1
           fi
           echo "Running 'alembic upgrade heads' — must be a no-op at head..."
           alembic upgrade heads
-          echo "Fresh-clone boot path succeeded: initdb + stamp + upgrade reaches the single head with no forest replay."
+          echo "Asserting the tables the stale snapshot was missing exist on the fresh path..."
+          for t in notifications personas channel_connections marketplace_widgets workspaces document_chunks codegraph_projects; do
+            FOUND="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "SELECT to_regclass('${t}');" | tr -d ' ')"
+            if [ -z "${FOUND}" ]; then
+              echo "::error::fresh schema is missing table '${t}' — the create_all path regressed."
+              exit 1
+            fi
+          done
+          echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
 
   # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
   # writers of schema truth" (init_complete_schema.sql, the Alembic migration

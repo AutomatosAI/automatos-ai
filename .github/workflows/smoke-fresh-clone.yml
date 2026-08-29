@@ -20,7 +20,8 @@ on:
     paths:
       - "docker-compose.yml"
       - "docker-entrypoint.sh"
-      - "orchestrator/core/database/init_complete_schema.sql"
+      - "orchestrator/scripts/init_fresh_db.py"
+      - "orchestrator/scripts/init_test_db.py"
       - "scripts/ci/smoke-fresh-clone.sh"
       - ".github/workflows/smoke-fresh-clone.yml"
   pull_request:
@@ -29,7 +30,8 @@ on:
     paths:
       - "docker-compose.yml"
       - "docker-entrypoint.sh"
-      - "orchestrator/core/database/init_complete_schema.sql"
+      - "orchestrator/scripts/init_fresh_db.py"
+      - "orchestrator/scripts/init_test_db.py"
       - "scripts/ci/smoke-fresh-clone.sh"
       - ".github/workflows/smoke-fresh-clone.yml"
 

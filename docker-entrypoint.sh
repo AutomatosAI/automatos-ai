@@ -84,10 +84,12 @@ load_seed_data() {
     
     echo "📥 Loading seed data..."
     
-    # Run seed data loader (real path: core/database/ — the old `database/`
-    # path never existed in the image, so this step silently failed on every
-    # boot since PRD-176; fail-open hid it. PRD-209 local-run finding.)
-    if python core/database/load_seed_data.py; then
+    # Run seed data loader AS A MODULE — script-mode sets sys.path[0] to the
+    # script's own dir, so its `from config import config` (line 23) can never
+    # resolve. (The old `database/` path also never existed in the image, so
+    # this step silently failed on every boot since PRD-176; fail-open hid
+    # both bugs. PRD-209 local-run finding.)
+    if python -m core.database.load_seed_data; then
         echo "✅ Seed data loaded successfully!"
     else
         echo "⚠️  Warning: Seed data loading failed (will continue anyway)"
@@ -153,6 +155,28 @@ wait_for_postgres
 
 # Check database
 check_database
+
+# Fresh (empty) database? Build the CI-proven schema and stamp at heads
+# (PRD-209: replaces the stale init_complete_schema.sql snapshot — see
+# scripts/init_fresh_db.py for why the migration forest cannot replay from
+# empty). Fails CLOSED: a half-initialized database must never serve. Existing
+# databases (alembic_version present) skip straight to incremental migrations.
+init_fresh_if_empty() {
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    HAS_VERSION=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tc "SELECT to_regclass('alembic_version');" 2>/dev/null | tr -d ' ')
+    unset PGPASSWORD
+    if [ -z "$HAS_VERSION" ]; then
+        echo ""
+        echo "🆕 No alembic_version — initializing fresh database (CI-proven schema + stamp)..."
+        if python -m scripts.init_fresh_db; then
+            echo "✅ Fresh database initialized"
+        else
+            echo "❌ Fresh-database initialization failed — refusing to start"
+            exit 1
+        fi
+    fi
+}
+init_fresh_if_empty
 
 # Run migrations (fail-closed) — the single owner of schema lifecycle
 run_migrations

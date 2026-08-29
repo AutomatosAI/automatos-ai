@@ -29,8 +29,8 @@ if [ -n "$BASE" ]; then
   DELMIG=$(git diff --name-only --diff-filter=D "$BASE"..HEAD -- orchestrator/alembic/versions/ 2>/dev/null | wc -l | tr -d ' ')
   if [ "$DELMIG" = "0" ]; then echo "   ✅ PASS"; else echo "   ❌ FAIL: $DELMIG revision files deleted"; FAIL=1; fi
 else echo "   ⚠️  SKIP: no merge base"; fi
-check "US-002 init_complete_schema.sql carries an alembic_version stamp" \
-  'grep -qi "alembic_version" orchestrator/core/database/init_complete_schema.sql'
+check "US-002 fresh path: init_fresh_db exists, stamps heads, entrypoint wired, stale SQL gone" \
+  'grep -q "command.stamp(cfg, \"heads\")" orchestrator/scripts/init_fresh_db.py && grep -q "init_fresh_if_empty" docker-entrypoint.sh && [ ! -f orchestrator/core/database/init_complete_schema.sql ] && ! grep -q "init_complete_schema" docker-compose.yml'
 
 # US-003 — compose local defaults
 check "US-003 compose consumes envs/api.defaults via env_file" \

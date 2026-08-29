@@ -1,14 +1,17 @@
 """PRD-209 S4 — the schema-drift check bites, and the real repo is clean.
 
-``scripts/ci/schema_drift_check.py`` is the structural net for "four writers of schema
-truth": it flags a table that a migration ``ALTER``s but that no migration and no
-``init_complete_schema.sql`` ever ``CREATE``s — the July failure class that crashed a
-from-base migration replay with ``relation "..." does not exist`` and that no lane caught.
+``scripts/ci/schema_drift_check.py`` is the structural net for the writers of schema
+truth: it flags a table that a migration ``ALTER``s but that no migration, no model
+(``__tablename__`` — the create_all fresh path), and no ``RAW_DDL_EXTRAS`` entry ever
+``CREATE``s — the July failure class that crashed a fresh database with
+``relation "..." does not exist`` and that no lane caught. (The S2 revision of
+2026-08-29 retired ``init_complete_schema.sql``; models are a first-class writer now.)
 
 These guards are pure (import the check module, feed it fixture DDL / fixture migration
-dirs, and read the real versions dir + init SQL). No database, no ``Base.metadata`` import,
-no live Alembic — the same posture as the other PRD-209 guards, so they run in the required
-orchestrator-tests lane and on a laptop with no services.
+dirs, and read the real versions dir + model tree as text). No database, no
+``Base.metadata`` import, no live Alembic — the same posture as the other PRD-209
+guards, so they run in the required orchestrator-tests lane and on a laptop with no
+services.
 """
 from __future__ import annotations
 
@@ -92,18 +95,19 @@ def test_orphan_alter_check_bites_on_altered_but_never_created(tmp_path):
         "    op.create_table('real_table', sa.Column('id', sa.Integer()))\n"
         "    op.add_column('real_table', sa.Column('name', sa.String()))\n",
     )
-    empty_init = tmp_path / "init.sql"
-    empty_init.write_text("-- no tables\n", encoding="utf-8")
+    empty_orch = tmp_path / "orch"
+    empty_orch.mkdir()
 
-    orphans = sdc.orphan_alter_tables(versions, empty_init)
+    orphans = sdc.orphan_alter_tables(versions, empty_orch)
 
     assert "ghost_table" in orphans, "an ALTER-ed-but-never-CREATE-d table must be flagged"
     assert "real_table" not in orphans, "a table created by a migration is not an orphan"
 
 
-def test_orphan_check_counts_init_sql_as_a_create_writer(tmp_path):
-    # A table CREATE-d only in init_complete_schema.sql (not by any migration) but
-    # ALTER-ed by a migration is NOT an orphan — init SQL is a writer the fresh clone sees.
+def test_orphan_check_counts_models_as_a_create_writer(tmp_path):
+    # A table declared only by a model (__tablename__ — the create_all fresh path)
+    # but ALTER-ed by a migration is NOT an orphan — models are a writer the fresh
+    # database sees (scripts/init_fresh_db.py builds them).
     versions = tmp_path / "versions"
     versions.mkdir()
     _write(
@@ -112,10 +116,13 @@ def test_orphan_check_counts_init_sql_as_a_create_writer(tmp_path):
         "def upgrade():\n"
         "    op.create_index('ix_seeded_name', 'seeded_table', ['name'])\n",
     )
-    init = tmp_path / "init.sql"
-    init.write_text("CREATE TABLE IF NOT EXISTS seeded_table (id serial PRIMARY KEY);\n", encoding="utf-8")
+    orch = tmp_path / "orch"
+    (orch / "core" / "models").mkdir(parents=True)
+    (orch / "core" / "models" / "seeded.py").write_text(
+        'class Seeded(Base):\n    __tablename__ = "seeded_table"\n', encoding="utf-8"
+    )
 
-    assert "seeded_table" not in sdc.orphan_alter_tables(versions, init)
+    assert "seeded_table" not in sdc.orphan_alter_tables(versions, orch)
 
 
 def test_orphan_check_reads_foreign_key_and_index_target_table(tmp_path):
@@ -129,11 +136,11 @@ def test_orphan_check_reads_foreign_key_and_index_target_table(tmp_path):
         "def upgrade():\n"
         "    op.create_foreign_key(op.f('fk_x'), 'fk_source_ghost', 'other', ['a'], ['id'])\n",
     )
-    empty_init = tmp_path / "init.sql"
-    empty_init.write_text("\n", encoding="utf-8")
+    empty_orch = tmp_path / "orch"
+    empty_orch.mkdir()
 
-    assert "fk_source_ghost" in sdc.orphan_alter_tables(versions, empty_init)
-    assert "fk_x" not in sdc.orphan_alter_tables(versions, empty_init)
+    assert "fk_source_ghost" in sdc.orphan_alter_tables(versions, empty_orch)
+    assert "fk_x" not in sdc.orphan_alter_tables(versions, empty_orch)
 
 
 # ---------------------------------------------- the real repo is clean on this branch (AC2)
@@ -141,18 +148,30 @@ def test_real_repo_has_no_unbaselined_orphans():
     # Green on this branch: every orphan-alter table today is in the documented baseline.
     # This is what the CI schema-drift lane asserts; running it here means the required
     # orchestrator-tests lane (and a local run) also redden on a NEW orphan.
-    new = sdc.new_orphans(sdc._VERSIONS_DIR, sdc._INIT_SQL)
+    new = sdc.new_orphans(sdc._VERSIONS_DIR, sdc._ORCH_ROOT)
     assert not new, (
         f"{len(new)} new ALTER-ed-but-never-CREATE-d table(s): {sorted(new)}. Add each to a "
-        "migration's create_table or to init_complete_schema.sql (or, if genuinely "
-        "create_all-only and accepted, to ORPHAN_ALTER_BASELINE with a reason)."
+        "migration's create_table, give it a model, or (raw-DDL only) add it to "
+        "init_test_db + RAW_DDL_EXTRAS (or, if genuinely accepted, to "
+        "ORPHAN_ALTER_BASELINE with a reason)."
+    )
+
+
+def test_raw_ddl_extras_in_sync_with_init_test_db():
+    # Every RAW_DDL_EXTRAS entry must actually be CREATE-d by scripts/init_test_db.py —
+    # the extras list is a claim about what the fresh path builds, not a wish list.
+    init_text = (_REPO_ROOT / "orchestrator" / "scripts" / "init_test_db.py").read_text(encoding="utf-8")
+    built = sdc.parse_sql_tables(init_text)
+    missing = set(sdc.RAW_DDL_EXTRAS) - built
+    assert not missing, (
+        f"RAW_DDL_EXTRAS entries not CREATE-d by init_test_db.py: {sorted(missing)}"
     )
 
 
 def test_baseline_has_no_stale_entries():
     # Every baseline entry must still be a real orphan. If a writer now CREATEs one, the
     # entry is stale and must be pruned so the baseline can never quietly over-accept.
-    stale = sdc.stale_baseline_entries(sdc._VERSIONS_DIR, sdc._INIT_SQL)
+    stale = sdc.stale_baseline_entries(sdc._VERSIONS_DIR, sdc._ORCH_ROOT)
     assert not stale, (
         f"stale ORPHAN_ALTER_BASELINE entries (a writer now CREATEs them — prune): {sorted(stale)}"
     )
@@ -177,10 +196,11 @@ def test_check_main_returns_nonzero_on_a_planted_orphan(tmp_path, monkeypatch):
         "0001_orphan.py",
         "def upgrade():\n    op.add_column('brand_new_ghost', sa.Column('x', sa.Integer()))\n",
     )
-    init = tmp_path / "init.sql"
-    init.write_text("-- empty\n", encoding="utf-8")
+    orch = tmp_path / "orch"
+    orch.mkdir()
     monkeypatch.setattr(sdc, "_VERSIONS_DIR", versions)
-    monkeypatch.setattr(sdc, "_INIT_SQL", init)
+    monkeypatch.setattr(sdc, "_ORCH_ROOT", orch)
+    monkeypatch.setattr(sdc, "RAW_DDL_EXTRAS", set())
 
     assert sdc.main() == 1
 
