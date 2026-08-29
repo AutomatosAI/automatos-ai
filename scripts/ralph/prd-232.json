@@ -23,14 +23,14 @@
       "title": "Each flag gates its own surface (fix the inversion)",
       "description": "The GraphRouter call in smart_tool_router.py:224 is gated on config.SEMANTIC_TOOL_ROUTING (default true) — move it behind config.TOOL_ROUTING_GRAPH (default false, currently consumed ONLY at platform_actions.py:135-139). SEMANTIC_TOOL_ROUTING continues to gate embedding narrowing (tool_router.py:88-92) and the catalog embedding path. Result: graph OFF = zero GraphRouter queries anywhere; graph ON = both schema path and catalog path use it.",
       "acceptanceCriteria": [
-        "With TOOL_ROUTING_GRAPH=false and SEMANTIC_TOOL_ROUTING=true, a test proves route() never calls rank_chains (mock/spy) while embedding narrowing still runs",
-        "With TOOL_ROUTING_GRAPH=true, a test proves both smart_tool_router and PlatformActionsSection consult the graph",
-        "config.py docstrings for both flags state the split; no os.getenv outside config.py",
-        "Branch-scoped pytest green"
+        "DONE — test_prd232_us002_flag_split.py::test_graph_off_no_rank_chains_but_embedding_narrowing_runs: TOOL_ROUTING_GRAPH=false + SEMANTIC=true → route() rank_chains spy records 0 calls (falls to category); embedding narrowing still live (tool_router._semantic_routing_enabled True, _narrow_dispatcher_actions_async_inputs returns None=proceed, PlatformActionsSection._semantic_routing_enabled True / _graph_routing_enabled False).",
+        "DONE — test_graph_on_both_surfaces_consult_graph: TOOL_ROUTING_GRAPH=true → SmartToolRouter.route() calls rank_chains (schema path) AND PlatformActionsSection._build_graph_filtered calls rank_chains with workspace_id='ws-42'/agent_id=9 (catalog path).",
+        "DONE — config.py docstrings on both SEMANTIC_TOOL_ROUTING and TOOL_ROUTING_GRAPH state the split (asserted by test_config_docstrings_state_the_split); test_no_os_getenv_for_routing_flags_outside_config greps clean (raw env read only in config.py).",
+        "DONE — cd orchestrator && python3 -m pytest -q: US-001+US-002+US-014 = 19 passed; platform_actions/tool_router_semantic/config/eval_graph_mode/context suites = 123 passed. No other test couples route() to the old gate."
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "One-line inversion fix: smart_tool_router.py route() graph read now `if config.TOOL_ROUTING_GRAPH:` (was SEMANTIC_TOOL_ROUTING). platform_actions.py already gated the catalog graph on TOOL_ROUTING_GRAPH — no change needed there. Updated test_us014 graph_env fixture to set TOOL_ROUTING_GRAPH=True and renamed the semantic-off test to test_graph_flag_off_skips_graph_router."
     },
     {
       "id": "US-003",
