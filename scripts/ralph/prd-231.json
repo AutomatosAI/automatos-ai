@@ -21,12 +21,12 @@
    "title": "Seed + assign platform-operations as a NON-core skill; second _BUILTIN_PATHS entry",
    "description": "seed_auto_agent.py: generalize the platform-management upsert/assign into a small loop or a second call — upsert Skill(name='platform-operations', skill_source='builtin-core', workspace_id=None, category='agent-role', version from frontmatter, prompt_template = seed body sans frontmatter) under its own advisory lock key, and ensure assignment to Auto with the same ON CONFLICT pattern. Because seed_auto_agent's ensure path runs on every lazy get-or-seed call, EXISTING workspaces receive the assignment on their next chat — assert this in a test (existing agent + existing charter skill → second call adds the ops assignment idempotently). skill_loader._BUILTIN_PATHS gains 'platform-operations' → core/seeds/platform-operations-skill.md so _refresh_builtin_if_stale propagates ops edits identically. VERIFY platform-operations is NOT in SKILL_CORE_ALWAYS_ON (test reads the config + the section's resolved set) — it must render as an L1 catalog line with the frontmatter description as trigger text, and platform_load_skill must return its body (test through the real handler with a seeded row).",
    "acceptanceCriteria": [
-    "Fresh workspace: both skills seeded + assigned (test); existing workspace: next ensure call adds ops assignment, idempotent twice (test)",
-    "platform-operations absent from the resolved core-always-on set; skills-section render for Auto shows charter FULL BODY + ops as ONE L1 line (component-level test on SkillsSection._build with a fake agent)",
-    "platform_load_skill 'platform-operations' returns the cookbook body (handler test)",
-    "_BUILTIN_PATHS has both entries; _refresh_builtin_if_stale refreshes a stale ops row from disk (test mirrors the existing platform-management refresh test)",
-    "ZERO new alembic files; route manifest untouched",
-    "cd orchestrator && python3 -m pytest -q green"
+    "DONE — generic _upsert_builtin_core_skill(name/path/lock_key/description/tags) drives both; _upsert_platform_operations_skill added (own lock 'seed:platform-operations', frontmatter description as L1 trigger). test_fresh_workspace_seeds_and_assigns_both_skills (db.add + assigned==[charter,ops]); test_existing_workspace_gains_ops_assignment_idempotently (2 ensure calls → ops assigned twice, no new agent) — the ensure path runs every lazy get-or-seed so existing workspaces are covered (tests/test_prd231_ops_skill.py)",
+    "DONE — test_platform_operations_absent_from_core_always_on (SkillsSection._core_always_on_names + config.SKILL_CORE_ALWAYS_ON exclude it; NEVER added); test_render_shows_charter_body_and_ops_l1_line_only (SkillsSection.render: charter full body inlined, ops body absent, ops one '**platform-operations**' L1 line w/ frontmatter-description trigger)",
+    "DONE — test_platform_load_skill_returns_ops_cookbook_body (real handler load_skill over a seeded-row mock returns the real ops body incl. '# Platform Operations Reference' + '## 0.'/'## 19.')",
+    "DONE — _BUILTIN_PATHS gained 'platform-operations'→core/seeds/platform-operations-skill.md (test_builtin_paths_has_both_entries); test_refresh_builtin_if_stale_refreshes_ops_from_disk (stale row → disk hash+body, commit once) + noop-when-current test",
+    "DONE — git diff 93e1b8170..HEAD touches no alembic/ or route manifest (verified); zero new revisions/tables/routes",
+    "DONE — tests/test_prd231_ops_skill.py 10 passed; regression tests/test_prd231_sync.py+ops_skill+p2w1+skills_section+prd226_doctrine+contract 82 passed (Postgres-free)"
    ],
    "files": ["orchestrator/core/seeds/seed_auto_agent.py", "orchestrator/modules/agents/services/skill_loader.py", "orchestrator/tests/"]
   },

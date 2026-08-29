@@ -28,11 +28,15 @@ from core.models.core import Agent, Skill, agent_skills
 
 logger = logging.getLogger(__name__)
 
-# The always-on platform-management skill lives alongside the seed files so it
-# ships in the Docker image. (The CTO soul file auto-cto-custom-soul.txt feeds the
+# Auto's two builtin-core skill seeds live alongside this file so they ship in the
+# Docker image. platform-management is the ALWAYS-ON charter (SKILL_CORE_ALWAYS_ON
+# → full body every turn); platform-operations is the on-demand cookbook — NON-core,
+# so it renders as one L1 catalog line and Auto pulls its body via platform_load_skill
+# (PRD-231, the context diet). (The CTO soul file auto-cto-custom-soul.txt feeds the
 # GLOBAL, admin-only CTO agent via seed_cto_agent.py — NOT this per-workspace Auto
 # agent, whose persona is _default_persona() below: friendly base + doctrine.)
 _PLATFORM_SKILL_PATH = Path(__file__).resolve().parent / "platform-management-skill.md"
+_PLATFORM_OPS_SKILL_PATH = Path(__file__).resolve().parent / "platform-operations-skill.md"
 
 _FRIENDLY_FALLBACK = """\
 **Who I Am:**
@@ -330,69 +334,89 @@ def _get_default_model_config() -> dict:
     return mc
 
 
-def _upsert_platform_management_skill(db: Session) -> Skill | None:
-    """Create the platform-management skill if it doesn't exist.
+def _upsert_builtin_core_skill(
+    db: Session,
+    *,
+    name: str,
+    path: Path,
+    lock_key: str,
+    description: str,
+    tags: list[str],
+    category: str = "agent-role",
+) -> Skill | None:
+    """Create one builtin-core skill from its generated seed if it doesn't exist.
 
-    Create-only at boot time. Runtime freshness is handled by
-    skill_loader.py via content-hash-cache — no need to rewrite
-    prompt_template on every restart.
+    Create-only at boot time. Runtime freshness is handled by skill_loader.py via
+    the content-hash cache — no need to rewrite prompt_template on every restart.
+    PRD-231 generalizes the original single-skill seeder so platform-management
+    (the charter) and platform-operations (the on-demand cookbook) share one
+    proven path: its own xact-scoped advisory lock (PRD-191 S3, serializes
+    concurrent seeders across workers), the same IntegrityError re-select on a
+    lost insert race, and the frontmatter version as the truth.
     """
     import hashlib
+    import re as _re
 
     from sqlalchemy import text as _sql_text
     from sqlalchemy.exc import IntegrityError
 
-    # PRD-191 S3: serialize concurrent seeders (hybrid/chat/workspaces run this
-    # on hot paths across workers). The xact-scoped advisory lock releases with
-    # the surrounding transaction; the IntegrityError fallback covers the race
-    # against the live UNIQUE(name) WHERE workspace_id IS NULL index.
     try:
-        db.execute(_sql_text(
-            "SELECT pg_advisory_xact_lock(hashtext('seed:platform-management'))"
-        ))
+        db.execute(
+            _sql_text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+            {"k": lock_key},
+        )
     except Exception:
         logger.warning("Advisory lock unavailable — continuing unserialized", exc_info=True)
 
     skill = db.query(Skill).filter(
-        Skill.name == "platform-management",
+        Skill.name == name,
         Skill.skill_source == "builtin-core",
     ).first()
 
     if skill:
-        logger.info("Platform-management skill exists (id=%s), skipping seed", skill.id)
+        logger.info("%s skill exists (id=%s), skipping seed", name, skill.id)
         return skill
 
-    if not _PLATFORM_SKILL_PATH.exists():
-        logger.warning("Platform-management SKILL.md not found at %s", _PLATFORM_SKILL_PATH)
+    if not path.exists():
+        logger.warning("%s SKILL.md not found at %s", name, path)
         return None
 
-    raw = _PLATFORM_SKILL_PATH.read_text(encoding="utf-8").strip()
+    raw = path.read_text(encoding="utf-8").strip()
 
-    # The seed file is GENERATED from automatos-skills/team/auto/SKILL.md
-    # (scripts/sync-auto-skill.py) — its frontmatter version is the truth.
-    import re as _re
+    # The seed file is GENERATED from automatos-skills (scripts/sync-auto-skill.py)
+    # — its frontmatter version is the truth.
     _vm = _re.search(r'^version:\s*"?([\d.]+)"?', raw, _re.M)
     skill_version = _vm.group(1) if _vm else "1.0.0"
 
-    # Split YAML frontmatter from markdown body
+    # Split YAML frontmatter from markdown body.
     if raw.startswith("---"):
         parts = raw.split("---", 2)
+        frontmatter = parts[1] if len(parts) > 2 else ""
         markdown_body = parts[2].strip() if len(parts) > 2 else raw
     else:
+        frontmatter = ""
         markdown_body = raw
+
+    # PRD-231: the L1 catalog trigger text is the AUTHORED frontmatter description
+    # (single source — no hardcoded drift), with the passed value as a defensive
+    # fallback if the frontmatter carries none.
+    resolved_description = description
+    _dm = _re.search(r'^description:\s*(.+)$', frontmatter, _re.M)
+    if _dm and _dm.group(1).strip():
+        resolved_description = _dm.group(1).strip()
 
     content_hash = hashlib.sha256(markdown_body.encode("utf-8")).hexdigest()
 
     skill = Skill(
-        name="platform-management",
-        description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
+        name=name,
+        description=resolved_description,
         skill_type="technical",
-        category="agent-role",
+        category=category,
         skill_version=skill_version,
         skill_source="builtin-core",
         prompt_template=markdown_body,
         content_hash=content_hash,
-        tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
+        tags=tags,
         is_active=True,
         workspace_id=None,  # global skill
     )
@@ -400,19 +424,48 @@ def _upsert_platform_management_skill(db: Session) -> Skill | None:
     try:
         db.flush()
     except IntegrityError:
-        # Another worker won the insert race despite the lock (or the lock
-        # was unavailable): the row exists — re-select and return it. Never
-        # swallow this into a silent no-seed (the Wave-0 lesson).
+        # Another worker won the insert race despite the lock (or the lock was
+        # unavailable): the row exists — re-select and return it. Never swallow
+        # this into a silent no-seed (the Wave-0 lesson).
         db.expunge(skill)
         existing = db.query(Skill).filter(
-            Skill.name == "platform-management",
+            Skill.name == name,
             Skill.skill_source == "builtin-core",
         ).first()
-        logger.info("Platform-management skill seeded by a concurrent worker (id=%s)",
+        logger.info("%s skill seeded by a concurrent worker (id=%s)", name,
                     getattr(existing, "id", None))
         return existing
-    logger.info("Platform-management skill created (id=%s)", skill.id)
+    logger.info("%s skill created (id=%s)", name, skill.id)
     return skill
+
+
+def _upsert_platform_management_skill(db: Session) -> Skill | None:
+    """Create the platform-management charter skill (always-on) if absent."""
+    return _upsert_builtin_core_skill(
+        db,
+        name="platform-management",
+        path=_PLATFORM_SKILL_PATH,
+        lock_key="seed:platform-management",
+        description="Complete platform operations — marketplace, agents, playbooks, heartbeats, board, governance, LLMs, workspace setup",
+        tags=["platform", "admin", "marketplace", "agents", "playbooks", "governance"],
+    )
+
+
+def _upsert_platform_operations_skill(db: Session) -> Skill | None:
+    """Create the platform-operations cookbook skill (NON-core, on-demand) if absent.
+
+    PRD-231: it is deliberately kept OUT of SKILL_CORE_ALWAYS_ON — it renders as a
+    single L1 catalog line whose trigger text is the seed's frontmatter description,
+    and Auto pulls its body with platform_load_skill only on operating turns.
+    """
+    return _upsert_builtin_core_skill(
+        db,
+        name="platform-operations",
+        path=_PLATFORM_OPS_SKILL_PATH,
+        lock_key="seed:platform-operations",
+        description="The tool-by-tool operations cookbook — load before executing any platform operation.",
+        tags=["platform", "operations", "cookbook", "reference"],
+    )
 
 
 def _assign_skill_to_agent(db: Session, agent: Agent, skill: Skill) -> None:
@@ -480,5 +533,13 @@ def seed_auto_agent(db: Session, workspace_id: UUID) -> Agent:
     platform_skill = _upsert_platform_management_skill(db)
     if platform_skill:
         _assign_skill_to_agent(db, agent, platform_skill)
+
+    # PRD-231: ensure the on-demand platform-operations cookbook is assigned too.
+    # Because this ensure path runs on EVERY lazy get-or-seed call, existing
+    # workspaces gain the ops assignment on their next chat — no separate backfill.
+    # ON CONFLICT DO NOTHING keeps it idempotent across the repeat calls.
+    ops_skill = _upsert_platform_operations_skill(db)
+    if ops_skill:
+        _assign_skill_to_agent(db, agent, ops_skill)
 
     return agent
