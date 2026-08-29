@@ -11,7 +11,7 @@ REC="orchestrator/modules/tools/discovery/signal_recorder.py"
 TRT="orchestrator/modules/tools/tool_router.py"
 CFG="orchestrator/config.py"
 UTT="orchestrator/core/seeds/utterances"
-BASE_BR="fix/main-ci-wave-drift"
+BASE_BR="origin/main"   # post-integration: the branch now CONTAINS main; diff against it, not the retired #643 base
 check() {
   local name="$1"; shift
   echo ""

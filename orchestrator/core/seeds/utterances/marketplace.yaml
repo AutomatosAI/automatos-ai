@@ -301,3 +301,120 @@ actions:
     source: authored
   - text: remove that plugin from all my agents
     source: authored
+  platform_search_packages:
+  - text: find a package for a shopify store
+    source: example
+  - text: what starter team fits an online jewellery shop
+    source: example
+  - text: search packages for ecommerce
+    source: example
+  - text: what packages do you have for a shopify shop
+    source: authored
+  - text: is there a starter kit for an ecommerce store
+    source: authored
+  - text: show me packages that fit a b2b saas business
+    source: authored
+  - text: which bundle should a small bakery start with
+    source: authored
+  - text: look up a package for customer support teams
+    source: authored
+  - text: any ready-made team for an online clothing brand
+    source: authored
+  - text: search the package catalogue for retail
+    source: authored
+  - text: what vertical packages exist
+    source: authored
+  - text: find me a starting team for a consultancy
+    source: authored
+  - text: browse packages for a subscription business
+    source: authored
+  - text: recommend a package for my kind of business
+    source: authored
+  - text: what's the closest package to an agency setup
+    source: authored
+  - text: list the packages available to install
+    source: authored
+  - text: packages for dropshipping?
+    source: authored
+  - text: do you have a marketing team package
+    source: authored
+  - text: what would you install for a florist shop
+    source: authored
+  platform_install_package:
+  - text: install the shopify management package
+    source: example
+  - text: set up the shopify-development team
+    source: example
+  - text: add the store package to my workspace
+    source: example
+  - text: install that package
+    source: authored
+  - text: go ahead and set up the ecommerce package
+    source: authored
+  - text: add the customer support package to this workspace
+    source: authored
+  - text: put the retail starter team in place
+    source: authored
+  - text: install the package you just recommended
+    source: authored
+  - text: set us up with the shopify bundle
+    source: authored
+  - text: yes install it
+    source: authored
+  - text: provision the marketing package
+    source: authored
+  - text: deploy the agency package here
+    source: authored
+  - text: get the b2b saas team installed
+    source: authored
+  - text: install package shopify-management
+    source: authored
+  - text: spin up the starter team for my store
+    source: authored
+  - text: add that bundle please
+    source: authored
+  - text: enable the ecommerce starter package
+    source: authored
+  - text: install the one that fits a jewellery shop
+    source: authored
+  - text: set up the recommended team
+    source: authored
+  platform_install_marketplace_agent:
+  - text: install the inventory manager agent
+    source: example
+  - text: add marketplace agent Store Analyst
+    source: example
+  - text: install agent 42
+    source: example
+  - text: add the inventory watcher from the marketplace
+    source: authored
+  - text: install the sales analyst agent
+    source: authored
+  - text: grab the customer service agent off the marketplace
+    source: authored
+  - text: add a store analyst to my team
+    source: authored
+  - text: install marketplace agent 17
+    source: authored
+  - text: bring in the greeter agent
+    source: authored
+  - text: add that agent from the marketplace to my workspace
+    source: authored
+  - text: install the follow-up agent
+    source: authored
+  - text: i want the insight engine agent
+    source: authored
+  - text: put the returns handler agent on my team
+    source: authored
+  - text: install the agent called Store Analyst
+    source: authored
+  - text: add the seo helper from the marketplace
+    source: authored
+  - text: get me the invoice chaser agent
+    source: authored
+  - text: add the marketplace agent you suggested
+    source: authored
+  - text: install an agent for stock alerts
+    source: authored
+  - text: yes add that agent
+    source: authored

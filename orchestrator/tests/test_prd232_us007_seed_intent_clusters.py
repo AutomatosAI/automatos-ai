@@ -344,7 +344,14 @@ def test_single_alembic_head_at_our_revision():
     heads = list(script.get_heads())
     assert heads == ["prd232_cluster_provenance"], f"expected single head, got {heads}"
     rev = script.get_revision("prd232_cluster_provenance")
-    assert rev.down_revision == "prd225_s1_asks_on_grants"
+    # Chain position is NOT an identity contract: later mainline migrations
+    # (PRD-230, workspace-models) legitimately sit between prd225 and us. What
+    # must hold: our down_revision is a real revision and prd225 is an ancestor
+    # (we are on the live chain, not a rival head).
+    assert rev.down_revision, "prd232 must chain onto a real revision"
+    assert script.get_revision(rev.down_revision) is not None
+    lineage = {r.revision for r in script.walk_revisions(base="base", head="prd232_cluster_provenance")}
+    assert "prd225_s1_asks_on_grants" in lineage
 
 
 def test_migration_adds_nullable_provenance_default_organic():
