@@ -40,8 +40,11 @@ echo "── #643 files untouched; zero migrations; manifest frozen"
 if [ -n "$BASEP" ]; then
   git diff --name-only "$BASEP"..HEAD -- orchestrator/tests/test_prd222_w2s1_plan_tiers.py orchestrator/tests/authz_sweep_probe.py | grep -q . \
     && { echo "   ❌ FAIL: #643's files modified"; FAIL=1; } || echo "   ✅ PASS: #643 files untouched"
-  NEWMIG=$(git diff --name-only --diff-filter=A "$BASEP"..HEAD -- orchestrator/alembic/versions/ 2>/dev/null | wc -l | tr -d ' ')
-  [ "$NEWMIG" = "0" ] && echo "   ✅ PASS: no new migrations" || { echo "   ❌ FAIL: $NEWMIG new migrations"; FAIL=1; }
+  NEWMIG_FILES=$(git diff --name-only --diff-filter=A "$BASEP"..HEAD -- orchestrator/alembic/versions/ 2>/dev/null)
+  NEWMIG=$(echo "$NEWMIG_FILES" | grep -c . | tr -d ' ')
+  if [ "$NEWMIG" = "0" ]; then echo "   ✅ PASS: no new migrations (US-007 revision optional-but-expected)";
+  elif [ "$NEWMIG" = "1" ] && echo "$NEWMIG_FILES" | grep -q "prd232.*provenance"; then echo "   ✅ PASS: exactly the authorized US-007 provenance revision";
+  else echo "   ❌ FAIL: unauthorized migrations: $NEWMIG_FILES"; FAIL=1; fi
   git diff "$BASEP"..HEAD -- orchestrator/reports/route-manifest.json | grep -q . \
     && { echo "   ❌ FAIL: route manifest changed"; FAIL=1; } || echo "   ✅ PASS: route manifest untouched"
 fi

@@ -16,7 +16,7 @@ You are executing **PRD-232**, one story per iteration, unattended. Branch **`ra
 - **You are the utterance generator** (US-005): author the corpus YAML yourself. NOTHING in this build may call an external LLM API or any network service.
 - **NO DB, NO servers, NO eval runs**: tests are PURE or fixture-based (`@integration` skips cleanly without local Postgres; real Postgres is CI). `seed_tool_routing_graph.py` and the uplift eval are HUMAN-APPLIED — you extend them, you never execute them against a database.
 - **Flags:** `TOOL_ROUTING_GRAPH` stays default **false** (flip is a post-merge human step, US-013). `TOOL_SIGNAL_RECORDER_ENABLED` flips default **true** (US-009, locked). No `os.getenv` outside `config.py`. No hardcoded values — thresholds/pins in config.
-- **NO new tables or alembic revisions.** If a story genuinely needs one (US-007 provenance column, US-011 gap storage), `RALPH_BLOCKED` with the evidence — never create schema silently.
+- **NO new tables; alembic revisions only as explicitly authorized:** US-007 is AUTHORIZED for exactly ONE revision (`prd232_cluster_provenance`, nullable provenance column — see the story). Anything else needing schema: `RALPH_BLOCKED` with the evidence — never create schema silently.
 - **No new ranking systems.** You wire and feed `ActionSemanticIndex` + `GraphRouter`. A second ranker or a parallel pins mechanism is an automatic review CRITICAL.
 - **DeterministicEmbeddingProvider never appears outside explicit test fixtures** (PRD-185 S3).
 - **Green tip:** `cd orchestrator && python3 -m pytest -q` after every commit; never commit on red. Pre-existing env failures (DB-bound) are known — your gate is the branch-scoped set; do not "fix" unrelated red.
@@ -25,7 +25,7 @@ You are executing **PRD-232**, one story per iteration, unattended. Branch **`ra
 ## Hard NOs
 
 - NO flipping `TOOL_ROUTING_GRAPH` default; NO running seeds/evals against any DB; NO external LLM/API calls.
-- NO new tables, alembic files, routes, routers; route manifest byte-untouched.
+- NO new tables or routes/routers; alembic ONLY the single authorized US-007 revision; route manifest byte-untouched.
 - NO edits to `orchestrator/tests/test_prd222_w2s1_plan_tiers.py` or `orchestrator/tests/authz_sweep_probe.py` (they belong to #643 beneath you).
 - NO second always-include/pins mechanism; NO duplicate ranking path (PRD-141 US-016's rule stands).
 - NO weakening tier gating (`super_admin_only`/admin fail-closed suites stay green untouched).
