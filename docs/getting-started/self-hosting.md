@@ -18,7 +18,7 @@ disagree, the file wins — open an issue.
 | Need | Notes |
 |---|---|
 | Docker Desktop (macOS / Windows) or Docker Engine (Linux) | with the Compose v2 plugin — the `docker compose` subcommand. The compose file uses v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. |
-| Disk | Budget roughly 10 GB for images and data volumes. The workspace-worker image is the largest: it carries Node 20, the Claude Code CLI, Python tooling and a headless Chromium. |
+| Disk | About 4 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.6 GB (Node 20 + the Claude Code CLI), Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
 | Git | to clone and to pull updates. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
 
@@ -401,4 +401,28 @@ The same CI gates both: every change is compose-only, fresh-clone-only, or
 guarded by `AUTH_EDITION`, and the fresh-clone smoke lane boots this exact
 stack from an empty checkout. Contributions land in every edition under the
 repository's Apache-2.0 licence with a DCO sign-off — see
+### Working on the code instead of with it
+
+The default stack runs the shipped production images — the Next.js standalone
+build and a compiler-free Python runtime — because that is what a user installs.
+For hot reload while editing:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+That swaps the frontend and backend to their development stages and mounts your
+source. It is heavier on purpose (the dev server alone holds ~3 GB of RAM).
+
+Two things are opt-in to keep the default install small:
+
+```bash
+# headless Chromium for the workspace_html_to_png tool (+1.2 GB)
+docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
+
+# Leiden clustering for the Knowledge Graph (+660 MB; without it the graph
+# still clusters, using networkx's Louvain — lower partition quality)
+docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
+```
+
 [CONTRIBUTING.md](../../CONTRIBUTING.md).
