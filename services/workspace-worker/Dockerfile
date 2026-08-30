@@ -15,9 +15,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && npm install -g pnpm \
     && rm -rf /var/lib/apt/lists/*
 
-# Claude Code CLI — required by claude-agent-sdk for headless canvas
-# sessions (PRD-170 S1). The SDK spawns this binary per workspace session.
-RUN npm install -g @anthropic-ai/claude-code
+# The Claude Code CLI is NOT installed here: claude-agent-sdk ships its own copy
+# (site-packages/claude_agent_sdk/_bundled/claude) and resolves it FIRST —
+# _find_cli() tries the bundled binary before shutil.which("claude"), so the npm
+# global was 232 MB the SDK could never reach (PRD-233 slim pass). Node/npm/pnpm
+# above stay: they are the agent workspace toolchain, not the CLI's runtime.
 
 # uv only — a single fast installer an agent can use to pull whatever a task
 # actually needs. Pre-installing pytest/ruff/black/mypy/isort/flake8/coverage/tox
