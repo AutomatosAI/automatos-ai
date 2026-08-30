@@ -57,10 +57,13 @@ FROM base as builder
 # API keys should be handled server-side only (see frontend/app/api/chat/route.ts)
 ARG NEXT_PUBLIC_API_URL
 # PRD-233: NEXT_PUBLIC_* are inlined at BUILD time, so the edition and the
-# API/WS origins must be build args for the standalone image. Defaults are the
-# local edition's (compose passes them); SaaS builds on Railway use Railpack,
-# not this file, and set their own env.
-ARG NEXT_PUBLIC_AUTH_EDITION=local
+# API/WS origins must be build args for the standalone image. The DEFAULT is
+# the hosted product (saas) — Railway DOES build this Dockerfile (it prefers a
+# Dockerfile over Railpack when one exists in the service root), and a `local`
+# default here shipped the Clerk-less edition to production on 2026-08-30 (#650
+# → #668). The local edition passes NEXT_PUBLIC_AUTH_EDITION=local explicitly
+# via docker-compose.yml build args.
+ARG NEXT_PUBLIC_AUTH_EDITION=saas
 ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
