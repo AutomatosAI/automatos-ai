@@ -557,8 +557,10 @@ jobs:
       - name: Frontend — edition baked with no args must be saas
         run: |
           docker build --target production -t parity-fe frontend/
-          LOCAL=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"||\"\"" .next 2>/dev/null | wc -l')
-          SAAS=$(docker run --rm parity-fe sh -c 'grep -rlF "\"saas\"||\"\"" .next 2>/dev/null | wc -l')
+          # lib/auth-edition.ts compiles to `"local"===<INLINED>.trim().toLowerCase()?"local":"saas"`
+          # (Next folds the `|| ''` away), so the baked edition is the literal on the right.
+          LOCAL=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"===\"local\".trim()" .next 2>/dev/null | wc -l')
+          SAAS=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"===\"saas\".trim()" .next 2>/dev/null | wc -l')
           echo "chunks with local literal: $LOCAL; with saas literal: $SAAS"
           if [ "$LOCAL" != "0" ] || [ "$SAAS" = "0" ]; then
             echo "::error::the production frontend image bakes the LOCAL edition — check ARG NEXT_PUBLIC_AUTH_EDITION in frontend/Dockerfile"
