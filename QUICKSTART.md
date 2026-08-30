@@ -45,8 +45,15 @@ you do, the chat page shows *"Add an LLM key to bring Auto to life"*).
 ## 2. Start the platform
 
 ```bash
-docker compose up
+make up
 ```
+
+That builds what changed, starts the stack, and clears the images and build
+cache the rebuild superseded — Docker keeps those forever otherwise, which is
+what quietly turns a 3.7 GB stack into 12 GB of disk. `make status` shows what
+is running and what it costs; `make down` stops it; `make clean` reclaims space
+at any time (it never touches your data). Plain `docker compose up` still works
+if you prefer it.
 
 First run builds the images, builds the database schema, runs the seeds and
 then serves. `http://localhost:8000/health` answers as soon as the API process

@@ -403,12 +403,27 @@ stack from an empty checkout. Contributions land in every edition under the
 repository's Apache-2.0 licence with a DCO sign-off — see
 ### Keeping it small
 
-Rebuilding leaves the previous image behind and the build cache grows without
-bound — that is what turns 3.7 GB of images into 12 GB of disk. After any
-rebuild:
+Rebuilding leaves the previous image untagged and grows the build cache, and
+Docker keeps both indefinitely — that is what turns 3.7 GB of images into 12 GB
+of disk. `make up` and `make dev` clean up after themselves, so this stays flat
+on its own. To reclaim at any time:
 
 ```bash
-docker image prune -f && docker builder prune -f
+make clean     # or: docker image prune -f && docker builder prune -f
+```
+
+`make clean` removes only untagged images and unused build cache. It never
+prunes volumes: a stopped stack's database volume looks "unused" to Docker, so
+`docker volume prune` would delete your data. Only `make reset` removes data,
+and it asks first.
+
+**Docker Desktop's own cache limit.** Docker garbage-collects the build cache
+only once it passes `defaultKeepStorage` — 20 GB by default, so in practice it
+never fires. If you build often, lower it in Docker Desktop → Settings →
+Docker Engine:
+
+```json
+{ "builder": { "gc": { "enabled": true, "defaultKeepStorage": "3GB" } } }
 ```
 
 ### Working on the code instead of with it
