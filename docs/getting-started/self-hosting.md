@@ -18,7 +18,7 @@ disagree, the file wins — open an issue.
 | Need | Notes |
 |---|---|
 | Docker Desktop (macOS / Windows) or Docker Engine (Linux) | with the Compose v2 plugin — the `docker compose` subcommand. The compose file uses v2 syntax (`${VAR:?…}` required variables, optional `env_file` entries), so the old `docker-compose` v1 binary is not supported. |
-| Disk | About 4 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.6 GB (Node 20 + the Claude Code CLI), Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
+| Disk | About 3.7 GB of images plus your data volumes. Backend 1.6 GB, workspace-worker 1.3 GB, Postgres 460 MB, frontend 240 MB, MinIO 175 MB, Redis 40 MB. |
 | Git | to clone and to pull updates. |
 | Free ports | 3000, 8000, 5432, 6379, 9000, 9001 by default — every one is overridable (§4). |
 
@@ -401,6 +401,16 @@ The same CI gates both: every change is compose-only, fresh-clone-only, or
 guarded by `AUTH_EDITION`, and the fresh-clone smoke lane boots this exact
 stack from an empty checkout. Contributions land in every edition under the
 repository's Apache-2.0 licence with a DCO sign-off — see
+### Keeping it small
+
+Rebuilding leaves the previous image behind and the build cache grows without
+bound — that is what turns 3.7 GB of images into 12 GB of disk. After any
+rebuild:
+
+```bash
+docker image prune -f && docker builder prune -f
+```
+
 ### Working on the code instead of with it
 
 The default stack runs the shipped production images — the Next.js standalone
