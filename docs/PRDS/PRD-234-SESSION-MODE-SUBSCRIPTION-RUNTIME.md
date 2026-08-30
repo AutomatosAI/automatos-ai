@@ -1,83 +1,95 @@
-# PRD-234: Session Mode — agents on your Claude subscription, zero API keys
+# PRD-234: Session Mode — agents run as your own terminal CLIs, on your subscription
 
-> **Status:** DRAFT — spec only, no build yet. Grounded @ `origin/main 182cd6739` (2026-08-29); `file:line` refs may drift — confirm by grep at build. **Program:** Open-Core **Phase 3** (see `PRD-WAVE-OPEN-CORE.md`). **Depends on:** PRD-209 (boot), PRD-233 (local worker profile + tool seam). Reuses the Code Canvas session runtime (`services/workspace-worker/canvas_session_service.py`), the merged Auto-Manager wave (PRD-224 ticket lane · PRD-225/229 questions · PRD-226 dispatch doctrine · PRD-227 board events · PRD-228 fleet state), and `AUTH_EDITION` (PRD-175).
+> **Status:** REWRITTEN 2026-08-30 from the research record (`docs/PRDS/Research/234-SESSION-MODE/RESEARCH-2026-08-30-munder-difflin-and-automatos-seams.md`) and the owner's decisions of the same day. Supersedes the 2026-08-29 draft, whose central assumption (generalise the Code Canvas service) the research overturned. **Program:** Open-Core Phase 2 in the owner's numbering (Phase 3 in `PRD-WAVE-OPEN-CORE.md`). **Depends on:** PRD-209 + PRD-233 merged and tested (PR #650). **Local edition only** — a hosted workspace has no host process to talk to. **Build starts:** after the owner's Phase 0+1 test (planned from Friday 2026-09-04).
 
 ---
 
 ## Framing (CLAUDE.md §3)
 
-**Extension — the runtime exists, the manager exists; this PRD connects them and makes the connection selectable.** `canvas_session_service.py` already drives Claude Agent SDK sessions with per-workspace config, permission callbacks, and confinement. The ticket lane already dispatches work to named agents. Net-new: a runtime selector on agent execution, the session-side prompt/result contract, and honest failure states. **Build size:** M-L (S1/S2 are the substance). **Risk:** Medium — a second execution runtime beside the API path; contained by local-only gating and no-silent-fallback rules.
+**Extension — connect the manager plane that already exists to a new, local-only runtime module.** Automatos already has the board, tickets, the dispatch contract (PRD-224/226), questions (225/229), board events (227), fleet (228), memory and Deliverables. What is new: a **Session Host** process on the user's machine, provider **adapters as data**, a session queue/result contract on the backend, and the honesty states around them. The Code Canvas runtime is **not** refactored: it stays byte-identical. **Build size:** L overall (S1 is the substance). **Risk:** Medium — a second execution runtime; the no-silent-fallback invariant is what keeps it honest.
 
 ## Overview
 
-**The Basic edition's headline feature.** Today every agent turn is an LLM API call (BYOK or platform key). Session mode adds a second runtime: an agent's work executes as a **Claude Code session on the user's own machine, authenticated by the user's own Claude subscription login — no API key anywhere**. Automatos is the layer above: Auto assigns tickets, writes the dispatch contract, tracks the board, keeps memory and context; sessions do the work. The lane is proven in-house: the Ralph overnight runner launches headless sessions with `ANTHROPIC_API_KEY` deliberately unset and bills the owner's Max subscription — supported Agent SDK path, user's own machine, user's own subscription. Session mode is **structurally local-only** (the login lives on the user's machine), which is exactly why it belongs to Basic: it is the thing the SaaS cannot offer, and the reason a contributor installs the open edition.
+Today every agent turn is an LLM API call (BYOK/OpenRouter). Session mode adds a second runtime: an agent's work executes as **a terminal-CLI session on the user's own machine, authenticated by the CLI's own login** — Claude Code first, Codex second, the rest as community adapters — with Automatos as the manager above: Auto assigns tickets and writes the dispatch contract, the board tracks them, memory and Deliverables work as before. **Hybrid by design** (owner, 2026-08-30): Auto and any agent can stay on the API/OpenRouter's 400+ models ("DeepSeek reading my mail, Kimi writing reports") while Claude Code sessions are kept for the code work they are built for — one board, one manager, mixed runtimes. The reference implementation is munder-difflin (MIT, read as code): its subscription-first, adapters-as-data, fail-loudly model is adopted; its PTY scraping, file mailbox and Electron UI are not.
 
-**Non-goals (owner decisions, recorded):** SaaS-side session mode (structurally impossible — not built around); **teams connecting local Automatos workspaces via the SaaS subscription = future funnel** (owner-flagged 2026-08-29 as later + nice-to-have; nothing here precludes it — the runtime contract is workspace-scoped, which is the seam a future team-connect would use); no scraping or reverse-engineering of subscription auth — the supported `claude_agent_sdk` / Claude Code login path only; Auto's own orchestrator brain stays on the API path in v1 (**Q3**).
-
----
-
-## Current reality (grounded @ `origin/main 182cd6739`)
-
-- **The session runtime exists for one caller.** `services/workspace-worker/canvas_session_service.py`: lazy `claude_agent_sdk` import (`:129` — `ClaudeAgentOptions`, `ClaudeSDKClient`), per-workspace `CLAUDE_CONFIG_DIR` (`/workspaces/{workspace_id}/.canvas/claude/`, `:12,68`), permission callbacks (`PermissionResultAllow/Deny`, `:185`), confinement (`canvas_confinement.py`), approvals (`canvas_approvals.py`), events (`canvas_events.py`). Built for Code Canvas; nothing else can reach it.
-- **Agent execution is API-only.** AgentFactory → LLM manager → provider clients (`core/llm/`), key resolution workspace-first (`core/llm/workspace_keys.py`). No runtime selector exists on agents or dispatch.
-- **The manager plane is merged and waiting.** Ticket lane: `platform_create_task(assigned_agent_name=…)`, `platform_assign_task`, status→`in_progress` triggers execution (PRD-224). Dispatch doctrine: `DISPATCH_CONTRACT_FRAGMENT` — OBJECTIVE·OUTPUT·TOOLS·BOUNDARIES (PRD-226). Agent moves emit board SSE (PRD-227). Fleet state + `platform_fleet_status` (PRD-228). Questions/clarifications ride `approval_grants` (PRD-225/229, incl. the answered-resume loop US-005).
-- **The subscription lane is proven.** Operational precedent 2026-08-27: headless sessions launched `env -u ANTHROPIC_API_KEY` bill the Max subscription; nested/headless launch works.
+**Non-goals (owner decisions):** no SaaS-side session mode; no scraping or reverse-engineering of subscription auth (the CLIs' own login and headless modes only); no auto-installing CLIs onto the user's machine (honest "install X" hints); teams connecting local hosts via the SaaS = future funnel; Auto itself on the subscription = a later story (Q6).
 
 ---
 
-## Stories (test-first; CI is the only gate — no live Claude sessions in CI)
+## Current reality (grounded 2026-08-30 — anchors in the research record §3)
 
-### S1 · SessionRuntime — generalize the canvas service into a selectable agent runtime — M/L
-**Files:** `services/workspace-worker/` (extract the session-drive core of `canvas_session_service.py` into a runtime module both canvas and agent-dispatch consume — refactor, not fork; canvas keeps working byte-identically); agent model + dispatch path gain `runtime: api | session` (default `api`; **no new table** — extend the existing agent definition per CLAUDE.md §4); `orchestrator/config.py` (`SESSION_RUNTIME_ENABLED`, default false; boot guard: enabling it requires `AUTH_EDITION=local` — extend `validate_auth_edition()`); session env construction **explicitly strips `ANTHROPIC_API_KEY`** (subscription billing is the contract, mixed billing is a bug).
-**Test:** runtime-module contract tests against a fake SDK client (the lazy-import seam at `:129` is the injection point — same pattern the canvas tests use); guard: `SESSION_RUNTIME_ENABLED=true` + `AUTH_EDITION=saas` ⇒ boot abort; env-construction test asserts the key-strip; canvas regression suite unchanged.
-**Notes:** Per-workspace `CLAUDE_CONFIG_DIR` already gives sessions isolated auth/config; reuse it unchanged. Session concurrency cap = **Q1** (config dial, small default).
+- **Canvas is welded to the SDK and to one-session-per-workspace** (`services/workspace-worker/canvas_session_service.py:141-154, 370-409`): isolated `CLAUDE_CONFIG_DIR`, injected key/token, SDK permission objects, no result channel. Right for canvas, wrong for sessions; left untouched.
+- **A container cannot run the user's CLI or see their login.** The worker image has no orchestrator code and cannot see `AUTH_EDITION` (`Dockerfile:34`, `worker_config.py:5-12`). Compose publishes 8000/6379/5432/9000 to the host.
+- **Headless Claude Code is a structured runtime already**: `claude -p --output-format stream-json` emits `system/init` (`apiKeySource`, `session_id`, tools), `assistant`, `rate_limit_event` (`utilization`, `status`, `resetsAt`) and `result` (`num_turns`, `total_cost_usd`, `usage`, `permission_denials`, text). Verified on the owner's machine: `apiKeySource: none` = subscription billing.
+- **Four launch sites funnel into `_launch_task_execution`** (`api/board_tasks.py:1138`); the completion writer is an **inline block** (`:1184-1222`); completion creates **no** Deliverable; the ask lane's reusable primitive is `create_grant(kind=KIND_QUESTION)` + park `blocked` (`handlers_asks.py:132-135`); `notify_board_event` needs a DB session (`services/board_events.py:38`); the canvas Redis channel has **no always-on consumer**.
+- `Agent.configuration` (JSON, shallow-merged on update — `core/models/core.py:222`, `api/agents.py:874-880`) is the no-migration home for `runtime` / `session_provider`.
+- `validate_auth_edition()` runs outside `run_stage` (`main.py:571`) — the only place a boot abort is real.
 
-### S2 · Dispatch to sessions — the ticket lane drives real work — M
-**Files:** the execution trigger behind status→`in_progress` (PRD-224's path) branches on the agent's runtime: `session` ⇒ enqueue to the worker's session runtime with a prompt built from the **PRD-226 dispatch contract** (OBJECTIVE·OUTPUT·TOOLS·BOUNDARIES) + agent soul/skills + workspace context pack; session result (final output + artifacts under the confinement root) flows back through the **existing** task-completion path so board events (227), watches, and Deliverable promotion (#611 lineage) all fire unchanged.
-**Test:** dispatch-branch unit tests (api agents unchanged — regression; session agents enqueue with the composed contract); completion-path test: a fake-session result lands as task completion + board event + Deliverable exactly like an API agent's would (assert no parallel result path was invented).
-**Notes:** Missions can target session agents too via the same AgentMatcher/dispatch seam — but the ticket lane is the v1 proof surface (single named agents, Gerard's stated management model). Mission-wide session staffing = **Q5**.
+---
 
-### S3 · Honest failure, no silent fallback — S
-**Files:** session runtime preflight (login/config present? SDK importable?); on failure the task goes **blocked** with a question through the PRD-225 ask lane ("Claude login not found for session agent X — run `claude login` on this machine or switch the agent to API runtime"), resuming via the 229 answered-resume loop. **Never** silently fall back to the API path (that would bill keys the user chose not to use — the fail-open disease class, PRD-223 lineage).
-**Test:** preflight-failure test asserts blocked-task + ask emission and **zero** API-client invocation; resume test: answer ⇒ task resumes on the corrected runtime.
-**Notes:** This is where 225/229's machinery pays for itself — reuse, don't invent a second question surface.
+## Stories (test-first; CI cannot run real sessions — contract tests against recorded `stream-json` fixtures + pure units + source guards; the owner runs the smoke)
 
-### S4 · Sessions on the board and in the fleet — S
-**Files:** session lifecycle (started / tool-permission-asked / finished / died) emits through `canvas_events.py` → `notify_board_event` (227) and surfaces in fleet state / `platform_fleet_status` (228) with `runtime: session` visible; permission asks route through the existing approvals surface (`canvas_approvals.py` → the approvals UI), not a new modal.
-**Test:** event-mapping unit tests (each lifecycle event → the existing board-event type it reuses); fleet-state test shows the session agent with runtime tag.
-**Notes:** Visibility is what makes "Automatos manages all my Claude sessions" true rather than vibes — the fleet page is the management console for sessions.
+### S1 · Vertical slice — one ticket runs as a Claude Code session and lands on the board — L
+**Files:** NEW `services/session-host/` (Python; `python -m automatos_session_host`; `make session-host`): connects outward to the backend (HTTP + Redis on the published ports), refuses unless the backend reports `edition: local`; announces capabilities (login-shell PATH probe ported from munder `shellEnv.ts:31-71`; installed CLIs + versions); claims session tasks; runs the **Claude adapter** — `claude -p --output-format stream-json --input-format stream-json --append-system-prompt <stable prompt> --permission-mode <policy> --allowedTools <list> --add-dir <dir> --model <model>` (the user's `claude` on PATH; the SDK's bundled macOS binary as fallback), `--resume <session_id>` for continuation; streams events; posts the **result** (final text, exit status, `session_id`, cost/usage, files touched). Backend: `Agent.configuration.runtime` + `session_provider`; **one branch inside `_launch_task_execution`** (covers all four launch sites) — `session` ⇒ enqueue `{task_id, workspace_id, agent_id, prompt, cwd, provider, model}`; **extract the completion writer** (`board_tasks.py:1184-1222`) into a function both runtimes call; `POST /api/v1/sessions/{task_id}/result`; sessions work in a **registered host directory** or `./workspaces/<id>` (Q3), confined by the ported `canvas_confinement` rules.
+**Test:** adapter contract tests against recorded `stream-json` fixtures (init/assistant/rate_limit/result; error shapes); argv-builder units (prompt via stdin, never via argv); confinement units; dispatch-branch units (api agents byte-identical — regression; session agents enqueue with the contract); completion-writer extraction proven by the existing board tests passing unchanged; source guard: the host never sets `ANTHROPIC_API_KEY` in a session env.
+**Notes:** The stable `--append-system-prompt` = agent soul + skills + the dispatch doctrine — nothing volatile (munder's prompt-cache invariant); the ticket's contract (already written into the description at creation) is the turn's prompt.
 
-### S5 · OpenAI lane — Codex CLI sessions behind the same runtime interface — M
-**Files:** a second implementation of S1's runtime interface driving OpenAI's Codex CLI headless sessions (subscription-authenticated, same preflight/honest-failure/fleet contracts); config dial per agent (`runtime: session` + `session_provider: claude | codex`).
-**Test:** same contract-test suite run against the codex fake; preflight distinguishes "no codex login" from "no claude login" in the ask text.
-**Notes:** **Q4 — in-wave or follow-on:** the interface (S1) is built for two implementations either way; the owner call is only *when* the second lands. Surfaced, not deferred.
+### S2 · Sessions on the board, in the fleet, and as Deliverables — M
+**Files:** an **always-on** Redis subscriber in the orchestrator (`workspace:ws:{id}:session:events`) → `notify_board_event` (227) + fleet state (228): `runtime: session`, live tool, tokens/cost, quota state, host connection; a **Session Host card** in the fleet ("connected — Claude Code 2.1.x, logged in" / "not running — `make session-host`"); file-edit events → `deliverable_service.register` (the gap: no runtime registers Deliverables today except `workspace_write_file`); live event feed via the existing SSE pattern.
+**Test:** event-mapping units (each host event → the board-event type it reuses); fleet read-model test shows the tag/quota/host; Deliverable registration idempotency; subscriber survives a Redis blip (reconnect test).
+
+### S3 · Honest failure and quota — no silent fallback, no artificial caps — M
+**Files:** preflight on dispatch: no host connected / CLI missing / not logged in / limit reached ⇒ the task is parked **`blocked`** with a question via `create_grant(kind=KIND_QUESTION)` (not the agent-facing tool) — "Session host not running: run `make session-host`", "Claude Code not logged in: run `claude login`", "Claude reports its limit is reached until <resetsAt>" — resumed through the existing answered-resume loop; **never** a fall-through to the API path. Quota: honour Claude's **own** `rate_limit_event` — dispatch pauses only when `status` is not `allowed` and resumes at `resetsAt`; warnings are surfaced, never acted on. **No cap on concurrent sessions** (owner: "1 or 100 — their choice"); per-session cost/token caps are **optional, default off**; loop guards (repeated-tool, error-storm — munder `breaker.ts:68-74` thresholds) default on.
+**Test:** preflight-failure ⇒ blocked task + ask emitted + **zero** API-client invocation; resume ⇒ relaunch on the agent's current runtime; quota units: `allowed_warning` ⇒ no pause; `rejected`/exhausted ⇒ pause + timed resume; cap units: unset ⇒ unlimited.
+
+### S4 · Settings, gate, docs — S
+**Files:** agent settings modal gains one field group (runtime: API | Claude Code session | Codex session…; model); `SESSION_RUNTIME_ENABLED` (default false) gated in `validate_auth_edition()` — enabling it in saas aborts boot; self-hosting guide + QUICKSTART: "start the session host", what it can and cannot see, where sessions work, how quota shows.
+**Test:** boot-guard unit (saas + enabled ⇒ RuntimeError outside `run_stage`); settings round-trip; doc guard extends `test_prd209_quickstart_honest.py`.
+
+### S5 · Codex adapter — the interface proof — S/M
+**Files:** second adapter (`codex exec --json`, OpenAI's headless mode; login via the user's `~/.codex/auth.json`, never copied or symlinked — the CLI reads it itself), same contract tests; `docs/contributing/session-adapters.md`: an adapter is a table row (binary, argv builder, prompt delivery, parser, resume, install hint, auth check) + recorded fixtures.
+**Test:** the S1 contract suite run against Codex fixtures; preflight distinguishes "no codex login" from "no claude login".
+
+### S6 · Community adapter lane — the remaining ten — S each
+grok, kimi, gemini, antigravity, qwen, opencode, crush, pi, copilot, cursor. Each ships `LIVE-UNVERIFIED` until someone runs it (munder's honesty convention). A generic **PTY fallback adapter** (headless-less TUIs: crush, likely kimi/pi) is its own small story with munder's guarded-typing rules ported.
 
 ---
 
 ## Sequencing
 
-S1 → S2 → {S3 ∥ S4} → S5 (if in-wave). All after PRD-233 (worker in local profile is the substrate). The canvas refactor inside S1 is the one regression-sensitive step — land it first with the canvas suite as the gate.
+S1 → S2 → S3 → S4 (S3/S4 parallel-safe) → S5 → S6 (open lane). Nothing starts before PR #650 is merged and the owner's Phase 0+1 test passes. Real-session validation = the owner's smoke script (create ticket → assign session agent → observe board), on a day the subscription's weekly window has headroom.
 
 ## Verification (CI only — sessions cannot run in CI)
 
-Real subscription sessions are unrunnable in CI by design (no login, and billing someone's subscription from CI would be wrong). The proof stack: contract tests against fake SDK clients at the lazy-import seam (canvas precedent), pure unit tests for dispatch branching / env-strip / preflight / event mapping, source guards for the boot-gate and no-fallback invariants, and the canvas regression suite for the refactor. First real-session validation is an owner smoke on the owner's machine — scripted (`scripts/` one-shot: create ticket → assign session agent → observe board), run by Gerard, not CI.
+Recorded-fixture contract tests at the adapter boundary; pure units for dispatch branching, completion extraction, preflight, quota, confinement, event mapping; source guards for the boot gate, the never-set-`ANTHROPIC_API_KEY` rule and the no-fallback invariant; the canvas suites unchanged (byte-identical by construction — nothing there is touched).
 
 ## Success metrics
 
-- A zero-API-key local install (subscription login only) takes a ticket from `platform_create_task` → assigned session agent → completed task + board event + Deliverable. Today: impossible without keys.
-- Missing login ⇒ blocked task + actionable question; **zero** silent API fallback. 
-- Fleet view shows live session agents with runtime tags; permission asks land in the existing approvals surface.
-- Canvas suite green before/after the S1 refactor (byte-identical canvas behaviour).
+- A ticket assigned to a session agent runs on the subscription (`apiKeySource: none`) and lands on the board with result, cost and the files it changed, exactly like an API agent's. Today: impossible.
+- Host not running / not logged in / limit reached ⇒ a blocked ticket with an actionable question; **zero** API calls made on the user's behalf.
+- The fleet shows every live session with runtime, tool and quota; any number of sessions in parallel.
+- Adding a CLI is a data row + fixtures a contributor can ship without touching core.
 
-## Open questions — Gerard's call (§12)
+## Decisions recorded (owner, 2026-08-30)
 
-1. **Concurrency cap (S1).** Sessions are heavyweight and share one subscription's limits. Default cap 2 concurrent sessions, config dial? Confirm a number.
-2. **Session lifetime (S1/S2).** Per-task ephemeral sessions (recommended v1 — clean, resumable via dispatch contract) vs long-lived per-agent sessions with resume. Confirm.
-3. **Auto itself on session runtime?** v1 keeps Auto (orchestrator brain) on the API path — chat latency and tool-loop shape fit the API client; sessions fit *task work*. Flip later if desired. Confirm v1 boundary.
-4. **Codex lane timing (S5).** In this wave or the first follow-on? (Interface built for it either way.)
-5. **Mission staffing on sessions (S2).** v1 = ticket lane only (recommended), missions follow once ticket-lane telemetry looks right. Confirm.
-6. **UI surface for runtime selection.** Agent settings page gains the `runtime`/`session_provider` fields (recommended: yes, it's one field group) — or config-only for v1?
+| Q | Decision |
+|---|---|
+| Q1 host shape | Python module in the repo, `make session-host` (`python -m`); a "bridge to localhost" that runs the CLIs as the user |
+| Q2 transport | Headless `stream-json` is the default; PTY only for CLIs with no headless mode |
+| Q3 where sessions work | Registered host directories (real repos) + `./workspaces/<id>` by default |
+| Q4 v1 permissions | Auto-accept edits inside the workspace; Bash allowlist; approvals-inbox routing = v2 |
+| Q5 caps | **No cap on sessions** — user's choice; only Claude's own limit signal pauses dispatch (warnings never do); per-session budget caps optional, default off |
+| Q6 Auto | **Hybrid**: Auto and any agent stay on API/OpenRouter (400+ models) in v1; Claude sessions for code; Auto-on-subscription = its own later story |
+| Q7 Codex | In-wave, as the interface proof (S5) |
+| Q8 packaging | `make session-host` first; a signed binary if contributors ask |
+
+## Open questions — owner's call (§12)
+
+1. Approvals-inbox routing for live permission asks (v2): via Claude Code's `--permission-prompt-tool` (needs an MCP endpoint on the host) — confirm v2 timing.
+2. Auto on the subscription (Q6 later story): `claude -p` as an LLM provider for Auto's turns, with our tool loop exposed as MCP — when?
+3. Several session hosts (laptop + workstation) on one local install — v2 or later?
+4. Per-agent git worktrees (munder's isolation) — v1 uses the directory as is; add later?
 
 ---
 
-*Traceability: program doc `PRD-WAVE-OPEN-CORE.md` (owner decisions 2026-08-29 — session mode = Basic headline; teams-later funnel note); munder-difflin review 2026-08-27 (the operating model: manager above CLI sessions; artifact f31677a8) and its merged wave PRD-224–229; Code Canvas lineage (PRD-170/184 → `canvas_session_service.py`); subscription-lane precedent (Ralph runner, `env -u ANTHROPIC_API_KEY`, 2026-08-27 ops notes); PRD-223 (fail-open = disease class → S3's no-silent-fallback rule); PRD-175 (`AUTH_EDITION` boot guard being extended).*
+*Traceability: research record (this repo, `docs/PRDS/Research/234-SESSION-MODE/`); munder-difflin @ fc436bd (`src/shared/agentProvider.ts`, `src/main/pty.ts`, `hive.ts`, `breaker.ts`, `cliInstall.ts`); PRD-224–229 (manager plane); PRD-233 S2 (capability-degrade pattern); PRD-223 (fail-open = disease class); PRD-175 (`AUTH_EDITION`); owner decisions 2026-08-29 (hybrid, local-only) and 2026-08-30 (Q1–Q8).*
