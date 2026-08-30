@@ -1,0 +1,29 @@
+# =============================================================================
+# Contributor override — hot reload instead of the shipped standalone build
+# =============================================================================
+# The default stack runs the production images: small and fast, what a user
+# downloads. Working ON the code instead of with it:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# That swaps the frontend and backend to their development stages and mounts
+# the source, so edits reload live. Railway never reads either file.
+# =============================================================================
+services:
+  frontend:
+    build:
+      target: development
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+  backend:
+    build:
+      target: development
+    volumes:
+      - ./orchestrator:/app
+      - ./docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      - backend_data:/app/data

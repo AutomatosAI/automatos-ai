@@ -58,6 +58,8 @@ Automatos AI uses **PostgreSQL** as its primary relational store, augmented with
 
 The system initializes in three phases: structural creation, version control via Alembic, and comprehensive seeding of platform defaults.
 
+**Fresh databases (compose, CI).** An empty database has no `alembic_version` table, and the migration history cannot replay from empty on its own. The backend entrypoint (`docker-entrypoint.sh`) therefore runs `python -m scripts.init_fresh_db` first: it builds the schema from the SQLAlchemy models plus a tolerant replay of the migration forest and stamps Alembic at heads, after which `alembic upgrade heads` is a no-op. No SQL snapshot is committed — the former `init_complete_schema.sql` is retired. Existing databases (anything with an `alembic_version` row) skip straight to incremental migrations. The `schema-drift` CI lane (`scripts/ci/schema_drift_check.py`) fails when a migration alters a table no writer creates. See [Self-hosting](../getting-started/self-hosting.md#4-first-boot--what-happens-and-how-long-it-takes) for the full boot order.
+
 ```mermaid
 flowchart TD
     subgraph "Phase 1: Engine & Tables"

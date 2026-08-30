@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server'
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const BACKEND_URL = // Server-side: BACKEND_INTERNAL_URL (container DNS, local edition) beats the
+// browser-facing NEXT_PUBLIC_API_URL — inside the frontend container 'localhost'
+// is the frontend itself. Unset in SaaS ⇒ identical to before. (PRD-209)
+process.env.BACKEND_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export async function GET(
   request: NextRequest,

@@ -18,25 +18,29 @@ The following files were used as context for generating this wiki page:
 
 
 
-This document describes the environment variable configuration system used across all Automatos AI services. Environment variables control database connections, external service credentials, feature flags, and service-specific settings across the 19-service production topology.
+This document describes the environment variable configuration system used across all Automatos AI services. Environment variables control database connections, external service credentials, feature flags, and service-specific settings in both editions.
 
-For deployment infrastructure, see [Production Deployment](20.6). For credential management in the UI, see [Credentials Management](17.5).
+For the compose stack end to end, see [Self-hosting — the local edition](../getting-started/self-hosting.md). For deployment infrastructure, see [Production Deployment](production-deployment.md). For credential management in the UI, see [Credentials Management](../authentication-multi-tenancy/credentials-management.md).
 
 ---
 
 ## Overview
 
-Automatos AI uses environment variables for all external configuration to support multiple deployment targets (Docker Compose, Railway, Kubernetes) without code changes. Variables are loaded from `.env` files in local development and from platform-provided environment in production.
+Automatos AI uses environment variables for all external configuration to support multiple deployment targets (Docker Compose locally, Railway for the hosted edition) without code changes. `orchestrator/config.py` is the only module that reads the environment; everything else reads `config`.
 
-The system follows a three-tier loading strategy:
+In the compose stack the layers are:
 
-1.  **Environment variables** (highest priority) — set by hosting platform or shell.
-2.  **`.env` file** — loaded via `python-dotenv` in the backend application lifecycle.
-3.  **Hardcoded defaults** — fallback values in centralized config.
+| Layer | What it holds | Precedence (backend container) |
+| :--- | :--- | :--- |
+| `.env` (from the root `.env.example`) | Secrets and the few values only you choose. **Read by compose for substitution only** — a variable reaches a container only if `docker-compose.yml` references it. | — |
+| `docker-compose.yml` `environment:` block | The substituted secrets and explicit wiring (`DATABASE_URL`, `S3_ENDPOINT_URL`, the `S3_*` → `AWS_*` mapping, Composio and LLM keys). | Highest |
+| `envs/api.local` (gitignored, optional) | Personal overrides for any backend variable — the deep-override lane. | Middle |
+| `envs/api.defaults` (committed) | The local topology: `AUTH_EDITION=local`, `DEFAULT_WORKSPACE_ID`, `LOCAL_OPERATOR_EMAIL`, `PLATFORM_KEY_WORKSPACE_ID`, `WORKER_INTERNAL_URL`, `S3_PUBLIC_ENDPOINT_URL`, `S3_VECTORS_ENABLED=false`, observability off. No secrets. | Lowest env file |
+| `orchestrator/config.py` | Code defaults for every remaining dial. | Fallback |
 
-The codebase includes an service-specific `orchestrator/.env.example` for the core API and a global `.gitignore` that protects sensitive environment files.
+The frontend has the same shape (`envs/frontend.defaults`, `envs/frontend.local`). The hosted deployment sets each service's environment itself and never reads the compose file or `envs/*`. `orchestrator/.env.example` is a template for running the backend process outside compose; it is not the supported local path and its values (for example `REQUIRE_AUTH`) predate the edition flag.
 
-**Sources:** [orchestrator/.env.example:1-65](), [.gitignore:102-109]()
+**Sources:** [docker-compose.yml](), [envs/api.defaults](), [envs/frontend.defaults](), [orchestrator/config.py](), [.gitignore]()
 
 ---
 
@@ -84,19 +88,41 @@ graph TB
 
 ## Required Environment Variables
 
-These variables **must** be set for the system to function. Missing required variables will cause startup failures in production.
+These are the only variables the compose stack **refuses to start without** — declared as `${VAR:?message}` in `docker-compose.yml`, so an unset or empty value stops `docker compose up` with the message shown.
 
 ### Core Infrastructure
 
-| Variable | Purpose | Example | Used By |
+| Variable | Purpose | Error when missing | Used By |
 | :--- | :--- | :--- | :--- |
-| `POSTGRES_PASSWORD` | PostgreSQL admin password | `secure_db_pass_123` | `pgvector` container, `backend` |
-| `REDIS_PASSWORD` | Redis authentication | `secure_redis_pass` | `redis` container, `backend` |
-| `API_KEY` | Internal API authentication | `your_secure_api_key_here` | `backend` |
-| `API_HOST` | Host binding for the API | `0.0.0.0` | `backend` |
-| `API_PORT` | Port binding for the API | `8000` | `backend` |
+| `POSTGRES_PASSWORD` | PostgreSQL password (applied when the data volume is first initialised) | `POSTGRES_PASSWORD is required - set in .env file` | `postgres`, `backend`, `workspace-worker` |
+| `REDIS_PASSWORD` | Redis authentication | `REDIS_PASSWORD is required - set in .env file` | `redis`, `backend`, `workspace-worker` |
+| `API_KEY` | The backend's own API-key principal | `API_KEY is required - set in .env file` | `backend` |
 
-**Sources:** [orchestrator/.env.example:6,11,14-16]()
+In the hosted edition (`AUTH_EDITION=saas`) the boot guard additionally requires `CLERK_JWKS_URL` and `CLERK_SECRET_KEY` and fails fast without them (`config.validate_auth_edition`); in the local edition it requires `DEFAULT_WORKSPACE_ID`, which `envs/api.defaults` provides.
+
+**Sources:** [docker-compose.yml](), [orchestrator/config.py]()
+
+---
+
+## Edition and Local-Edition Variables
+
+| Variable | Default (compose) | Purpose |
+| :--- | :--- | :--- |
+| `AUTH_EDITION` | `local` (`envs/api.defaults`; code default `saas`) | The one edition flag. `local` forces `REQUIRE_AUTH=false` (no login, one operator); `saas` requires Clerk. |
+| `NEXT_PUBLIC_AUTH_EDITION` | `local` (`envs/frontend.defaults`) | Frontend mirror, read by `frontend/lib/auth-edition.ts`; hides the hosted-only surfaces locally. |
+| `DEFAULT_WORKSPACE_ID` | `00000000-0000-0000-0000-0000000000c1` | The single local workspace every anonymous request resolves to. |
+| `LOCAL_OPERATOR_EMAIL` | `local@automatos.local` | The operator's `users` row (the session's lookup key; name editable under Settings → Profile). |
+| `PLATFORM_KEY_WORKSPACE_ID` | the local workspace id | Whose stored API key acts as the platform key for embeddings and system LLM calls. |
+| `AUTOMATOS_WORKSPACE_DIR` | `./workspaces` | Host directory bind-mounted at `/workspaces` — the workspace-worker's host-access dial. |
+| `WORKER_INTERNAL_URL` / `WORKER_INTERNAL_TOKEN` | `http://workspace-worker:8081` / empty | Where the backend reaches the worker; optional shared secret. |
+| `COMPOSIO_API_KEY` | unset | Bring-your-own Composio key (env-only). Absent ⇒ Composio tools are not offered and the Tools page says integrations are disabled; native tools keep working. |
+| `S3_ENDPOINT_URL` | `http://minio:9000` | Points the single S3 client factory at MinIO. |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` | MinIO root credentials / `us-east-1` | The object store's credentials as the backend sees them (compose maps them onto the backend's `AWS_*`); your own `AWS_*` variables are deliberately not read by the local store. |
+| `S3_PUBLIC_ENDPOINT_URL` | `http://localhost:9000` | Host the browser can reach for presigned links; change with `MINIO_PORT`. |
+| `S3_VECTORS_ENABLED` | `false` | Local RAG runs on pgvector; S3 Vectors is hosted-only. |
+| `CREDENTIAL_KEY_FILE` | `/app/data/.credential_key` | Where the auto-generated credential-encryption key persists (the `backend_data` volume). |
+
+**Sources:** [docker-compose.yml](), [envs/api.defaults](), [envs/frontend.defaults](), [orchestrator/config.py]()
 
 ---
 
@@ -105,24 +131,25 @@ These variables **must** be set for the system to function. Missing required var
 ### PostgreSQL with pgvector
 The system uses `pgvector` for semantic search and `orchestrator_db` for relational data.
 
-| Variable | Default | Purpose |
+| Variable | Default (compose) | Purpose |
 | :--- | :--- | :--- |
-| `POSTGRES_HOST` | `localhost` | PostgreSQL server hostname |
+| `POSTGRES_HOST` | `postgres` | PostgreSQL server hostname (the compose service) |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
 | `POSTGRES_DB` | `orchestrator_db` | Database name |
 | `POSTGRES_USER` | `postgres` | Database user |
+| `DATABASE_URL` | assembled by compose | The SQLAlchemy connection string |
 
-**Sources:** [orchestrator/.env.example:1-5]()
+**Sources:** [docker-compose.yml](), [envs/api.defaults]()
 
 ### Redis Configuration
 Redis serves as the L1 memory tier, Pub/Sub broker, and task queue.
 
-| Variable | Default | Purpose |
+| Variable | Default (compose) | Purpose |
 | :--- | :--- | :--- |
-| `REDIS_HOST` | `localhost` | Redis server hostname |
+| `REDIS_HOST` | `redis` | Redis server hostname (the compose service) |
 | `REDIS_PORT` | `6379` | Redis port |
 
-**Sources:** [orchestrator/.env.example:9-11]()
+**Sources:** [docker-compose.yml](), [envs/api.defaults]()
 
 ---
 
@@ -151,16 +178,16 @@ graph TD
 
 | Variable | Purpose |
 | :--- | :--- |
-| `OPENAI_API_KEY` | Key for OpenAI models |
-| `ANTHROPIC_API_KEY` | Key for Anthropic models |
-| `LLM_PROVIDER` | Default provider (e.g., `openai`) |
-| `LLM_MODEL` | Default model (e.g., `gpt-4`) |
-| `LLM_MAX_TOKENS` | Token limit per request |
-| `LLM_TEMPERATURE` | Default model temperature |
+| `OPENAI_API_KEY` | Key for OpenAI models (passed through by compose) |
+| `ANTHROPIC_API_KEY` | Key for Anthropic models — also the credential the workspace-worker's Canvas sessions read |
+| `OPENROUTER_API_KEY` | Key for OpenRouter (many providers behind one key) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Alternative Canvas-session credential (Claude subscription token), worker only |
 
-**Encryption:** Credentials stored in the database are encrypted using `encryption_service.encrypt_dict()` before being persisted in the `credentials` table [orchestrator/core/credentials/service.py:146-150](). The `Credential` model stores this as `encrypted_data` [orchestrator/core/models/credentials.py:74]().
+Any one of the first three is enough for chat, agents and embeddings; keys can also be added in the UI under Settings → API Keys, where they are stored encrypted.
 
-**Sources:** [orchestrator/.env.example:18-26](), [orchestrator/core/credentials/service.py:146-150](), [orchestrator/core/models/credentials.py:60-75]()
+**Encryption:** Credentials stored in the database are encrypted using `encryption_service.encrypt_dict()` before being persisted in the `credentials` table [orchestrator/core/credentials/service.py:146-150](). The `Credential` model stores this as `encrypted_data` [orchestrator/core/models/credentials.py:74](). The encryption key is generated on first boot and persisted at `CREDENTIAL_KEY_FILE` (the `backend_data` volume) unless `CREDENTIAL_ENCRYPTION_KEY` is set — note that compose does not pass `CREDENTIAL_ENCRYPTION_KEY` from `.env`; set it in `envs/api.local` if you want to pin it.
+
+**Sources:** [docker-compose.yml](), [envs/api.defaults](), [orchestrator/core/credentials/service.py:146-150](), [orchestrator/core/models/credentials.py:60-75]()
 
 ---
 
@@ -187,29 +214,29 @@ Controls the marketplace caching and storage.
 
 **Sources:** [orchestrator/.env.example:38-40]()
 
-### AWS and Cloud Integration
-Used for S3-backed storage and PRD-42 Cloud Document Sync.
+### Object storage (S3 API) — hosted edition
+Every S3 client in the backend is built by one factory (`orchestrator/core/storage/s3.py`). With `S3_ENDPOINT_URL` unset it targets AWS S3 with the credentials below; with it set (the compose default, `http://minio:9000`) it targets MinIO with path-style addressing. The hosted deployment sets these itself.
 
 | Variable | Purpose |
 | :--- | :--- |
-| `AWS_ACCESS_KEY_ID` | AWS authentication ID |
-| `AWS_SECRET_ACCESS_KEY` | AWS authentication secret |
-| `AWS_REGION` | Target AWS region |
-| `S3_VECTORS_ENABLED` | Toggle for cloud vector sync |
+| `AWS_ACCESS_KEY_ID` | AWS authentication ID (locally set by compose from `S3_ACCESS_KEY_ID`) |
+| `AWS_SECRET_ACCESS_KEY` | AWS authentication secret (locally from `S3_SECRET_ACCESS_KEY`) |
+| `AWS_REGION` | Target AWS region (locally from `S3_REGION`) |
+| `S3_DOCUMENTS_BUCKET`, `MARKETPLACE_S3_BUCKET`, `RECIPE_LOG_S3_BUCKET` | Bucket names; against MinIO they self-create on first use, on AWS they must exist |
+| `S3_VECTORS_ENABLED` | S3 Vectors for RAG — hosted only; never enable against MinIO |
 
-**Sources:** [orchestrator/.env.example:49-51,61-64]()
+**Sources:** [orchestrator/config.py](), [orchestrator/core/storage/s3.py](), [docker-compose.yml]()
 
 ---
 
 ## System and Logging
-| Variable | Purpose | Default |
+| Variable | Purpose | Default (compose) |
 | :--- | :--- | :--- |
-| `ENVIRONMENT` | Deployment stage (`development`, `production`) | `production` |
+| `ENVIRONMENT` | Deployment stage (`development`, `production`) | `development` |
 | `LOG_LEVEL` | Verbosity of backend logs (`DEBUG`, `INFO`, `ERROR`) | `INFO` |
-| `LOG_FILE` | Path to log output | `logs/orchestrator.log` |
-| `DEBUG` | Toggle for FastAPI debug mode | `false` |
-| `REQUIRE_AUTH` | Toggle for authentication enforcement | `false` (local dev) |
+| `LOG_RELAY_ENABLED`, `LOG_RELAY_URL`, `LOKI_URL`, `PROMETHEUS_URL`, `AGENT_OPT_WORKER_URL` | Hosted telemetry and the prompt-optimisation worker; an empty URL disables the feature with a log line | `false` / empty |
+| `REQUIRE_AUTH` | Authentication enforcement — **derived**: forced `false` when `AUTH_EDITION=local`, read from the environment (default `true`) in `saas` | derived |
 
-**Sources:** [orchestrator/.env.example:29-30,33,57-58]()
+**Sources:** [envs/api.defaults](), [orchestrator/config.py]()
 
 ---

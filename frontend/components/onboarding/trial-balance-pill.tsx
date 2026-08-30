@@ -1,6 +1,7 @@
 'use client'
 
 import { useWorkspace } from '@/components/workspace-provider'
+import { isSaaS } from '@/lib/auth-edition'
 
 /**
  * PRD-222 US-014 (W1·S9) — the trial balance pill.
@@ -18,6 +19,10 @@ import { useWorkspace } from '@/components/workspace-provider'
 export function TrialBalancePill({ className = '' }: { className?: string }) {
   const { workspace } = useWorkspace()
   const trial = workspace?.onboarding?.trial ?? null
+
+  // PRD-233 S7: plan/trial copy is a hosted-edition surface — never in local,
+  // whatever a future local seed puts in onboarding.trial.
+  if (!isSaaS) return null
 
   // No pill for a converted (paid) workspace or one that never got a trial.
   if (!trial || trial.state === 'converted') return null

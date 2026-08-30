@@ -488,6 +488,18 @@ class Config:
     DEFAULT_WORKSPACE_ID: str = os.getenv("DEFAULT_WORKSPACE_ID")
     WORKSPACE_ID: str = os.getenv("WORKSPACE_ID")
     CREDENTIAL_ENCRYPTION_KEY: str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+    # Where the auto-generated Fernet key is persisted when CREDENTIAL_ENCRYPTION_KEY
+    # is unset. Default = the historical location (core/.credential_key, inside the
+    # image's writable layer — lost on container recreate). The local edition
+    # points this at a named volume (envs/api.defaults) so stored keys survive
+    # `docker compose down` / rebuilds. PRD-209 live-test finding.
+    CREDENTIAL_KEY_FILE: str = os.getenv("CREDENTIAL_KEY_FILE", "")
+
+    # Local edition: the single operator's identity. The entrypoint seeds a users
+    # row with this email (id 1 — the chat service's own fallback), and the
+    # anonymous local session carries it so chat/attribution resolve a real user.
+    # PRD-233 S6 adds the editable profile on top. Unused in saas.
+    LOCAL_OPERATOR_EMAIL: str = os.getenv("LOCAL_OPERATOR_EMAIL", "local@automatos.local")
     # Workspace whose stored user_api_keys rows act as the platform-level
     # provider keys for background workers (embeddings, system LLM) and the
     # pilot chat fallback. Empty = disabled (legacy credential-store-only).
@@ -1098,7 +1110,7 @@ class Config:
     LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
     # =============================================================================
-    # AWS S3 VECTORS (PRD-42: Cloud Document Sync)
+    # OBJECT STORAGE (S3 / MinIO) + AWS S3 VECTORS (PRD-42: Cloud Document Sync)
     # =============================================================================
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
@@ -1108,6 +1120,17 @@ class Config:
     # sets it to the MinIO endpoint so the knowledge flywheel persists outputs
     # instead of fail-softing to None on ephemeral disk.
     S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "")
+    # PRD-233 S4 (absorbs PRD-151): every S3 client is built by core/storage/s3.py
+    # from the three knobs above/below. S3_PUBLIC_ENDPOINT_URL is the host a
+    # BROWSER can reach for presigned links (locally http://localhost:9000 while
+    # the backend talks to http://minio:9000); empty = same as the endpoint, so
+    # SaaS presigns are unchanged. S3_USE_PATH_STYLE forces path-style bucket
+    # addressing (MinIO needs it, AWS uses virtual-host style); unset = derived
+    # from S3_ENDPOINT_URL presence, so SaaS keeps boto's default.
+    S3_PUBLIC_ENDPOINT_URL: str = os.getenv("S3_PUBLIC_ENDPOINT_URL", "")
+    S3_USE_PATH_STYLE: bool = (
+        os.getenv("S3_USE_PATH_STYLE") or ("true" if S3_ENDPOINT_URL else "false")
+    ).lower() in ("true", "1", "yes")
 
     # S3 Vectors Configuration
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
@@ -1136,8 +1159,9 @@ class Config:
     # MARKETPLACE / S3 (Plugin Marketplace)
     # =============================================================================
     MARKETPLACE_S3_BUCKET: str = os.getenv("MARKETPLACE_S3_BUCKET", "automatos-marketplace")
-    # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION defined above (AWS S3 Vectors section)
-    MARKETPLACE_LOCAL_DIR: str = os.getenv("MARKETPLACE_LOCAL_DIR")
+    # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_ENDPOINT_URL defined
+    # above (object storage section). Local runs use MinIO through the same path —
+    # the MARKETPLACE_LOCAL_DIR filesystem fallback was deleted (PRD-233 S4).
     PLUGIN_MAX_UPLOAD_SIZE_MB: int = int(os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "10"))
     PLUGIN_LLM_SCAN_MODEL: str = os.getenv("PLUGIN_LLM_SCAN_MODEL", "claude-haiku-4-20250414")
     PLUGIN_CACHE_TTL_SECONDS: int = int(os.getenv("PLUGIN_CACHE_TTL_SECONDS", "3600"))
@@ -1224,7 +1248,6 @@ class Config:
     # =============================================================================
     AUTOMATOS_WORKSPACE: str = os.getenv("AUTOMATOS_WORKSPACE", "/tmp/automatos_workspace")
     AUTOMATOS_DOCUMENTS_DIRS: str = os.getenv("AUTOMATOS_DOCUMENTS_DIRS") or os.getenv("AUTOMATOS_DOCUMENTS_DIR") or os.getenv("DOCUMENTS_DIR")
-    IMAGE_STORE_LOCAL_DIR: str = os.getenv("IMAGE_STORE_LOCAL_DIR")
     GOTENBERG_URL: str = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
     DOCUMENT_STORAGE_DIR: str = os.getenv("DOCUMENT_STORAGE_DIR", "documents")
 

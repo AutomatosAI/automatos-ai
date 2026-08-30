@@ -199,6 +199,34 @@ def exposure_for_plan(plan: str, tiers: Optional[dict] = None) -> dict:
     }
 
 
+LOCAL_EDITION_PLAN = "local"
+
+
+def exposure_for_local_edition(tiers: Optional[dict] = None) -> dict:
+    """PRD-233 S7 — the local edition's exposure profile: UNRESTRICTED.
+
+    Owner rule for Basic: paid tiers gate organisational features and hosting,
+    never product capability. The single local workspace has no plan (the
+    entrypoint seeds ``plan = NULL``), and falling back to the entry tier hid
+    Analytics and put plan chips on marketplace items. So: every nav item,
+    no family restrictions, the deepest marketplace tier. SaaS-only surfaces
+    are hidden by the frontend's explicit route allowlist (lib/auth-edition.ts),
+    never by a plan. Never called in saas (api/workspaces.py branches on
+    ``config.AUTH_EDITION``).
+    """
+    resolved = _tiers(tiers)
+    depths = [int(t.get("marketplace_depth", 1) or 1) for t in resolved.values() if isinstance(t, dict)]
+    return {
+        "plan": LOCAL_EDITION_PLAN,
+        "display_name": "Local edition",
+        "display_price_usd": None,
+        "price_label": None,
+        "families": {},
+        "marketplace_depth": max(depths) if depths else 1,
+        "nav": _nav_exposure({}, declares_families=False),
+    }
+
+
 # --------------------------------------------------------------------------- #
 # US-024 — Auto's per-turn tool surface, trimmed to the tier's families
 # --------------------------------------------------------------------------- #

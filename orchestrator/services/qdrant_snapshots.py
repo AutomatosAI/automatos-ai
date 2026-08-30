@@ -99,21 +99,10 @@ def _build_qdrant_client():
 
 
 def _build_s3_client():
-    import boto3
-    from botocore.config import Config as BotoConfig
+    """The platform S3 client (core.storage, PRD-233 S4) — MinIO locally, AWS in SaaS."""
+    from core.storage import get_s3_client
 
-    boto_cfg = BotoConfig(
-        region_name=config.AWS_REGION or "us-east-1",
-        signature_version="v4",
-        retries={"max_attempts": 3, "mode": "adaptive"},
-    )
-    kwargs: Dict[str, Any] = {"config": boto_cfg}
-    if config.S3_ENDPOINT_URL:
-        kwargs["endpoint_url"] = config.S3_ENDPOINT_URL
-    if config.AWS_ACCESS_KEY_ID and config.AWS_SECRET_ACCESS_KEY:
-        kwargs["aws_access_key_id"] = config.AWS_ACCESS_KEY_ID
-        kwargs["aws_secret_access_key"] = config.AWS_SECRET_ACCESS_KEY
-    return boto3.client("s3", **kwargs)
+    return get_s3_client()
 
 
 async def _download_snapshot(collection: str, snapshot_name: str) -> bytes:
@@ -160,6 +149,10 @@ async def run_snapshot_cycle(
     prefix = config.MEMORY_SNAPSHOT_S3_PREFIX
     retention_days = config.MEMORY_SNAPSHOT_RETENTION_DAYS
     loop = asyncio.get_running_loop()
+    # Self-create the snapshot bucket on MinIO (no-op on AWS) before the first put.
+    from core.storage import ensure_bucket
+
+    await loop.run_in_executor(None, lambda: ensure_bucket(bucket, s3))
 
     summary: Dict[str, Dict[str, Any]] = {}
     for collection in _collections():

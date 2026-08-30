@@ -70,29 +70,57 @@ load_seed_data() {
     # Set PGPASSWORD for psql commands
     export PGPASSWORD="$POSTGRES_PASSWORD"
     
-    # Check if seed data is already loaded
-    CREDENTIAL_COUNT=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "SELECT COUNT(*) FROM credential_types;" 2>/dev/null || echo "0")
+    # No shell-level "already loaded" gate: every section of the loader is
+    # idempotent on its own (credential types insert-if-missing, models/skills/
+    # personas/categories upsert, marketplace catalog checks by name/slug).
+    # The old credential_types>0 early-return silently skipped every LATER
+    # section (marketplace catalog, packages) on any pre-seeded database.
+    echo "📥 Loading seed data (idempotent)..."
     
-    # Clean up whitespace
-    CREDENTIAL_COUNT=$(echo "$CREDENTIAL_COUNT" | tr -d ' ')
-    
-    if [ "$CREDENTIAL_COUNT" -gt 0 ] 2>/dev/null; then
-        echo "✅ Seed data already loaded ($CREDENTIAL_COUNT credential types found)"
-        unset PGPASSWORD
-        return 0
-    fi
-    
-    echo "📥 Loading seed data..."
-    
-    # Run seed data loader
-    if python database/load_seed_data.py; then
+    # Run seed data loader AS A MODULE — script-mode sets sys.path[0] to the
+    # script's own dir, so its `from config import config` (line 23) can never
+    # resolve. (The old `database/` path also never existed in the image, so
+    # this step silently failed on every boot since PRD-176; fail-open hid
+    # both bugs. PRD-209 local-run finding.)
+    if python -m core.database.load_seed_data; then
         echo "✅ Seed data loaded successfully!"
     else
         echo "⚠️  Warning: Seed data loading failed (will continue anyway)"
     fi
-    
+
     # Unset PGPASSWORD
     unset PGPASSWORD
+}
+
+# =============================================================================
+# Function: Ensure the local-edition workspace exists (PRD-209)
+# =============================================================================
+# In local mode every anonymous request resolves to DEFAULT_WORKSPACE_ID; a
+# boot that "succeeds" without that row is a shell that 500s on first use.
+# Same idempotent shape as the CI seed (scripts/init_test_db.py). FAILS CLOSED
+# in local mode — SaaS never enters this branch (AUTH_EDITION defaults saas).
+ensure_local_workspace() {
+    if [ "${AUTH_EDITION:-saas}" != "local" ] || [ -z "${DEFAULT_WORKSPACE_ID:-}" ]; then
+        return 0
+    fi
+    echo ""
+    echo "🏠 Ensuring local workspace ${DEFAULT_WORKSPACE_ID} exists..."
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    if psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        "INSERT INTO workspaces (id, name, slug, is_personal, is_active) VALUES ('${DEFAULT_WORKSPACE_ID}', 'Local Workspace', 'local', TRUE, TRUE) ON CONFLICT (id) DO NOTHING;"; then
+        echo "✅ Local workspace present"
+        # The single local operator (users id 1 — api/chat.py's own fallback).
+        # Idempotent; PRD-233 S6 makes name/email editable in Settings → Profile.
+        psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO users (id, username, email, name, is_active) VALUES (1, 'local', '${LOCAL_OPERATOR_EMAIL:-local@automatos.local}', 'Local Operator', TRUE) ON CONFLICT (id) DO NOTHING; SELECT setval(pg_get_serial_sequence('users','id'), GREATEST((SELECT max(id) FROM users), 1));" >/dev/null \
+            && echo "✅ Local operator user present" \
+            || { echo "❌ Could not seed the local operator user — refusing to start a shell instance"; unset PGPASSWORD; exit 1; }
+        unset PGPASSWORD
+    else
+        echo "❌ Could not create the local workspace — refusing to start a shell instance"
+        unset PGPASSWORD
+        exit 1
+    fi
 }
 
 # =============================================================================
@@ -127,11 +155,36 @@ wait_for_postgres
 # Check database
 check_database
 
+# Fresh (empty) database? Build the CI-proven schema and stamp at heads
+# (PRD-209: replaces the stale init_complete_schema.sql snapshot — see
+# scripts/init_fresh_db.py for why the migration forest cannot replay from
+# empty). Fails CLOSED: a half-initialized database must never serve. Existing
+# databases (alembic_version present) skip straight to incremental migrations.
+init_fresh_if_empty() {
+    export PGPASSWORD="$POSTGRES_PASSWORD"
+    HAS_VERSION=$(psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tc "SELECT to_regclass('alembic_version');" 2>/dev/null | tr -d ' ')
+    unset PGPASSWORD
+    if [ -z "$HAS_VERSION" ]; then
+        echo ""
+        echo "🆕 No alembic_version — initializing fresh database (CI-proven schema + stamp)..."
+        if python -m scripts.init_fresh_db; then
+            echo "✅ Fresh database initialized"
+        else
+            echo "❌ Fresh-database initialization failed — refusing to start"
+            exit 1
+        fi
+    fi
+}
+init_fresh_if_empty
+
 # Run migrations (fail-closed) — the single owner of schema lifecycle
 run_migrations
 
 # Load seed data (idempotent)
 load_seed_data
+
+# Local edition: the anonymous workspace must exist (fail-closed; no-op in saas)
+ensure_local_workspace
 
 echo ""
 echo "========================================="

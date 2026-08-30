@@ -19,8 +19,10 @@ import os
 import re
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+import pathlib
 import yaml
 
 _ORCH_ROOT = Path(__file__).resolve().parent.parent
@@ -79,21 +81,18 @@ def _initdb_mount_source() -> str:
         # bind mounts are "src:dst[:mode]" strings
         if isinstance(vol, str) and "docker-entrypoint-initdb.d" in vol:
             return vol.split(":", 1)[0]
-    raise AssertionError("postgres service has no initdb.d mount")
+    return None
 
 
-def test_initdb_mount_source_exists_on_disk():
-    """F009: the exact regression — a compose mount pointing at a missing file."""
+def test_no_initdb_schema_mount_remains():
+    """PRD-209 S2 revision (2026-08-29): the initdb SQL snapshot is retired — fresh
+    databases are built by scripts/init_fresh_db.py from the entrypoint instead.
+    Postgres must start EMPTY; any initdb.d schema mount reintroduces the stale-copy
+    writer this wave deleted (fresh clones were getting 107 of prod's ~152 tables)."""
     src = _initdb_mount_source()
-    # Source is repo-root-relative (leading ./).
-    resolved = (_REPO_ROOT / src.lstrip("./")).resolve()
-    assert resolved.is_file(), f"initdb mount source does not exist: {src} -> {resolved}"
-
-
-def test_initdb_mount_points_at_core_database_schema():
-    src = _initdb_mount_source()
-    assert src.endswith("orchestrator/core/database/init_complete_schema.sql"), (
-        f"initdb mount should point at the real schema file, got {src!r}"
+    assert src is None, (
+        f"postgres service mounts an initdb.d schema again ({src!r}) — fresh schema "
+        "comes from init_fresh_db via the entrypoint, not an initdb snapshot"
     )
 
 
@@ -203,11 +202,25 @@ def test_compose_backend_wired_to_minio_endpoint():
     assert "S3_ENDPOINT_URL" in keys, "backend must receive S3_ENDPOINT_URL for MinIO"
 
 
-def test_compose_defines_minio_bucket_init():
-    """A one-shot service creates the documents bucket the flywheel writes to."""
+def test_the_app_creates_its_own_buckets_no_init_container():
+    """The flywheel's bucket is created by the app, not a one-shot container.
+
+    PRD-233 S4 gave the storage factory ``ensure_bucket()``, called on first use
+    against any S3-compatible endpoint, so the ``minio-init`` mc container (a
+    second 82 MB image doing what the app now does itself) is gone. The guard
+    inverts: compose must NOT reintroduce it, and the factory must still own
+    bucket creation.
+    """
     compose = _load_compose()
-    assert "minio-init" in compose["services"], (
-        "compose must create the flywheel's bucket on first boot (minio-init)"
+    assert "minio-init" not in compose["services"], (
+        "minio-init is superseded by core.storage.s3.ensure_bucket() — do not reintroduce it"
+    )
+    assert "minio" in compose["services"], "the local object store itself must stay"
+    factory = (
+        pathlib.Path(__file__).resolve().parents[1] / "core" / "storage" / "s3.py"
+    ).read_text()
+    assert "def ensure_bucket" in factory, (
+        "bucket creation moved into the storage factory — ensure_bucket() must exist"
     )
 
 
@@ -218,6 +231,8 @@ def test_compose_defines_minio_bucket_init():
 # fail-softs to None with no object store. This proves the endpoint override the
 # whole MinIO wiring depends on actually reaches boto3.client — without a live
 # server (we spy on boto3.client and stub the heavy post-client collaborators).
+# Since PRD-233 S4 the client is built by core.storage on FIRST USE, so the
+# probe reaches through the factory: env -> config -> factory -> boto3.client.
 
 
 def _make_document_manager_capturing_boto(monkeypatch, endpoint_url: str):
@@ -230,39 +245,41 @@ def _make_document_manager_capturing_boto(monkeypatch, endpoint_url: str):
     monkeypatch.setenv("S3_ENDPOINT_URL", endpoint_url) if endpoint_url else monkeypatch.delenv(
         "S3_ENDPOINT_URL", raising=False
     )
+    monkeypatch.delenv("S3_USE_PATH_STYLE", raising=False)
+    # The prod shape (no endpoint) is "configured" through an explicit key pair.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
     sys.modules.pop("config", None)
     import config  # noqa: F401
 
     importlib.reload(config)
 
+    import core.storage.s3 as s3mod
     from modules.rag.ingestion import manager as mgr_mod
+
+    # The factory bound its config instance at import; point it at the one just
+    # reloaded from this test's env and drop any memoized client.
+    monkeypatch.setattr(s3mod, "config", config.config)
+    s3mod.reset_s3_client()
 
     captured = {}
 
     def _spy_client(service, **kwargs):
         captured["service"] = service
         captured["kwargs"] = kwargs
-
-        class _FakeS3:
-            def head_bucket(self, **_):
-                return {}
-
-            def create_bucket(self, **_):
-                return {}
-
-        return _FakeS3()
+        return MagicMock()
 
     # Spy on the boto client; neutralize the heavy collaborators __init__ calls.
-    monkeypatch.setattr(mgr_mod.boto3, "client", _spy_client)
-    monkeypatch.setattr(
-        mgr_mod.DocumentManager, "_ensure_s3_bucket_exists", lambda self: None
-    )
+    monkeypatch.setattr(boto3, "client", _spy_client)
     monkeypatch.setattr(
         "core.llm.create_embedding_manager",
         lambda *a, **kw: _StubEmbeddings(),
     )
 
-    mgr_mod.DocumentManager(db_config={}, workspace_id="ws-test")
+    manager = mgr_mod.DocumentManager(db_config={}, workspace_id="ws-test")
+    assert not captured, "DocumentManager must not build an S3 client at construction"
+    manager.s3_client  # first use builds it through the factory
+    s3mod.reset_s3_client()
     return captured
 
 

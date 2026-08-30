@@ -15,16 +15,16 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
-from core.composio.client import get_composio_client
+from core.composio.client import composio_available, composio_unavailable_reason, get_composio_client
 from core.composio.entity_manager import EntityManager
 from core.database.database import get_db
-from core.models.composio_cache import ComposioActionCache, ComposioAppCache, ComposioStatsCache
+from core.models.composio_cache import ComposioActionCache, ComposioAppCache, ComposioStatsCache, ComposioSyncJob
 from services.metadata_sync_service import MetadataSyncService
 from config import config
 
@@ -131,6 +131,17 @@ class StatsOut(BaseModel):
     connected_apps: int
     categories: Dict[str, Any]
     last_synced: Optional[str] = None
+
+
+class IntegrationsStatusOut(BaseModel):
+    """PRD-233 S2 — honest integration state for the Tools page."""
+    available: bool
+    reason: Optional[str] = None
+    key_configured: bool
+    apps_cached: int
+    last_sync: Optional[str] = None
+    # Latest composio_sync_jobs row: running | completed | failed | None (never synced).
+    sync_status: Optional[str] = None
 
 
 class ConnectIn(BaseModel):
@@ -264,6 +275,41 @@ async def stats(
         connected_apps=connected,
         categories=stats.get("categories") or {},
         last_synced=(stats.get("last_full_sync") or {}).get("timestamp"),
+    )
+
+
+@router.get("/integrations/status", response_model=IntegrationsStatusOut)
+async def integrations_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Whether Composio integrations can run here — and why not when they can't.
+
+    ``available`` is the SAME predicate the tool router uses to decide whether
+    Composio tools are offered at all (PRD-233 S2), so the Tools page and the
+    model always agree. ``apps_cached`` / ``last_sync`` describe the local
+    catalogue (``composio_apps_cache``), which syncs itself on the first keyed
+    boot.
+    """
+    apps_cached = db.query(func.count(ComposioAppCache.id)).scalar() or 0
+    last_sync_row = (
+        db.query(ComposioStatsCache)
+        .filter(ComposioStatsCache.stat_key == "last_full_sync")
+        .first()
+    )
+    last_sync = (last_sync_row.stat_value or {}).get("timestamp") if last_sync_row else None
+    latest_job = (
+        db.query(ComposioSyncJob)
+        .order_by(ComposioSyncJob.started_at.desc())
+        .first()
+    )
+    return IntegrationsStatusOut(
+        available=composio_available(),
+        reason=composio_unavailable_reason(),
+        key_configured=bool(config.COMPOSIO_API_KEY),
+        apps_cached=int(apps_cached),
+        last_sync=last_sync,
+        sync_status=latest_job.status if latest_job else None,
     )
 
 

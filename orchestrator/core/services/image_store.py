@@ -2,29 +2,20 @@
 Image Store Service
 ====================
 
-Uploads generated images (base64) to S3 and returns servable URLs.
-Falls back to local filesystem when AWS credentials are not configured.
+Uploads generated images (base64) to the platform object store (S3 / MinIO
+via ``core.storage``, PRD-233 S4) and serves them back by id.
 
 S3 key pattern: generated-images/{workspace_id}/{uuid}.{ext}
 """
 
 import asyncio
 import base64
-import io
 import logging
-import os
-import pathlib
 from typing import Optional, Tuple
 from uuid import uuid4
 
-try:
-    import boto3
-    from botocore.config import Config as BotoConfig
-    from botocore.exceptions import ClientError
-except ImportError:
-    boto3 = None
-
 from config import config
+from core.storage import ensure_bucket, get_s3_client
 
 logger = logging.getLogger(__name__)
 
@@ -38,80 +29,17 @@ MIME_TO_EXT = {
 }
 
 
-class LocalImageStore:
-    """Local filesystem fallback for dev environments."""
-
-    def __init__(self):
-        self.base_dir = pathlib.Path(
-            config.IMAGE_STORE_LOCAL_DIR or
-            os.path.join(os.path.expanduser("~"), ".automatos", "generated-images")
-        )
-        self.base_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        logger.info("Image store: local filesystem at %s", self.base_dir)
-
-    async def save_image(
-        self,
-        base64_data: str,
-        mime_type: str = "image/png",
-        workspace_id: Optional[str] = None,
-    ) -> str:
-        ext = MIME_TO_EXT.get(mime_type, "png")
-        image_id = str(uuid4())
-        ws = workspace_id or "default"
-        rel_path = f"{ws}/{image_id}.{ext}"
-        full_path = self.base_dir / rel_path
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        image_bytes = base64.b64decode(base64_data)
-        full_path.write_bytes(image_bytes)
-        logger.info("Saved image locally: %s (%d bytes)", rel_path, len(image_bytes))
-        return image_id
-
-    async def get_image(self, image_id: str, workspace_id: Optional[str] = None) -> Optional[Tuple[bytes, str]]:
-        ws = workspace_id or "default"
-        parent = self.base_dir / ws
-        if not parent.exists():
-            # Search all workspace dirs
-            for d in self.base_dir.iterdir():
-                if d.is_dir():
-                    for f in d.iterdir():
-                        if f.stem == image_id:
-                            mime = _ext_to_mime(f.suffix.lstrip("."))
-                            return f.read_bytes(), mime
-            return None
-        for f in parent.iterdir():
-            if f.stem == image_id:
-                mime = _ext_to_mime(f.suffix.lstrip("."))
-                return f.read_bytes(), mime
-        # Fallback: search all workspaces
-        for d in self.base_dir.iterdir():
-            if d.is_dir():
-                for f in d.iterdir():
-                    if f.stem == image_id:
-                        mime = _ext_to_mime(f.suffix.lstrip("."))
-                        return f.read_bytes(), mime
-        return None
-
-
 class S3ImageStore:
-    """S3-backed image store for production."""
+    """Image store on the platform object store (S3 in SaaS, MinIO locally)."""
 
     def __init__(self):
         self.bucket = config.S3_DOCUMENTS_BUCKET
-        boto_cfg = BotoConfig(
-            region_name=config.AWS_REGION or "us-east-1",
-            signature_version="v4",
-            retries={"max_attempts": 3, "mode": "adaptive"},
-        )
-        if config.AWS_ACCESS_KEY_ID and config.AWS_SECRET_ACCESS_KEY:
-            self.client = boto3.client(
-                "s3",
-                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-                config=boto_cfg,
-            )
-        else:
-            self.client = boto3.client("s3", config=boto_cfg)
         logger.info("Image store: S3 (bucket=%s)", self.bucket)
+
+    @property
+    def client(self):
+        """The process-wide S3 client — lazy, no network at construction."""
+        return get_s3_client()
 
     async def save_image(
         self,
@@ -125,6 +53,7 @@ class S3ImageStore:
         key = f"generated-images/{ws}/{image_id}.{ext}"
         image_bytes = base64.b64decode(base64_data)
         loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: ensure_bucket(self.bucket))
         await loop.run_in_executor(
             None,
             lambda: self.client.put_object(
@@ -178,17 +107,6 @@ class S3ImageStore:
             return None
 
 
-def _ext_to_mime(ext: str) -> str:
-    return {
-        "jpg": "image/jpeg",
-        "jpeg": "image/jpeg",
-        "png": "image/png",
-        "gif": "image/gif",
-        "webp": "image/webp",
-        "svg": "image/svg+xml",
-    }.get(ext, "image/png")
-
-
 # ======================================================================
 # Factory
 # ======================================================================
@@ -199,16 +117,6 @@ _image_store = None
 def get_image_store():
     """Get or create the image store singleton."""
     global _image_store
-    if _image_store is not None:
-        return _image_store
-
-    use_s3 = (
-        boto3 is not None
-        and getattr(config, "AWS_ACCESS_KEY_ID", None)
-        and getattr(config, "AWS_SECRET_ACCESS_KEY", None)
-    )
-    if use_s3:
+    if _image_store is None:
         _image_store = S3ImageStore()
-    else:
-        _image_store = LocalImageStore()
     return _image_store

@@ -317,6 +317,19 @@ async def _seed_semantic_embeddings():
     _asyncio.create_task(ensure_field_memory_collection())
 
 
+def _bootstrap_composio_catalog() -> None:
+    """PRD-233 S2: Composio catalogue bootstrap (core/composio/bootstrap.py).
+
+    Key + empty ``composio_apps_cache`` ⇒ full sync on a background thread,
+    then the seeded marketplace agents are re-bound; key + populated cache ⇒
+    one COUNT and a no-op rebind; no key ⇒ logs why integrations are off.
+    Self-guarding — never blocks or fails boot.
+    """
+    from core.composio.bootstrap import ensure_catalog_on_boot
+
+    ensure_catalog_on_boot()
+
+
 class TrustGateError(RuntimeError):
     """Raised when the trust gate check fails — platform runs in degraded mode."""
 
@@ -562,6 +575,8 @@ async def lifespan(app: FastAPI):
         await run_stage(report, BootstrapStage.DATABASE_INIT, _boot_phase_1_core)
         # Seed embeddings (fire-and-forget background task)
         await run_stage(report, BootstrapStage.SEMANTIC_EMBEDDINGS, _seed_semantic_embeddings)
+        # PRD-233 S2: Composio catalogue — sync on the first keyed boot, re-bind seeds.
+        await run_stage(report, BootstrapStage.TOOL_SYNC, _bootstrap_composio_catalog)
 
         logger.info("Phase 1 complete: core ready")
 

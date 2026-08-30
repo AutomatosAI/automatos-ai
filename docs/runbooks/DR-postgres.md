@@ -36,9 +36,11 @@ the PITR decision in §5.
 
 - All SQLAlchemy-modelled tables.
 - **Raw-DDL tables** that `create_all()` cannot build (e.g. `document_chunks`,
-  the pgvector chunk store created in prod via `init_complete_schema.sql`).
-  These live in the database, so the dump contains them — the restore rebuilds
-  them from the dump, not from `create_all()`.
+  the pgvector chunk store — on a fresh database it is built by the raw-DDL
+  extras in `scripts/init_fresh_db.py` / `scripts/init_test_db.py`; the old
+  `init_complete_schema.sql` snapshot is retired). These live in the database,
+  so the dump contains them — the restore rebuilds them from the dump, not
+  from `create_all()`.
 
 Two things the restore must handle that a naive `pg_restore` misses:
 

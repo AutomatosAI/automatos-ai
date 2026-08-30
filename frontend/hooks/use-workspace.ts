@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { apiClient } from '@/lib/api-client'
-import { useAuth } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth-hooks'
 
 export function useWorkspace() {
     const [workspaceId, setWorkspaceId] = useState<string | null>(null)

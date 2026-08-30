@@ -22,7 +22,6 @@ The following files were used as context for generating this wiki page:
 - [orchestrator/api/llm_marketplace.py](orchestrator/api/llm_marketplace.py)
 - [orchestrator/api/marketplace_plugins.py](orchestrator/api/marketplace_plugins.py)
 - [orchestrator/api/openrouter_marketplace.py](orchestrator/api/openrouter_marketplace.py)
-- [orchestrator/core/database/init_complete_schema.sql](orchestrator/core/database/init_complete_schema.sql)
 - [orchestrator/core/database/migrations/042_openrouter_models_cache.sql](orchestrator/core/database/migrations/042_openrouter_models_cache.sql)
 - [orchestrator/scripts/seed_llm_marketplace.py](orchestrator/scripts/seed_llm_marketplace.py)
 - [orchestrator/scripts/seed_recipes_marketplace.py](orchestrator/scripts/seed_recipes_marketplace.py)

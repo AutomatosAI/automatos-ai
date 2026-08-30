@@ -122,9 +122,8 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load System Settings (PRD-25)
             print("\n📂 Loading system settings...")
             try:
-                sys.path.insert(0, str(Path(__file__).parent.parent))
-                from seeds.seed_system_settings import seed_system_settings
-                from database.database import get_db_session
+                from core.seeds.seed_system_settings import seed_system_settings
+                from core.database.database import get_db_session
                 
                 with get_db_session() as db:
                     created, updated = seed_system_settings(db)
@@ -136,7 +135,7 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load LLM Models
             print("\n📂 Loading LLM models...")
             try:
-                from seeds.seed_models import seed_models
+                from core.seeds.seed_models import seed_models
                 seed_models()
                 print("  ✅ LLM models seeded")
             except Exception as e:
@@ -145,7 +144,7 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load Skills and Patterns
             print("\n📂 Loading skills and patterns...")
             try:
-                from seeds.seed_skills import seed_skills, seed_patterns
+                from core.seeds.seed_skills import seed_skills, seed_patterns
                 seed_skills()
                 seed_patterns()
                 print("  ✅ Skills and patterns seeded")
@@ -155,8 +154,8 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             # Load Personas
             print("\n📂 Loading personas...")
             try:
-                from seeds.seed_personas import seed_personas
-                from database.database import get_db_session as _get_db_session
+                from core.seeds.seed_personas import seed_personas
+                from core.database.database import get_db_session as _get_db_session
 
                 with _get_db_session() as db:
                     created, updated = seed_personas(db)
@@ -164,17 +163,67 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
             except Exception as e:
                 print(f"  ⚠️  Error loading personas: {e}")
 
+            # Marketplace catalog (PRD-209 local first-run; PRD-233 S3 owns the
+            # curated refresh). All idempotent: v2 agents check by name, Shopify
+            # agents + packages upsert by slug. Starter agents DELETE+reinsert the
+            # 'Automatos Team' items (would churn ids that marketplace_installs
+            # reference) — so they run only into an EMPTY catalog.
+            print("\n📂 Loading marketplace catalog...")
+            try:
+                from core.database.database import get_db_session as _mk_session
+                from sqlalchemy import text as _sql
+                with _mk_session() as db:
+                    catalog_rows = db.execute(_sql("SELECT count(*) FROM marketplace_items")).scalar() or 0
+                if catalog_rows == 0:
+                    from scripts.seed_starter_agents import seed_starter_agents
+                    seed_starter_agents()
+                    print("  ✅ Starter agents seeded (empty catalog)")
+                from scripts.seed_marketplace_agents_v2 import seed_marketplace_agents_v2
+                seed_marketplace_agents_v2()
+                print("  ✅ Marketplace agents v2 seeded")
+            except Exception as e:
+                print(f"  ⚠️  Error loading marketplace agents: {e}")
+            try:
+                from core.seeds.seed_shopify_agents import seed_shopify_agents
+                seed_shopify_agents()
+                print("  ✅ Shopify agents seeded")
+            except Exception as e:
+                print(f"  ⚠️  Error loading Shopify agents: {e}")
+            try:
+                from core.seeds.seed_packages import seed_packages
+                created, updated = seed_packages()
+                print(f"  ✅ Packages: {created} created, {updated} updated")
+            except Exception as e:
+                print(f"  ⚠️  Error loading packages: {e}")
+
             # Load Plugin Categories
             print("\n📂 Loading plugin categories...")
             try:
-                from seeds.seed_plugin_categories import seed_plugin_categories
-                from database.database import get_db_session as __get_db_session
+                from core.seeds.seed_plugin_categories import seed_plugin_categories
+                from core.database.database import get_db_session as __get_db_session
 
                 with __get_db_session() as db:
                     created, updated = seed_plugin_categories(db)
                     print(f"  ✅ Plugin categories: {created} created, {updated} updated")
             except Exception as e:
                 print(f"  ⚠️  Error loading plugin categories: {e}")
+
+            # PRD-233 S3: local-edition first-run content — the workspace +
+            # operator rows, Auto, a starter roster, one demo Playbook and a
+            # welcome Deliverable. Gated INSIDE the seed on AUTH_EDITION=local
+            # + DEFAULT_WORKSPACE_ID (saas ⇒ no-op); idempotent-refresh, never
+            # overwrites edits. Package-qualified imports so the seed shares the
+            # app's ORM session/model objects (module mode: python -m ...).
+            print("\n📂 Loading local-edition first-run content...")
+            try:
+                from core.seeds.seed_local_first_run import seed_local_first_run
+                from core.database.database import get_db_session as _local_session
+
+                with _local_session() as db:
+                    outcome = seed_local_first_run(db)
+                    print(f"  ✅ Local first-run: {outcome}")
+            except Exception as e:
+                print(f"  ⚠️  Error loading local-edition first-run content: {e}")
 
         print("\n" + "=" * 60)
         print("✅ SEED DATA LOADED SUCCESSFULLY!")

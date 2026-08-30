@@ -13,7 +13,7 @@ Features:
 
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from uuid import UUID
 
 from config import config
@@ -1423,3 +1423,56 @@ def get_composio_client() -> ComposioClient:
     if _client_instance is None:
         _client_instance = ComposioClient()
     return _client_instance
+
+
+# =============================================================================
+# PRD-233 S2 — availability predicate (the ONE degrade seam)
+# =============================================================================
+#
+# "Available" means the platform can actually reach Composio: a key is
+# configured (config only — never os.getenv here) AND the SDK imports. Every
+# consumer that decides whether to OFFER or RUN a Composio tool asks this one
+# predicate; nothing else probes the key. Evaluated once per process (the key
+# is env-only and the SDK install is static) — ``reset_composio_availability``
+# exists for tests that flip the config.
+
+COMPOSIO_UNAVAILABLE_NO_KEY = "COMPOSIO_API_KEY is not configured"
+# NOTE: keep "composio-openai" out of this string — tool_router's
+# _is_fatal_dependency_error() keys on it and would replace the honest
+# message with a generic "restart the backend" line.
+COMPOSIO_UNAVAILABLE_NO_SDK = "Composio SDK is not installed (composio-core package missing)"
+
+_availability: Optional[Tuple[bool, Optional[str]]] = None
+
+
+def _probe_composio_availability() -> Tuple[bool, Optional[str]]:
+    if not config.COMPOSIO_API_KEY:
+        return False, COMPOSIO_UNAVAILABLE_NO_KEY
+    try:
+        _get_composio()
+    except ImportError:
+        return False, COMPOSIO_UNAVAILABLE_NO_SDK
+    return True, None
+
+
+def _composio_availability() -> Tuple[bool, Optional[str]]:
+    global _availability
+    if _availability is None:
+        _availability = _probe_composio_availability()
+    return _availability
+
+
+def composio_available() -> bool:
+    """True when a Composio key is configured AND the SDK is importable."""
+    return _composio_availability()[0]
+
+
+def composio_unavailable_reason() -> Optional[str]:
+    """Human-readable reason Composio is unavailable; ``None`` when available."""
+    return _composio_availability()[1]
+
+
+def reset_composio_availability() -> None:
+    """Forget the cached probe (tests flip config / SDK presence)."""
+    global _availability
+    _availability = None

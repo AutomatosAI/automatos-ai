@@ -586,32 +586,20 @@ async def serve_generated_file(
     # Fallback: redirect to S3 presigned URL
     try:
         from config import config as app_config
-        import boto3
-        from botocore.config import Config as BotoConfig
+        from core.storage import get_public_s3_client, get_s3_client, is_storage_configured
 
-        if not app_config.AWS_ACCESS_KEY_ID or not app_config.AWS_SECRET_ACCESS_KEY:
+        if not is_storage_configured():
             raise HTTPException(status_code=404, detail="File not found")
 
         bucket = app_config.S3_DOCUMENTS_BUCKET
         s3_key = f"workspaces/{ctx.workspace_id}/generated-documents/{filename}"
 
-        boto_cfg = BotoConfig(
-            region_name=app_config.AWS_REGION or "us-east-1",
-            signature_version="v4",
-        )
-        client = boto3.client(
-            "s3",
-            aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
-            config=boto_cfg,
-        )
-
         # Check the object exists
-        client.head_object(Bucket=bucket, Key=s3_key)
+        get_s3_client().head_object(Bucket=bucket, Key=s3_key)
 
-        # Generate presigned URL and redirect
+        # Presign against the browser-reachable host and redirect (PRD-151 US-006)
         from fastapi.responses import RedirectResponse
-        presigned_url = client.generate_presigned_url(
+        presigned_url = get_public_s3_client().generate_presigned_url(
             "get_object",
             Params={
                 "Bucket": bucket,
@@ -622,8 +610,6 @@ async def serve_generated_file(
         )
         return RedirectResponse(url=presigned_url, status_code=302)
 
-    except ImportError:
-        raise HTTPException(status_code=404, detail="File not found")
     except Exception as e:
         logger.warning(f"S3 fallback failed for {filename}: {e}")
         raise HTTPException(status_code=404, detail="File not found")

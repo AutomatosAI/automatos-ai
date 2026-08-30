@@ -141,7 +141,7 @@ graph TD
 
     subgraph "Backend_Services"
         BACK["backend (FastAPI)"]
-        WSW["workspace-worker (Profile: workers)"]
+        WSW["workspace-worker (default profile; host bind mount AUTOMATOS_WORKSPACE_DIR)"]
     end
 
     subgraph "UI_Layer"

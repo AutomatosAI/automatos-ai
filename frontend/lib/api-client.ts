@@ -359,6 +359,27 @@ export interface WatchDetailResponse {
   recent_events: WatchEventRow[]
 }
 
+// ===== PRD-233 S6 Local profile: who Auto is talking to =====
+export interface ProfileResponse {
+  edition: 'local' | 'saas'
+  // true only in the local edition — saas profiles are managed by Clerk
+  editable: boolean
+  id: number | null
+  email: string | null
+  name: string | null
+  username: string | null
+  avatar_url: string | null
+  system_role: string
+  // Why email is read-only (the operator lookup key / the identity provider)
+  email_note: string
+}
+
+export interface ProfileUpdateRequest {
+  name?: string
+  username?: string
+  avatar_url?: string
+}
+
 class ApiClient {
   private baseUrl: string
   private defaultHeaders: Record<string, string>
@@ -562,6 +583,18 @@ class ApiClient {
 
   async getApiHealth() {
     return this.request('/api/health/endpoints')
+  }
+
+  // ===== PRD-233 S6 Local profile (GET both editions, PUT local only) =====
+  async getProfile(): Promise<ProfileResponse> {
+    return this.request<ProfileResponse>('/api/profile')
+  }
+
+  async updateProfile(data: ProfileUpdateRequest): Promise<ProfileResponse> {
+    return this.request<ProfileResponse>('/api/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
   }
 
   async getSystemConfig() {
@@ -1744,6 +1777,19 @@ class ApiClient {
 
   async syncToolsCache(syncType: 'full' | 'incremental' = 'full') {
     return this.request(`/api/tools/sync?sync_type=${syncType}`, { method: 'POST' })
+  }
+
+  async getIntegrationsStatus() {
+    // PRD-233 S2: honest integrations state — the same predicate the tool
+    // router uses to decide whether Composio tools are offered at all.
+    return this.request<{
+      available: boolean
+      reason: string | null
+      key_configured: boolean
+      apps_cached: number
+      last_sync: string | null
+      sync_status: 'running' | 'completed' | 'failed' | string | null
+    }>('/api/tools/integrations/status')
   }
 
   async syncOpenRouterCache() {

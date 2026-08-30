@@ -15,7 +15,16 @@ with the orchestrator's ``config.py`` that ``main.py`` transiently places on
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Dict
+
+# Workspace mount root inside the worker container (PRD-233 S1). Compose
+# bind-mounts the host directory ``${AUTOMATOS_WORKSPACE_DIR:-./workspaces}``
+# here; Railway mounts its persistent volume here. Per-workspace roots are
+# ``workspace_root() / <workspace_id>`` (``WorkspaceManager.root``) — the
+# boundary every canvas tool call is re-bound against (canvas_confinement).
+WORKSPACE_ROOT_ENV = "WORKSPACE_VOLUME_PATH"
+DEFAULT_WORKSPACE_ROOT = "/workspaces"
 
 
 def model_auth_env() -> Dict[str, str]:
@@ -42,3 +51,14 @@ def model_auth_env() -> Dict[str, str]:
 def has_model_auth() -> bool:
     """True iff a model credential is configured for the SDK subprocess."""
     return bool(model_auth_env())
+
+
+def workspace_root() -> Path:
+    """The workspace mount root (``WORKSPACE_VOLUME_PATH``, default ``/workspaces``).
+
+    Read at call time, not import time, so it always reflects the process
+    environment. Blank/whitespace counts as unset: a relative root silently
+    anchored to the process cwd is the one thing this must never return.
+    """
+    raw = os.environ.get(WORKSPACE_ROOT_ENV, "").strip()
+    return Path(raw or DEFAULT_WORKSPACE_ROOT)

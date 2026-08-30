@@ -93,3 +93,8 @@ add-*.py
 *.mov
 *.zip
 *.tar.gz
+# PRD-209: env files must never be baked into images — Next loads .env*/.env.local
+# and config.py load_dotenv()s them, leaking dev/SaaS values into the local edition.
+.env.*
+**/.env
+**/.env.*

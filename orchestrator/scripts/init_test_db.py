@@ -20,6 +20,31 @@ from core.models.composio import ComposioConnection, ComposioEntity
 # — the L2 transcript store the memory restart/isolation tests depend on.
 import modules.memory.models  # noqa: F401,E402  (registers MemoryShortTerm on Base)
 
+def _pgvector_available(engine) -> bool:
+    """True when the ``vector`` type exists (after a best-effort CREATE EXTENSION).
+
+    CI's orchestrator-tests job runs on stock postgres:15 (no pgvector package),
+    where CREATE EXTENSION fails; the alembic-from-zero job, the local compose
+    stack (pgvector/pgvector) and prod all have it. The extras below build the
+    vector-free shape on stock postgres — the same doctrine as document_chunks
+    and codegraph_symbols above — and the full shape everywhere else.
+    """
+    from sqlalchemy import text as _sql
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(_sql("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception:  # noqa: BLE001 — extension not installable here
+        pass
+    with engine.connect() as conn:
+        return conn.execute(_sql("SELECT 1 FROM pg_type WHERE typname = 'vector'")).scalar() is not None
+
+
+def _with_embedding(ddl: str, has_vector: bool) -> str:
+    """Fill the ``__EMBEDDING__`` slot: a pgvector column, or nothing on stock postgres."""
+    return ddl.replace("__EMBEDDING__", "embedding vector(4096)," if has_vector else "")
+
+
 def init_db():
     """Create all tables from models."""
     print("🔧 Creating all database tables...")
@@ -60,6 +85,7 @@ def init_db():
     # stock CI service does not have. Tests that exercise that path (full
     # indexing / semantic search) skip when pgvector is unavailable; the
     # table-only tests (list/delete) just need these relations to exist.
+    has_vector = _pgvector_available(engine)
     with engine.begin() as conn:
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS codegraph_projects (
@@ -163,6 +189,96 @@ def init_db():
                 duration_ms FLOAT,
                 workspace_id UUID NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+
+        # Model-less tables migrations ALTER but nothing CREATEs (PRD-209
+        # schema-drift orphans, 2026-08-29) + kb_types (their FK target; live
+        # readers in RAG ingestion / tool registry): live code reads all three
+        # (team_access/analytics/knowledge_multimodal · nl2sql schema provider).
+        # DDL ported verbatim from the retired init_complete_schema.sql.
+        # (learning_outcomes was NOT ported: prd187_s5 dropped it as a relic —
+        # workspace_purge's reference to it is dangling in prod too.) Keep scripts/ci/schema_drift_check.py's
+        # RAW_DDL_EXTRAS in sync with this block.
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS kb_types (
+                id SERIAL PRIMARY KEY,
+                type_name VARCHAR(100) UNIQUE NOT NULL,
+                display_name VARCHAR(255) NOT NULL,
+                description TEXT,
+                icon VARCHAR(50),
+                processor_class VARCHAR(255),
+                storage_strategy VARCHAR(100),
+                supports_embedding BOOLEAN DEFAULT true,
+                supports_search BOOLEAN DEFAULT true,
+                supports_relationships BOOLEAN DEFAULT false,
+                enabled BOOLEAN DEFAULT true,
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        conn.execute(_raw_sql(_with_embedding("""
+            CREATE TABLE IF NOT EXISTS knowledge_items (
+                id SERIAL PRIMARY KEY,
+                kb_type_id INTEGER REFERENCES kb_types(id) ON DELETE CASCADE,
+                parent_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+                source_type VARCHAR(100),
+                source_id VARCHAR(255),
+                title VARCHAR(500),
+                content TEXT NOT NULL,
+                summary TEXT,
+                __EMBEDDING__
+                metadata JSONB DEFAULT '{}',
+                quality_score FLOAT DEFAULT 0.0,
+                importance_score FLOAT DEFAULT 0.0,
+                complexity_score FLOAT DEFAULT 0.0,
+                confidence_score FLOAT DEFAULT 1.0,
+                visibility VARCHAR(50) DEFAULT 'system',
+                owner_id VARCHAR(255),
+                permissions JSONB DEFAULT '{}',
+                status VARCHAR(50) DEFAULT 'active',
+                version INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                accessed_at TIMESTAMP,
+                indexed_at TIMESTAMP
+            )
+        """, has_vector)))
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS tool_usage_logs (
+                id SERIAL PRIMARY KEY,
+                execution_id INTEGER,  -- legacy workflow_executions ref; no FK on the fresh path
+                agent_id INTEGER REFERENCES agents(id) NOT NULL,
+                tool_id INTEGER NOT NULL,  -- legacy mcp_tools ref (dead table); no FK on the fresh path
+                method_called VARCHAR(255),
+                input_data JSONB,
+                output_data JSONB,
+                success BOOLEAN,
+                execution_time_ms INTEGER,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+        # agent_tool_assignments — the agent↔tool assignment table the marketplace
+        # API reads AND writes (api/marketplace.py, cascade_installer, provisioning)
+        # yet no model and no migration creates it: it lived only in the retired
+        # hand-written init SQL (PRD-209 live-test finding, 2026-08-29) — and even
+        # that snapshot was stale: live code uses a TEXT tool_id (app slug) and a
+        # created_at column. Shape derived from the code's actual reads/writes.
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS agent_tool_assignments (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE NOT NULL,
+                tool_id VARCHAR(255) NOT NULL,  -- app slug ('gmail'); api/marketplace.py LOWER()s it
+                credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL,
+                enabled BOOLEAN DEFAULT TRUE,
+                permissions JSON DEFAULT '{}',
+                configuration JSON DEFAULT '{}',
+                assigned_at TIMESTAMP DEFAULT NOW(),
+                created_at TIMESTAMP DEFAULT NOW(),   -- api/marketplace.py INSERTs created_at
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(agent_id, tool_id)
             )
         """))
 

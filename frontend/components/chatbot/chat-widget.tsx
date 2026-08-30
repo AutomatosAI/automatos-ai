@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useUser } from '@clerk/nextjs'
+import { useUser } from '@/lib/auth-hooks'
 import { useSubmitBugReport, type BugReportRequest } from '@/hooks/use-bug-report-api'
 import { useChat } from '@/lib/chat/hooks'
 import { usePageContext } from '@/lib/page-context'

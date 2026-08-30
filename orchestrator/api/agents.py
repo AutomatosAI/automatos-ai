@@ -968,7 +968,9 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
         deletions = [
             ("agent_skills", "DELETE FROM agent_skills WHERE agent_id = :agent_id", True),
             ("workflow_agents", "DELETE FROM workflow_agents WHERE agent_id = :agent_id", True),
-            ("memory_items", "DELETE FROM memory_items WHERE agent_id = :agent_id", True),
+            # memory_items was dropped by prd187_s5_drop_memory_relics (a 0-row relic);
+            # keeping it here as `required` made every agent deletion 500 on a
+            # nonexistent table (PRD-209 live-test finding, 2026-08-29).
             ("workflow_executions", "DELETE FROM workflow_executions WHERE agent_id = :agent_id", False),
         ]
         

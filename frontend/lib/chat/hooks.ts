@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useAuth } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth-hooks'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import type { PageContext } from '@/lib/page-context'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
@@ -144,7 +144,7 @@ export function useChat({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            ...(token ? { ...(token ? { Authorization: `Bearer ${token}` } : {}),} : {}),
             ...(apiKey ? { 'x-api-key': apiKey } : {}),
             // Ensure backend gets the correct workspace context (prevents dev fallback UUID)
             ...(typeof window !== 'undefined' && localStorage.getItem('last_active_workspace')
