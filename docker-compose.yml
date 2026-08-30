@@ -106,27 +106,9 @@ services:
       start_period: 5s
     networks:
       - automatos
-  # One-shot bucket bootstrap (exits immediately; 82 MB mc image). PRD-233 S4
-  # deletes this — its storage factory calls ensure_bucket() on first use for
-  # every bucket, against any S3-compatible endpoint.
-  minio-init:
-    image: minio/mc:latest
-    container_name: automatos_minio_init
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      S3_DOCUMENTS_BUCKET: ${S3_DOCUMENTS_BUCKET:-automatos-ai}
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
-      mc mb --ignore-existing local/$${S3_DOCUMENTS_BUCKET} &&
-      echo 'MinIO bucket ready: '$${S3_DOCUMENTS_BUCKET}
-      "
-    networks:
-      - automatos
+  # (minio-init deleted — S4's storage factory calls ensure_bucket() on first
+  # use for every bucket against any S3-compatible endpoint, so the one-shot mc
+  # container was an extra 82 MB image doing work the app now does itself.)
 
   backend:
     build:

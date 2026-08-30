@@ -22,6 +22,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import pathlib
 import yaml
 
 _ORCH_ROOT = Path(__file__).resolve().parent.parent
@@ -201,11 +202,25 @@ def test_compose_backend_wired_to_minio_endpoint():
     assert "S3_ENDPOINT_URL" in keys, "backend must receive S3_ENDPOINT_URL for MinIO"
 
 
-def test_compose_defines_minio_bucket_init():
-    """A one-shot service creates the documents bucket the flywheel writes to."""
+def test_the_app_creates_its_own_buckets_no_init_container():
+    """The flywheel's bucket is created by the app, not a one-shot container.
+
+    PRD-233 S4 gave the storage factory ``ensure_bucket()``, called on first use
+    against any S3-compatible endpoint, so the ``minio-init`` mc container (a
+    second 82 MB image doing what the app now does itself) is gone. The guard
+    inverts: compose must NOT reintroduce it, and the factory must still own
+    bucket creation.
+    """
     compose = _load_compose()
-    assert "minio-init" in compose["services"], (
-        "compose must create the flywheel's bucket on first boot (minio-init)"
+    assert "minio-init" not in compose["services"], (
+        "minio-init is superseded by core.storage.s3.ensure_bucket() — do not reintroduce it"
+    )
+    assert "minio" in compose["services"], "the local object store itself must stay"
+    factory = (
+        pathlib.Path(__file__).resolve().parents[1] / "core" / "storage" / "s3.py"
+    ).read_text()
+    assert "def ensure_bucket" in factory, (
+        "bucket creation moved into the storage factory — ensure_bucket() must exist"
     )
 
 
