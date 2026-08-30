@@ -56,6 +56,12 @@ FROM base as builder
 # NOTE: NEXT_PUBLIC_* variables are embedded in the client bundle and must NOT contain secrets
 # API keys should be handled server-side only (see frontend/app/api/chat/route.ts)
 ARG NEXT_PUBLIC_API_URL
+# PRD-233: NEXT_PUBLIC_* are inlined at BUILD time, so the edition and the
+# API/WS origins must be build args for the standalone image. Defaults are the
+# local edition's (compose passes them); SaaS builds on Railway use Railpack,
+# not this file, and set their own env.
+ARG NEXT_PUBLIC_AUTH_EDITION=local
+ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
@@ -64,6 +70,8 @@ ARG NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
 
 # Set as environment variables for Next.js build
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_AUTH_EDITION=${NEXT_PUBLIC_AUTH_EDITION}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
 ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
 ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}

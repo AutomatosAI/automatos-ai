@@ -19,12 +19,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # sessions (PRD-170 S1). The SDK spawns this binary per workspace session.
 RUN npm install -g @anthropic-ai/claude-code
 
-# Python dev/test tools (pre-installed so agents can use immediately)
-RUN pip install --no-cache-dir \
-    pytest pytest-cov pytest-asyncio \
-    ruff black mypy isort flake8 \
-    coverage tox \
-    uv
+# uv only — a single fast installer an agent can use to pull whatever a task
+# actually needs. Pre-installing pytest/ruff/black/mypy/isort/flake8/coverage/tox
+# cost 185 MB in every install for tools most sessions never touch (PRD-233 slim pass).
+RUN pip install --no-cache-dir uv
 
 # Worker application dependencies
 COPY requirements.txt .
@@ -38,20 +36,29 @@ RUN useradd -m -u 1000 worker \
     && mkdir -p /workspaces \
     && chown -R worker:worker /app /workspaces
 
-# Headless Chromium for workspace_html_to_png tool (PRD-social-render).
-# Install deps manually (--with-deps fails on Debian Trixie due to renamed font pkgs).
+# Headless Chromium for the workspace_html_to_png tool — OPT-IN (PRD-233 slim
+# pass). Chromium plus its X11/font stack is 1.18 GB, for one tool; installing
+# it in every local edition made the worker image 2.9 GB. Enable with:
+#   docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
+# Without it the tool fails with Playwright's own "Executable doesn't exist"
+# message naming the install command — honest, not silent.
+# (Install deps manually: --with-deps fails on Debian Trixie due to renamed font pkgs.)
+ARG INSTALL_BROWSER=false
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
-    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-    libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \
-    fonts-liberation fonts-noto-color-emoji fonts-unifont \
-    && rm -rf /var/lib/apt/lists/* \
-    && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers playwright install chromium \
-    && chmod -R o+rx /opt/playwright-browsers \
-    && mkdir -p /home/worker/.cache && ln -sf /opt/playwright-browsers /home/worker/.cache/ms-playwright \
-    && mkdir -p /root/.cache && ln -sf /opt/playwright-browsers /root/.cache/ms-playwright
-
+RUN if [ "$INSTALL_BROWSER" = "true" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+        libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
+        libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+        libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 \
+        fonts-liberation fonts-noto-color-emoji fonts-unifont \
+        && rm -rf /var/lib/apt/lists/* \
+        && PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers playwright install chromium \
+        && chmod -R o+rx /opt/playwright-browsers \
+        && mkdir -p /home/worker/.cache && ln -sf /opt/playwright-browsers /home/worker/.cache/ms-playwright \
+        && mkdir -p /root/.cache && ln -sf /opt/playwright-browsers /root/.cache/ms-playwright; \
+    else \
+        echo "Skipping Chromium (INSTALL_BROWSER=false) — workspace_html_to_png is unavailable"; \
+    fi
 # Entrypoint fixes volume ownership then drops to worker user
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

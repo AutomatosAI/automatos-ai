@@ -85,7 +85,8 @@ services:
   # Prod is unchanged (real AWS S3, S3_ENDPOINT_URL unset).
   # ===========================================================================
   minio:
-    image: minio/minio:latest
+    # Pinned: `latest` had resolved to a year-old image on this machine.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: automatos_minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -105,8 +106,9 @@ services:
       start_period: 5s
     networks:
       - automatos
-
-  # One-shot: create the documents bucket the flywheel writes to, then exit.
+  # One-shot bucket bootstrap (exits immediately; 82 MB mc image). PRD-233 S4
+  # deletes this — its storage factory calls ensure_bucket() on first use for
+  # every bucket, against any S3-compatible endpoint.
   minio-init:
     image: minio/mc:latest
     container_name: automatos_minio_init
@@ -126,9 +128,6 @@ services:
     networks:
       - automatos
 
-  # ===========================================================================
-  # Backend API (FastAPI)
-  # ===========================================================================
   backend:
     build:
       context: ./orchestrator
@@ -251,7 +250,16 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      target: development
+      # PRD-233: the SHIPPED local edition runs the Next.js standalone build
+      # (~350 MB, ~200 MB RAM) — not the dev server, which carried every
+      # devDependency (1.7 GB image, 3.2 GB RAM). Contributors who want hot
+      # reload: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+      target: production
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
+        NEXT_PUBLIC_AUTH_EDITION: ${NEXT_PUBLIC_AUTH_EDITION:-local}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
     container_name: automatos_frontend
     restart: unless-stopped
     depends_on:
@@ -271,15 +279,9 @@ services:
       # An API-key principal would hit the workspace-permission gate instead (403).
       # SaaS-only; `:-` so its absence never blocks local `docker compose up`.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
-      NODE_ENV: development
+      NODE_ENV: production
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
-    volumes:
-      # Mount source for hot-reload
-      - ./frontend:/app
-      # Prevent overwriting node_modules and build artifacts
-      - /app/node_modules
-      - /app/.next
     networks:
       - automatos
 
