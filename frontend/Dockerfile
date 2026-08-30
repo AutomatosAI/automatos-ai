@@ -60,7 +60,7 @@ ARG NEXT_PUBLIC_API_URL
 # API/WS origins must be build args for the standalone image. Defaults are the
 # local edition's (compose passes them); SaaS builds on Railway use Railpack,
 # not this file, and set their own env.
-ARG NEXT_PUBLIC_AUTH_EDITION=local
+ARG NEXT_PUBLIC_AUTH_EDITION=saas
 ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
