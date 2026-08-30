@@ -878,8 +878,8 @@ def _upload_step_log_to_s3(
     Path: workspaces/{workspace_id}/logs/executions/{execution_id}/step_{order}.json
     """
     try:
-        import boto3
         from config import config
+        from core.storage import ensure_bucket, get_s3_client
 
         bucket = config.RECIPE_LOG_S3_BUCKET
         if not bucket:
@@ -887,12 +887,8 @@ def _upload_step_log_to_s3(
 
         s3_key = f"workspaces/{workspace_id}/logs/executions/{execution_id}/step_{step_order}.json"
 
-        s3 = boto3.client(
-            "s3",
-            region_name=config.AWS_REGION or "us-east-1",
-            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-        )
+        ensure_bucket(bucket)
+        s3 = get_s3_client()
 
         s3.put_object(
             Bucket=bucket,

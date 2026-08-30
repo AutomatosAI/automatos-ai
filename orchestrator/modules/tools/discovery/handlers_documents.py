@@ -138,10 +138,11 @@ async def delete_document(db: Session, workspace_id: UUID, params: Dict[str, Any
     file_path = doc.file_path or ""
     if file_path.startswith("s3://"):
         try:
-            import boto3
+            from core.storage import get_s3_client
+
             parts = file_path.replace("s3://", "").split("/", 1)
             bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
-            s3 = boto3.client("s3")
+            s3 = get_s3_client()
             s3.delete_object(Bucket=bucket, Key=key)
             cleanup_notes.append("S3 file deleted")
         except Exception as e:
@@ -197,10 +198,11 @@ async def reprocess_document(db: Session, workspace_id: UUID, params: Dict[str, 
     # Validate file exists
     if file_path.startswith("s3://"):
         try:
-            import boto3
+            from core.storage import get_s3_client
+
             parts = file_path.replace("s3://", "").split("/", 1)
             bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
-            s3 = boto3.client("s3")
+            s3 = get_s3_client()
             s3.head_object(Bucket=bucket, Key=key)
         except Exception as e:
             return {"success": False, "error": f"S3 file not accessible: {e}"}
@@ -225,12 +227,13 @@ async def reprocess_document(db: Session, workspace_id: UUID, params: Dict[str, 
         actual_path = file_path
         if file_path.startswith("s3://"):
             import tempfile
-            import boto3
+            from core.storage import get_s3_client
+
             parts = file_path.replace("s3://", "").split("/", 1)
             bucket, key = parts[0], parts[1] if len(parts) > 1 else ""
             suffix = "." + key.rsplit(".", 1)[-1] if "." in key else ""
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            boto3.client("s3").download_file(bucket, key, tmp.name)
+            get_s3_client().download_file(bucket, key, tmp.name)
             actual_path = tmp.name
 
         new_doc_id = await dm.upload_document(

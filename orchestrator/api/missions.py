@@ -61,8 +61,6 @@ from core.models.orchestration_enums import (
     TERMINAL_RUN_STATES,
 )
 from modules.coordination.planner import PlanValidationError
-import boto3
-from botocore.config import Config as BotoConfig
 
 from services.chat_messenger import strip_caller_narration_origin
 from services.coordinator_service import get_coordinator_service

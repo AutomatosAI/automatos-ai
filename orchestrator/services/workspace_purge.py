@@ -26,8 +26,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-import boto3
-from botocore.config import Config as BotoConfig
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -35,6 +33,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.auth.clerk import get_clerk_auth
 from core.database.database import SessionLocal
+from core.storage import get_s3_client, is_storage_configured
 
 logger = logging.getLogger(__name__)
 
@@ -100,27 +99,15 @@ class PurgeResult:
 
 
 def _build_s3_client():
-    """Return a configured boto3 S3 client, or None when AWS creds are absent.
+    """Return the platform S3 client, or None when object storage is unconfigured.
 
-    Mirrors the construction pattern in modules/attachments/store.py so behavior
-    stays consistent across the codebase (region, retries, sigv4).
+    The client comes from core.storage (PRD-233 S4) — one construction path for
+    every site. An unconfigured store is a clean skip here, never an error: the
+    DB purge must proceed regardless.
     """
-    if not (
-        getattr(config, "AWS_ACCESS_KEY_ID", None)
-        and getattr(config, "AWS_SECRET_ACCESS_KEY", None)
-    ):
+    if not is_storage_configured():
         return None
-    boto_cfg = BotoConfig(
-        region_name=config.AWS_REGION or "eu-west-1",
-        signature_version="v4",
-        retries={"max_attempts": 3, "mode": "adaptive"},
-    )
-    return boto3.client(
-        "s3",
-        aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-        config=boto_cfg,
-    )
+    return get_s3_client()
 
 
 def _purge_s3_prefix(client, bucket: str, prefix: str) -> tuple[int, int]:
