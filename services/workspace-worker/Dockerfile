@@ -38,14 +38,16 @@ RUN useradd -m -u 1000 worker \
     && mkdir -p /workspaces \
     && chown -R worker:worker /app /workspaces
 
-# Headless Chromium for the workspace_html_to_png tool — OPT-IN (PRD-233 slim
-# pass). Chromium plus its X11/font stack is 1.18 GB, for one tool; installing
-# it in every local edition made the worker image 2.9 GB. Enable with:
-#   docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
-# Without it the tool fails with Playwright's own "Executable doesn't exist"
-# message naming the install command — honest, not silent.
+# Headless Chromium for the workspace_html_to_png tool. THE DEFAULT IS THE
+# PRODUCTION VALUE (true): Railway builds THIS file (railway.json: builder
+# DOCKERFILE), so a `false` default here removed the browser from the prod
+# worker on 2026-08-30 (#650). The local edition passes INSTALL_BROWSER=false
+# explicitly via docker-compose.yml build args (Chromium + its X11/font stack
+# is 1.18 GB for one tool); without it the tool fails with Playwright's own
+# "Executable doesn't exist" message naming the install command — honest, not
+# silent. Want it locally: docker compose build --build-arg INSTALL_BROWSER=true workspace-worker
 # (Install deps manually: --with-deps fails on Debian Trixie due to renamed font pkgs.)
-ARG INSTALL_BROWSER=false
+ARG INSTALL_BROWSER=true
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 RUN if [ "$INSTALL_BROWSER" = "true" ]; then \
         apt-get update && apt-get install -y --no-install-recommends \

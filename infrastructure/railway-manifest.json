@@ -4,483 +4,856 @@
   "_project": "Automatos AI",
   "_environment": "production",
   "_project_id": "e2e8cf82-c1c0-4afb-8b88-1a7c32c41606",
-
   "domains": {
     "api.automatos.app": "automatos-ai-api",
     "ui.automatos.app": "automotas-ai-frontend",
     "automatos.app": "automatos-ai-landing"
   },
-
   "service_groups": {
     "core": {
       "description": "Core platform — API, Frontend, Workers",
       "repo": "AutomatosAI/automatos-ai",
-      "services": ["automatos-ai-api", "automotas-ai-frontend", "agent-workspace-worker", "agent-opt-worker"]
+      "services": [
+        "automatos-ai-api",
+        "automotas-ai-frontend",
+        "agent-workspace-worker",
+        "agent-opt-worker"
+      ]
     },
     "voice": {
       "description": "Voice processing — TTS, STT, pipeline",
       "repo": "AutomatosAI/automatos-voice",
-      "services": ["voice-service", "voice-pipeline"]
+      "services": [
+        "voice-service",
+        "voice-pipeline"
+      ]
     },
     "memory": {
       "description": "Long-term memory — Mem0 OpenMemory server",
       "repo": "AutomatosAI/automatos-mem0",
-      "services": ["automatos-ai-mem0-Server", "automatos-ai-mem0-pgvector"]
+      "services": [
+        "automatos-ai-mem0-Server",
+        "automatos-ai-mem0-pgvector"
+      ]
     },
     "monitoring": {
       "description": "Observability — metrics, logs, alerts, dashboards",
       "repo": "AutomatosAI/automatos-monitoring",
-      "services": ["prometheus", "grafana", "loki", "log-relay", "alertmanager", "postgres-exporter", "redis-exporter"]
+      "services": [
+        "prometheus",
+        "grafana",
+        "loki",
+        "log-relay",
+        "alertmanager",
+        "postgres-exporter",
+        "redis-exporter"
+      ]
     },
     "data": {
       "description": "Data infrastructure — databases, caches, vector stores",
-      "services": ["automatos-ai-pgvector", "Redis", "Qdrant"]
+      "services": [
+        "automatos-ai-pgvector",
+        "Redis",
+        "Qdrant"
+      ]
     },
     "landing": {
       "description": "Marketing landing page",
       "repo": "AutomatosAI/automatos-ai-landing",
-      "services": ["automatos-ai-landing"]
+      "services": [
+        "automatos-ai-landing"
+      ]
     }
   },
-
   "services": {
     "automatos-ai-api": {
       "group": "core",
-      "source": {"repo": "AutomatosAI/automatos-ai", "root_dir": "/orchestrator"},
-      "builder": "RAILPACK",
+      "source": {
+        "repo": "AutomatosAI/automatos-ai",
+        "root_dir": "/orchestrator"
+      },
+      "builder": "DOCKERFILE",
       "dockerfile": null,
       "start_command": null,
       "port": 8000,
       "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
       "sleep": false,
       "replicas": null,
       "domains": {
-        "railway": ["automatos-ai-production.up.railway.app"],
-        "custom": ["api.automatos.app"]
+        "railway": [
+          "automatos-ai-production.up.railway.app"
+        ],
+        "custom": [
+          "api.automatos.app"
+        ]
       },
       "volumes": [],
       "env_keys": [
-        "ADAPTER_ADMIN_BASE_URL", "ADAPTER_ADMIN_TOKEN", "ADMINER_PORT",
-        "AGENT_OPT_WORKER_URL", "ALERT_INGEST_TOKEN", "ANTHROPIC_API_KEY",
-        "API_KEY", "API_PORT", "AUTOMATOS_DOCUMENTS_DIR",
-        "AWS_ACCESS_KEY_ID", "AWS_REGION", "AWS_SECRET_ACCESS_KEY",
-        "BACKEND_URL", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
-        "COMPOSIO_KEY", "COMPOSIO_WEBHOOK_SECRET", "CORS_ALLOW_ORIGINS",
-        "CREDENTIAL_ENCRYPTION_KEY", "DATABASE_PUBLIC_URL", "DATABASE_URL",
-        "EMBEDDING_DIMENSION", "EMBEDDING_MODEL", "EMBEDDING_PROVIDER",
-        "ENVIRONMENT", "FRONTEND_PORT", "FRONTEND_URL",
-        "FUTUREAGI_API_KEY", "FUTUREAGI_ENABLED", "FUTUREAGI_SECRET_KEY",
-        "GITHUB", "GITHUB_DEFAULT_BRANCH", "GITHUB_REPO_NAME",
-        "GITHUB_REPO_OWNER", "GITHUB_WEBHOOK_SECRET", "GOOGLE_API_KEY",
-        "GRAFANA_LOKI_DATASOURCE_UID", "GRAFANA_SERVICE_ACCOUNT_TOKEN", "GRAFANA_URL",
-        "HUGGINGFACE_API_KEY", "LLM_MAX_TOKENS", "LLM_MODEL",
-        "LLM_PROVIDER", "LLM_TEMPERATURE", "LOG_LEVEL",
-        "LOG_RELAY_ENABLED", "LOG_RELAY_URL", "MEM0_API_URL",
-        "NEXT_PUBLIC_API_KEY", "NEXT_PUBLIC_API_URL", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-        "NEXT_PUBLIC_WS_URL", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
-        "POSTGRES_DB", "POSTGRES_PASSWORD", "POSTGRES_PORT", "POSTGRES_USER",
-        "QDRANT_URL", "RAILWAY_API_TOKEN",
-        "REDIS_HOST", "REDIS_PASSWORD", "REDIS_PORT", "REDIS_URL",
-        "S3_VECTORS_BUCKET", "S3_VECTORS_DIMENSION", "S3_VECTORS_ENABLED",
-        "S3_VECTORS_INDEX_NAME", "S3_VECTORS_METRIC",
-        "S3_VECTOR_BUCKET", "S3_VECTOR_INDEX", "S3_VECTOR_REGION",
-        "SERVICE_NAME", "SHARED_CONTEXT_BACKEND",
-        "SLACK_API_KEY", "TASK_RUNNER_BACKEND",
-        "VOICE_ENABLED", "VOICE_SERVICE_URL", "VOICE_STT_MODEL",
-        "VOICE_TTS_DEFAULT_VOICE", "VOICE_TTS_MODEL",
-        "WIDGET_TOKEN_SECRET", "WORKER_INTERNAL_TOKEN", "WORKER_INTERNAL_URL"
+        "ADAPTER_ADMIN_BASE_URL",
+        "ADAPTER_ADMIN_TOKEN",
+        "ADMINER_PORT",
+        "AGENT_OPT_WORKER_URL",
+        "ALERT_INGEST_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "API_KEY",
+        "API_PORT",
+        "AUTOMATOS_DOCUMENTS_DIR",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_REGION",
+        "AWS_SECRET_ACCESS_KEY",
+        "BACKEND_URL",
+        "CLERK_JWKS_URL",
+        "CLERK_SECRET_KEY",
+        "COMPOSIO_KEY",
+        "COMPOSIO_WEBHOOK_SECRET",
+        "CORS_ALLOW_ORIGINS",
+        "CREDENTIAL_ENCRYPTION_KEY",
+        "DATABASE_PUBLIC_URL",
+        "DATABASE_URL",
+        "EMBEDDING_DIMENSION",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_PROVIDER",
+        "ENVIRONMENT",
+        "FRONTEND_PORT",
+        "FRONTEND_URL",
+        "FUTUREAGI_API_KEY",
+        "FUTUREAGI_ENABLED",
+        "FUTUREAGI_SECRET_KEY",
+        "GITHUB",
+        "GITHUB_DEFAULT_BRANCH",
+        "GITHUB_REPO_NAME",
+        "GITHUB_REPO_OWNER",
+        "GITHUB_WEBHOOK_SECRET",
+        "GOOGLE_API_KEY",
+        "GRAFANA_LOKI_DATASOURCE_UID",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+        "GRAFANA_URL",
+        "HUGGINGFACE_API_KEY",
+        "LLM_MAX_TOKENS",
+        "LLM_MODEL",
+        "LLM_PROVIDER",
+        "LLM_TEMPERATURE",
+        "LOG_LEVEL",
+        "LOG_RELAY_ENABLED",
+        "LOG_RELAY_URL",
+        "MEM0_API_URL",
+        "NEXT_PUBLIC_API_KEY",
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_WS_URL",
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "POSTGRES_DB",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_PORT",
+        "POSTGRES_USER",
+        "QDRANT_URL",
+        "RAILWAY_API_TOKEN",
+        "REDIS_HOST",
+        "REDIS_PASSWORD",
+        "REDIS_PORT",
+        "REDIS_URL",
+        "S3_VECTORS_BUCKET",
+        "S3_VECTORS_DIMENSION",
+        "S3_VECTORS_ENABLED",
+        "S3_VECTORS_INDEX_NAME",
+        "S3_VECTORS_METRIC",
+        "S3_VECTOR_BUCKET",
+        "S3_VECTOR_INDEX",
+        "S3_VECTOR_REGION",
+        "SERVICE_NAME",
+        "SHARED_CONTEXT_BACKEND",
+        "SLACK_API_KEY",
+        "TASK_RUNNER_BACKEND",
+        "VOICE_ENABLED",
+        "VOICE_SERVICE_URL",
+        "VOICE_STT_MODEL",
+        "VOICE_TTS_DEFAULT_VOICE",
+        "VOICE_TTS_MODEL",
+        "WIDGET_TOKEN_SECRET",
+        "WORKER_INTERNAL_TOKEN",
+        "WORKER_INTERNAL_URL"
       ]
     },
-
     "automotas-ai-frontend": {
       "group": "core",
-      "source": {"repo": "AutomatosAI/automatos-ai", "root_dir": "/frontend"},
-      "builder": "RAILPACK",
+      "source": {
+        "repo": "AutomatosAI/automatos-ai",
+        "root_dir": "/frontend"
+      },
+      "builder": "DOCKERFILE",
       "dockerfile": "/frontend/Dockerfile",
       "start_command": null,
       "port": 3000,
       "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
       "sleep": true,
       "replicas": null,
       "domains": {
-        "railway": ["automotas-ai-frontend-production.up.railway.app"],
-        "custom": ["ui.automatos.app"]
+        "railway": [
+          "automotas-ai-frontend-production.up.railway.app"
+        ],
+        "custom": [
+          "ui.automatos.app"
+        ]
       },
       "volumes": [],
       "env_keys": [
-        "ADAPTER_ADMIN_BASE_URL", "ADAPTER_ADMIN_TOKEN", "ADMINER_PORT",
-        "API_KEY", "API_PORT", "CLERK_JWKS_URL", "CLERK_SECRET_KEY",
-        "CORS_ALLOW_ORIGINS", "ENVIRONMENT", "LOG_LEVEL",
-        "NEXT_PUBLIC_API_KEY", "NEXT_PUBLIC_API_URL",
-        "NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL", "NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL",
-        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
-        "NEXT_PUBLIC_CLERK_SIGN_UP_URL", "NEXT_PUBLIC_VOICE_PIPELINE_URL"
+        "ADAPTER_ADMIN_BASE_URL",
+        "ADAPTER_ADMIN_TOKEN",
+        "ADMINER_PORT",
+        "API_KEY",
+        "API_PORT",
+        "CLERK_JWKS_URL",
+        "CLERK_SECRET_KEY",
+        "CORS_ALLOW_ORIGINS",
+        "ENVIRONMENT",
+        "LOG_LEVEL",
+        "NEXT_PUBLIC_API_KEY",
+        "NEXT_PUBLIC_API_URL",
+        "NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL",
+        "NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL",
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_CLERK_SIGN_IN_URL",
+        "NEXT_PUBLIC_CLERK_SIGN_UP_URL",
+        "NEXT_PUBLIC_VOICE_PIPELINE_URL"
       ]
     },
-
     "agent-workspace-worker": {
       "group": "core",
-      "source": {"repo": "AutomatosAI/automatos-ai", "root_dir": "/services/workspace-worker"},
-      "builder": "RAILPACK",
+      "source": {
+        "repo": "AutomatosAI/automatos-ai",
+        "root_dir": "/services/workspace-worker"
+      },
+      "builder": "DOCKERFILE",
       "dockerfile": null,
       "start_command": null,
       "port": 8081,
       "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [
-        {"name": "agent-workspace-data", "mount": "/workspaces", "size_mb": 50000}
-      ],
-      "env_keys": [
-        "DATABASE_URL", "ENVIRONMENT", "LOG_LEVEL", "LOG_RELAY_ENABLED",
-        "QDRANT_URL", "REDIS_URL", "SERVICE_NAME",
-        "WORKER_CONCURRENCY", "WORKER_HEALTH_PORT", "WORKER_INTERNAL_TOKEN",
-        "WORKSPACE_DEFAULT_QUOTA_GB", "WORKSPACE_VOLUME_PATH"
-      ]
-    },
-
-    "agent-opt-worker": {
-      "group": "core",
-      "source": {"repo": "AutomatosAI/automatos-ai", "root_dir": "/services/agent-opt-worker"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 8080,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {
-        "railway": ["agent-opt-worker-production.up.railway.app"],
-        "custom": []
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
       },
-      "volumes": [],
-      "env_keys": [
-        "FI_API_KEY", "FI_SECRET_KEY", "FUTUREAGI_API_KEY", "FUTUREAGI_SECRET_KEY",
-        "LOG_RELAY_ENABLED", "MAX_OPTIMIZE_TIMEOUT", "OPENAI_API_KEY",
-        "PORT", "QDRANT_URL", "SERVICE_NAME"
-      ]
-    },
-
-    "voice-service": {
-      "group": "voice",
-      "source": {"repo": "AutomatosAI/automatos-voice", "root_dir": "/"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 8300,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {
-        "railway": ["voice-service-production-bb28.up.railway.app"],
-        "custom": []
-      },
-      "volumes": [],
-      "env_keys": [
-        "ENVIRONMENT", "HOST", "LOG_LEVEL", "METRICS_ENABLED", "PORT",
-        "TTS_DEFAULT_MODEL", "TTS_DEFAULT_VOICE", "TTS_ENGINE",
-        "WHISPER_COMPUTE_TYPE", "WHISPER_DEVICE", "WHISPER_MODEL"
-      ]
-    },
-
-    "voice-pipeline": {
-      "group": "voice",
-      "source": {"repo": "AutomatosAI/automatos-voice", "root_dir": "/"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 8301,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {
-        "railway": ["voice-pipeline-production.up.railway.app"],
-        "custom": []
-      },
-      "volumes": [],
-      "env_keys": [
-        "HOST", "LOG_LEVEL", "MAX_CONCURRENT_SESSIONS", "METRICS_ENABLED",
-        "ORCHESTRATOR_URL", "PORT", "STT_MODEL", "TTS_MODEL", "TTS_VOICE",
-        "VOICE_SERVICE_URL"
-      ]
-    },
-
-    "automatos-ai-mem0-Server": {
-      "group": "memory",
-      "source": {"repo": "AutomatosAI/automatos-mem0", "root_dir": "/openmemory/api"},
-      "builder": "RAILPACK",
-      "dockerfile": "/openmemory/api/Dockerfile",
-      "start_command": null,
-      "port": 8765,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [],
-      "env_keys": [
-        "DATABASE_URL", "ELASTICSEARCH_PASSWORD", "LOG_RELAY_ENABLED",
-        "OPENAI_API_KEY", "PG_DB", "PG_HOST", "PG_PASSWORD", "PG_PORT",
-        "PG_USER", "SERVICE_NAME"
-      ]
-    },
-
-    "automatos-ai-mem0-pgvector": {
-      "group": "memory",
-      "source": {"image": "pgvector/pgvector:pg18"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 5432,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [
-        {"name": "automatos-ai-mem0-pgvector-volume", "mount": "/var/lib/postgresql/data/", "size_mb": 50000}
-      ],
-      "env_keys": []
-    },
-
-    "prometheus": {
-      "group": "monitoring",
-      "source": {"repo": "AutomatosAI/automatos-monitoring", "root_dir": "/services/prometheus"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 9090,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [
-        {"name": "prometheus-volume", "mount": "/prometheus", "size_mb": 50000}
-      ],
-      "env_keys": ["PORT"]
-    },
-
-    "grafana": {
-      "group": "monitoring",
-      "source": {"repo": "AutomatosAI/automatos-monitoring", "root_dir": "/services/grafana"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 3000,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {
-        "railway": ["grafana-production-5f61.up.railway.app"],
-        "custom": []
-      },
-      "volumes": [
-        {"name": "grafana-volume", "mount": "/var/lib/grafana", "size_mb": 50000}
-      ],
-      "env_keys": [
-        "GF_AUTH_ANONYMOUS_ENABLED", "GF_SECURITY_ADMIN_PASSWORD",
-        "GF_SECURITY_ADMIN_USER", "GF_SERVER_ROOT_URL",
-        "GF_USERS_ALLOW_SIGN_UP", "PORT"
-      ]
-    },
-
-    "loki": {
-      "group": "monitoring",
-      "source": {"repo": "AutomatosAI/automatos-monitoring", "root_dir": "/services/loki"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 3100,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [
-        {"name": "loki-volume", "mount": "/loki", "size_mb": 50000}
-      ],
-      "env_keys": ["PORT"]
-    },
-
-    "log-relay": {
-      "group": "monitoring",
-      "source": {"repo": "AutomatosAI/automatos-monitoring", "root_dir": "/services/log-relay"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 8080,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {
-        "railway": ["log-relay-production.up.railway.app"],
-        "custom": []
-      },
-      "volumes": [],
-      "env_keys": [
-        "ENVIRONMENT", "LOG_RELAY_SECRET", "LOKI_PUSH_URL", "PORT"
-      ]
-    },
-
-    "alertmanager": {
-      "group": "monitoring",
-      "source": {"repo": "AutomatosAI/automatos-monitoring", "root_dir": "/services/alertmanager"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 9093,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [
-        {"name": "alertmanager-volume", "mount": "/alertmanager", "size_mb": 50000}
-      ],
-      "env_keys": ["ALERT_INGEST_TOKEN", "PORT"]
-    },
-
-    "postgres-exporter": {
-      "group": "monitoring",
-      "source": {"image": "prometheuscommunity/postgres-exporter:v0.19.1"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 9187,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [],
-      "env_keys": ["DATA_SOURCE_NAME"]
-    },
-
-    "redis-exporter": {
-      "group": "monitoring",
-      "source": {"image": "oliver006/redis_exporter:v1.82.0"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 9121,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [],
-      "env_keys": ["REDIS_ADDR"]
-    },
-
-    "automatos-ai-pgvector": {
-      "group": "data",
-      "source": {"image": "pgvector/pgvector:pg18"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": "/bin/sh -c \"unset PGPORT; docker-entrypoint.sh postgres --port=5432\"",
-      "port": 5432,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [
-        {"name": "pgvector-volume", "mount": "/var/lib/postgresql/data/", "size_mb": 50000}
-      ],
-      "env_keys": [
-        "PGDATA", "PGDATABASE", "PGHOST", "PGPASSWORD", "PGPORT", "PGUSER",
-        "POSTGRES_DB", "POSTGRES_PASSWORD", "POSTGRES_USER",
-        "DATABASE_PUBLIC_URL", "DATABASE_URL"
-      ]
-    },
-
-    "Redis": {
-      "group": "data",
-      "source": {"image": "redis:8.2.1"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": "/bin/sh -c \"rm -rf $RAILWAY_VOLUME_MOUNT_PATH/lost+found/ && exec docker-entrypoint.sh redis-server --requirepass $REDIS_PASSWORD --save 60 1 --dir $RAILWAY_VOLUME_MOUNT_PATH\"",
-      "port": 6379,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {"railway": [], "custom": []},
-      "volumes": [
-        {"name": "redis-volume", "mount": "/data", "size_mb": 50000}
-      ],
-      "env_keys": [
-        "REDISHOST", "REDISPASSWORD", "REDISPORT", "REDISUSER",
-        "REDIS_PASSWORD", "REDIS_PUBLIC_URL", "REDIS_URL"
-      ]
-    },
-
-    "Qdrant": {
-      "group": "data",
-      "source": {"image": "qdrant/qdrant"},
-      "builder": "RAILPACK",
-      "dockerfile": null,
-      "start_command": null,
-      "port": 6333,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
-      "sleep": false,
-      "replicas": null,
-      "domains": {
-        "railway": ["qdrant-production-c691.up.railway.app"],
-        "custom": []
-      },
-      "volumes": [
-        {"name": "qdrant-volume", "mount": "/qdrant/storage", "size_mb": 50000}
-      ],
-      "env_keys": ["PORT"]
-    },
-
-    "automatos-ai-landing": {
-      "group": "landing",
-      "source": {"repo": "AutomatosAI/automatos-ai-landing"},
-      "builder": "RAILPACK",
-      "dockerfile": "/Dockerfile",
-      "start_command": null,
-      "port": 80,
-      "healthcheck": null,
-      "restart_policy": {"type": "ON_FAILURE", "max_retries": 10},
       "sleep": false,
       "replicas": null,
       "domains": {
         "railway": [],
-        "custom": ["automatos.app"]
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "agent-workspace-data",
+          "mount": "/workspaces",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "DATABASE_URL",
+        "ENVIRONMENT",
+        "LOG_LEVEL",
+        "LOG_RELAY_ENABLED",
+        "QDRANT_URL",
+        "REDIS_URL",
+        "SERVICE_NAME",
+        "WORKER_CONCURRENCY",
+        "WORKER_HEALTH_PORT",
+        "WORKER_INTERNAL_TOKEN",
+        "WORKSPACE_DEFAULT_QUOTA_GB",
+        "WORKSPACE_VOLUME_PATH"
+      ]
+    },
+    "agent-opt-worker": {
+      "group": "core",
+      "source": {
+        "repo": "AutomatosAI/automatos-ai",
+        "root_dir": "/services/agent-opt-worker"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 8080,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [
+          "agent-opt-worker-production.up.railway.app"
+        ],
+        "custom": []
       },
       "volumes": [],
       "env_keys": [
-        "CONTACT_EMAIL", "SMTP_HOST", "SMTP_PASS", "SMTP_PORT", "SMTP_USER",
-        "VITE_AUTOMATOS_WORKSPACE_ID", "VITE_CLERK_PUBLISHABLE_KEY"
+        "FI_API_KEY",
+        "FI_SECRET_KEY",
+        "FUTUREAGI_API_KEY",
+        "FUTUREAGI_SECRET_KEY",
+        "LOG_RELAY_ENABLED",
+        "MAX_OPTIMIZE_TIMEOUT",
+        "OPENAI_API_KEY",
+        "PORT",
+        "QDRANT_URL",
+        "SERVICE_NAME"
+      ]
+    },
+    "voice-service": {
+      "group": "voice",
+      "source": {
+        "repo": "AutomatosAI/automatos-voice",
+        "root_dir": "/"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 8300,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [
+          "voice-service-production-bb28.up.railway.app"
+        ],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "ENVIRONMENT",
+        "HOST",
+        "LOG_LEVEL",
+        "METRICS_ENABLED",
+        "PORT",
+        "TTS_DEFAULT_MODEL",
+        "TTS_DEFAULT_VOICE",
+        "TTS_ENGINE",
+        "WHISPER_COMPUTE_TYPE",
+        "WHISPER_DEVICE",
+        "WHISPER_MODEL"
+      ]
+    },
+    "voice-pipeline": {
+      "group": "voice",
+      "source": {
+        "repo": "AutomatosAI/automatos-voice",
+        "root_dir": "/"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 8301,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [
+          "voice-pipeline-production.up.railway.app"
+        ],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "HOST",
+        "LOG_LEVEL",
+        "MAX_CONCURRENT_SESSIONS",
+        "METRICS_ENABLED",
+        "ORCHESTRATOR_URL",
+        "PORT",
+        "STT_MODEL",
+        "TTS_MODEL",
+        "TTS_VOICE",
+        "VOICE_SERVICE_URL"
+      ]
+    },
+    "automatos-ai-mem0-Server": {
+      "group": "memory",
+      "source": {
+        "repo": "AutomatosAI/automatos-mem0",
+        "root_dir": "/openmemory/api"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": "/openmemory/api/Dockerfile",
+      "start_command": null,
+      "port": 8765,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "DATABASE_URL",
+        "ELASTICSEARCH_PASSWORD",
+        "LOG_RELAY_ENABLED",
+        "OPENAI_API_KEY",
+        "PG_DB",
+        "PG_HOST",
+        "PG_PASSWORD",
+        "PG_PORT",
+        "PG_USER",
+        "SERVICE_NAME"
+      ]
+    },
+    "automatos-ai-mem0-pgvector": {
+      "group": "memory",
+      "source": {
+        "image": "pgvector/pgvector:pg18"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 5432,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "automatos-ai-mem0-pgvector-volume",
+          "mount": "/var/lib/postgresql/data/",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": []
+    },
+    "prometheus": {
+      "group": "monitoring",
+      "source": {
+        "repo": "AutomatosAI/automatos-monitoring",
+        "root_dir": "/services/prometheus"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 9090,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "prometheus-volume",
+          "mount": "/prometheus",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "PORT"
+      ]
+    },
+    "grafana": {
+      "group": "monitoring",
+      "source": {
+        "repo": "AutomatosAI/automatos-monitoring",
+        "root_dir": "/services/grafana"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 3000,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [
+          "grafana-production-5f61.up.railway.app"
+        ],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "grafana-volume",
+          "mount": "/var/lib/grafana",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "GF_AUTH_ANONYMOUS_ENABLED",
+        "GF_SECURITY_ADMIN_PASSWORD",
+        "GF_SECURITY_ADMIN_USER",
+        "GF_SERVER_ROOT_URL",
+        "GF_USERS_ALLOW_SIGN_UP",
+        "PORT"
+      ]
+    },
+    "loki": {
+      "group": "monitoring",
+      "source": {
+        "repo": "AutomatosAI/automatos-monitoring",
+        "root_dir": "/services/loki"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 3100,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "loki-volume",
+          "mount": "/loki",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "PORT"
+      ]
+    },
+    "log-relay": {
+      "group": "monitoring",
+      "source": {
+        "repo": "AutomatosAI/automatos-monitoring",
+        "root_dir": "/services/log-relay"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 8080,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [
+          "log-relay-production.up.railway.app"
+        ],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "ENVIRONMENT",
+        "LOG_RELAY_SECRET",
+        "LOKI_PUSH_URL",
+        "PORT"
+      ]
+    },
+    "alertmanager": {
+      "group": "monitoring",
+      "source": {
+        "repo": "AutomatosAI/automatos-monitoring",
+        "root_dir": "/services/alertmanager"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 9093,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "alertmanager-volume",
+          "mount": "/alertmanager",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "ALERT_INGEST_TOKEN",
+        "PORT"
+      ]
+    },
+    "postgres-exporter": {
+      "group": "monitoring",
+      "source": {
+        "image": "prometheuscommunity/postgres-exporter:v0.19.1"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 9187,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "DATA_SOURCE_NAME"
+      ]
+    },
+    "redis-exporter": {
+      "group": "monitoring",
+      "source": {
+        "image": "oliver006/redis_exporter:v1.82.0"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 9121,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [],
+      "env_keys": [
+        "REDIS_ADDR"
+      ]
+    },
+    "automatos-ai-pgvector": {
+      "group": "data",
+      "source": {
+        "image": "pgvector/pgvector:pg18"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": "/bin/sh -c \"unset PGPORT; docker-entrypoint.sh postgres --port=5432\"",
+      "port": 5432,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "pgvector-volume",
+          "mount": "/var/lib/postgresql/data/",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "PGDATA",
+        "PGDATABASE",
+        "PGHOST",
+        "PGPASSWORD",
+        "PGPORT",
+        "PGUSER",
+        "POSTGRES_DB",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_USER",
+        "DATABASE_PUBLIC_URL",
+        "DATABASE_URL"
+      ]
+    },
+    "Redis": {
+      "group": "data",
+      "source": {
+        "image": "redis:8.2.1"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": "/bin/sh -c \"rm -rf $RAILWAY_VOLUME_MOUNT_PATH/lost+found/ && exec docker-entrypoint.sh redis-server --requirepass $REDIS_PASSWORD --save 60 1 --dir $RAILWAY_VOLUME_MOUNT_PATH\"",
+      "port": 6379,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "redis-volume",
+          "mount": "/data",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "REDISHOST",
+        "REDISPASSWORD",
+        "REDISPORT",
+        "REDISUSER",
+        "REDIS_PASSWORD",
+        "REDIS_PUBLIC_URL",
+        "REDIS_URL"
+      ]
+    },
+    "Qdrant": {
+      "group": "data",
+      "source": {
+        "image": "qdrant/qdrant"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": null,
+      "start_command": null,
+      "port": 6333,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [
+          "qdrant-production-c691.up.railway.app"
+        ],
+        "custom": []
+      },
+      "volumes": [
+        {
+          "name": "qdrant-volume",
+          "mount": "/qdrant/storage",
+          "size_mb": 50000
+        }
+      ],
+      "env_keys": [
+        "PORT"
+      ]
+    },
+    "automatos-ai-landing": {
+      "group": "landing",
+      "source": {
+        "repo": "AutomatosAI/automatos-ai-landing"
+      },
+      "builder": "DOCKERFILE",
+      "dockerfile": "/Dockerfile",
+      "start_command": null,
+      "port": 80,
+      "healthcheck": null,
+      "restart_policy": {
+        "type": "ON_FAILURE",
+        "max_retries": 10
+      },
+      "sleep": false,
+      "replicas": null,
+      "domains": {
+        "railway": [],
+        "custom": [
+          "automatos.app"
+        ]
+      },
+      "volumes": [],
+      "env_keys": [
+        "CONTACT_EMAIL",
+        "SMTP_HOST",
+        "SMTP_PASS",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "VITE_AUTOMATOS_WORKSPACE_ID",
+        "VITE_CLERK_PUBLISHABLE_KEY"
       ]
     }
   },
-
   "volumes_summary": {
-    "qdrant-volume":                    {"mount": "/qdrant/storage",             "service": "Qdrant",                    "size_mb": 50000},
-    "loki-volume":                      {"mount": "/loki",                       "service": "loki",                      "size_mb": 50000},
-    "pgvector-volume":                  {"mount": "/var/lib/postgresql/data/",   "service": "automatos-ai-pgvector",     "size_mb": 50000},
-    "agent-workspace-data":             {"mount": "/workspaces",                 "service": "agent-workspace-worker",    "size_mb": 50000},
-    "alertmanager-volume":              {"mount": "/alertmanager",               "service": "alertmanager",              "size_mb": 50000},
-    "prometheus-volume":                {"mount": "/prometheus",                 "service": "prometheus",                "size_mb": 50000},
-    "redis-volume":                     {"mount": "/data",                       "service": "Redis",                     "size_mb": 50000},
-    "automatos-ai-mem0-pgvector-volume":{"mount": "/var/lib/postgresql/data/",   "service": "automatos-ai-mem0-pgvector","size_mb": 50000},
-    "grafana-volume":                   {"mount": "/var/lib/grafana",            "service": "grafana",                   "size_mb": 50000}
+    "qdrant-volume": {
+      "mount": "/qdrant/storage",
+      "service": "Qdrant",
+      "size_mb": 50000
+    },
+    "loki-volume": {
+      "mount": "/loki",
+      "service": "loki",
+      "size_mb": 50000
+    },
+    "pgvector-volume": {
+      "mount": "/var/lib/postgresql/data/",
+      "service": "automatos-ai-pgvector",
+      "size_mb": 50000
+    },
+    "agent-workspace-data": {
+      "mount": "/workspaces",
+      "service": "agent-workspace-worker",
+      "size_mb": 50000
+    },
+    "alertmanager-volume": {
+      "mount": "/alertmanager",
+      "service": "alertmanager",
+      "size_mb": 50000
+    },
+    "prometheus-volume": {
+      "mount": "/prometheus",
+      "service": "prometheus",
+      "size_mb": 50000
+    },
+    "redis-volume": {
+      "mount": "/data",
+      "service": "Redis",
+      "size_mb": 50000
+    },
+    "automatos-ai-mem0-pgvector-volume": {
+      "mount": "/var/lib/postgresql/data/",
+      "service": "automatos-ai-mem0-pgvector",
+      "size_mb": 50000
+    },
+    "grafana-volume": {
+      "mount": "/var/lib/grafana",
+      "service": "grafana",
+      "size_mb": 50000
+    }
   },
-
   "network_topology": {
     "internal_dns": "*.railway.internal",
     "service_discovery": "Railway private networking — services reference each other via RAILWAY_SERVICE_<NAME>_URL env vars",
@@ -501,5 +874,6 @@
       "postgres-exporter",
       "redis-exporter"
     ]
-  }
+  },
+  "_builder_correction_2026-08-30": "railway.json is the truth: builder DOCKERFILE, dockerfileTarget production, for every service. This 2026-04-09 export said RAILPACK and misled the PRD-233 Docker slim pass into shipping the local edition's defaults to production (#650 -> Clerk outage -> #668). Dockerfile ARG defaults are production values; docker-compose.yml passes the local edition's choices explicitly."
 }

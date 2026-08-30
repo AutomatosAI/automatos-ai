@@ -541,6 +541,38 @@ jobs:
           echo "v_workspace_outputs answers (rows=${ROWS})"
           echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
 
+  # Prod-image parity (2026-08-30, after #650 shipped the local edition's
+  # Dockerfile defaults to production — Clerk outage, #668). Railway builds the
+  # three Dockerfiles with NO build args (railway.json: DOCKERFILE, target
+  # production), so this lane builds exactly that and checks what got baked:
+  # the frontend's edition literal, the backend's graph extras, the worker's
+  # browser. Non-required like the other lanes; the required flip is the repo
+  # admin's call.
+  prod-image-parity:
+    name: Prod images built with default args carry production behaviour (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Frontend — edition baked with no args must be saas
+        run: |
+          docker build --target production -t parity-fe frontend/
+          LOCAL=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"||\"\"" .next 2>/dev/null | wc -l')
+          SAAS=$(docker run --rm parity-fe sh -c 'grep -rlF "\"saas\"||\"\"" .next 2>/dev/null | wc -l')
+          echo "chunks with local literal: $LOCAL; with saas literal: $SAAS"
+          if [ "$LOCAL" != "0" ] || [ "$SAAS" = "0" ]; then
+            echo "::error::the production frontend image bakes the LOCAL edition — check ARG NEXT_PUBLIC_AUTH_EDITION in frontend/Dockerfile"
+            exit 1
+          fi
+      - name: Backend — graph extras present with no args
+        run: |
+          docker build --target production -t parity-be orchestrator/
+          docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
+      - name: Worker — headless browser present with no args
+        run: |
+          docker build -t parity-wk services/workspace-worker/
+          docker run --rm parity-wk sh -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
+
   # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
   # writers of schema truth" (init_complete_schema.sql, the Alembic migration
   # forest, create_all-at-boot, and inline ALTERs inside migrations). No lane
