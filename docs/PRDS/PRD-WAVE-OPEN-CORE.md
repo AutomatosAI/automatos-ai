@@ -15,8 +15,8 @@
 
 | Phase | Goal | PRD | State | Blocks |
 |---|---|---|---|---|
-| **0** | `docker compose up` true; smoke lane armed; SaaS provably untouched | **PRD-209** (S1–S9) | Drafted, build-ready | everything |
-| **1** | Basic worth downloading: worker on the laptop, honest tool degrade, seeded first-run, one storage factory, self-host docs + DCO | **PRD-233** | Drafted, build-ready after 209 | Phase 3 |
+| **0** | `docker compose up` true; smoke lane armed; SaaS provably untouched | **PRD-209** (S1–S9) | BUILT — local edition proven 2026-08-29; PR #650 (rebase + CI pending) | everything |
+| **1** | Basic worth downloading: worker on the laptop, honest tool degrade, seeded first-run, one storage factory, self-host docs + DCO | **PRD-233** | BUILT 2026-08-30 (stacked on 209; S4 = own PR) — awaiting push/CI/merge | Phase 3 |
 | **2** | Promotion safety: git-history secrets scrub + branch-protection arming | **PRD-210** (exists) | Drafted | any public promotion of Basic |
 | **3** | Session mode: tickets execute as subscription sessions; fleet = the session console; Codex lane | **PRD-234** | Drafted, build-ready after 233 | — |
 

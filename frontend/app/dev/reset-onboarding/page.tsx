@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useUser } from '@clerk/nextjs'
-import { useRouter } from 'next/navigation'
+import { redirect, useRouter } from 'next/navigation'
+import { isRouteAvailableInEdition } from '@/lib/auth-edition'
 import { RotateCcw, AlertTriangle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -45,7 +46,7 @@ function clearLegacyOnboardingStorage(userId: string) {
   }
   remove.forEach((k) => localStorage.removeItem(k))
 }
-export default function ResetOnboardingPage() {
+function ResetOnboardingConsole() {
   const { user } = useUser()
   const router = useRouter()
   const { workspace, refreshWorkspace } = useWorkspace()
@@ -219,4 +220,13 @@ export default function ResetOnboardingPage() {
       </Button>
     </div>
   )
+}
+
+// PRD-233 S7: this dev page is built on Clerk's useUser(); in the local edition
+// it would throw without ClerkProvider, so it redirects home like sign-in.
+export default function ResetOnboardingPage() {
+  if (!isRouteAvailableInEdition('/dev/reset-onboarding')) {
+    redirect('/')
+  }
+  return <ResetOnboardingConsole />
 }

@@ -90,7 +90,11 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # multiple unmerged heads; ``head`` (singular) errors out. If any
 # migration fails the container fails to boot — loud is better than
 # silent UndefinedColumn errors at request time.
-CMD sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+# --timeout-graceful-shutdown (dev stage only; prod runs --workers below): a
+# --reload first waits for open HTTP connections to close and the browser's SSE
+# streams (notifications, board events) never do, so every code edit wedged the
+# server in "Waiting for connections to close" until a restart (PRD-233 finding).
+CMD sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5"
 
 # =============================================================================
 # Production Stage - Optimized & Minimal

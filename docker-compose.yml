@@ -3,16 +3,21 @@
 # =============================================================================
 # Quick Start:
 #   1. Copy .env.example to .env and set required values (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY)
-#   2. Run: docker-compose up --build
+#   2. Run: docker compose up
 #   3. Access: http://localhost:3000
-#   4. Go to Settings > Credentials to add API keys (OpenAI, Anthropic, etc.)
+#   4. Add an LLM key: Settings → API Keys in the UI, or OPENAI_API_KEY /
+#      ANTHROPIC_API_KEY / OPENROUTER_API_KEY in .env (passed through below)
 #
 # A .env file IS REQUIRED with at minimum: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
-# All LLM credentials managed via the Settings UI.
+# LLM keys live in the database (Settings → API Keys) or in .env; the stored key
+# also drives embeddings locally (PLATFORM_KEY_WORKSPACE_ID in envs/api.defaults).
 #
 # Profiles:
-#   - Default: Core services (postgres, redis, backend, frontend)
-#   - All: Add --profile all (includes admin tools)
+#   - Default: postgres, redis, minio (+ minio-init), backend, frontend and the
+#     workspace-worker (Code Canvas runtime). The worker's files live in a host
+#     directory bind-mounted at /workspaces — AUTOMATOS_WORKSPACE_DIR in .env,
+#     default ./workspaces next to this file, created on first boot (PRD-233 S1).
+#   - All: Add --profile all (adminer database GUI, gotenberg document conversion)
 # =============================================================================
 
 services:
@@ -168,18 +173,29 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Optional: pin the credential-encryption key instead of the auto-generated
+      # one on the backend_data volume (CREDENTIAL_KEY_FILE in envs/api.defaults).
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
       # Composio (hosted tool integrations) — bring your own key; without it the
       # integrations surface stays empty (PRD-233 makes that honest in the UI).
       COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
 
       # Object storage — local MinIO via the S3 seam (PRD-176 F089).
-      # S3_ENDPOINT_URL points boto at MinIO; the AWS_* creds are the MinIO
-      # root creds. Prod leaves S3_ENDPOINT_URL unset and uses real AWS S3.
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      # S3_ENDPOINT_URL points boto at MinIO. The store's credentials are mapped
+      # through S3_* names on purpose (PRD-233 S4 finding): a developer's AWS_*
+      # in .env or the shell must never reach the local store — with a real
+      # AWS key in AWS_ACCESS_KEY_ID every server-side call to MinIO failed
+      # InvalidAccessKeyId. To use real S3 locally instead: S3_ENDPOINT_URL=
+      # (empty) + S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY / S3_REGION in .env.
+      # Prod (Railway) never reads this file and keeps its AWS_* env.
+      # `-` (no colon) on purpose: an EMPTY S3_ENDPOINT_URL in .env means 'real S3'
+      # (`:-` would silently put MinIO back). Then also override S3_PUBLIC_ENDPOINT_URL=
+      # and S3_USE_PATH_STYLE=false in envs/api.local.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL-http://minio:9000}
       S3_DOCUMENTS_BUCKET: ${S3_DOCUMENTS_BUCKET:-automatos-ai}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
+      AWS_REGION: ${S3_REGION:-us-east-1}
 
       # Document Generation (PRD-63)
       GOTENBERG_URL: http://gotenberg:3000
@@ -190,6 +206,10 @@ services:
       
       # Security
       API_KEY: ${API_KEY:?API_KEY is required - set in .env file}
+      # Optional shared secret for the workspace-worker's internal HTTP API —
+      # sent as X-Internal-Token; must match the worker's value (empty = none,
+      # the worker port is never published outside the compose network).
+      WORKER_INTERNAL_TOKEN: ${WORKER_INTERNAL_TOKEN:-}
       
       # Clerk Authentication — SaaS-only. `:-` (not `:?`) so their ABSENCE never
       # blocks `docker compose up` in local mode; when set (saas) they resolve
@@ -207,8 +227,11 @@ services:
       # Persists the auto-generated credential-encryption key (see envs/api.defaults).
       - backend_data:/app/data
       - backend_logs:/app/logs
-      # PRD-66: Read-only access to workspace files for code viewer widget
-      - workspace_data:/workspaces:ro
+      # The workspace-worker's host directory, read-only (PRD-233 S1): the
+      # backend's WORKSPACE_VOLUME_PATH view of agent deliverables. The file
+      # browser and Code Canvas go through the worker's HTTP API instead
+      # (WORKER_INTERNAL_URL in envs/api.defaults).
+      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -261,10 +284,16 @@ services:
       - automatos
 
   # ===========================================================================
-  # Workspace Worker (PRD-56 Phase 2: Physical Workspaces)
+  # Workspace Worker — the Code Canvas runtime (PRD-56 Phase 2 · PRD-170 · PRD-233 S1)
   # ===========================================================================
-  # Agent task execution in isolated workspace directories.
-  # Enable with: --profile workers
+  # Runs in the DEFAULT profile: agents act on files that live on YOUR machine.
+  # The host directory ${AUTOMATOS_WORKSPACE_DIR:-./workspaces} is bind-mounted
+  # at /workspaces (created on first boot). Each workspace gets
+  # /workspaces/<workspace_id>/; every Code Canvas tool call is confined to it
+  # (canvas_confinement.py) and mutations still need approval
+  # (canvas_approvals.py) — local is not unguarded. AUTOMATOS_WORKSPACE_DIR in
+  # .env is the ONE dial that widens host access. The backend reaches this
+  # service over the compose network at WORKER_INTERNAL_URL (envs/api.defaults).
   # ===========================================================================
   workspace-worker:
     build:
@@ -272,7 +301,6 @@ services:
       dockerfile: Dockerfile
     container_name: automatos_workspace_worker
     restart: unless-stopped
-    profiles: ["workers"]
     depends_on:
       redis:
         condition: service_healthy
@@ -283,7 +311,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
       # Redis
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      # Workspace config
+      # Workspace config — the IN-CONTAINER mount root (worker_config.workspace_root);
+      # the host side is the bind mount under `volumes:` below.
       WORKSPACE_VOLUME_PATH: /workspaces
       WORKSPACE_DEFAULT_QUOTA_GB: ${WORKSPACE_DEFAULT_QUOTA_GB:-5}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-3}
@@ -293,11 +322,19 @@ services:
       # Set the same value on the Railway workspace-worker service.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Optional shared secret for this service's internal HTTP API (the
+      # backend sends the same value as X-Internal-Token; empty = no token).
+      WORKER_INTERNAL_TOKEN: ${WORKER_INTERNAL_TOKEN:-}
       # Environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The worker's log relay targets Railway's internal Loki push endpoint by
+      # default (automatos_logging.py); off locally, like the backend.
+      LOG_RELAY_ENABLED: "false"
+      SERVICE_NAME: workspace-worker
     volumes:
-      - workspace_data:/workspaces
+      # Host directory (bind mount, read-write) — the ONE host-access dial.
+      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces
     deploy:
       resources:
         limits:
@@ -365,9 +402,6 @@ volumes:
   backend_logs:
     driver: local
     name: automatos_backend_logs
-  workspace_data:
-    driver: local
-    name: automatos_workspace_data
 
 # =============================================================================
 # Networks

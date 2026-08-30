@@ -141,3 +141,10 @@ tests/e2e/.auth/
 # live/ dirs hold real workspace UUIDs + client corpus data (e.g. InBuild UK).
 orchestrator/scripts/eval/**/live/
 *.gold.jsonl
+
+# Workspace-worker host directory (PRD-233 S1): agent deliverables live here on
+# YOUR machine (AUTOMATOS_WORKSPACE_DIR, default ./workspaces). Never tracked.
+/workspaces/
+
+# TypeScript incremental build state (dropped by `tsc --noEmit` runs)
+*.tsbuildinfo

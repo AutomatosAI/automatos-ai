@@ -2,6 +2,9 @@
 
 Clone the repo and bring up the full stack with Docker. The local edition runs
 with **no login** and a single default workspace — no Clerk, no cloud accounts.
+This is the short path; the full reference (every service, every dial,
+troubleshooting, how the editions relate) is
+[docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).
 
 ## 1. Set the three required secrets
 
@@ -23,7 +26,7 @@ cp .env.example .env
 ```
 
 That is the whole requirement — everything else (edition, workspace id, storage,
-ports) already has a working default baked into the compose file.
+ports) already has a working default in the compose file and `envs/*.defaults`.
 
 ### Optional: one LLM key for AI features (bring your own key)
 
@@ -36,7 +39,8 @@ OPENAI_API_KEY=sk-...          # or
 ANTHROPIC_API_KEY=sk-ant-...   # or an OpenRouter key for 300+ models
 ```
 
-You can also add keys later through **Settings → Credentials** in the UI.
+You can also add keys later through **Settings → API Keys** in the UI (until
+you do, the chat page shows *"Add an LLM key to bring Auto to life"*).
 
 ## 2. Start the platform
 
@@ -44,10 +48,10 @@ You can also add keys later through **Settings → Credentials** in the UI.
 docker compose up
 ```
 
-First run builds the images and initialises the database. When the backend is
-healthy it serves `http://localhost:8000/health` (liveness) and
-`http://localhost:8000/health/ready` (readiness — true once the local RAG
-backend has constructed).
+First run builds the images, builds the database schema, runs the seeds and
+then serves. `http://localhost:8000/health` answers as soon as the API process
+is up; `http://localhost:8000/health/ready` returns 503 until the full boot has
+finished and 200 once the instance is usable.
 
 ## 3. Open it
 
@@ -61,27 +65,42 @@ backend has constructed).
 ## What you get in the local edition
 
 - **No login.** `AUTH_EDITION=local` — you land straight in a single default
-  workspace, no accounts to create.
+  workspace, no accounts to create. The one operator is you: set your name
+  under **Settings → Profile** and Auto greets you by it.
+- **Something to run on the first boot.** The local edition seeds Auto, a
+  starter roster (Researcher, Writer, Analyst), one Playbook — *Two-minute
+  brief* — and a welcome Deliverable under **Deliverables → Blogs**. Run the
+  Playbook from the Playbooks page with a topic of your own.
 - **Local RAG on pgvector.** Documents are chunked, embedded, and searched in
   Postgres (`S3_VECTORS_ENABLED=false`) — no AWS needed.
 - **MinIO object storage.** An S3-compatible store (ports 9000 / 9001) holds
   generated outputs so nothing is lost between runs.
 - **The core stack:** Postgres (5432), Redis (6379), backend API (8000),
-  frontend (3000), and MinIO (9000/9001). Optional profiles add more:
-  `docker compose --profile workers up` includes the workspace worker, and
-  `--profile all` adds Gotenberg document rendering (3001) and Adminer (8080).
+  frontend (3000), MinIO (9000/9001) and the **workspace worker** — the Code
+  Canvas runtime that lets agents act on files on *your* machine. It keeps
+  those files in `./workspaces` next to `docker-compose.yml`
+  (`AUTOMATOS_WORKSPACE_DIR` in `.env` points it elsewhere); every tool call
+  is confined to that directory and mutations still need your approval.
+  Canvas sessions need `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in
+  `.env` (the SDK subprocess reads env only, not Settings → API Keys). On a
+  Linux host the files there end up owned by uid 1000, the worker's user.
+  `docker compose --profile all up` adds Gotenberg document rendering (3001)
+  and Adminer (8080).
 
 ## What does *not* work out of the box
 
 - **AI features need an LLM key** (above) — without one, agents and chat have no
   model to call.
-- **Composio-powered integrations** (the 1,000+ external-tool marketplace) need a
-  Composio API key in `.env` (`COMPOSIO_API_KEY=…`, free tier at app.composio.dev),
-  then `docker compose up -d backend` to apply it, then run the catalogue sync
-  once — the **Sync** action on the Tools page, or
-  `curl -X POST http://localhost:8000/api/tools/sync`. Nothing syncs on boot.
-  Without a key the integrations surface stays empty — an honest
-  "integrations disabled" state and auto-sync-on-first-key are **PRD-233 S2**.
+- **Composio-powered integrations** (Gmail, Slack, GitHub, Shopify and the rest
+  of the third-party app catalogue) need your own Composio key in `.env`
+  (`COMPOSIO_API_KEY=…`, free tier at app.composio.dev; env-only, there is no
+  UI field), then `docker compose up -d backend` to apply it. On that boot the
+  backend syncs the catalogue itself and re-binds the seeded agents to their
+  apps. Without a key the Tools page says *"Integrations are disabled — no
+  Composio API key is configured."*, Composio tools are not offered to agents,
+  and the native platform tools keep working (PRD-233 S2).
+- **Durable memory (mem0) and field memory (Qdrant)** are not in the default
+  stack; the backend degrades cleanly without them.
 
 ## Optional: database GUI
 
@@ -98,6 +117,17 @@ docker compose down            # stop
 docker compose down -v         # stop and delete all data volumes
 ```
 
+`down -v` does not remove the bind-mounted `./workspaces` folder — delete it
+yourself if you want the agents' files gone too.
+
+## Updating
+
+```bash
+git pull && docker compose up -d --build
+```
+
+Database migrations run on every backend boot.
+
 ## Troubleshooting
 
 - **Backend logs:** `docker compose logs -f backend`
@@ -106,8 +136,12 @@ docker compose down -v         # stop and delete all data volumes
 - **"POSTGRES_PASSWORD is required" / "REDIS_PASSWORD is required" /
   "API_KEY is required":** one of the three required secrets is missing from
   `.env` — see step 1.
+- **"password authentication failed" after changing `POSTGRES_PASSWORD`:** the
+  existing Postgres volume keeps the password it was initialised with — reset
+  with `docker compose down -v` or `ALTER USER` it; see the guide.
 - **Database GUI:** Adminer at http://localhost:8080 (with `--profile all`).
 - **API reference:** http://localhost:8000/docs
 
-All keys you add through Settings → Credentials are encrypted in the database and
-available to the platform immediately.
+All keys you add through Settings → API Keys are encrypted in the database and
+available to the platform immediately. More in
+[docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md).

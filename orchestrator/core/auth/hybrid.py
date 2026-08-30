@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac as _hmac
 import logging
 import secrets
+import time
 from typing import Callable, Optional
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -494,6 +495,93 @@ def _resolve_workspace_for_clerk_user(
     return None
 
 
+# ---------------------------------------------------------------------------
+# PRD-233 S6 — the local operator's identity: ONE users row, resolved by email
+# ---------------------------------------------------------------------------
+
+# Backstop only: PUT /api/profile invalidates explicitly after every write; the
+# TTL bounds staleness for writers that bypass the API (psql, a re-seed).
+_LOCAL_OPERATOR_CACHE_TTL_SECONDS = 60.0
+_LOCAL_OPERATOR_COLUMNS = ("id", "email", "name", "username", "avatar_url")
+_local_operator_cache: dict = {}
+
+
+def invalidate_local_operator_cache() -> None:
+    """Drop the cached operator row so the next request re-reads ``users``."""
+    _local_operator_cache.clear()
+
+
+def _load_local_operator_row(db, email: str) -> Optional[dict]:
+    """The operator's ``users`` row by email (the seed's lookup key) or None."""
+    row = db.execute(
+        text(
+            "SELECT id, email, name, username, avatar_url FROM users "
+            "WHERE email = :email LIMIT 1"
+        ),
+        {"email": email},
+    ).fetchone()
+    if not row:
+        return None
+    values = tuple(row[index] for index in range(len(_LOCAL_OPERATOR_COLUMNS)))
+    # A real row carries an integer PK and the email it was looked up by;
+    # anything else (a stubbed session in tests, a malformed row) is "no row".
+    if not isinstance(values[0], int) or values[1] != email:
+        return None
+    return dict(zip(_LOCAL_OPERATOR_COLUMNS, values))
+
+
+def _resolve_local_operator(db, email: str) -> Optional[dict]:
+    """Cached read of the operator row; a miss is never cached (a seed that
+    lands later must be picked up immediately) and a DB error never 500s the
+    request — the caller falls back to PRD-209's email-only lane."""
+    now = time.monotonic()
+    cached = _local_operator_cache.get(email)
+    if cached and (now - cached["fetched_at"]) < _LOCAL_OPERATOR_CACHE_TTL_SECONDS:
+        return cached["row"]
+    try:
+        row = _load_local_operator_row(db, email)
+    except Exception as exc:  # noqa: BLE001 — identity enrichment must never break auth
+        logger.warning("Local operator row lookup failed (%s); using email-only lane", exc)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    if row is None:
+        logger.warning("Local operator row missing for %s — entrypoint seed did not run?", email)
+        return None
+    _local_operator_cache[email] = {"row": row, "fetched_at": now}
+    return row
+
+
+def _local_operator_user_context(db) -> Optional[UserContext]:
+    """Bind the anonymous local session to the operator's ``users`` row.
+
+    ``id`` carries the EMAIL, not the integer PK: every resolver in the tree
+    maps ``ctx.user.id`` → ``users`` via ``clerk_user_id == ctx.user.id`` and
+    then ``email == ctx.user.email`` (api/chat.py get_user_id, marketplace,
+    notifications, workflow_recipes, harness, team), and the Clerk lane itself
+    binds ``id = clerk_user_id or email``. An integer here would 500 the
+    ``clerk_user_id == ctx.user.id`` sites (varchar = integer). The integer PK
+    rides ``raw_claims["user_id"]`` for callers that want it without a query.
+    """
+    row = _resolve_local_operator(db, config.LOCAL_OPERATOR_EMAIL)
+    if row is None:
+        return None
+    return UserContext(
+        id=row["email"],
+        email=row["email"],
+        system_role="super_admin",
+        raw_claims={
+            "source": "local_operator",
+            "user_id": row["id"],
+            "name": row["name"],
+            "username": row["username"],
+            "avatar_url": row["avatar_url"],
+        },
+    )
+
+
 def _get_api_key(request: Request) -> Optional[str]:
     # Common patterns
     api_key = request.headers.get("x-api-key") or request.headers.get("X-Api-Key")
@@ -854,10 +942,11 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
         # system settings, credentials, admin analytics all belong to them).
         # In saas, the anonymous dev-fallback remains a plain user.
         if config.AUTH_EDITION == "local":
-            # The operator's seeded users row is resolved by email (api/chat.py,
-            # widgets/chat.py); `id` stays unset on purpose — ctx.user.id is a
-            # Clerk-string elsewhere and must never be read as users.id.
-            anon_user = UserContext(email=config.LOCAL_OPERATOR_EMAIL, system_role="super_admin")
+            # PRD-233 S6: bind the operator's seeded users row (email-keyed; see
+            # _local_operator_user_context for why `id` is the email, never the
+            # PK). A missing row keeps PRD-209's email-only lane — never a 500.
+            anon_user = _local_operator_user_context(db) or \
+                UserContext(email=config.LOCAL_OPERATOR_EMAIL, system_role="super_admin")
         else:
             anon_user = UserContext()
         result = RequestContext(workspace_id=resolved, user=anon_user, auth_type="anonymous")

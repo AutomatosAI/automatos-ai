@@ -1,0 +1,49 @@
+name: dco
+
+# PRD-233 S5 — Developer Certificate of Origin check.
+#
+# Every commit in a pull request must carry a `Signed-off-by:` trailer
+# (`git commit -s`). The sign-off is the contributor's certification of the
+# DCO (https://developercertificate.org) — the only rider on top of the
+# repository's Apache-2.0 licence, whose §5 already makes contributions
+# shippable in every edition (local, hosted, commercial). No CLA.
+#
+# Dependency-free on purpose: a plain git log over the PR range, so the lane
+# cannot break when a third-party action is retired. Introduced NON-REQUIRED
+# like the other lanes; flipping it to a required check is the repo admin's
+# call (see CONTRIBUTING.md).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    name: Signed-off-by on every commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check sign-offs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r sha; do
+            [ -z "$sha" ] && continue
+            if ! git log -1 --format=%B "$sha" | grep -qE '^Signed-off-by: .+ <.+@.+>$'; then
+              echo "::error::commit $sha has no Signed-off-by trailer — commit with 'git commit -s' (see CONTRIBUTING.md)"
+              missing=$((missing + 1))
+            fi
+          done < <(git rev-list --no-merges "$BASE_SHA".."$HEAD_SHA")
+          if [ "$missing" -gt 0 ]; then
+            echo "$missing commit(s) missing a DCO sign-off"
+            exit 1
+          fi
+          echo "All commits carry a Signed-off-by trailer."

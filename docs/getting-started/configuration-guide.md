@@ -29,13 +29,30 @@ The following files were used as context for generating this wiki page:
 
 
 
-This document covers the technical configuration of Automatos AI, including environment variables, service-specific settings (LLM, Redis, Postgres), memory layer parameters, and the database-backed system settings architecture that replaces traditional `.env` files for runtime configuration.
+This document covers the technical configuration of Automatos AI, including environment variables, service-specific settings (LLM, Redis, Postgres), memory layer parameters, and the database-backed system settings architecture that holds runtime configuration.
+
+---
+
+## Where configuration lives
+
+For a compose (local-edition) install the layers are, in order of precedence for the backend container:
+
+| Layer | Role |
+|---|---|
+| `docker-compose.yml` `environment:` block | Explicit values and the three required secrets (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`), substituted from `.env`. Wins over the env files. |
+| `envs/api.local` (gitignored, optional) | Personal overrides for **any** backend variable — the deep-override lane. |
+| `envs/api.defaults` (committed) | The local topology: `AUTH_EDITION=local`, `DEFAULT_WORKSPACE_ID`, `LOCAL_OPERATOR_EMAIL`, MinIO wiring (`S3_ENDPOINT_URL`, `S3_PUBLIC_ENDPOINT_URL`), `WORKER_INTERNAL_URL`, observability off. |
+| `orchestrator/config.py` | Code defaults for every remaining dial; the only module that reads the environment. |
+
+`.env` itself only feeds compose substitution — a variable reaches a container only if `docker-compose.yml` references it. The frontend has the same shape with `envs/frontend.defaults` / `envs/frontend.local`. LLM tiers, the Auto/System/Embeddings model choices and feature flags are then edited in the database through the Settings UI, not in files. The hosted deployment sets each service's environment itself and never reads the compose file or `envs/*`.
+
+Full walkthrough: [Self-hosting — the local edition](self-hosting.md). Variable reference: [Environment Variables](../deployment-infrastructure/environment-variables.md).
 
 ---
 
 ## Configuration Architecture
 
-Automatos AI has migrated from a static environment-based configuration to a dynamic, database-backed system. While core infrastructure (DB/Redis) still uses environment variables for bootstrapping, LLM tiers and feature flags are managed via the `SystemSetting` model.
+Automatos AI keeps infrastructure wiring (DB/Redis/storage/edition) in environment variables for bootstrapping, while LLM tiers and feature flags are managed via the `SystemSetting` model.
 
 ### Configuration Loading Flow
 

@@ -126,8 +126,8 @@ graph TD
 
 ## Data Model & Storage
 
-### Plugin Storage (S3/Local)
-Plugins are stored in S3 (production) or the local filesystem (development). The `MarketplaceS3Service` handles the extraction of ZIP contents into a structured directory: `plugins/{slug}/{version}/` [orchestrator/core/services/marketplace_s3.py:61-91]().
+### Plugin Storage (S3 API)
+Plugins are stored in an S3-compatible object store through the platform's single S3 client factory (`orchestrator/core/storage/s3.py`): AWS S3 in the hosted edition, the MinIO container in the local edition (`S3_ENDPOINT_URL`, bucket `MARKETPLACE_S3_BUCKET`). There is no filesystem fallback — the former local-directory path was deleted (PRD-233 S4). The `MarketplaceS3Service` handles the extraction of ZIP contents into a structured key prefix: `plugins/{slug}/{version}/` [orchestrator/core/services/marketplace_s3.py]().
 
 ### Database Schema
 

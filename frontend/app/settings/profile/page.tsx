@@ -7,9 +7,26 @@ import { User, Mail, Shield, Trash2, Upload, Save, X, CheckCircle, AlertCircle, 
 import { Button } from '@/components/ui/button'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { PageHeader } from '@/components/shared'
+import { isLocal } from '@/lib/auth-edition'
+import { LocalProfileForm } from './local-profile-form'
 
 /**
- * Custom Profile Page
+ * Profile page — one route, two editions (PRD-233 S6).
+ *
+ *   local → the operator's profile row (name / username / avatar; email is the
+ *           lookup key and read-only) via GET/PUT /api/profile. No Clerk, no
+ *           account: a profile, not an identity system.
+ *   saas  → the Clerk-managed profile below, untouched.
+ *
+ * `isLocal` is a build-time constant, so each build renders exactly one branch
+ * and the hooks inside it run unconditionally — the rules of hooks hold.
+ */
+export default function ProfilePage() {
+    return isLocal ? <LocalProfileForm /> : <ClerkProfilePage />
+}
+
+/**
+ * Custom Profile Page (saas — Clerk-managed identity)
  * 
  * Fully custom profile management page with:
  * - Personal information editing
@@ -18,8 +35,7 @@ import { PageHeader } from '@/components/shared'
  * - Security settings
  * - Proper contrast and styling
  */
-
-export default function ProfilePage() {
+function ClerkProfilePage() {
     const router = useRouter()
     const { user, isLoaded } = useUser()
     const [isEditing, setIsEditing] = useState(false)

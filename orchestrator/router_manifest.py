@@ -83,6 +83,8 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.watches"),
     # PRD-228 -- the one new fleet-state route (GET /api/v1/fleet).
     RouterSpec("api.fleet"),
+    # PRD-233 S6 -- the operator's profile (GET both editions, PUT local only).
+    RouterSpec("api.profile"),
 )
 
 

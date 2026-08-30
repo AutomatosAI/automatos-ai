@@ -277,6 +277,20 @@ def seed_marketplace_agents_v2():
         trans = db.begin()
 
         try:
+            # PRD-233: stable ids across boots. The local edition runs this seeder on
+            # EVERY boot (SaaS never did — its entrypoint is a stub); clear+recreate
+            # churned every marketplace_items id each time. Skip when the full v2
+            # set is already present; the clear+create below then only runs on a
+            # fresh or partial catalogue.
+            existing = {row[0] for row in db.execute(text(
+                "SELECT name FROM marketplace_items WHERE type = 'agent' AND creator_name = 'Automatos Team'"
+            )).fetchall()}
+            wanted = {agent_config["name"] for agent_config in MARKETPLACE_AGENTS_V2}
+            if wanted <= existing:
+                print(f"✓ v2 marketplace agents already present ({len(wanted)}) — ids left stable\n")
+                trans.rollback()
+                return
+
             # Clear only v2 agents (identified by creator_name), per-name deletes
             for agent_config in MARKETPLACE_AGENTS_V2:
                 db.execute(text(
