@@ -573,7 +573,9 @@ jobs:
       - name: Worker — headless browser present with no args
         run: |
           docker build -t parity-wk services/workspace-worker/
-          docker run --rm parity-wk sh -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
+          # --entrypoint: the worker image's entrypoint.sh execs the worker itself
+          # (ignoring CMD) and dies on Redis — we only want to look inside the image.
+          docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
 
   # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
   # writers of schema truth" (init_complete_schema.sql, the Alembic migration
