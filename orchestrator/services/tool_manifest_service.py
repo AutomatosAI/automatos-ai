@@ -13,9 +13,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-import boto3
-
 from config import config
+from core.storage import ensure_bucket, get_s3_client
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,8 @@ _MANIFEST_PREFIX = "manifests"
 
 
 def _s3_client():
-    return boto3.client("s3")
+    """The platform S3 client (core.storage, PRD-233 S4)."""
+    return get_s3_client()
 
 
 def _schema_hash(schema: dict) -> str:
@@ -72,6 +72,7 @@ async def snapshot_tool_manifest(workspace_id: UUID, db_session=None) -> dict:
     key = f"{_MANIFEST_PREFIX}/{workspace_id}/{version}.json"
 
     try:
+        ensure_bucket(_BUCKET)
         _s3_client().put_object(
             Bucket=_BUCKET,
             Key=key,

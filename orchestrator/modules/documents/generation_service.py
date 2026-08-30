@@ -55,14 +55,8 @@ def _safe_url_fetcher(url, *args, **kwargs):
     from weasyprint import default_url_fetcher
     return default_url_fetcher(url, *args, **kwargs)
 
-try:
-    import boto3
-    from botocore.config import Config as BotoConfig
-    from botocore.exceptions import ClientError
-except ImportError:
-    boto3 = None
-
 from config import config
+from core.storage import ensure_bucket, get_s3_client, is_storage_configured
 from core.models.core import DocumentTemplate
 from core.models.workspaces import Workspace
 from modules.documents.models import GeneratedDocument, UnresolvedDeliverableError
@@ -734,12 +728,8 @@ class DocumentGenerationService:
         No download link is minted here — ``serve_generated_file`` presigns on
         demand, so persisted URLs never expire (P2-09 S1).
         """
-        if not boto3:
-            logger.debug("[DocGen] boto3 not available, skipping S3 upload")
-            return False
-
-        if not config.AWS_ACCESS_KEY_ID or not config.AWS_SECRET_ACCESS_KEY:
-            logger.debug("[DocGen] AWS credentials not configured, skipping S3 upload")
+        if not is_storage_configured():
+            logger.debug("[DocGen] object storage not configured, skipping S3 upload")
             return False
 
         ws_id = workspace_id or self.workspace_id
@@ -748,17 +738,8 @@ class DocumentGenerationService:
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
         try:
-            boto_cfg = BotoConfig(
-                region_name=config.AWS_REGION or "us-east-1",
-                signature_version="v4",
-                retries={"max_attempts": 3, "mode": "adaptive"},
-            )
-            client = boto3.client(
-                "s3",
-                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-                config=boto_cfg,
-            )
+            ensure_bucket(bucket)
+            client = get_s3_client()
 
             with open(local_path, "rb") as f:
                 client.put_object(

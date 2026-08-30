@@ -70,20 +70,14 @@ class ToolResultFormatter:
     def _download_text_from_s3(s3_uri: str) -> str:
         """Download a text file from S3 given an s3:// URI."""
         try:
-            import boto3
             parts = s3_uri.replace("s3://", "").split("/", 1)
             bucket = parts[0]
             key = parts[1] if len(parts) > 1 else ""
             if not key:
                 return ""
 
-            from config import config as app_config
-            s3_client = boto3.client(
-                's3',
-                region_name=app_config.AWS_REGION or 'us-east-1',
-                aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
-            )
+            from core.storage import get_s3_client
+            s3_client = get_s3_client()
             response = s3_client.get_object(Bucket=bucket, Key=key)
             content = response['Body'].read().decode('utf-8')
             logger.info(f"[FullContent] ✅ Downloaded original from S3 ({len(content)} chars): {key}")

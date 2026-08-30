@@ -314,12 +314,16 @@ async def download_document_by_id(
     # Try S3 first
     try:
         from config import config as app_config
-        import boto3
-        from botocore.config import Config as BotoConfig
+        from core.storage import (
+            StorageNotConfigured,
+            get_public_s3_client,
+            get_s3_client,
+            is_storage_configured,
+        )
         from fastapi.responses import RedirectResponse
 
-        if not app_config.AWS_ACCESS_KEY_ID or not app_config.AWS_SECRET_ACCESS_KEY:
-            raise ValueError("No AWS credentials")
+        if not is_storage_configured():
+            raise StorageNotConfigured()
 
         bucket = app_config.S3_DOCUMENTS_BUCKET
         # file_path formats:
@@ -337,20 +341,10 @@ async def download_document_by_id(
         else:
             s3_key = raw_path
 
-        boto_cfg = BotoConfig(
-            region_name=app_config.AWS_REGION or "us-east-1",
-            signature_version="v4",
-        )
-        client = boto3.client(
-            "s3",
-            aws_access_key_id=app_config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=app_config.AWS_SECRET_ACCESS_KEY,
-            config=boto_cfg,
-        )
+        get_s3_client().head_object(Bucket=bucket, Key=s3_key)
 
-        client.head_object(Bucket=bucket, Key=s3_key)
-
-        presigned_url = client.generate_presigned_url(
+        # Presign against the browser-reachable host (PRD-151 US-006).
+        presigned_url = get_public_s3_client().generate_presigned_url(
             "get_object",
             Params={
                 "Bucket": bucket,
@@ -1904,13 +1898,8 @@ async def reprocess_all_documents(
                         local_path = file_path
                         tmp_path = None
                         if file_path.startswith("s3://"):
-                            import boto3
-                            s3_client = boto3.client(
-                                's3',
-                                region_name=config.AWS_REGION or 'us-east-1',
-                                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-                                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY
-                            )
+                            from core.storage import get_s3_client
+                            s3_client = get_s3_client()
                             # Parse s3://bucket/key
                             parts = file_path.replace("s3://", "").split("/", 1)
                             bucket, key = parts[0], parts[1]

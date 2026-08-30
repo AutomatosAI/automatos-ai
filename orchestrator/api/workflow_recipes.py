@@ -1261,21 +1261,15 @@ async def get_step_full_logs(
             )
 
         # Fetch from S3
-        import boto3
         import json as json_mod
-        from config import config
+        from core.storage import get_s3_client
 
         # Parse s3://bucket/key from log_url
         s3_path = log_url.replace("s3://", "")
         bucket = s3_path.split("/", 1)[0]
         key = s3_path.split("/", 1)[1]
 
-        s3 = boto3.client(
-            "s3",
-            region_name=config.AWS_REGION or "us-east-1",
-            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-        )
+        s3 = get_s3_client()
 
         response = s3.get_object(Bucket=bucket, Key=key)
         body = response["Body"].read().decode("utf-8")
