@@ -114,6 +114,10 @@ services:
     build:
       context: ./orchestrator
       dockerfile: Dockerfile
+      args:
+        # The Dockerfile defaults are PRODUCTION values (Railway builds it). The
+        # local edition opts out of the ~660 MB Leiden clustering stack here.
+        INSTALL_GRAPH_EXTRAS: "false"
       target: development
     container_name: automatos_backend
     restart: unless-stopped
@@ -283,6 +287,10 @@ services:
     build:
       context: ./services/workspace-worker
       dockerfile: Dockerfile
+      args:
+        # Production default is a bundled Chromium (1.18 GB); the local edition
+        # opts out — workspace_html_to_png says so honestly if used.
+        INSTALL_BROWSER: "false"
     container_name: automatos_workspace_worker
     restart: unless-stopped
     depends_on:

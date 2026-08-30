@@ -34,11 +34,14 @@ COPY requirements.txt .
 # graphify.cluster documents its own fallback: "Tries Leiden (graspologic)
 # first… falls back to Louvain (built into networkx) if graspologic is not
 # installed", so the Knowledge Graph still clusters without it, at lower
-# partition quality. Local default: off. Want Leiden locally:
-#   docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
-# requirements.txt itself is UNCHANGED, so Railway (Railpack) still installs
-# the extra and SaaS clustering is untouched.
-ARG INSTALL_GRAPH_EXTRAS=false
+# partition quality.
+# THE DEFAULT IS THE PRODUCTION VALUE (true). Railway builds THIS file
+# (railway.json: builder DOCKERFILE, target production), so a Dockerfile default
+# is a production decision — a `false` here shipped degraded clustering to prod
+# on 2026-08-30 (#650). The local edition passes INSTALL_GRAPH_EXTRAS=false
+# explicitly via docker-compose.yml build args to stay slim; want Leiden
+# locally: docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
+ARG INSTALL_GRAPH_EXTRAS=true
 
 # futureagi is installed separately with --no-deps because it pins exact
 # versions of common packages (requests==2.32.3, pandas==2.2.2, etc.)
