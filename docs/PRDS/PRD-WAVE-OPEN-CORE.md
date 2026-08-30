@@ -18,7 +18,7 @@
 | **0** | `docker compose up` true; smoke lane armed; SaaS provably untouched | **PRD-209** (S1–S9) | BUILT — local edition proven 2026-08-29; PR #650 (rebase + CI pending) | everything |
 | **1** | Basic worth downloading: worker on the laptop, honest tool degrade, seeded first-run, one storage factory, self-host docs + DCO | **PRD-233** | BUILT 2026-08-30 (stacked on 209; S4 = own PR) — awaiting push/CI/merge | Phase 3 |
 | **2** | Promotion safety: git-history secrets scrub + branch-protection arming | **PRD-210** (exists) | Drafted | any public promotion of Basic |
-| **3** | Session mode: tickets execute as subscription sessions; fleet = the session console; Codex lane | **PRD-234** | Drafted, build-ready after 233 | — |
+| **3** | Session mode: tickets execute as subscription sessions via a local-only Session Host; fleet = the session console; Codex lane | **PRD-234** | REWRITTEN 2026-08-30 from the research record; owner decisions Q1–Q8 logged; build from 2026-09-04 after the Phase 0+1 test | — |
 
 **Merge order: 209 → 233 → 234.** 210 is order-independent but **gates promotion** (no launch push, README blitz, or announcement before the scrub runs). Shared-file collision to respect: `docker-compose.yml` is touched by 209 S7 and 233 S1 — sequence, don't parallel, those two PRs.
 
