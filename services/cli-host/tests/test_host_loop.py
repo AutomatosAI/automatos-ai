@@ -65,7 +65,7 @@ class FakeBackend:
                     return self._json(200, {"reattached": [], "stale": [], "server_time": "t"})
                 if self.path == "/api/v1/cli-hosts/h1/claim":
                     if backend.claimed:
-                        return self._json(200, {"tasks": []})
+                        return self._json(200, {"tasks": [], "parked": [{"task_id": 43, "title": "held", "reason": "Awaiting human approval (grant #1)"}]})
                     backend.claimed = True
                     return self._json(200, {"tasks": [{
                         "task_id": 42, "attempt": 1, "session_id": str(uuid.uuid4()), "agent_name": "Dwight",

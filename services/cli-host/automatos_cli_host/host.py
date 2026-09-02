@@ -72,6 +72,7 @@ class Host:
         self._last_flush = 0.0
         self._claimed_once = False
         self._capabilities: Optional[Dict[str, Any]] = None
+        self._announced_parked: set = set()
 
     # ── setup ───────────────────────────────────────────────────────────────
     def prepare(self) -> None:
@@ -174,12 +175,18 @@ class Host:
         if free <= 0 or (self.cfg.once and self._claimed_once):
             return
         try:
-            tickets = self.api.claim(host_id, min(free, self.cfg.claim_batch))
+            claimed = self.api.claim(host_id, min(free, self.cfg.claim_batch))
         except BackendError as exc:
             log.warning("claim failed: %s", exc)
             return
         self._claimed_once = True
-        for ticket in tickets:
+        for held in claimed["parked"]:
+            key = str(held.get("task_id"))
+            if key not in self._announced_parked:
+                self._announced_parked.add(key)
+                log.info("task %s (%s) is waiting for the operator: %s — approve it in the Command Centre and it comes back",
+                         key, held.get("title"), held.get("reason"))
+        for ticket in claimed["tasks"]:
             self._start(ticket)
 
     def _start(self, ticket: Dict[str, Any]) -> None:

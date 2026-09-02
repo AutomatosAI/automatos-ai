@@ -71,10 +71,13 @@ class BackendClient:
         return self._request("POST", f"/api/v1/cli-hosts/{host_id}/heartbeat",
                              {"capabilities": capabilities, "running": running})
 
-    def claim(self, host_id: str, limit: int) -> List[Dict[str, Any]]:
+    def claim(self, host_id: str, limit: int) -> Dict[str, List[Dict[str, Any]]]:
+        """``{"tasks": [...], "parked": [...]}`` — parked = held by the board's approval gate."""
         out = self._request("POST", f"/api/v1/cli-hosts/{host_id}/claim", {"limit": max(1, limit)})
-        tasks = out.get("tasks") or []
-        return [t for t in tasks if isinstance(t, dict)]
+        return {
+            "tasks": [t for t in (out.get("tasks") or []) if isinstance(t, dict)],
+            "parked": [t for t in (out.get("parked") or []) if isinstance(t, dict)],
+        }
 
     def events(self, host_id: str, task_id: int, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         return self._request("POST", f"/api/v1/cli-hosts/{host_id}/tasks/{task_id}/events",
