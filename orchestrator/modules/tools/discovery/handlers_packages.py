@@ -203,7 +203,15 @@ async def install_package_tool(db: Any, workspace_id: UUID, params: Dict[str, An
 
     package = get_by_slug(db, slug)
     if package is None:
-        return {"success": False, "error": f"Package not found: {slug}"}
+        # The catalogue is small: name what exists (live-test 2026-09-02 — Auto
+        # guessed 'shopify-store-manager' and retried other guesses).
+        from modules.tools.discovery.not_found_candidates import candidate_terms, not_found_error
+        from services.marketplace_packages import list_packages
+
+        catalogue = [{"slug": p.slug, "name": p.name} for p in list_packages(db)]
+        terms = candidate_terms(slug)
+        close = [c for c in catalogue if any(t in f"{c['slug']} {c['name']}".lower() for t in terms)]
+        return not_found_error("Package", slug, (close or catalogue)[:3], search_tool="platform_search_packages")
 
     # D9 — over-quota is an honest conversation, checked BEFORE any registration.
     quota = _check_quota(db, workspace, workspace_id, package)
@@ -253,6 +261,12 @@ async def install_marketplace_agent_tool(db: Any, workspace_id: UUID, params: Di
     try:
         manifest = await install_marketplace_agent(db, workspace_id, ref, user_id=None)
     except PackageInstallError as exc:
+        if "not found" in str(exc).lower():
+            from modules.tools.discovery.handlers_marketplace import browse_marketplace_agents
+            from modules.tools.discovery.not_found_candidates import find_candidates, not_found_error
+
+            candidates = await find_candidates(browse_marketplace_agents, db, workspace_id, ref, list_key="agents")
+            return not_found_error("Marketplace agent", ref, candidates, search_tool="platform_browse_marketplace_agents")
         return {"success": False, "error": str(exc)}
     db.commit()
 

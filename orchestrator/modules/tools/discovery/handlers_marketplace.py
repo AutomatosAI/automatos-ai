@@ -366,7 +366,11 @@ async def install_plugin(db: Session, workspace_id: UUID, params: Dict[str, Any]
 
     plugin = query.first()
     if not plugin:
-        return {"success": False, "error": "Plugin not found"}
+        from modules.tools.discovery.not_found_candidates import find_candidates, not_found_error
+
+        requested = str(plugin_slug or plugin_id)
+        candidates = await find_candidates(browse_marketplace_plugins, db, workspace_id, requested, list_key="plugins")
+        return not_found_error("Plugin", requested, candidates, search_tool="platform_browse_marketplace_plugins")
 
     if plugin.approval_status != "approved" or not plugin.is_active:
         return {"success": False, "error": "Plugin is not approved or inactive"}
@@ -505,7 +509,11 @@ async def install_skill(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
     skill = query.first()
     if not skill:
-        return {"success": False, "error": "Marketplace skill not found"}
+        from modules.tools.discovery.not_found_candidates import find_candidates, not_found_error
+
+        requested = str(skill_name or skill_id)
+        candidates = await find_candidates(browse_marketplace_skills, db, workspace_id, requested, list_key="skills")
+        return not_found_error("Marketplace skill", requested, candidates, search_tool="platform_browse_marketplace_skills")
 
     if not skill.is_active:
         return {"success": False, "error": "Skill is inactive"}
