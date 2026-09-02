@@ -6,3 +6,9 @@
 # string concatenation) right after, but the original literal lives in this
 # one historical commit blob, which the range scan keeps re-reading.
 7f653279595e32516ff1b182a620ffb1e1b258cd:orchestrator/tests/test_prd206_write_contract.py:generic-api-key:242
+
+# 2026-09-02 — test_system_settings_null_flags.py fixture: a system_settings row
+# key="trial_spend_2026-09-02" (a setting NAME, value "0.001") matched
+# generic-api-key by entropy alone. Defanged in the next commit (key="spend");
+# the original literal lives only in this historical blob.
+8c4e5ccd804ee7cc6a2d8af7987aec0649c60bdb:orchestrator/tests/test_system_settings_null_flags.py:generic-api-key:30
