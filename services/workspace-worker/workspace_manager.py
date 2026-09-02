@@ -31,9 +31,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from worker_config import workspace_root
+
 logger = logging.getLogger(__name__)
 
-VOLUME_PATH = os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces")
 DEFAULT_QUOTA_GB = int(os.environ.get("WORKSPACE_DEFAULT_QUOTA_GB", "5"))
 
 
@@ -50,7 +51,9 @@ class WorkspaceManager:
 
     def __init__(self, workspace_id: str, volume_path: Optional[str] = None) -> None:
         self.workspace_id = workspace_id
-        self.volume_path = volume_path or VOLUME_PATH
+        # Default root = the mount root from worker_config (WORKSPACE_VOLUME_PATH),
+        # resolved at construction time; callers may pass an explicit root.
+        self.volume_path = volume_path or str(workspace_root())
         self.root = Path(self.volume_path) / workspace_id
         self.quota_bytes = DEFAULT_QUOTA_GB * (1024 ** 3)
         self._current_usage: int = 0

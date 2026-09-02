@@ -18,6 +18,8 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { MainLayout } from '@/components/layout/main-layout'
+import { SaasOnlyNotice } from '@/components/local/saas-only-notice'
+import { isRouteAvailableInEdition } from '@/lib/auth-edition'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -152,7 +154,7 @@ function formatDate(dateStr: string | null) {
 // Component
 // ===================================================================
 
-export default function AdminPluginsPendingPage() {
+function AdminPluginsPendingConsole() {
   usePageAPI('admin')
 
   // Data
@@ -891,4 +893,18 @@ export default function AdminPluginsPendingPage() {
       </div>
     </MainLayout>
   )
+}
+
+// PRD-233 S7: plugin moderation is the hosted hub's approval queue (owner
+// decision 2026-08-29: publishing is monitored and approved on the hosted
+// side). The local edition renders the notice; the console never mounts.
+export default function AdminPluginsPendingPage() {
+  if (!isRouteAvailableInEdition('/admin/plugins')) {
+    return (
+      <MainLayout>
+        <SaasOnlyNotice surface="Plugin moderation" />
+      </MainLayout>
+    )
+  }
+  return <AdminPluginsPendingConsole />
 }

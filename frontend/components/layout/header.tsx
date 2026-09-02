@@ -4,7 +4,9 @@ import { Menu, BookOpen, ExternalLink, Code2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ProfileMenu } from '@/components/auth/profile-menu'
+import { UserProfileButton } from '@/components/auth/user-profile-button'
 import { NotificationBell } from '@/components/notifications/notification-bell'
+import { isSaaS } from '@/lib/auth-edition'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -92,8 +94,10 @@ export function Header({ onMenuClick }: HeaderProps) {
           {/* Notifications */}
           <NotificationBell />
 
-          {/* User Menu */}
-          <ProfileMenu />
+          {/* User Menu — hosted edition only (PRD-233 S7). ProfileMenu is the
+              account menu, and signed-out it is a sign-in affordance; the local
+              edition has no accounts. Settings stays reachable from the rail. */}
+          {isSaaS ? <ProfileMenu /> : <UserProfileButton />}
         </div>
       </div>
     </header>

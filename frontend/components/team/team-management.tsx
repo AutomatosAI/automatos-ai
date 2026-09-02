@@ -6,7 +6,7 @@ import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X } fr
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { InviteModal } from './invite-modal'
-import { useAuth } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth-hooks'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'

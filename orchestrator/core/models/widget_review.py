@@ -17,7 +17,9 @@ class WidgetReview(Base):
 
     id = Column(PGUUID(as_uuid=True), primary_key=True)
     widget_id = Column(PGUUID(as_uuid=True), ForeignKey("marketplace_widgets.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Integer, matching users.id and the creating migration (sa.Integer) —
+    # see marketplace_widget.developer_id for the fresh-DB crash this fixes.
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)
     title = Column(String(200))
     body = Column(Text)

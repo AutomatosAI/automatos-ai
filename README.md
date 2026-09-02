@@ -14,19 +14,27 @@
 
 ---
 
-Automatos AI is an open-source platform for building AI workforces. Create specialised agents, equip them with tools and knowledge, schedule their work, and let them operate autonomously — reporting back through a unified command centre.
+Automatos AI is an open-source (Apache-2.0) platform for running teams of AI agents. You create agents, give them skills, tools and knowledge, run them through Playbooks and Missions, and read what they produced as Deliverables — with Auto, the assistant, as the front door and a Command Center for oversight.
 
-It is not a chatbot wrapper. It is an operating system for AI agents.
+## One codebase, three editions
+
+| Edition | What it is | Status |
+|---|---|---|
+| **Local edition** | Clone the repo, set three secrets, `docker compose up`. No login, one workspace, one operator; Postgres + pgvector, Redis and MinIO in the stack; agents can act on files on your own machine through the workspace-worker. Bring your own LLM key (and, optionally, your own Composio key). | Available — [QUICKSTART.md](QUICKSTART.md) · [self-hosting guide](docs/getting-started/self-hosting.md) |
+| **Hosted edition** | The same code run as a service at [automatos.app](https://automatos.app): accounts, workspaces, teams and plans on top of it. | Available |
+| **Enterprise** | Parked. No separate directory, no license keys, nothing built. | Not started |
+
+The edition is a runtime flag (`AUTH_EDITION=local|saas`). Product capability is not gated: every agent, tool, Playbook, Mission and Deliverable feature in the code runs in the local edition.
 
 <p align="center">
-  <strong>100+ marketplace agents &middot; 1,000+ tool integrations &middot; 300+ LLMs &middot; 150+ skills &middot; Bring-your-own-keys</strong>
+  <strong>Marketplace agents &middot; Composio tool integrations (bring your own key) &middot; 300+ LLMs through OpenRouter or direct keys &middot; Reusable skills</strong>
 </p>
 
 <br>
 
 ## Talk to your agents
 
-A unified chat interface that routes your messages to the right agent automatically. Quick actions let you jump straight into coding, creating agents, managing knowledge, or building recipes.
+A unified chat interface that routes your messages to the right agent automatically. Quick actions let you jump straight into coding, creating agents, managing knowledge, or building Playbooks.
 
 <p align="center">
   <img src="docs/assets/01-Chat.png" alt="Chat Interface" width="800">
@@ -46,7 +54,7 @@ A unified chat interface that routes your messages to the right agent automatica
 
 ## 1,000+ tool integrations
 
-Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, HubSpot, and a thousand more through the community marketplace. Browse, install, and assign integrations to specific agents from a single dashboard — no glue code, no per-tool SDKs.
+Connect your agents to GitHub, Slack, Jira, Stripe, Shopify, Datadog, Notion, HubSpot, and a thousand more through the Composio catalogue. Browse, install, and assign integrations to specific agents from a single dashboard — no glue code, no per-tool SDKs. In the local edition this needs your own `COMPOSIO_API_KEY`; without one the Tools page says so and the native platform tools keep working.
 
 <p align="center">
   <img src="docs/assets/03-Marketplace-tools.png" alt="Community Marketplace" width="800">
@@ -88,7 +96,7 @@ Track every API call across every model. See cost per agent, cost per request, u
 
 ## Knowledge bases with cloud sync
 
-Upload documents, sync folders from Dropbox and cloud storage, and let the platform chunk, embed, and index everything automatically. Your agents get RAG-powered access to your entire knowledge base.
+Upload documents, sync folders from Dropbox and cloud storage (the cloud connectors run through Composio), and let the platform chunk, embed, and index everything automatically. Your agents get RAG-powered access to your entire knowledge base — on pgvector in the local edition, on S3 Vectors in the hosted one.
 
 <p align="center">
   <img src="docs/assets/06-Knowledge.png" alt="Knowledge Bases" width="800">
@@ -101,25 +109,29 @@ Upload documents, sync folders from Dropbox and cloud storage, and let the platf
 | Capability | What it does |
 |---|---|
 | **Universal Router** | Multi-tier routing (cache, rules, semantic, LLM) sends messages to the right agent every time |
-| **Recipes & Workflows** | Multi-step automation with scheduling, triggers, and inter-agent coordination |
+| **Playbooks & Missions** | Multi-step automation with scheduling, triggers, and inter-agent coordination |
 | **Prompt Optimisation** | A/B test and score prompts against live traffic, automatically improve agent performance |
 | **Workspace Execution** | Sandboxed environments where agents run code, manage files, and interact with Git repos |
-| **Multi-Tenancy** | Full workspace isolation — each team gets their own agents, data, and configuration |
+| **Multi-Tenancy** | Full workspace isolation in the hosted edition — each team gets their own agents, data, and configuration |
 | **Plugin System** | Extend agents with skills, plugins, and custom tools from the marketplace or your own repos |
 
 ---
 
-## Quick start
+## Quick start (local edition)
 
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
-cp .env.example .env    # Add your API keys
-docker-compose up
+cp .env.example .env    # set the 3 required secrets: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY
+docker compose up       # first run builds the images and the database schema
 ```
 
-- **Frontend**: http://localhost:3000
-- **API Docs**: http://localhost:8000/docs
+Then open http://localhost:3000 (API reference at http://localhost:8000/docs).
+No login. Add one LLM key (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` /
+`OPENROUTER_API_KEY` in `.env`, or later under Settings → API Keys) and run the
+seeded *Two-minute brief* Playbook. [QUICKSTART.md](QUICKSTART.md) is the short
+walkthrough; [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md)
+covers every service, dial, and what the local edition does not include.
 
 ---
 
@@ -127,29 +139,28 @@ docker-compose up
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 14, TypeScript, Tailwind CSS, shadcn/ui |
-| Backend | Python, FastAPI, SQLAlchemy, Alembic |
-| Database | PostgreSQL, Redis |
-| AI | OpenRouter, OpenAI, Anthropic, DeepSeek (multi-provider) |
-| Storage | AWS S3, S3 Vectors |
-| Auth | Clerk |
-| Infra | Docker, Railway |
+| Frontend | Next.js 15, React, TypeScript, Tailwind CSS, shadcn/ui |
+| Backend | Python 3.11, FastAPI, SQLAlchemy, Alembic |
+| Data | PostgreSQL 16 with pgvector, Redis 7 |
+| AI | OpenRouter, OpenAI, Anthropic and other providers through one router; bring your own keys |
+| Object storage | S3 API — MinIO in the local stack, AWS S3 (+ S3 Vectors for RAG) in the hosted edition |
+| Auth | None in the local edition (`AUTH_EDITION=local`); Clerk in the hosted edition |
+| Runtime | Docker Compose (local); Railway (hosted) |
 
 ---
 
 ## Documentation
 
-Full platform documentation is available in [`/docs`](docs/README.md), auto-synced from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai) — 100+ pages covering architecture, APIs, agents, workflows, and deployment.
+Platform documentation lives in [`/docs`](docs/README.md) — architecture, APIs, agents, Playbooks, deployment. Most pages are generated from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai); the self-hosting guide and the contributing guide are maintained by hand.
 
 ---
 
 ## Contributing
 
-We're building the operating system for the agentic future. Contributions welcome.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Two things to know before the first PR:
 
-1. Fork the repo
-2. Create a feature branch
-3. Submit a PR
+- **Sign off every commit** (`git commit -s`). The `Signed-off-by:` trailer is your [Developer Certificate of Origin](https://developercertificate.org) attestation and the `dco` check verifies it on each pull request. There is no CLA; contributions are Apache-2.0 and ship in every edition.
+- **Capability first, core second.** Skills, tools, MCP integrations, Playbooks and agent packages reach both editions unchanged and never conflict with core. Open an issue first for anything touching auth, storage, the tool router or a migration.
 
 ---
 

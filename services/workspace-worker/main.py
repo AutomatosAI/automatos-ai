@@ -13,7 +13,8 @@ Startup:
 Configuration (env vars):
     REDIS_URL              - Redis connection string (required)
     DATABASE_URL           - PostgreSQL connection string (required)
-    WORKSPACE_VOLUME_PATH  - Mount path for persistent volume (default: /workspaces)
+    WORKSPACE_VOLUME_PATH  - Workspace mount root (default: /workspaces; read only
+                             via worker_config.workspace_root — PRD-233 S1)
     WORKSPACE_DEFAULT_QUOTA_GB - Default storage per workspace (default: 5)
     WORKER_CONCURRENCY     - Max concurrent tasks (default: 3)
     WORKER_HEALTH_PORT     - Health check HTTP port (default: 8081)
@@ -39,6 +40,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "orchestr
 from automatos_logging import setup_logging
 setup_logging(service="workspace-worker")
 logger = logging.getLogger("workspace-worker")
+
+from worker_config import workspace_root
 
 # Redis key patterns (must match queued.py)
 QUEUE_NAMES = [
@@ -85,8 +88,7 @@ class WorkspaceWorker:
         """Start the worker — runs until SIGTERM/SIGINT."""
         logger.info(
             "Workspace Worker starting (id=%s, concurrency=%d, volume=%s)",
-            self._worker_id, self.concurrency,
-            os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces"),
+            self._worker_id, self.concurrency, workspace_root(),
         )
 
         import redis.asyncio as aioredis
@@ -465,7 +467,7 @@ class WorkspaceWorker:
         from aiohttp import web
         from workspace_manager import WorkspaceManager, SecurityError
 
-        volume_path = os.environ.get("WORKSPACE_VOLUME_PATH", "/workspaces")
+        volume_path = str(workspace_root())
         max_file_size = 2 * 1024 * 1024  # 2 MB
         max_dir_entries = 500
         internal_token = os.environ.get("WORKER_INTERNAL_TOKEN", "")

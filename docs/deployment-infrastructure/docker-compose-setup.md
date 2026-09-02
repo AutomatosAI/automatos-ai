@@ -17,35 +17,38 @@ The following files were used as context for generating this wiki page:
 
 
 
-This page documents the Docker Compose orchestration for Automatos AI, covering service definitions, dependencies, health checks, volumes, networks, and deployment profiles. The setup mirrors a 19-service production topology used in Railway deployments, organized into modular functional groups.
+This page documents the Docker Compose orchestration for Automatos AI — the stack that **is** the local edition and the development environment: service definitions, dependencies, health checks, volumes, networks and the one optional profile. The hosted (Railway) topology is separate and described in [Production Deployment](production-deployment.md); Railway never reads this file.
+
+> The operator-facing walkthrough — secrets, first boot, the worker's host directory, object storage, Composio, updating, resetting, troubleshooting — is [Self-hosting — the local edition](../getting-started/self-hosting.md). This page describes the compose file itself.
 
 ## Purpose and Scope
 
 The Docker Compose configuration orchestrates all services required to run Automatos AI in a containerized environment. It defines:
 
-- **Core Services**: PostgreSQL, Redis, FastAPI backend, Next.js frontend [docker-compose.yml:18-170]().
-- **Data Infrastructure**: Dedicated pgvector and Redis instances [docker-compose.yml:22-73]().
-- **Worker Services**: `workspace-worker` for isolated task execution and `agent-opt-worker` for prompt optimization [docker-compose.yml:178-217]().
-- **Support Services**: Gotenberg for document generation (PRD-63) [docker-compose.yml:109]().
+- **Data services**: PostgreSQL with `pgvector`, Redis, MinIO (S3-compatible object storage) with a one-shot bucket initialiser [docker-compose.yml]().
+- **Application services**: the FastAPI backend and the Next.js frontend, built from source with their `development` targets [docker-compose.yml]().
+- **The workspace-worker**: the Code Canvas runtime, in the default profile, acting on a host directory [docker-compose.yml]().
+- **`--profile all`**: Adminer (database GUI) and Gotenberg (DOCX/XLSX → PDF, PRD-63) [docker-compose.yml]().
 
-Sources: [docker-compose.yml:1-217](), [orchestrator/Dockerfile:1-141](), [frontend/Dockerfile:1-115]()
+The `agent-opt-worker` (prompt optimisation), mem0, Qdrant and the observability stack are not part of the compose file; they belong to the hosted deployment.
+
+Sources: [docker-compose.yml](), [orchestrator/Dockerfile:1-141](), [frontend/Dockerfile:1-115]()
 
 ---
 
-## Modular Architecture
+## Services
 
-The system uses a unified `docker-compose.yml` with profiles to manage service groups, allowing for both minimal local development and full-scale worker deployments.
-
-### Service Grouping
-
-| Group | Service Name | Role |
-|-------|--------------|------|
-| **Database** | `postgres` | Primary storage with `pgvector` [docker-compose.yml:22-43]() |
-| **Cache** | `redis` | Pub/Sub hub and session store [docker-compose.yml:48-73]() |
-| **API** | `backend` | FastAPI orchestrator [docker-compose.yml:78-138]() |
-| **UI** | `frontend` | Next.js dashboard [docker-compose.yml:146-170]() |
-| **Workers** | `workspace-worker` | Isolated agent task execution [docker-compose.yml:178-202]() |
-| **Optimization**| `agent-opt-worker` | FutureAGI prompt scoring/optimization [docker-compose.yml:204-217]() |
+| Service | Container | Image / build | Host port (variable) | Role |
+|---|---|---|---|---|
+| `postgres` | `automatos_postgres` | `pgvector/pgvector:pg16` | 5432 (`POSTGRES_PORT`) | Relational data and the pgvector chunk store (local RAG) [docker-compose.yml]() |
+| `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues; `FLUSHDB`/`FLUSHALL`/`DEBUG` disabled, 256 MB `allkeys-lru` [docker-compose.yml]() |
+| `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store; the backend reaches it via `S3_ENDPOINT_URL=http://minio:9000` [docker-compose.yml]() |
+| `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates `S3_DOCUMENTS_BUCKET` (default `automatos-ai`), then exits [docker-compose.yml]() |
+| `backend` | `automatos_backend` | `./orchestrator`, target `development` | 8000 (`API_PORT`) | FastAPI API; `uvicorn --reload` over the bind-mounted source; entrypoint `docker-entrypoint.sh` [docker-compose.yml]() |
+| `frontend` | `automatos_frontend` | `./frontend`, target `development` | 3000 (`FRONTEND_PORT`) | Next.js UI (`npm run dev`); starts after the backend is healthy [docker-compose.yml]() |
+| `workspace-worker` | `automatos_workspace_worker` | `./services/workspace-worker` | none (8081 internal only) | Code Canvas runtime; 2 CPU / 2 GB limits; `WORKER_CONCURRENCY` default 3 [docker-compose.yml]() |
+| `adminer` (`--profile all`) | `automatos_adminer` | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI pre-pointed at `postgres` [docker-compose.yml]() |
+| `gotenberg` (`--profile all`) | `automatos_gotenberg` | `gotenberg/gotenberg:8` | 3001 (`GOTENBERG_PORT`) | Document conversion at `http://gotenberg:3000` for the backend [docker-compose.yml]() |
 
 **System Data Flow & Networking**
 
@@ -54,34 +57,36 @@ graph TB
     subgraph "Public Entrypoints"
         LB_API["localhost:8000"]
         LB_UI["localhost:3000"]
+        LB_MINIO["localhost:9000 / 9001"]
     end
 
-    subgraph "Core Group"
+    subgraph "Application"
         API["automatos_backend<br/>(FastAPI)"]
         UI["automatos_frontend<br/>(Next.js)"]
+        WS_WORKER["automatos_workspace_worker<br/>(Code Canvas runtime, default profile)"]
     end
 
-    subgraph "Worker Group (Profile: workers)"
-        WS_WORKER["workspace_worker<br/>(ARQ/Redis)"]
-        OPT_WORKER["agent_opt_worker<br/>(FutureAGI)"]
-    end
-
-    subgraph "Data Group"
+    subgraph "Data"
         PG["postgres<br/>(pgvector)"]
         RD["redis<br/>(Cache/PubSub)"]
+        MN["minio<br/>(S3 API)"]
     end
 
     LB_API --> API
     LB_UI --> UI
+    LB_MINIO --> MN
     
     API --> PG
     API --> RD
+    API --> MN
+    API -- "WORKER_INTERNAL_URL" --> WS_WORKER
     WS_WORKER --> RD
     WS_WORKER --> PG
-    OPT_WORKER --> API
 ```
 
-Sources: [docker-compose.yml:18-217](), [orchestrator/core/redis/client.py:141-197]()
+All services share the `automatos` bridge network (`automatos_network`) [docker-compose.yml]().
+
+Sources: [docker-compose.yml](), [envs/api.defaults](), [orchestrator/core/redis/client.py:141-197]()
 
 ---
 
@@ -90,8 +95,13 @@ Sources: [docker-compose.yml:18-217](), [orchestrator/core/redis/client.py:141-1
 ### Backend (FastAPI)
 The backend service is built using a multi-stage `Dockerfile` targeting `python:3.11-slim` [orchestrator/Dockerfile:13](). It includes system dependencies for OCR (`tesseract-ocr`), document processing (`ghostscript`), and PDF generation (`libpango`) [orchestrator/Dockerfile:18-32]().
 
-- **Entrypoint**: Runs `alembic upgrade heads` before starting `uvicorn` to ensure schema synchronization [orchestrator/Dockerfile:140]().
-- **Hot Reload**: In development mode, the `./orchestrator` directory is mounted to `/app` [docker-compose.yml:126]().
+- **Entrypoint**: `docker-entrypoint.sh` (bind-mounted from the repo root) waits for Postgres, builds the schema on an empty database (`python -m scripts.init_fresh_db`), runs `alembic upgrade heads` (fail-closed), loads the idempotent seeds, ensures the local workspace and operator exist, then starts `uvicorn` [docker-entrypoint.sh]().
+- **Configuration**: `env_file: envs/api.defaults` (committed local topology, `AUTH_EDITION=local`) then the optional gitignored `envs/api.local`; the `environment:` block carries the secrets substituted from `.env` and wins over both [docker-compose.yml]().
+- **Hot Reload**: In development mode, the `./orchestrator` directory is mounted to `/app` and `uvicorn` runs with `--reload` [docker-compose.yml](), [orchestrator/Dockerfile:93]().
+- **Object storage**: `S3_ENDPOINT_URL=http://minio:9000`; the backend's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` are set from `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` (defaulting to the MinIO root credentials), so a developer's `AWS_*` variables never reach the local store [docker-compose.yml]().
+
+### Workspace worker
+Built from `services/workspace-worker`. The host directory `${AUTOMATOS_WORKSPACE_DIR:-./workspaces}` is bind-mounted at `/workspaces` (read-write here, read-only in the backend); each workspace gets `/workspaces/<workspace_id>/`, every Code Canvas tool call is confined to it and mutations need approval. The process runs as uid 1000 (`worker`) and its entrypoint takes ownership of the mounted directory. Canvas sessions need `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `.env`. The backend reaches the worker at `WORKER_INTERNAL_URL=http://workspace-worker:8081` (`envs/api.defaults`); the port is not published on the host [docker-compose.yml](), [services/workspace-worker/entrypoint.sh](), [services/workspace-worker/worker_config.py]().
 
 ### Frontend (Next.js)
 The frontend uses a multi-stage build that outputs a standalone Node.js server for production efficiency [frontend/Dockerfile:83-114]().
@@ -140,35 +150,39 @@ Sources: [orchestrator/main.py:1-50](), [orchestrator/core/redis/client.py:14-31
 
 ## Data Persistence & Volumes
 
-The setup uses named volumes to ensure state is preserved across container lifecycles.
+The setup uses named volumes to ensure state is preserved across container lifecycles, plus one host bind mount.
 
-| Volume Name | Service | Mount Path | Purpose |
+| Volume / mount | Service | Mount Path | Purpose |
 |-------------|---------|------------|---------|
-| `postgres_data` | `postgres` | `/var/lib/postgresql/data` | Persistent SQL & Vector data [docker-compose.yml:34]() |
-| `redis_data` | `redis` | `/data` | Cache and session persistence [docker-compose.yml:65]() |
-| `workspace_data` | `backend`, `worker` | `/workspaces` | Shared agent filesystems (RO for API, RW for Worker) [docker-compose.yml:130]() |
-| `backend_logs` | `backend` | `/app/logs` | Centralized application logs [docker-compose.yml:128]() |
+| `postgres_data` (`automatos_postgres_data`) | `postgres` | `/var/lib/postgresql/data` | Persistent SQL & vector data. Keeps the password it was initialised with — changing `POSTGRES_PASSWORD` later needs a reset or `ALTER USER` [docker-compose.yml]() |
+| `redis_data` (`automatos_redis_data`) | `redis` | `/data` | Cache and session persistence [docker-compose.yml]() |
+| `minio_data` (`automatos_minio_data`) | `minio` | `/data` | Object storage (documents, generated outputs, plugin packages, images) [docker-compose.yml]() |
+| `backend_data` | `backend` | `/app/data` | The auto-generated credential-encryption key (`CREDENTIAL_KEY_FILE`); losing it makes stored API keys undecryptable [docker-compose.yml](), [envs/api.defaults]() |
+| `backend_logs` (`automatos_backend_logs`) | `backend` | `/app/logs` | Application logs [docker-compose.yml]() |
+| **bind mount** `${AUTOMATOS_WORKSPACE_DIR:-./workspaces}` | `workspace-worker` (rw), `backend` (ro) | `/workspaces` | The agents' files, on the host. Not a named volume: `docker compose down -v` leaves it in place [docker-compose.yml]() |
 
-Sources: [docker-compose.yml:34](), [docker-compose.yml:65](), [docker-compose.yml:128-130]()
+Sources: [docker-compose.yml](), [envs/api.defaults]()
 
 ---
 
 ## Environment Configuration
 
-A `.env` file is mandatory for initialization. Key required variables include:
+A `.env` file is mandatory for initialization. Compose reads it for variable substitution only; the committed topology lives in `envs/api.defaults` and `envs/frontend.defaults`, with `envs/api.local` / `envs/frontend.local` as gitignored overrides.
 
-- **Database**: `POSTGRES_PASSWORD` [docker-compose.yml:29]().
-- **Redis**: `REDIS_PASSWORD` [docker-compose.yml:56]().
-- **Security**: `API_KEY` for backend authentication [docker-compose.yml:116]().
-- **Auth**: `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` [docker-compose.yml:119-121]().
-- **LLM Keys**: Optional at startup; can be configured via the UI [docker-compose.yml:105-106]().
+- **Required** (`${VAR:?…}` — compose refuses to start without them): `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY` [docker-compose.yml]().
+- **LLM keys**: optional at startup (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`); can also be stored under Settings → API Keys [docker-compose.yml]().
+- **Integrations**: `COMPOSIO_API_KEY` — bring your own; without it integrations are disabled and native tools keep working [docker-compose.yml]().
+- **Worker**: `AUTOMATOS_WORKSPACE_DIR`, `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`, `WORKER_CONCURRENCY`, `WORKSPACE_DEFAULT_QUOTA_GB`, `WORKER_INTERNAL_TOKEN` [docker-compose.yml]().
+- **Auth**: Clerk variables are hosted-edition only and use `:-` defaults, so their absence never blocks a local boot; `AUTH_EDITION=local` comes from `envs/api.defaults` [docker-compose.yml](), [envs/api.defaults]().
 
 ### Launching the Stack
 
-- **Standard Development**: `docker-compose up --build` [docker-compose.yml:6]().
-- **With Workers**: `docker-compose --profile workers up --build` [docker-compose.yml:184]().
-- **Production Mode**: Build using the `production` target in Dockerfiles to exclude dev dependencies like `pytest`, `black`, and `isort` [orchestrator/Dockerfile:110-114]().
+- **Default**: `docker compose up` (add `--build` after dependency or Dockerfile changes) [docker-compose.yml]().
+- **With admin tools**: `docker compose --profile all up` — Adminer and Gotenberg [docker-compose.yml]().
+- **Updating**: `git pull && docker compose up -d --build`; migrations run on every backend boot.
+- **Reset**: `docker compose down -v` removes the named volumes; delete `AUTOMATOS_WORKSPACE_DIR` by hand.
+- **Production Mode**: the `production` targets in the Dockerfiles exclude dev dependencies like `pytest`, `black`, and `isort` and are what the hosted deployment builds; the compose file uses the `development` targets [orchestrator/Dockerfile:98-146](), [frontend/Dockerfile:92-121]().
 
-Sources: [docker-compose.yml:1-16](), [orchestrator/Dockerfile:95-141](), [frontend/Dockerfile:85-115]()
+Sources: [docker-compose.yml](), [orchestrator/Dockerfile](), [frontend/Dockerfile]()
 
 ---

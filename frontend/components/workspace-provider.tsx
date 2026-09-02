@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { useAuth, useOrganization } from '@clerk/nextjs'
+import { useAuth, useOrganization } from '@/lib/auth-hooks'
 import { usePathname } from 'next/navigation'
 
 const ACCEPT_INVITATION_ROUTE = /^\/accept-invitation(\/|$|\?)/
@@ -142,7 +142,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 `${process.env.NEXT_PUBLIC_API_URL}/api/workspaces/current`,
                 {
                     headers: {
-                        'Authorization': `Bearer ${token}`,
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
                         'Content-Type': 'application/json',
                     },
                 }

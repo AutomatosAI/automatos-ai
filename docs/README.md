@@ -1,8 +1,12 @@
-# DeepWiki Documentation
+# Documentation
 
-Auto-synced from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai)
+Most pages here are generated from [DeepWiki](https://deepwiki.com/AutomatosAI/automatos-ai)
+(last sync: 2026-05-08 23:55:45 UTC) and carry a "Relevant source files" block.
+A few are maintained by hand and take precedence where they overlap:
 
-Last synced: 2026-05-08 23:55:45 UTC
+- [Self-hosting — the local edition](getting-started/self-hosting.md): services, ports, dials, troubleshooting, how the editions relate.
+- [Contributing](CONTRIBUTING.md): DCO sign-off, where capability contributions go, the CI lanes.
+- [QUICKSTART.md](../QUICKSTART.md) (repo root): the short install path.
 
 ## Table of Contents
 
@@ -10,6 +14,7 @@ Last synced: 2026-05-08 23:55:45 UTC
   - [Key Concepts](overview/key-concepts.md)
   - [System Architecture](overview/system-architecture.md)
 - [Getting Started](getting-started/_index.md)
+  - [Self-hosting — the local edition](getting-started/self-hosting.md)
   - [Installation & Setup](getting-started/installation-setup.md)
   - [Configuration Guide](getting-started/configuration-guide.md)
   - [Quick Start Tutorial](getting-started/quick-start-tutorial.md)

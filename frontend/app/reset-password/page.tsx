@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useSignIn } from '@clerk/nextjs'
-import { useRouter } from 'next/navigation'
+import { useRouter, redirect } from 'next/navigation'
+import { isRouteAvailableInEdition } from '@/lib/auth-edition'
 import { motion } from 'framer-motion'
 import { ArrowRight, Loader2, AlertCircle, Lock, KeyRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,6 +14,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import Image from 'next/image'
 
 export default function ResetPasswordPage() {
+    // PRD-233 S7: a Clerk sign-in sub-flow — there is no login in the local
+    // edition, so send visitors home before the Clerk hook runs (as sign-in does).
+    if (!isRouteAvailableInEdition('/reset-password')) {
+        redirect('/')
+    }
     const { isLoaded, signIn, setActive } = useSignIn()
     const [code, setCode] = useState('')
     const [newPassword, setNewPassword] = useState('')

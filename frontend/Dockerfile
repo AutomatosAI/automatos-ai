@@ -56,6 +56,15 @@ FROM base as builder
 # NOTE: NEXT_PUBLIC_* variables are embedded in the client bundle and must NOT contain secrets
 # API keys should be handled server-side only (see frontend/app/api/chat/route.ts)
 ARG NEXT_PUBLIC_API_URL
+# PRD-233: NEXT_PUBLIC_* are inlined at BUILD time, so the edition and the
+# API/WS origins must be build args for the standalone image. The DEFAULT is
+# the hosted product (saas) — Railway DOES build this Dockerfile (it prefers a
+# Dockerfile over Railpack when one exists in the service root), and a `local`
+# default here shipped the Clerk-less edition to production on 2026-08-30 (#650
+# → #668). The local edition passes NEXT_PUBLIC_AUTH_EDITION=local explicitly
+# via docker-compose.yml build args.
+ARG NEXT_PUBLIC_AUTH_EDITION=saas
+ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
@@ -64,6 +73,8 @@ ARG NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
 
 # Set as environment variables for Next.js build
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_AUTH_EDITION=${NEXT_PUBLIC_AUTH_EDITION}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
 ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
 ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}

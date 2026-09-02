@@ -1,6 +1,15 @@
 /** @type {import('next').NextConfig} */
 const path = require('path')
 
+// PRD-209 (local edition): the API's origin must be an allowed connect-src.
+const apiOrigin = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_API_URL ? new URL(process.env.NEXT_PUBLIC_API_URL).origin : ''
+  } catch {
+    return ''
+  }
+})()
+
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: false,
@@ -94,7 +103,11 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
               "img-src 'self' data: blob: https://*.clerk.accounts.dev https://img.clerk.com https://*.googleusercontent.com https://logos.composio.dev",
               "font-src 'self' data: https://cdn.jsdelivr.net",
-              "connect-src 'self' https://*.automatos.app https://*.clerk.accounts.dev https://api.clerk.com https://cdn.jsdelivr.net wss: ws:",
+              // The API origin is derived from NEXT_PUBLIC_API_URL so the local edition
+              // (http://localhost:8000) is allowed too — without it the browser refuses
+              // every API call ("Failed to fetch") before it leaves the page. In SaaS the
+              // value is https://api.automatos.app, already covered by the wildcard.
+              `connect-src 'self' ${apiOrigin} https://*.automatos.app https://*.clerk.accounts.dev https://api.clerk.com https://cdn.jsdelivr.net wss: ws:`,
               "frame-src 'self' https://*.clerk.accounts.dev https://challenges.cloudflare.com",
               "worker-src 'self' blob:",
               "object-src 'none'",

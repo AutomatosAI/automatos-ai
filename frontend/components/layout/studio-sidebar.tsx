@@ -11,6 +11,7 @@ import {
 } from '@/lib/studio-menu';
 import { useWorkspaceOptional } from '@/components/workspace-provider';
 import { isNavItemVisible } from '@/lib/nav-exposure';
+import { filterNavForEdition, navExposureForEdition } from '@/lib/auth-edition';
 
 /**
  * StudioSidebar — SIDE-B (labelled rail, 232px) per CD's shell delivery.
@@ -52,7 +53,12 @@ export function StudioSidebar({
   const mark = workspaceMark ?? workspaceName.slice(0, 1).toUpperCase();
   // US-024: plan-tier exposure gating for the studio rail (hidden ≠ deleted).
   // Optional context — the studio shell can render in isolation (fails open).
-  const exposure = useWorkspaceOptional()?.workspace?.exposure;
+  // In local there is no plan: the seam reports exposure as unknown (fail-open).
+  const exposure = navExposureForEdition(useWorkspaceOptional()?.workspace?.exposure);
+  // PRD-233 S7: SaaS-only entries (Team, Workspace Admin) are absent in local —
+  // the seam's explicit list, applied once per menu; not the operator's role.
+  const primaryMenu = filterNavForEdition(STUDIO_MENU_PRIMARY);
+  const footerMenu = filterNavForEdition(STUDIO_MENU_FOOTER);
 
   return (
     <aside
@@ -105,7 +111,7 @@ export function StudioSidebar({
           <div key={group}>
             {!collapsed && <div className="sh-group">{group}</div>}
             {collapsed && <div className="sh-group-rule" aria-hidden />}
-            {STUDIO_MENU_PRIMARY.filter((m) => m.group === group && isNavItemVisible(m.requiredExposure, exposure)).map((m) => {
+            {primaryMenu.filter((m) => m.group === group && isNavItemVisible(m.requiredExposure, exposure)).map((m) => {
               const Icon = m.icon;
               const isActive = activeId === m.id;
               const alert = alerts[m.id];
@@ -135,7 +141,7 @@ export function StudioSidebar({
 
       {/* Footer — Docs external + Settings */}
       <div className="sh-footer">
-        {STUDIO_MENU_FOOTER.map((m) => {
+        {footerMenu.map((m) => {
           const Icon = m.icon;
           const isActive = activeId === m.id;
           if (m.external) {

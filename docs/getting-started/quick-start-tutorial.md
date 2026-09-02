@@ -33,9 +33,11 @@ The following files were used as context for generating this wiki page:
 
 
 
-This document provides a hands-on tutorial for getting started with Automatos AI. You will learn how to create an agent, connect tools, run a streaming chat, and execute a workflow.
+This document provides a hands-on tutorial for getting started with Automatos AI. You will learn how to create an agent, connect tools, run a streaming chat, and execute a Playbook.
 
-**Prerequisites**: This tutorial assumes you have completed the installation described in [Installation & Setup](2.1) and have the application running.
+**Prerequisites**: This tutorial assumes you have completed the installation described in [Self-hosting — the local edition](self-hosting.md) (or [Installation & Setup](installation-setup.md)), have the application running, and have stored one LLM key (`.env` or Settings → API Keys).
+
+**Shortest path in the local edition**: a fresh instance is already seeded with Auto, a starter roster (Researcher, Writer, Analyst) and one Playbook, *Two-minute brief*. Open **Playbooks**, run it with a topic of your own, and follow the execution log — the Analyst's output is the brief. The welcome Deliverable under **Deliverables → Blogs** repeats these steps. The sections below then show how each piece is built.
 
 ---
 
@@ -72,7 +74,7 @@ sequenceDiagram
 
 ## Step 2: Connect Tools and Skills
 
-Tools allow agents to interact with the outside world (e.g., Slack, GitHub, Jira) via Composio.
+Tools allow agents to interact with the outside world (e.g., Slack, GitHub, Jira) via Composio. In the local edition that needs your own `COMPOSIO_API_KEY` in `.env` (then `docker compose up -d backend`; the catalogue syncs itself on that boot). Without one the Tools page says integrations are disabled, Composio tools are not offered to agents, and the native platform tools — the `platform_*` actions Auto uses, documents, Deliverables, Code Canvas — keep working. See [Self-hosting §7](self-hosting.md#7-bring-your-own-composio-key-optional).
 
 ### Tool Assignment Logic
 Tools are assigned to agents through the `agent_app_assignments` table. When an agent is executed, the `ToolRouter` fetches these assignments to build the available toolset for the LLM.
@@ -123,11 +125,11 @@ graph TD
 
 ---
 
-## Step 4: Execute a Workflow (Recipe)
+## Step 4: Execute a Playbook
 
-Workflows (or "Recipes") are sequences of steps executed by one or more agents. For simple automation, the system uses the `RecipeDirectExecutor`.
+Playbooks (`workflow_recipes` in the schema; "recipe" in older code paths) are sequences of steps executed by one or more agents. For simple automation, the system uses the `RecipeDirectExecutor`. The seeded *Two-minute brief* is one: Researcher → Writer → Analyst, three steps, native tools only.
 
-### Workflow Execution Lifecycle
+### Playbook Execution Lifecycle
 1.  **Context Assembly**: Uses `ContextService(RECIPE)` to build a system prompt containing the recipe's goal and current step instructions [orchestrator/api/recipe_executor.py:9-12]().
 2.  **Scratchpad**: Agents use a `RecipeScratchpad` to pass data between steps without bloating the context window [orchestrator/api/recipe_executor.py:15-16]().
 3.  **Notifications**: On completion, the `NotificationDispatcher` sends an event (e.g., `playbook_complete`) to the user's notification bell [orchestrator/api/recipe_executor.py:45-61]().
@@ -148,7 +150,7 @@ Upon finishing a recipe, the `ReportService` generates a Markdown summary includ
 | **Create Agent** | `AgentFactory.create_agent` | [orchestrator/modules/agents/factory/agent_factory.py]() |
 | **Route Chat** | `UniversalRouter.route` | [orchestrator/core/routing/engine.py]() |
 | **Execute Tool** | `UnifiedToolExecutor.execute` | [orchestrator/modules/tools/tool_router.py]() |
-| **Run Workflow** | `execute_recipe_direct` | [orchestrator/api/recipe_executor.py]() |
+| **Run Playbook** | `execute_recipe_direct` | [orchestrator/api/recipe_executor.py]() |
 | **Stream Response** | `StreamingChatService.stream` | [orchestrator/consumers/chatbot/service.py]() |
 
 **Sources**: [orchestrator/api/agents.py:31](), [orchestrator/api/chat.py:30](), [orchestrator/api/recipe_executor.py:1]()

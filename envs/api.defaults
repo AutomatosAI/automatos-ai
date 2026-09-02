@@ -33,22 +33,60 @@ REDIS_PORT=6379
 ENVIRONMENT=development
 LOG_LEVEL=INFO
 
-# Document conversion sidecar (compose profile: tools) [ACTIVE]
+# Document conversion sidecar (compose profile: all) [ACTIVE]
 GOTENBERG_URL=http://gotenberg:3000
 
 # -----------------------------------------------------------------------------
-# Edition & auth
+# Edition & auth [ACTIVE] — the ONE shipped flag (PRD-175)
 # -----------------------------------------------------------------------------
-# [PRD-150] OSS edition: local auth provider, single workspace, no login.
-EDITION=oss
-AUTH_PROVIDER=local
+# local -> no Clerk, no login, single shared workspace. config.py forces
+# REQUIRE_AUTH=false when AUTH_EDITION=local, so operators set ONE flag, not
+# three that can silently contradict. Flip to saas (+ Clerk keys in the root
+# .env) for a Clerk-mode local stack; Railway/SaaS is unaffected (it sets its
+# own env per service and never reads this file).
+AUTH_EDITION=local
 
-# [ACTIVE] Interim no-Clerk mode until PRD-150 lands (anonymous auth path).
-# PRD-150 replaces this with AUTH_PROVIDER=local; flip back to true then.
-REQUIRE_AUTH=false
+# [ACTIVE] Persist the auto-generated credential-encryption key on the backend_data
+# volume (compose) — inside the image it would vanish on the next recreate and every
+# stored API key would become undecryptable. Set CREDENTIAL_ENCRYPTION_KEY in .env
+# to pin your own key instead.
+CREDENTIAL_KEY_FILE=/app/data/.credential_key
 
-# [ACTIVE] Leave blank — generated and persisted on first boot (PRD-150 Q3).
-DEFAULT_WORKSPACE_ID=
+# [ACTIVE] The single local workspace every anonymous request resolves to.
+# This exact id is what the CI seed (orchestrator/scripts/init_test_db.py) and
+# the entrypoint seed create; validate_auth_edition() (config.py) hard-requires
+# it non-empty in local mode. Fixed well-known UUID (workspaces.id is UUID).
+DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+
+# [ACTIVE] The local operator's identity (users id 1, seeded by the entrypoint);
+# the anonymous local session carries this email so chat and attribution resolve
+# a real user. Editable profile = PRD-233 S6.
+LOCAL_OPERATOR_EMAIL=local@automatos.local
+
+# [ACTIVE] Embeddings (RAG, memory, semantic routing) resolve their provider key
+# from the PLATFORM key slot — core/llm/workspace_keys.py reads the key row of
+# THIS workspace (the PR #610 'read the key where it lives' seam). Locally that
+# is the single default workspace, so the OpenRouter/OpenAI key you add in
+# Settings → API Keys powers embeddings too. Unset, every document upload ends
+# 'failed' (no embedding provider) while the API still says 'uploaded'.
+PLATFORM_KEY_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1
+
+# -----------------------------------------------------------------------------
+# Workspace worker — the Code Canvas runtime, in the default compose profile
+# -----------------------------------------------------------------------------
+# [ACTIVE] Where the backend reaches the worker's internal HTTP API (file
+# browser, Code Canvas sessions, sandboxed exec — core/workspace_client.py).
+# config.py's code default is http://localhost:8081, which inside the backend
+# container reaches nothing; the compose service name is the answer (PRD-233 S1).
+WORKER_INTERNAL_URL=http://workspace-worker:8081
+# WORKER_INTERNAL_TOKEN -> root .env (optional; compose passes it to both services)
+
+# [ACTIVE] The worker's files live on YOUR machine: compose bind-mounts the host
+# directory ${AUTOMATOS_WORKSPACE_DIR:-./workspaces} (root .env dial) at
+# /workspaces in both containers — read-write for the worker, read-only here.
+# This is the in-container path; it stays fixed when you move the host directory.
+# The worker reads the same variable through worker_config.workspace_root().
+WORKSPACE_VOLUME_PATH=/workspaces
 
 # -----------------------------------------------------------------------------
 # Object storage — MinIO (S3-compatible, ships in the compose stack)
@@ -60,8 +98,9 @@ S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
 S3_USE_PATH_STYLE=true
 # MinIO ignores region; kept for AWS-API compatibility. [ACTIVE]
 AWS_REGION=us-east-1
-# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY -> root .env
-# (locally these are the MinIO root credentials)
+# The store's credentials arrive as AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, which
+# compose maps FROM S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY / S3_REGION in .env
+# (MinIO root creds by default) — a developer's own AWS_* never reaches the store.
 
 # [ACTIVE] Vector store: pgvector in the main Postgres is the default.
 # AWS S3 Vectors is a SaaS-only opt-in; never enable it against MinIO.
@@ -76,13 +115,14 @@ S3_VECTORS_ENABLED=false
 # -----------------------------------------------------------------------------
 # Memory & vectors
 # -----------------------------------------------------------------------------
-# [ACTIVE] mem0 long-term memory (L3) — compose service DNS, port 8765.
-# Overrides the Railway-internal default in config.py (removed by PRD-152).
+# HONEST NOTE: neither mem0 nor Qdrant ships in the default compose stack today,
+# so durable (L3) memory and field memory are OFF in the local edition — the
+# backend degrades gracefully (these DNS names simply never resolve). Adding
+# both as optional compose profiles is PRD-233 territory. If you run your own
+# instances, point these at them and the features light up.
 MEM0_API_URL=http://mem0-server:8765
-# MEM0_API_KEY -> root .env
-
-# [ACTIVE] Qdrant field memory (PRD-108). Service lands in the consolidated
-# compose (PRD-153); the backend boots gracefully if it is absent.
+# MEM0_API_KEY: set it in envs/api.local if you run your own mem0 (.env values are
+# substitution-only; compose does not pass MEM0_API_KEY through)
 QDRANT_URL=http://qdrant:6333
 
 # -----------------------------------------------------------------------------
@@ -95,5 +135,5 @@ LOG_RELAY_URL=
 LOKI_URL=
 PROMETHEUS_URL=
 AGENT_OPT_WORKER_URL=
-# Enable observability locally via:  docker compose --profile observability up
-# plus envs/observability.defaults (see that file).
+# Observability (Loki/Prometheus/Grafana) is not part of this compose file — see the
+# automatos-monitoring repo; envs/observability.defaults documents the variables.

@@ -41,7 +41,7 @@ import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { apiClient } from '@/lib/api-client'
-import { useUser } from '@clerk/nextjs'
+import { useUser } from '@/lib/auth-hooks'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
 import { GitHubImportModal } from './github-import-modal'
 

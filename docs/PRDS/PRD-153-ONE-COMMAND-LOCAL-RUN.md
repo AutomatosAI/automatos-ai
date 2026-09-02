@@ -1,6 +1,6 @@
 # PRD-153: One-Command Local Run — Compose Consolidation & Schema Lifecycle
 
-**Status:** Draft
+**Status:** Draft — **ABSORBED 2026-08-29 into PRD-209 S2/S7/S8/S9** (open-core Phase 0; see `PRD-WAVE-OPEN-CORE.md`): schema lifecycle → S2, `envs/*.defaults` consumer → S7, honest QUICKSTART (M1) → S8, deletion of the six drifted compose files → S9. Do not build from this doc — §10's program table is superseded by the wave doc.
 **Author:** Gerard Kavanagh (with Auto)
 **Date:** 2026-06-09
 **Type:** Refactor / Consolidation (one canonical compose; one schema lifecycle; delete six drifted compose files)

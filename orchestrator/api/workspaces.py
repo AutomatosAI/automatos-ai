@@ -107,7 +107,7 @@ async def get_current_workspace(
 
         member_role = resolve_workspace_role(db, ctx) or "viewer"
 
-    from services.plan_tiers import exposure_for_plan
+    from services.plan_tiers import exposure_for_local_edition, exposure_for_plan
 
     return {
         "id": str(workspace.id),
@@ -121,7 +121,12 @@ async def get_current_workspace(
         # marketplace depth + tier display info. Field addition only, same route
         # (route-manifest unchanged). Hidden ≠ deleted (D5): the client trims
         # nav/marketplace labels; no route or data is removed.
-        "exposure": exposure_for_plan(workspace.plan or "basic"),
+        "exposure": (
+            # PRD-233 S7: the local edition is never plan-gated (see plan_tiers).
+            exposure_for_local_edition()
+            if config.AUTH_EDITION == "local"
+            else exposure_for_plan(workspace.plan or "basic")
+        ),
         # PRD-222 W1S2: server-side onboarding stage + trial snapshot ({stage,
         # trial}). Field addition only — no new route (route-manifest unchanged).
         # PRD-222 W2·S6 (US-022) retired the legacy new-workspace boolean — its

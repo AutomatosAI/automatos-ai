@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { MainLayout } from '@/components/layout/main-layout'
 import { Chat } from '@/components/chatbot/chat'
+import { FirstRunNudge } from '@/components/local/first-run-nudge'
 import { AppSidebar } from '@/components/chatbot/sidebar'
 import { StudioChatShell } from '@/components/chatbot/studio-chat-shell'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
@@ -100,15 +101,20 @@ export default function ChatPage() {
   }, [chatIdParam, currentChatId, chatLoadAttempted])
 
   const chatBody = (
-    <Chat
-      key={`${currentChatId || 'new'}-${chatInstance}`}
-      id={currentChatId}
-      initialMessages={currentMessages}
-      initialVisibilityType={selectedChat?.visibility || 'private'}
-      isReadonly={false}
-      autoResume={false}
-      initialLastContext={selectedChat?.lastContext}
-    />
+    <>
+      {/* PRD-233 S3: local-edition first-run nudge — renders nothing in saas
+          or once an LLM key exists; a zero-height overlay in both layouts. */}
+      <FirstRunNudge />
+      <Chat
+        key={`${currentChatId || 'new'}-${chatInstance}`}
+        id={currentChatId}
+        initialMessages={currentMessages}
+        initialVisibilityType={selectedChat?.visibility || 'private'}
+        isReadonly={false}
+        autoResume={false}
+        initialLastContext={selectedChat?.lastContext}
+      />
+    </>
   )
 
   // Studio desktop: CD's three-column ledger layout

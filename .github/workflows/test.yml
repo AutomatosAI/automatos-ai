@@ -392,21 +392,24 @@ jobs:
         run: |
           python -m evals.retrieval_recall --json
 
-  # PRD-176 F010 — the reliability bar: Alembic replays from zero to exactly
-  # ONE head. NON-REQUIRED (same posture as the test net) until the Step-2
-  # single-baseline squash lands.
+  # PRD-176 F010 / PRD-209 S2 — the reliability bar: a fresh database reaches
+  # exactly ONE head via the SUPPORTED fresh-clone path. NON-REQUIRED (same
+  # posture as the test net) until the owner flips branch protection (Q2).
   #
-  # Two gates, deliberately separated by the review §7 two-step:
+  # Two gates:
   #   1. single-head invariant — asserts `alembic heads` returns exactly one
-  #      revision. Step 1 (the prd176_merge_heads merge revision) delivers this
-  #      NOW, so this step is the permanent regression guard against a new
-  #      divergent head. It needs no database.
-  #   2. from-zero replay — stands up an EMPTY pgvector database and runs
-  #      `alembic upgrade heads`. This is the Step-2 gate: it goes green once the
-  #      single-baseline squash reconciles the tables that today are ALTER-ed but
-  #      never CREATE-d. Runs with continue-on-error until then so the job
-  #      reports the real state without falsely blocking; flip to a hard failure
-  #      (drop continue-on-error) the moment Step 2 merges.
+  #      revision. The 12-head forest was collapsed by prior merge revisions
+  #      (PRD-176/203/204/230 …), so this is the permanent regression guard
+  #      against a new divergent head. It needs no database.
+  #   2. fresh-clone boot path (PRD-209 S2) — the approved shape is merge-to-one-
+  #      head (done) + a stamped initdb, NOT a full-forest squash (deleting
+  #      revision files would strand Railway prod). So this gate reproduces what
+  #      a fresh compose volume actually does: load init_complete_schema.sql
+  #      (which CREATEs the schema AND stamps alembic_version at the head), then
+  #      run `alembic upgrade heads` — a no-op at head. A pure from-base replay
+  #      is NOT the compose path and is deliberately not tested here (it crashes
+  #      on tables that are ALTER-ed but never CREATE-d in the historical forest).
+  #      Both gates are HARD (no continue-on-error) as of PRD-209 US-004.
   alembic-from-zero:
     name: Alembic from-zero — exactly one head (non-required)
     runs-on: ubuntu-latest
@@ -483,14 +486,134 @@ jobs:
         run: |
           psql -h 127.0.0.1 -U test -d alembic_zero_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-      # Gate 2 — from-zero replay (Step-2 gate). Non-blocking until the
-      # single-baseline squash lands; drop continue-on-error when it does.
-      - name: Replay all migrations from an empty database
-        continue-on-error: true
+      # Gate 2 — the SUPPORTED fresh-clone boot path (PRD-209 S2, revised
+      # 2026-08-29): scripts/init_fresh_db.py builds the CI-proven schema
+      # (create_all + raw-DDL extras) on the empty DB and stamps heads; then
+      # `alembic upgrade heads` must be a no-op, and the tables the live local
+      # test found MISSING from the old snapshot must exist. The old
+      # init_complete_schema.sql was a stale hand-maintained copy (fresh DBs
+      # got 107 of prod's ~152 tables); it is deleted — the 41 orphan-root
+      # revisions make a from-empty forest replay impossible until the lineage
+      # is repaired (recorded follow-on in the PRD addendum).
+      # HARD (no continue-on-error) as of PRD-209 US-004.
+      - name: Fresh-clone boot path — init_fresh_db (create_all + stamp), then upgrade heads
+        env:
+          PGPASSWORD: test
+          DATABASE_URL: postgresql://test:test@127.0.0.1:5432/alembic_zero_db
         run: |
-          echo "Replaying alembic upgrade heads against an empty pgvector DB..."
+          echo "Building the fresh schema via scripts/init_fresh_db (CI-proven path)..."
+          python -m scripts.init_fresh_db
+          echo "Verifying the stamp equals the single alembic head..."
+          STAMP="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT version_num FROM alembic_version;')"
+          HEAD="$(alembic heads 2>/dev/null | awk 'NR==1{print $1}')"
+          echo "stamp=[${STAMP}] alembic head=[${HEAD}]"
+          if [ "${STAMP}" != "${HEAD}" ]; then
+            echo "::error::stamp '${STAMP}' != alembic head '${HEAD}' — init_fresh_db stamped somewhere other than the head."
+            exit 1
+          fi
+          echo "Running 'alembic upgrade heads' — must be a no-op at head..."
           alembic upgrade heads
-          echo "From-zero replay succeeded — Step 2 baseline is in place. Remove continue-on-error on this step."
+          echo "Asserting the tables the stale snapshot was missing exist on the fresh path..."
+          for t in notifications personas channel_connections marketplace_widgets workspaces document_chunks codegraph_projects; do
+            FOUND="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "SELECT to_regclass('${t}');" | tr -d ' ')"
+            if [ -z "${FOUND}" ]; then
+              echo "::error::fresh schema is missing table '${t}' — the create_all path regressed."
+              exit 1
+            fi
+          done
+          echo "Asserting what orphan-root ORDERING used to lose on a fresh path (PRD-233 live-test finding)..."
+          # prd82a (a root) adds agent_reports.orchestration_task_id before agent_reports exists in the
+          # replay; prd133b (another root) builds v_workspace_outputs on it. The generator's
+          # model-column reconciliation + idempotent raw-SQL re-run passes must leave both present.
+          for chk in "v_workspace_outputs" ; do
+            FOUND="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "SELECT to_regclass('${chk}');" | tr -d ' ')"
+            if [ -z "${FOUND}" ]; then
+              echo "::error::fresh schema is missing '${chk}' — the idempotent raw-SQL (views) pass regressed."
+              exit 1
+            fi
+          done
+          COL="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc "SELECT column_name FROM information_schema.columns WHERE table_name='agent_reports' AND column_name='orchestration_task_id';" | tr -d ' ')"
+          if [ -z "${COL}" ]; then
+            echo "::error::fresh schema is missing agent_reports.orchestration_task_id — the model-column reconciliation pass regressed."
+            exit 1
+          fi
+          ROWS="$(psql -h 127.0.0.1 -U test -d alembic_zero_db -tAc 'SELECT count(*) FROM v_workspace_outputs;' | tr -d ' ')"
+          echo "v_workspace_outputs answers (rows=${ROWS})"
+          echo "Fresh-clone boot path succeeded: complete schema + stamp + no-op upgrade."
+
+  # Prod-image parity (2026-08-30, after #650 shipped the local edition's
+  # Dockerfile defaults to production — Clerk outage, #668). Railway builds the
+  # three Dockerfiles with NO build args (railway.json: DOCKERFILE, target
+  # production), so this lane builds exactly that and checks what got baked:
+  # the frontend's edition literal, the backend's graph extras, the worker's
+  # browser. Non-required like the other lanes; the required flip is the repo
+  # admin's call.
+  prod-image-parity:
+    name: Prod images built with default args carry production behaviour (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Frontend — edition baked with no args must be saas
+        run: |
+          docker build --target production -t parity-fe frontend/
+          # lib/auth-edition.ts compiles to `"local"===<INLINED>.trim().toLowerCase()?"local":"saas"`
+          # (Next folds the `|| ''` away), so the baked edition is the literal on the right.
+          LOCAL=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"===\"local\".trim()" .next 2>/dev/null | wc -l')
+          SAAS=$(docker run --rm parity-fe sh -c 'grep -rlF "\"local\"===\"saas\".trim()" .next 2>/dev/null | wc -l')
+          echo "chunks with local literal: $LOCAL; with saas literal: $SAAS"
+          if [ "$LOCAL" != "0" ] || [ "$SAAS" = "0" ]; then
+            echo "::error::the production frontend image bakes the LOCAL edition — check ARG NEXT_PUBLIC_AUTH_EDITION in frontend/Dockerfile"
+            exit 1
+          fi
+      - name: Backend — graph extras present with no args
+        run: |
+          docker build --target production -t parity-be orchestrator/
+          docker run --rm parity-be python -c "import graspologic, graphify.cluster; print('leiden extras present')"
+      - name: Worker — headless browser present with no args
+        run: |
+          docker build -t parity-wk services/workspace-worker/
+          # --entrypoint: the worker image's entrypoint.sh execs the worker itself
+          # (ignoring CMD) and dies on Redis — we only want to look inside the image.
+          docker run --rm --entrypoint sh parity-wk -c 'ls /opt/playwright-browsers | grep -q chromium && echo "chromium present"'
+
+  # PRD-209 S4 (F051 / deployability J4) — the schema-drift net for the "four
+  # writers of schema truth" (init_complete_schema.sql, the Alembic migration
+  # forest, create_all-at-boot, and inline ALTERs inside migrations). No lane
+  # caught July's ALTER-ed-but-never-CREATE-d table, which crashed a from-base
+  # replay with `relation "..." does not exist` (the very failure the from-zero
+  # lane above sidesteps by booting via init-SQL+stamp instead of a replay).
+  #
+  # This lane runs scripts/ci/schema_drift_check.py — a PURE, static parse (no
+  # database, no Base.metadata import, no live Alembic) asserting that every table
+  # a migration ALTERs / add_columns / indexes / foreign-keys is also CREATE-d by
+  # some migration or by init_complete_schema.sql. Green today (the known
+  # create_all-only orphans are a documented baseline in the script); RED on the
+  # NEXT new orphan. Stdlib only — no pip install, no Postgres service, so it is
+  # fast and cannot flake. The pure diff core and the planted-divergence fixtures
+  # live in orchestrator/tests/test_prd209_schema_drift.py (run by the required
+  # pytest suite, so a new orphan also reddens that suite).
+  #
+  # NON-REQUIRED at introduction (the workflow's established posture); flipping it
+  # to a required check once green is the repo admin's call (PRD-209 Q2).
+  schema-drift:
+    name: Schema-drift check (four writers) (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # HARD gate — red on a table ALTER-ed by a migration but CREATE-d by no
+      # migration and not by init_complete_schema.sql (beyond the baseline).
+      - name: Schema-drift check (ALTER-ed-but-never-CREATE-d tables)
+        run: python scripts/ci/schema_drift_check.py
 
   # PRD-182 W12-S1 (F034) + S3 (F044) — the frontend CI lane. 148k lines of TS
   # were entirely ungated: `next.config.js` sets `ignoreBuildErrors:true` /

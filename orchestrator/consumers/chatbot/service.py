@@ -158,6 +158,40 @@ def build_tool_caller_context(
     return ctx or None
 
 
+def resolve_known_user_name(db, user_id: Optional[int]) -> Optional[str]:
+    """PRD-233 S6: the driving human's display name from their ``users`` row.
+
+    ``user_id`` is the INTERNAL integer ``users.id`` (the value
+    ``api/chat.py::get_user_id`` resolves — never ``ctx.user.id``, which is a
+    Clerk string in saas and the operator's email in local). Blank/whitespace
+    names and missing rows resolve to None so the greeting path keeps its
+    "ready to help" fallback. Best effort: a DB error never fails a turn.
+    """
+    if not user_id:
+        return None
+    try:
+        from core.models import User
+
+        row = db.query(User.name).filter(User.id == user_id).first()
+    except Exception:  # noqa: BLE001 — identity is a nicety, never a failed turn
+        logger.debug("[PRD-233] users.name lookup skipped for user %s", user_id, exc_info=True)
+        return None
+    name = (row[0] or "").strip() if row else ""
+    return name or None
+
+
+def atom_identity_clause(user_name: Optional[str]) -> str:
+    """The ATOM prompt's "who am I talking to" clause (PRD-233 S6).
+
+    Mirrors the full path's personality wording ("You're talking to <name>",
+    consumers/chatbot/personality.py) so both lanes greet from ONE source —
+    ``ConversationState.user_name``. Empty (prompt byte-identical) when the
+    name is unknown.
+    """
+    name = user_name.strip() if isinstance(user_name, str) else ""
+    return f" You're talking to {name}." if name else ""
+
+
 class ToolExecutionTracker:
     """
     Tracks tool executions within a conversation turn to prevent looping.
@@ -869,6 +903,18 @@ class StreamingChatService:
             widget_mode=self.widget_mode,
             db_session=self.db,
         )
+        # PRD-233 S6: seed the greeting with the driving human's name from their
+        # users row. IdentitySection already renders the ``user_name`` kwarg the
+        # orchestrator forwards from this state ("You're talking to <name>");
+        # memory-derived names still win there (``_user_name`` is read first).
+        # The ATOM prompt below reads the same state — one source, both lanes.
+        # Local edition only (owner rule for this wave: the SaaS prompt stays
+        # byte-identical). Flipping the seed on for saas is this one condition.
+        if config.AUTH_EDITION == "local":
+            smart_chat.orchestrator.state.user_name = (
+                smart_chat.orchestrator.state.user_name
+                or resolve_known_user_name(self.db, getattr(self, "_driving_user_id", None))
+            )
 
         _complexity = (
             complexity_assessment.complexity
@@ -1027,7 +1073,8 @@ class StreamingChatService:
 
         _atom_prompt = (
             f"You are {agent_runtime.metadata.name}, an AI assistant on the Automatos platform.\n\n"
-            f"{_time_ctx}. Read the conversation and match the user's energy. "
+            f"{_time_ctx}.{atom_identity_clause(smart_chat.get_user_name())} "
+            "Read the conversation and match the user's energy. "
             "If they're frustrated, be direct — skip the niceties and lead with the answer. "
             "If they're curious, explain the why. If they're casual, be casual back. "
             "If they're formal, match it. Never be artificially cheerful when someone is having a bad time. "
@@ -2147,6 +2194,9 @@ class StreamingChatService:
         # recall guard (user_id here is the INTERNAL integer id — the same
         # value the PRD-196 subject tag carries at store time).
         self._viewer_subject_id = f"user:{user_id}" if user_id else None
+        # PRD-233 S6: the same integer id seeds the greeting (see
+        # _prepare_llm_messages → resolve_known_user_name).
+        self._driving_user_id = user_id
 
         try:
             # Ensure workspace_id is available

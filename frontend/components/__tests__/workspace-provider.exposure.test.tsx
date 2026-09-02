@@ -15,6 +15,9 @@ const { getTokenMock } = vi.hoisted(() => ({
 vi.mock('@clerk/nextjs', () => ({
   useAuth: () => ({ isSignedIn: true, getToken: getTokenMock }),
   useOrganization: () => ({ organization: null }),
+  useUser: () => ({ isLoaded: true, isSignedIn: true, user: null }),
+  useSession: () => ({ isLoaded: true, isSignedIn: true, session: null }),
+  useClerk: () => ({ signOut: async () => {} }),
 }))
 
 vi.mock('next/navigation', () => ({

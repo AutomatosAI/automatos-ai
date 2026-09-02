@@ -1,105 +1,143 @@
-# 🤝 Contributing to Automatos AI
+# Contributing to Automatos AI
 
-> **"We're building the operating system for AI agents. We need your help."**
-
-First off, thank you for considering contributing to Automatos AI! It's people like you that make open source such a powerful force.
-
----
-
-## 🌟 Ways to Contribute
-
-You don't need to be an AI expert to help out. Here are high-impact ways to contribute:
-
-### 1. 🛠️ Build Tools (Best for Beginners)
-The easiest way to add value is to add a new tool to the registry.
-- **Idea:** Add a tool for Jira, Trello, GitHub, or your favorite API.
-- **Guide:** See [Developer Guide > Adding a Tool](DEVELOPER_GUIDE.md#tutorial-1-adding-a-new-tool).
-
-### 2. 🐛 Fix Bugs
-Find a bug? Fix it!
-- Look for issues labeled `good first issue`.
-- Check `FIXME` or `TODO` comments in the code.
-
-### 3. 📝 Improve Documentation
-Docs are never perfect.
-- Fix typos.
-- Add examples.
-- Write tutorials.
-- Translate docs.
-
-### 4. 🧠 Enhance Core Modules
-Ready for a challenge?
-- Improve the RAG pipeline.
-- Optimize the memory system.
-- Add new agent coordination patterns.
+This is the full contributor guide. The short version lives in the repository
+root, [CONTRIBUTING.md](../CONTRIBUTING.md); where the two overlap, they say
+the same thing.
 
 ---
 
-## 🚀 Pull Request Process
+## The deal, in three lines
 
-### 1. Fork & Clone
-Fork the repo to your account and clone it locally.
+1. **Licence.** The repository is Apache-2.0. Under §5 of that licence your
+   contribution may be distributed in every edition of the platform — the
+   local edition you run yourself, and the hosted and commercial editions run
+   by the maintainers — under the same terms, with no separate agreement.
+   What you contribute stays Apache-2.0 for everyone, and it ships everywhere
+   the code ships.
+2. **Sign-off, not CLA.** Every commit carries a `Signed-off-by:` trailer
+   (`git commit -s`), your [Developer Certificate of Origin](https://developercertificate.org)
+   attestation. The `dco` check on each pull request verifies it and fails on
+   any commit without one. There is no CLA to sign.
+3. **One codebase, two shipped editions.** The local edition
+   (`AUTH_EDITION=local`, `docker compose up`, no accounts) and the hosted
+   edition (`saas`, automatos.app) are the same code behind one runtime flag.
+   A change must keep both working; CI gates both.
 
-### 2. Create a Branch
-Use a descriptive name:
+---
+
+## Where to contribute capability
+
+Capability lands best where it never conflicts with core, in this order:
+
+| First | Second |
+|---|---|
+| **Skills, tools, MCP integrations, Playbooks, agent packages.** A new skill or platform action needs no knowledge of the orchestrator's internals and reaches both editions unchanged. | **Core** — auth, storage, the tool router, migrations, the boot lifecycle. A core change needs the schema-drift, route-contract and fresh-clone smoke lanes to stay green in both editions. |
+
+Open an issue first for anything that touches auth, storage, the tool router
+or a migration. For the mechanics of adding a platform action, read
+[`orchestrator/modules/tools/README.md`](../orchestrator/modules/tools/README.md).
+
+Other welcome contributions: bug fixes (look for `good first issue`),
+documentation (this directory — most pages are DeepWiki-generated, a few are
+hand-maintained and listed in [docs/README.md](README.md)), and tests.
+
+---
+
+## Development environment
+
+The compose stack **is** the development environment — there is no separate
+bare-metal setup:
+
 ```bash
-git checkout -b feat/add-jira-tool
-# or
-git checkout -b fix/memory-leak-in-stream
+git clone https://github.com/<you>/automatos-ai.git
+cd automatos-ai
+cp .env.example .env        # POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY + one LLM key
+docker compose up
 ```
 
-### 3. Make Changes
-- Follow the [Developer Guide](DEVELOPER_GUIDE.md).
-- Keep changes focused (one feature per PR).
-- Add tests for new code.
-
-### 4. Test & Lint
-Before pushing, ensure everything is green:
-```bash
-# Run tests
-pytest
-
-# Check style
-ruff check .
-```
-
-### 5. Push & Open PR
-Push to your fork and open a Pull Request against `main`.
-- **Title**: Clear and descriptive (e.g., "feat: Add Jira integration tool").
-- **Description**: Explain *what* you did and *why*.
-- **Screenshots**: If you changed the UI, show us!
+- The backend and frontend containers bind-mount their source directories
+  (`./orchestrator` → `/app`, `./frontend` → `/app`) and run in reload mode
+  (`uvicorn --reload`, `npm run dev`), so edits are picked up without a
+  rebuild. Dependency changes need `docker compose up -d --build`.
+- For frontend-only work you can run the UI on the host instead
+  (`cd frontend && npm install && npm run dev`) against the containerised API
+  at `http://localhost:8000`.
+- Database migrations run on every backend boot (`alembic upgrade heads`);
+  a fresh, empty database is built by `python -m scripts.init_fresh_db` first.
+- Everything else — services, ports, dials, troubleshooting — is in the
+  [self-hosting guide](getting-started/self-hosting.md).
 
 ---
 
-## 🎨 Style Guidelines
+## Pull request process
 
-- **Python**: We follow PEP 8. Use `ruff` to format.
-- **Types**: All function arguments and return values must have type hints.
-- **Docstrings**: Every public function/class needs a docstring.
-- **Async**: Use `async/await` for all I/O operations.
+1. **Fork and branch** from `main` with a descriptive name
+   (`feat/…`, `fix/…`, `docs/…`).
+2. **Keep it focused** — one change per PR. Add or extend tests with the
+   change: features and bug fixes ship with the test that proves them.
+3. **Sign off every commit**: `git commit -s -m "feat: …"`. Amend a missed
+   one with `git commit --amend -s --no-edit` (or `git rebase --signoff`
+   for a range).
+4. **Open the PR against `main`** with a clear title, what changed and why,
+   and screenshots for UI changes. Link the issue if there is one.
+5. **CI is the gate.** Every lane runs on the PR; fix what it reports. The
+   lanes and what each one proves:
+
+| Workflow · job | What it checks |
+|---|---|
+| `test` · `orchestrator-tests` | The backend suite (`pytest tests`) against an ephemeral Postgres, in the local edition, with a coverage ratchet. **Required.** |
+| `test` · `alembic-from-zero` | Exactly one Alembic head, and the fresh-clone boot path (`init_fresh_db`, then `upgrade heads`). |
+| `test` · `schema-drift` | No table is `ALTER`-ed by a migration without some writer `CREATE`-ing it (`scripts/ci/schema_drift_check.py`). |
+| `test` · `frontend-ci` | vitest, baselined `tsc`, eslint report, and the route contract (every backend path the frontend calls exists in the route manifest). |
+| `test` · eval lanes | NL2SQL, retrieval-recall, memory-recall and graph-uplift harness self-tests (informational). |
+| `smoke-fresh-clone` | `docker compose up` from an empty checkout with only the three secrets reaches a green `/health` and `/health/ready`. |
+| `import-linter` | Module-boundary contracts (`orchestrator/.importlinter`). |
+| `dco` | A `Signed-off-by:` trailer on every commit. |
+| `gitleaks`, `CodeQL`, `malware-scan`, `check-shopify-isolation` | Secrets, static analysis, dependency hygiene, Shopify-package isolation. |
+
+Lanes marked non-required in their workflow file still run and still report;
+treat red as red.
 
 ---
 
-## 📜 Code of Conduct
+## Conventions the code enforces
 
-**Be kind. Be respectful. Be constructive.**
-
-We are committed to providing a friendly, safe, and welcoming environment for all, regardless of gender, sexual orientation, disability, ethnicity, religion, or similar personal characteristic.
-
-Harassment of any kind will not be tolerated.
+- **`orchestrator/config.py` is the only module that reads the environment.**
+  No `os.getenv` elsewhere; add a config attribute and read it through
+  `config`.
+- **Canonical terms** in user-facing copy and identifiers: *Playbook* (not
+  recipe), *Mission* (not workflow or job), *Deliverable* (not output or
+  artifact), *Knowledge Graph*, *Command Center*, and *Auto* is a name.
+- **Replace, don't shim.** When a path is superseded, the old one is deleted
+  in the same PR — no `_legacy` suffixes, no compatibility branches.
+- **Data lives in the database.** Personas, agent definitions and seed
+  content are seeded into tables (`orchestrator/core/seeds/`), never read from
+  files at runtime.
+- **Python**: PEP 8, type hints on public functions, docstrings on public
+  classes and functions, `async`/`await` for I/O. **TypeScript**: the
+  project's ESLint/Prettier configuration.
+- **Editions.** Anything hosted-only is gated by `AUTH_EDITION` /
+  `isSaaS`, never by role; anything compose-only lives in `docker-compose.yml`
+  and `envs/*.defaults`, which the hosted deployment never reads.
 
 ---
 
-## 🏆 Recognition
+## Pull request checklist
 
-We love our contributors!
-- **All contributors** are listed in the repository.
-- **Major contributors** get shout-outs in our release notes.
-- **Consistent contributors** may be invited to join the core team.
+- [ ] Linked issue (if applicable)
+- [ ] Clear description of the change and the reason for it
+- [ ] Tests added or updated
+- [ ] Docs updated (`README.md`, `QUICKSTART.md` or `docs/` as needed)
+- [ ] Every commit signed off (`git commit -s`)
+- [ ] No linter or build errors; CI green
 
 ---
 
-**Questions?**
-Join our [Discord](https://discord.gg/automatos) and ask in the `#dev-chat` channel.
+## Code of Conduct
 
-**Happy Hacking!** 💻
+Participation is governed by the [Code of Conduct](../CODE_OF_CONDUCT.md).
+Report unacceptable behaviour to support@automatos.ai.
+
+## Questions
+
+Open an issue on the repository.

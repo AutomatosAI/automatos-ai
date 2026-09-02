@@ -56,7 +56,8 @@ import { ToolConfigModal } from './tool-config-modal'
 import { ToolDetailsModal } from './tool-details-modal'
 // import { AgentToolAssignment } from './agent-tool-assignment'
 import { EnhancedPagination } from '@/components/ui/pagination'
-import { useTools, useToolsStats, useToolCategories } from '@/hooks/use-tools-api'
+import { useTools, useToolsStats, useToolCategories, useIntegrationsStatus } from '@/hooks/use-tools-api'
+import { IntegrationsDisabledCard } from './integrations-disabled-card' // PRD-233 S2: honest no-key state
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { ComposioAppsSection } from './composio-apps-section' // PRD-36: Composio Integration
 import { ToolActionsModal } from './tool-actions-modal'
@@ -169,6 +170,7 @@ export function ToolsDashboard() {
   })
   const { data: statsData, error: statsError } = useToolsStats()
   const { data: categoriesData, error: categoriesError } = useToolCategories()
+  const { data: integrationsStatus } = useIntegrationsStatus()
   const disconnectAppMutation = useDisconnectApp()
   const queryClient = useQueryClient()
   const syncCacheMutation = useMutation({
@@ -618,6 +620,9 @@ export function ToolsDashboard() {
         }
       />
       </div>
+
+      {/* PRD-233 S2: no Composio key ⇒ say so instead of an empty grid */}
+      <IntegrationsDisabledCard status={integrationsStatus} />
 
       {/* Statistics Cards */}
       <StatsBar

@@ -9,7 +9,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useUser } from '@clerk/nextjs'
+import { useUser } from '@/lib/auth-hooks'
 import { LayoutGrid, LayoutList, Table2, Search } from 'lucide-react'
 
 import { useMissions } from '@/hooks/use-missions-api'

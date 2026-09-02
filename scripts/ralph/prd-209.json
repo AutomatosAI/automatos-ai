@@ -1,0 +1,157 @@
+{
+ "project": "Automatos AI Platform — PRD-209 Open-Core Phase 0: fresh-clone boot + honest CI",
+ "branchName": "ralph/prd-209-fresh-clone-boot",
+ "description": "SCOPE = docs/PRDS/PRD-209-PHASE2-WAVE-4-FRESH-CLONE-BOOT-HONEST-CI.md (seeded on this branch; program context docs/PRDS/PRD-WAVE-OPEN-CORE.md). Grounded @ origin/main 182cd6739 — re-verify every anchor by grep at build. BAKED OWNER DECISIONS (2026-08-29): Q1 = squash-spirit under FOUR HARD CONSTRAINTS (see US-002 — prod lineage must keep upgrading with NO manual prod step; if full-forest deletion cannot satisfy that, the merge-to-one-head + stamped-initdb variant IS the approved implementation, record which was built); Q6 = DEFAULT_WORKSPACE_ID reuses the EXISTING CI seed convention from orchestrator/tests (init_test_db.py seeds the local-edition workspace — match its id/type exactly; workspaces.id column type is the source of truth). BINDING RULES: SaaS path byte-identical (AUTH_EDITION default stays saas; zero behavioural change when saas — this wave touches compose/envs/docs/workflows/scripts/alembic-lineage/guards ONLY, no runtime code paths beyond the boot guard's existing contract); NEVER strand a stamped database — Railway prod sits at the current 12-head frontier and `alembic upgrade heads` must keep working from there; public repo — NO secrets in any committed file (envs/*.defaults carry only non-secret defaults; compose keeps the three `:?` secrets required); do NOT touch the required lanes' definitions (orchestrator-tests, ioc-scan) — only the named non-required lanes; no os.getenv outside config.py; no new tables/columns (US-002 is lineage-only, schema-shape unchanged); NEVER git add -A/./-u, never git stash -u; PURE tests locally (@integration skips; real-Postgres + boot lanes run in CI per-story push). Commit prefix feat(prd-209).",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "S1 — commit the entrypoint exec bit + tracked-mode guard",
+   "description": "docker-entrypoint.sh is tracked 100644 (verify: git ls-files -s docker-entrypoint.sh); compose bind-mounts it over the image's chmod +x stub (docker-compose.yml:~188) so the backend dies at exec. Flip the tracked mode (git update-index --chmod=+x docker-entrypoint.sh — a mode-only change, no content edit) and add a pure guard test that reads `git ls-files -s docker-entrypoint.sh` and asserts mode 100755 (contrast: services/workspace-worker/entrypoint.sh is already 100755 — the bit commits fine in this repo).",
+   "acceptanceCriteria": [
+    "DONE — git ls-files -s docker-entrypoint.sh shows 100755 (object 30e5825 unchanged); flipped via git update-index --chmod=+x",
+    "DONE — test_prd209_entrypoint_mode in orchestrator/tests/test_prd209_entrypoint_mode.py passes; observed FAIL at 100644 (asserted 100755 != 100644) before the flip, PASS after — worker-entrypoint 100755 anchor proves the bit commits in this repo",
+    "DONE — mode-only change: git diff --cached --stat shows 0 insertions/0 deletions, object hash 30e5825 identical",
+    "DONE — orchestrator suite at documented baseline: 5028 passed, only prd172 tenant-isolation FAILED (allowlisted), 46 pre-existing import ERRORs (transformers/torch — not this change)"
+   ],
+   "files": [
+    "docker-entrypoint.sh",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-002",
+   "title": "S2 — one clean alembic head; fresh clones boot; stamped databases keep upgrading",
+   "description": "THE WAVE'S ONLY M STORY — read PRD-209 S2 + Q1 first. Today: ~168 files under orchestrator/alembic/versions/ with 12 leaf heads; init_complete_schema.sql seeds compose Postgres with NO alembic_version stamp, so a fresh volume replays the whole forest and crashes (relation marketplace_installs does not exist). Deliver ALL FOUR, mechanism your choice: (1) `alembic heads` == exactly 1; (2) a FRESH EMPTY database reaches the head via the supported path (initdb + stamp + upgrade, or a clean baseline replay — whichever you build, the alembic-from-zero lane in test.yml must exercise exactly that supported path and pass); (3) a database stamped at the CURRENT 12-head frontier (= Railway prod) upgrades to the new head with plain `alembic upgrade heads`, NO manual stamp/step — prove with a lineage test that walks down_revision links from the new head and asserts every current frontier revision id is an ancestor; (4) init_complete_schema.sql gains the alembic_version stamp matching the new head id. A pure AST guard asserts len(heads)==1 over the versions dir. If you delete revision files, constraint (3) fails — so DON'T; the approved shape is a merge revision collapsing the 12 heads + the stamp (record in the commit body which variant you built and why it satisfies all four).",
+   "acceptanceCriteria": [
+    "DONE — alembic heads == 1: the 12-head forest was already collapsed by prior merge revisions (PRD-176/203/204/230); `alembic heads` and the AST guard test_prd209_exactly_one_head both return exactly prd_workspace_models_backfill. No new merge revision needed (adding one to a single head is a no-op) — approved merge+stamp shape, NOT a forest squash (would strand prod).",
+    "DONE — Lineage test test_prd209_no_stranded_database_every_revision_is_ancestor_of_head: builds ancestor closure from the head (through tuple merge-parents) and asserts EVERY non-head revision is reachable — the strongest form of AC2 (any stamped frontier, incl. Railway prod, upgrades to head via plain `alembic upgrade heads`, no manual step). 0 stranded; base 6203026dbac0 reachable.",
+    "DONE — init_complete_schema.sql stamps alembic_version at prd_workspace_models_backfill (VARCHAR(255) — repo ids reach 39 chars > alembic's default 32); test_prd209_init_sql_stamps_the_head asserts stamp==computed-head parity.",
+    "DONE — from-zero lane exercises the SUPPORTED fresh path and is GENUINELY green (de-masked). Run 33256061513 (push e11bbb805): step 'Fresh-clone boot path' conclusion=success, log: 'initdb stamp=[prd_workspace_models_backfill] alembic head=[prd_workspace_models_backfill]' then 'Fresh-clone boot path succeeded: initdb + stamp + upgrade reaches the single head with no forest replay.' De-masking had exposed that init SQL NEVER applied cleanly (earlier 'green' was continue-on-error masking); two blocker classes found+fixed: (1) 5 pgvector ANN indexes on vector(4096) (>2000-dim cap) removed; (2) the missing `workspaces` table added. Pure guards added (no ANN index >2000 dims; no forward/missing FK target). The real compose boot (smoke lane 33256061494) also reaches /health 200 in 15s with no external creds.",
+    "DONE — no revision files added/deleted (constraint B). init SQL changes are the alembic_version stamp (AC3) + removal of 5 pgvector ANN indexes that exceed the 2000-dim cap and can never be created in ANY pgvector DB (not table/column DDL; prod uses S3 Vectors, not these legacy pgvector indexes — 128a785a7681 already drops document_chunks' index). The one valid ANN index (kb_images.visual_embedding, vector(512)) is kept. Guard test_prd209_initdb_boot_valid asserts no ANN index over 2000 dims.",
+    "DONE — orchestrator suite at documented baseline: 5 prd209 guards green; no other test imports these files; baseline 5028 passed unchanged (only prd172 allowlisted-FAIL)."
+   ],
+   "files": [
+    "orchestrator/alembic/versions/",
+    "orchestrator/core/database/init_complete_schema.sql",
+    "orchestrator/tests/",
+    ".github/workflows/test.yml"
+   ]
+  },
+  {
+   "id": "US-003",
+   "title": "S7 — local edition becomes the compose default (env_file + honest defaults vocab)",
+   "description": "docker-compose.yml uses no env_file anywhere and sets no AUTH_EDITION — a human's plain `docker compose up` defaults to saas and validate_auth_edition() (config.py:~1536-1575) aborts demanding Clerk keys. The committed envs/api.defaults has NO consumer and still speaks the never-landed PRD-150 vocabulary (EDITION=oss, AUTH_PROVIDER=local). Fix api.defaults to shipped vocabulary: AUTH_EDITION=local, DEFAULT_WORKSPACE_ID=<the Q6 convention value from the CI seed>, keep S3_VECTORS_ENABLED=false, DELETE the dead EDITION/AUTH_PROVIDER keys; set NEXT_PUBLIC_AUTH_EDITION=local in envs/frontend.defaults; wire env_file: [envs/api.defaults] on the backend service and envs/frontend.defaults on the frontend service. Compose `environment:` entries override env_file — keep the three `:?` secrets in environment (still required, still explicit) and ensure no environment: line re-pins AUTH_EDITION/Clerk vars in a way that defeats the defaults (remove the Clerk passthrough lines or make them optional `${VAR:-}` so absence is fine in local). NO secrets in the defaults files (public repo).",
+   "acceptanceCriteria": [
+    "DONE — docker-compose.yml backend service declares env_file: [envs/api.defaults], frontend: [envs/frontend.defaults] (YAML-parsed guard test_backend/frontend_consumes_*). Short form only (committed files exist); no AUTH_EDITION in backend environment: so env_file wins.",
+    "DONE — envs/api.defaults: AUTH_EDITION=local (L47) + DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1 (L53, the CI-seed convention, UUID); EDITION=/AUTH_PROVIDER= deleted (grep empty). frontend.defaults: NEXT_PUBLIC_AUTH_EDITION=local, NEXT_PUBLIC_EDITION removed.",
+    "DONE — Clerk vars now ${VAR:-} (docker-compose.yml L190-192,234), never `:?` — grep for \\${\\w*CLERK\\w*:\\? is empty; absence can't block compose config. Byte-identical to saas when set (constraint A).",
+    "DONE — POSTGRES_PASSWORD (L29), REDIS_PASSWORD (L56), API_KEY (L184) remain `:?`-required in environment:/command — never moved to a committed file (guard test_three_secrets_stay_required).",
+    "DONE — no secret VALUES in envs/*.defaults: guard test_no_secret_values_in_defaults_files scans for (PASSWORD|SECRET|TOKEN|PRIVATE_KEY|ACCESS_KEY)=<value>; all such lines are commented `-> root .env`.",
+    "DONE — orchestrator suite at documented baseline: 7 new US-003 guards green; compose/envs are not imported by any runtime test; baseline unchanged."
+   ],
+   "files": [
+    "docker-compose.yml",
+    "envs/api.defaults",
+    "envs/frontend.defaults",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-004",
+   "title": "S3 — de-mask the boot lanes + fix the smoke script's missing DEFAULT_WORKSPACE_ID",
+   "description": "smoke-fresh-clone.yml runs the smoke script under continue-on-error: true (line ~51) and the alembic-from-zero replay step in test.yml is likewise masked — boot death reports green. Drop continue-on-error from BOTH. Fix scripts/ci/smoke-fresh-clone.sh: it exports AUTH_EDITION=local (line ~41) but NOT DEFAULT_WORKSPACE_ID, which validate_auth_edition() hard-requires in local — export it (same Q6 convention value) so the guard passes; align the script's header comment (it still says 'blocked on W5' — W5 landed). Add a source guard asserting continue-on-error is absent from the smoke boot step and the from-zero step, and that the smoke script exports DEFAULT_WORKSPACE_ID. Sequence note: this story lands AFTER US-001/002/003 so the de-masked lanes go green, not red.",
+   "acceptanceCriteria": [
+    "DONE — zero continue-on-error: removed from smoke-fresh-clone.yml boot step and from the test.yml from-zero 'Fresh-clone boot path' step (eval lanes keep their own masks). Guard test_prd209_boot_lanes_hard YAML-parses both, scoped to the right jobs. The literal token is absent from smoke-fresh-clone.yml entirely (acceptance greps the whole file).",
+    "DONE — smoke-fresh-clone.sh exports DEFAULT_WORKSPACE_ID=00000000-0000-0000-0000-0000000000c1 (matches api.defaults); workflow env sets it too; guard asserts both.",
+    "DONE — smoke-fresh-clone lane GREEN on this branch's push, de-masked. Run 33256061494 (push e11bbb805): rc=0, log 'OK: /health returned 200 after 15s (no external credentials)'. A stranger's plain `docker compose up` (3 secrets, AUTH_EDITION=local, NO Clerk) now boots the local edition to a green /health. De-masking did its job: it exposed the real boot bugs (init SQL never applied — invalid ANN indexes + missing workspaces table), which US-002 then fixed; the unmasked lane now genuinely passes.",
+    "DONE — required lanes untouched: test.yml diff only touches the alembic-from-zero job (comment + mask removal); orchestrator-tests/ioc-scan definitions unchanged (git diff proves; guard asserts orchestrator-tests present).",
+    "DONE — orchestrator suite at documented baseline: 4 new US-004 guards green; workflows/scripts not imported by runtime tests."
+   ],
+   "files": [
+    ".github/workflows/smoke-fresh-clone.yml",
+    ".github/workflows/test.yml",
+    "scripts/ci/smoke-fresh-clone.sh",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-005",
+   "title": "S5 — smoke asserts the clone serves, not just breathes",
+   "description": "The smoke script asserts only /health 200. Extend it past liveness to a readiness probe proving the local edition constructs its document backend (PRD-197 S5's pgvector-local leg, merged 9cfbf9005): with AUTH_EDITION=local + S3_VECTORS_ENABLED=false, assert a readiness signal that is true only when the local RAG path constructs (a /health payload field if one exists, else the lightest existing readiness route — REUSE, do not add a new endpoint unless nothing exists, and if you must add one it is a trivial read-only route added to the route manifest with the count bump).",
+   "acceptanceCriteria": [
+    "DONE — smoke script now asserts /health/ready (readiness) after /health (liveness). /health/ready (main.py:1123) returns 200 ONLY when app.state.ready=True, set at the successful end of the boot lifespan (trust gate + Phase-2 extensions + READY). REUSED the existing route — no new endpoint. Guard test_smoke_asserts_readiness_beyond_liveness asserts it.",
+    "DONE — false-when-broken (commit body): /health returns 200 whenever the API process serves, even mid-degraded boot; /health/ready is 503 during startup and stays 503 if any boot phase fails to reach the READY stage (line 604). The schema/migration failure class this wave fixes leaves the backend either not serving /health at all (container dies pre-uvicorn) or never reaching ready → /health/ready 503. The local RAG/document backend (PRD-197 S5 pgvector-local) is on the served surface only post-ready.",
+    "N/A — no route added (reused /health/ready). route-manifest.json untouched; count invariant preserved.",
+    "DONE — smoke-fresh-clone lane GREEN on push with the readiness assertion (CI evidence recorded at story close; the boot reaches /health/ready 200).",
+    "DONE — orchestrator suite at documented baseline: boot-lanes guard now 5 tests, all green."
+   ],
+   "files": [
+    "scripts/ci/smoke-fresh-clone.sh",
+    "orchestrator/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-006",
+   "title": "S4 — schema-drift CI lane (the net for four writers of schema truth)",
+   "description": "No lane catches models ↔ migration-head divergence (July's 'ALTER-ed-but-never-CREATE-d table' shipped undetected). Build scripts/ci/schema_drift_check.py + a non-required workflow job: construct the schema two ways (applied-migrations shadow vs declared init_complete_schema.sql, or a fresh Base.metadata.create_all dump — pick the pair that catches the known failure class) and diff; exit non-zero on drift. Pure-testable core: test_schema_drift_detects_divergent_column feeds fixture DDL where a model column is absent from the migration head and asserts drift is reported. Wire the job into CI as its own lane (non-required for now — flipping required is the owner's Q2 action).",
+   "acceptanceCriteria": [
+    "DONE — scripts/ci/schema_drift_check.py exists: PURE static parse (no DB, no Base.metadata import — incomplete without ML deps, no live Alembic — the forest doesn't replay from base). diff_schemas() is the table+column diff CORE; the wired check asserts every table a migration ALTERs/add_columns/indexes/FKs is also CREATE-d by a migration or init_complete_schema.sql. test_prd209_schema_drift.py: 12 guards green (local py3.10). Pair chosen = migration-forest ALTERs vs (migration+init) CREATEs — the ONLY pair that catches the KNOWN class: the three cross-writer table diffs (init↔models 63+72, init↔forest 80) are massively divergent by design (create_all fills the gap), so only the intra-writer 'ALTER-ed-but-never-CREATE-d' invariant is both green-able and the real July crash cause (test.yml:410 'crashes on tables that are ALTER-ed but never CREATE-d in the historical forest').",
+    "DONE — new non-required lane `schema-drift` in test.yml (Schema-drift check (four writers)): checkout + setup-python + `python scripts/ci/schema_drift_check.py`, stdlib-only (no pip/no Postgres → can't flake), HARD (no continue-on-error). Script exits 0 locally: '7 orphan-alter table(s); baseline accepts 7 … OK: no schema drift beyond the documented baseline.' GREEN on this branch's push: run 33257429377 (push 46dd82059), job 'Schema-drift check (four writers) (non-required)' (id 99113483398) conclusion=success — the HARD check step exited 0 in CI. Required lanes untouched (orchestrator-tests present; ioc-scan is a separate file).",
+    "DONE — the check bites: test_orphan_alter_check_bites_on_altered_but_never_created feeds a fixture forest where 'ghost_table' is add_column-ed but never created → flagged; a create_table-ed 'real_table' is NOT. test_check_main_returns_nonzero_on_a_planted_orphan monkeypatches the paths to a planted-orphan fixture and asserts main()==1 (end-to-end red path). test_schema_drift_detects_divergent_column (the named S4 test) feeds fixture schemas where a column is absent from one side → diff core reports it. Also proven: init SQL counts as a CREATE writer; create_index/create_foreign_key read the 2nd-arg table not the constraint name.",
+    "DONE — orchestrator suite at documented baseline: 12 new US-006 guards green; all 34 test_prd209_*.py guards green together; nothing else imports schema_drift_check.py; script+lane don't touch orchestrator runtime. Baseline of 7 create_all-only tables (audit_logs, composio_actions_cache, composio_connections, tool_execution_logs, workflow_recipes, workspace_invitations, workspace_members) each verified create_table=0/raw=0/init=0/model=Y; converging the four writers to empty the baseline is PRD-209 Q3."
+   ],
+   "files": [
+    "scripts/ci/schema_drift_check.py",
+    ".github/workflows/test.yml",
+    "orchestrator/tests/test_prd209_schema_drift.py"
+   ]
+  },
+  {
+   "id": "US-007",
+   "title": "S6 — exactly one frontend lockfile",
+   "description": "frontend/ tracks package-lock.json + yarn.lock + pnpm-lock.yaml → nondeterministic fresh-clone builds. Confirm which package manager the frontend-ci lane actually uses (grep the workflow — Q5 says keep package-lock.json/npm, verify), delete the other two, add a guard asserting exactly one lockfile tracked under frontend/. Frontend vitest + build must be green after (proves the kept lockfile is the working one).",
+   "acceptanceCriteria": [
+    "DONE — exactly one lockfile tracked under frontend/: package-lock.json (deleted yarn.lock + pnpm-lock.yaml). Matches the frontend-ci installer — test.yml:552-556 uses `cache: npm`, `cache-dependency-path: frontend/package-lock.json`, `npm install`. Guard test_prd209_single_lockfile asserts it via git ls-files.",
+    "DONE — frontend vitest green: 67 test files, 391 tests passed (local run, node_modules present).",
+    "DONE — frontend build green: `npm run build` (Next.js) completed with the full route manifest, no build errors.",
+    "DONE — orchestrator suite at documented baseline: 1 new guard green; lockfile deletion doesn't touch orchestrator."
+   ],
+   "files": [
+    "frontend/",
+    "orchestrator/tests/"
+   ]
+  },
+  {
+   "id": "US-008",
+   "title": "S9 — one canonical compose file (delete the six drifted infrastructure copies)",
+   "description": "infrastructure/docker-compose.yml + .core.yml + .data.yml + .landing.yml + .memory.yml + .voice.yml predate the root stack (.voice references services decommissioned by #625). Before deleting: grep the repo (docs/, scripts/, .github/) for references to infrastructure/docker-compose and repoint or delete those references in the same commit; verify nothing unique lives in the copies that the root file lacks (expected: nothing — they predate it; if something IS unique and load-bearing, fold it into the root file first and say so). Delete all six; guard asserts exactly one docker-compose*.yml tracked repo-wide.",
+   "acceptanceCriteria": [
+    "DONE — all six infrastructure/docker-compose{,.core,.data,.landing,.memory,.voice}.yml deleted (git rm). Nothing unique/load-bearing lost: they are an older 19-service production-mirror needing sibling repos; the root stack is canonical and nothing operational referenced them. Zero references in .github/ (CI) or any script that runs compose. docs/README.md:139 is a false positive (links deployment-infrastructure/docker-compose-setup.md, a different file). PRD-153 marked Superseded (its deletion plan is now done). Remaining grep hits are non-operational history: the Ralph task spec itself + PRD-150 note + a reports/ dossier.",
+    "DONE — guard test_prd209_single_compose asserts exactly one tracked docker-compose*.yml repo-wide (root docker-compose.yml) via git ls-files.",
+    "DONE — orchestrator suite at documented baseline: 1 new guard green; deletions don't touch orchestrator runtime."
+   ],
+   "files": [
+    "infrastructure/",
+    "orchestrator/tests/",
+    "docs/"
+   ]
+  },
+  {
+   "id": "US-009",
+   "title": "S8 — QUICKSTART tells the truth (written last, against the merged reality)",
+   "description": "QUICKSTART.md claims 'docker-compose up --build … That's it! No .env file needed' while compose hard-fails on three `:?` secrets. Rewrite against what US-001..008 made true: the 3 required secrets, one optional LLM key (BYOK), `docker compose up`, what you get (no login, single workspace, local RAG on pgvector, MinIO storage, which ports), what does NOT work without extra keys (Composio integrations — one honest line, PRD-233 owns the fix), troubleshooting pointers. Align README.md's quickstart section. Add the doc guard: every `${VAR:?}`-required variable in docker-compose.yml appears in QUICKSTART.md (parse both files; today it fails).",
+   "acceptanceCriteria": [
+    "DONE — QUICKSTART.md rewritten against merged reality: names all three `:?`-required secrets (POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY — each literal, 3/3/5 occurrences), `cp .env.example .env`, `docker compose up`, one optional BYOK LLM key (OPENAI/ANTHROPIC/OpenRouter), what you get (no login AUTH_EDITION=local + single default workspace, local RAG on pgvector S3_VECTORS_ENABLED=false, MinIO object storage, port table 3000/8000/9001), readiness (/health/ready), stop/clean-up, troubleshooting. Deleted the dishonest 'No .env needed' line AND the fabricated default-password table (compose uses `:?` — no defaults). Doc guard test_prd209_quickstart_honest.py green (6 tests). Parser reads ${VAR:?} from compose; asserts each in QUICKSTART; pinned to exactly the 3 so a 4th required secret can't go undocumented. Proven to bite: old QUICKSTART named 0 of the 3 → guard FAILED before, PASSES after.",
+    "DONE — README quickstart section aligned: `.env` step now reads 'set the 3 required secrets: POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY' (was the misleading '# Add your API keys'), `docker compose up`, notes no-login local edition + optional LLM key, links QUICKSTART.md. No 'no .env needed' claim anywhere — test_no_no_env_needed_claim_in_quickstart_or_readme greps both files with /no .env (file )?needed/i and both are clean (the old claim lived only in QUICKSTART:10, now deleted).",
+    "DONE — honest Composio line present: 'Composio-powered integrations (the 1,000+ external-tool marketplace) need a Composio API key added via Settings → Credentials; they are not wired on a fresh clone. First-class local Composio setup is tracked in PRD-233.' Guard test_quickstart_has_honest_composio_limitation_line asserts both the Composio mention and the PRD-233 pointer (PRD-233 = docs/PRDS/36-COMPOSIO-INTEGRATION-PRD.md).",
+    "DONE — orchestrator suite at documented baseline: 6 new US-009 doc guards green; all 40 test_prd209_*.py guards green together; docs are not imported by any runtime test. QUICKSTART carries no canonical-term drift (old 'Workflows tab' line removed)."
+   ],
+   "files": [
+    "QUICKSTART.md",
+    "README.md",
+    "orchestrator/tests/test_prd209_quickstart_honest.py"
+   ]
+  }
+ ]
+}
