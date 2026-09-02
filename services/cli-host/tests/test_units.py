@@ -212,3 +212,52 @@ def test_source_guard_no_credential_handling_anywhere():
         for token in ("keychain", "CLAUDE_CODE_ENTRYPOINT=", "ANTHROPIC_API_KEY="):
             assert token not in code, f"{py.name} handles credentials/identity ({token})"
     assert "--bare" in session.FORBIDDEN_ARGS and "-p" in session.FORBIDDEN_ARGS
+
+
+# ── transient backend failures never crash the host ─────────────────────────
+
+def test_backend_client_maps_connection_resets_to_backend_error(monkeypatch):
+    import http.client
+    from automatos_cli_host.api import BackendClient, BackendError
+
+    client = BackendClient("http://127.0.0.1:1")
+
+    def _boom(*a, **k):
+        raise http.client.RemoteDisconnected("Remote end closed connection without response")
+
+    monkeypatch.setattr("urllib.request.urlopen", _boom)
+    with pytest.raises(BackendError) as exc:
+        client.health()
+    assert exc.value.status == 0 and "RemoteDisconnected" in str(exc.value)
+
+    def _reset(*a, **k):
+        raise ConnectionResetError(54, "Connection reset by peer")
+
+    monkeypatch.setattr("urllib.request.urlopen", _reset)
+    with pytest.raises(BackendError):
+        client.health()
+
+
+def test_host_loop_survives_a_failing_tick(short_tmp, monkeypatch):
+    from automatos_cli_host.config import HostConfig
+    from automatos_cli_host.host import Host
+
+    cfg = HostConfig(state_dir=short_tmp / "state", once=True, poll_seconds=1.0, heartbeat_seconds=0.0)
+    host = Host(cfg)
+    host.identity = {"host_id": "h1", "token": "t"}
+    host.allow_roots = [str(short_tmp)]
+    calls = {"n": 0}
+
+    def _heartbeat(host_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated backend restart")
+
+    monkeypatch.setattr(host, "_heartbeat", _heartbeat)
+    monkeypatch.setattr(host, "_claim_and_start", lambda host_id: setattr(host, "_claimed_once", True))
+    monkeypatch.setattr(host, "_flush_events", lambda host_id: None)
+    monkeypatch.setattr(host, "_reap_finished", lambda host_id: None)
+    monkeypatch.setattr(host, "_retry_results", lambda host_id: None)
+    monkeypatch.setattr(host.hooks, "stop", lambda: None)
+    assert host.run_forever() == 0
+    assert calls["n"] >= 1  # the first tick raised and the loop went on

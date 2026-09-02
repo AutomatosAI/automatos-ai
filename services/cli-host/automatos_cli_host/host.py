@@ -129,15 +129,20 @@ class Host:
         try:
             while not self.stop.is_set():
                 now = time.time()
-                if now - self._last_heartbeat >= self.cfg.heartbeat_seconds:
-                    self._heartbeat(host_id)
-                    self._last_heartbeat = now
-                self._claim_and_start(host_id)
-                if now - self._last_flush >= self.cfg.event_flush_seconds:
-                    self._flush_events(host_id)
-                    self._last_flush = now
-                self._reap_finished(host_id)
-                self._retry_results(host_id)
+                try:
+                    if now - self._last_heartbeat >= self.cfg.heartbeat_seconds:
+                        self._heartbeat(host_id)
+                        self._last_heartbeat = now
+                    self._claim_and_start(host_id)
+                    if now - self._last_flush >= self.cfg.event_flush_seconds:
+                        self._flush_events(host_id)
+                        self._last_flush = now
+                    self._reap_finished(host_id)
+                    self._retry_results(host_id)
+                except Exception:  # noqa: BLE001 — the loop outlives any single tick's failure
+                    # A backend restart or a bug in one tick must never take the
+                    # host down with running sessions attached; log, keep serving.
+                    log.exception("host tick failed — continuing")
                 if self.cfg.once and self._claimed_once and not self.sessions and not self.pending_results:
                     return 0
                 time.sleep(self.cfg.poll_seconds if not self.sessions else min(1.0, self.cfg.poll_seconds))
