@@ -452,6 +452,69 @@ docker compose build --build-arg INSTALL_GRAPH_EXTRAS=true backend
 
 [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
+## Session mode — your own Claude Code sessions, managed (PRD-234)
+
+Session mode lets an agent's tickets run as **your own Claude Code session on
+your machine**, under your own Claude login, with Automatos as the manager above
+them: Auto assigns the ticket and writes the contract, the board tracks it, the
+result lands like any other agent's. API agents (BYOK, OpenRouter) keep working
+exactly as before — an agent is either `api` or `cli`, and you mix them freely.
+
+### Before you start
+
+- Claude Code installed on this machine, and run interactively at least once
+  (`claude`, then `claude login`). The host never logs in for you.
+- `CLI_RUNTIME_ENABLED=true` in `.env`, then `make up` (or restart the backend).
+  The flag is refused outside the local edition.
+
+### Pair the host, once
+
+Settings → Session mode → **Pair a host** shows a one-time code (ten minutes).
+Then, from the repository root:
+
+```bash
+make cli-host PAIR=XXXX-XXXX
+```
+
+The host exchanges the code for a token it keeps in `~/.automatos/cli-host/`
+(owner-only files) and starts serving. Afterwards it is just `make cli-host`;
+stop it with Ctrl-C. The fleet shows the host as connected while it runs.
+
+### Where sessions work
+
+`make cli-host` registers `./workspaces` (the compose default). Register real
+repositories with `CLI_HOST_ARGS="--allow /path/to/repo"`. A ticket's working
+directory must sit inside a registered directory — the host refuses anything
+else before a process starts, whatever the backend says. Git repositories get a
+`--worktree` per session; sessions never push — you (or Auto) integrate.
+
+### Using it
+
+Give an agent the runtime **Claude Code session** (`runtime: cli`, provider
+`claude`, an optional model alias) and assign it a ticket. The ticket stays
+*Assigned* until the host claims it, then *In Progress* while the session runs,
+then *Done* — or *Review* when the session hit a policy denial ("could not run
+the tests" must never read as finished). Cancel from the board; the session is
+stopped on its next event. Take over any session in your own terminal from its
+directory: `claude --resume <session id>` (shown on the ticket).
+
+### What you will and will not see
+
+Token usage per session, from Claude Code's own transcript. No dollar figures:
+on a subscription there is nothing to invent. Limits are Claude Code's own — when
+a session reports one, the ticket blocks with the reset time. Overage is
+controlled in your Anthropic account, not here.
+
+### The terms this design stays inside
+
+Anthropic's Claude Code legal page permits "an end user signing in to the
+unmodified Claude Code binary with their own Claude subscription", forbids
+third parties from offering Claude.ai login or intermediating credentials, and
+notes that usage limits "assume ordinary, individual usage". The host runs your
+unmodified `claude`, never touches a token, never uses `-p` or `--bare`, and
+serves one user on one machine. How many sessions you run in parallel is your
+choice; the phrase above is the ceiling to keep in mind.
+
 ## Network exposure (`BIND_ADDRESS`)
 
 The API (8000), Postgres, Redis and MinIO publish on `127.0.0.1` by default, so

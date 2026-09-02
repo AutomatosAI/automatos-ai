@@ -18,7 +18,7 @@
 COMPOSE      ?= docker compose
 DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: up dev down clean reset status logs
+.PHONY: up dev down clean reset status logs cli-host
 
 up:
 	$(COMPOSE) up -d --build --remove-orphans
@@ -55,3 +55,14 @@ status:
 	@$(COMPOSE) ps --format '{{.Service}}\t{{.Status}}'
 	@echo ""
 	@docker system df
+
+# PRD-234 Session mode — run tickets as YOUR OWN Claude Code sessions on this
+# machine (local edition only; CLI_RUNTIME_ENABLED=true in .env).
+#   make cli-host PAIR=XXXX-XXXX   first time — the code comes from Settings → Session mode
+#   make cli-host                  afterwards
+# Registers ./workspaces (the compose default) as a working directory. Add real
+# repositories with CLI_HOST_ARGS="--allow /path/to/repo". Standard library
+# Python 3.9+; nothing to install. Stop with Ctrl-C.
+cli-host:
+	@mkdir -p "$(CURDIR)/workspaces"
+	@cd services/cli-host && python3 -m automatos_cli_host --allow "$(CURDIR)/workspaces" $(if $(PAIR),--pair $(PAIR),) $(CLI_HOST_ARGS)
