@@ -169,7 +169,7 @@ async def claim(
     host: CliHost = Depends(require_cli_host),
     db: Session = Depends(get_db),
 ):
-    return {"tasks": svc.claim_for_host(db, host, body.limit)}
+    return svc.claim_for_host(db, host, body.limit)
 
 
 @router.post("/{host_id}/tasks/{task_id}/events")

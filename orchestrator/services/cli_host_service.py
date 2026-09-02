@@ -248,13 +248,18 @@ def _ticket_prompt(task: BoardTask) -> str:
     return prompt
 
 
-def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> List[Dict[str, Any]]:
+def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]:
     """Claim up to ``limit`` ``cli`` tickets of this host's workspace for it.
 
     The claim is the dispatcher's exactly-once statement with ``runtime='cli'``
     and the workspace filter. Each claimed ticket gets a pre-assigned session id
     in ``runtime_ref`` so the host can start ``claude --session-id <id>`` and the
     transcript path is known up front.
+
+    Returns ``{"tasks": [...], "parked": [...]}``: ``parked`` names the tickets the
+    board's approval gate held back at claim time (status ``blocked`` with the
+    grant in the reason) so the host can SAY so instead of polling in silence —
+    the operator approves them in the Command Centre and they come back.
     """
     from uuid import uuid4
 
@@ -269,8 +274,11 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> List[Dict[str,
         workspace_id=host.workspace_id,
     )
     out: List[Dict[str, Any]] = []
+    parked: List[Dict[str, Any]] = []
     for task in claimed:
         if _blocked_pending_approval(db, task):
+            db.refresh(task)
+            parked.append({"task_id": task.id, "title": task.title, "reason": task.blocked_reason})
             continue  # parked ``blocked`` by the gate; the answered-resume loop returns it
         agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
         cfg = (getattr(agent, "configuration", None) if agent else None) or {}
@@ -306,7 +314,7 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> List[Dict[str,
             }
         )
     db.commit()
-    return out
+    return {"tasks": out, "parked": parked}
 
 
 # ── events + results ─────────────────────────────────────────────────────────
