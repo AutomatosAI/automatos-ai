@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 from core.models.workspaces import Workspace
 from services.onboarding_state import (
     ALL_STAGES,
+    INITIAL_STAGE,
+    QUESTION_KEYS,
     SEGMENT_KEYS,
     InvalidStageTransition,
     advance_onboarding_stage,
@@ -26,6 +28,22 @@ from services.onboarding_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# What each stage needs before the NEXT advance — returned on a same-stage
+# re-assert so a no-op never reads as progress (short: this rides every such
+# tool result).
+_SAME_STAGE_HINTS = {
+    "questions": "Record the answers via segment; the third answer moves the stage to teach.",
+    "teach": "Call platform_search_packages, then advance_to proposal with what it returned.",
+    "proposal": "Wait for the user's explicit yes, then advance_to building.",
+    "building": (
+        "Nothing is built yet: install the matched package (platform_install_package) or "
+        "create the agents (platform_create_agent / platform_install_marketplace_agent); "
+        "advance_to boom only after that succeeds."
+    ),
+    "boom": "Show the value on their business, then advance_to powerup.",
+}
 
 
 def _usable_segment(segment: Any) -> Optional[Dict[str, Any]]:
@@ -74,7 +92,7 @@ def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
     if not out.get("advance_to") and isinstance(value, str) and value.strip().lower() in ALL_STAGES:
         out["advance_to"] = value.strip().lower()
         notes.append("advance_to taken from 'value'")
-    elif value is not None:
+    elif value is not None and not isinstance(value, str):
         notes.append(f"'value' ignored (type={type(value).__name__})")
 
     advance_to = out.get("advance_to")
@@ -86,14 +104,35 @@ def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
     usable = _usable_segment(raw_segment)
     if isinstance(raw_segment, str) and usable is not None:
         notes.append("segment parsed from a JSON string")
+    # Bare text (live-test 2026-09-02, local + prod: the model sends the user's
+    # ANSWER as the segment string, sometimes with the question's key name under
+    # 'value' — e.g. segment="Fairly comfortable…", value="comfort"). Keep the
+    # text aside for the handler, which knows which question is still unanswered.
+    bare_text = None
+    bare_key = None
+    strings = {k: v.strip() for k, v in ((("segment", raw_segment), ("value", value))) if isinstance(v, str) and v.strip()}
+    if usable is None and strings:
+        keyed = {k: v for k, v in strings.items() if v.lower() in SEGMENT_KEYS}
+        texts = {k: v for k, v in strings.items() if v.lower() not in SEGMENT_KEYS and v.lower() not in ALL_STAGES}
+        if keyed and texts:
+            bare_key = next(iter(keyed.values())).lower()
+            bare_text = next(iter(texts.values()))
+        elif texts:
+            bare_text = next(iter(texts.values()))
+    if bare_text:
+        out["_bare_answer"] = (bare_key, bare_text)
     flat = {k: out.pop(k) for k in SEGMENT_KEYS if out.get(k) is not None}
     if flat:
         notes.append(f"segment keys arrived flat: {sorted(flat)}")
         usable = {**(usable or {}), **flat}
-    if raw_segment is not None and usable is None:
+    if bare_text:
+        notes.append("bare-text answer kept for the handler to map onto a question")
+    elif raw_segment is not None and usable is None:
         shape = f"type={type(raw_segment).__name__}"
         if isinstance(raw_segment, dict):
             shape += f", keys={sorted(map(str, raw_segment))[:6]}"
+        elif isinstance(raw_segment, str):
+            shape += f", len={len(raw_segment.strip())}"  # 0 = an empty string, not an answer
         notes.append(f"segment carries nothing usable ({shape}) — dropped")
     out["segment"] = usable
 
@@ -132,7 +171,7 @@ async def update_onboarding(
     segment = params.get("segment")
     plan = params.get("plan")
 
-    if not advance_to and not segment and not plan:
+    if not advance_to and not segment and not plan and not params.get("_bare_answer"):
         return {
             "success": False,
             "error": "Provide advance_to, segment, or plan — at least one is required.",
@@ -143,6 +182,27 @@ async def update_onboarding(
     )
     if not workspace:
         return {"success": False, "error": "workspace not found"}
+
+    # A bare-text answer becomes the first question still unanswered (or the
+    # key the model named). The questions are asked in QUESTION order, so the
+    # document says which one this is; dropping the text was the freeze.
+    bare = params.get("_bare_answer")
+    if bare and not segment and not advance_to and current_stage(workspace) in (INITIAL_STAGE, "questions"):
+        # Only while the questions are open: past 'questions' a bare sentence is
+        # not an answer to anything (the #656 rule — honest error — still holds).
+        key, text = bare
+        answered = get_onboarding(workspace).get("segment") or {}
+        if not key:
+            key = next((k for k in QUESTION_KEYS if answered.get(k) is None), None)
+        if key:
+            segment = {key: text}
+            logger.warning("[update_onboarding] bare-text answer recorded as '%s' (%s)", key,
+                           "key named by the model" if bare[0] else "first unanswered question")
+    if not advance_to and not segment and not plan:
+        return {
+            "success": False,
+            "error": "Provide advance_to, segment, or plan — at least one is required.",
+        }
 
     # Idempotent same-stage advance (live-test 2026-08-29): the LLM routinely
     # re-asserts the stage it is already in — e.g. calling advance_to="building"
@@ -159,7 +219,18 @@ async def update_onboarding(
         )
         advance_to = None
         if not segment and not plan:
-            return {"success": True, "data": public_snapshot(workspace)}
+            # Honest no-op (local test 2026-09-02): Auto re-asserted 'building'
+            # twice while SAYING "I'm proceeding with the installation" and
+            # installing nothing — a bare success read as progress. Say what
+            # changed (nothing) and what the stage actually needs.
+            snap = public_snapshot(workspace)
+            hint = _SAME_STAGE_HINTS.get(snap.get("stage"), "")
+            return {
+                "success": True,
+                "data": snap,
+                "noop": True,
+                "message": f"Already at '{snap.get('stage')}' — nothing changed. {hint}".strip(),
+            }
 
     # Reject a non-assignable plan BEFORE any write — honest coming-soon copy.
     if plan is not None:
@@ -214,7 +285,11 @@ async def update_onboarding(
     except InvalidStageTransition as exc:
         if db is not None:
             db.rollback()
-        return {"success": False, "error": str(exc)}
+        # A refused move (backward, or the payoff without a build) names what the
+        # CURRENT stage needs — local test 2026-09-02: Auto tried building →
+        # proposal, was told "non-forward", and stalled.
+        hint = _SAME_STAGE_HINTS.get(current_stage(workspace), "")
+        return {"success": False, "error": f"{exc} {hint}".strip()}
     except ValueError as exc:
         # e.g. set_segment called with no recognised keys.
         if db is not None:

@@ -60,7 +60,10 @@ def test_normaliser_returns_a_new_dict_and_never_mutates_input():
 def test_normaliser_value_only_counts_when_it_names_a_stage():
     out, notes = _normalise_params({"value": "banana"})
     assert "advance_to" not in out and "value" not in out
-    assert any("'value' ignored" in n for n in notes)
+    assert out["_bare_answer"] == (None, "banana")  # free text is kept for the handler to place
+    assert any("bare-text" in n for n in notes)
+    out, notes = _normalise_params({"value": 42})
+    assert any("'value' ignored (type=int)" in n for n in notes)
     out, _ = _normalise_params({"advance_to": "proposal", "value": "teach"})
     assert out["advance_to"] == "proposal"  # an explicit advance_to always wins
 
@@ -72,11 +75,12 @@ def test_normaliser_folds_flat_answer_keys_into_segment():
     assert any("arrived flat" in n for n in notes)
 
 
-def test_normaliser_drops_junk_segment_with_a_shape_note_and_no_user_text():
+def test_normaliser_keeps_bare_text_for_mapping_and_drops_junk_dicts_with_a_shape_note():
     out, notes = _normalise_params({"segment": "We are Lumen & Lark, a jewellery brand"})
     assert out["segment"] is None
-    note = next(n for n in notes if "nothing usable" in n)
-    assert "type=str" in note and "Lumen" not in note
+    assert out["_bare_answer"] == (None, "We are Lumen & Lark, a jewellery brand")
+    note = next(n for n in notes if "bare-text" in n)
+    assert "Lumen" not in note
     out, notes = _normalise_params({"segment": {"industry": "dental", "notes": "x"}})
     assert out["segment"] is None
     assert "keys=['industry', 'notes']" in next(n for n in notes if "nothing usable" in n)
@@ -120,15 +124,24 @@ def test_handler_folds_flat_answers():
     assert ws.onboarding["segment"]["business"] == "a barber shop in Leeds"
 
 
-def test_handler_junk_segment_alone_is_still_the_honest_error_and_is_logged(caplog):
+def test_handler_bare_text_segment_is_recorded_as_the_first_unanswered_question(caplog):
     ws = _FakeWorkspace("not_started")
     with caplog.at_level(logging.WARNING, logger=_LOGGER):
         res = _run(update_onboarding(_db_returning(ws), ws.id, {"segment": "We are Lumen & Lark"}))
+    assert res["success"] is True
+    assert ws.onboarding["segment"] == {"business": "We are Lumen & Lark"}
+    warned = [r.getMessage() for r in caplog.records if "bare-text answer recorded as 'business'" in r.getMessage()]
+    assert warned and "Lumen" not in warned[0]  # never the user's text
+
+
+def test_handler_junk_dict_segment_alone_is_still_the_honest_error_and_is_logged(caplog):
+    ws = _FakeWorkspace("not_started")
+    with caplog.at_level(logging.WARNING, logger=_LOGGER):
+        res = _run(update_onboarding(_db_returning(ws), ws.id, {"segment": {"industry": "jewellery"}}))
     assert res["success"] is False
     assert "at least one is required" in res["error"]
     warned = [r.getMessage() for r in caplog.records if "argument shape coerced" in r.getMessage()]
-    assert warned and "type=str" in warned[0]
-    assert "Lumen" not in warned[0]  # never the user's text
+    assert warned and "keys=['industry']" in warned[0]
 
 
 def test_handler_is_silent_when_the_shape_is_already_right(caplog):

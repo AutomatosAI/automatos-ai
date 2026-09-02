@@ -205,10 +205,14 @@ def advance_onboarding_stage(
     # Honesty gate: the payoff stage needs a build to show. With no session
     # (pure-document logic path) there is nothing to count against — the
     # ordering validator alone applies, as before.
-    if to_stage == BUILD_EVIDENCE_STAGE and db is not None:
+    if (
+        to_stage in BUILD_EVIDENCE_STAGES
+        and _stage_index(current) < _stage_index(BUILD_EVIDENCE_STAGE)
+        and db is not None
+    ):
         if not build_evidence(db, workspace)["any"]:
             raise InvalidStageTransition(
-                "boom needs a build first: nothing is registered to this workspace "
+                f"{to_stage} needs a build first: nothing is registered to this workspace "
                 "yet (no package installed, no agents created, no mission). Install "
                 "the matched package or create the agents, then advance to boom."
             )
@@ -259,9 +263,42 @@ def set_segment(
     doc = get_onboarding(workspace)
     merged = dict(doc.get("segment") or {})
     merged.update(cleaned)
+    implied = implied_stage(doc.get("stage", INITIAL_STAGE), merged)
+    if implied:
+        # The recorded answers prove the stage (see implied_stage) — one write
+        # advances and merges, exactly as an explicit advance_to would.
+        return advance_onboarding_stage(db, workspace, implied, segment=cleaned, commit=commit)
     doc["segment"] = merged
     doc["updated_at"] = _now_iso()
     return _persist(db, workspace, doc, commit=commit)
+
+
+# The three answers the questions stage exists to collect.
+QUESTION_KEYS: tuple[str, ...] = ("business", "goal", "comfort")
+
+
+def implied_stage(current: str, segment: dict) -> Optional[str]:
+    """The stage the RECORDED answers prove, or None.
+
+    Live test 2026-09-02 (prod, Gemini 2.5 Flash): the model saved answers
+    through the tool — ``platform_update_onboarding success=True`` twice — but
+    never sent ``advance_to``, so the stage sat at ``not_started`` while Auto
+    recited the questions; the user saw ordinary chat. The facts are in the
+    document: an answer being recorded means the questions are underway; all
+    three recorded means they are done. Inferring from those facts is honest,
+    deterministic, and still tool-driven (nothing moves without the call).
+    Explicit ``advance_to`` targets are never overridden — this only applies
+    to segment-only writes.
+    """
+    if current == INITIAL_STAGE and any(segment.get(k) is not None for k in QUESTION_KEYS):
+        implied = "questions"
+    else:
+        implied = None
+    if current in (INITIAL_STAGE, "questions") and all(
+        segment.get(k) is not None for k in QUESTION_KEYS
+    ):
+        implied = "teach"
+    return implied
 
 
 # The funnel-timestamp key stamped by the first integration a workspace connects
@@ -384,6 +421,10 @@ def onboarding_package_installed(workspace: Any) -> bool:
 # rows onboarding already writes.
 
 BUILD_EVIDENCE_STAGE = "boom"
+# Reaching ANY stage at or past the payoff from before it needs the build — the
+# validator allows forward skips, so ``advance_to="completed"`` from ``building``
+# would otherwise walk around the boom gate (found 2026-09-02).
+BUILD_EVIDENCE_STAGES: frozenset[str] = frozenset({"boom", "powerup", "completed"})
 
 
 def build_evidence(db: Any, workspace: Any) -> dict[str, Any]:
