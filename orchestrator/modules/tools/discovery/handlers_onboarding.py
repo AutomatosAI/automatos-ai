@@ -29,6 +29,22 @@ from services.onboarding_state import (
 logger = logging.getLogger(__name__)
 
 
+# What each stage needs before the NEXT advance — returned on a same-stage
+# re-assert so a no-op never reads as progress (short: this rides every such
+# tool result).
+_SAME_STAGE_HINTS = {
+    "questions": "Record the answers via segment; the third answer moves the stage to teach.",
+    "teach": "Call platform_search_packages, then advance_to proposal with what it returned.",
+    "proposal": "Wait for the user's explicit yes, then advance_to building.",
+    "building": (
+        "Nothing is built yet: install the matched package (platform_install_package) or "
+        "create the agents (platform_create_agent / platform_install_marketplace_agent); "
+        "advance_to boom only after that succeeds."
+    ),
+    "boom": "Show the value on their business, then advance_to powerup.",
+}
+
+
 def _usable_segment(segment: Any) -> Optional[Dict[str, Any]]:
     """The segment as a dict carrying at least one recognised key, else None.
 
@@ -198,7 +214,18 @@ async def update_onboarding(
         )
         advance_to = None
         if not segment and not plan:
-            return {"success": True, "data": public_snapshot(workspace)}
+            # Honest no-op (local test 2026-09-02): Auto re-asserted 'building'
+            # twice while SAYING "I'm proceeding with the installation" and
+            # installing nothing — a bare success read as progress. Say what
+            # changed (nothing) and what the stage actually needs.
+            snap = public_snapshot(workspace)
+            hint = _SAME_STAGE_HINTS.get(snap.get("stage"), "")
+            return {
+                "success": True,
+                "data": snap,
+                "noop": True,
+                "message": f"Already at '{snap.get('stage')}' — nothing changed. {hint}".strip(),
+            }
 
     # Reject a non-assignable plan BEFORE any write — honest coming-soon copy.
     if plan is not None:

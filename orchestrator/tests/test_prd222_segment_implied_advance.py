@@ -163,3 +163,14 @@ def test_bare_text_never_overrides_a_real_segment_or_advance():
     r = asyncio.run(update_onboarding(_db(workspace=ws), ws.id, {"advance_to": "questions", "segment": "junk"}))
     assert r["success"] is True and r["data"]["stage"] == "questions"
     assert ws.onboarding["segment"] == {}   # an explicit advance with junk text records nothing invented
+
+
+# ── a same-stage re-assert says what changed (nothing) and what is needed ──
+
+def test_same_stage_reassert_is_an_honest_noop_with_the_next_step():
+    ws = _Workspace("building")
+    r = asyncio.run(update_onboarding(_db(workspace=ws), ws.id, {"advance_to": "building"}))
+    assert r["success"] is True and r["noop"] is True
+    assert "nothing changed" in r["message"]
+    assert "platform_install_package" in r["message"] and "advance_to boom only after" in r["message"]
+    assert current_stage(ws) == "building"
