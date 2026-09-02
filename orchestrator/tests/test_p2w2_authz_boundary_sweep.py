@@ -105,6 +105,18 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/widgets/data/execute"),
     ("POST", "/api/widgets/data/query"),
     ("POST", "/api/widgets/docs/search"),
+    # PRD-234 S1a — the CLI host machine lane (api/cli_hosts.py). Every route
+    # 404s unless CLI_RUNTIME_ENABLED (local edition only; the boot guard refuses
+    # the flag in saas). ``pair`` is authenticated by a one-time pairing code the
+    # operator issued (admin-gated route); the rest by the ``X-CLI-Host-Token``
+    # header resolved through its SHA-256 digest (require_cli_host, 401
+    # fail-closed, host confined to its own workspace). None ride the shared
+    # hybrid dependency — the operator surface (pairing-codes, list) does.
+    ("POST", "/api/v1/cli-hosts/pair"),
+    ("POST", "/api/v1/cli-hosts/{host_id}/claim"),
+    ("POST", "/api/v1/cli-hosts/{host_id}/heartbeat"),
+    ("POST", "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/events"),
+    ("POST", "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/result"),
 }
 
 # (f) Admin-gated in the handler body — the 8 admin-flavoured routers keep

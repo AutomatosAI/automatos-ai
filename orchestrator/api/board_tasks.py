@@ -1181,7 +1181,14 @@ def _board_task_blocked_pending_approval(
 
 def _agent_runtime_kind(db: Session, agent_id: int) -> str:
     """PRD-234 S1a: the assigned agent's runtime (``api`` unless it declares ``cli``)."""
-    row = db.query(Agent.configuration).filter(Agent.id == agent_id).first()
+    try:
+        row = db.query(Agent.configuration).filter(Agent.id == agent_id).first()
+    except Exception:  # noqa: BLE001 — a test double or a broken session
+        # The factory guard (AgentFactory._runtime_mismatch) is the second line
+        # of defence for cli agents; a lookup this lane cannot make is treated as
+        # the default runtime so an API run's fate never changes here.
+        logger.debug("[BoardTasks] runtime lookup unavailable for agent %s", agent_id, exc_info=True)
+        return RUNTIME_API
     configuration = None
     if row is not None:
         try:
