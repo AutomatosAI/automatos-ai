@@ -366,8 +366,14 @@ def _increment_daily_spend(db: Any, cost_usd: float, *, day: Optional[date] = No
     else:
         db.execute(
             text(
-                "INSERT INTO system_settings (category, key, value, value_type, description) "
-                "VALUES (:c, :k, :v, 'number', :d)"
+                # Raw SQL bypasses the ORM's Python-side defaults, and the columns
+                # carry no server default: a row inserted without is_sensitive /
+                # is_required / created_by lands as NULL and the settings API's
+                # response contract (bool/bool/str) then 500s the whole Settings
+                # page (seen 2026-09-02 on the first trial_spend_* row of a day).
+                "INSERT INTO system_settings "
+                "(category, key, value, value_type, description, is_sensitive, is_required, created_by) "
+                "VALUES (:c, :k, :v, 'number', :d, false, false, 'system')"
             ),
             {"c": DAILY_SPEND_CATEGORY, "k": key, "v": str(new_total), "d": "PRD-222 trial daily spend"},
         )
