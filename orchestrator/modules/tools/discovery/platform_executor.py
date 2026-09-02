@@ -996,7 +996,8 @@ class PlatformActionExecutor:
                     actor_id = int(actor_id_raw) if actor_id_raw is not None else None
                 except (TypeError, ValueError):
                     actor_id = None
-                for target_id_raw in target_ids_raw:
+                n_targets = len(target_ids_raw)
+                for idx, target_id_raw in enumerate(target_ids_raw, 1):
                     try:
                         target_id = int(target_id_raw) if target_id_raw is not None else None
                     except (TypeError, ValueError):
@@ -1020,10 +1021,12 @@ class PlatformActionExecutor:
                         # and leave the write's fate to upstream handling. Deny locally
                         # and escalate to Auto — mirrors the registry-lookup fail-closed
                         # above.
+                        # The target id itself is caller-supplied data: it is returned
+                        # in the error below, never written to the log.
                         logger.warning(
                             "[PlatformExecutor] hierarchy_check_failed action=%s actor=%s "
-                            "target=%s/%s err=%s — denying (fail-closed)",
-                            action_name, actor_id, target_type, target_id, e,
+                            "target=%s (#%d of %d) err=%s — denying (fail-closed)",
+                            action_name, actor_id, target_type, idx, n_targets, e,
                         )
                         return {
                             "success": False,
@@ -1037,8 +1040,9 @@ class PlatformActionExecutor:
                         }
                     if not decision.allowed:
                         logger.warning(
-                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s target=%s/%s reason=%s",
-                            action_name, actor_id, target_type, target_id, decision.reason,
+                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s "
+                            "target=%s (#%d of %d) reason=%s",
+                            action_name, actor_id, target_type, idx, n_targets, decision.reason,
                         )
                         return {
                             "success": False,
