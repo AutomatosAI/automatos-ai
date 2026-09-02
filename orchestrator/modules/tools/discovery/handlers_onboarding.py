@@ -130,6 +130,8 @@ def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
         shape = f"type={type(raw_segment).__name__}"
         if isinstance(raw_segment, dict):
             shape += f", keys={sorted(map(str, raw_segment))[:6]}"
+        elif isinstance(raw_segment, str):
+            shape += f", len={len(raw_segment.strip())}"  # 0 = an empty string, not an answer
         notes.append(f"segment carries nothing usable ({shape}) — dropped")
     out["segment"] = usable
 
@@ -280,7 +282,11 @@ async def update_onboarding(
     except InvalidStageTransition as exc:
         if db is not None:
             db.rollback()
-        return {"success": False, "error": str(exc)}
+        # A refused move (backward, or the payoff without a build) names what the
+        # CURRENT stage needs — local test 2026-09-02: Auto tried building →
+        # proposal, was told "non-forward", and stalled.
+        hint = _SAME_STAGE_HINTS.get(current_stage(workspace), "")
+        return {"success": False, "error": f"{exc} {hint}".strip()}
     except ValueError as exc:
         # e.g. set_segment called with no recognised keys.
         if db is not None:

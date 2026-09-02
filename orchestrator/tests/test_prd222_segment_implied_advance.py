@@ -174,3 +174,11 @@ def test_same_stage_reassert_is_an_honest_noop_with_the_next_step():
     assert "nothing changed" in r["message"]
     assert "platform_install_package" in r["message"] and "advance_to boom only after" in r["message"]
     assert current_stage(ws) == "building"
+
+
+def test_a_refused_move_names_what_the_current_stage_needs():
+    ws = _Workspace("building")
+    r = asyncio.run(update_onboarding(_db(workspace=ws), ws.id, {"advance_to": "proposal"}))
+    assert r["success"] is False
+    assert "non-forward" in r["error"] and "platform_install_package" in r["error"]
+    assert current_stage(ws) == "building"
