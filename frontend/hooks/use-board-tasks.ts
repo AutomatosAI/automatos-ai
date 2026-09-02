@@ -251,5 +251,6 @@ function mapTaskToBoardTask(item: any): BoardTask {
     blocked_at: item.blocked_at ?? undefined,
     blocked_reason: item.blocked_reason ?? undefined,
     result: item.result,
+    runtime_ref: item.runtime_ref ?? undefined,  // PRD-234
   }
 }

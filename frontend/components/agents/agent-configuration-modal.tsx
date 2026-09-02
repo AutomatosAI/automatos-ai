@@ -29,6 +29,7 @@ import {
   Activity,
   Loader2,
   Play,
+  TerminalSquare,
 } from 'lucide-react'
 import { InlineHelp } from '@/components/ui/help-tooltip'
 import { Button } from '@/components/ui/button'
@@ -61,6 +62,7 @@ import { useTools } from '@/hooks/use-tools-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { isLocal } from '@/lib/auth-edition'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -419,7 +421,12 @@ export function AgentConfigurationModal({
         // PRD-15: Model configuration
         model_config: modelConfig,
         // Tools configuration — filter out null IDs (tools without cache entries)
-        assigned_tools: ((agent as any).tools || []).map((tool: any) => tool.id).filter((id: any) => id != null)
+        assigned_tools: ((agent as any).tools || []).map((tool: any) => tool.id).filter((id: any) => id != null),
+        // PRD-234: runtime — API model (default) or the user's own Claude Code session
+        runtime: ((agent as any).configuration?.runtime === 'cli') ? 'cli' : 'api',
+        cli_provider: (agent as any).configuration?.provider || 'claude',
+        cli_model: (agent as any).configuration?.model || '',
+        cli_working_directory: (agent as any).configuration?.working_directory || '',
       })
       setHasChanges(false)
     }
@@ -637,6 +644,15 @@ export function AgentConfigurationModal({
         tags,
         configuration: {
           category: selectedCategory,
+          // PRD-234: the runtime fields ride the same configuration JSON (backend validates)
+          runtime: formData.runtime === 'cli' ? 'cli' : 'api',
+          ...(formData.runtime === 'cli'
+            ? {
+                provider: formData.cli_provider || 'claude',
+                model: (formData.cli_model || '').trim() || null,
+                working_directory: (formData.cli_working_directory || '').trim() || null,
+              }
+            : {}),
           priority_level: formData.priority_level,
           max_concurrent_tasks: formData.max_concurrent_tasks,
           auto_start: formData.auto_start,
@@ -1516,6 +1532,72 @@ export function AgentConfigurationModal({
                       </p>
                     </CardHeader>
                     <CardContent className="space-y-6">
+                      {/* PRD-234 S4: where this agent runs — API model, or the user's own Claude Code session (local edition) */}
+                      {isLocal && (
+                        <div className="space-y-4 rounded-lg border border-border/40 p-4">
+                          <div className="flex items-center gap-2">
+                            <TerminalSquare className="h-4 w-4 text-[hsl(var(--agent))]" />
+                            <Label className="text-sm font-medium">Runtime</Label>
+                          </div>
+                          <Select
+                            value={formData.runtime || 'api'}
+                            onValueChange={(value) => updateFormData('runtime', value)}
+                          >
+                            <SelectTrigger aria-label="Runtime">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="api">API model (this workspace&apos;s keys or OpenRouter)</SelectItem>
+                              <SelectItem value="cli">Claude Code session (your own login, on your machine)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {formData.runtime === 'cli' && (
+                            <div className="space-y-3">
+                              <p className="text-xs text-muted-foreground">
+                                Tickets for this agent are run by your paired CLI host as interactive Claude Code sessions.
+                                The model settings below do not apply to sessions.
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <Label htmlFor="cli-provider" className="text-xs">CLI</Label>
+                                  <Select
+                                    value={formData.cli_provider || 'claude'}
+                                    onValueChange={(value) => updateFormData('cli_provider', value)}
+                                  >
+                                    <SelectTrigger id="cli-provider"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="claude">Claude Code</SelectItem>
+                                      <SelectItem value="codex">Codex (S5 — not yet served by the host)</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor="cli-model" className="text-xs">Model alias (optional)</Label>
+                                  <Input
+                                    id="cli-model"
+                                    placeholder="sonnet · opus · haiku · fable (blank = the CLI's default)"
+                                    value={formData.cli_model || ''}
+                                    onChange={(e) => updateFormData('cli_model', e.target.value)}
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="cli-working-directory" className="text-xs">Working directory (absolute path, inside a directory the host registered)</Label>
+                                <Input
+                                  id="cli-working-directory"
+                                  placeholder="/Users/you/Development/your-repo"
+                                  value={formData.cli_working_directory || ''}
+                                  onChange={(e) => updateFormData('cli_working_directory', e.target.value)}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Blank = the host&apos;s default <span className="font-mono">./workspaces</span>. Git repositories get their own worktree per session; sessions never push.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Model Selection */}
                       <ModelSelector
                         value={formData.model_config?.model_id || LLM_DEFAULTS.model_id}
