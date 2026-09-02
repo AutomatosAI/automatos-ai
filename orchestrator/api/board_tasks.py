@@ -27,7 +27,7 @@ from core.models.core import BoardTask
 from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
-from core.cli_runtime import RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
+from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
 from services.board_dispatcher import notify_task_available
 from services.board_events import board_event_stream, notify_board_event
 
