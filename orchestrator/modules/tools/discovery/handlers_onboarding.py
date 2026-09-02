@@ -5,14 +5,16 @@ of the stage machine — and returns the client-safe ``{stage, trial}`` snapshot
 Invalid transitions are returned as clear errors, never raised as crashes.
 """
 
+import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from core.models.workspaces import Workspace
 from services.onboarding_state import (
+    ALL_STAGES,
     SEGMENT_KEYS,
     InvalidStageTransition,
     advance_onboarding_stage,
@@ -24,6 +26,82 @@ from services.onboarding_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _usable_segment(segment: Any) -> Optional[Dict[str, Any]]:
+    """The segment as a dict carrying at least one recognised key, else None.
+
+    A JSON-encoded string is parsed first: Gemini 2.5 Flash on prod stringifies
+    the nested ``segment`` object often enough to matter (live-test 2026-09-02).
+    """
+    if isinstance(segment, str):
+        try:
+            segment = json.loads(segment)
+        except ValueError:
+            return None
+    if isinstance(segment, dict) and any(segment.get(k) is not None for k in SEGMENT_KEYS):
+        return segment
+    return None
+
+
+def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
+    """Coerce the LLM-supplied argument shapes seen in prod into the schema's.
+
+    Returns a NEW dict (the input is never mutated) plus notes of what was
+    coerced or dropped — types and keys only, never user text — for the
+    handler to log. The shapes, all observed on prod 2026-09-02 (Gemini 2.5
+    Flash) while a workspace sat frozen at ``not_started``:
+
+    * ``segment`` as a JSON-encoded string          -> parsed;
+    * the answers flat at top level
+      (business/goal/comfort/team_size)            -> folded into ``segment``;
+    * ``value`` carrying a stage name instead of
+      ``advance_to`` (the enum under the wrong key;
+      INFERRED from ``keys=['value', 'segment']``)  -> ``advance_to``, only when
+      it names a real stage;
+    * ``advance_to`` / ``plan`` with stray case or
+      whitespace ('Teach', ' Basic ')               -> lower-cased.
+
+    Anything still unusable is dropped with a note; the honest "at least one
+    is required" error then applies (2026-08-29 rule: a junk segment must never
+    fail a call that also carries a valid advance).
+    """
+    src = params if isinstance(params, dict) else {}
+    out: Dict[str, Any] = dict(src)
+    notes: List[str] = []
+
+    value = out.pop("value", None)
+    if not out.get("advance_to") and isinstance(value, str) and value.strip().lower() in ALL_STAGES:
+        out["advance_to"] = value.strip().lower()
+        notes.append("advance_to taken from 'value'")
+    elif value is not None:
+        notes.append(f"'value' ignored (type={type(value).__name__})")
+
+    advance_to = out.get("advance_to")
+    if isinstance(advance_to, str) and advance_to != advance_to.strip().lower():
+        out["advance_to"] = advance_to.strip().lower()
+        notes.append("advance_to case/whitespace normalised")
+
+    raw_segment = out.get("segment")
+    usable = _usable_segment(raw_segment)
+    if isinstance(raw_segment, str) and usable is not None:
+        notes.append("segment parsed from a JSON string")
+    flat = {k: out.pop(k) for k in SEGMENT_KEYS if out.get(k) is not None}
+    if flat:
+        notes.append(f"segment keys arrived flat: {sorted(flat)}")
+        usable = {**(usable or {}), **flat}
+    if raw_segment is not None and usable is None:
+        shape = f"type={type(raw_segment).__name__}"
+        if isinstance(raw_segment, dict):
+            shape += f", keys={sorted(map(str, raw_segment))[:6]}"
+        notes.append(f"segment carries nothing usable ({shape}) — dropped")
+    out["segment"] = usable
+
+    plan = out.get("plan")
+    if isinstance(plan, str) and plan != plan.strip().lower():
+        out["plan"] = plan.strip().lower()
+        notes.append("plan case/whitespace normalised")
+    return out, notes
 
 
 async def update_onboarding(
@@ -38,29 +116,21 @@ async def update_onboarding(
     to the proposal stamps ``plan_recommended``. Returns ``{success, data:
     {stage, trial}}``.
     """
+    # Argument shapes are external data (LLM-supplied) — coerced at this
+    # boundary, never assumed. 2026-08-29: a bare-string segment used to fail
+    # the whole call ("'str' object has no attribute 'get'", every onboarding
+    # stuck at teach); an unusable one is dropped, a valid advance proceeds.
+    # 2026-09-02: the shapes below froze a workspace at not_started — the model
+    # sent the stage under 'value' with a stringified segment, was told "at least
+    # one is required", retried identically and narrated on with nothing
+    # recorded. Every coercion or drop is a WARNING naming the shape (types and
+    # keys only, never the user's text) so the next variant names itself.
+    params, notes = _normalise_params(params)
+    if notes:
+        logger.warning("[update_onboarding] argument shape coerced: %s", "; ".join(notes))
     advance_to = params.get("advance_to")
     segment = params.get("segment")
     plan = params.get("plan")
-
-    # Normalize an UNUSABLE segment to absent (live-test 2026-08-29). ``segment``
-    # is LLM-supplied: it arrives as a bare string, or a dict of unrecognized
-    # keys, often enough to matter. ``_clean_segment`` already tolerates that at
-    # the state layer, but ``set_segment`` deliberately RAISES when nothing
-    # recognised survives (so a no-op write can't masquerade as a saved answer) —
-    # and the handler routed such calls straight into it, failing the whole tool
-    # call with "set_segment requires at least one of business/goal/comfort".
-    # Observed in prod paired with a same-stage advance: the advance is dropped
-    # as a no-op, then the junk segment raises, so a benign call errors.
-    # Treating unusable as absent makes each path correct: advance proceeds,
-    # a same-stage no-op returns success, and a call carrying NOTHING usable
-    # gets the honest "at least one is required" message below instead of an
-    # internal function name.
-    if segment is not None and not (
-        isinstance(segment, dict)
-        and any(segment.get(k) is not None for k in SEGMENT_KEYS)
-    ):
-        logger.info("[update_onboarding] segment carries nothing usable — ignoring")
-        segment = None
 
     if not advance_to and not segment and not plan:
         return {
@@ -96,11 +166,17 @@ async def update_onboarding(
         from services.plan_tiers import is_assignable
 
         if not is_assignable(plan):
+            # Honest copy: only enterprise is "coming soon"; anything else is not
+            # a tier at all (live-test 2026-09-02: 'Basic' was answered with
+            # "Enterprise is coming soon" — case is forgiven above, so this
+            # branch now only sees genuine non-tiers).
             return {
                 "success": False,
                 "error": (
-                    f"'{plan}' can't be assigned yet — Enterprise is coming soon. "
+                    "'enterprise' can't be assigned yet — Enterprise is coming soon. "
                     "Choose basic, pro, or business."
+                    if plan == "enterprise"
+                    else f"'{plan}' isn't a plan tier — choose basic, pro, or business."
                 ),
             }
 
