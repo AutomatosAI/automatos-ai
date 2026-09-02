@@ -1,0 +1,147 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: onboarding)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: onboarding                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: onboarding
+actions:
+  platform_get_intake_status:
+  - text: check the intake progress for profile <id>
+    source: example
+  - text: what stage is the business scan at
+    source: example
+  - text: how's the business scan coming along
+    source: authored
+  - text: what stage is intake at for profile abc123
+    source: authored
+  - text: is the site scan done yet
+    source: authored
+  - text: check the status of the intake run
+    source: authored
+  - text: where are we in the business intake pipeline
+    source: authored
+  - text: how many pages has the scan found so far
+    source: authored
+  - text: give me an update on the intake for profile xyz
+    source: authored
+  - text: did the business site scan finish
+    source: authored
+  - text: what's the archetype the intake detected
+    source: authored
+  - text: status of the firecrawl scan for profile 77
+    source: authored
+  - text: how far along is the site ingestion
+    source: authored
+  - text: check intake progress for profile 4821
+    source: authored
+  - text: is the knowledge graph build from the scan done
+    source: authored
+  - text: show me the intake summary for that profile
+    source: authored
+  - text: what stage is the onboarding scan on now
+    source: authored
+  - text: poll the intake status for profile def456
+    source: authored
+  - text: how's the domain scan progressing
+    source: authored
+  platform_scan_business_site:
+  - text: scan the user's business site acme.com
+    source: example
+  - text: kick off intake for example.co.uk
+    source: example
+  - text: scan my website mystore.com to learn about the business
+    source: authored
+  - text: crawl our site widgetco.io and build a profile
+    source: authored
+  - text: start the intake pipeline for shop.example.com
+    source: authored
+  - text: analyze my business from acme.org
+    source: authored
+  - text: ingest everything on our domain foobar.ai
+    source: authored
+  - text: kick off a site scan for greenleaf.co
+    source: authored
+  - text: scan bluewave.com and pull in the content
+    source: authored
+  - text: learn about my company from its website, it's dandelion.io
+    source: authored
+  - text: run the business intake on techstart.dev
+    source: authored
+  - text: crawl mybakery.com and set up my profile
+    source: authored
+  - text: scan the domain acme.io for onboarding
+    source: authored
+  - text: go read my website northwind.com
+    source: authored
+  - text: index my site pages from brightlabs.co
+    source: authored
+  - text: start intake from the url zenshop.store
+    source: authored
+  - text: scan our homepage at coastal.finance
+    source: authored
+  - text: pull my business details from example.net
+    source: authored
+  - text: profile my company off the site swiftly.app
+    source: authored
+  platform_update_onboarding:
+  - text: record that the user runs a barber shop and wants appointment booking
+    source: example
+  - text: advance onboarding to the proposal stage
+    source: example
+  - text: skip onboarding — the user wants to explore on their own
+    source: example
+  - text: mark onboarding completed
+    source: example
+  - text: move onboarding to the teach stage
+    source: authored
+  - text: the user picked the pro plan
+    source: authored
+  - text: advance to the building stage now
+    source: authored
+  - text: record that they run a dental clinic wanting more bookings
+    source: authored
+  - text: the user is a solo founder, note that as team size
+    source: authored
+  - text: set the accepted plan to basic
+    source: authored
+  - text: push onboarding forward to the proposal
+    source: authored
+  - text: they chose the business tier
+    source: authored
+  - text: the user is comfortable with tech, log their comfort level
+    source: authored
+  - text: advance the flow to the powerup stage
+    source: authored
+  - text: note the user's goal is growing their email list
+    source: authored
+  - text: move to the boom stage
+    source: authored
+  - text: the user wants to skip onboarding entirely
+    source: authored
+  - text: bump onboarding to questions
+    source: authored
+  - text: record their business as a coffee roastery
+    source: authored
+  - text: mark the onboarding flow completed for this workspace
+    source: authored

@@ -109,9 +109,10 @@ def register_onboarding_actions(registry: ActionRegistry) -> None:
                         },
                     },
                     "description": (
-                        "The onboarding answers — business, goal, comfort, and "
-                        "optional team_size. Any subset may be supplied; keys are "
-                        "merged into onboarding state. Omit to only advance."
+                        "The onboarding answers as a JSON object — business, goal, "
+                        "comfort, and optional team_size. Pass an object, never a "
+                        "string. Any subset may be supplied; keys are merged into "
+                        "onboarding state. Omit to only advance."
                     ),
                 },
                 "plan": {

@@ -1,0 +1,69 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: workspace_exec)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: workspace_exec                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: workspace_exec
+actions:
+  workspace_exec:
+  - text: run the tests
+    source: example
+  - text: run pytest on the backend
+    source: example
+  - text: execute npm run build
+    source: example
+  - text: run the linter
+    source: example
+  - text: run tests
+    source: phrase_map
+  - text: run command
+    source: phrase_map
+  - text: execute command
+    source: phrase_map
+  - text: npm test
+    source: phrase_map
+  - text: pytest
+    source: phrase_map
+  - text: run the build
+    source: phrase_map
+  - text: run linter
+    source: phrase_map
+  - text: run npm run lint on the frontend
+    source: authored
+  - text: execute python manage.py migrate
+    source: authored
+  - text: kick off the unit tests
+    source: authored
+  - text: run pytest tests/test_agents.py
+    source: authored
+  - text: build the project with npm run build
+    source: authored
+  - text: run the type checker
+    source: authored
+  - text: execute the coverage report
+    source: authored
+  - text: run flake8 across the codebase
+    source: authored
+  - text: give the test suite a run
+    source: authored

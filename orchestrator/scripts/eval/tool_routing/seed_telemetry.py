@@ -225,6 +225,12 @@ def generate_synthetic_rows(
         correct_actions = eval_entry["correct_actions"]
         category = eval_entry["category"]
 
+        # PRD-232 US-012A: abstain rows (no applicable tool) have no correct
+        # action, so they produce NO synthetic tool-execution telemetry — the
+        # ground truth is that nothing ran.
+        if eval_entry.get("abstain") or not correct_actions:
+            continue
+
         for rep in range(REPETITIONS_PER_QUERY):
             # Select agent based on category bias
             agent_id = _select_agent(category, rng)

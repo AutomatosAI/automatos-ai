@@ -1,0 +1,363 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: codegraph)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: codegraph                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: codegraph
+actions:
+  platform_codegraph_architecture:
+  - text: give me an architecture overview of the orchestrator repo
+    source: example
+  - text: what are the main modules in this codebase?
+    source: example
+  - text: walk me through how this project is structured
+    source: authored
+  - text: high level overview of the codebase please
+    source: authored
+  - text: how is the automatos-ai repo laid out?
+    source: authored
+  - text: give me the lay of the land for this repo
+    source: authored
+  - text: what are the core packages and how do they fit together
+    source: authored
+  - text: explain the overall architecture
+    source: authored
+  - text: break down the modules in the orchestrator
+    source: authored
+  - text: how do the pieces of this codebase connect
+    source: authored
+  - text: show me the big picture of this project
+    source: authored
+  - text: what's the top-level structure here
+    source: authored
+  - text: orient me before i dig into the code
+    source: authored
+  - text: summarize the architecture of this service
+    source: authored
+  - text: which modules are the backbone of this repo
+    source: authored
+  - text: map out the dependency patterns in this codebase
+    source: authored
+  - text: i'm new to this repo, give me the architecture
+    source: authored
+  - text: what are the key components of automatos-ai
+    source: authored
+  - text: overview of how the frontend and backend modules relate
+    source: authored
+  platform_codegraph_call_graph:
+  - text: what calls AgentFactory.execute?
+    source: example
+  - text: what does the recipe executor call?
+    source: example
+  - text: who calls execute_task?
+    source: authored
+  - text: trace the callers of create_llm_manager
+    source: authored
+  - text: what functions invoke the tool router?
+    source: authored
+  - text: show me everything that calls submit_report
+    source: authored
+  - text: what does WorkflowOrchestrator.run call internally?
+    source: authored
+  - text: callers of the retry helper please
+    source: authored
+  - text: which methods call into the dispatch function
+    source: authored
+  - text: what does route_action reach out to?
+    source: authored
+  - text: map the incoming calls to AgentFactory.execute
+    source: authored
+  - text: what gets called by the mission planner?
+    source: authored
+  - text: find callers of parse_intent
+    source: authored
+  - text: who invokes send_message?
+    source: authored
+  - text: outgoing calls from the recipe executor
+    source: authored
+  - text: trace what handle_request calls downstream
+    source: authored
+  - text: which parts of the code call this method
+    source: authored
+  - text: show the call chain into execute_pipeline
+    source: authored
+  platform_codegraph_dependencies:
+  - text: what breaks if I change the tool router?
+    source: example
+  - text: what depends on create_llm_manager?
+    source: example
+  - text: if i modify execute_task what will break
+    source: authored
+  - text: impact analysis for changing the intent classifier
+    source: authored
+  - text: what relies on the AgentFactory class
+    source: authored
+  - text: who would i break by renaming send_message
+    source: authored
+  - text: what's downstream of the mission planner
+    source: authored
+  - text: show me the blast radius of editing route_action
+    source: authored
+  - text: what depends on the config module
+    source: authored
+  - text: safe to change parse_intent? what uses it
+    source: authored
+  - text: what would refactoring the scheduler affect
+    source: authored
+  - text: list everything coupled to the tool registry
+    source: authored
+  - text: change impact for the report submitter
+    source: authored
+  - text: if i touch the llm manager what needs retesting
+    source: authored
+  - text: what breaks downstream if i remove this helper
+    source: authored
+  - text: dependencies on the WorkflowOrchestrator class
+    source: authored
+  - text: which modules would a change to auth ripple into
+    source: authored
+  - text: what consumes the output of build_prompt
+    source: authored
+  platform_codegraph_get_symbol:
+  - text: where is the function execute_task defined?
+    source: example
+  - text: find the class WorkflowOrchestrator
+    source: example
+  - text: where's the AgentFactory class defined
+    source: authored
+  - text: locate the method run_mission
+    source: authored
+  - text: find the definition of parse_intent
+    source: authored
+  - text: which file has create_llm_manager
+    source: authored
+  - text: show me the signature of submit_report
+    source: authored
+  - text: point me to where route_action lives
+    source: authored
+  - text: look up the ToolRouter class
+    source: authored
+  - text: what's the docstring for execute_pipeline
+    source: authored
+  - text: find the function build_prompt
+    source: authored
+  - text: where do i find the IntentClassifier class
+    source: authored
+  - text: grab the definition of send_message
+    source: authored
+  - text: which line is dispatch_task on
+    source: authored
+  - text: show me where handle_request is declared
+    source: authored
+  - text: find symbol MissionPlanner
+    source: authored
+  - text: locate the get_latest_report function
+    source: authored
+  - text: where is the retry decorator defined
+    source: authored
+  platform_codegraph_index:
+  - text: index the automatos-ai repo
+    source: example
+  - text: add this github repo to the code graph
+    source: example
+  - text: onboard this github repo into the graph
+    source: authored
+  - text: add my repo so agents can search it
+    source: authored
+  - text: index github.com/acme/backend for me
+    source: authored
+  - text: pull this codebase into the code graph
+    source: authored
+  - text: set up code search for the frontend repo
+    source: authored
+  - text: ingest the new microservice repo
+    source: authored
+  - text: register this github project for tracing
+    source: authored
+  - text: can you index a repo i just linked
+    source: authored
+  - text: load the payments-service repo into the graph
+    source: authored
+  - text: start indexing our api gateway codebase
+    source: authored
+  - text: onboard a fresh repo for call tracing
+    source: authored
+  - text: add github repo to make it searchable
+    source: authored
+  - text: index the repo at that github url
+    source: authored
+  - text: bring this codebase into code search
+    source: authored
+  - text: scan and index my new github project
+    source: authored
+  - text: get this repo into the graph so i can trace calls
+    source: authored
+  platform_codegraph_list_projects:
+  - text: what code repos are indexed?
+    source: example
+  - text: list the codebases the agents can search
+    source: example
+  - text: which repos are in the code graph
+    source: authored
+  - text: show me all indexed projects
+    source: authored
+  - text: what codebases do we have indexed
+    source: authored
+  - text: list the indexed repositories
+    source: authored
+  - text: what projects can the agents trace calls in
+    source: authored
+  - text: which code repos are searchable right now
+    source: authored
+  - text: show indexed projects with their languages
+    source: authored
+  - text: what repos have been onboarded to the graph
+    source: authored
+  - text: how many symbols are indexed per repo
+    source: authored
+  - text: give me the list of code projects
+    source: authored
+  - text: what's in the code graph so far
+    source: authored
+  - text: which codebases are available to search
+    source: authored
+  - text: show me the indexed repos and when they last refreshed
+    source: authored
+  - text: what code projects exist in this workspace
+    source: authored
+  - text: list every repo the graph knows about
+    source: authored
+  - text: what codebases are wired up for search
+    source: authored
+  platform_codegraph_reindex:
+  - text: reindex the orchestrator repo
+    source: example
+  - text: refresh the code graph for automatos-ai
+    source: example
+  - text: the graph is stale, re-index the backend repo
+    source: authored
+  - text: refresh the code graph, it's out of date
+    source: authored
+  - text: rebuild the index for automatos-ai
+    source: authored
+  - text: re-scan the orchestrator, code changed
+    source: authored
+  - text: update the code graph after my last push
+    source: authored
+  - text: the symbols are outdated, reindex please
+    source: authored
+  - text: sync the graph with the latest code
+    source: authored
+  - text: refresh indexing for the payments repo
+    source: authored
+  - text: re-run indexing on the frontend project
+    source: authored
+  - text: graph's out of sync, re-index it
+    source: authored
+  - text: reindex after the merge
+    source: authored
+  - text: pull the newest code into the graph again
+    source: authored
+  - text: freshen up the code graph for this repo
+    source: authored
+  - text: regenerate the index for our api repo
+    source: authored
+  - text: the code graph is behind, refresh it
+    source: authored
+  - text: reindex so call traces reflect new code
+    source: authored
+  platform_codegraph_search:
+  - text: find where retry logic lives in the orchestrator repo
+    source: example
+  - text: search the codebase for the tool router
+    source: example
+  - text: where does authentication happen in this codebase
+    source: authored
+  - text: search for anything related to rate limiting
+    source: authored
+  - text: find the code that handles retries
+    source: authored
+  - text: locate where we parse user intent
+    source: authored
+  - text: grep the repo for websocket handling
+    source: authored
+  - text: where is the caching logic in this project
+    source: authored
+  - text: find functions dealing with token counting
+    source: authored
+  - text: search the codebase for report submission
+    source: authored
+  - text: where do we handle payment webhooks
+    source: authored
+  - text: look for anything about tenant isolation
+    source: authored
+  - text: find where the mission planning lives
+    source: authored
+  - text: search for the code that talks to openrouter
+    source: authored
+  - text: where's the logic for cost tracking
+    source: authored
+  - text: find symbols related to embeddings
+    source: authored
+  - text: search this repo for the scheduler loop
+    source: authored
+  - text: hunt down where we build the system prompt
+    source: authored
+  platform_codegraph_set_auto_reindex:
+  - text: enable auto-reindex for the orchestrator repo on every push
+    source: example
+  - text: stop auto-reindexing the automatos-ai repo
+    source: example
+  - text: turn on automatic reindexing for the backend repo
+    source: authored
+  - text: auto-refresh the graph whenever i push
+    source: authored
+  - text: disable auto-reindex for automatos-ai
+    source: authored
+  - text: keep the code graph fresh on every push
+    source: authored
+  - text: switch off push-triggered reindexing
+    source: authored
+  - text: enable the reindex webhook for this repo
+    source: authored
+  - text: stop auto-refreshing the graph on pushes
+    source: authored
+  - text: set the frontend repo to reindex automatically
+    source: authored
+  - text: toggle on hands-off reindexing
+    source: authored
+  - text: don't auto-reindex the payments repo anymore
+    source: authored
+  - text: make the graph update itself when code lands
+    source: authored
+  - text: turn off automatic graph refresh for this project
+    source: authored
+  - text: wire up push-based reindexing for our api repo
+    source: authored
+  - text: enable auto reindex so i don't have to do it manually
+    source: authored
+  - text: cancel the auto-reindex on the orchestrator
+    source: authored
+  - text: have every github push refresh the code graph
+    source: authored

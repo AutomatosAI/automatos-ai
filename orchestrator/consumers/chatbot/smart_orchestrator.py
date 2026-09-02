@@ -248,6 +248,12 @@ class SmartChatOrchestrator:
             skip_memory=not _wants_memory,
             chat_id=chat_id,
             query=latest_query,
+            # PRD-232 US-004: thread the real agent id into ctx.kwargs so the
+            # PlatformActionsSection graph path (platform_actions._build_graph_filtered
+            # reads ctx.kwargs["agent_id"]) is agent-scoped instead of permanently
+            # agent-blind. Without this the catalog graph read can never apply
+            # per-agent edges/affinities (C9).
+            agent_id=self.agent_id,
             # The surface service.py::_get_tools built for this turn — carries
             # is_super_admin + page-prior that ToolsSection can't resolve.
             # None when empty so a failed upstream build falls back to the

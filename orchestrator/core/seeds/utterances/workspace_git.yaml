@@ -1,0 +1,69 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: workspace_git)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: workspace_git                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: workspace_git
+actions:
+  workspace_git:
+  - text: check git status
+    source: example
+  - text: commit the changes with message 'fix login bug'
+    source: example
+  - text: push to remote
+    source: example
+  - text: show the last 5 commits
+    source: example
+  - text: git status
+    source: phrase_map
+  - text: git diff
+    source: phrase_map
+  - text: git commit
+    source: phrase_map
+  - text: git push
+    source: phrase_map
+  - text: git log
+    source: phrase_map
+  - text: git pull
+    source: phrase_map
+  - text: check git
+    source: phrase_map
+  - text: commit changes
+    source: phrase_map
+  - text: push changes
+    source: phrase_map
+  - text: clone https://github.com/acme/webapp into the workspace
+    source: authored
+  - text: what changed, show me the diff
+    source: authored
+  - text: stage all my changes
+    source: authored
+  - text: pull the latest from origin
+    source: authored
+  - text: create a new branch called feature-login
+    source: authored
+  - text: stash my work for now
+    source: authored
+  - text: run a git blame on this file
+    source: authored

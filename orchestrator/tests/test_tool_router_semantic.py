@@ -166,7 +166,6 @@ def _install_low_level_stubs():
     class _FakeConfig:
         SEMANTIC_TOOL_ROUTING = False
         SEMANTIC_TOOL_ROUTING_TOP_K = 15
-        TOOL_ROUTING_GRAPH = False
 
     config_mod.config = _FakeConfig()
     sys.modules["config"] = config_mod
@@ -438,7 +437,7 @@ def test_run_coroutine_blocking_inside_running_loop():
 
 
 def test_rank_actions_for_dispatcher_happy_path():
-    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.91),
             ("platform_create_agent", 0.83),
@@ -505,11 +504,14 @@ def test_get_tools_for_agent_no_query_returns_full_enum(caplog):
         )
     dispatcher = _dispatcher_from(tools)
     enum = _enum_of_tool(dispatcher)
-    # Full enum: all non-promoted actions (admin included since is_admin=True)
+    # Full enum: all eligible actions (admin included since is_admin=True)
     assert "platform_list_agents" in enum
     assert "platform_get_workspace_info" in enum
     assert "platform_admin_only_action" in enum  # is_admin=True → admin allowed
-    assert "platform_promoted_thing" not in enum  # promoted excluded
+    # PRD-232 US-014: a promoted action that is NOT a config pin and did NOT rank
+    # (no query) is no longer attached first-class — it is reachable via the
+    # dispatcher enum like any action (promotion-as-prior, not unconditional attach).
+    assert "platform_promoted_thing" in enum
     # Trace log says NOT narrowed
     assert any(
         "dispatcher enum NOT narrowed" in r.message
@@ -522,7 +524,7 @@ def test_get_tools_for_agent_with_query_narrows_enum(caplog):
     """AC: query + flag on → dispatcher enum is the ranked subset."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.95),
             ("platform_create_agent", 0.80),
@@ -603,7 +605,7 @@ def test_get_tools_for_agent_excludes_admin_when_not_admin():
     regardless of query / ranking output."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         # Even if the ranker tried to surface an admin action, the schema
         # builder should drop it.
         return [
@@ -633,7 +635,7 @@ def test_get_tools_for_agent_async_narrows_enum_without_bridge(caplog):
     and the thread-bridge helper is never engaged."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
 
-    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.95),
             ("platform_create_agent", 0.80),
@@ -700,7 +702,7 @@ def test_get_tools_for_agent_async_no_query_full_enum():
 
 
 def test_rank_actions_for_dispatcher_async_happy_path():
-    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False):
+    async def _fake_rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
             ("platform_list_agents", 0.91),
             ("platform_create_agent", 0.83),

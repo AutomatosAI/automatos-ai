@@ -7,16 +7,32 @@ Wraps ActionSemanticIndex.rank_actions() for entry node selection -- does NOT
 reimplement embedding search. Falls back to pure embedding ranking when the graph
 is empty or unavailable.
 
+PRD-232 §6.5 — the TWO-LAYER graph (RVW-2, Gerard's ruling, amending PRD-177's
+per-tenant lock): every edge/affinity/failed_after read returns two layers —
+  * the tenant's OWN rows (workspace_id == X) at full weight, and
+  * a TEXT-FREE GLOBAL prior (workspace_id IS NULL, aggregated across tenants)
+    at reduced weight (TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR),
+so a zero-telemetry tenant still routes (rides the global prior) while a tenant's
+own learned signal always dominates it. The moat holds for tenant-SPECIFIC rows —
+workspace B's rows never surface for A; only the deliberately-global aggregate
+crosses. The global layer is TEXT-FREE by construction (edges/affinities carry only
+action names; global intent-cluster rows carry no raw user query — organic cluster
+sample_query is redacted to an action-name label, seeded rows carry a synthetic
+utterance), so PRD-181 (GDPR erasure) scope stays per-tenant rows ONLY — nothing in
+the global layer identifies a user. A None (system/eval) read sees the global layer
+at full weight (there is no tenant layer to prefer).
+
 Cache: traversal results cached in CacheService for 5 minutes keyed on
-(query_embedding_hash, agent_id, top_k).
+(query_embedding_hash, agent_id, top_k, workspace_id).
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import math
 import threading
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .action_semantic_index import get_action_semantic_index
 
@@ -54,6 +70,47 @@ class GraphRouter:
             return getattr(config, "TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", 50)
         except Exception:
             return 50
+
+    @staticmethod
+    def _cluster_match_threshold() -> float:
+        # PRD-232 US-010: cosine floor for assigning a query to an intent cluster.
+        try:
+            from config import config
+            return float(getattr(config, "TOOL_ROUTING_GRAPH_CLUSTER_MATCH_THRESHOLD", 0.6))
+        except Exception:
+            return 0.6
+
+    @staticmethod
+    def _global_affinity_discount() -> float:
+        # PRD-232 US-010: weight for cluster-blind (intent_cluster_id IS NULL)
+        # affinity rows when a cluster matched — a weak global prior.
+        try:
+            from config import config
+            return float(getattr(config, "TOOL_ROUTING_GRAPH_GLOBAL_AFFINITY_DISCOUNT", 0.5))
+        except Exception:
+            return 0.5
+
+    @staticmethod
+    def _failed_after_penalty_weight() -> float:
+        # PRD-232 US-010c: scale for the failed_after de-ranking penalty.
+        try:
+            from config import config
+            return float(getattr(config, "TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY", 1.0))
+        except Exception:
+            return 1.0
+
+    @staticmethod
+    def _global_prior_factor() -> float:
+        # PRD-232 §6.5 (RVW-2): the two-layer graph. Weight applied to a GLOBAL
+        # (workspace_id IS NULL) edge/affinity/failed_after row's contribution when a
+        # TENANT reads it — a text-free cross-tenant prior the tenant's own rows
+        # override. A system/eval read (workspace_id=None) sees the global layer at
+        # full weight (factor is not applied — there is no tenant layer to prefer).
+        try:
+            from config import config
+            return float(getattr(config, "TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR", 0.5))
+        except Exception:
+            return 0.5
 
     # ------------------------------------------------------------------
     # Cache helpers
@@ -135,13 +192,14 @@ class GraphRouter:
     ) -> List[Tuple[str, float, List[str]]]:
         """Rank tool chains by combining embedding similarity with graph edges.
 
-        PRD-177 S5: ``workspace_id`` is a REQUIRED keyword. The learned operating
-        graph is per-tenant (owner decision) — edge/affinity reads are filtered
-        to this workspace, and there is no unfiltered global-read fallback that
-        would bleed one tenant's edges into another's routing. Pass the caller's
-        workspace id, or ``None`` explicitly for a genuinely unscoped read (the
-        offline eval harness); the keyword is required so no caller can silently
-        reintroduce a global read.
+        PRD-177 S5 + PRD-232 §6.5: ``workspace_id`` is a REQUIRED keyword. Reads are
+        TWO-LAYER — this tenant's own rows at full weight PLUS the text-free global
+        prior at reduced weight (see the module docstring). A tenant-specific row of
+        one workspace never bleeds into another's routing; only the deliberately
+        cross-tenant, text-free global aggregate is shared. Pass the caller's
+        workspace id, or ``None`` explicitly for a genuinely unscoped system/eval read
+        (the global layer at full weight); the keyword is required so no caller can
+        silently pick the wrong tenant.
 
         PRD-143: fail-closed — super_admin_only actions are excluded from
         entry nodes AND from edge-expansion targets unless
@@ -155,29 +213,46 @@ class GraphRouter:
         if cached is not None:
             return cached
 
-        # Step 1: entry nodes from ActionSemanticIndex
+        # Step 1: entry nodes from ActionSemanticIndex. PRD-232 US-003: pass
+        # workspace_id so this entry rank reuses the turn's shared cosine
+        # ranking (the graph slices its top-5 from the one computation the
+        # dispatcher narrowing / catalog already ran).
         entry_nodes = await self._semantic_index.rank_actions(
             query,
             top_k=_ENTRY_TOP_K,
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
+            workspace_id=workspace_id,
         )
         if not entry_nodes:
             return []
 
-        # Step 2: expand through graph edges + affinities (workspace-scoped)
+        # Step 1.5 (PRD-232 US-010): resolve the query vector for intent-cluster
+        # matching. Reuses the semantic index's bounded/cached embed (a Redis hit
+        # on the vector the entry-node ranking just computed). None = no vector →
+        # _expand_with_graph skips cluster matching (embedding floor only).
+        query_vec, model_key = await self._match_query_vector(query)
+
+        # Step 2: expand through graph edges + affinities (workspace-scoped),
+        # cluster-aware when a query vector is available.
         try:
-            chains = self._expand_with_graph(entry_nodes, agent_id, workspace_id)
+            chains = self._expand_with_graph(
+                entry_nodes, agent_id, workspace_id, query_vec, model_key
+            )
         except Exception as e:
             logger.warning("GraphRouter: graph expansion failed, falling back to embedding-only: %s", e)
             chains = self._to_single_chains(entry_nodes)
 
-        # Step 2.5 (PRD-143): edges learned from super-admin usage can point
-        # AT su actions even when every entry node is operator-eligible —
-        # drop any chain touching the su tier before it reaches a consumer.
-        if not include_super_admin:
-            chains = self._drop_super_admin_chains(chains)
+        # Step 2.5 (PRD-143 + PRD-232 US-010 P232-RVW-4): the final role net over
+        # the WHOLE expanded surface. Entry nodes are already role-ranked, but two
+        # downstream paths add un-gated names — edge-expansion targets (edges learned
+        # from privileged usage can point AT a gated action) and the cluster
+        # action_names_hot US-010 merges into the entry candidates — so drop any chain
+        # touching an action this caller may not see. The graph layer stays fail-closed
+        # on admin AND su on its own, independent of any downstream re-gate (the
+        # TOOL_ROUTING_GRAPH flip is what this PRD builds toward).
+        chains = self._drop_ineligible_chains(chains, exclude_admin, include_super_admin)
 
         # Step 3: deduplicate by action set, keep highest
         chains = self._deduplicate(chains)
@@ -198,11 +273,19 @@ class GraphRouter:
         entry_nodes: List[Tuple[str, float]],
         agent_id: Optional[int],
         workspace_id: Optional[str],
+        query_vec: Optional[List[float]] = None,
+        model_key: Optional[str] = None,
     ) -> List[Tuple[str, float, List[str]]]:
         """Query edge + affinity tables and build scored chains.
 
         PRD-177 S5: all edge/affinity reads are scoped to ``workspace_id`` — the
         learned graph is per-tenant.
+
+        PRD-232 US-010: when ``query_vec`` is provided the live query is matched to
+        the nearest intent cluster — its ``action_names_hot`` join the entry
+        candidates, and its id scopes the affinity read so ``succeeds/fails_for_intent``
+        apply PER-INTENT (not summed across every intent). A missed / absent cluster
+        leaves routing at the embedding floor exactly as before.
         """
         from core.database.database import get_db_session
 
@@ -211,35 +294,79 @@ class GraphRouter:
 
         chains: List[Tuple[str, float, List[str]]] = []
 
-        # Always include single-action chains from entry nodes
-        chains.extend(self._to_single_chains(entry_nodes))
-
-        entry_action_names = [name for name, _ in entry_nodes]
-        cosine_by_name = {name: score for name, score in entry_nodes}
-
         with get_db_session() as db:
+            # PRD-232 US-010(a): match the query to an intent cluster (if we have a
+            # vector). A hit adds its hot actions as entry candidates and its id
+            # scopes the affinity read below.
+            intent_cluster_id: Optional[int] = None
+            if query_vec is not None and model_key is not None:
+                try:
+                    cluster = self._match_intent_cluster(
+                        db, query_vec, model_key, self._cluster_match_threshold()
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "GraphRouter: intent-cluster match failed, embedding floor only: %s", e
+                    )
+                    cluster = None
+                if cluster is not None:
+                    intent_cluster_id = cluster[0]
+                    entry_nodes = self._merge_cluster_hot_actions(entry_nodes, cluster)
+
+            # Always include single-action chains from entry nodes (now including
+            # any merged cluster hot actions)
+            chains.extend(self._to_single_chains(entry_nodes))
+
+            entry_action_names = [name for name, _ in entry_nodes]
+            cosine_by_name = {name: score for name, score in entry_nodes}
+
             # Determine whether to use agent-specific edges
             use_agent_scope = False
             if agent_id is not None:
                 agent_sample_count = self._agent_total_samples(db, agent_id)
                 use_agent_scope = agent_sample_count >= sample_floor
+            scoped_agent = agent_id if use_agent_scope else None
 
             # Batch-query edges for all entry nodes (workspace-scoped)
-            edges = self._query_edges(
-                db, entry_action_names, min_conf,
-                agent_id if use_agent_scope else None,
-                workspace_id,
-            )
+            edges = self._query_edges(db, entry_action_names, min_conf, scoped_agent, workspace_id)
 
             # Batch-query affinities for entry + expansion targets (workspace-scoped)
             all_action_names = set(entry_action_names)
             for edge in edges:
                 all_action_names.add(edge["to_action"])
-            positive_boosts, negative_penalties = self._query_affinities(
-                db, list(all_action_names),
-                agent_id if use_agent_scope else None,
-                workspace_id,
-            )
+            # PRD-232 US-010(b): pass intent_cluster_id ONLY when a cluster matched,
+            # so the no-cluster path keeps the exact legacy 4-arg call signature.
+            if intent_cluster_id is not None:
+                positive_boosts, negative_penalties = self._query_affinities(
+                    db, list(all_action_names), scoped_agent, workspace_id, intent_cluster_id
+                )
+            else:
+                positive_boosts, negative_penalties = self._query_affinities(
+                    db, list(all_action_names), scoped_agent, workspace_id
+                )
+
+            # PRD-232 US-010(c): failed_after edges read as a de-ranking penalty.
+            # Best-effort — a failure to read the (optional) failure signal must
+            # never sink the whole expansion, which is already the embedding floor's
+            # refinement, not its foundation.
+            try:
+                failed_penalties = self._query_failed_after(
+                    db, list(all_action_names), min_conf, scoped_agent, workspace_id
+                )
+            except Exception as e:
+                logger.warning(
+                    "GraphRouter: failed_after read failed, no de-ranking applied: %s", e
+                )
+                failed_penalties = {}
+
+        failed_weight = self._failed_after_penalty_weight()
+
+        # PRD-232 §6.5: on a TENANT read, a global (workspace_id IS NULL) edge is a
+        # prior — discount its confidence so a tenant's own edge of equal-or-higher
+        # confidence outranks it (they dedup to one chain, highest score wins). A
+        # None/system read sees the global layer at full weight (no tenant to prefer).
+        tenant_read = workspace_id is not None
+        prior_factor = self._global_prior_factor()
 
         # Build chains from edges (depth 1 only -- _MAX_DEPTH = 2 means
         # chains of length 2: [entry, next])
@@ -251,6 +378,8 @@ class GraphRouter:
             to_action = edge["to_action"]
             cosine = cosine_by_name.get(from_action, 0.0)
             edge_confidence = edge["confidence"]
+            if tenant_read and edge.get("is_global"):
+                edge_confidence *= prior_factor
 
             # Affinity boosts (succeeds/prefers) lift the chain; negative
             # penalties (fails_for_intent) lower it — PRD-141 US-017.
@@ -260,11 +389,117 @@ class GraphRouter:
                 boost += positive_boosts.get(action, 0.0)
                 penalty += negative_penalties.get(action, 0.0)
 
-            score = cosine * edge_confidence + boost - penalty
+            # A learned failed_after transition de-ranks this chain (US-010c).
+            failed_pen = failed_penalties.get((from_action, to_action), 0.0) * failed_weight
+
+            score = cosine * edge_confidence + boost - penalty - failed_pen
             chains.append((from_action, score, [from_action, to_action]))
             expanded += 1
 
         return chains
+
+    # ------------------------------------------------------------------
+    # Intent-cluster matching (PRD-232 US-010a)
+    # ------------------------------------------------------------------
+
+    async def _match_query_vector(
+        self, query: str
+    ) -> Tuple[Optional[List[float]], Optional[str]]:
+        """Resolve ``(query_vector, model_key)`` via the semantic index's embed.
+
+        Returns ``(None, None)`` when the index cannot embed (unit fakes expose
+        only ``rank_actions``; a degraded/timed-out embed) — the caller then skips
+        cluster matching and stays at the embedding floor. Never raises.
+        """
+        embed = getattr(self._semantic_index, "embed_query", None)
+        if embed is None:
+            return None, None
+        try:
+            return await embed(query)
+        except Exception as e:
+            logger.debug("GraphRouter: query embed for cluster match failed: %s", e)
+            return None, None
+
+    @staticmethod
+    def _match_intent_cluster(
+        db,
+        query_vec: List[float],
+        model_key: str,
+        threshold: float,
+    ) -> Optional[Tuple[int, List[str], float]]:
+        """Nearest ToolRoutingIntentCluster by centroid cosine, over ``threshold``.
+
+        Only clusters embedded under the SAME canonical ``model_key`` are
+        candidates — a centroid from another embedding model is not comparable.
+        Returns ``(cluster_id, action_names_hot, similarity)`` or ``None`` (a miss:
+        the query belongs to no learned intent, so routing stays at the embedding
+        floor rather than forcing it into an ill-fitting cluster).
+        """
+        from core.models.tool_routing import ToolRoutingIntentCluster
+
+        rows = (
+            db.query(ToolRoutingIntentCluster)
+            .filter(ToolRoutingIntentCluster.embedding_model_key == model_key)
+            .all()
+        )
+        if not rows:
+            return None
+
+        q_norm = math.sqrt(sum(v * v for v in query_vec))
+        if q_norm == 0.0:
+            return None
+
+        best: Optional[Tuple[int, List[str], float]] = None
+        for r in rows:
+            sample_count = getattr(r, "sample_count", None)
+            if sample_count is not None and sample_count == 0:
+                # Skip ONLY a true k-means empty-cluster artifact (zero members, its
+                # centroid COPIED from a real point when k exceeds the distinct-query
+                # count). Such a copied centroid can tie (or beat, by a float ULP) the
+                # populated cluster that shares the intent, so matching it would merge
+                # nothing AND scope the affinity read to a cluster with no rows,
+                # starving the real per-intent boost. Gate on sample_count, NOT on
+                # empty action_names_hot: a POPULATED cluster (sample_count > 0) can
+                # legitimately have empty hot when all its members are non-'success'
+                # (e.g. a __tool_gap__-dominated intent) — that cluster must still
+                # match on its centroid so US-011(c)'s gap→resolution affinity, scoped
+                # to its id, is reachable by a live query re-expressing the intent.
+                continue
+            centroid = r.centroid_embedding or []
+            if len(centroid) != len(query_vec):
+                continue  # dimension mismatch — not comparable
+            c_norm = math.sqrt(sum(v * v for v in centroid))
+            if c_norm == 0.0:
+                continue
+            dot = sum(a * b for a, b in zip(query_vec, centroid))
+            similarity = dot / (q_norm * c_norm)
+            if best is None or similarity > best[2]:
+                best = (r.id, list(r.action_names_hot or []), similarity)
+
+        if best is None or best[2] < threshold:
+            return None
+        return best
+
+    @staticmethod
+    def _merge_cluster_hot_actions(
+        entry_nodes: List[Tuple[str, float]],
+        cluster: Tuple[int, List[str], float],
+    ) -> List[Tuple[str, float]]:
+        """A matched cluster's ``action_names_hot`` join the entry candidates.
+
+        Existing cosine entries keep their score and order; a hot action not
+        already present is appended at the cluster-similarity score so it enters
+        the surface — its final rank is then decided by the per-intent affinity,
+        not by this seed score. Pure; order-preserving (organic entries first).
+        """
+        _cluster_id, hot_actions, similarity = cluster
+        present = {name for name, _ in entry_nodes}
+        merged = list(entry_nodes)
+        for name in hot_actions:
+            if name not in present:
+                merged.append((name, float(similarity)))
+                present.add(name)
+        return merged
 
     # ------------------------------------------------------------------
     # DB queries
@@ -291,18 +526,37 @@ class GraphRouter:
         agent_id: Optional[int],
         workspace_id: Optional[str],
     ) -> List[dict]:
-        """Query tool_routing_edges for used_after edges from entry nodes.
+        """Query tool_routing_edges for used_after/meta_sibling edges from entry nodes.
 
-        PRD-177 S5: filtered to ``workspace_id``. The learned graph is per-tenant,
-        so a read for workspace A returns ONLY workspace A's edges (or the
-        genuinely unscoped ``workspace_id IS NULL`` rows when the caller passes
-        None). There is no cross-tenant global-read fallback.
+        PRD-232 §6.5 (RVW-2 — the two-layer graph, amending US-004's meta_sibling-only
+        NULL admission): a read for workspace A returns TWO layers —
+          * the tenant's OWN rows (``workspace_id == A``) at full weight, and
+          * the text-free GLOBAL layer (``workspace_id IS NULL``, aggregated across
+            tenants) at reduced weight — admitted for EVERY edge type now, not just
+            ``meta_sibling``. Its confidence is discounted by ``_global_prior_factor()``
+            in ``_expand_with_graph`` (flagged here via ``is_global``), so a tenant's
+            own learned co-occurrence always dominates the borrowed cross-tenant prior.
+        The moat still holds for tenant-SPECIFIC rows: workspace B's ``workspace_id == B``
+        rows are NEVER admitted for A. Only the deliberately-global, text-free aggregate
+        crosses tenants — that is the cold-start prior a zero-telemetry tenant rides.
+        A None caller (system/eval read) sees the global layer at FULL weight.
         """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingEdge
 
         if not from_actions:
             return []
+
+        # §6.5 two-layer: a tenant read admits its own rows PLUS every global
+        # (workspace_id IS NULL) row as a prior; a None (system) read sees the
+        # global layer alone. No edge_type coupling on the NULL admission anymore.
+        if workspace_id is not None:
+            workspace_filter = or_(
+                ToolRoutingEdge.workspace_id == workspace_id,
+                ToolRoutingEdge.workspace_id.is_(None),
+            )
+        else:
+            workspace_filter = ToolRoutingEdge.workspace_id.is_(None)
 
         filters = [
             ToolRoutingEdge.from_action.in_(from_actions),
@@ -312,12 +566,7 @@ class GraphRouter:
             # real usage (higher Wilson confidence) outranks metadata edges.
             ToolRoutingEdge.edge_type.in_(("used_after", "meta_sibling")),
             ToolRoutingEdge.confidence >= min_confidence,
-            # Per-tenant isolation (moat): scope to this workspace exactly. A
-            # None workspace_id reads only the unscoped rows (IS NULL — e.g. the
-            # global meta_sibling cold-start seeds), never a tenant's rows.
-            ToolRoutingEdge.workspace_id == workspace_id
-            if workspace_id is not None
-            else ToolRoutingEdge.workspace_id.is_(None),
+            workspace_filter,
         ]
 
         if agent_id is not None:
@@ -347,6 +596,9 @@ class GraphRouter:
                 "confidence": r.confidence,
                 "weight": r.weight,
                 "agent_id": r.agent_id,
+                # §6.5: a NULL-workspace row is the global prior — discounted on a
+                # tenant read (never on a None/system read) in _expand_with_graph.
+                "is_global": getattr(r, "workspace_id", None) is None,
             }
             for r in rows
         ]
@@ -357,6 +609,7 @@ class GraphRouter:
         action_names: List[str],
         agent_id: Optional[int],
         workspace_id: Optional[str],
+        intent_cluster_id: Optional[int] = None,
     ) -> Tuple[dict, dict]:
         """Query tool_routing_affinities, returning (positive_boosts, negative_penalties).
 
@@ -369,9 +622,21 @@ class GraphRouter:
         * ``fails_for_intent`` -> negative_penalties[action] += weight*confidence,
           recorded as a POSITIVE magnitude (the caller subtracts it).
 
-        PRD-177 S5: filtered to ``workspace_id`` — affinities are per-tenant, so a
-        succeeds/fails-for-intent signal learned in one workspace never boosts or
-        penalizes another's routing.
+        PRD-232 §6.5 (RVW-2 — two-layer graph): a tenant read admits its OWN affinities
+        (``workspace_id == X``) at full weight PLUS the text-free GLOBAL layer
+        (``workspace_id IS NULL``) as a cross-tenant prior, discounted by
+        ``_global_prior_factor()``. A tenant-SPECIFIC affinity never crosses to another
+        tenant. A None (system/eval) read sees the global layer at full weight.
+
+        PRD-232 US-010(b): when ``intent_cluster_id`` is given (a live query matched
+        a cluster), read PER-INTENT rows (``intent_cluster_id ==`` the match) at full
+        weight PLUS cluster-blind rows (``intent_cluster_id IS NULL``) as a weak
+        prior, discounted by ``_global_affinity_discount()``. This is the fix
+        for C4: previously affinities were summed across EVERY intent, so an action
+        that fails for intent X but succeeds for intent Y looked neutral. When no
+        cluster matched, only the cluster-blind rows apply (exact legacy behaviour).
+        The two discounts COMPOUND: a global, cluster-blind row on a tenant read with a
+        matched cluster is the weakest prior (prior_factor * cluster_blind_discount).
         """
         from sqlalchemy import and_, or_
         from core.models.tool_routing import ToolRoutingAffinity
@@ -379,13 +644,19 @@ class GraphRouter:
         if not action_names:
             return {}, {}
 
+        # §6.5 two-layer: a tenant read admits its own rows + the global (IS NULL)
+        # prior; a None (system) read sees the global layer alone.
+        if workspace_id is not None:
+            workspace_filter = or_(
+                ToolRoutingAffinity.workspace_id == workspace_id,
+                ToolRoutingAffinity.workspace_id.is_(None),
+            )
+        else:
+            workspace_filter = ToolRoutingAffinity.workspace_id.is_(None)
+
         filters = [
             ToolRoutingAffinity.action_name.in_(action_names),
-            # Per-tenant isolation (moat): scope to this workspace exactly.
-            # None reads only the unscoped rows (IS NULL), never a tenant's.
-            ToolRoutingAffinity.workspace_id == workspace_id
-            if workspace_id is not None
-            else ToolRoutingAffinity.workspace_id.is_(None),
+            workspace_filter,
         ]
 
         if agent_id is not None:
@@ -398,22 +669,131 @@ class GraphRouter:
         else:
             filters.append(ToolRoutingAffinity.agent_id.is_(None))
 
+        # PRD-232 US-010(b): per-intent scoping. A matched cluster admits its own
+        # rows AND the cluster-blind global prior; a miss admits only the global
+        # prior (intent_cluster_id IS NULL), never another intent's rows.
+        if intent_cluster_id is not None:
+            filters.append(
+                or_(
+                    ToolRoutingAffinity.intent_cluster_id == intent_cluster_id,
+                    ToolRoutingAffinity.intent_cluster_id.is_(None),
+                )
+            )
+        else:
+            filters.append(ToolRoutingAffinity.intent_cluster_id.is_(None))
+
         rows = (
             db.query(ToolRoutingAffinity)
             .filter(and_(*filters))
             .all()
         )
 
+        discount = GraphRouter._global_affinity_discount() if intent_cluster_id is not None else 1.0
+        # §6.5: a global (workspace_id IS NULL) row is a cross-tenant prior on a
+        # tenant read — discounted so a tenant's own affinity dominates. Not applied
+        # on a None/system read (no tenant layer to prefer). Compounds with the
+        # cluster-blind discount above.
+        tenant_read = workspace_id is not None
+        prior_factor = GraphRouter._global_prior_factor() if tenant_read else 1.0
+
         positive_boosts: dict = {}
         negative_penalties: dict = {}
         for r in rows:
             magnitude = r.weight * r.confidence
+            # A global (cross-tenant) row is a prior on a tenant read.
+            if tenant_read and getattr(r, "workspace_id", None) is None:
+                magnitude *= prior_factor
+            # A cluster-blind row is a WEAK global prior when a cluster matched;
+            # a per-intent row applies at full weight. (When no cluster matched,
+            # discount is 1.0 and every admitted row is cluster-blind anyway.)
+            if intent_cluster_id is not None and getattr(r, "intent_cluster_id", None) is None:
+                magnitude *= discount
             if r.affinity_type in ("succeeds_for_intent", "agent_prefers"):
                 positive_boosts[r.action_name] = positive_boosts.get(r.action_name, 0.0) + magnitude
             elif r.affinity_type == "fails_for_intent":
                 negative_penalties[r.action_name] = negative_penalties.get(r.action_name, 0.0) + magnitude
 
         return positive_boosts, negative_penalties
+
+    @staticmethod
+    def _query_failed_after(
+        db,
+        from_actions: List[str],
+        min_confidence: float,
+        agent_id: Optional[int],
+        workspace_id: Optional[str],
+    ) -> Dict[Tuple[str, str], float]:
+        """Read ``failed_after`` edges as a de-ranking penalty (PRD-232 US-010c).
+
+        Returns ``{(from_action, to_action): confidence}`` — the failure signal for
+        each risky transition, where ``confidence`` is the Wilson lower bound of the
+        failure rate (edge_builder). The caller multiplies by the configured penalty
+        weight and subtracts it from that chain's score, so a chain whose transition
+        reliably fails is suppressed. Turns the previously write-only ``failed_after``
+        rows into a live signal — no write-only tables (US-010c).
+
+        Scoping follows the PRD-232 §6.5 two-layer model like ``_query_edges``: a
+        tenant read admits its own ``failed_after`` rows at full weight PLUS the global
+        (``workspace_id IS NULL``) failure prior, discounted by ``_global_prior_factor()``
+        so a tenant's own failure evidence dominates the cross-tenant prior. A None
+        (system) read sees the global layer at full weight. Defence-in-depth: the
+        ``edge_type`` is re-checked in Python so a permissive fake/DB layer can never
+        mistake a ``used_after`` row for a failure.
+        """
+        from sqlalchemy import and_, or_
+        from core.models.tool_routing import ToolRoutingEdge
+
+        if not from_actions:
+            return {}
+
+        if workspace_id is not None:
+            workspace_filter = or_(
+                ToolRoutingEdge.workspace_id == workspace_id,
+                ToolRoutingEdge.workspace_id.is_(None),
+            )
+        else:
+            workspace_filter = ToolRoutingEdge.workspace_id.is_(None)
+
+        filters = [
+            ToolRoutingEdge.from_action.in_(from_actions),
+            ToolRoutingEdge.edge_type == "failed_after",
+            ToolRoutingEdge.confidence >= min_confidence,
+            workspace_filter,
+        ]
+
+        if agent_id is not None:
+            filters.append(
+                or_(
+                    ToolRoutingEdge.agent_id == agent_id,
+                    ToolRoutingEdge.agent_id.is_(None),
+                )
+            )
+        else:
+            filters.append(ToolRoutingEdge.agent_id.is_(None))
+
+        rows = (
+            db.query(ToolRoutingEdge)
+            .filter(and_(*filters))
+            .limit(_MAX_EXPANDED_NODES)
+            .all()
+        )
+
+        tenant_read = workspace_id is not None
+        prior_factor = GraphRouter._global_prior_factor()
+
+        penalties: Dict[Tuple[str, str], float] = {}
+        for r in rows:
+            if getattr(r, "edge_type", None) != "failed_after":
+                continue  # defence-in-depth against a permissive filter layer
+            conf = float(r.confidence)
+            # §6.5: a global failure row is a discounted cross-tenant prior on a
+            # tenant read (full weight on a None/system read).
+            if tenant_read and getattr(r, "workspace_id", None) is None:
+                conf *= prior_factor
+            key = (r.from_action, r.to_action)
+            # Keep the strongest failure signal if a pair recurs across scopes.
+            penalties[key] = max(penalties.get(key, 0.0), conf)
+        return penalties
 
     # ------------------------------------------------------------------
     # Helpers
@@ -426,24 +806,42 @@ class GraphRouter:
         """Convert embedding-only results to single-action chains."""
         return [(name, score, [name]) for name, score in entry_nodes]
 
-    def _drop_super_admin_chains(
+    def _drop_ineligible_chains(
         self,
         chains: List[Tuple[str, float, List[str]]],
+        exclude_admin: bool,
+        include_super_admin: bool,
     ) -> List[Tuple[str, float, List[str]]]:
-        """Drop every chain that touches a super_admin_only action (PRD-143).
+        """Drop every chain touching an action the caller is not entitled to
+        (PRD-143 fail-closed; PRD-232 US-010 P232-RVW-4 extends it to admin_only).
 
-        The registry is resolved via the semantic index's reference (always
-        present in production; keeps unit fakes lightweight) with the
-        canonical singleton as fallback.
+        The final role net over the whole expanded surface. Entry nodes are already
+        role-ranked by rank_actions, but two paths add un-gated names downstream:
+        edge-expansion targets (edges learned from privileged usage can point AT a
+        gated action) and the cluster ``action_names_hot`` US-010 merges into the
+        entry candidates. Enforce the SAME eligibility here as organic entry nodes:
+          * super_admin_only chains drop unless include_super_admin=True;
+          * admin_only chains drop when exclude_admin=True (a non-admin caller).
+        So rank_chains' exclude_admin / include_super_admin contract holds for EVERY
+        action it returns, not just the ranked entry nodes.
+
+        The registry is resolved via the semantic index's reference (always present
+        in production; keeps unit fakes lightweight) with the canonical singleton
+        as fallback.
         """
         registry = getattr(self._semantic_index, "_registry", None)
         if registry is None:
             from .action_registry import get_action_registry
             registry = get_action_registry()
-        su_names = {a.name for a in registry.get_all() if a.super_admin_only}
-        if not su_names:
+        blocked = set()
+        for a in registry.get_all():
+            if getattr(a, "super_admin_only", False) and not include_super_admin:
+                blocked.add(a.name)
+            elif getattr(a, "admin_only", False) and exclude_admin:
+                blocked.add(a.name)
+        if not blocked:
             return chains
-        return [c for c in chains if not su_names.intersection(c[2])]
+        return [c for c in chains if not blocked.intersection(c[2])]
 
     @staticmethod
     def _deduplicate(

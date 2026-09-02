@@ -1,0 +1,213 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: channels)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: channels                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: channels
+actions:
+  platform_configure_channel:
+  - text: rotate the telegram bot token
+    source: example
+  - text: point the slack channel at the support agent
+    source: example
+  - text: update the whatsapp channel config
+    source: example
+  - text: change the discord channel's default agent
+    source: authored
+  - text: swap the credentials on the slack connection
+    source: authored
+  - text: update the bot token for telegram
+    source: authored
+  - text: reassign the whatsapp channel to the sales agent
+    source: authored
+  - text: edit the config on channel 3
+    source: authored
+  - text: point the teams channel at a different agent
+    source: authored
+  - text: refresh the access token for whatsapp
+    source: authored
+  - text: change which agent handles the telegram messages
+    source: authored
+  - text: update the signing secret on the slack channel
+    source: authored
+  - text: reconfigure the discord connection settings
+    source: authored
+  - text: set the support agent as handler for the slack channel
+    source: authored
+  - text: modify the existing whatsapp channel config
+    source: authored
+  - text: rotate the api key on channel 5
+    source: authored
+  - text: have the billing agent take the telegram channel
+    source: authored
+  - text: update the credentials for the connected discord bot
+    source: authored
+  platform_connect_channel:
+  - text: connect telegram with this bot token
+    source: example
+  - text: set up a slack channel connection
+    source: example
+  - text: wire whatsapp into the workspace
+    source: example
+  - text: add a discord channel to the workspace
+    source: authored
+  - text: hook up telegram in polling mode
+    source: authored
+  - text: connect our slack with the bot token and signing secret
+    source: authored
+  - text: set up whatsapp using the phone number id
+    source: authored
+  - text: wire teams into auto
+    source: authored
+  - text: make auto reachable on discord
+    source: authored
+  - text: connect a new telegram bot via webhook
+    source: authored
+  - text: get slack connected to this workspace
+    source: authored
+  - text: add whatsapp as a channel with polling
+    source: authored
+  - text: plug telegram into the workspace
+    source: authored
+  - text: set up a webhook-based slack connection
+    source: authored
+  - text: connect the discord bot so it starts receiving messages
+    source: authored
+  - text: onboard a new whatsapp channel here
+    source: authored
+  - text: link telegram to auto using webhook mode
+    source: authored
+  - text: establish a slack channel connection for us
+    source: authored
+  platform_list_channels:
+  - text: which channels are connected?
+    source: example
+  - text: list the messaging channels
+    source: example
+  - text: is telegram connected for this workspace?
+    source: example
+  - text: show me all the messaging channels
+    source: authored
+  - text: what channels do we have wired up?
+    source: authored
+  - text: list every channel connection with its status
+    source: authored
+  - text: is slack live for this workspace?
+    source: authored
+  - text: which platforms is auto connected to?
+    source: authored
+  - text: show the channels and their message counts
+    source: authored
+  - text: are any channels connected here?
+    source: authored
+  - text: display the telegram and discord connections
+    source: authored
+  - text: what messaging integrations are set up?
+    source: authored
+  - text: give me the channel list with modes
+    source: authored
+  - text: which channels are active right now?
+    source: authored
+  - text: show me our whatsapp and slack channels
+    source: authored
+  - text: list the connections and their default agents
+    source: authored
+  - text: what channels can auto receive messages on?
+    source: authored
+  - text: browse the workspace channel connections
+    source: authored
+  platform_start_channel:
+  - text: start the telegram channel
+    source: example
+  - text: resume the discord connection
+    source: example
+  - text: activate the slack channel
+    source: authored
+  - text: turn on the whatsapp connection
+    source: authored
+  - text: start receiving messages on telegram again
+    source: authored
+  - text: bring the discord channel back online
+    source: authored
+  - text: enable channel 4
+    source: authored
+  - text: resume the slack adapter
+    source: authored
+  - text: start up the teams connection
+    source: authored
+  - text: get telegram receiving messages
+    source: authored
+  - text: switch the whatsapp channel on
+    source: authored
+  - text: reactivate the paused discord channel
+    source: authored
+  - text: start the channel we just connected
+    source: authored
+  - text: kick off the slack adapter
+    source: authored
+  - text: put the telegram connection into active mode
+    source: authored
+  - text: go live on the discord channel
+    source: authored
+  - text: wake up the stopped whatsapp channel
+    source: authored
+  - text: start listening on the slack channel
+    source: authored
+  platform_stop_channel:
+  - text: pause the slack channel
+    source: example
+  - text: stop the telegram connection
+    source: example
+  - text: deactivate the discord channel
+    source: authored
+  - text: turn off the whatsapp connection
+    source: authored
+  - text: stop receiving messages on telegram
+    source: authored
+  - text: pause channel 6 for now
+    source: authored
+  - text: take the slack channel offline
+    source: authored
+  - text: disable the teams connection temporarily
+    source: authored
+  - text: halt the discord adapter
+    source: authored
+  - text: stop the whatsapp channel but keep its config
+    source: authored
+  - text: switch off telegram messages
+    source: authored
+  - text: put the slack channel into inactive mode
+    source: authored
+  - text: silence the discord channel for a bit
+    source: authored
+  - text: pause inbound on the whatsapp connection
+    source: authored
+  - text: shut down the telegram adapter
+    source: authored
+  - text: stop listening on the slack channel
+    source: authored
+  - text: suspend the discord connection
+    source: authored
+  - text: quiet the teams channel for now
+    source: authored

@@ -94,7 +94,10 @@ async def test_j2_chat_reasoning_entry_routes_message():
     platform = await brain.assess("list my agents")
     assert platform.complexity is Complexity.MOLECULE
     assert platform.action is Action.RESPOND
-    assert "platform_list_agents" in platform.matched_tools  # routes to the scoped tool
+    # PRD-232 US-008: the phrase map is a booster, not a gate — it classifies
+    # MOLECULE + tool_hints=["platform"] so the platform surface loads; the
+    # specific tool is chosen by the ranker (dead matched_tools removed).
+    assert platform.tool_hints == ["platform"]
 
 
 # ===========================================================================

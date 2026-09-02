@@ -253,10 +253,16 @@ def _call_model(
     max_tokens: int,
     request_timeout: int,
     tools: List[Dict[str, Any]],
+    abstain: bool = False,
 ) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     Call OpenRouter once. Returns (parsed_result, error).
     The parsed_result keys map directly into the output row.
+
+    PRD-232 US-012A: on abstain rows (no applicable tool) tool_choice is "auto"
+    so the model CAN decline to call a tool — the correct outcome for these
+    queries; the scorer counts a no-call as correct only for abstain rows.
+    Non-abstain rows keep "required" so a chosen action is always produced.
     """
     started = time.perf_counter()
     try:
@@ -267,7 +273,7 @@ def _call_model(
                 {"role": "user", "content": user_query},
             ],
             tools=tools,
-            tool_choice="required",  # force a tool call so we always get a chosen action
+            tool_choice="auto" if abstain else "required",
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=request_timeout,
@@ -534,6 +540,7 @@ def main() -> int:
                     max_tokens=max_tokens,
                     request_timeout=request_timeout,
                     tools=tools,
+                    abstain=bool(q.get("abstain", False)),
                 )
                 row = {
                     "ts": _now_iso(),
@@ -544,6 +551,7 @@ def main() -> int:
                     "correct_actions": q["correct_actions"],
                     "category": q.get("category"),
                     "difficulty": q.get("difficulty"),
+                    "abstain": bool(q.get("abstain", False)),  # US-012A: scorer keys on this
                     **result,
                     "surfaced": surfaced,
                     "error": err,

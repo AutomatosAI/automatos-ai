@@ -1,0 +1,184 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: workspace)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: workspace                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: workspace
+actions:
+  platform_get_workspace_info:
+  - text: what workspace am I in?
+    source: example
+  - text: show workspace info
+    source: example
+  - text: workspace info
+    source: phrase_map
+  - text: my workspace info
+    source: phrase_map
+  - text: tell me about my workspace
+    source: phrase_map
+  - text: show workspace details
+    source: phrase_map
+  - text: how many members are in this workspace?
+    source: authored
+  - text: when was my workspace created?
+    source: authored
+  - text: what's the name of this workspace?
+    source: authored
+  - text: give me a summary of my workspace config
+    source: authored
+  - text: who's on my workspace?
+    source: authored
+  - text: show me the account details
+    source: authored
+  - text: how many people have access here?
+    source: authored
+  - text: what's my workspace set up as?
+    source: authored
+  - text: tell me the workspace name and member count
+    source: authored
+  - text: when did we create this account?
+    source: authored
+  - text: display my workspace metadata
+    source: authored
+  - text: what are the details of my current workspace?
+    source: authored
+  - text: how big is my team in this workspace?
+    source: authored
+  platform_list_workspace_models:
+  - text: what models do I have?
+    source: example
+  - text: list my models
+    source: example
+  - text: show installed models
+    source: example
+  - text: what LLMs are available in my workspace?
+    source: example
+  - text: my models
+    source: phrase_map
+  - text: workspace models
+    source: phrase_map
+  - text: installed models
+    source: phrase_map
+  - text: what models do i have
+    source: phrase_map
+  - text: enabled models
+    source: phrase_map
+  - text: which llms can i use right now?
+    source: authored
+  - text: show the models set up in this workspace
+    source: authored
+  - text: what are my model options and their costs?
+    source: authored
+  - text: list the llms i've got enabled
+    source: authored
+  - text: which models are ready to use here?
+    source: authored
+  - text: give me my installed models with context windows
+    source: authored
+  - text: what models can my agents run on?
+    source: authored
+  - text: show me every model available to me
+    source: authored
+  - text: compare the models i have installed
+    source: authored
+  - text: what's in my model lineup?
+    source: authored
+  platform_list_workspace_plugins:
+  - text: what plugins do I have?
+    source: example
+  - text: list my plugins
+    source: example
+  - text: show enabled plugins
+    source: example
+  - text: what plugins are installed?
+    source: example
+  - text: my plugins
+    source: phrase_map
+  - text: workspace plugins
+    source: phrase_map
+  - text: enabled plugins
+    source: phrase_map
+  - text: installed plugins
+    source: phrase_map
+  - text: what plugins do i have
+    source: phrase_map
+  - text: which plugins are turned on here?
+    source: authored
+  - text: show me the plugins i've already added
+    source: authored
+  - text: what add-ons are active in my workspace?
+    source: authored
+  - text: list the plugins running right now
+    source: authored
+  - text: which plugins have i enabled so far?
+    source: authored
+  - text: give me my current plugin lineup
+    source: authored
+  - text: what's installed on my workspace plugin-wise?
+    source: authored
+  - text: show the plugins my agents are using
+    source: authored
+  - text: which plugins are live in this workspace?
+    source: authored
+  - text: run down the plugins i've got enabled
+    source: authored
+  platform_list_workspace_skills:
+  - text: what skills do I have?
+    source: example
+  - text: list my skills
+    source: example
+  - text: show enabled skills
+    source: example
+  - text: what skills are installed?
+    source: example
+  - text: my skills
+    source: phrase_map
+  - text: workspace skills
+    source: phrase_map
+  - text: enabled skills
+    source: phrase_map
+  - text: installed skills
+    source: phrase_map
+  - text: what skills do i have
+    source: phrase_map
+  - text: which skills are turned on here?
+    source: authored
+  - text: show me the skills i've already added
+    source: authored
+  - text: what skills are active in my workspace?
+    source: authored
+  - text: list the skills available to my agents
+    source: authored
+  - text: which skills have i enabled so far?
+    source: authored
+  - text: give me my current skill lineup
+    source: authored
+  - text: what's enabled on my workspace skill-wise?
+    source: authored
+  - text: show the skills my agents can use
+    source: authored
+  - text: which skills are live in this workspace?
+    source: authored
+  - text: run down the skills i've got switched on
+    source: authored

@@ -1,0 +1,85 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: database)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: database                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: database
+actions:
+  platform_query_data:
+  - text: how many active users do we have
+    source: example
+  - text: what's our current MRR
+    source: example
+  - text: show revenue trend for last 6 months
+    source: example
+  - text: top 5 products by sales
+    source: example
+  - text: how many users signed up last week
+    source: example
+  - text: query the database for average order value
+    source: example
+  - text: query the database
+    source: phrase_map
+  - text: query data
+    source: phrase_map
+  - text: how many users
+    source: phrase_map
+  - text: what's our mrr
+    source: phrase_map
+  - text: current revenue
+    source: phrase_map
+  - text: latest metrics
+    source: phrase_map
+  - text: users signed up
+    source: phrase_map
+  - text: average order value
+    source: phrase_map
+  - text: show me the data
+    source: phrase_map
+  - text: run a query
+    source: phrase_map
+  - text: ask the database
+    source: phrase_map
+  - text: check the numbers
+    source: phrase_map
+  - text: how many customers
+    source: phrase_map
+  - text: total sales
+    source: phrase_map
+  - text: query my database
+    source: phrase_map
+  - text: what was our revenue last quarter
+    source: authored
+  - text: break down sales by region
+    source: authored
+  - text: how many orders came in yesterday
+    source: authored
+  - text: which customers spent the most this year
+    source: authored
+  - text: show me churn rate over the past 3 months
+    source: authored
+  - text: count how many subscriptions are active
+    source: authored
+  - text: what's the average deal size this month
+    source: authored

@@ -148,6 +148,8 @@ class _FakeSemanticIndex:
         exclude_admin: bool = True,
         exclude_promoted: bool = True,
         include_super_admin: bool = False,
+        workspace_id=None,
+        **kwargs
     ) -> List[Tuple[str, float]]:
         self.calls.append({
             "query": query,
@@ -155,6 +157,7 @@ class _FakeSemanticIndex:
             "exclude_admin": exclude_admin,
             "exclude_promoted": exclude_promoted,
             "include_super_admin": include_super_admin,
+            "workspace_id": workspace_id,
         })
         if self.exception is not None:
             raise self.exception

@@ -157,7 +157,9 @@ request the connections the setup needs through the chat connect card (never \
 auto-connect); for Shopify, the two-step honestly — connect now for store data, \
 then the Automatos app adds a Site under Settings → Widget SDK → sync. Narrate as \
 you go ("Created your Marketing helper — it's on your Agents page"). When the build \
-is complete and verified, advance_to `boom`.
+is complete and verified, advance_to `boom` — it is refused until the workspace \
+actually holds the build (an installed package, created agents, or a mission), so \
+never announce a team before it exists.
 """
 
 _STAGE_BOOM = """\

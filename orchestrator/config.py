@@ -1079,8 +1079,79 @@ class Config:
     TOOL_ROUTING_GRAPH: bool = os.getenv("TOOL_ROUTING_GRAPH", "false").lower() == "true"
     TOOL_ROUTING_GRAPH_MIN_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_GRAPH_MIN_CONFIDENCE", "0.6"))
     TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR: int = int(os.getenv("TOOL_ROUTING_GRAPH_AGENT_SAMPLE_FLOOR", "50"))
+    # PRD-232 §6.5 (RVW-2, Gerard's ruling — the two-layer graph, amending PRD-177's
+    # per-tenant lock): the learned graph reads as TWO layers — a tenant's own rows
+    # (workspace_id == X) at full weight PLUS a text-free GLOBAL prior (workspace_id
+    # IS NULL, aggregated across tenants) at REDUCED weight. This factor (0..1) scales
+    # every global edge/affinity/failed_after row's contribution on a TENANT read, so a
+    # tenant's own learned signal always dominates the borrowed cross-tenant prior — a
+    # tenant edge of equal-or-higher confidence outranks the identical global edge. A
+    # genuinely unscoped (workspace_id=None) system/eval read sees the global layer at
+    # FULL weight (there is no tenant layer to prefer). Never hardcoded in the router.
+    TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR: float = float(os.getenv("TOOL_ROUTING_GRAPH_GLOBAL_PRIOR_FACTOR", "0.5"))
+    # PRD-232 US-010: cluster-aware reads — the graph expresses what it learned.
+    # CLUSTER_MATCH_THRESHOLD is the cosine floor for assigning a live query to the
+    # nearest ToolRoutingIntentCluster centroid (GraphRouter.rank_chains). Below it,
+    # the query matches NO cluster and routing falls back to the embedding floor
+    # (per-intent affinities do not apply) — a deliberate miss, never a wrong guess.
+    TOOL_ROUTING_GRAPH_CLUSTER_MATCH_THRESHOLD: float = float(os.getenv("TOOL_ROUTING_GRAPH_CLUSTER_MATCH_THRESHOLD", "0.6"))
+    # PRD-232 US-007: confidence stamped on the SEEDED cold-start affinity that the
+    # synthetic-utterance seed writes alongside each seeded intent cluster. Set at the
+    # graph min-confidence floor (matching metadata_graph_seed's meta_sibling floor) so
+    # a seed PASSES the router filter but any organic succeeds_for_intent row of higher
+    # Wilson confidence outranks it as real telemetry accrues — the seed is the floor,
+    # learned usage always wins. Human-applied seed only; never read by a live turn.
+    TOOL_ROUTING_SEED_CLUSTER_CONFIDENCE: float = float(os.getenv("TOOL_ROUTING_SEED_CLUSTER_CONFIDENCE", "0.6"))
+    # PRD-232 US-014 (§6.2 LOCKED): promotion-as-prior. Only these pins ALWAYS attach
+    # as first-class OpenAI schemas — the list starts from PRD-122's original ~13
+    # promoted actions and adds platform_find_tools (the when-required discovery seam,
+    # which MUST stay pinned). Every OTHER promoted=True action loses unconditional
+    # attachment: its promoted flag becomes a ranking BOOST (below), and it attaches
+    # first-class ONLY when it ranks into the query surface — otherwise it lives in the
+    # platform_execute dispatcher enum like any action. Cuts the per-turn tool payload
+    # from 47 unconditional schemas to ~14 pins + whatever the query ranked in. The
+    # pin set lives HERE, never hardcoded in the router (CLAUDE.md §4). CSV, whitespace-
+    # tolerant; role/tier gating (admin/super_admin_only) still applies to every pin.
+    TOOL_ROUTING_PROMOTION_PINS: str = os.getenv(
+        "TOOL_ROUTING_PROMOTION_PINS",
+        "platform_find_tools,"
+        "platform_list_agents,platform_get_agent,platform_create_agent,platform_update_agent,"
+        "platform_browse_marketplace_agents,platform_browse_marketplace_skills,"
+        "platform_browse_marketplace_plugins,platform_install_skill,platform_install_plugin,"
+        "platform_get_system_health,platform_get_activity_feed,"
+        "platform_search_memory,platform_store_memory",
+    )
+    # The additive ranking boost a promoted action gets in the shared cosine pass, so a
+    # promoted action outranks an equal-cosine unpromoted one and is more likely to rank
+    # into the surface (and thus attach first-class). Small — a PRIOR, not an override:
+    # a strongly-relevant unpromoted action still outranks a barely-relevant promoted one.
+    TOOL_ROUTING_PROMOTION_BOOST: float = float(os.getenv("TOOL_ROUTING_PROMOTION_BOOST", "0.05"))
+    # When a cluster matches, per-intent affinity rows (intent_cluster_id == match)
+    # apply at full weight; cluster-blind rows (intent_cluster_id IS NULL) still
+    # apply as a WEAK global prior, discounted by this factor (0..1). Keeps a
+    # global succeeds/fails signal informative without letting it override the
+    # per-intent evidence the cluster match unlocked.
+    TOOL_ROUTING_GRAPH_GLOBAL_AFFINITY_DISCOUNT: float = float(os.getenv("TOOL_ROUTING_GRAPH_GLOBAL_AFFINITY_DISCOUNT", "0.5"))
+    # failed_after edges (a succeeded→b errored, within 2 steps) are read as an
+    # EXPANSION PENALTY: a chain [a, b] whose transition reliably fails is de-ranked
+    # by penalty = failed_after.confidence (Wilson lower bound of the failure rate)
+    # * this weight. Scales how hard a learned failure suppresses a chain. This is
+    # what turns the previously write-only failed_after rows into a live signal
+    # (PRD-232 US-010c — no write-only tables).
+    TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY: float = float(os.getenv("TOOL_ROUTING_GRAPH_FAILED_AFTER_PENALTY", "1.0"))
     EDGE_BUILDER_HOUR_UTC: int = int(os.getenv("EDGE_BUILDER_HOUR_UTC", "3"))
     EDGE_BUILDER_WINDOW_DAYS: int = int(os.getenv("EDGE_BUILDER_WINDOW_DAYS", "30"))
+    # PRD-232 US-011: the learning loop's gap + shown-vs-used signals (nightly).
+    # GAP_RESOLUTION_HOURS: a tool_gap answered by a successful action within this
+    # window in the SAME conversation becomes a succeeds_for_intent for that
+    # action (the ground truth is what eventually served the intent).
+    TOOL_ROUTING_GAP_RESOLUTION_HOURS: float = float(os.getenv("TOOL_ROUTING_GAP_RESOLUTION_HOURS", "24"))
+    # SHOWN_DECAY_FACTOR: geometric erosion applied per shown-not-used excess to an
+    # action's succeeds_for_intent weight (surfaced far more than used = dial down).
+    TOOL_ROUTING_SHOWN_DECAY_FACTOR: float = float(os.getenv("TOOL_ROUTING_SHOWN_DECAY_FACTOR", "0.9"))
+    # AFFINITY_WEIGHT_FLOOR: the shown-not-used decay never drops an affinity's
+    # weight below this — a seeded/earned affinity is dialed down, never deleted.
+    TOOL_ROUTING_AFFINITY_WEIGHT_FLOOR: float = float(os.getenv("TOOL_ROUTING_AFFINITY_WEIGHT_FLOOR", "0.5"))
     # PRD-177 S3 (F018): Composio action-metadata sync scheduler + fail-CLOSED
     # destructive gate. When the metadata table is empty (sync not yet run), a
     # destructive intent is DENIED rather than silently permitted; clearly
@@ -1091,9 +1162,15 @@ class Config:
     COMPOSIO_SYNC_ENABLED: bool = os.getenv("COMPOSIO_SYNC_ENABLED", "true").lower() == "true"
     COMPOSIO_SYNC_HOUR_UTC: int = int(os.getenv("COMPOSIO_SYNC_HOUR_UTC", "4"))
     # PRD-141 US-019: batched incremental tool-execution signal recorder.
-    # Opt-in (default off). Drains an in-process queue with ONE DB session per
-    # flush — never a DB session or task per tool call.
-    TOOL_SIGNAL_RECORDER_ENABLED: bool = os.getenv("TOOL_SIGNAL_RECORDER_ENABLED", "false").lower() == "true"
+    # PRD-232 US-009 (decision LOCKED §6.1): default ON. The write side of the
+    # learning loop ships from day one — signals flow so harness stats are
+    # non-zero within a day of deploy; rollback is this one env var. Drains an
+    # in-process queue with ONE DB session per flush (never a DB session or task
+    # per tool call), and flushes the pending batch on clean shutdown (stop()).
+    # Bounded-loss window is honest: a HARD crash drops the in-process queue, but
+    # the nightly edge_builder RECOMPUTES authoritative edges from the durable
+    # tool_execution_logs, so only intra-day freshness is ever at risk.
+    TOOL_SIGNAL_RECORDER_ENABLED: bool = os.getenv("TOOL_SIGNAL_RECORDER_ENABLED", "true").lower() == "true"
     TOOL_SIGNAL_FLUSH_BATCH_SIZE: int = int(os.getenv("TOOL_SIGNAL_FLUSH_BATCH_SIZE", "50"))
     TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS: float = float(os.getenv("TOOL_SIGNAL_FLUSH_INTERVAL_SECONDS", "5.0"))
     TOOL_SIGNAL_QUEUE_MAXSIZE: int = int(os.getenv("TOOL_SIGNAL_QUEUE_MAXSIZE", "10000"))

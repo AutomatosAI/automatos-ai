@@ -1,0 +1,98 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: widgets)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: widgets                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: widgets
+actions:
+  platform_get_widget_config:
+  - text: what's the widget config for this workspace?
+    source: example
+  - text: is the cart-idle popup enabled?
+    source: example
+  - text: show the proactive engagement settings
+    source: example
+  - text: show me the widget settings
+    source: authored
+  - text: what's turned on in the site widget?
+    source: authored
+  - text: read the current widget configuration
+    source: authored
+  - text: is proactive engagement switched on?
+    source: authored
+  - text: what delay is the cart-idle popup set to?
+    source: authored
+  - text: display the embedded widget's config
+    source: authored
+  - text: which callback destinations are configured?
+    source: authored
+  - text: what does the public widget send right now?
+    source: authored
+  - text: get the widget config for this workspace
+    source: authored
+  - text: are the proactive popups enabled or not?
+    source: authored
+  - text: show the widget's proactive engagement setup
+    source: authored
+  - text: what are the current widget preferences?
+    source: authored
+  - text: check the site widget configuration
+    source: authored
+  - text: tell me how the widget is configured
+    source: authored
+  platform_update_widget_config:
+  - text: enable the cart idle popup
+    source: example
+  - text: set the widget proactive delay to 10 seconds
+    source: example
+  - text: configure the callback form destinations
+    source: example
+  - text: turn on the cart-idle popup
+    source: authored
+  - text: disable proactive engagement on the widget
+    source: authored
+  - text: change the proactive delay to 30 seconds
+    source: authored
+  - text: set the callback form destination to sales inbox
+    source: authored
+  - text: switch off the site widget popups
+    source: authored
+  - text: bump the cart-idle delay up to a minute
+    source: authored
+  - text: enable the proactive nudges
+    source: authored
+  - text: update the widget's callback routing
+    source: authored
+  - text: tune the engagement delay down to 5 seconds
+    source: authored
+  - text: configure the widget to show the callback form
+    source: authored
+  - text: flip on the cart abandonment popup
+    source: authored
+  - text: adjust the widget proactive settings
+    source: authored
+  - text: turn the widget popups off for now
+    source: authored
+  - text: set widget proactive engagement to enabled
+    source: authored

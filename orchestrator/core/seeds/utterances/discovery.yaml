@@ -1,0 +1,151 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: discovery)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: discovery                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: discovery
+actions:
+  platform_list_datasources:
+  - text: what data sources do I have?
+    source: example
+  - text: show my databases
+    source: example
+  - text: what documents are indexed?
+    source: example
+  - text: list datasources
+    source: example
+  - text: what data
+    source: phrase_map
+  - text: data sources
+    source: phrase_map
+  - text: what databases
+    source: phrase_map
+  - text: what documents
+    source: phrase_map
+  - text: rag sources
+    source: phrase_map
+  - text: nl2sql
+    source: phrase_map
+  - text: queryable databases
+    source: phrase_map
+  - text: what repos are indexed
+    source: phrase_map
+  - text: show me all my knowledge base collections
+    source: authored
+  - text: which databases can i query with natural language
+    source: authored
+  - text: list every document source and database i have
+    source: authored
+  - text: how many docs are in my rag knowledge base
+    source: authored
+  - text: what database connections are set up
+    source: authored
+  - text: show my document collections and their chunk counts
+    source: authored
+  - text: what's in my knowledge base
+    source: authored
+  - text: list all data sources, both docs and databases
+    source: authored
+  platform_list_llms:
+  - text: what models are available?
+    source: example
+  - text: list LLMs
+    source: example
+  - text: cheapest model with tool support
+    source: example
+  - text: show models with vision capability
+    source: example
+  - text: what models
+    source: phrase_map
+  - text: available models
+    source: phrase_map
+  - text: list models
+    source: phrase_map
+  - text: what llms
+    source: phrase_map
+  - text: cheapest model
+    source: phrase_map
+  - text: show models
+    source: phrase_map
+  - text: openrouter models
+    source: phrase_map
+  - text: which models support reasoning
+    source: authored
+  - text: list free tier models i can use
+    source: authored
+  - text: show premium models sorted by context length
+    source: authored
+  - text: what budget models handle tool calls
+    source: authored
+  - text: models with json mode please
+    source: authored
+  - text: sort available llms by cost
+    source: authored
+  - text: any mid-tier models with vision
+    source: authored
+  - text: biggest context window models available
+    source: authored
+  - text: cheapest reasoning-capable model
+    source: authored
+  platform_list_tools:
+  - text: what tools can I use?
+    source: example
+  - text: list my tools
+    source: example
+  - text: what integrations are available?
+    source: example
+  - text: show connected tools
+    source: example
+  - text: search tools for github
+    source: example
+  - text: what tools
+    source: phrase_map
+  - text: available tools
+    source: phrase_map
+  - text: what can i use
+    source: phrase_map
+  - text: show my tools
+    source: phrase_map
+  - text: what integrations
+    source: phrase_map
+  - text: composio tools
+    source: phrase_map
+  - text: connected tools
+    source: phrase_map
+  - text: list all platform tools i have access to
+    source: authored
+  - text: what composio tools are connected
+    source: authored
+  - text: show me every tool across all categories
+    source: authored
+  - text: what actions can auto perform
+    source: authored
+  - text: search the tools for anything slack related
+    source: authored
+  - text: which platform actions are available
+    source: authored
+  - text: what capabilities do i have right now
+    source: authored
+  - text: show all tools grouped by category
+    source: authored

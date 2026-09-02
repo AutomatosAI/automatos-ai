@@ -68,45 +68,42 @@ QUERY_UNSEEDED = "compress the deliverable folder"
 # ---------------------------------------------------------------------------
 
 
-def _extract_triples(clause, out):
-    """Flatten and_()/BinaryExpression clauses into (key, op, value) triples."""
-    sub = getattr(clause, "clauses", None)
-    if sub is not None:
-        for c in sub:
-            _extract_triples(c, out)
-        return
+def _eval_leaf(clause, row) -> bool:
+    """Evaluate ONE BinaryExpression leaf (col op value) against a stub row."""
     left = getattr(clause, "left", None)
     key = getattr(left, "key", None)
     if key is None:
-        return
+        return True  # not a column predicate — treat as satisfied
     op_name = getattr(getattr(clause, "operator", None), "__name__", "")
     value = getattr(getattr(clause, "right", None), "value", None)
+    actual = getattr(row, key, None)
     if op_name in ("is_", "is_op"):
-        out.append((key, "is_null", None))
-    elif op_name == "in_op":
-        out.append((key, "in", list(value) if value is not None else []))
-    elif op_name == "eq":
-        out.append((key, "eq", value))
-    elif op_name == "ge":
-        out.append((key, "ge", value))
+        return actual is None
+    if op_name == "in_op":
+        vals = list(value) if value is not None else []
+        return str(actual) in {str(v) for v in vals}
+    if op_name == "eq":
+        return actual is not None and str(actual) == str(value)
+    if op_name == "ge":
+        return actual is not None and actual >= value
+    return True  # unknown op — don't over-constrain the fake
 
 
-def _match(row, triples) -> bool:
-    for key, op, value in triples:
-        actual = getattr(row, key, None)
-        if op == "is_null":
-            if actual is not None:
-                return False
-        elif op == "in":
-            if str(actual) not in {str(v) for v in value}:
-                return False
-        elif op == "eq":
-            if actual is None or str(actual) != str(value):
-                return False
-        elif op == "ge":
-            if actual is None or not actual >= value:
-                return False
-    return True
+def _eval_clause(clause, row) -> bool:
+    """Faithfully evaluate a SQLAlchemy and_/or_/leaf clause TREE against a row.
+
+    PRD-232 §6.5's two-layer read uses ``or_(workspace_id == X, workspace_id IS
+    NULL)``; the earlier flatten-to-AND pass (``_match``) rejected a tenant's own
+    row against that OR, so honour real AND/OR semantics by walking the tree.
+    """
+    sub = getattr(clause, "clauses", None)
+    if sub is not None:
+        op = getattr(getattr(clause, "operator", None), "__name__", "")
+        results = [_eval_clause(c, row) for c in sub]
+        if op == "or_":
+            return any(results)
+        return all(results)  # and_ (BooleanClauseList default)
+    return _eval_leaf(clause, row)
 
 
 # ---------------------------------------------------------------------------
@@ -121,12 +118,11 @@ class _FakeQuery:
     def __init__(self, store, model):
         self._store = store
         self._model = model
-        self._triples = []
+        self._clauses = []
         self._limit = None
 
     def filter(self, *clauses):
-        for c in clauses:
-            _extract_triples(c, self._triples)
+        self._clauses.extend(clauses)
         return self
 
     def order_by(self, *a, **k):
@@ -135,6 +131,9 @@ class _FakeQuery:
     def limit(self, n):
         self._limit = n
         return self
+
+    def _matches(self, row) -> bool:
+        return all(_eval_clause(c, row) for c in self._clauses)
 
     def _rows(self):
         if self._model is ToolExecutionLog:
@@ -147,7 +146,7 @@ class _FakeQuery:
             rows = [SimpleNamespace(**v) for v in self._store.affinities.values()]
         else:
             rows = []
-        return [r for r in rows if _match(r, self._triples)]
+        return [r for r in rows if self._matches(r)]
 
     def all(self):
         rows = self._rows()
@@ -160,10 +159,21 @@ class _FakeQuery:
         if self._model is ToolRoutingIntentCluster:
             self._store.clusters = [c for c in self._store.clusters if c not in doomed]
             return len(doomed)
+        if self._model is ToolRoutingEdge:
+            # PRD-232 §6.5: the global used_after layer is rebuilt delete-then-insert
+            # (the NULL-workspace key defeats ON CONFLICT). Model the DELETE faithfully
+            # so idempotency is actually exercised, not a dict-overwrite illusion.
+            doomed_keys = {
+                k for k, v in self._store.edges.items()
+                if self._matches(SimpleNamespace(**v))
+            }
+            for k in doomed_keys:
+                del self._store.edges[k]
+            return len(doomed_keys)
         if self._model is ToolRoutingAffinity:
             doomed_keys = {
                 k for k, v in self._store.affinities.items()
-                if _match(SimpleNamespace(**v), self._triples)
+                if self._matches(SimpleNamespace(**v))
             }
             for k in doomed_keys:
                 del self._store.affinities[k]
@@ -220,8 +230,13 @@ class _FakeEmbeddingManager:
 
 
 def _vec(query: str):
+    # Mean-centred to [-0.5, 0.5] so cosine is DISCRIMINATIVE: an identical query
+    # scores 1.0 against its own centroid, but two unrelated queries score ~0 (not
+    # the ~0.75 that all-positive 8-vectors share). That keeps a query matching only
+    # its OWN seeded/organic intent cluster (GraphRouter._match_intent_cluster), so an
+    # unseeded intent stays a genuine cluster MISS (embedding floor), not a spurious hit.
     digest = hashlib.sha256(query.encode()).digest()
-    return [b / 255.0 for b in digest[:8]]
+    return [(b / 255.0) - 0.5 for b in digest[:8]]
 
 
 @pytest.fixture
@@ -409,7 +424,9 @@ def _load_graph_router():
 
 
 class _FakeSemanticIndex:
-    """Embedding floor: canned (action, cosine) entries per query."""
+    """Embedding floor: canned (action, cosine) entries per query, plus the SAME
+    deterministic query embedding the fake edge builder used (so a live query can
+    match its seeded/organic intent centroid — PRD-232 US-010 / §6.5)."""
 
     def __init__(self, mapping):
         self._mapping = mapping
@@ -417,6 +434,12 @@ class _FakeSemanticIndex:
 
     async def rank_actions(self, query, top_k=5, **kwargs):
         return list(self._mapping.get(query, []))[:top_k]
+
+    async def embed_query(self, query):
+        # Same _vec + model key the seed stamped on clusters, so
+        # GraphRouter._match_intent_cluster compares like-for-like. A hermetic
+        # deterministic fixture — NOT DeterministicEmbeddingProvider (PRD-185 S3).
+        return _vec(query), "fake:fake-embed:8"
 
 
 def _router_over_store(monkeypatch, store, mapping):
