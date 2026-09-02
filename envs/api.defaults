@@ -137,3 +137,10 @@ PROMETHEUS_URL=
 AGENT_OPT_WORKER_URL=
 # Observability (Loki/Prometheus/Grafana) is not part of this compose file — see the
 # automatos-monitoring repo; envs/observability.defaults documents the variables.
+
+# -----------------------------------------------------------------------------
+# Onboarding replay [ACTIVE] — local edition only
+# -----------------------------------------------------------------------------
+# POST /api/workspaces/current/onboarding/reset rewinds the operator workspace
+# to not_started so Auto-led onboarding can be run again (SaaS keeps this off).
+ONBOARDING_RESET_ENABLED=true
