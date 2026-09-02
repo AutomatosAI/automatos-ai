@@ -134,3 +134,32 @@ def test_skipped_is_untouched_by_the_gate():
     ws = _Workspace("building")
     advance_onboarding_stage(_db(0, 0), ws, "skipped")
     assert current_stage(ws) == "skipped"
+
+
+# ── bare-text answers (the local + prod freeze shape) ─────────────────────
+
+def test_bare_text_answer_fills_the_first_unanswered_question():
+    ws = _Workspace()
+    db = _db(workspace=ws)
+    r = asyncio.run(update_onboarding(db, ws.id, {"segment": "We're Snip & Fade, a barber shop in Leeds"}))
+    assert r["success"] is True and r["data"]["stage"] == "questions"
+    assert ws.onboarding["segment"] == {"business": "We're Snip & Fade, a barber shop in Leeds"}
+    asyncio.run(update_onboarding(db, ws.id, {"segment": "appointment booking"}))
+    assert ws.onboarding["segment"]["goal"] == "appointment booking"
+    r3 = asyncio.run(update_onboarding(db, ws.id, {"value": "Brand new to this", "segment": "comfort"}))
+    assert ws.onboarding["segment"]["comfort"] == "Brand new to this"   # key named by the model
+    assert r3["data"]["stage"] == "teach"                                  # third answer → teach
+
+
+def test_bare_text_with_all_questions_answered_is_still_the_honest_error():
+    ws = _Workspace("teach", segment={"business": "a", "goal": "b", "comfort": "c"})
+    r = asyncio.run(update_onboarding(_db(workspace=ws), ws.id, {"segment": "some extra chat"}))
+    assert r["success"] is False and "at least one is required" in r["error"]
+    assert ws.onboarding["segment"] == {"business": "a", "goal": "b", "comfort": "c"}
+
+
+def test_bare_text_never_overrides_a_real_segment_or_advance():
+    ws = _Workspace()
+    r = asyncio.run(update_onboarding(_db(workspace=ws), ws.id, {"advance_to": "questions", "segment": "junk"}))
+    assert r["success"] is True and r["data"]["stage"] == "questions"
+    assert ws.onboarding["segment"] == {}   # an explicit advance with junk text records nothing invented

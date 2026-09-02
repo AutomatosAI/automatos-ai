@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from core.models.workspaces import Workspace
 from services.onboarding_state import (
     ALL_STAGES,
+    QUESTION_KEYS,
     SEGMENT_KEYS,
     InvalidStageTransition,
     advance_onboarding_stage,
@@ -74,7 +75,7 @@ def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
     if not out.get("advance_to") and isinstance(value, str) and value.strip().lower() in ALL_STAGES:
         out["advance_to"] = value.strip().lower()
         notes.append("advance_to taken from 'value'")
-    elif value is not None:
+    elif value is not None and not isinstance(value, str):
         notes.append(f"'value' ignored (type={type(value).__name__})")
 
     advance_to = out.get("advance_to")
@@ -86,11 +87,30 @@ def _normalise_params(params: Any) -> Tuple[Dict[str, Any], List[str]]:
     usable = _usable_segment(raw_segment)
     if isinstance(raw_segment, str) and usable is not None:
         notes.append("segment parsed from a JSON string")
+    # Bare text (live-test 2026-09-02, local + prod: the model sends the user's
+    # ANSWER as the segment string, sometimes with the question's key name under
+    # 'value' — e.g. segment="Fairly comfortable…", value="comfort"). Keep the
+    # text aside for the handler, which knows which question is still unanswered.
+    bare_text = None
+    bare_key = None
+    strings = {k: v.strip() for k, v in ((("segment", raw_segment), ("value", value))) if isinstance(v, str) and v.strip()}
+    if usable is None and strings:
+        keyed = {k: v for k, v in strings.items() if v.lower() in SEGMENT_KEYS}
+        texts = {k: v for k, v in strings.items() if v.lower() not in SEGMENT_KEYS and v.lower() not in ALL_STAGES}
+        if keyed and texts:
+            bare_key = next(iter(keyed.values())).lower()
+            bare_text = next(iter(texts.values()))
+        elif texts:
+            bare_text = next(iter(texts.values()))
+    if bare_text:
+        out["_bare_answer"] = (bare_key, bare_text)
     flat = {k: out.pop(k) for k in SEGMENT_KEYS if out.get(k) is not None}
     if flat:
         notes.append(f"segment keys arrived flat: {sorted(flat)}")
         usable = {**(usable or {}), **flat}
-    if raw_segment is not None and usable is None:
+    if bare_text:
+        notes.append("bare-text answer kept for the handler to map onto a question")
+    elif raw_segment is not None and usable is None:
         shape = f"type={type(raw_segment).__name__}"
         if isinstance(raw_segment, dict):
             shape += f", keys={sorted(map(str, raw_segment))[:6]}"
@@ -132,7 +152,7 @@ async def update_onboarding(
     segment = params.get("segment")
     plan = params.get("plan")
 
-    if not advance_to and not segment and not plan:
+    if not advance_to and not segment and not plan and not params.get("_bare_answer"):
         return {
             "success": False,
             "error": "Provide advance_to, segment, or plan — at least one is required.",
@@ -143,6 +163,25 @@ async def update_onboarding(
     )
     if not workspace:
         return {"success": False, "error": "workspace not found"}
+
+    # A bare-text answer becomes the first question still unanswered (or the
+    # key the model named). The questions are asked in QUESTION order, so the
+    # document says which one this is; dropping the text was the freeze.
+    bare = params.get("_bare_answer")
+    if bare and not segment and not advance_to:
+        key, text = bare
+        answered = get_onboarding(workspace).get("segment") or {}
+        if not key:
+            key = next((k for k in QUESTION_KEYS if answered.get(k) is None), None)
+        if key:
+            segment = {key: text}
+            logger.warning("[update_onboarding] bare-text answer recorded as '%s' (%s)", key,
+                           "key named by the model" if bare[0] else "first unanswered question")
+    if not advance_to and not segment and not plan:
+        return {
+            "success": False,
+            "error": "Provide advance_to, segment, or plan — at least one is required.",
+        }
 
     # Idempotent same-stage advance (live-test 2026-08-29): the LLM routinely
     # re-asserts the stage it is already in — e.g. calling advance_to="building"
