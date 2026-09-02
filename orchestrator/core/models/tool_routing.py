@@ -99,6 +99,12 @@ class ToolRoutingIntentCluster(Base):
     sample_query = Column(Text, nullable=False)
     action_names_hot = Column(ARRAY(String), nullable=False)
     sample_count = Column(Integer, nullable=False)
+    # PRD-232 US-007: where this cluster came from. 'organic' = learned by the
+    # nightly edge_builder from tool_execution_logs; 'seeded' = synthetic-utterance
+    # cold-start (seed_tool_routing_graph). The nightly rebuild deletes-and-reinserts
+    # ONLY 'organic' rows, so seeded cold-start clusters survive 03:00 UTC and the
+    # graph routes day-one. server_default 'organic' backfills every pre-migration row.
+    provenance = Column(String(20), nullable=True, default="organic", server_default="organic")
     last_updated = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = ({"extend_existing": True},)
@@ -110,6 +116,7 @@ class ToolRoutingIntentCluster(Base):
             "sample_query": self.sample_query,
             "action_names_hot": self.action_names_hot,
             "sample_count": self.sample_count,
+            "provenance": self.provenance,
             "last_updated": self.last_updated.isoformat() if self.last_updated else None,
         }
 

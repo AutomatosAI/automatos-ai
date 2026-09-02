@@ -353,3 +353,106 @@ queries:
     correct_actions: [platform_get_activity_feed, platform_workspace_stats, platform_list_missions]
     category: cross
     difficulty: ambiguous
+
+  # ──────────────────────────────────────────────────────────────────
+  # PRD-232 US-012A — utterance-derived queries (sampled from the seeded
+  # corpus, US-005), including the 2026-08-28 VECTOR failure. These exercise
+  # the register variants the phrase map never carried.
+  # ──────────────────────────────────────────────────────────────────
+  - q: "close all the blocked tickets from vector"
+    correct_actions: [platform_update_task_status, platform_list_tasks]
+    category: tasks
+    difficulty: paraphrase
+    notes: "The 2026-08-28 VECTOR failure — close/ticket/blocked vocabulary the phrase map lacked."
+
+  - q: "mark ticket 5 as closed"
+    correct_actions: [platform_update_task_status]
+    category: tasks
+    difficulty: paraphrase
+
+  - q: "trash that document from the knowledge base"
+    correct_actions: [platform_delete_document]
+    category: documents
+    difficulty: paraphrase
+
+  - q: "kill the mission"
+    correct_actions: [platform_cancel_mission]
+    category: missions
+    difficulty: paraphrase
+
+  - q: "re-embed the pricing doc"
+    correct_actions: [platform_reprocess_document]
+    category: documents
+    difficulty: paraphrase
+
+  - q: "get rid of the old standup playbook"
+    correct_actions: [platform_delete_playbook]
+    category: playbooks
+    difficulty: paraphrase
+
+  # ──────────────────────────────────────────────────────────────────
+  # PRD-232 US-012A — ABSTAIN rows (PRD-223 Gap 1). No platform (or top-level)
+  # tool applies: pure conversational turns. The runner uses tool_choice="auto"
+  # so the model CAN decline; a correct answer is a no-call, and ANY tool call
+  # scores wrong. correct_actions is empty by contract for abstain rows.
+  # ──────────────────────────────────────────────────────────────────
+  - q: "good morning!"
+    abstain: true
+    category: abstain
+    difficulty: easy
+    notes: "Greeting — no tool should fire."
+
+  - q: "thanks, that's all for now"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "how's your day going?"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "tell me a joke"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "i'm feeling a bit stressed today"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "happy birthday!"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "goodbye for now"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "you're doing great, keep it up"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "what's your favorite color?"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "let's take a short break"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "nice to meet you"
+    abstain: true
+    category: abstain
+    difficulty: easy
+
+  - q: "haha that's genuinely funny"
+    abstain: true
+    category: abstain
+    difficulty: easy

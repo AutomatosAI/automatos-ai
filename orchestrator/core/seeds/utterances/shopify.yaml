@@ -1,0 +1,102 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: shopify)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: shopify                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: shopify
+actions:
+  platform_shopify_sync_catalog:
+  - text: refresh the catalog and tell me what changed
+    source: example
+  - text: re-sync the product graph
+    source: example
+  - text: update the store catalog in the knowledge graph
+    source: example
+  - text: sync my shopify products again
+    source: authored
+  - text: pull in the latest catalog from shopify
+    source: authored
+  - text: refresh the product graph from the store
+    source: authored
+  - text: re-import our shopify catalog
+    source: authored
+  - text: update the knowledge graph with new products
+    source: authored
+  - text: run a catalog sync now
+    source: authored
+  - text: reload the store products into the graph
+    source: authored
+  - text: my catalog changed, sync it please
+    source: authored
+  - text: kick off a shopify catalog refresh
+    source: authored
+  - text: bring the product data up to date
+    source: authored
+  - text: resync collections and vendors from shopify
+    source: authored
+  - text: the answers look stale, re-sync the catalog
+    source: authored
+  - text: import my newest products into the graph
+    source: authored
+  - text: trigger a fresh catalog sync
+    source: authored
+  - text: rebuild the product graph from our store
+    source: authored
+  platform_shopify_sync_status:
+  - text: when did the catalog last sync?
+    source: example
+  - text: is the product graph up to date?
+    source: example
+  - text: how fresh is the store catalog?
+    source: example
+  - text: has the catalog ever been synced?
+    source: authored
+  - text: when was the last product sync?
+    source: authored
+  - text: check if the catalog graph is stale
+    source: authored
+  - text: how many product nodes are in the graph?
+    source: authored
+  - text: what's the status of the last catalog sync?
+    source: authored
+  - text: is my shopify data current?
+    source: authored
+  - text: did the last sync succeed?
+    source: authored
+  - text: tell me the freshness of the product graph
+    source: authored
+  - text: how long since we synced the store?
+    source: authored
+  - text: show me the last sync time and counts
+    source: authored
+  - text: is the catalog graph out of date?
+    source: authored
+  - text: how many edges did the last sync produce?
+    source: authored
+  - text: was the catalog ever imported?
+    source: authored
+  - text: give me the sync status for the store
+    source: authored
+  - text: when did shopify products last update in the graph?
+    source: authored

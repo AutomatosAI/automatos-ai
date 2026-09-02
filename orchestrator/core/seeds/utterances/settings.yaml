@@ -1,0 +1,250 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: settings)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: settings                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: settings
+actions:
+  platform_get_auto_reporting_prefs:
+  - text: what are my notification preferences?
+    source: example
+  - text: where do I send reports?
+    source: example
+  - text: show auto reporting config
+    source: example
+  - text: what channel do my reports go to?
+    source: authored
+  - text: do I have quiet hours set up?
+    source: authored
+  - text: how often do I get the digest?
+    source: authored
+  - text: show me my notification routing rules
+    source: authored
+  - text: which channel is my fallback for alerts?
+    source: authored
+  - text: what's my digest frequency right now?
+    source: authored
+  - text: where do error alerts get routed?
+    source: authored
+  - text: check my report delivery settings
+    source: authored
+  - text: am I getting daily or weekly digests?
+    source: authored
+  - text: what are the quiet hours on this workspace?
+    source: authored
+  - text: pull up how notifications are configured here
+    source: authored
+  - text: which events go to telegram vs in app?
+    source: authored
+  - text: tell me my current reporting setup
+    source: authored
+  - text: when do you not disturb me?
+    source: authored
+  - text: what time do quiet hours start?
+    source: authored
+  platform_get_autonomy_level:
+  - text: what autonomy level am I on?
+    source: example
+  - text: is Auto running supervised or full?
+    source: example
+  - text: how much can Auto do without asking?
+    source: example
+  - text: are you allowed to run things without asking me?
+    source: authored
+  - text: do you need my confirmation before writing?
+    source: authored
+  - text: is Auto in full autonomy mode?
+    source: authored
+  - text: am I on standard or full autonomy?
+    source: authored
+  - text: can you run admin tools right now?
+    source: authored
+  - text: what's my current permission level for Auto?
+    source: authored
+  - text: does Auto ask before making changes?
+    source: authored
+  - text: is this workspace supervised or hands off?
+    source: authored
+  - text: how autonomous is Auto set to be?
+    source: authored
+  - text: will you execute writes without checking with me?
+    source: authored
+  - text: tell me if Auto runs as admin
+    source: authored
+  - text: what mode is Auto operating in?
+    source: authored
+  - text: do I have to approve every action?
+    source: authored
+  - text: is autonomy set to full here?
+    source: authored
+  - text: check whether Auto is running supervised
+    source: authored
+  platform_list_system_settings:
+  - text: list the system settings
+    source: example
+  - text: show the llm configuration settings
+    source: example
+  - text: what platform settings exist?
+    source: example
+  - text: show me the platform configuration
+    source: authored
+  - text: what config values are set in the database?
+    source: authored
+  - text: browse the system settings
+    source: authored
+  - text: list settings under the email category
+    source: authored
+  - text: what are the current llm settings?
+    source: authored
+  - text: pull up all platform config
+    source: authored
+  - text: display the database backed configuration
+    source: authored
+  - text: show every system setting we have
+    source: authored
+  - text: what's configured at the platform level?
+    source: authored
+  - text: give me the settings for the storage category
+    source: authored
+  - text: let me see how the platform is configured
+    source: authored
+  - text: what system settings exist for notifications?
+    source: authored
+  - text: list the config keys and their values
+    source: authored
+  - text: show masked values for all settings
+    source: authored
+  - text: what platform-wide config is in place?
+    source: authored
+  platform_update_auto_reporting_prefs:
+  - text: set telegram as the primary notification channel
+    source: example
+  - text: enable quiet hours from 10pm to 8am
+    source: example
+  - text: route urgent errors to telegram, info to in_app
+    source: example
+  - text: switch my primary channel to slack
+    source: authored
+  - text: send my digest weekly instead of daily
+    source: authored
+  - text: make notifications immediate please
+    source: authored
+  - text: set my fallback channel to webhook
+    source: authored
+  - text: turn on quiet hours overnight
+    source: authored
+  - text: route all errors to slack from now on
+    source: authored
+  - text: change the digest to daily
+    source: authored
+  - text: use in_app as my primary notification channel
+    source: authored
+  - text: send critical alerts to telegram, everything else in app
+    source: authored
+  - text: disable quiet hours
+    source: authored
+  - text: set quiet hours from 11pm until 7am
+    source: authored
+  - text: make webhook my fallback for reports
+    source: authored
+  - text: give me an immediate digest for urgent stuff
+    source: authored
+  - text: route info level events to in_app
+    source: authored
+  - text: set digest frequency to weekly
+    source: authored
+  platform_update_system_setting:
+  - text: change the default LLM model setting
+    source: example
+  - text: update the email sender system setting
+    source: example
+  - text: update the platform default model to gpt-4o
+    source: authored
+  - text: change the system setting for max tokens
+    source: authored
+  - text: set the email sender address platform wide
+    source: authored
+  - text: modify the default temperature setting
+    source: authored
+  - text: change the platform level rate limit
+    source: authored
+  - text: update the storage bucket system setting
+    source: authored
+  - text: set the default llm provider for everyone
+    source: authored
+  - text: change the platform timeout config
+    source: authored
+  - text: update the smtp host setting
+    source: authored
+  - text: tweak the system setting for embedding model
+    source: authored
+  - text: set a new value for the api base url setting
+    source: authored
+  - text: update the platform's default currency setting
+    source: authored
+  - text: modify the retry limit in system settings
+    source: authored
+  - text: change the global setting for session length
+    source: authored
+  - text: adjust the platform-wide logging level
+    source: authored
+  - text: bump the default max tokens across the platform
+    source: authored
+  platform_update_workspace_settings:
+  - text: use my own OpenAI key for this workspace
+    source: example
+  - text: turn off BYOK for anthropic
+    source: example
+  - text: set the default notification channel to telegram
+    source: example
+  - text: enable byok for openai in this workspace
+    source: authored
+  - text: let me bring my own anthropic key here
+    source: authored
+  - text: set default notification channel to slack
+    source: authored
+  - text: switch our default channel to webhook
+    source: authored
+  - text: turn on bring your own key for gemini
+    source: authored
+  - text: use our own api keys for this workspace
+    source: authored
+  - text: disable byok for openai
+    source: authored
+  - text: make in_app the default channel for this workspace
+    source: authored
+  - text: route default notifications to telegram for us
+    source: authored
+  - text: enable byok overrides for anthropic
+    source: authored
+  - text: stop using the platform key, use ours
+    source: authored
+  - text: set the workspace default notifications to webhook
+    source: authored
+  - text: toggle byok on for our openai account
+    source: authored
+  - text: change our default notification channel to in app
+    source: authored
+  - text: turn off bring your own key for all providers
+    source: authored

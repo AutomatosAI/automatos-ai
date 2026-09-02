@@ -296,7 +296,37 @@ def test_promoted_excluded_by_default():
     assert "platform_normal" in names
 
 
+def test_promoted_action_boosted_over_equal_cosine_unpromoted():
+    """PRD-232 US-014 (promotion-as-prior): a promoted action outranks an
+    EQUAL-cosine unpromoted one. Both actions embed to the same 'agent' vector
+    (identical cosine to the query), so only the promotion boost can separate
+    them — the promoted one must come first."""
+    actions = [
+        _make("agent_plain", description="agent thing", category="agents"),
+        _make("agent_promoted", description="agent thing", category="agents", promoted=True),
+    ]
+    idx = _make_index(actions)
+    # exclude_promoted=False so the promoted action is eligible in the surface.
+    results = _run(idx.rank_actions(query="agent", exclude_promoted=False, top_k=5))
+    names = [n for n, _ in results]
+    assert names[:2] == ["agent_promoted", "agent_plain"], (
+        f"promoted action must outrank the equal-cosine unpromoted one; got {results}"
+    )
+    scores = {n: s for n, s in results}
+    # The boost is exactly the configured prior on top of the identical cosine.
+    from config import config
+    assert scores["agent_promoted"] > scores["agent_plain"]
+    assert scores["agent_promoted"] - scores["agent_plain"] == pytest.approx(
+        config.TOOL_ROUTING_PROMOTION_BOOST, abs=1e-9
+    )
+
+
 def test_build_embedding_text_format():
+    # PRD-232 US-006: the embedded text now also carries parameter enum values
+    # (Options:, from the action's own schema) and the seeded utterance corpus
+    # (Utterances:). "platform_x" is a test-only name with no corpus entry, so its
+    # utterance section is empty here; the populated path is covered by
+    # tests/test_prd232_us006_corpus_embeddings.py.
     action = _make(
         "platform_x",
         category="agents",
@@ -304,8 +334,12 @@ def test_build_embedding_text_format():
         tags=["t1", "t2"],
         examples=["ex1", "ex2"],
     )
+    action.parameters["properties"]["mode"] = {"type": "string", "enum": ["fast", "slow"]}
     text = ActionSemanticIndex._build_embedding_text(action)
-    assert text == "platform_x: Do the thing | Tags: t1, t2 | Examples: ex1; ex2 | Category: agents"
+    assert text == (
+        "platform_x: Do the thing | Tags: t1, t2 | Examples: ex1; ex2 | "
+        "Category: agents | Options: fast, slow | Utterances: "
+    )
 
 
 def test_factory_returns_singleton():

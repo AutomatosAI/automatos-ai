@@ -394,7 +394,7 @@ async def stream_chat(
         logger.info(
             f"[Auto] Complexity={complexity_assessment.complexity.value} "
             f"action={complexity_assessment.action.value} "
-            f"tools={complexity_assessment.matched_tools} "
+            f"tool_hints={complexity_assessment.tool_hints} "
             f"reasoning={complexity_assessment.reasoning}"
         )
 

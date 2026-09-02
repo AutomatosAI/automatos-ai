@@ -1,0 +1,110 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: configuration)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: configuration                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: configuration
+actions:
+  platform_get_power_mode:
+  - text: what power mode is this workspace on?
+    source: example
+  - text: check the current power mode
+    source: example
+  - text: is the workspace running light, standard or max?
+    source: example
+  - text: what's the current power mode setting
+    source: authored
+  - text: am i on light or max right now
+    source: authored
+  - text: show me the workspace power mode
+    source: authored
+  - text: which power tier is this workspace using
+    source: authored
+  - text: is this workspace set to standard mode
+    source: authored
+  - text: tell me the default power mode
+    source: authored
+  - text: what quality tier are missions running at
+    source: authored
+  - text: check whether we're on max power mode
+    source: authored
+  - text: what's my spend vs quality setting
+    source: authored
+  - text: is the power mode a custom setting or the default
+    source: authored
+  - text: what power mode do missions inherit here
+    source: authored
+  - text: read the current power mode for this workspace
+    source: authored
+  - text: are we running in light mode to save cost
+    source: authored
+  - text: what's the power dial set to
+    source: authored
+  - text: show the cost quality tier for this workspace
+    source: authored
+  - text: which mode is the workspace defaulting to
+    source: authored
+  - text: tell me if we're on light, standard, or max
+    source: authored
+  platform_set_power_mode:
+  - text: set the workspace to max power mode
+    source: example
+  - text: switch to light power mode to save cost
+    source: example
+  - text: use standard power mode
+    source: example
+  - text: dial up quality for this workspace
+    source: example
+  - text: change the workspace to standard power mode
+    source: authored
+  - text: put us on max mode for better quality
+    source: authored
+  - text: drop down to light mode, we're spending too much
+    source: authored
+  - text: set default power mode to max
+    source: authored
+  - text: switch this workspace over to standard
+    source: authored
+  - text: dial the power mode back to light
+    source: authored
+  - text: bump the workspace up to max power
+    source: authored
+  - text: make standard the default mode here
+    source: authored
+  - text: lower the power tier to save on cost
+    source: authored
+  - text: crank the quality up to max for all missions
+    source: authored
+  - text: set the workspace power dial to light
+    source: authored
+  - text: move us to standard power mode
+    source: authored
+  - text: turn the power mode up to max
+    source: authored
+  - text: change our default tier to light
+    source: authored
+  - text: configure the workspace for max quality runs
+    source: authored
+  - text: set power mode to standard for now
+    source: authored

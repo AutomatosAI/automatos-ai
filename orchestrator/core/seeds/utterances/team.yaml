@@ -1,0 +1,192 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: team)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: team                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: team
+actions:
+  platform_invite_member:
+  - text: invite jane@acme.com to the workspace
+    source: example
+  - text: add a new editor to the team
+    source: example
+  - text: send an invite to my colleague
+    source: example
+  - text: invite bob@company.io as an admin
+    source: authored
+  - text: add sarah@startup.com to the team as a viewer
+    source: authored
+  - text: send an invitation to mike@dev.co with editor access
+    source: authored
+  - text: bring on a new admin, email is lead@corp.com
+    source: authored
+  - text: invite my designer as an editor
+    source: authored
+  - text: add tom@acme.com to this workspace
+    source: authored
+  - text: please invite priya@team.io as a viewer
+    source: authored
+  - text: get john onto the team as an admin
+    source: authored
+  - text: send a workspace invite to hello@client.com
+    source: authored
+  - text: add a viewer, their email is intern@school.edu
+    source: authored
+  - text: invite the new contractor with editor role
+    source: authored
+  - text: onboard alex@partner.com as an admin
+    source: authored
+  - text: shoot an invite over to dev2@company.com
+    source: authored
+  - text: add my manager as an editor please
+    source: authored
+  - text: invite finance@corp.com to join as a viewer
+    source: authored
+  - text: can you add nina@agency.com to the workspace
+    source: authored
+  - text: send an editor invite to writer@media.co
+    source: authored
+  platform_list_members:
+  - text: who is in this workspace?
+    source: example
+  - text: list the team members
+    source: example
+  - text: show members and their roles
+    source: example
+  - text: who has access to this workspace
+    source: authored
+  - text: show me everyone on the team
+    source: authored
+  - text: list all workspace members and their emails
+    source: authored
+  - text: who are the admins here
+    source: authored
+  - text: give me the member roster
+    source: authored
+  - text: how many people are in this workspace
+    source: authored
+  - text: display the team and when they joined
+    source: authored
+  - text: who else is on this workspace with me
+    source: authored
+  - text: show me the list of members and roles
+    source: authored
+  - text: pull up everyone who can access this
+    source: authored
+  - text: which members are editors
+    source: authored
+  - text: who's on my team
+    source: authored
+  - text: list the people in this workspace
+    source: authored
+  - text: show all active members
+    source: authored
+  - text: who are the viewers in this workspace
+    source: authored
+  - text: run down the workspace members for me
+    source: authored
+  - text: tell me who's part of this team
+    source: authored
+  platform_remove_member:
+  - text: remove John from the workspace
+    source: example
+  - text: take that contractor off the team
+    source: example
+  - text: kick sarah out of the workspace
+    source: authored
+  - text: revoke bob's access to the team
+    source: authored
+  - text: take mike off this workspace
+    source: authored
+  - text: remove the contractor from the team
+    source: authored
+  - text: delete tom's membership
+    source: authored
+  - text: get rid of the intern's access
+    source: authored
+  - text: boot alex from the workspace
+    source: authored
+  - text: remove member 42 from the team
+    source: authored
+  - text: take priya off the workspace
+    source: authored
+  - text: cut john's access, he left the company
+    source: authored
+  - text: remove that former employee from the team
+    source: authored
+  - text: drop nina from the workspace
+    source: authored
+  - text: please remove the designer from this workspace
+    source: authored
+  - text: revoke access for dev2@company.com
+    source: authored
+  - text: take my old manager off the team
+    source: authored
+  - text: remove the viewer we added last week
+    source: authored
+  - text: kick the ex-contractor out of the workspace
+    source: authored
+  - text: pull sarah's membership
+    source: authored
+  platform_set_member_role:
+  - text: make John an admin
+    source: example
+  - text: demote that member to viewer
+    source: example
+  - text: change Jane's role to editor
+    source: example
+  - text: promote sarah to admin
+    source: authored
+  - text: make bob an editor
+    source: authored
+  - text: downgrade mike to viewer
+    source: authored
+  - text: give tom admin rights
+    source: authored
+  - text: change the contractor's role to editor
+    source: authored
+  - text: bump priya up to admin
+    source: authored
+  - text: set alex as a viewer
+    source: authored
+  - text: demote the intern from editor to viewer
+    source: authored
+  - text: make john a viewer instead of editor
+    source: authored
+  - text: upgrade nina to admin
+    source: authored
+  - text: switch dev2's role to editor
+    source: authored
+  - text: grant admin to the new hire
+    source: authored
+  - text: change member 42 to viewer
+    source: authored
+  - text: make my manager an editor
+    source: authored
+  - text: give the designer editor permissions
+    source: authored
+  - text: turn sarah into an admin
+    source: authored
+  - text: drop bob down to viewer
+    source: authored

@@ -1,0 +1,145 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: harness)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: harness                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: harness
+actions:
+  platform_harness_history:
+  - text: show harness history
+    source: example
+  - text: what optimizations have been made?
+    source: example
+  - text: past optimization runs
+    source: example
+  - text: harness changelog
+    source: example
+  - text: harness history
+    source: phrase_map
+  - text: optimization history
+    source: phrase_map
+  - text: past optimizations
+    source: phrase_map
+  - text: harness runs
+    source: phrase_map
+  - text: optimization runs
+    source: phrase_map
+  - text: what has harness done
+    source: phrase_map
+  - text: list all the harness optimization runs
+    source: authored
+  - text: what has the optimizer changed over time?
+    source: authored
+  - text: show me previous harness runs and their dates
+    source: authored
+  - text: give me the log of past optimizations
+    source: authored
+  - text: how many prescriptions did past harness runs apply?
+    source: authored
+  - text: walk me through the harness run history
+    source: authored
+  - text: what optimization runs have happened before?
+    source: authored
+  - text: show the timeline of harness optimizations
+    source: authored
+  - text: which past runs converged?
+    source: authored
+  platform_harness_status:
+  - text: how is the team performing?
+    source: example
+  - text: what's the optimization status?
+    source: example
+  - text: harness status
+    source: example
+  - text: org health check
+    source: example
+  - text: why hasn't harness run yet?
+    source: example
+  - text: optimization status
+    source: phrase_map
+  - text: org health
+    source: phrase_map
+  - text: how is the team performing
+    source: phrase_map
+  - text: team performance
+    source: phrase_map
+  - text: harness state
+    source: phrase_map
+  - text: optimization loop
+    source: phrase_map
+  - text: is harness running right now?
+    source: authored
+  - text: what state is the optimization loop in?
+    source: authored
+  - text: did the last harness tick fail?
+    source: authored
+  - text: is the optimizer dormant or active?
+    source: authored
+  - text: check the current harness state for me
+    source: authored
+  - text: why is harness waiting to run?
+    source: authored
+  - text: has the optimization converged yet?
+    source: authored
+  - text: is harness disabled for this workspace?
+    source: authored
+  platform_harness_trigger:
+  - text: run harness now
+    source: example
+  - text: trigger optimization
+    source: example
+  - text: optimize the team
+    source: example
+  - text: run the optimization loop
+    source: example
+  - text: run harness
+    source: phrase_map
+  - text: trigger harness
+    source: phrase_map
+  - text: optimize now
+    source: phrase_map
+  - text: run optimization
+    source: phrase_map
+  - text: tune the team
+    source: phrase_map
+  - text: kick off a harness run right now
+    source: authored
+  - text: manually start the optimization loop
+    source: authored
+  - text: we swapped models, re-run harness
+    source: authored
+  - text: force an optimization run this instant
+    source: authored
+  - text: trigger a harness tick outside the schedule
+    source: authored
+  - text: re-optimize the team after the incident
+    source: authored
+  - text: run the optimizer now, don't wait for the cron
+    source: authored
+  - text: start a fresh harness optimization
+    source: authored
+  - text: please tune the agents now
+    source: authored
+  - text: launch an on-demand harness run
+    source: authored

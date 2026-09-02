@@ -1,0 +1,221 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: workspace_files)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: workspace_files                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: workspace_files
+actions:
+  workspace_get_public_url:
+  - text: get a public URL for the rendered image
+    source: example
+  - text: I need a shareable link to this PNG
+    source: example
+  - text: make this image publicly accessible for Instagram
+    source: example
+  - text: give me a public link to the chart png
+    source: authored
+  - text: i need a shareable url for this document
+    source: authored
+  - text: make the logo file accessible for twitter
+    source: authored
+  - text: get a cdn url for the rendered graphic
+    source: authored
+  - text: expose this image publicly so i can post it to linkedin
+    source: authored
+  - text: create a public link for the report pdf
+    source: authored
+  - text: i want an external url for the banner image
+    source: authored
+  - text: make this file downloadable without login
+    source: authored
+  - text: get a hosted url for the generated image
+    source: authored
+  - text: share this png with instagram, need a public link
+    source: authored
+  - text: turn the workspace image into a public url
+    source: authored
+  - text: publish this file so an external service can fetch it
+    source: authored
+  - text: give me a link to this image that doesn't need auth
+    source: authored
+  - text: get a shareable address for the infographic
+    source: authored
+  - text: i need to post this photo, make a public url
+    source: authored
+  workspace_grep:
+  - text: search for 'def handle_error' in the code
+    source: example
+  - text: find all TODO comments in Python files
+    source: example
+  - text: where is the database connection configured?
+    source: example
+  - text: search code
+    source: phrase_map
+  - text: find in code
+    source: phrase_map
+  - text: grep
+    source: phrase_map
+  - text: search for
+    source: phrase_map
+  - text: where is the function
+    source: phrase_map
+  - text: find definition
+    source: phrase_map
+  - text: grep the repo for the string API_BASE_URL
+    source: authored
+  - text: find every call to fetchUser in the code
+    source: authored
+  - text: search the codebase for deprecated warnings
+    source: authored
+  - text: where is the class OrderService defined?
+    source: authored
+  - text: find all print statements in the python files
+    source: authored
+  - text: grep for the import os pattern across the repo
+    source: authored
+  - text: locate where SECRET_KEY is referenced in code
+    source: authored
+  - text: search files for any FIXME comments
+    source: authored
+  - text: which file defines the route /api/login?
+    source: authored
+  - text: find the function that parses the config
+    source: authored
+  workspace_list_dir:
+  - text: what files are in the repo?
+    source: example
+  - text: list the src directory
+    source: example
+  - text: show me the project structure
+    source: example
+  - text: list files
+    source: phrase_map
+  - text: list directory
+    source: phrase_map
+  - text: show directory
+    source: phrase_map
+  - text: project structure
+    source: phrase_map
+  - text: what files are there
+    source: phrase_map
+  - text: ls
+    source: phrase_map
+  - text: show files
+    source: phrase_map
+  - text: what's inside the tests folder?
+    source: authored
+  - text: ls the components directory
+    source: authored
+  - text: show me what's in the root of the repo
+    source: authored
+  - text: list everything under src/utils
+    source: authored
+  - text: browse the files in the config folder
+    source: authored
+  - text: what directories are at the top level?
+    source: authored
+  - text: show the contents of the api folder
+    source: authored
+  - text: list files and sizes in the docs directory
+    source: authored
+  - text: what's in the scripts folder?
+    source: authored
+  workspace_read_file:
+  - text: read src/main.py
+    source: example
+  - text: show me the package.json
+    source: example
+  - text: what's in the config file?
+    source: example
+  - text: read file
+    source: phrase_map
+  - text: show file
+    source: phrase_map
+  - text: open file
+    source: phrase_map
+  - text: cat file
+    source: phrase_map
+  - text: view source
+    source: phrase_map
+  - text: read the code
+    source: phrase_map
+  - text: show me the code
+    source: phrase_map
+  - text: open src/utils/auth.ts
+    source: authored
+  - text: show me the contents of Dockerfile
+    source: authored
+  - text: read the requirements.txt
+    source: authored
+  - text: what's inside settings.py?
+    source: authored
+  - text: cat the .env.example file
+    source: authored
+  - text: pull up the contents of index.js
+    source: authored
+  - text: let me see tsconfig.json
+    source: authored
+  - text: display the code in server/app.py
+    source: authored
+  - text: read the makefile for me
+    source: authored
+  workspace_write_file:
+  - text: fix the bug on line 42 of main.py
+    source: example
+  - text: create a new test file
+    source: example
+  - text: update the README
+    source: example
+  - text: write file
+    source: phrase_map
+  - text: create file
+    source: phrase_map
+  - text: save file
+    source: phrase_map
+  - text: update file
+    source: phrase_map
+  - text: edit file
+    source: phrase_map
+  - text: modify file
+    source: phrase_map
+  - text: fix the code
+    source: phrase_map
+  - text: add a new utils.py with a helper function
+    source: authored
+  - text: create a dockerfile for the app
+    source: authored
+  - text: write a config.yaml with these settings
+    source: authored
+  - text: patch the typo in app.js line 10
+    source: authored
+  - text: make a new .gitignore file
+    source: authored
+  - text: overwrite the README with this content
+    source: authored
+  - text: create tests/test_auth.py and add a test
+    source: authored
+  - text: update package.json to bump the version
+    source: authored
+  - text: save this snippet into src/handler.ts
+    source: authored

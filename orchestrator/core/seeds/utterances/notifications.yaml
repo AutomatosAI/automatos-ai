@@ -1,0 +1,106 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: notifications)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: notifications                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: notifications
+actions:
+  platform_notify_owner:
+  - text: ask Gerard whether to approve the $500 LinkedIn ad spend
+    source: example
+  - text: tell the owner the daily-social-post agent has been failing for 3 days
+    source: example
+  - text: escalate to Gerard — mission 22c489bb is blocked on a config decision
+    source: example
+  - text: notify the owner that the cost spike on agent 337 needs review
+    source: example
+  - text: dm the owner, urgent, the payment webhook is down
+    source: authored
+  - text: message gerard to approve the new agent hire
+    source: authored
+  - text: 'tell the owner high priority: we''re about to hit the budget cap'
+    source: authored
+  - text: let the owner know the deploy needs their sign-off
+    source: authored
+  - text: ping gerard directly, the scraper's been erroring all morning
+    source: authored
+  - text: notify the owner urgently that prod is throwing 500s
+    source: authored
+  - text: shoot gerard a message about the blocked mission
+    source: authored
+  - text: tell the owner, low urgency, that the weekly numbers look off
+    source: authored
+  - text: escalate to the owner, need a decision on the vendor by noon
+    source: authored
+  - text: message gerard that agent 42 keeps failing its runs
+    source: authored
+  - text: flag the owner high urgency about the security alert
+    source: authored
+  - text: let gerard know the api key expires tomorrow
+    source: authored
+  - text: dm the owner for approval on the 1k spend
+    source: authored
+  - text: 'surface to gerard: the harness run is stuck and needs eyes'
+    source: authored
+  - text: notify the owner normal priority that the report needs review
+    source: authored
+  platform_send_notification:
+  - text: ping me on telegram about the failing harness run
+    source: example
+  - text: send an approval request notification
+    source: example
+  - text: notify Gerard that the daily brief is ready
+    source: example
+  - text: send a notification when the mission completes
+    source: authored
+  - text: fire off an alert that an agent errored
+    source: authored
+  - text: notify the channel that the playbook finished
+    source: authored
+  - text: push a warning about the failing task to slack
+    source: authored
+  - text: send an info notification that the report was submitted
+    source: authored
+  - text: alert everyone the trigger fired
+    source: authored
+  - text: broadcast that the mission step is done
+    source: authored
+  - text: send an urgent notification about the security issue
+    source: authored
+  - text: ping the configured channels that the task completed
+    source: authored
+  - text: notify us when the heartbeat finishes
+    source: authored
+  - text: drop a notification that the playbook step wrapped up
+    source: authored
+  - text: send a warning-level alert about the budget
+    source: authored
+  - text: fire a notification through our channels about the agent error
+    source: authored
+  - text: let the team know via notification that the mission's done
+    source: authored
+  - text: send an info ping that the daily run completed
+    source: authored
+  - text: notify on the trigger firing
+    source: authored

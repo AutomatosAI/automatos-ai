@@ -2,7 +2,8 @@
 
 The 12-head forest that the PRD-209 spec described has already been collapsed to a
 single head by prior merge revisions (PRD-176/203/204/230 …); ``alembic heads``
-returns exactly ``prd_workspace_models_backfill`` on this branch. This wave's job is
+returned exactly ``prd_workspace_models_backfill`` when this guard was written (PRD-232
+moved it to ``prd232_cluster_provenance`` — see ``EXPECTED_HEAD``). This wave's job is
 not to squash again (deleting revision files would STRAND Railway prod — constraint
 B) but to (a) lock the single-head invariant against a future divergent head, (b)
 prove no stamped database is stranded, and (c) guard the fresh path: since the
@@ -40,7 +41,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 
 # The single head on this branch. Changing the head (a new terminal revision) is a
 # deliberate act that must update this pin — that is the point of the guard.
-EXPECTED_HEAD = "prd_workspace_models_backfill"
+# PRD-232 (2026-09-02): the one authorized 232 revision, prd232_cluster_provenance,
+# chains onto prd_workspace_models_backfill and is the new single head.
+EXPECTED_HEAD = "prd232_cluster_provenance"
 
 
 def _literal(node: ast.AST):

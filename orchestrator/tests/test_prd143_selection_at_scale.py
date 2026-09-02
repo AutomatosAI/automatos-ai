@@ -522,25 +522,41 @@ def test_topk_is_bounded(scale_registry, scale_index):
     ["create an agent", "invite a member to the workspace", "show me the logs"],
 )
 def test_dispatcher_enum_matches_ranked_set(scale_registry, scale_index, intent):
-    """The platform_execute enum the LLM sees is exactly the ranked top-K —
-    no fallback to the full catalogue, no su members, promoted actions stay
-    first-class (never enum members)."""
+    """The platform_execute enum the LLM sees is exactly the ranked top-K MINUS
+    the promoted actions that attach first-class this turn (PRD-232 US-014 §6.2:
+    config pins + whatever promoted ranked in) — no fallback to the full
+    catalogue, no su members. A promoted action is NEVER a bare enum member: it is
+    first-class when pinned/ranked, else reachable via platform_find_tools."""
     with _tool_surface(scale_registry, scale_index):
         tools = tr.get_tools_for_agent(agent_id=None, workspace_id=None, query=intent)
 
     enum = _dispatcher_enum(tools)
-    ranked_names = [n for n, _ in _rank(scale_index, intent)]
+
+    # §6.2: the surface ranks the FULL set (exclude_promoted=False), attaches the
+    # ranked/pinned promoted first-class, and the enum is the ranked remainder.
+    # Recompute that expected split exactly the way tool_router's loader does.
+    full_ranked = [n for n, _ in _rank(scale_index, intent, exclude_promoted=False)]
+    promoted_all = {spec[0] for spec in _PROMOTED}
+    pins = tr._promotion_pins()
+    expected_first_class = {n for n in full_ranked if n in promoted_all} | (pins & promoted_all)
+    expected_enum = [n for n in full_ranked if n not in expected_first_class]
 
     assert enum, f"dispatcher enum empty for {intent!r}"
-    assert set(enum) == set(ranked_names), (
-        f"dispatcher enum diverged from ranked set for {intent!r}: "
-        f"enum-only={sorted(set(enum) - set(ranked_names))}, "
-        f"ranked-only={sorted(set(ranked_names) - set(enum))}"
+    assert set(enum) == set(expected_enum), (
+        f"dispatcher enum diverged from the §6.2 ranked-minus-first-class set for "
+        f"{intent!r}: enum-only={sorted(set(enum) - set(expected_enum))}, "
+        f"expected-only={sorted(set(expected_enum) - set(enum))}"
     )
     assert len(enum) <= TOP_K
     assert not (set(enum) & _su_names(scale_registry))
 
+    # Promotion-as-prior reachability: a promoted action is never a bare enum
+    # member; it is first-class iff pinned or ranked in this turn, otherwise
+    # reachable only via platform_find_tools (absent from both first-class + enum).
     surface = _names(tools)
-    for promoted_name in (spec[0] for spec in _PROMOTED):
-        assert promoted_name in surface
+    for promoted_name in promoted_all:
         assert promoted_name not in enum
+        if promoted_name in expected_first_class:
+            assert promoted_name in surface
+        else:
+            assert promoted_name not in surface

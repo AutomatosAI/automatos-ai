@@ -1,0 +1,299 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: memory)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: memory                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: memory
+actions:
+  platform_browse_memories:
+  - text: show all memories
+    source: example
+  - text: browse memories
+    source: example
+  - text: what has been remembered
+    source: example
+  - text: search memories for user preferences
+    source: example
+  - text: list memories
+    source: phrase_map
+  - text: view memories
+    source: phrase_map
+  - text: memory explorer
+    source: phrase_map
+  - text: show memory contents
+    source: phrase_map
+  - text: let me scroll through everything you've stored
+    source: authored
+  - text: page through the stored memories
+    source: authored
+  - text: show me the full list of memories
+    source: authored
+  - text: give me everything in the memory store
+    source: authored
+  - text: browse memories about deployments
+    source: authored
+  - text: walk me through what's saved in memory
+    source: authored
+  - text: display all remembered items with dates
+    source: authored
+  - text: show the memory entries and who saved them
+    source: authored
+  - text: list out all the memories we have
+    source: authored
+  - text: pull up the memory list filtered by pricing
+    source: authored
+  - text: open the memory browser
+    source: authored
+  platform_checkpoint_thread:
+  - text: save where we are
+    source: example
+  - text: checkpoint this conversation
+    source: example
+  - text: remember where we left off here
+    source: example
+  - text: save our progress before I go
+    source: authored
+  - text: checkpoint where we got to
+    source: authored
+  - text: log a summary of this chat so far
+    source: authored
+  - text: note the decisions and open items from this thread
+    source: authored
+  - text: capture where we are in this conversation
+    source: authored
+  - text: bookmark this discussion so I can resume later
+    source: authored
+  - text: record where we left off
+    source: authored
+  - text: snapshot this conversation into memory
+    source: authored
+  - text: save the state of this thread
+    source: authored
+  - text: wrap up and save what we covered
+    source: authored
+  - text: checkpoint this before we lose it
+    source: authored
+  - text: store where we're at in this chat
+    source: authored
+  - text: make a save point for this conversation
+    source: authored
+  - text: jot down our open loops and decisions here
+    source: authored
+  - text: preserve this thread so we can pick it up
+    source: authored
+  platform_delete_memory:
+  - text: delete memory abc-123
+    source: example
+  - text: remove that incorrect memory
+    source: example
+  - text: delete memory
+    source: phrase_map
+  - text: remove memory
+    source: phrase_map
+  - text: forget this
+    source: phrase_map
+  - text: erase memory
+    source: phrase_map
+  - text: clear memory
+    source: phrase_map
+  - text: get rid of memory 7f2a
+    source: authored
+  - text: drop that memory about my old address
+    source: authored
+  - text: forget what you stored regarding the deadline
+    source: authored
+  - text: wipe memory id 4471
+    source: authored
+  - text: delete the wrong fact you saved about me
+    source: authored
+  - text: purge that outdated memory
+    source: authored
+  - text: remove memory number 22 permanently
+    source: authored
+  - text: kill the memory with id b9c3
+    source: authored
+  - text: erase that note you kept about pricing
+    source: authored
+  - text: throw out memory abc-999
+    source: authored
+  - text: forget that i said friday, delete it
+    source: authored
+  - text: delete the stale memory about the deploy
+    source: authored
+  platform_get_memory_stats:
+  - text: how many memories do you have?
+    source: example
+  - text: what do you remember?
+    source: example
+  - text: memory stats
+    source: example
+  - text: how much memory storage am I using?
+    source: authored
+  - text: give me the memory system stats
+    source: authored
+  - text: what's the breakdown of memory types?
+    source: authored
+  - text: how many facts have you stored total?
+    source: authored
+  - text: show me memory usage numbers
+    source: authored
+  - text: count how many memories exist
+    source: authored
+  - text: what types of memories do you keep and how many?
+    source: authored
+  - text: how big is the memory store?
+    source: authored
+  - text: stats on what's remembered
+    source: authored
+  - text: total number of stored memories please
+    source: authored
+  - text: summarize the memory system size
+    source: authored
+  - text: how many decisions vs preferences are stored?
+    source: authored
+  - text: give me a memory health overview
+    source: authored
+  - text: what's the total memory count and storage?
+    source: authored
+  - text: how many entries in memory right now?
+    source: authored
+  platform_resume_context:
+  - text: where did we leave off?
+    source: example
+  - text: what were we working on yesterday?
+    source: example
+  - text: pick up where we left off
+    source: example
+  - text: what's still open?
+    source: example
+  - text: catch me up on what I was doing
+    source: authored
+  - text: what should I pick back up?
+    source: authored
+  - text: remind me where we stopped last time
+    source: authored
+  - text: what were my open loops?
+    source: authored
+  - text: give me my recent threads and next steps
+    source: authored
+  - text: i'm back, what was I in the middle of?
+    source: authored
+  - text: what's the status of things we were working on?
+    source: authored
+  - text: recap where we got to yesterday
+    source: authored
+  - text: what did we decide last session?
+    source: authored
+  - text: help me get back into what I was doing
+    source: authored
+  - text: summarize my recent work and what's next
+    source: authored
+  - text: what's outstanding from our last chats?
+    source: authored
+  - text: where should I resume from?
+    source: authored
+  - text: bring me up to speed on my open work
+    source: authored
+  platform_search_memory:
+  - text: what do you remember about me?
+    source: example
+  - text: search memory for Slack channel
+    source: example
+  - text: what's stored about the deployment?
+    source: example
+  - text: do you remember my name?
+    source: example
+  - text: search memory
+    source: phrase_map
+  - text: what do you remember
+    source: phrase_map
+  - text: recall
+    source: phrase_map
+  - text: do you remember
+    source: phrase_map
+  - text: what's in memory
+    source: phrase_map
+  - text: memory search
+    source: phrase_map
+  - text: what do you know about me
+    source: phrase_map
+  - text: check memory
+    source: phrase_map
+  - text: stored memories
+    source: phrase_map
+  - text: my preferences
+    source: phrase_map
+  - text: what have you learned
+    source: phrase_map
+  - text: do you recall my preferred deploy day?
+    source: authored
+  - text: look up what you know about our pricing plan
+    source: authored
+  - text: what did I tell you about the api integration?
+    source: authored
+  - text: search your memory for my timezone
+    source: authored
+  - text: have you got anything stored about the pilot customer?
+    source: authored
+  - text: recall what we agreed on for the database
+    source: authored
+  - text: find any memory about my email preferences
+    source: authored
+  platform_store_memory:
+  - text: remember that our deploy day is Thursday
+    source: example
+  - text: remember we decided to ship the pilot without SSO (type=decision)
+    source: example
+  - text: store with source_type=platform_verified after running the check
+    source: example
+  - text: remember that I prefer dark mode (type=preference)
+    source: authored
+  - text: note that our company is B2B fintech (type=business_fact)
+    source: authored
+  - text: 'save this decision: we''re using postgres not mysql'
+    source: authored
+  - text: keep in mind my name is gerard, that's a user_fact
+    source: authored
+  - text: store as private that i work uk hours
+    source: authored
+  - text: remember the procedure for deploying to railway
+    source: authored
+  - text: 'log an open_loop: we still need to rotate the keys'
+    source: authored
+  - text: commit to memory that our billing renews in march
+    source: authored
+  - text: remember for the workspace that standups are at 9am
+    source: authored
+  - text: save that i like concise answers as a preference
+    source: authored
+  - text: note down our brand color is teal, workspace scope
+    source: authored
+  - text: remember this fact about me privately
+    source: authored
+  - text: store that the pilot launches next quarter (decision)
+    source: authored
+  - text: keep a memory that our main region is eu-west
+    source: authored
+  - text: remember that the client approved the budget
+    source: authored

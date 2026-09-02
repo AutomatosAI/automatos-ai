@@ -112,20 +112,24 @@ async def test_assess_chitchat_is_atom_respond(message):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "message,expected_tool",
+    "message",
     [
-        ("list my agents", "platform_list_agents"),
-        ("show my playbooks", "platform_list_recipes"),
-        ("token usage", "platform_get_llm_usage"),
-        ("what models are available", "platform_list_llms"),
+        "list my agents",
+        "show my playbooks",
+        "token usage",
+        "what models are available",
     ],
 )
-async def test_assess_platform_query_is_molecule_with_tool(message, expected_tool):
+async def test_assess_platform_query_is_molecule_with_tool(message):
+    # PRD-232 US-008: the phrase map stays a fast-path BOOSTER — it classifies
+    # MOLECULE + tool_hints=["platform"] so the platform surface loads. The
+    # specific tool is now chosen by the ranker from the seeded corpus, so the
+    # dead ``matched_tools`` pre-selection (and its stale platform_list_recipes
+    # entry) is gone.
     out = await _brain().assess(message)
     assert out.complexity is Complexity.MOLECULE, message
     assert out.action is Action.RESPOND, message
     assert out.tool_hints == ["platform"]
-    assert expected_tool in out.matched_tools, (message, out.matched_tools)
 
 
 @pytest.mark.asyncio
@@ -172,7 +176,6 @@ async def test_assess_memory_search_phrasing_routes_to_platform_tool(message):
     assert out.action is Action.RESPOND, message
     assert out.needs_memory is False, message
     assert out.tool_hints == ["platform"], message
-    assert "platform_search_memory" in out.matched_tools, (message, out.matched_tools)
 
 
 @pytest.mark.asyncio

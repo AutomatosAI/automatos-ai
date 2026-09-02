@@ -1,0 +1,340 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: governance)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: governance                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: governance
+actions:
+  platform_ask_human:
+  - text: ask the human which vendor to use before I place the order
+    source: example
+  - text: I need the API credentials to continue — ask the operator
+    source: example
+  - text: park this task and ask whether to ship variant A or B
+    source: example
+  - text: flag this for a human, i can't pick the pricing tier myself
+    source: authored
+  - text: park the playbook run and ask someone which region to deploy to
+    source: authored
+  - text: i need sign-off before deleting the prod bucket, ask the operator
+    source: authored
+  - text: get a human to confirm the refund amount before i issue it
+    source: authored
+  - text: hold this task and check with a person on the contract terms
+    source: authored
+  - text: ask whoever's around whether we're allowed to email the whole list
+    source: authored
+  - text: i don't have the stripe key, get a human to hand it over
+    source: authored
+  - text: 'escalate to a person: which of these two logos do we ship?'
+    source: authored
+  - text: park this tool call and ask a human to approve the api scope
+    source: authored
+  - text: need human approval to spend on the ad campaign, ask them
+    source: authored
+  - text: check with someone before i overwrite the existing report
+    source: authored
+  - text: ask a human whether prod or staging is the target here
+    source: authored
+  - text: i can't decide the legal wording, put it to a person and pause
+    source: authored
+  - text: get sign-off from the team before merging this board task
+    source: authored
+  - text: pause and ask the operator for the database password
+    source: authored
+  - text: someone needs to okay the vendor switch, ask and stop
+    source: authored
+  platform_ask_orchestrator:
+  - text: ask the orchestrator which data source is canonical for revenue
+    source: example
+  - text: I'm not sure which of two upstream outputs to use — ask Auto
+    source: example
+  - text: confirm whether deleting the old records is in scope before I proceed
+    source: example
+  - text: ask auto which upstream result feeds this step
+    source: authored
+  - text: check with the orchestrator on the canonical customer table
+    source: authored
+  - text: auto, is truncating the logs a destructive change here?
+    source: authored
+  - text: ask the orchestrator whether this counts as scope creep
+    source: authored
+  - text: i'm stuck, ask auto which model the mission plan expects
+    source: authored
+  - text: confirm with auto whether spending on the api is approved
+    source: authored
+  - text: ask the orchestrator what memory says about the naming convention
+    source: authored
+  - text: which of these two figures is right? ask auto
+    source: authored
+  - text: check with auto whether wiping the cache is in scope
+    source: authored
+  - text: ask the orchestrator if this counts as real money spend
+    source: authored
+  - text: auto, which source in the corpus is authoritative here?
+    source: authored
+  - text: i can't tell which branch the plan wants, ask the orchestrator
+    source: authored
+  - text: ask auto whether dropping the column is destructive
+    source: authored
+  - text: get the orchestrator to settle which output is upstream truth
+    source: authored
+  - text: ask auto if expanding to a second region is still in scope
+    source: authored
+  - text: check with the orchestrator before i commit real spend
+    source: authored
+  platform_check_budget:
+  - text: check mission budget
+    source: example
+  - text: how much budget is left?
+    source: example
+  - text: is the mission over budget?
+    source: example
+  - text: how much of the budget have we burned?
+    source: authored
+  - text: what's the remaining spend on this mission?
+    source: authored
+  - text: are we close to the budget limit?
+    source: authored
+  - text: show me tokens left for the mission
+    source: authored
+  - text: did the mission blow past its budget?
+    source: authored
+  - text: what's the budget status right now?
+    source: authored
+  - text: how many tokens do we have left to spend?
+    source: authored
+  - text: is the mission budget in warning or still ok?
+    source: authored
+  - text: what's left in the cost allowance?
+    source: authored
+  - text: check whether we can keep running or we're out of budget
+    source: authored
+  - text: how much money has this mission spent so far?
+    source: authored
+  - text: are we in the red on budget yet?
+    source: authored
+  - text: give me the remaining cost and token count
+    source: authored
+  - text: is there enough budget to finish this run?
+    source: authored
+  - text: how much headroom is left before we hit the cap?
+    source: authored
+  - text: tell me if the mission is over, warning, or fine on spend
+    source: authored
+  platform_create_blueprint:
+  - text: create a blueprint requiring system prompts
+    source: example
+  - text: set up agent readiness rules
+    source: example
+  - text: make a governance blueprint capping budget per run
+    source: authored
+  - text: create a readiness standard requiring at least 3 tools
+    source: authored
+  - text: set up a quality blueprint that only allows claude models
+    source: authored
+  - text: define a blueprint with required tags for agents
+    source: authored
+  - text: spin up a governance rule set for agent quality
+    source: authored
+  - text: 'new blueprint: every agent needs a system prompt and 2+ tools'
+    source: authored
+  - text: create standards limiting agents to approved models
+    source: authored
+  - text: add a blueprint that enforces a max budget per run
+    source: authored
+  - text: set up quality rules requiring tags on all agents
+    source: authored
+  - text: make a new agent readiness blueprint
+    source: authored
+  - text: create a governance policy for minimum tool count
+    source: authored
+  - text: define quality standards agents must meet before running
+    source: authored
+  - text: build a blueprint restricting which models agents can use
+    source: authored
+  - text: set up a readiness check requiring system prompts and tags
+    source: authored
+  - text: create a blueprint enforcing our agent quality bar
+    source: authored
+  - text: 'new governance standard: cap spend per run at 5 dollars'
+    source: authored
+  - text: make rules so agents need min tools and a prompt
+    source: authored
+  platform_get_blueprint:
+  - text: get blueprint details
+    source: example
+  - text: show blueprint rules
+    source: example
+  - text: show me what's in the default blueprint
+    source: authored
+  - text: pull up blueprint 7 and its rules
+    source: authored
+  - text: what does the marketing blueprint require?
+    source: authored
+  - text: get the full rule set for that governance blueprint
+    source: authored
+  - text: open blueprint id 42
+    source: authored
+  - text: what are the requirements in the sales-team blueprint?
+    source: authored
+  - text: show the rules for the strict-quality blueprint
+    source: authored
+  - text: give me the details of blueprint 12
+    source: authored
+  - text: what models does this blueprint allow?
+    source: authored
+  - text: read out the constraints in the default blueprint
+    source: authored
+  - text: fetch blueprint by id and show its config
+    source: authored
+  - text: what tags does the onboarding blueprint require?
+    source: authored
+  - text: display the min tools and budget for blueprint 3
+    source: authored
+  - text: show me the specifics of that readiness blueprint
+    source: authored
+  - text: what's the max budget rule on blueprint 9?
+    source: authored
+  - text: look up the rules for blueprint number 5
+    source: authored
+  - text: get me the requirements for the compliance blueprint
+    source: authored
+  platform_list_blueprints:
+  - text: list blueprints
+    source: example
+  - text: what governance rules exist?
+    source: example
+  - text: show agent standards
+    source: example
+  - text: what blueprints do we have?
+    source: authored
+  - text: show all the governance blueprints
+    source: authored
+  - text: list every readiness standard in the workspace
+    source: authored
+  - text: which quality blueprints are set up?
+    source: authored
+  - text: do we have any agent governance rules configured?
+    source: authored
+  - text: pull up all the blueprints
+    source: authored
+  - text: what standards are defined for agents here?
+    source: authored
+  - text: show me the list of governance policies
+    source: authored
+  - text: how many blueprints exist in this workspace?
+    source: authored
+  - text: give me all the agent readiness blueprints
+    source: authored
+  - text: what quality standards do we have on file?
+    source: authored
+  - text: display the workspace blueprints
+    source: authored
+  - text: are there any blueprints configured?
+    source: authored
+  - text: show the governance rule sets we've created
+    source: authored
+  - text: list the readiness policies
+    source: authored
+  - text: what agent standards are currently in place?
+    source: authored
+  platform_update_blueprint:
+  - text: update blueprint rules
+    source: example
+  - text: change minimum tools requirement
+    source: example
+  - text: bump the max budget per run on blueprint 4
+    source: authored
+  - text: rename the default blueprint to strict-mode
+    source: authored
+  - text: add gpt-4o to the allowed models in this blueprint
+    source: authored
+  - text: loosen the min tools rule to 1
+    source: authored
+  - text: edit the blueprint to require system prompts now
+    source: authored
+  - text: change the required tags on the sales blueprint
+    source: authored
+  - text: update blueprint 8's description
+    source: authored
+  - text: raise the budget cap in the marketing blueprint
+    source: authored
+  - text: drop the model restriction from this blueprint
+    source: authored
+  - text: modify the readiness rules for blueprint 3
+    source: authored
+  - text: tweak the blueprint so agents need 5 tools minimum
+    source: authored
+  - text: adjust the allowed models list on the default blueprint
+    source: authored
+  - text: update the governance standard to require tags
+    source: authored
+  - text: change blueprint 12's name and its budget rule
+    source: authored
+  - text: revise the min tools requirement upward
+    source: authored
+  - text: set a new max budget per run on this blueprint
+    source: authored
+  - text: edit the compliance blueprint's rule set
+    source: authored
+  platform_validate_agent:
+  - text: is this agent ready?
+    source: example
+  - text: validate agent against blueprint
+    source: example
+  - text: check agent readiness
+    source: example
+  - text: does agent 337 pass the blueprint?
+    source: authored
+  - text: check if the marketing agent meets our standards
+    source: authored
+  - text: run a readiness check on this agent
+    source: authored
+  - text: will the sales agent pass governance validation?
+    source: authored
+  - text: verify the agent against the default blueprint
+    source: authored
+  - text: does this agent meet the quality bar?
+    source: authored
+  - text: check agent 42 for blueprint compliance
+    source: authored
+  - text: is my new agent up to standard?
+    source: authored
+  - text: validate the onboarding agent's readiness
+    source: authored
+  - text: run the agent through the governance check
+    source: authored
+  - text: does the scout agent satisfy the blueprint rules?
+    source: authored
+  - text: check whether this agent is missing any required tools
+    source: authored
+  - text: test if agent sentinel passes validation
+    source: authored
+  - text: is the agent compliant with our readiness rules?
+    source: authored
+  - text: see if this agent fails any blueprint requirements
+    source: authored
+  - text: vet agent 9 against the quality standards
+    source: authored

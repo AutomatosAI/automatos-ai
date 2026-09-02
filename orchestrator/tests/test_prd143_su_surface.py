@@ -183,11 +183,16 @@ def test_su_tool_absent_from_openai_tools_by_default():
     assert _SU not in enum
     assert _SU_PROMOTED not in enum
     assert _OPERATOR in enum
+    # PRD-232 US-014 (§6.2 promotion-as-prior): a promoted action that is neither
+    # a config pin nor ranked into this (query-less, un-narrowed) surface no longer
+    # attaches first-class — it stays reachable as a dispatcher enum member. (Old
+    # contract: every promoted action attached first-class unconditionally.)
+    assert _OPERATOR_PROMOTED in enum
 
     names = _names(tools)
     assert _SU not in names
     assert _SU_PROMOTED not in names
-    assert _OPERATOR_PROMOTED in names
+    assert _OPERATOR_PROMOTED not in names
 
 
 def test_su_tool_absent_under_full_autonomy():
@@ -233,7 +238,13 @@ def test_su_tool_present_for_super_admin_principal():
     The routing flags are patched at the helper level — mutating the shared
     ``config.config`` instance here leaves instance-attr residue that
     shadows sibling suites' class-level flag writes."""
-    recorder = _RecordingIndex(results=[(_SU, 0.95), (_OPERATOR, 0.6)])
+    # PRD-232 US-014 (§6.2): _SU_PROMOTED ranks INTO the surface here, so as a
+    # ranked promoted action it attaches first-class; _SU (non-promoted) rides the
+    # dispatcher enum. The security property under test is unchanged — the ONLY
+    # inclusion path for either su action is an explicit is_super_admin=True
+    # principal (proven by the exclusion tests above), and include_super_admin is
+    # threaded into the narrowing rank call.
+    recorder = _RecordingIndex(results=[(_SU, 0.95), (_SU_PROMOTED, 0.9), (_OPERATOR, 0.6)])
     with _tool_surface(_surface_registry()), \
             patch.object(tr, "_semantic_routing_enabled", return_value=True), \
             patch.object(tr, "_semantic_routing_top_k", return_value=10), \
@@ -251,7 +262,9 @@ def test_su_tool_present_for_super_admin_principal():
 
     enum = _dispatcher_enum(tools)
     assert _SU in enum
+    # ranked promoted → first-class (never a bare enum member), su-eligible only
     assert _SU_PROMOTED in _names(tools)
+    assert _SU_PROMOTED not in enum
     assert recorder.calls, "semantic narrowing was not invoked"
     assert recorder.calls[-1]["include_super_admin"] is True
 

@@ -77,7 +77,15 @@ def _validate(queries: List[Dict[str, Any]], known: Set[str]) -> List[str]:
             errors.append(prefix + f"duplicate query: {q!r}")
         seen_qs.add(q)
 
+        # PRD-232 US-012A: abstain rows expect NO tool call (no correct action
+        # applies), so they must carry an empty correct_actions list.
+        abstain = bool(entry.get("abstain"))
         correct = entry.get("correct_actions") or []
+        if abstain:
+            if correct:
+                errors.append(prefix + "abstain row must have empty 'correct_actions'")
+            continue
+
         if not isinstance(correct, list) or not correct:
             errors.append(prefix + "'correct_actions' must be a non-empty list")
             continue
@@ -118,9 +126,13 @@ def main() -> int:
             row = {
                 "query_id": f"q{i:03d}",
                 "query": entry["q"].strip(),
-                "correct_actions": entry["correct_actions"],
+                "correct_actions": entry.get("correct_actions") or [],
                 "category": entry.get("category", "uncategorized"),
                 "difficulty": entry.get("difficulty", "easy"),
+                # PRD-232 US-012A: abstain rows (no applicable tool) — the runner
+                # lets the model NOT call a tool and the scorer counts a no-call
+                # as correct for these rows only.
+                "abstain": bool(entry.get("abstain", False)),
                 "notes": entry.get("notes", ""),
             }
             f.write(json.dumps(row, ensure_ascii=False) + "\n")

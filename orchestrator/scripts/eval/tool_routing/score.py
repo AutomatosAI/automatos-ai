@@ -65,6 +65,11 @@ def _mean(values: Iterable[float]) -> Optional[float]:
 
 def _is_correct(row: Dict[str, Any]) -> bool:
     chosen = row.get("chosen_action")
+    # PRD-232 US-012A: an abstain row expects NO tool call — correct iff the
+    # model chose nothing; ANY chosen action is a wrong answer (a false tool call
+    # on a query no platform tool serves).
+    if row.get("abstain"):
+        return not chosen
     if not chosen:
         return False
     return chosen in (row.get("correct_actions") or [])
@@ -98,6 +103,11 @@ def _is_in_set(row: Dict[str, Any]) -> bool:
     because they're independent function-calling tools, not entries in the
     filtered platform-action catalog.
     """
+    # PRD-232 US-012A: an abstain row has no correct action to surface — the
+    # right outcome is a no-call, not a surfaced tool, so the in-set question
+    # does not apply. Count it in-set so it never drags the surface metric down.
+    if row.get("abstain"):
+        return True
     correct = set(row.get("correct_actions") or [])
     if correct & _ALWAYS_AVAILABLE:
         return True

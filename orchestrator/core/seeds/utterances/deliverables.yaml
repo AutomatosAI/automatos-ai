@@ -1,0 +1,108 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: deliverables)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: deliverables                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: deliverables
+actions:
+  platform_get_deliverable:
+  - text: open that deliverable
+    source: example
+  - text: read the generated report
+    source: example
+  - text: show me the contents of deliverable X
+    source: example
+  - text: open deliverable 42
+    source: authored
+  - text: read me the market analysis report you made
+    source: authored
+  - text: show the contents of that slide deck
+    source: authored
+  - text: pull up the code file from deliverable 118
+    source: authored
+  - text: open the last report and show its text
+    source: authored
+  - text: let me read the deliverable you just produced
+    source: authored
+  - text: fetch deliverable 7 and display it
+    source: authored
+  - text: show me what's inside that generated document
+    source: authored
+  - text: read the contents of the pricing spreadsheet deliverable
+    source: authored
+  - text: open up deliverable id 903
+    source: authored
+  - text: give me the full text of that report
+    source: authored
+  - text: display the blog post deliverable
+    source: authored
+  - text: read back the summary deliverable from the mission
+    source: authored
+  - text: show me deliverable number 55
+    source: authored
+  - text: open the pdf you generated and read it
+    source: authored
+  - text: fetch the contents of the competitor analysis deliverable
+    source: authored
+  platform_list_deliverables:
+  - text: what deliverables do we have
+    source: example
+  - text: list your deliverables
+    source: example
+  - text: show the outputs from that mission
+    source: example
+  - text: find the report you wrote yesterday
+    source: example
+  - text: show me all the reports you've produced
+    source: authored
+  - text: list every deliverable in this workspace
+    source: authored
+  - text: what images have the agents generated
+    source: authored
+  - text: pull up all the slide decks we have
+    source: authored
+  - text: show me your code deliverables
+    source: authored
+  - text: list the documents produced by agent 3
+    source: authored
+  - text: what spreadsheets are in our deliverables
+    source: authored
+  - text: find all the blog posts we've written
+    source: authored
+  - text: show deliverables from the last mission
+    source: authored
+  - text: list just my own outputs
+    source: authored
+  - text: what have the agents produced so far
+    source: authored
+  - text: show me any videos in the deliverables
+    source: authored
+  - text: list all the reports and documents we've generated
+    source: authored
+  - text: what outputs came out of task 88
+    source: authored
+  - text: browse everything in our deliverables library
+    source: authored
+  - text: show me the audio files agents made
+    source: authored

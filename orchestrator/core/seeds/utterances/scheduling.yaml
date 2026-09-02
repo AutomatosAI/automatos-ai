@@ -1,0 +1,196 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: scheduling)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: scheduling                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: scheduling
+actions:
+  platform_cancel_scheduled_task:
+  - text: cancel scheduled task 5
+    source: example
+  - text: stop that recurring task
+    source: example
+  - text: cancel scheduled task
+    source: phrase_map
+  - text: stop scheduled task
+    source: phrase_map
+  - text: remove scheduled task
+    source: phrase_map
+  - text: cancel recurring task
+    source: phrase_map
+  - text: stop the daily report automation
+    source: authored
+  - text: kill scheduled task 12
+    source: authored
+  - text: cancel that weekly competitor check
+    source: authored
+  - text: disable the cron job i set up yesterday
+    source: authored
+  - text: turn off the recurring monday reminder
+    source: authored
+  - text: remove scheduled task number 8
+    source: authored
+  - text: stop running the nightly backup task
+    source: authored
+  - text: cancel the follow-up i scheduled for friday
+    source: authored
+  - text: delete the automation that runs every morning
+    source: authored
+  - text: halt scheduled task 3
+    source: authored
+  - text: get rid of that recurring task i set up
+    source: authored
+  - text: stop the scheduled data refresh
+    source: authored
+  - text: cancel task 20 from the schedule
+    source: authored
+  - text: kill off the automated weekly digest
+    source: authored
+  platform_get_schedule:
+  - text: what's scheduled
+    source: example
+  - text: what runs next
+    source: example
+  - text: show the schedule for the next week
+    source: example
+  - text: what automations do I have set up
+    source: example
+  - text: what's coming up on the schedule
+    source: authored
+  - text: show me the calendar of automations
+    source: authored
+  - text: what's the next thing set to run
+    source: authored
+  - text: walk me through everything that's scheduled
+    source: authored
+  - text: what runs tomorrow
+    source: authored
+  - text: show all my scheduled automations and heartbeats
+    source: authored
+  - text: what's on the schedule for this week
+    source: authored
+  - text: when does the next playbook run
+    source: authored
+  - text: give me an overview of what's automated
+    source: authored
+  - text: what heartbeats and crons are set up
+    source: authored
+  - text: show the upcoming run times for everything
+    source: authored
+  - text: what's queued to run next
+    source: authored
+  - text: display the full automation schedule
+    source: authored
+  - text: what do i have running on a schedule
+    source: authored
+  - text: when's the next scheduled run
+    source: authored
+  - text: show me what's automated across the workspace
+    source: authored
+  platform_list_scheduled_tasks:
+  - text: what tasks are scheduled
+    source: example
+  - text: show my scheduled tasks
+    source: example
+  - text: list active scheduled tasks
+    source: example
+  - text: scheduled tasks
+    source: phrase_map
+  - text: show scheduled
+    source: phrase_map
+  - text: list scheduled tasks
+    source: phrase_map
+  - text: pending tasks
+    source: phrase_map
+  - text: my scheduled tasks
+    source: phrase_map
+  - text: upcoming tasks
+    source: phrase_map
+  - text: show me any paused scheduled tasks
+    source: authored
+  - text: which scheduled tasks have failed
+    source: authored
+  - text: list the completed tasks from the schedule
+    source: authored
+  - text: are there any cancelled scheduled tasks
+    source: authored
+  - text: show all my scheduled tasks with their run history
+    source: authored
+  - text: list every scheduled task and its status
+    source: authored
+  - text: what tasks are paused right now
+    source: authored
+  - text: give me the failed automations list
+    source: authored
+  - text: show the active scheduled tasks and when they last ran
+    source: authored
+  - text: which of my scheduled tasks are still active
+    source: authored
+  - text: pull up the tasks that finished running
+    source: authored
+  platform_schedule_task:
+  - text: schedule a follow-up check for tomorrow morning
+    source: example
+  - text: remind me to review this in 3 days
+    source: example
+  - text: set up a weekly check every Monday at 9am
+    source: example
+  - text: schedule the researcher to update competitor data weekly
+    source: example
+  - text: schedule a task
+    source: phrase_map
+  - text: schedule follow-up
+    source: phrase_map
+  - text: remind me
+    source: phrase_map
+  - text: check again later
+    source: phrase_map
+  - text: schedule for tomorrow
+    source: phrase_map
+  - text: set up recurring
+    source: phrase_map
+  - text: schedule weekly
+    source: phrase_map
+  - text: schedule daily
+    source: phrase_map
+  - text: create a scheduled task
+    source: phrase_map
+  - text: follow up on this
+    source: phrase_map
+  - text: come back to this
+    source: phrase_map
+  - text: set up a recurring task to pull metrics every friday at 5pm
+    source: authored
+  - text: schedule a one-off reminder for next tuesday to email the client
+    source: authored
+  - text: have the research agent check the news feed daily at 8am
+    source: authored
+  - text: create a recurring task to run the backup every night
+    source: authored
+  - text: remind me one time next month to renew the license
+    source: authored
+  - text: schedule sentinel to sweep logs every hour
+    source: authored
+  - text: set a one-shot task for 3pm today to send the summary
+    source: authored

@@ -62,6 +62,7 @@ def db_session():
                 sample_query TEXT NOT NULL,
                 action_names_hot TEXT NOT NULL,
                 sample_count INTEGER NOT NULL,
+                provenance VARCHAR(20) DEFAULT 'organic',
                 last_updated DATETIME NOT NULL
             )
         """))

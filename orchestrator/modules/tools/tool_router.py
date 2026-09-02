@@ -21,7 +21,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Coroutine, Dict, List, Optional, Tuple
+from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple
 from uuid import UUID, uuid4
 
 # Import from submodules directly to avoid circular import
@@ -231,6 +231,7 @@ async def _rank_actions_for_dispatcher_async(
     exclude_admin: bool,
     exclude_promoted: bool,
     include_super_admin: bool = False,
+    workspace_id: Optional[str] = None,
 ) -> Optional[List[str]]:
     """Return the top-K action names for ``query`` from ActionSemanticIndex,
     or None on any failure (caller falls back to the full enum).
@@ -261,6 +262,7 @@ async def _rank_actions_for_dispatcher_async(
             exclude_admin=exclude_admin,
             exclude_promoted=exclude_promoted,
             include_super_admin=include_super_admin,
+            workspace_id=workspace_id,
         )
         if not ranked:
             return None
@@ -281,6 +283,7 @@ def _rank_actions_for_dispatcher(
     exclude_admin: bool,
     exclude_promoted: bool,
     include_super_admin: bool = False,
+    workspace_id: Optional[str] = None,
 ) -> Optional[List[str]]:
     """Sync compatibility entry — bridges to the async core.
 
@@ -296,6 +299,7 @@ def _rank_actions_for_dispatcher(
                 exclude_admin=exclude_admin,
                 exclude_promoted=exclude_promoted,
                 include_super_admin=include_super_admin,
+                workspace_id=workspace_id,
             )
         )
     except Exception as exc:
@@ -330,6 +334,43 @@ def _fallback_pins() -> List[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _promotion_pins() -> Set[str]:
+    """PRD-232 US-014 (§6.2): the config pin set that ALWAYS attaches first-class
+    (CSV, whitespace-safe). The list lives in config, never hardcoded here."""
+    try:
+        from config import config
+        raw = str(getattr(config, "TOOL_ROUTING_PROMOTION_PINS", "") or "")
+    except Exception:
+        raw = ""
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+def _first_class_names(
+    allowed_names: Optional[List[str]],
+    promoted_names: Set[str],
+) -> Set[str]:
+    """PRD-232 US-014: the promoted actions that attach FIRST-CLASS this turn —
+    the config pins PLUS whatever promoted actions ranked into the surface
+    (``allowed_names``, which now includes promoted since narrowing ranks the full
+    set). Intersected with ``promoted_names`` so a pin that is NOT a promoted action
+    is never put in the dispatcher's ``exclude_names`` (which would strand it —
+    excluded from the enum yet with no first-class schema).
+
+    Every other promoted action stays reachable, but by which path depends on
+    whether the enum is narrowed:
+      * un-narrowed (``allowed_names is None`` — no query / fallback): the enum is
+        the full eligible set (``exclude_promoted=False``), so a non-first-class
+        promoted action IS a dispatcher enum member.
+      * narrowed steady state (``allowed_names`` is the ranked top-K): a promoted
+        action that ranked in becomes first-class (never a bare enum entry); one
+        that did NOT rank in is neither first-class NOR an enum member this turn —
+        it is reachable via ``platform_find_tools`` (a pinned discovery seam), the
+        way the LLM pulls in any action the ranker did not surface."""
+    pins = _promotion_pins() & promoted_names
+    ranked_promoted = {n for n in (allowed_names or ()) if n in promoted_names}
+    return pins | ranked_promoted
+
+
 def _fallback_mode_closed() -> bool:
     """True when TOOL_FALLBACK_MODE=closed-pins (PR-B; default open-full)."""
     try:
@@ -358,6 +399,7 @@ async def _narrow_dispatcher_actions_async(
     query: Optional[str],
     is_admin: bool,
     is_super_admin: bool,
+    workspace_id: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Resolve (allowed_names, narrow_reason, from_pins) for the dispatcher
     enum — async-native (awaits ranking on the caller's loop).
@@ -365,6 +407,9 @@ async def _narrow_dispatcher_actions_async(
     from_pins marks a closed-pins fallback surface: the allow-list may then
     contain promoted names that to_dispatcher_schema should admit. A flag-off
     operator choice is always honored as open-full.
+
+    ``workspace_id`` scopes the shared per-turn rank_actions memo (PRD-232
+    US-003) so this narrowing and the prompt catalog reuse one cosine ranking.
     """
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
     if skip_reason is not None:
@@ -375,8 +420,12 @@ async def _narrow_dispatcher_actions_async(
         query=query,
         top_k=_semantic_routing_top_k(),
         exclude_admin=not is_admin,
-        exclude_promoted=True,
+        # PRD-232 US-014: rank the FULL surface (promoted included) so a promoted
+        # action that ranks in can attach first-class; the loader splits allowed
+        # into first-class (pins + ranked promoted) vs the dispatcher enum.
+        exclude_promoted=False,
         include_super_admin=is_super_admin,
+        workspace_id=workspace_id,
     )
     if allowed is None:
         return _fallback_narrowing("rank_actions returned empty or raised")
@@ -548,6 +597,7 @@ def _narrow_dispatcher_actions_sync(
     query: Optional[str],
     is_admin: bool,
     is_super_admin: bool,
+    workspace_id: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], Optional[str], bool]:
     """Sync twin of _narrow_dispatcher_actions_async (thread bridge)."""
     skip_reason = _narrow_dispatcher_actions_async_inputs(query)
@@ -559,8 +609,10 @@ def _narrow_dispatcher_actions_sync(
         query=query,
         top_k=_semantic_routing_top_k(),
         exclude_admin=not is_admin,
-        exclude_promoted=True,
+        # PRD-232 US-014: rank the full surface (promoted included) — see the async twin.
+        exclude_promoted=False,
         include_super_admin=is_super_admin,
+        workspace_id=workspace_id,
     )
     if allowed is None:
         return _fallback_narrowing("rank_actions returned empty or raised")
@@ -807,6 +859,10 @@ def _get_tools_for_agent_core(
         # from Phase 1 (prompt-text-only filtering) — same fallback pattern as
         # PlatformActionsSection.
         action_registry = None
+        # PRD-232 US-014: the promoted actions attaching FIRST-CLASS this turn
+        # (pins + ranked promoted). Initialised before the try so the first-class
+        # block below still has a safe value if the dispatcher build raised.
+        first_class_names: Optional[Set[str]] = None
         try:
             from modules.tools.discovery import get_action_registry
             action_registry = get_action_registry()
@@ -815,18 +871,38 @@ def _get_tools_for_agent_core(
             # native await) BEFORE this loop-free body ran.
             allowed_names, narrow_reason, from_pins = narrowing
 
+            # PRD-232 US-014 (§6.2): promotion-as-prior. First-class = config pins
+            # ∪ the promoted actions that ranked into the surface (allowed_names now
+            # ranks the full set). Everything else promoted lives in the dispatcher
+            # enum (exclude_promoted=False), reachable like any action — instead of
+            # 47 promoted schemas attaching unconditionally every turn.
+            all_actions = action_registry.get_all()
+            promoted_names = {a.name for a in all_actions if a.promoted}
+            first_class_names = _first_class_names(allowed_names, promoted_names)
+
+            # Normally the first-class actions are dropped from the enum (no
+            # duplication). EXCEPTION: the closed-pins fallback (from_pins) — its
+            # curated pin list IS the intended minimal enum surface, and several
+            # pins are promoted config pins; excluding them would collapse the
+            # narrowed enum into the full-enum defensive fallback (the opposite of
+            # the mode's intent). So in that fallback, keep the pins in the enum.
+            enum_exclude_names = first_class_names
+            if from_pins and allowed_names:
+                enum_exclude_names = first_class_names - set(allowed_names)
+
             dispatcher_schema = action_registry.to_dispatcher_schema(
                 exclude_admin=not is_admin,
-                exclude_promoted=True,  # promoted actions have first-class schemas below
+                exclude_promoted=False,  # US-014: non-first-class promoted stay in the enum
                 allowed_names=allowed_names,
                 include_super_admin=is_super_admin,
                 # closed-pins fallback pins include promoted names
                 # (platform_find_tools et al.) — admit them into the enum.
                 allow_promoted_in_allowlist=from_pins,
+                # first-class actions are attached directly, not duplicated in the enum
+                exclude_names=enum_exclude_names,
             )
             openai_tools.append(dispatcher_schema)
-            all_actions = action_registry.get_all()
-            dispatcher_count = len([a for a in all_actions if not a.promoted])
+            dispatcher_count = len([a for a in all_actions if a.name not in first_class_names])
 
             if allowed_names is not None:
                 enum_size = len(
@@ -853,21 +929,26 @@ def _get_tools_for_agent_core(
                 narrowed=allowed_names is not None,
                 reason=narrow_reason,
                 allowed_names=allowed_names,
+                # PRD-232 US-011b: the query lets the recorder persist the narrowed
+                # surface as a __tool_shown__ row for the nightly shown-vs-used decay.
+                query=query,
             )
         except Exception as e:
             logger.debug(f"[tool-trace {trace_id}] Platform actions unavailable: {e}")
 
-        # PRD-122: First-class schemas for promoted actions.
-        # Promoted actions get their own OpenAI tool schemas instead of
-        # going through the platform_execute dispatcher — the LLM can call
-        # them directly. The execution path at unified_executor.py routes
-        # platform_* calls correctly regardless of how the schema was defined.
+        # PRD-122 + PRD-232 US-014: first-class schemas for the PINNED and RANKED
+        # promoted actions only. They get their own OpenAI tool schemas instead of
+        # going through the platform_execute dispatcher — the LLM can call them
+        # directly. Every other promoted action stays reachable via the dispatcher
+        # enum. The execution path at unified_executor.py routes platform_* calls
+        # correctly regardless of how the schema was defined.
         try:
             if not action_registry:
                 raise RuntimeError("action_registry not initialized")
             promoted_schemas = action_registry.to_first_class_schemas(
                 exclude_admin=not is_admin,
                 include_super_admin=is_super_admin,
+                first_class_names=first_class_names,
             )
             openai_tools.extend(promoted_schemas)
             logger.info(f"[tool-trace {trace_id}] Added {len(promoted_schemas)} promoted action schemas")
@@ -924,7 +1005,10 @@ def get_tools_for_agent(
     try:
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
-        narrowing = _narrow_dispatcher_actions_sync(query, is_admin, is_super_admin)
+        narrowing = _narrow_dispatcher_actions_sync(
+            query, is_admin, is_super_admin,
+            workspace_id=str(workspace_id) if workspace_id is not None else None,
+        )
         # PARITY WITH THE ASYNC TWIN (live-test 2026-08-29). The async entry
         # applies the page prior (PRD-221 S4) and the onboarding prior
         # (PRD-222/#647) after narrowing; this sync entry applied NEITHER, so
@@ -934,6 +1018,8 @@ def get_tools_for_agent(
         # composition, only one hardened, is the same shape as the stripped
         # dispatcher (#654). Both priors are gate-filtered and capped inside,
         # and both no-op when their preconditions are absent.
+        # (PRD-232 integration: narrowing stays workspace-keyed — US-003's single
+        # ranking pass is scoped per tenant — and the #662 priors apply on top.)
         narrowing = _apply_page_prior(narrowing, None, is_admin, is_super_admin)
         narrowing = _apply_onboarding_prior(
             narrowing, session_used, workspace_id, is_admin, is_super_admin
@@ -963,6 +1049,7 @@ async def _maybe_log_shadow_surface(
     is_super_admin: bool,
     shipped_tools: List[Dict[str, Any]],
     trace_id: str,
+    workspace_id: Optional[str] = None,
 ) -> None:
     """PR-C eval data (tool-surface review): log — never ship — what the
     relevance-gated surface WOULD have been for this turn.
@@ -988,6 +1075,7 @@ async def _maybe_log_shadow_surface(
             exclude_admin=not is_admin,
             exclude_promoted=False,  # the would-be surface spans promoted too
             include_super_admin=is_super_admin,
+            workspace_id=workspace_id,
         )
         registry = get_action_registry()
         cap = int(getattr(config, "TOOL_SURFACE_HYBRID_CAP", 6))
@@ -1023,7 +1111,10 @@ async def get_tools_for_agent_async(
     try:
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
-        narrowing = await _narrow_dispatcher_actions_async(query, is_admin, is_super_admin)
+        ws_key = str(workspace_id) if workspace_id is not None else None
+        narrowing = await _narrow_dispatcher_actions_async(
+            query, is_admin, is_super_admin, workspace_id=ws_key
+        )
         # PRD-221 S4: fold the current page's manifest actions into the narrowed
         # enum so page-relevant tools survive even when the query ranks them out.
         # Gate-filtered by the SAME predicate as ranking — a manifest can never
@@ -1046,7 +1137,9 @@ async def get_tools_for_agent_async(
             start_time=start_time,
         )
         tools = _apply_tier_exposure(session_used, workspace_id, tools, trace_id)
-        await _maybe_log_shadow_surface(query, is_admin, is_super_admin, tools, trace_id)
+        await _maybe_log_shadow_surface(
+            query, is_admin, is_super_admin, tools, trace_id, workspace_id=ws_key
+        )
         return tools
     except Exception as e:
         logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")

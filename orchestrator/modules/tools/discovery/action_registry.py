@@ -15,7 +15,7 @@ Usage:
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,7 @@ class ActionRegistry:
         self,
         exclude_admin: bool = False,
         include_super_admin: bool = False,
+        first_class_names: Optional[Set[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Return OpenAI function schemas for promoted actions.
@@ -151,9 +152,19 @@ class ActionRegistry:
                 (non-admin callers won't get schemas for admin tools).
             include_super_admin: Fail-closed — super_admin_only actions are
                 excluded unless this is explicitly True.
+            first_class_names: PRD-232 US-014 (promotion-as-prior) — when given,
+                ONLY promoted actions whose name is in this set attach first-class
+                (the config pins + whatever ranked into the query surface). Every
+                other promoted action is reachable via the platform_execute
+                dispatcher enum instead. When None, legacy behaviour: every promoted
+                action attaches first-class (unconditional-all-promoted). Role/tier
+                filters below ALWAYS run, so a set can never re-admit an admin/su
+                action the caller isn't entitled to.
         """
         self._ensure_initialized()
         promoted = [a for a in self._actions.values() if a.promoted]
+        if first_class_names is not None:
+            promoted = [a for a in promoted if a.name in first_class_names]
         if not include_super_admin:
             promoted = [a for a in promoted if not a.super_admin_only]
         if exclude_admin:
@@ -167,6 +178,7 @@ class ActionRegistry:
         allowed_names: Optional[List[str]] = None,
         include_super_admin: bool = False,
         allow_promoted_in_allowlist: bool = False,
+        exclude_names: Optional[Set[str]] = None,
     ) -> Dict[str, Any]:
         """
         Return a SINGLE OpenAI tool schema (platform_execute) that wraps
@@ -195,17 +207,28 @@ class ActionRegistry:
                 (platform_find_tools et al.) is largely promoted; without
                 this the pins would intersect to nothing and fall open to
                 the full enum — the exact failure the mode exists to stop.
+            exclude_names: PRD-232 US-014 (promotion-as-prior) — names to keep
+                OUT of the enum because they are attached FIRST-CLASS this turn
+                (the config pins + whatever promoted actions ranked into the
+                surface). Applied AFTER the role/su filters, alongside
+                ``exclude_promoted=False`` so the remaining (non-first-class)
+                promoted actions stay reachable in the enum like any action.
         """
         self._ensure_initialized()
+
+        exclude_set = set(exclude_names or ())
 
         # Build enum of valid action names AFTER admin/su/promoted filters.
         # The su filter applies here, BEFORE the allow-list, so the
         # empty-intersection fallback below can never re-admit su actions.
+        # US-014: exclude_set drops the first-class-attached names (pins + ranked
+        # promoted) so they aren't duplicated in the enum.
         valid_actions = sorted(
             a.name for a in self._actions.values()
             if (not exclude_promoted or not a.promoted)
             and (not exclude_admin or not a.admin_only)
             and (include_super_admin or not a.super_admin_only)
+            and a.name not in exclude_set
         )
 
         # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
@@ -228,6 +251,7 @@ class ActionRegistry:
                     a.name for a in self._actions.values()
                     if (not exclude_admin or not a.admin_only)
                     and (include_super_admin or not a.super_admin_only)
+                    and a.name not in exclude_set
                 )
             narrowed_actions = [n for n in intersect_pool if n in allow_set]
             # Defensive: if the intersection is empty (e.g. ranker returned

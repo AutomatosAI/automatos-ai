@@ -1,0 +1,420 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: marketplace)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: marketplace                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: marketplace
+actions:
+  platform_browse_marketplace_agents:
+  - text: browse marketplace agents
+    source: example
+  - text: search agents for marketing
+    source: example
+  - text: what agents are available to hire?
+    source: example
+  - text: find an agent for sales
+    source: example
+  - text: show me available team members
+    source: example
+  - text: marketplace agents
+    source: phrase_map
+  - text: browse agents
+    source: phrase_map
+  - text: search agents
+    source: phrase_map
+  - text: available agents
+    source: phrase_map
+  - text: find an agent
+    source: phrase_map
+  - text: hire agent
+    source: phrase_map
+  - text: show me agents
+    source: phrase_map
+  - text: agent catalog
+    source: phrase_map
+  - text: team members
+    source: phrase_map
+  - text: any pre-built agents i can add for customer support?
+    source: authored
+  - text: what's in the agent marketplace for data analysis?
+    source: authored
+  - text: look for a template agent to handle seo
+    source: authored
+  - text: i want to hire an agent for content writing, what's out there?
+    source: authored
+  - text: show me agent templates i can install
+    source: authored
+  - text: got any marketplace agents for finance?
+    source: authored
+  platform_browse_marketplace_plugins:
+  - text: browse marketplace plugins
+    source: example
+  - text: search plugins for code review
+    source: example
+  - text: what plugins are available?
+    source: example
+  - text: find a plugin for testing
+    source: example
+  - text: marketplace plugins
+    source: phrase_map
+  - text: browse plugins
+    source: phrase_map
+  - text: search plugins
+    source: phrase_map
+  - text: available plugins
+    source: phrase_map
+  - text: find a plugin
+    source: phrase_map
+  - text: what plugins can i install for shopify?
+    source: authored
+  - text: show me plugins in the marketplace for analytics
+    source: authored
+  - text: any plugins i can add for slack integration?
+    source: authored
+  - text: look for a plugin to handle seo
+    source: authored
+  - text: which plugins are out there for github?
+    source: authored
+  - text: i want to add a plugin for social posting, what's available
+    source: authored
+  - text: discover plugins for email marketing
+    source: authored
+  - text: got a marketplace plugin for pdf export?
+    source: authored
+  - text: browse add-ons i can enable for testing
+    source: authored
+  - text: what installable plugins exist for crm?
+    source: authored
+  platform_browse_marketplace_skills:
+  - text: browse marketplace skills
+    source: example
+  - text: search skills for summarization
+    source: example
+  - text: what skills are available?
+    source: example
+  - text: find a skill for code review
+    source: example
+  - text: marketplace skills
+    source: phrase_map
+  - text: browse skills
+    source: phrase_map
+  - text: search skills
+    source: phrase_map
+  - text: available skills
+    source: phrase_map
+  - text: find a skill
+    source: phrase_map
+  - text: what skills can i install for translation?
+    source: authored
+  - text: show me the skills catalog for data viz
+    source: authored
+  - text: any skills in the marketplace for sentiment analysis?
+    source: authored
+  - text: look for a skill to add for pdf parsing
+    source: authored
+  - text: which skills are out there for image generation?
+    source: authored
+  - text: i want to enable a new skill for research, what's available
+    source: authored
+  - text: discover skills for writing tests
+    source: authored
+  - text: got a marketplace skill for seo audits?
+    source: authored
+  - text: browse the global catalog for a summarizer skill
+    source: authored
+  - text: what installable skills exist for email drafting?
+    source: authored
+  platform_install_model:
+  - text: install anthropic/claude-sonnet-4-20250514
+    source: example
+  - text: add model google/gemini-2.5-pro
+    source: example
+  - text: enable openai/gpt-4o
+    source: example
+  - text: install model
+    source: phrase_map
+  - text: enable model
+    source: phrase_map
+  - text: add model
+    source: phrase_map
+  - text: activate model
+    source: phrase_map
+  - text: add claude opus 4 to my workspace
+    source: authored
+  - text: install the deepseek chat model
+    source: authored
+  - text: enable meta-llama/llama-3.3-70b for me
+    source: authored
+  - text: pull in gpt-4o-mini from openrouter
+    source: authored
+  - text: set up mistral large as an option
+    source: authored
+  - text: i want gemini 2.5 flash installed
+    source: authored
+  - text: add anthropic/claude-haiku to the model list
+    source: authored
+  - text: install qwen/qwen-2.5-72b for me
+    source: authored
+  - text: turn on the grok model for this workspace
+    source: authored
+  - text: get openai/o1 into my available models
+    source: authored
+  - text: add x-ai/grok-2 to the catalog
+    source: authored
+  - text: install the new sonnet model please
+    source: authored
+  platform_install_plugin:
+  - text: install the code review plugin
+    source: example
+  - text: enable plugin code-review
+    source: example
+  - text: add the testing plugin
+    source: example
+  - text: install plugin
+    source: phrase_map
+  - text: enable plugin
+    source: phrase_map
+  - text: add plugin
+    source: phrase_map
+  - text: activate plugin
+    source: phrase_map
+  - text: turn on the shopify plugin
+    source: authored
+  - text: enable the seo-toolkit plugin for us
+    source: authored
+  - text: add the analytics plugin to the workspace
+    source: authored
+  - text: install plugin slug social-poster
+    source: authored
+  - text: switch on the slack integration plugin
+    source: authored
+  - text: get the github plugin running here
+    source: authored
+  - text: activate the pdf-export plugin
+    source: authored
+  - text: set up the email-marketing plugin
+    source: authored
+  - text: install the crm connector plugin
+    source: authored
+  - text: enable that testing plugin i found in the marketplace
+    source: authored
+  - text: add plugin id 5f3a to this workspace
+    source: authored
+  - text: put the data-viz plugin in place
+    source: authored
+  platform_install_skill:
+  - text: install the summarization skill
+    source: example
+  - text: enable skill code-review
+    source: example
+  - text: add the analysis skill
+    source: example
+  - text: install skill
+    source: phrase_map
+  - text: enable skill
+    source: phrase_map
+  - text: add skill
+    source: phrase_map
+  - text: activate skill
+    source: phrase_map
+  - text: turn on the translation skill
+    source: authored
+  - text: enable the sentiment-analysis skill for us
+    source: authored
+  - text: add the pdf-parsing skill to the workspace
+    source: authored
+  - text: install skill id 12
+    source: authored
+  - text: switch on the image-generation skill
+    source: authored
+  - text: get the research skill running here
+    source: authored
+  - text: activate the seo-audit skill
+    source: authored
+  - text: set up the test-writing skill
+    source: authored
+  - text: install the email-drafting skill please
+    source: authored
+  - text: add the data-viz skill i saw in the catalog
+    source: authored
+  - text: enable skill named summarizer
+    source: authored
+  - text: put the sentiment skill in place
+    source: authored
+  platform_uninstall_plugin:
+  - text: disable the shopify plugin
+    source: example
+  - text: remove that plugin from the workspace
+    source: example
+  - text: uninstall the SEO plugin
+    source: example
+  - text: get rid of the analytics plugin
+    source: authored
+  - text: turn off the slack integration plugin
+    source: authored
+  - text: drop the github plugin from the workspace
+    source: authored
+  - text: kill the social-poster plugin
+    source: authored
+  - text: deactivate the testing plugin
+    source: authored
+  - text: remove the pdf-export plugin, we don't need it
+    source: authored
+  - text: uninstall plugin id 5f3a
+    source: authored
+  - text: disable the crm connector for everyone
+    source: authored
+  - text: take the email-marketing plugin off the workspace
+    source: authored
+  - text: unhook the data-viz plugin
+    source: authored
+  - text: yank the code-review plugin
+    source: authored
+  - text: shut off the seo-toolkit plugin
+    source: authored
+  - text: delete the shopify plugin and unassign it from agents
+    source: authored
+  - text: pull the analytics plugin out of the workspace
+    source: authored
+  - text: i want the testing plugin gone
+    source: authored
+  - text: remove that plugin from all my agents
+    source: authored
+  platform_search_packages:
+  - text: find a package for a shopify store
+    source: example
+  - text: what starter team fits an online jewellery shop
+    source: example
+  - text: search packages for ecommerce
+    source: example
+  - text: what packages do you have for a shopify shop
+    source: authored
+  - text: is there a starter kit for an ecommerce store
+    source: authored
+  - text: show me packages that fit a b2b saas business
+    source: authored
+  - text: which bundle should a small bakery start with
+    source: authored
+  - text: look up a package for customer support teams
+    source: authored
+  - text: any ready-made team for an online clothing brand
+    source: authored
+  - text: search the package catalogue for retail
+    source: authored
+  - text: what vertical packages exist
+    source: authored
+  - text: find me a starting team for a consultancy
+    source: authored
+  - text: browse packages for a subscription business
+    source: authored
+  - text: recommend a package for my kind of business
+    source: authored
+  - text: what's the closest package to an agency setup
+    source: authored
+  - text: list the packages available to install
+    source: authored
+  - text: packages for dropshipping?
+    source: authored
+  - text: do you have a marketing team package
+    source: authored
+  - text: what would you install for a florist shop
+    source: authored
+  platform_install_package:
+  - text: install the shopify management package
+    source: example
+  - text: set up the shopify-development team
+    source: example
+  - text: add the store package to my workspace
+    source: example
+  - text: install that package
+    source: authored
+  - text: go ahead and set up the ecommerce package
+    source: authored
+  - text: add the customer support package to this workspace
+    source: authored
+  - text: put the retail starter team in place
+    source: authored
+  - text: install the package you just recommended
+    source: authored
+  - text: set us up with the shopify bundle
+    source: authored
+  - text: yes install it
+    source: authored
+  - text: provision the marketing package
+    source: authored
+  - text: deploy the agency package here
+    source: authored
+  - text: get the b2b saas team installed
+    source: authored
+  - text: install package shopify-management
+    source: authored
+  - text: spin up the starter team for my store
+    source: authored
+  - text: add that bundle please
+    source: authored
+  - text: enable the ecommerce starter package
+    source: authored
+  - text: install the one that fits a jewellery shop
+    source: authored
+  - text: set up the recommended team
+    source: authored
+  platform_install_marketplace_agent:
+  - text: install the inventory manager agent
+    source: example
+  - text: add marketplace agent Store Analyst
+    source: example
+  - text: install agent 42
+    source: example
+  - text: add the inventory watcher from the marketplace
+    source: authored
+  - text: install the sales analyst agent
+    source: authored
+  - text: grab the customer service agent off the marketplace
+    source: authored
+  - text: add a store analyst to my team
+    source: authored
+  - text: install marketplace agent 17
+    source: authored
+  - text: bring in the greeter agent
+    source: authored
+  - text: add that agent from the marketplace to my workspace
+    source: authored
+  - text: install the follow-up agent
+    source: authored
+  - text: i want the insight engine agent
+    source: authored
+  - text: put the returns handler agent on my team
+    source: authored
+  - text: install the agent called Store Analyst
+    source: authored
+  - text: add the seo helper from the marketplace
+    source: authored
+  - text: get me the invoice chaser agent
+    source: authored
+  - text: add the marketplace agent you suggested
+    source: authored
+  - text: install an agent for stock alerts
+    source: authored
+  - text: yes add that agent
+    source: authored

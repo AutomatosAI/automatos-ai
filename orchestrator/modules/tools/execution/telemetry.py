@@ -264,3 +264,120 @@ def fire_telemetry(
     except RuntimeError:
         # No running event loop -- skip telemetry silently
         logger.debug("[telemetry] No event loop available, skipping telemetry write")
+
+
+# PRD-232 US-011: the tool_gap marker action name. A synthetic row on the EXISTING
+# tool_execution_logs table (no new table) — the nightly edge_builder reads it as
+# the 'shown-but-absent capability' signal for the gap→resolution join.
+TOOL_GAP_ACTION = "__tool_gap__"
+
+# PRD-232 US-011: the telemetry_source for synthetic learning-signal rows
+# (__tool_gap__, __tool_shown__). These are NOT tool executions, so they must NOT
+# land in the 'production' bucket that services/slo_metrics.tool_call_success_rate
+# and services/telemetry_canary read (both filter telemetry_source=='production',
+# with no action/status exclusion) — a 'gap'/'shown' row there would drag the SLI
+# and mask the silence canary. A DISTINCT value (not 'synthetic', which
+# seed_telemetry DELETES) keeps them out of both while staying readable by the
+# nightly edge_builder (_load_logs has no telemetry_source filter). WIRE PROTOCOL —
+# signal_recorder._insert_shown_row must write the same literal.
+SYNTHETIC_SIGNAL_SOURCE = "synthetic_signal"
+
+
+async def write_tool_gap(
+    *,
+    query: Optional[str],
+    workspace_id: Optional[UUID],
+    agent_id: Optional[int] = None,
+    gap_source: str,
+    caller_context: Optional[Dict[str, Any]] = None,
+    session_factory: Optional[Callable[[], Session]] = None,
+) -> None:
+    """Write one tool_gap row to tool_execution_logs (PRD-232 US-011a).
+
+    A tool_gap records that the model needed a capability it did not have surfaced:
+    it called ``platform_find_tools`` to hunt for one (``gap_source='find_tools'``),
+    or a tool-warranted turn ended having run no tool at all
+    (``gap_source='no_tool_call'``). It is NOT a tool execution — the synthetic
+    ``action_name='__tool_gap__'`` + ``status='gap'`` keep it out of edges and
+    normal affinities; the nightly resolution join uses it (and the query that
+    clusters it) to credit whatever action eventually served the intent.
+
+    Owns its session exactly like ``write_telemetry`` (opens/commits/rolls
+    back/closes) so a failed gap write can never poison a caller's transaction.
+    Never raises.
+    """
+    db: Optional[Session] = None
+    try:
+        from core.models.composio_cache import ToolExecutionLog
+
+        if session_factory is None:
+            from core.database.database import SessionLocal
+            session_factory = SessionLocal
+        db = session_factory()
+
+        ctx = caller_context or {}
+        router_decision: Dict[str, Any] = {"tool_gap": True, "gap_source": gap_source}
+        if ctx.get("conversation_id"):
+            router_decision["conversation_id"] = ctx["conversation_id"]
+        if ctx.get("turn_id"):
+            router_decision["turn_id"] = ctx["turn_id"]
+
+        log_entry = ToolExecutionLog(
+            agent_id=agent_id if agent_id and agent_id > 0 else None,
+            app_name="PLATFORM",
+            action_name=TOOL_GAP_ACTION,
+            workspace_id=workspace_id,
+            user_id=_coerce_user_id(db, ctx.get("user_id")),
+            user_query=(query or ctx.get("user_query")),
+            status="gap",
+            router_decision=router_decision,
+            # Never 'production': a gap is a signal, not a tool execution — keep it
+            # out of the success-rate SLO / silence canary (see SYNTHETIC_SIGNAL_SOURCE).
+            telemetry_source=SYNTHETIC_SIGNAL_SOURCE,
+        )
+        db.add(log_entry)
+        db.commit()
+    except Exception as exc:
+        logger.warning(f"[telemetry] Failed to write tool_gap row: {exc}")
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def fire_tool_gap(
+    *,
+    query: Optional[str],
+    workspace_id: Optional[UUID],
+    agent_id: Optional[int] = None,
+    gap_source: str,
+    caller_context: Optional[Dict[str, Any]] = None,
+    session_factory: Optional[Callable[[], Session]] = None,
+) -> None:
+    """Fire-and-forget the tool_gap write (PRD-232 US-011a).
+
+    Same discipline as ``fire_telemetry``: schedules ``write_tool_gap`` on the
+    running loop; owns its own session; silently skips off-loop. Never fails the
+    turn that recorded the gap.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(
+            write_tool_gap(
+                query=query,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                gap_source=gap_source,
+                caller_context=caller_context,
+                session_factory=session_factory,
+            )
+        )
+    except RuntimeError:
+        logger.debug("[telemetry] No event loop available, skipping tool_gap write")

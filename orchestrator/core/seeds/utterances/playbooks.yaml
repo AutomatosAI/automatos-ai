@@ -1,0 +1,469 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: playbooks)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: playbooks                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: playbooks
+actions:
+  platform_add_playbook_step:
+  - text: add a step to playbook 3 that summarizes the results
+    source: example
+  - text: add a code review step to the bug triage playbook
+    source: example
+  - text: append a step to the onboarding playbook
+    source: authored
+  - text: tack on a final step that emails the summary
+    source: authored
+  - text: add a new step to playbook 7 to notify slack
+    source: authored
+  - text: put another step in the deploy playbook for running tests
+    source: authored
+  - text: add a step where agent 4 drafts the release notes
+    source: authored
+  - text: insert a data-cleanup step into my etl playbook
+    source: authored
+  - text: give the bug triage playbook a step that pings on-call
+    source: authored
+  - text: add a step and set error handling to retry on failure
+    source: authored
+  - text: new step in playbook 2, skip it if the api is down
+    source: authored
+  - text: add a validation step that stops the run on error
+    source: authored
+  - text: extend the weekly review playbook with a metrics step
+    source: authored
+  - text: add a step to summarize the tickets at the end
+    source: authored
+  - text: can you add another step to playbook 9
+    source: authored
+  - text: add a final approval step to the invoice playbook
+    source: authored
+  - text: add a step that retries three times before giving up
+    source: authored
+  - text: append a screenshot step to the qa playbook
+    source: authored
+  - text: add a step to post the results to the channel
+    source: authored
+  platform_create_playbook:
+  - text: create a playbook for daily standup summaries
+    source: example
+  - text: make an automation for code review
+    source: example
+  - text: create a playbook
+    source: phrase_map
+  - text: create playbook
+    source: phrase_map
+  - text: make a playbook
+    source: phrase_map
+  - text: new playbook
+    source: phrase_map
+  - text: build a playbook
+    source: phrase_map
+  - text: set up a playbook
+    source: phrase_map
+  - text: create a workflow
+    source: phrase_map
+  - text: make a workflow
+    source: phrase_map
+  - text: new workflow
+    source: phrase_map
+  - text: create a recipe
+    source: phrase_map
+  - text: make a recipe
+    source: phrase_map
+  - text: new recipe
+    source: phrase_map
+  - text: build a workflow
+    source: phrase_map
+  - text: set up an automation
+    source: phrase_map
+  - text: i want to automate my monthly reporting
+    source: authored
+  - text: spin up a playbook for onboarding new clients
+    source: authored
+  - text: let's build an automation that handles refunds
+    source: authored
+  - text: create a workflow to triage incoming support tickets
+    source: authored
+  - text: make me a playbook that runs our release checklist
+    source: authored
+  - text: draft a new automation for social media posting
+    source: authored
+  platform_delete_playbook:
+  - text: delete the test playbook
+    source: example
+  - text: remove playbook 5
+    source: example
+  - text: delete automation 3
+    source: example
+  - text: delete recipe
+    source: phrase_map
+  - text: remove recipe
+    source: phrase_map
+  - text: delete automation
+    source: phrase_map
+  - text: delete playbook
+    source: phrase_map
+  - text: remove playbook
+    source: phrase_map
+  - text: get rid of the old standup playbook
+    source: authored
+  - text: trash playbook 7
+    source: authored
+  - text: nuke the abandoned automation
+    source: authored
+  - text: can you delete my daily digest playbook
+    source: authored
+  - text: wipe out playbook number 12
+    source: authored
+  - text: kill the duplicate bug triage playbook
+    source: authored
+  - text: drop the playbook called sandbox test
+    source: authored
+  - text: permanently remove the invoice automation
+    source: authored
+  - text: delete that broken workflow please
+    source: authored
+  - text: remove the recipe we don't use anymore
+    source: authored
+  - text: scrap playbook 4
+    source: authored
+  - text: delete the marketing playbook, we're done with it
+    source: authored
+  platform_delete_playbook_step:
+  - text: delete step 3 from playbook 5
+    source: example
+  - text: remove the last step from the bug fixer playbook
+    source: example
+  - text: drop step 0 from playbook 8
+    source: authored
+  - text: delete the second step of the deploy playbook
+    source: authored
+  - text: remove step 4 from the onboarding automation
+    source: authored
+  - text: take out the last step in playbook 3
+    source: authored
+  - text: get rid of the notify step in the qa playbook
+    source: authored
+  - text: delete the first step from my etl playbook
+    source: authored
+  - text: remove the third step from playbook 6
+    source: authored
+  - text: cut step 2 out of the release playbook
+    source: authored
+  - text: delete the summary step from the digest playbook
+    source: authored
+  - text: remove step index 1 from playbook 5
+    source: authored
+  - text: kill the review step in the bug triage playbook
+    source: authored
+  - text: delete the middle step of playbook 9
+    source: authored
+  - text: strip the email step out of the reporting playbook
+    source: authored
+  - text: remove that redundant step from playbook 2
+    source: authored
+  - text: delete step 5, it's not needed anymore
+    source: authored
+  - text: take step 0 off the standup playbook
+    source: authored
+  - text: remove the failing step from the deploy automation
+    source: authored
+  platform_execute_playbook:
+  - text: run the daily digest playbook
+    source: example
+  - text: execute playbook 5
+    source: example
+  - text: trigger the bug triage automation
+    source: example
+  - text: run the recipe
+    source: phrase_map
+  - text: execute recipe
+    source: phrase_map
+  - text: trigger recipe
+    source: phrase_map
+  - text: run automation
+    source: phrase_map
+  - text: start recipe
+    source: phrase_map
+  - text: run the playbook
+    source: phrase_map
+  - text: execute playbook
+    source: phrase_map
+  - text: trigger playbook
+    source: phrase_map
+  - text: start playbook
+    source: phrase_map
+  - text: run playbook
+    source: phrase_map
+  - text: kick off the daily digest playbook now
+    source: authored
+  - text: fire the bug triage automation
+    source: authored
+  - text: go ahead and run playbook 7
+    source: authored
+  - text: launch the weekly review playbook
+    source: authored
+  - text: please execute the onboarding playbook right now
+    source: authored
+  - text: can you run the release checklist playbook
+    source: authored
+  platform_get_playbook:
+  - text: show me the Jira Bug Triage playbook
+    source: example
+  - text: what does playbook 3 do?
+    source: example
+  - text: what steps are in playbook 5
+    source: authored
+  - text: show me the details of the daily digest playbook
+    source: authored
+  - text: what's the trigger config for playbook 2
+    source: authored
+  - text: pull up the onboarding playbook
+    source: authored
+  - text: how is the deploy playbook set up
+    source: authored
+  - text: tell me about playbook 8
+    source: authored
+  - text: what does the invoice automation actually do
+    source: authored
+  - text: show the execution history for playbook 3
+    source: authored
+  - text: give me the full config of the bug triage playbook
+    source: authored
+  - text: what agent is assigned in playbook 6
+    source: authored
+  - text: open playbook 12 and show me its steps
+    source: authored
+  - text: walk me through the weekly review playbook
+    source: authored
+  - text: how many steps does the reporting playbook have
+    source: authored
+  - text: show the setup for the standup playbook
+    source: authored
+  - text: what's inside playbook 4
+    source: authored
+  - text: describe the marketing playbook for me
+    source: authored
+  - text: let me see playbook number 9
+    source: authored
+  platform_get_playbook_execution:
+  - text: what's the status of that playbook run?
+    source: example
+  - text: check playbook execution abc123
+    source: example
+  - text: did the playbook run successfully?
+    source: example
+  - text: recipe status
+    source: phrase_map
+  - text: execution status
+    source: phrase_map
+  - text: recipe result
+    source: phrase_map
+  - text: did the recipe run
+    source: phrase_map
+  - text: check recipe
+    source: phrase_map
+  - text: playbook status
+    source: phrase_map
+  - text: playbook result
+    source: phrase_map
+  - text: did the playbook run
+    source: phrase_map
+  - text: check playbook
+    source: phrase_map
+  - text: playbook execution
+    source: phrase_map
+  - text: how did that last playbook run go
+    source: authored
+  - text: show me the results of execution xyz789
+    source: authored
+  - text: is the deploy playbook run finished yet
+    source: authored
+  - text: what were the step results from that run
+    source: authored
+  - text: how long did the digest playbook take to run
+    source: authored
+  - text: check on execution 456, is it done
+    source: authored
+  platform_list_playbooks:
+  - text: what playbooks do I have?
+    source: example
+  - text: list my workflows
+    source: example
+  - text: show automations
+    source: example
+  - text: list my recipes
+    source: phrase_map
+  - text: what recipes do i have
+    source: phrase_map
+  - text: show my recipes
+    source: phrase_map
+  - text: show my workflows
+    source: phrase_map
+  - text: how many recipes
+    source: phrase_map
+  - text: how many workflows
+    source: phrase_map
+  - text: list my playbooks
+    source: phrase_map
+  - text: what playbooks do i have
+    source: phrase_map
+  - text: show my playbooks
+    source: phrase_map
+  - text: how many playbooks
+    source: phrase_map
+  - text: show my automations
+    source: phrase_map
+  - text: which of my playbooks are active
+    source: authored
+  - text: give me a rundown of all my automations
+    source: authored
+  - text: any inactive playbooks i should clean up
+    source: authored
+  - text: pull up everything in my playbook library
+    source: authored
+  - text: show me all workflows including the inactive ones
+    source: authored
+  - text: list every playbook, active and inactive
+    source: authored
+  platform_schedule_playbook:
+  - text: schedule the daily briefing playbook to run at 9am
+    source: example
+  - text: set playbook 5 to run every Monday
+    source: example
+  - text: schedule this playbook on a cron
+    source: example
+  - text: automate the weekly review playbook
+    source: example
+  - text: schedule playbook
+    source: phrase_map
+  - text: schedule the playbook
+    source: phrase_map
+  - text: set playbook schedule
+    source: phrase_map
+  - text: cron playbook
+    source: phrase_map
+  - text: automate playbook
+    source: phrase_map
+  - text: recurring playbook
+    source: phrase_map
+  - text: schedule this playbook
+    source: phrase_map
+  - text: schedule a playbook
+    source: phrase_map
+  - text: run playbook on a schedule
+    source: phrase_map
+  - text: set up recurring playbook
+    source: phrase_map
+  - text: have the digest playbook run every morning at 8
+    source: authored
+  - text: make playbook 3 fire on a nightly schedule
+    source: authored
+  - text: set the weekly review to run every friday afternoon
+    source: authored
+  - text: run the backup playbook every day at midnight
+    source: authored
+  - text: schedule playbook 7 to run on the first of each month
+    source: authored
+  - text: have the standup summary go out every weekday at 9am
+    source: authored
+  platform_update_playbook:
+  - text: rename playbook 5 to Daily Digest
+    source: example
+  - text: update the bug triage playbook description
+    source: example
+  - text: set playbook 3 to run on a cron schedule
+    source: example
+  - text: rename the deploy playbook to release pipeline
+    source: authored
+  - text: change the description of playbook 7
+    source: authored
+  - text: add the tag urgent to the bug triage playbook
+    source: authored
+  - text: update the name of playbook 2 to weekly metrics
+    source: authored
+  - text: tweak the config on the digest playbook
+    source: authored
+  - text: retitle playbook 9 to customer onboarding
+    source: authored
+  - text: change playbook 4's tags to include finance
+    source: authored
+  - text: update the execution settings for the qa playbook
+    source: authored
+  - text: give playbook 6 a better description
+    source: authored
+  - text: rename my standup playbook to morning sync
+    source: authored
+  - text: edit the metadata on playbook 3
+    source: authored
+  - text: set a new description for the invoice automation
+    source: authored
+  - text: change the display name of playbook 11
+    source: authored
+  - text: reconfigure the timeout on the deploy playbook
+    source: authored
+  - text: update the tags on my reporting playbook
+    source: authored
+  - text: relabel playbook 8 as archived
+    source: authored
+  platform_update_playbook_step:
+  - text: update step 2 of playbook 5 to use agent 3
+    source: example
+  - text: change the prompt in step 1 of the bug fixer playbook
+    source: example
+  - text: change step 0 of playbook 8 to use agent 5
+    source: authored
+  - text: edit the prompt on step 3 of the deploy playbook
+    source: authored
+  - text: set step 2 error handling to skip
+    source: authored
+  - text: make step 1 retry instead of stopping
+    source: authored
+  - text: reassign step 4 in playbook 6 to a different agent
+    source: authored
+  - text: reword the prompt in step 2 of the qa playbook
+    source: authored
+  - text: change step 5 to stop on error
+    source: authored
+  - text: move step 3 earlier in the reporting playbook
+    source: authored
+  - text: update the agent for step 0 in playbook 9
+    source: authored
+  - text: tweak step 1's instructions in the digest playbook
+    source: authored
+  - text: set step 2 of playbook 7 to retry on failure
+    source: authored
+  - text: change the order of step 4 in the etl playbook
+    source: authored
+  - text: update step 3 to skip when it errors
+    source: authored
+  - text: edit step 6's prompt in the bug triage playbook
+    source: authored
+  - text: have step 0 use agent 2 instead
+    source: authored
+  - text: modify the error handling on step 5 to stop
+    source: authored
+  - text: rewrite the prompt for step 1 of playbook 3
+    source: authored

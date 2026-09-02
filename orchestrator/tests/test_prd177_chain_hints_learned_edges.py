@@ -81,6 +81,7 @@ class _StubAffinity:
     agent_id = _Col("agent_id")
     workspace_id = _Col("workspace_id")
     affinity_type = _Col("affinity_type")
+    intent_cluster_id = _Col("intent_cluster_id")  # PRD-232 US-010b
 
     def __init__(self, **kw):
         for k, v in kw.items():
@@ -107,35 +108,39 @@ _CORE_STUBS = {
 _CORE_PACKAGES = ["core", "core.database", "core.cache", "core.models"]
 
 
-def _collect(pred, out):
-    if isinstance(pred, tuple) and pred and pred[0] in ("and_", "or_"):
-        for sub in pred[1]:
-            _collect(sub, out)
-    elif isinstance(pred, tuple):
-        out.append(pred)
+def _eval_pred(pred, row):
+    """Recursively evaluate an and_/or_ predicate TREE against a stub row.
 
-
-def _row_ok(row, preds):
-    for p in preds:
-        op, name = p[0], p[1]
-        if name != "workspace_id":
-            continue
-        rv = getattr(row, "workspace_id", None)
-        if op == "eq" and rv != p[2]:
-            return False
-        if op == "is" and rv is not p[2] and rv != p[2]:
-            return False
+    Enforces workspace_id AND edge_type — the dimensions PRD-232 US-004 couples
+    in ``or_(ws == A, and_(ws IS NULL, edge_type == meta_sibling))`` — with real
+    OR/AND semantics. A flatten-to-AND pass would wrongly reject a tenant's own
+    used_after edge against that OR filter. Other leaves are treated as satisfied.
+    """
+    if isinstance(pred, tuple) and pred:
+        if pred[0] == "and_":
+            return all(_eval_pred(s, row) for s in pred[1])
+        if pred[0] == "or_":
+            return any(_eval_pred(s, row) for s in pred[1])
+        op, name = pred[0], pred[1]
+        if name not in ("workspace_id", "edge_type"):
+            return True
+        rv = getattr(row, name, None)
+        if op == "eq":
+            return rv == pred[2]
+        if op == "is":
+            return rv is pred[2] or rv == pred[2]
+        if op == "in":
+            return rv in pred[2]
     return True
 
 
 class _FakeQuery:
     def __init__(self, rows):
         self._rows = list(rows)
-        self._preds = []
+        self._filters = []
 
     def filter(self, *args, **kw):
-        for a in args:
-            _collect(a, self._preds)
+        self._filters.extend(args)
         return self
 
     def order_by(self, *a, **k):
@@ -148,7 +153,7 @@ class _FakeQuery:
         return 0
 
     def all(self):
-        return [r for r in self._rows if _row_ok(r, self._preds)]
+        return [r for r in self._rows if all(_eval_pred(f, r) for f in self._filters)]
 
 
 class _FakeDBSession:

@@ -1,0 +1,225 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: reports)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: reports                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: reports
+actions:
+  platform_acknowledge_report:
+  - text: acknowledge the latest HARNESS audit
+    source: example
+  - text: mark report xyz as actioned
+    source: example
+  - text: mark the incident report as read
+    source: authored
+  - text: ack the sentinel audit
+    source: authored
+  - text: i've actioned the cost report, acknowledge it
+    source: authored
+  - text: clear this report from decisions needed
+    source: authored
+  - text: sign off on the latest research report
+    source: authored
+  - text: mark report 88 as handled
+    source: authored
+  - text: acknowledge the monitoring standup
+    source: authored
+  - text: close out the audit report, it's dealt with
+    source: authored
+  - text: note that i've read and actioned this report
+    source: authored
+  - text: ack the delivery report from FORGE
+    source: authored
+  - text: mark the HARNESS findings as acknowledged
+    source: authored
+  - text: i've seen it, acknowledge the report
+    source: authored
+  - text: stamp this report as actioned by gerard
+    source: authored
+  - text: drop this one off the decisions needed queue
+    source: authored
+  - text: acknowledge the security audit report
+    source: authored
+  - text: confirm i've handled report abc123
+    source: authored
+  platform_browse_reports:
+  - text: list reports from the last 7 days
+    source: example
+  - text: show me playbook reports that ran on opus-4.7
+    source: example
+  - text: list critical reports across the workspace
+    source: example
+  - text: show task reports for agent FORGE this month
+    source: example
+  - text: show all incident reports this month
+    source: authored
+  - text: list every audit report in the last 30d
+    source: authored
+  - text: which reports came back with warning status
+    source: authored
+  - text: browse research reports from the past 90 days
+    source: authored
+  - text: show me all reports triggered by heartbeat
+    source: authored
+  - text: pull up delivery reports across all agents
+    source: authored
+  - text: what standup reports landed today
+    source: authored
+  - text: list reports with critical status this week
+    source: authored
+  - text: show summary reports from the last 1d
+    source: authored
+  - text: browse all playbook-triggered reports
+    source: authored
+  - text: give me every report over all time
+    source: authored
+  - text: which reports flagged info this week
+    source: authored
+  - text: show task reports triggered by playbooks
+    source: authored
+  - text: compare model costs across recent reports
+    source: authored
+  - text: list all reports from the last 30d for cost analysis
+    source: authored
+  - text: any warning or critical reports lately
+    source: authored
+  platform_get_latest_report:
+  - text: get the latest report from sentinel
+    source: example
+  - text: what did the researcher find?
+    source: example
+  - text: read the market researcher's latest research report
+    source: example
+  - text: get the most recent standup from the monitoring agent
+    source: example
+  - text: latest report
+    source: phrase_map
+  - text: agent report
+    source: phrase_map
+  - text: get report
+    source: phrase_map
+  - text: read report
+    source: phrase_map
+  - text: show report
+    source: phrase_map
+  - text: what did the agent find
+    source: phrase_map
+  - text: sentinel report
+    source: phrase_map
+  - text: agent standup
+    source: phrase_map
+  - text: last report
+    source: phrase_map
+  - text: what's scout's most recent report
+    source: authored
+  - text: pull up FORGE's latest delivery report
+    source: authored
+  - text: read the newest audit from the security agent
+    source: authored
+  - text: show me blueprint's last standup
+    source: authored
+  - text: what did sentinel report most recently
+    source: authored
+  - text: grab the researcher's latest findings before i write
+    source: authored
+  - text: latest incident report from the monitoring agent
+    source: authored
+  platform_link_report_to_task:
+  - text: link this report to task 42
+    source: example
+  - text: tie the audit findings to the new ticket
+    source: example
+  - text: connect this report to board task 17
+    source: authored
+  - text: attach the audit to ticket 91
+    source: authored
+  - text: link the research findings to task 5
+    source: authored
+  - text: wire this report up to the new card
+    source: authored
+  - text: associate report abc with task 200
+    source: authored
+  - text: tie this incident report to ticket 33
+    source: authored
+  - text: link the standup to the follow-up task
+    source: authored
+  - text: hook this report into board task 7
+    source: authored
+  - text: add task 42 to this report's linked tasks
+    source: authored
+  - text: connect the HARNESS findings to the ticket i just made
+    source: authored
+  - text: link this delivery report to the card
+    source: authored
+  - text: bind the report to task number 12
+    source: authored
+  - text: cross-link this report with ticket 404
+    source: authored
+  - text: tie the audit's action items to task 88
+    source: authored
+  - text: attach this report to the kanban card
+    source: authored
+  - text: link report xyz to the board task
+    source: authored
+  platform_submit_report:
+  - text: submit a health check report
+    source: example
+  - text: file a status report after my heartbeat run
+    source: example
+  - text: create an incident report about the API errors
+    source: example
+  - text: submit research findings
+    source: example
+  - text: submit report
+    source: phrase_map
+  - text: file report
+    source: phrase_map
+  - text: create report
+    source: phrase_map
+  - text: write report
+    source: phrase_map
+  - text: status report
+    source: phrase_map
+  - text: save report
+    source: phrase_map
+  - text: log a delivery report for the work i just finished
+    source: authored
+  - text: file an audit report with warning status
+    source: authored
+  - text: write up my standup and submit it
+    source: authored
+  - text: record a summary report of today's findings
+    source: authored
+  - text: submit an onboarding report for the new agent
+    source: authored
+  - text: post a critical incident report about the outage
+    source: authored
+  - text: save a research report on the competitor analysis
+    source: authored
+  - text: file a heartbeat status report marked ok
+    source: authored
+  - text: publish a delivery report to the activity page
+    source: authored
+  - text: create a summary of what i completed
+    source: authored

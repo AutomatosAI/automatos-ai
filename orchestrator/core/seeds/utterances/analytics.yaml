@@ -1,0 +1,613 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: analytics)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: analytics                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: analytics
+actions:
+  platform_get_activity_feed:
+  - text: what's been happening?
+    source: example
+  - text: show recent activity
+    source: example
+  - text: activity feed for the last week
+    source: example
+  - text: what has been running?
+    source: example
+  - text: recent activity
+    source: phrase_map
+  - text: activity feed
+    source: phrase_map
+  - text: what's been happening
+    source: phrase_map
+  - text: show activity
+    source: phrase_map
+  - text: what has been running
+    source: phrase_map
+  - text: activity log
+    source: phrase_map
+  - text: catch me up on what happened today
+    source: authored
+  - text: anything happen while i was out?
+    source: authored
+  - text: pull up everything that ran in the last 30 days
+    source: authored
+  - text: what ran in the past 90 days?
+    source: authored
+  - text: give me a rundown of recent workspace activity
+    source: authored
+  - text: what's my team been up to lately?
+    source: authored
+  - text: timeline of everything from this week
+    source: authored
+  - text: recap the last day for me
+    source: authored
+  - text: show me the recipe runs and routines from the past month
+    source: authored
+  platform_get_agent_ranking:
+  - text: rank agents by performance
+    source: example
+  - text: who are the top performers?
+    source: example
+  - text: worst performing agents
+    source: example
+  - text: which agent is my best performer?
+    source: authored
+  - text: leaderboard of agents by success rate
+    source: authored
+  - text: rank my agents by how fast they respond
+    source: authored
+  - text: who handled the most tasks?
+    source: authored
+  - text: show me the agent leaderboard
+    source: authored
+  - text: sort agents by their performance score
+    source: authored
+  - text: which bots are underperforming?
+    source: authored
+  - text: top 5 agents this week
+    source: authored
+  - text: gimme the ranking by tasks completed
+    source: authored
+  - text: who's got the highest success rate?
+    source: authored
+  - text: compare my agents by response time
+    source: authored
+  - text: best to worst, how do my agents stack up?
+    source: authored
+  - text: order agents from strongest to weakest
+    source: authored
+  - text: who's crushing it and who's lagging?
+    source: authored
+  - text: show me the slowest agents
+    source: authored
+  - text: which agent should i retire based on performance?
+    source: authored
+  platform_get_bottlenecks:
+  - text: any bottlenecks?
+    source: example
+  - text: what's slowing things down?
+    source: example
+  - text: check for resource issues
+    source: example
+  - text: why is everything so slow?
+    source: authored
+  - text: where's the bottleneck?
+    source: authored
+  - text: is cpu maxed out?
+    source: authored
+  - text: are we running low on memory?
+    source: authored
+  - text: check for database connection issues
+    source: authored
+  - text: what's causing the slowdown?
+    source: authored
+  - text: find the resource constraints
+    source: authored
+  - text: diagnose why the platform is sluggish
+    source: authored
+  - text: any memory or cpu problems?
+    source: authored
+  - text: what's the biggest performance chokepoint?
+    source: authored
+  - text: show me bottlenecks with severity and impact
+    source: authored
+  - text: is anything hitting its limits?
+    source: authored
+  - text: what's throttling the system?
+    source: authored
+  - text: are db connections exhausted?
+    source: authored
+  - text: which resource is the constraint right now?
+    source: authored
+  - text: tell me what's dragging performance down
+    source: authored
+  platform_get_completion_time:
+  - text: how long do tasks take?
+    source: example
+  - text: average completion time
+    source: example
+  - text: are tasks getting faster?
+    source: example
+  - text: what's the mean time to finish a task?
+    source: authored
+  - text: how many minutes per task on average?
+    source: authored
+  - text: are tasks slower than yesterday?
+    source: authored
+  - text: did completion time regress today?
+    source: authored
+  - text: typical time to complete a task
+    source: authored
+  - text: how quick are tasks finishing lately?
+    source: authored
+  - text: average turnaround time for tasks
+    source: authored
+  - text: compare today's task speed to yesterday
+    source: authored
+  - text: is our task duration creeping up?
+    source: authored
+  - text: how long from start to done on average?
+    source: authored
+  - text: task completion speed over the last day
+    source: authored
+  - text: are jobs taking longer than usual?
+    source: authored
+  - text: give me the avg minutes to complete a task
+    source: authored
+  - text: any slowdown in how fast tasks wrap up?
+    source: authored
+  - text: mean completion time versus 24 hours ago
+    source: authored
+  - text: how's the time-to-done trending?
+    source: authored
+  platform_get_cost_breakdown:
+  - text: what are my costs?
+    source: example
+  - text: how much am I spending on LLM?
+    source: example
+  - text: cost breakdown by agent
+    source: example
+  - text: break down my spend by model
+    source: authored
+  - text: how much does each agent cost me?
+    source: authored
+  - text: daily cost breakdown please
+    source: authored
+  - text: which model is costing the most?
+    source: authored
+  - text: show spending per agent
+    source: authored
+  - text: what's my llm bill by day?
+    source: authored
+  - text: where is my money going?
+    source: authored
+  - text: cost split across models
+    source: authored
+  - text: how much did each agent spend this month?
+    source: authored
+  - text: give me a per-day cost chart
+    source: authored
+  - text: what's driving my llm costs?
+    source: authored
+  - text: breakdown of expenses by model
+    source: authored
+  - text: which agents are the most expensive?
+    source: authored
+  - text: day by day spending trend
+    source: authored
+  - text: itemize my llm charges by model
+    source: authored
+  - text: how much am i paying per agent?
+    source: authored
+  platform_get_cost_per_execution:
+  - text: what's our cost per execution?
+    source: example
+  - text: are costs going up or down?
+    source: example
+  - text: cost efficiency trend
+    source: example
+  - text: how much does one execution cost on average?
+    source: authored
+  - text: average price per run
+    source: authored
+  - text: is our per-execution cost trending up?
+    source: authored
+  - text: cost per run over the last 30 days
+    source: authored
+  - text: are individual runs getting cheaper?
+    source: authored
+  - text: what do we pay per execution?
+    source: authored
+  - text: unit cost per run trend
+    source: authored
+  - text: how much per mission execution these days?
+    source: authored
+  - text: is the cost per run stable or rising?
+    source: authored
+  - text: show the 30-day cost-per-execution trend
+    source: authored
+  - text: average spend for each execution
+    source: authored
+  - text: are we spending more per run than before?
+    source: authored
+  - text: help me budget the cost of each execution
+    source: authored
+  - text: is cost per execution going down?
+    source: authored
+  - text: what's the daily trend for per-run cost?
+    source: authored
+  - text: typical dollars per execution lately
+    source: authored
+  platform_get_efficiency_score:
+  - text: what's our efficiency score?
+    source: example
+  - text: overall platform health
+    source: example
+  - text: system efficiency grade
+    source: example
+  - text: give me the platform's efficiency grade
+    source: authored
+  - text: how healthy is the system overall?
+    source: authored
+  - text: what letter grade are we at?
+    source: authored
+  - text: single number for platform health
+    source: authored
+  - text: are we running efficiently?
+    source: authored
+  - text: score my platform out of 100
+    source: authored
+  - text: how's our overall efficiency looking?
+    source: authored
+  - text: quick health check on the platform
+    source: authored
+  - text: what's the composite health score?
+    source: authored
+  - text: rate the system's efficiency
+    source: authored
+  - text: are we an A or a C right now?
+    source: authored
+  - text: overall utilization and health score
+    source: authored
+  - text: how well is everything running, one metric?
+    source: authored
+  - text: efficiency rating for the workspace
+    source: authored
+  - text: give me the health grade
+    source: authored
+  - text: how do we score on efficiency today?
+    source: authored
+  platform_get_error_rates:
+  - text: which agents are failing?
+    source: example
+  - text: error rates by type
+    source: example
+  - text: show failure breakdown
+    source: example
+  - text: what's our failure rate by agent type?
+    source: authored
+  - text: which agent category errors the most?
+    source: authored
+  - text: how often are agents failing?
+    source: authored
+  - text: show me error percentages per agent type
+    source: authored
+  - text: where are the failures concentrated?
+    source: authored
+  - text: breakdown of failed executions by type
+    source: authored
+  - text: what's the error rate right now?
+    source: authored
+  - text: which type of agent is the least reliable?
+    source: authored
+  - text: how many executions are failing?
+    source: authored
+  - text: give me failure stats by agent category
+    source: authored
+  - text: which agents throw the most errors?
+    source: authored
+  - text: error percentage across agent types
+    source: authored
+  - text: are any agent types erroring out a lot?
+    source: authored
+  - text: rank agent types by failure rate
+    source: authored
+  - text: how buggy are our agents by category?
+    source: authored
+  - text: total failures and error rate per type
+    source: authored
+  platform_get_llm_usage:
+  - text: what's my token usage?
+    source: example
+  - text: how many API calls this month?
+    source: example
+  - text: show LLM usage stats
+    source: example
+  - text: token usage
+    source: phrase_map
+  - text: llm usage
+    source: phrase_map
+  - text: how much have i spent
+    source: phrase_map
+  - text: my api cost
+    source: phrase_map
+  - text: my token spend
+    source: phrase_map
+  - text: how many tokens
+    source: phrase_map
+  - text: show my usage
+    source: phrase_map
+  - text: show my spending
+    source: phrase_map
+  - text: how many tokens have i burned this week?
+    source: authored
+  - text: total requests to the llm so far
+    source: authored
+  - text: give me my token consumption by model
+    source: authored
+  - text: how many llm calls did we make today?
+    source: authored
+  - text: breakdown of tokens per model
+    source: authored
+  - text: how many prompt and completion tokens?
+    source: authored
+  - text: show api request counts for the month
+    source: authored
+  - text: what's my total token count across models?
+    source: authored
+  platform_get_peak_hours:
+  - text: when is the platform busiest?
+    source: example
+  - text: peak usage hours
+    source: example
+  - text: when should I schedule heavy tasks?
+    source: example
+  - text: what time of day are we busiest?
+    source: authored
+  - text: show me the hourly usage pattern
+    source: authored
+  - text: when's the quietest hour to run big jobs?
+    source: authored
+  - text: what hours have the most api traffic?
+    source: authored
+  - text: when do agents get slammed?
+    source: authored
+  - text: usage by hour over a day
+    source: authored
+  - text: which hours are peak versus low?
+    source: authored
+  - text: when's the best window for heavy workloads?
+    source: authored
+  - text: show the 24-hour activity curve
+    source: authored
+  - text: what's our busiest time slot?
+    source: authored
+  - text: when does traffic spike during the day?
+    source: authored
+  - text: peak, medium and low hours breakdown
+    source: authored
+  - text: what hour sees the most active agents?
+    source: authored
+  - text: when should i avoid scheduling to dodge the peak?
+    source: authored
+  - text: give me the daily load pattern by hour
+    source: authored
+  - text: what times are off-peak?
+    source: authored
+  platform_get_predictive_alerts:
+  - text: any upcoming capacity issues?
+    source: example
+  - text: predictive alerts
+    source: example
+  - text: will we run out of resources?
+    source: example
+  - text: are we about to hit a rate limit?
+    source: authored
+  - text: forecast any storage problems
+    source: authored
+  - text: will agent capacity run out soon?
+    source: authored
+  - text: what issues are coming down the pipe?
+    source: authored
+  - text: predict capacity problems before they hit
+    source: authored
+  - text: any warnings about future resource limits?
+    source: authored
+  - text: are we going to run low on storage?
+    source: authored
+  - text: heads up on anything about to break?
+    source: authored
+  - text: will we exceed api limits this week?
+    source: authored
+  - text: proactive alerts for capacity
+    source: authored
+  - text: what should i worry about before it happens?
+    source: authored
+  - text: forecast agent capacity for next week
+    source: authored
+  - text: any predicted capacity issues ahead?
+    source: authored
+  - text: am i going to blow past the api quota?
+    source: authored
+  - text: what capacity risks are on the horizon?
+    source: authored
+  - text: give me early warnings on resources
+    source: authored
+  platform_get_queue_depth:
+  - text: how many tasks are queued?
+    source: example
+  - text: what's the current backlog?
+    source: example
+  - text: check queue depth
+    source: example
+  - text: how big is the queue right now?
+    source: authored
+  - text: how many jobs are waiting to run?
+    source: authored
+  - text: what's pending in the queue?
+    source: authored
+  - text: how many tasks are running versus waiting?
+    source: authored
+  - text: is there a backlog building up?
+    source: authored
+  - text: queue size at the moment
+    source: authored
+  - text: how many high-priority tasks are queued?
+    source: authored
+  - text: anything stuck waiting to execute?
+    source: authored
+  - text: current load on the task queue
+    source: authored
+  - text: how deep is the backlog?
+    source: authored
+  - text: how many normal vs high priority tasks pending?
+    source: authored
+  - text: show me what's in the queue
+    source: authored
+  - text: are tasks piling up?
+    source: authored
+  - text: how many pending executions right now?
+    source: authored
+  - text: is the queue backed up?
+    source: authored
+  - text: count of running and queued tasks
+    source: authored
+  platform_get_sla_compliance:
+  - text: are we meeting SLAs?
+    source: example
+  - text: SLA compliance report
+    source: example
+  - text: check service level targets
+    source: example
+  - text: are we hitting our 95% completion target?
+    source: authored
+  - text: is response time under the 120 second sla?
+    source: authored
+  - text: how's our sla compliance score?
+    source: authored
+  - text: are we within service level targets?
+    source: authored
+  - text: sla status right now
+    source: authored
+  - text: are we breaching any slas?
+    source: authored
+  - text: how close are we to the sla threshold?
+    source: authored
+  - text: compliance against our service levels
+    source: authored
+  - text: are response times meeting the target?
+    source: authored
+  - text: give me the sla scorecard
+    source: authored
+  - text: did we meet sla this week?
+    source: authored
+  - text: are we on track for our slas?
+    source: authored
+  - text: show sla adherence numbers
+    source: authored
+  - text: how are we doing versus the 95 percent goal?
+    source: authored
+  - text: any sla violations to worry about?
+    source: authored
+  - text: overall service level compliance
+    source: authored
+  platform_get_success_rate:
+  - text: what's our success rate?
+    source: example
+  - text: how are agents performing?
+    source: example
+  - text: check agent health
+    source: example
+  - text: what percent of tasks succeed?
+    source: authored
+  - text: overall agent success percentage
+    source: authored
+  - text: how's our success rate trending this week?
+    source: authored
+  - text: are agents succeeding more or less lately?
+    source: authored
+  - text: what's the completion success rate overall?
+    source: authored
+  - text: give me the 7-day success trend
+    source: authored
+  - text: how reliable are the agents on the whole?
+    source: authored
+  - text: success rate over the last week
+    source: authored
+  - text: what fraction of runs are succeeding?
+    source: authored
+  - text: is our success rate improving?
+    source: authored
+  - text: aggregate success percentage please
+    source: authored
+  - text: how many tasks are we nailing overall?
+    source: authored
+  - text: platform-wide success rate
+    source: authored
+  - text: are we succeeding at a healthy clip?
+    source: authored
+  - text: show the overall pass rate for agents
+    source: authored
+  - text: what's our win rate on tasks?
+    source: authored
+  platform_workspace_stats:
+  - text: show workspace stats
+    source: example
+  - text: platform usage summary
+    source: example
+  - text: what's been happening this week?
+    source: example
+  - text: show me agent activity
+    source: example
+  - text: workspace stats
+    source: phrase_map
+  - text: platform stats
+    source: phrase_map
+  - text: usage stats
+    source: phrase_map
+  - text: how many queries
+    source: phrase_map
+  - text: agent activity
+    source: phrase_map
+  - text: what's being used
+    source: phrase_map
+  - text: show stats
+    source: phrase_map
+  - text: show usage
+    source: phrase_map
+  - text: give me the workspace dashboard for today
+    source: authored
+  - text: quick overview of the whole workspace
+    source: authored
+  - text: summary of models, agents and usage this week
+    source: authored
+  - text: dashboard snapshot for the last 30 days
+    source: authored
+  - text: top models and top agents at a glance
+    source: authored
+  - text: high level numbers for the workspace
+    source: authored
+  - text: one-glance summary of platform usage
+    source: authored

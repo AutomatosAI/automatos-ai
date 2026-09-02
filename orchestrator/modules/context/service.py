@@ -158,19 +158,28 @@ class ContextService:
         # --- 3. Instantiate sections from config ---
         sections = self._instantiate_sections(config)
 
-        # --- 4. Render all sections in parallel ---
-        rendered = await self._render_sections(sections, ctx)
+        # PRD-232 US-003: one rank_actions pass per turn. The action catalog
+        # (a section, step 4) and the dispatcher narrowing + shadow surface
+        # (tool load, step 7) both rank the SAME turn query; this scope makes
+        # the su-gated cosine ranking compute once and every surface slice its
+        # own view from that one result. Outside the scope rank_actions is
+        # unchanged, so nothing but real turn assembly opts in.
+        from modules.tools.discovery.action_semantic_index import rank_actions_scope
 
-        # --- 5. Apply token budget (PRD-201 S3: sized to the model window) ---
-        budget = self._get_budget(mode, config, resolved_model_id, self._db_session)
-        included, trimmed_names = _budget_manager.allocate(rendered, budget)
+        with rank_actions_scope():
+            # --- 4. Render all sections in parallel ---
+            rendered = await self._render_sections(sections, ctx)
 
-        # --- 6. Assemble system prompt (PRD-201 S4: cache-stable ordering) ---
-        system_prompt, cacheable_prefix = self._assemble_prompt(included)
-        prompt_token_estimate = count_tokens(system_prompt)
+            # --- 5. Apply token budget (PRD-201 S3: sized to the model window) ---
+            budget = self._get_budget(mode, config, resolved_model_id, self._db_session)
+            included, trimmed_names = _budget_manager.allocate(rendered, budget)
 
-        # --- 7. Load tools ---
-        tools, tool_choice = await self._load_tools(config, ctx)
+            # --- 6. Assemble system prompt (PRD-201 S4: cache-stable ordering) ---
+            system_prompt, cacheable_prefix = self._assemble_prompt(included)
+            prompt_token_estimate = count_tokens(system_prompt)
+
+            # --- 7. Load tools ---
+            tools, tool_choice = await self._load_tools(config, ctx)
 
         # --- 8. Format messages ---
         formatted_messages = self._format_messages(

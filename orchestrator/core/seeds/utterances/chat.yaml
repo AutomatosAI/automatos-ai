@@ -1,0 +1,73 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: chat)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: chat                 registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: "<what the user types>"
+#         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
+version: 1
+category: chat
+actions:
+  platform_search_chat_history:
+  - text: what did we talk about yesterday?
+    source: example
+  - text: search my chats for 'Jira'
+    source: example
+  - text: find conversations about the deployment
+    source: example
+  - text: did I mention anything about Redis?
+    source: example
+  - text: search chat
+    source: phrase_map
+  - text: search conversations
+    source: phrase_map
+  - text: find in chat
+    source: phrase_map
+  - text: what did we talk about
+    source: phrase_map
+  - text: what did i say about
+    source: phrase_map
+  - text: chat history search
+    source: phrase_map
+  - text: find conversation
+    source: phrase_map
+  - text: did i mention
+    source: phrase_map
+  - text: when did i say
+    source: phrase_map
+  - text: previous chat
+    source: phrase_map
+  - text: search my chats
+    source: phrase_map
+  - text: look through chats
+    source: phrase_map
+  - text: pull up our chat from last week about pricing
+    source: authored
+  - text: search past conversations for the word migration
+    source: authored
+  - text: have we discussed the s3 vectors switch before?
+    source: authored
+  - text: look back through my messages for anything on onboarding
+    source: authored
+  - text: where did we chat about the widget rollout?
+    source: authored
+  - text: dig through old threads for what I said about billing
+    source: authored
