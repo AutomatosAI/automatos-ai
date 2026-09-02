@@ -167,6 +167,10 @@ services:
       # Composio (hosted tool integrations) — bring your own key; without it the
       # integrations surface stays empty (PRD-233 makes that honest in the UI).
       COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
+      # PRD-234 Session mode — tickets of `runtime: cli` agents run as YOUR OWN
+      # Claude Code sessions on this machine via `make cli-host`. Off by default;
+      # the boot guard refuses it outside the local edition. Set it in .env.
+      CLI_RUNTIME_ENABLED: ${CLI_RUNTIME_ENABLED:-false}
 
       # Object storage — local MinIO via the S3 seam (PRD-176 F089).
       # S3_ENDPOINT_URL points boto at MinIO. The store's credentials are mapped
