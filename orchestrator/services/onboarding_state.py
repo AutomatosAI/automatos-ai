@@ -202,6 +202,17 @@ def advance_onboarding_stage(
     current = doc.get("stage", INITIAL_STAGE)
     _validate_transition(current, to_stage)
 
+    # Honesty gate: the payoff stage needs a build to show. With no session
+    # (pure-document logic path) there is nothing to count against — the
+    # ordering validator alone applies, as before.
+    if to_stage == BUILD_EVIDENCE_STAGE and db is not None:
+        if not build_evidence(db, workspace)["any"]:
+            raise InvalidStageTransition(
+                "boom needs a build first: nothing is registered to this workspace "
+                "yet (no package installed, no agents created, no mission). Install "
+                "the matched package or create the agents, then advance to boom."
+            )
+
     # W1S2/US-002 funnel decision — the JSONB per-stage timestamps below ARE the
     # Wave-1 funnel record. There is no generic analytics/funnel event sink to
     # emit an ``onboarding_stage_changed`` event into: grepping
@@ -355,6 +366,65 @@ def onboarding_package_installed(workspace: Any) -> bool:
     """True once a package has been installed during THIS onboarding (D6 gate)."""
     doc = get_onboarding(workspace) or {}
     return bool((doc.get("funnel") or {}).get("package_installed"))
+
+
+# =========================================================================== #
+# Build evidence — the honesty gate on ``boom`` (live test 2026-08-29)
+# =========================================================================== #
+#
+# Two personas (Saffron, Waggle) reached the payoff stage having built NOTHING:
+# ``_validate_transition`` checks ordering only, so ``advance_to="boom"`` from
+# ``building`` always succeeded and Auto presented a team that did not exist.
+# ``boom`` is "here is your team" — it is reachable only once the workspace
+# actually holds a build. "Built" reuses the purge's definition
+# (``services.workspace_purge._AGENT_SURVIVOR_SQL``, inverted): a workspace-owned
+# agent that is neither a platform system agent nor a hidden onboarding-role
+# agent. The package funnel stamp and a mission (the larger-build path, which
+# awaits approval) count too. Read-only — no new table, no new stamp: only the
+# rows onboarding already writes.
+
+BUILD_EVIDENCE_STAGE = "boom"
+
+
+def build_evidence(db: Any, workspace: Any) -> dict[str, Any]:
+    """What this workspace holds that onboarding could have built.
+
+    Returns ``{package_installed, agents_built, missions, any}``. With ``db``
+    None (the pure-document logic path) the live counts are 0 and only the
+    funnel stamp can supply evidence.
+    """
+    package_installed = onboarding_package_installed(workspace)
+    agents_built = 0
+    missions = 0
+    workspace_id = getattr(workspace, "id", None)
+    if db is not None and workspace_id is not None:
+        from sqlalchemy import or_
+
+        from core.models.core import Agent
+        from core.models.orchestration import OrchestrationRun
+
+        agents_built = int(
+            db.query(Agent)
+            .filter(
+                Agent.workspace_id == workspace_id,
+                Agent.is_system_agent.isnot(True),
+                or_(Agent.required_role.is_(None), Agent.required_role != "onboarding"),
+            )
+            .count()
+            or 0
+        )
+        missions = int(
+            db.query(OrchestrationRun)
+            .filter(OrchestrationRun.workspace_id == workspace_id)
+            .count()
+            or 0
+        )
+    return {
+        "package_installed": bool(package_installed),
+        "agents_built": agents_built,
+        "missions": missions,
+        "any": bool(package_installed or agents_built or missions),
+    }
 
 
 # =========================================================================== #
