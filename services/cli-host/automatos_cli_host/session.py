@@ -173,6 +173,7 @@ class Session:
         self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self.cancel_requested = threading.Event()
         self.stopped = threading.Event()
+        self.session_started = threading.Event()
         self.ended = threading.Event()
         self.started_at = time.time()
         self.proc: Optional[subprocess.Popen] = None
@@ -193,6 +194,7 @@ class Session:
         event = payload.get("hook_event_name") or ""
         self._emit(event, payload)
         if event == "SessionStart":
+            self.session_started.set()
             self.reported_session_id = payload.get("session_id") or self.reported_session_id
             self.transcript_path = payload.get("transcript_path") or self.transcript_path
             cwd = payload.get("cwd")
@@ -376,6 +378,9 @@ class Session:
             if time.time() > deadline:
                 exit_reason = "timeout"
                 break
+            if not self.session_started.is_set() and time.time() - self.started_at > self.cfg.startup_timeout_seconds:
+                exit_reason = "no_session_start"
+                break
             time.sleep(0.25)
         self._terminate()
         return self._collect(exit_reason, cwd)
@@ -429,6 +434,13 @@ class Session:
             status, error = "cancelled", "cancelled by the operator"
         elif exit_reason == "timeout":
             status, error = "error", f"session exceeded {int(self.cfg.session_timeout_seconds)} s"
+        elif exit_reason == "no_session_start":
+            tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
+            status, error = "error", (
+                f"claude did not start a session within {int(self.cfg.startup_timeout_seconds)} s — "
+                "it is probably showing a login screen or a dialog. Run `claude` in that directory once "
+                f"and log in, then retry. Last output:\n{tail}"
+            )
         else:
             tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
             code = self.proc.returncode if self.proc else None

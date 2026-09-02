@@ -71,6 +71,7 @@ class Host:
         self._last_heartbeat = 0.0
         self._last_flush = 0.0
         self._claimed_once = False
+        self._capabilities: Optional[Dict[str, Any]] = None
 
     # ── setup ───────────────────────────────────────────────────────────────
     def prepare(self) -> None:
@@ -92,7 +93,7 @@ class Host:
         if self.identity is None:
             if not self.cfg.pair_code:
                 raise HostRefused("this host is not paired — get a code from Settings → Session mode and run: make cli-host PAIR=<code>")
-            paired = self.api.pair(self.cfg.pair_code, self.cfg.name, host_capabilities(self.cfg))
+            paired = self.api.pair(self.cfg.pair_code, self.cfg.name, self.capabilities())
             state.save_host_identity(
                 self.cfg.token_path, host_id=paired["host_id"], token=paired["token"],
                 workspace_id=paired.get("workspace_id", ""), url=self.cfg.url,
@@ -102,6 +103,11 @@ class Host:
         self.api.token = self.identity["token"]
         self._reap_previous_run()
         self.hooks.start()
+
+    def capabilities(self) -> Dict[str, Any]:
+        if self._capabilities is None:
+            self._capabilities = host_capabilities(self.cfg)
+        return self._capabilities
 
     def _reap_previous_run(self) -> None:
         table = state.load_process_table(self.cfg.process_table_path)
@@ -148,7 +154,7 @@ class Host:
         running = [{"task_id": int(tid), "session_id": s.session_id, "attempt": s.attempt}
                    for tid, s in self.sessions.items()]
         try:
-            out = self.api.heartbeat(host_id, host_capabilities(self.cfg), running)
+            out = self.api.heartbeat(host_id, self.capabilities(), running)
         except BackendError as exc:
             log.warning("heartbeat failed: %s", exc)
             return

@@ -143,3 +143,13 @@ def test_not_onboarded_claude_is_refused_before_spawn(short_tmp, env_clean, monk
     workdir.mkdir(parents=True)
     s, out = _run(short_tmp, _ticket(workdir))
     assert out.status == "error" and out.exit_reason == "claude_not_onboarded" and s.proc is None
+
+
+def test_a_session_that_never_starts_is_an_error_not_a_four_hour_wait(short_tmp, fake_home, env_clean, monkeypatch):
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", "no-start")
+    cfg = _cfg(short_tmp, startup_timeout_seconds=3)
+    s, out = _run(short_tmp, _ticket(workdir), cfg=cfg)
+    assert out.status == "error" and out.exit_reason == "no_session_start"
+    assert "login screen" in (out.error or "") and s.proc.poll() is not None

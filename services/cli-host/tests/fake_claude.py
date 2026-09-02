@@ -13,7 +13,7 @@ It does what the host relies on, and nothing else:
 * after ``Stop`` it idles like a TUI waiting for input until it is terminated.
 
 Scenario knobs (environment): ``FAKE_CLAUDE_SCENARIO`` = ``happy`` (default),
-``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop).
+``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop), ``no-start`` (never fires a hook).
 """
 from __future__ import annotations
 
@@ -91,6 +91,11 @@ def main(argv) -> int:
     def transcript_line(rec):
         with transcript.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
+
+    if scenario == "no-start":
+        # A login screen / dialog: no hooks ever fire, the process just sits there.
+        while True:
+            time.sleep(0.2)
 
     hook("SessionStart", source="startup", model=model)
     transcript_line({"type": "user", "message": {"role": "user", "content": prompt}, "sessionId": session_id, "cwd": cwd})
