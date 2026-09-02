@@ -89,3 +89,10 @@ def test_claude_driver_invariants_are_not_yet_contradicted_in_backend_code():
         text = path.read_text(encoding="utf-8")
         for token in forbidden:
             assert token not in text, f"{path.name} must not reference {token}"
+
+
+def test_compose_passes_the_session_mode_dial_into_the_backend():
+    """A .env value only reaches a container through `environment:` (or the
+    api.local lane). CLI_RUNTIME_ENABLED must be wired, default off."""
+    text = COMPOSE.read_text(encoding="utf-8")
+    assert "CLI_RUNTIME_ENABLED: ${CLI_RUNTIME_ENABLED:-false}" in text
