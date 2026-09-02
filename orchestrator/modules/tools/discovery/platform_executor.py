@@ -974,73 +974,87 @@ class PlatformActionExecutor:
             if target_spec is not None:
                 target_type, target_param = target_spec
                 actor_id_raw = params.get("_agent_id") if isinstance(params, dict) else None
-                target_id_raw = (
-                    params.get(target_param)
-                    if (target_param and isinstance(params, dict))
+                # A bulk call carries its targets as ``<target_param>s`` (e.g.
+                # platform_update_task_status task_ids) — EVERY id is gated, and
+                # one denial denies the whole call. A missing/None target keeps
+                # the pre-bulk behaviour (one check with target_id=None).
+                bulk_key = f"{target_param}s" if target_param else None
+                bulk_raw = (
+                    params.get(bulk_key)
+                    if (bulk_key and isinstance(params, dict))
                     else None
                 )
+                if isinstance(bulk_raw, (list, tuple)) and bulk_raw:
+                    target_ids_raw = list(bulk_raw)
+                else:
+                    target_ids_raw = [
+                        params.get(target_param)
+                        if (target_param and isinstance(params, dict))
+                        else None
+                    ]
                 try:
                     actor_id = int(actor_id_raw) if actor_id_raw is not None else None
                 except (TypeError, ValueError):
                     actor_id = None
-                try:
-                    target_id = int(target_id_raw) if target_id_raw is not None else None
-                except (TypeError, ValueError):
-                    target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
+                for target_id_raw in target_ids_raw:
+                    try:
+                        target_id = int(target_id_raw) if target_id_raw is not None else None
+                    except (TypeError, ValueError):
+                        target_id = target_id_raw  # leave string IDs alone (UUIDs etc.)
 
-                try:
-                    decision = can_actor_modify(
-                        self.db,
-                        actor_agent_id=actor_id,
-                        target_type=target_type,
-                        workspace_id=self.workspace_id,
-                        target_id=target_id,
-                        change_type="update" if action_def.permission_level == "write" else "delete",
-                        source="platform_tool",
-                    )
-                except Exception as e:
-                    # Fail closed: a permission check that errors must DENY, never
-                    # fall through to execution. can_actor_modify's DB probes
-                    # (_agent_row / _reports_to_id) aren't all savepoint-guarded,
-                    # so a transient DB error would otherwise raise out of the gate
-                    # and leave the write's fate to upstream handling. Deny locally
-                    # and escalate to Auto — mirrors the registry-lookup fail-closed
-                    # above.
-                    logger.warning(
-                        "[PlatformExecutor] hierarchy_check_failed action=%s actor=%s "
-                        "target=%s/%s err=%s — denying (fail-closed)",
-                        action_name, actor_id, target_type, target_id, e,
-                    )
-                    return {
-                        "success": False,
-                        "permission_denied": True,
-                        "reason": "permission_check_failed",
-                        "escalation_target": "auto",
-                        "error": (
-                            f"Action '{action_name}' denied — permission check could not be "
-                            "completed. Route this through the auto for arbitration."
-                        ),
-                    }
-                if not decision.allowed:
-                    logger.warning(
-                        "[PlatformExecutor] hierarchy_denied action=%s actor=%s target=%s/%s reason=%s",
-                        action_name, actor_id, target_type, target_id, decision.reason,
-                    )
-                    return {
-                        "success": False,
-                        "permission_denied": True,
-                        "reason": decision.reason,
-                        "escalation_target": decision.escalation_target,
-                        "error": (
-                            f"Action '{action_name}' denied — {decision.reason}. "
-                            + (
-                                f"Route this through the {decision.escalation_target} "
-                                "for arbitration."
-                                if decision.escalation_target
-                                else ""
-                            )
-                        ).strip(),
-                    }
+                    try:
+                        decision = can_actor_modify(
+                            self.db,
+                            actor_agent_id=actor_id,
+                            target_type=target_type,
+                            workspace_id=self.workspace_id,
+                            target_id=target_id,
+                            change_type="update" if action_def.permission_level == "write" else "delete",
+                            source="platform_tool",
+                        )
+                    except Exception as e:
+                        # Fail closed: a permission check that errors must DENY, never
+                        # fall through to execution. can_actor_modify's DB probes
+                        # (_agent_row / _reports_to_id) aren't all savepoint-guarded,
+                        # so a transient DB error would otherwise raise out of the gate
+                        # and leave the write's fate to upstream handling. Deny locally
+                        # and escalate to Auto — mirrors the registry-lookup fail-closed
+                        # above.
+                        logger.warning(
+                            "[PlatformExecutor] hierarchy_check_failed action=%s actor=%s "
+                            "target=%s/%s err=%s — denying (fail-closed)",
+                            action_name, actor_id, target_type, target_id, e,
+                        )
+                        return {
+                            "success": False,
+                            "permission_denied": True,
+                            "reason": "permission_check_failed",
+                            "escalation_target": "auto",
+                            "error": (
+                                f"Action '{action_name}' denied — permission check could not be "
+                                "completed. Route this through the auto for arbitration."
+                            ),
+                        }
+                    if not decision.allowed:
+                        logger.warning(
+                            "[PlatformExecutor] hierarchy_denied action=%s actor=%s target=%s/%s reason=%s",
+                            action_name, actor_id, target_type, target_id, decision.reason,
+                        )
+                        return {
+                            "success": False,
+                            "permission_denied": True,
+                            "reason": decision.reason,
+                            "escalation_target": decision.escalation_target,
+                            "error": (
+                                f"Action '{action_name}' denied — {decision.reason}. "
+                                + (
+                                    f"Route this through the {decision.escalation_target} "
+                                    "for arbitration."
+                                    if decision.escalation_target
+                                    else ""
+                                )
+                            ).strip(),
+                        }
 
         # Rate limit write/destructive actions — scoped per (workspace, agent)
         # so a chatty Auto session doesn't starve mission tasks of headroom.

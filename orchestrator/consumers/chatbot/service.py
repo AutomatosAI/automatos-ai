@@ -2125,9 +2125,12 @@ class StreamingChatService:
             llm_messages.append({
                 "role": "system",
                 "content": (
-                    f"STOP: `{tool_name}` has been called {_attempts} times. "
-                    "You MUST now synthesize a response from the results you have. "
-                    "Do NOT call any more tools."
+                    f"STOP: `{tool_name}` has been called {_attempts} times — this turn's "
+                    "tool budget is exhausted. You MUST now synthesize a response from the "
+                    "results you have and call NO more tools. Be exact about completeness: "
+                    "say what was actually done and what remains undone. If the request "
+                    "needed more calls than you could make, say so plainly and offer to "
+                    "continue — never report the request as done."
                 ),
             })
             logger.warning(f"[tool-loop] Multi-step tool {tool_name} hit hard cap ({_attempts} calls) — forcing synthesis")
