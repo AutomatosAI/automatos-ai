@@ -1530,3 +1530,154 @@ def test_rvw4_single_active_match_still_resolves(monkeypatch):
     assert result["status"] == "assigned"
     assert db._task.assigned_agent_id == 7
     assert len(dispatch) == 1
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-02 -- "close ALL blocked tasks": bulk status updates, a listing that
+# says how many match, and schemas that expose every real board status.
+# ---------------------------------------------------------------------------
+
+
+class _MultiQ:
+    """A query over several tasks that honours ``BoardTask.id == N`` filters."""
+
+    def __init__(self, tasks_by_id):
+        self._tasks = tasks_by_id
+        self._id = None
+
+    def filter(self, *exprs, **kw):
+        for expr in exprs:
+            left, right = getattr(expr, "left", None), getattr(expr, "right", None)
+            if getattr(left, "key", None) == "id" and hasattr(right, "value"):
+                self._id = right.value
+        return self
+
+    def order_by(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def first(self):
+        return self._tasks.get(self._id) if self._id is not None else None
+
+    def all(self):
+        return list(self._tasks.values())
+
+    def count(self):
+        return len(self._tasks)
+
+
+class _MultiSession:
+    def __init__(self, tasks):
+        self.tasks = {t.id: t for t in tasks}
+        self.commits = 0
+
+    def query(self, model):
+        return _MultiQ(self.tasks)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_bulk_status_update_closes_every_id_in_one_call(monkeypatch):
+    calls = _patch_notify(monkeypatch)
+    tasks = [_fresh_task(id=i, status="blocked", blocked_at=1, blocked_reason="x") for i in (11, 12, 13)]
+    db = _MultiSession(tasks)
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_ids": [11, 12, 13], "status": "done"})
+    )
+
+    assert result["success"] is True and result["partial"] is False
+    assert result["updated"] == [11, 12, 13] and result["updated_count"] == 3
+    assert result["failed"] == [] and result["requested"] == 3
+    assert all(t.status == "done" for t in tasks)
+    assert all(t.blocked_reason is None and t.blocked_at is None for t in tasks)
+    assert [c["task_id"] for c in calls] == [11, 12, 13]  # one board NOTIFY per task
+
+
+def test_bulk_status_update_reports_the_ids_it_could_not_update(monkeypatch):
+    _patch_notify(monkeypatch)
+    db = _MultiSession([_fresh_task(id=11, status="blocked", blocked_reason="x")])
+
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_ids": [11, 999, "nope"], "status": "done"})
+    )
+
+    assert result["success"] is False and result["partial"] is True
+    assert result["updated"] == [11]
+    assert [f["task_id"] for f in result["failed"]] == [999, "nope"]
+    assert "not found" in result["failed"][0]["error"]
+
+
+def test_bulk_status_update_refuses_more_than_the_cap(monkeypatch):
+    _patch_notify(monkeypatch)
+    ids = list(range(1, _HANDLER.MAX_BULK_TASK_IDS + 2))
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(_MultiSession([]), _WS_ID, {"task_ids": ids, "status": "done"})
+    )
+    assert result["success"] is False and "maximum" in result["error"]
+
+
+def test_bulk_status_update_keeps_the_single_path_rules(monkeypatch):
+    """'blocked' still needs blocked_reason — per id, through the same validation."""
+    _patch_notify(monkeypatch)
+    db = _MultiSession([_fresh_task(id=11, status="in_progress")])
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(db, _WS_ID, {"task_ids": [11], "status": "blocked"})
+    )
+    assert result["success"] is False
+    assert "blocked_reason" in result["failed"][0]["error"]
+
+
+def test_single_status_update_without_any_id_names_both_forms():
+    result = asyncio.run(
+        _HANDLER.update_board_task_status(_MultiSession([]), _WS_ID, {"status": "done"})
+    )
+    assert result["success"] is False and "task_ids" in result["error"]
+
+
+def test_list_tasks_reports_total_matching_beyond_the_page():
+    tasks = [_fresh_task(id=i, status="blocked", tags=[], description="d", priority="low",
+                         assigned_agent_id=None, created_at=None, error_message=None)
+             for i in range(1, 8)]
+    result = asyncio.run(
+        _HANDLER.list_board_tasks(_MultiSession(tasks), _WS_ID, {"status": "blocked", "limit": 3})
+    )
+    assert result["success"] is True
+    assert result["total_matching"] == 7 and result["limit"] == 3
+    assert result["total"] == len(result["tasks"])
+
+
+def test_list_tasks_limit_is_capped_at_the_module_maximum():
+    result = asyncio.run(
+        _HANDLER.list_board_tasks(_MultiSession([]), _WS_ID, {"limit": 10_000})
+    )
+    assert result["limit"] == _HANDLER.MAX_LIST_TASKS_LIMIT
+
+
+class _StubRegistry:
+    def __init__(self):
+        self.actions = {}
+
+    def register(self, action):
+        self.actions[action.name] = action
+
+
+def test_task_tool_schemas_expose_every_board_status_and_the_bulk_form():
+    """The schemas the model sees must carry the HTTP path's full status set
+    (PRD-227 fixed only the handler): 'blocked' was invisible, so 'close all the
+    blocked tickets' could not even list them."""
+    from api.board_tasks import VALID_STATUSES
+    from modules.tools.discovery.actions_board_tasks import register_board_task_actions
+
+    reg = _StubRegistry()
+    register_board_task_actions(reg)
+    list_props = reg.actions["platform_list_tasks"].parameters["properties"]
+    upd = reg.actions["platform_update_task_status"].parameters
+    assert list_props["status"]["enum"] == sorted(VALID_STATUSES)
+    assert upd["properties"]["status"]["enum"] == sorted(VALID_STATUSES)
+    assert upd["properties"]["task_ids"]["type"] == "array"
+    assert "blocked_reason" in upd["properties"]
+    assert upd["required"] == ["status"]  # task_id OR task_ids, validated by the handler
