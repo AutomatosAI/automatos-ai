@@ -618,6 +618,14 @@ class Config:
     # once; the rest stay 'assigned' (the DB is the queue — double-texting is
     # queued, never dropped). The claim honours this via in_progress counts.
     BOARD_DISPATCH_AGENT_SLOTS: int = int(os.getenv("BOARD_DISPATCH_AGENT_SLOTS", "2"))
+
+    # =============================================================================
+    # SESSION MODE (PRD-234): tickets run as the user's OWN Claude Code sessions
+    # =============================================================================
+    # ``runtime: cli`` agents are claimed by a paired local CLI host, never by the
+    # LLM factory. Local edition ONLY: validate_auth_edition() aborts a saas boot
+    # that sets this (the SaaS path stays byte-identical). Default off everywhere.
+    CLI_RUNTIME_ENABLED: bool = os.getenv("CLI_RUNTIME_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
     # S5: done tasks older than this drop off the active board (retained in DB).
     BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
     # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
@@ -1653,6 +1661,17 @@ class Config:
         Raises ``RuntimeError`` (aborting boot) on a contradiction.
         """
         errors: list[str] = []
+
+        # PRD-234 S1a: session mode is a local-edition feature. A saas boot with
+        # CLI_RUNTIME_ENABLED set is a misconfiguration that would expose the CLI
+        # host routes to tenants — abort, never a silent partial enable. Runs
+        # outside run_stage (main.py) like the rest of this guard, so it is real.
+        if self.CLI_RUNTIME_ENABLED and self.AUTH_EDITION != "local":
+            raise RuntimeError(
+                "CLI_RUNTIME_ENABLED=true requires AUTH_EDITION=local. Session mode "
+                "runs the user's own CLI sessions on their machine and has no meaning "
+                "in the hosted edition; unset CLI_RUNTIME_ENABLED or set AUTH_EDITION=local."
+            )
 
         if self.AUTH_EDITION == "saas":
             if not (self.CLERK_JWKS_URL or "").strip():

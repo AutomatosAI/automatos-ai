@@ -800,6 +800,17 @@ class AgentFactory:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
 
+            # PRD-234 S1a: a ``runtime: cli`` agent (session mode) is never
+            # activated into the LLM runtime — its tickets are claimed by the
+            # paired CLI host. Loud, and before any key resolution happens.
+            from core.cli_runtime import is_cli_agent
+            if is_cli_agent(getattr(db_agent, "configuration", None)):
+                self.logger.warning(
+                    "Agent %s runs as a cli session (session mode) — not activated "
+                    "in the LLM runtime; file a board ticket for it", agent_id,
+                )
+                return None
+
             # PRD-230 US-001 — the effective workspace for key resolution, the trial
             # gate, and usage tracking. The chat path passes the conversation's
             # workspace (Auto carries none of its own); every other caller falls back
@@ -1008,6 +1019,30 @@ class AgentFactory:
     # Tool loop with max_tool_iterations (default 10)
     # No hardcoded schemas, no legacy JSON actions, no mid-execution discovery
 
+    def _runtime_mismatch(self, agent: Union[int, "AgentRuntime"]):
+        """PRD-234 S1a: ``RuntimeMismatchError`` if ``agent`` is a ``runtime: cli``
+        agent, else ``None``. One DB read of the agent's configuration — the single
+        choke point every execution lane passes through (review §B3: eight lanes,
+        the PRD branched in one)."""
+        from core.cli_runtime import RUNTIME_CLI, RuntimeMismatchError, runtime_kind_of
+
+        agent_id = agent if isinstance(agent, int) else getattr(agent, "agent_id", None)
+        session = getattr(self, "db_session", None)
+        if agent_id is None or session is None or not hasattr(session, "query"):
+            return None
+        try:
+            row = session.query(Agent.configuration).filter(Agent.id == agent_id).first()
+        except Exception:  # noqa: BLE001 — a broken session fails at activation anyway
+            self.logger.warning(
+                "[AgentFactory] runtime guard could not read agent %s configuration — "
+                "proceeding on the existing path", agent_id, exc_info=True,
+            )
+            return None
+        configuration = row[0] if row else None
+        if runtime_kind_of(configuration) == RUNTIME_CLI:
+            return RuntimeMismatchError(agent_id, RUNTIME_CLI)
+        return None
+
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],
@@ -1033,6 +1068,15 @@ class AgentFactory:
         the single source of truth. No required_tools parameter needed.
         """
         start_time = time.time()
+
+        # PRD-234 S1a: a ``cli`` agent (session mode) never runs through the LLM
+        # factory — its tickets are claimed by the CLI host. Every lane that calls
+        # this method fails HONESTLY here, with the actionable reason, before any
+        # context is built or any model client is touched.
+        mismatch = self._runtime_mismatch(agent)
+        if mismatch is not None:
+            self.logger.warning("[AgentFactory] %s", mismatch)
+            return mismatch.as_result()
 
         # --- Resolve agent runtime ---
         if isinstance(agent, int):

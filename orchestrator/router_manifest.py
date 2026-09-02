@@ -83,6 +83,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     RouterSpec("api.watches"),
     # PRD-228 -- the one new fleet-state route (GET /api/v1/fleet).
     RouterSpec("api.fleet"),
+    # PRD-234 S1a -- the CLI host contract (pair / heartbeat / claim / events / result).
+    # Every handler 404s unless CLI_RUNTIME_ENABLED (local edition only).
+    RouterSpec("api.cli_hosts"),
     # PRD-233 S6 -- the operator's profile (GET both editions, PUT local only).
     RouterSpec("api.profile"),
 )

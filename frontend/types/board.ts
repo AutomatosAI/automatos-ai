@@ -3,7 +3,7 @@
  * "Task" in UI = "Recipe" in backend. No backend rename.
  */
 
-export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'failed'
+export type BoardStatus = 'inbox' | 'assigned' | 'in_progress' | 'review' | 'blocked' | 'done' | 'failed' | 'cancelled'
 
 export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low'
 
@@ -71,6 +71,7 @@ export const BOARD_COLUMNS: { status: BoardStatus; label: string }[] = [
   { status: 'blocked', label: 'Blocked' },
   { status: 'done', label: 'Done' },
   { status: 'failed', label: 'Failed' },
+  { status: 'cancelled', label: 'Cancelled' }, // PRD-234 S1a
 ]
 
 export const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: string; cssVar: string }> = {
@@ -88,4 +89,5 @@ export const STATUS_CONFIG: Record<BoardStatus, { label: string; dotColor: strin
   blocked: { label: 'Blocked', dotColor: 'bg-[hsl(var(--destructive))]', cssVar: '--destructive' },
   done: { label: 'Done', dotColor: 'bg-[hsl(var(--success))]', cssVar: '--success' },
   failed: { label: 'Failed', dotColor: 'bg-[hsl(var(--destructive))]', cssVar: '--destructive' },
+  cancelled: { label: 'Cancelled', dotColor: 'bg-muted-foreground', cssVar: '--muted-foreground' }, // PRD-234 S1a
 }

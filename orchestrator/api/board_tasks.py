@@ -27,13 +27,14 @@ from core.models.core import BoardTask
 from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
+from core.cli_runtime import RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
 from services.board_dispatcher import notify_task_available
 from services.board_events import board_event_stream, notify_board_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 
-VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed"}
+VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled"}  # PRD-234 S1a: cancelled
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
 
@@ -946,6 +947,49 @@ async def update_task_status(
     return {"id": task.id, "status": task.status}
 
 
+@router.post("/{task_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def cancel_task(
+    task_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-234 S1a: cancel a task that has not finished.
+
+    Terminal ``cancelled`` at once, whatever lane owns it: a queued/blocked task
+    simply stops being claimable; a CLI-host session is told to stop on its next
+    event batch (``control: ["cancel"]``) and its late result is a no-op; an API
+    run still finishes in the background but its result is dropped honestly —
+    the completion writer only writes ``in_progress`` rows.
+    """
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status in ("done", "failed", "cancelled"):
+        return {"id": task.id, "status": task.status, "applied": False}
+
+    previous = task.status
+    now = datetime.now(timezone.utc)
+    task.status = "cancelled"
+    task.completed_at = now
+    task.lease_until = None
+    if previous == "blocked":
+        task.blocked_at = None
+        task.blocked_reason = None
+    ref = dict(task.runtime_ref or {})
+    ref["cancel_requested_at"] = now.isoformat()
+    task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
+    db.commit()
+    notify_board_event(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, status="cancelled",
+        event="task_cancelled",
+    )
+    logger.info("[BoardTasks] task %d cancelled (was %s)", task.id, previous)
+    return {"id": task.id, "status": "cancelled", "applied": True, "previous_status": previous}
+
+
 # ── Immediate execution (fire-and-forget) ────────────────────────────
 
 async def _lease_heartbeat(task_id: int) -> None:
@@ -1135,6 +1179,112 @@ def _board_task_blocked_pending_approval(
         return True
 
 
+def _agent_runtime_kind(db: Session, agent_id: int) -> str:
+    """PRD-234 S1a: the assigned agent's runtime (``api`` unless it declares ``cli``)."""
+    row = db.query(Agent.configuration).filter(Agent.id == agent_id).first()
+    return runtime_kind_of(row[0] if row else None)
+
+
+def _park_for_cli_host(db: Session, task_id: int, workspace_id: str, agent_id: int) -> None:
+    """A ``cli`` agent's ticket is never executed by this process. Leave it
+    ``assigned`` (reverting a direct-launch flip to ``in_progress``) so a paired
+    CLI host claims it, and wake claimants. PRD-234 §Terms / review §B3."""
+    task = db.query(BoardTask).get(task_id)
+    if task is not None and task.status == "in_progress":
+        task.status = "assigned"
+        task.lease_until = None
+        db.commit()
+        notify_board_event(
+            db, workspace_id=workspace_id, task_id=task_id, status="assigned",
+            event="task_updated",
+        )
+    notify_task_available(db, workspace_id=workspace_id, task_id=task_id)
+    logger.info(
+        "[BoardTasks] task %d belongs to cli agent %d — parked 'assigned' for the CLI host",
+        task_id, agent_id,
+    )
+
+
+async def finalize_board_task_run(
+    db: Session,
+    *,
+    task_id: int,
+    workspace_id: str,
+    agent_id: int,
+    exec_result: Optional[Dict[str, Any]],
+    review_mode: str = "auto",
+    force_review: bool = False,
+) -> Optional[str]:
+    """PRD-234 S1a: the ONE completion writer for a board-task run.
+
+    Extracted from ``_launch_task_execution`` with its behaviour unchanged (PRD-171
+    F023: an error result closes ``failed``, never ``done``; a success closes
+    ``done``/``review`` per ``review_mode``, dispatches ``task_complete`` only on
+    ``done`` and writes the report row) so an API run and a CLI-host session result
+    land identically. ``force_review`` (a session with permission denials) turns an
+    auto ``done`` into ``review`` — "couldn't run the tests" never reads as finished.
+    A ``cancelled`` result closes ``cancelled``.
+
+    Returns the terminal status written, or ``None`` when the task was no longer
+    ``in_progress`` (finished, cancelled or requeued meanwhile) — the write is
+    skipped, never forced.
+    """
+    exec_result = exec_result or {}
+    exec_status = exec_result.get("status")
+
+    # Extract response text
+    llm_text = (
+        exec_result.get("result")
+        or exec_result.get("response")
+        or exec_result.get("output")
+        or exec_result.get("content")
+        or ""
+    )
+
+    task = db.query(BoardTask).get(task_id)
+    if not task or task.status != "in_progress":
+        return None
+
+    if exec_status == "error":
+        task.status = "failed"
+        task.error_message = str(
+            exec_result.get("error") or "Agent execution failed"
+        )[:500]
+        task.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        await _dispatch_task_failed(db, workspace_id, task)
+        # Surface failures the same way successes are surfaced.
+        await _auto_create_task_report(
+            db, workspace_id, task,
+            {"result": "", "tokens_used": 0},
+        )
+        db.commit()
+        return task.status
+
+    if exec_status == "cancelled":
+        task.status = "cancelled"
+        task.completed_at = datetime.now(timezone.utc)
+        task.lease_until = None
+        db.commit()
+        notify_board_event(
+            db, workspace_id=workspace_id, task_id=task_id, status="cancelled",
+            event="task_cancelled",
+        )
+        return task.status
+
+    task.result = str(llm_text) if llm_text else None
+    task.status = "done" if (review_mode == "auto" and not force_review) else "review"
+    task.completed_at = datetime.now(timezone.utc)
+    # PRD-128: dispatch task_complete only on terminal 'done'
+    if task.status == "done":
+        await _dispatch_task_complete(db, workspace_id, task)
+    # Persist a report row for every completed task so it surfaces
+    # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
+    await _auto_create_task_report(db, workspace_id, task, exec_result)
+    db.commit()
+    return task.status
+
+
 def _launch_task_execution(
     task_id: int,
     agent_id: int,
@@ -1162,6 +1312,15 @@ def _launch_task_execution(
                 db.close()
                 return
 
+            # PRD-234 S1a: a ``runtime: cli`` agent's ticket never runs here — the
+            # paired CLI host claims it (the user's own Claude Code session). One
+            # check covers all four launch sites; zero factory calls.
+            if _agent_runtime_kind(db, agent_id) == RUNTIME_CLI:
+                _park_for_cli_host(db, task_id, workspace_id, agent_id)
+                heartbeat.cancel()
+                db.close()
+                return
+
             from modules.agents.factory.agent_factory import AgentFactory
 
             factory = AgentFactory(db_session=db)
@@ -1177,52 +1336,21 @@ def _launch_task_execution(
                 attachment_ids=attachment_ids,  # PRD-127
             )
 
-            # PRD-171 F023: the executor reports its true terminal status. A
-            # run that failed (e.g. the loop raised) returns {"status":"error"}
-            # — closing that as 'done' masks the failure. Fail honestly, exactly
-            # as the crash-handler below and the mission path already do.
-            exec_status = (exec_result or {}).get("status")
-
-            # Extract response text
-            llm_text = (
-                exec_result.get("result")
-                or exec_result.get("response")
-                or exec_result.get("output")
-                or exec_result.get("content")
-                or ""
+            # PRD-234 S1a: ONE completion writer for both runtimes (an API run
+            # here, a CLI-host result via api/cli_hosts). Behaviour is the PRD-171
+            # F023 block, extracted unchanged — see finalize_board_task_run.
+            terminal = await finalize_board_task_run(
+                db,
+                task_id=task_id,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                exec_result=exec_result,
+                review_mode=review_mode,
             )
-
-            task = db.query(BoardTask).get(task_id)
-            if task and task.status == "in_progress":
-                if exec_status == "error":
-                    task.status = "failed"
-                    task.error_message = str(
-                        exec_result.get("error") or "Agent execution failed"
-                    )[:500]
-                    task.completed_at = datetime.now(timezone.utc)
-                    db.commit()
-                    await _dispatch_task_failed(db, workspace_id, task)
-                    # Surface failures the same way successes are surfaced.
-                    await _auto_create_task_report(
-                        db, workspace_id, task,
-                        {"result": "", "tokens_used": 0},
-                    )
-                    db.commit()
-                else:
-                    task.result = str(llm_text) if llm_text else None
-                    task.status = "done" if review_mode == "auto" else "review"
-                    task.completed_at = datetime.now(timezone.utc)
-                    # PRD-128: dispatch task_complete only on terminal 'done'
-                    if task.status == "done":
-                        await _dispatch_task_complete(db, workspace_id, task)
-                    # Persist a report row for every completed task so it surfaces
-                    # in Reports / Deliverables / Activity Feed (mirrors heartbeats).
-                    await _auto_create_task_report(db, workspace_id, task, exec_result)
-                    db.commit()
 
             logger.info(
                 "[BoardTasks] Agent %d completed task %d → %s",
-                agent_id, task_id, task.status if task else "?",
+                agent_id, task_id, terminal or "?",
             )
         except Exception as e:
             logger.error(

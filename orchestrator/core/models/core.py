@@ -1589,6 +1589,10 @@ class BoardTask(Base):
     blocked_at = Column(DateTime(timezone=True), nullable=True)
     blocked_reason = Column(Text, nullable=True)
     attachment_ids = Column(JSONB, default=list, server_default='[]')  # PRD-127: ephemeral attachments
+    # PRD-234 S1a: the session reference a ``runtime: cli`` ticket carries once a
+    # CLI host claims it (host id, pre-assigned session id, attempt, provider,
+    # live tool, transcript path, exit reason). NULL for every API-run ticket.
+    runtime_ref = Column(JSONB, nullable=True)
     # PRD-161: dispatch lease — claim/lease/requeue so assigned work executes
     # exactly once. lease_until is the active claim's deadline (a worker holding
     # it past this is presumed crashed → the sweeper requeues); attempts is the
@@ -1638,6 +1642,7 @@ class BoardTask(Base):
             "blocked_at": self.blocked_at.isoformat() if self.blocked_at else None,
             "blocked_reason": self.blocked_reason,
             "attachment_ids": self.attachment_ids or [],  # PRD-127
+            "runtime_ref": self.runtime_ref,  # PRD-234 S1a
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

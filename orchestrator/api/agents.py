@@ -33,6 +33,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 
+def _reject_invalid_runtime(configuration) -> None:
+    """PRD-234 S1a: validate the runtime fields of an agent configuration.
+
+    ``runtime: cli`` (session mode) needs ``CLI_RUNTIME_ENABLED`` (local edition
+    only), a known provider and a CLI-shaped model — an OpenRouter id on a session
+    agent is rejected here, not discovered at dispatch (PRD-223). API agents pass
+    untouched.
+    """
+    from config import config as _cfg
+    from core.cli_runtime import validate_runtime_configuration
+
+    errors = validate_runtime_configuration(
+        configuration, cli_enabled=bool(getattr(_cfg, "CLI_RUNTIME_ENABLED", False))
+    )
+    if errors:
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
+
 # ------------------------------------------------------------------
 # PRD-64: Semantic embedding helper (fire-and-forget)
 # ------------------------------------------------------------------
@@ -364,6 +382,8 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
         created_agents = []
         
         for agent_data in agents:
+        
+            _reject_invalid_runtime(agent_data.configuration)  # PRD-234 S1a
             tags = _normalize_tags(getattr(agent_data, 'tags', None))
             # Check if agent with this name already exists in workspace
             existing = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.name == agent_data.name).first()
@@ -428,6 +448,7 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
             raise HTTPException(status_code=400, detail="Agent with this name already exists")
         
         tags = _normalize_tags(agent_data.tags if hasattr(agent_data, 'tags') else None)
+        _reject_invalid_runtime(agent_data.configuration)  # PRD-234 S1a
         
         # Create agent with workspace
         from uuid import uuid4 as _uuid4
@@ -874,11 +895,12 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
 
         # Update configuration if provided
         if agent_update.configuration is not None:
-            # Merge with existing configuration
-            if agent.configuration:
-                agent.configuration = {**agent.configuration, **agent_update.configuration}
-            else:
-                agent.configuration = agent_update.configuration
+            # Merge with existing configuration (shallow — PRD-234 validates the
+            # MERGED result so a runtime/provider/model split across two updates
+            # can never leave a cli agent half-configured).
+            merged = {**(agent.configuration or {}), **agent_update.configuration}
+            _reject_invalid_runtime(merged)  # PRD-234 S1a
+            agent.configuration = merged
 
         # Handle tool updates (NEW: agent_app_assignments)
         if agent_update.tool_ids is not None:
