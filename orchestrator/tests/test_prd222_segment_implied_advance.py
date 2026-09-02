@@ -182,3 +182,25 @@ def test_a_refused_move_names_what_the_current_stage_needs():
     assert r["success"] is False
     assert "non-forward" in r["error"] and "platform_install_package" in r["error"]
     assert current_stage(ws) == "building"
+
+
+# ── the building hint names what is already registered ────────────────────
+
+def test_building_noop_hint_names_the_registered_build():
+    ws = _Workspace("building")
+    r = asyncio.run(update_onboarding(_db(agents=2, workspace=ws), ws.id, {"advance_to": "building"}))
+    assert r["noop"] is True
+    assert "2 agent(s) created" in r["message"] and "advance_to boom now" in r["message"]
+    assert "Nothing is built yet" not in r["message"]
+
+
+def test_building_noop_hint_with_a_package_stamp():
+    ws = _Workspace("building", funnel={"package_installed": {"slug": "shopify-management", "at": "t"}})
+    r = asyncio.run(update_onboarding(_db(0, 0, workspace=ws), ws.id, {"advance_to": "building"}))
+    assert "a package installed" in r["message"] and "advance_to boom now" in r["message"]
+
+
+def test_building_noop_hint_with_nothing_built_is_unchanged():
+    ws = _Workspace("building")
+    r = asyncio.run(update_onboarding(_db(0, 0, workspace=ws), ws.id, {"advance_to": "building"}))
+    assert "Nothing is built yet" in r["message"]

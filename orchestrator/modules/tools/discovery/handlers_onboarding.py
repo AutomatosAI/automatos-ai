@@ -20,6 +20,7 @@ from services.onboarding_state import (
     SEGMENT_KEYS,
     InvalidStageTransition,
     advance_onboarding_stage,
+    build_evidence,
     current_stage,
     get_onboarding,
     public_snapshot,
@@ -44,6 +45,29 @@ _SAME_STAGE_HINTS = {
     ),
     "boom": "Show the value on their business, then advance_to powerup.",
 }
+
+
+def _stage_hint(db: Any, workspace: Any) -> str:
+    """The current stage's next step. At 'building' it names what is ALREADY
+    registered (prod 2026-09-02, post-merge: two runs created a real agent or
+    installed the package, then re-asserted 'building' twice and never advanced
+    — the generic hint said "nothing is built yet", which was no longer true)."""
+    stage = current_stage(workspace)
+    if stage == "building" and db is not None:
+        ev = build_evidence(db, workspace)
+        if ev["any"]:
+            parts = []
+            if ev["package_installed"]:
+                parts.append("a package installed")
+            if ev["agents_built"]:
+                parts.append(f"{ev['agents_built']} agent(s) created")
+            if ev["missions"]:
+                parts.append(f"{ev['missions']} mission(s)")
+            return (
+                "Registered so far: " + ", ".join(parts) + ". If the build is complete, "
+                "advance_to boom now; otherwise keep building."
+            )
+    return _SAME_STAGE_HINTS.get(stage, "")
 
 
 def _usable_segment(segment: Any) -> Optional[Dict[str, Any]]:
@@ -224,7 +248,7 @@ async def update_onboarding(
             # installing nothing — a bare success read as progress. Say what
             # changed (nothing) and what the stage actually needs.
             snap = public_snapshot(workspace)
-            hint = _SAME_STAGE_HINTS.get(snap.get("stage"), "")
+            hint = _stage_hint(db, workspace)
             return {
                 "success": True,
                 "data": snap,
@@ -288,7 +312,7 @@ async def update_onboarding(
         # A refused move (backward, or the payoff without a build) names what the
         # CURRENT stage needs — local test 2026-09-02: Auto tried building →
         # proposal, was told "non-forward", and stalled.
-        hint = _SAME_STAGE_HINTS.get(current_stage(workspace), "")
+        hint = _stage_hint(db, workspace)
         return {"success": False, "error": f"{exc} {hint}".strip()}
     except ValueError as exc:
         # e.g. set_segment called with no recognised keys.
