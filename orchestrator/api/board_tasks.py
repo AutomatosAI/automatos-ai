@@ -1182,7 +1182,15 @@ def _board_task_blocked_pending_approval(
 def _agent_runtime_kind(db: Session, agent_id: int) -> str:
     """PRD-234 S1a: the assigned agent's runtime (``api`` unless it declares ``cli``)."""
     row = db.query(Agent.configuration).filter(Agent.id == agent_id).first()
-    return runtime_kind_of(row[0] if row else None)
+    configuration = None
+    if row is not None:
+        try:
+            configuration = row[0]  # a (configuration,) row
+        except (TypeError, IndexError, KeyError):
+            # A test double or a full Agent object instead of a column row: read
+            # the attribute; anything unreadable is an API agent (today's default).
+            configuration = getattr(row, "configuration", None)
+    return runtime_kind_of(configuration)
 
 
 def _park_for_cli_host(db: Session, task_id: int, workspace_id: str, agent_id: int) -> None:
