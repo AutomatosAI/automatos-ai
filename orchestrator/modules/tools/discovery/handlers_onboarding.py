@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from core.models.workspaces import Workspace
 from services.onboarding_state import (
     ALL_STAGES,
+    INITIAL_STAGE,
     QUESTION_KEYS,
     SEGMENT_KEYS,
     InvalidStageTransition,
@@ -186,7 +187,9 @@ async def update_onboarding(
     # key the model named). The questions are asked in QUESTION order, so the
     # document says which one this is; dropping the text was the freeze.
     bare = params.get("_bare_answer")
-    if bare and not segment and not advance_to:
+    if bare and not segment and not advance_to and current_stage(workspace) in (INITIAL_STAGE, "questions"):
+        # Only while the questions are open: past 'questions' a bare sentence is
+        # not an answer to anything (the #656 rule — honest error — still holds).
         key, text = bare
         answered = get_onboarding(workspace).get("segment") or {}
         if not key:

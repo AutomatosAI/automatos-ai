@@ -60,7 +60,10 @@ def test_normaliser_returns_a_new_dict_and_never_mutates_input():
 def test_normaliser_value_only_counts_when_it_names_a_stage():
     out, notes = _normalise_params({"value": "banana"})
     assert "advance_to" not in out and "value" not in out
-    assert any("'value' ignored" in n for n in notes)
+    assert out["_bare_answer"] == (None, "banana")  # free text is kept for the handler to place
+    assert any("bare-text" in n for n in notes)
+    out, notes = _normalise_params({"value": 42})
+    assert any("'value' ignored (type=int)" in n for n in notes)
     out, _ = _normalise_params({"advance_to": "proposal", "value": "teach"})
     assert out["advance_to"] == "proposal"  # an explicit advance_to always wins
 
