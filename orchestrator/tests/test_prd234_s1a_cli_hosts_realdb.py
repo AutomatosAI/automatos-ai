@@ -147,7 +147,7 @@ def test_host_claim_preassigns_a_session_and_result_applies_once(seeded, new_ses
     host, _token = svc.pair_host(s, code)
     task_id = _seed_task(s, ws_id, cli_agent, "cli-work")
 
-    claimed = svc.claim_for_host(s, host, limit=5)
+    claimed = svc.claim_for_host(s, host, limit=5)["tasks"]
     assert [c["task_id"] for c in claimed] == [task_id]
     ticket = claimed[0]
     assert ticket["provider"] == "claude" and ticket["model"] == "sonnet"
@@ -186,7 +186,7 @@ def test_a_host_cannot_touch_a_ticket_it_did_not_claim(seeded, new_session):
     host_b, code_b, _ = svc.create_pairing_code(s, uuid.UUID(ws_id), "b")
     host_b, _ = svc.pair_host(s, code_b)
     task_id = _seed_task(s, ws_id, cli_agent, "cli-work")
-    assert svc.claim_for_host(s, host_a, limit=1)[0]["task_id"] == task_id
+    assert svc.claim_for_host(s, host_a, limit=1)["tasks"][0]["task_id"] == task_id
     with pytest.raises(PermissionError):
         svc.record_events(s, host_b, task_id, [])
     with pytest.raises(LookupError):
@@ -200,7 +200,7 @@ def test_heartbeat_reattaches_a_requeued_ticket_and_flags_stale_ones(seeded, new
     host, code, _ = svc.create_pairing_code(s, uuid.UUID(ws_id), "laptop")
     host, _ = svc.pair_host(s, code)
     task_id = _seed_task(s, ws_id, cli_agent, "cli-work")
-    ticket = svc.claim_for_host(s, host, limit=1)[0]
+    ticket = svc.claim_for_host(s, host, limit=1)["tasks"][0]
     # the sweeper requeued it while the host was away
     s.execute(text("UPDATE board_tasks SET status='assigned', lease_until=NULL WHERE id=:id"), {"id": task_id})
     s.commit()

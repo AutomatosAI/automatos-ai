@@ -126,11 +126,13 @@ def test_claim_returns_the_tickets_the_service_claimed(monkeypatch):
 
     def _claim(db, host, limit):
         seen["host"], seen["limit"] = host.id, limit
-        return [{"task_id": 5, "session_id": "s-1", "attempt": 1, "prompt": "do it"}]
+        return {"tasks": [{"task_id": 5, "session_id": "s-1", "attempt": 1, "prompt": "do it"}],
+                "parked": [{"task_id": 6, "title": "held", "reason": "Awaiting human approval (grant #9)"}]}
 
     monkeypatch.setattr(mod.svc, "claim_for_host", _claim, raising=True)
     r = c.post(f"/api/v1/cli-hosts/{HOST_ID}/claim", json={"limit": 3}, headers=_h())
     assert r.status_code == 200 and r.json()["tasks"][0]["session_id"] == "s-1"
+    assert r.json()["parked"][0]["task_id"] == 6
     assert seen == {"host": HOST_ID, "limit": 3}
 
 
