@@ -17,7 +17,7 @@ from alembic import op
 
 
 revision = "prd234_s1a_cli_hosts_runtime_ref"
-down_revision = "prd_workspace_models_backfill"
+down_revision = "prd232_cluster_provenance"
 branch_labels = None
 depends_on = None
 
