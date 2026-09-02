@@ -105,7 +105,18 @@ Each ships `LIVE-UNVERIFIED` until someone runs it. Facts as of 2026-09-02: **cu
 
 S1a → S1b → **owner smoke** → S2 → S3 → S4 (S3/S4 parallel-safe) → S5 → S6 (open lane). Nothing starts before the Phase 0+1 test passes.
 
-**Owner smoke (real sessions; a day with headroom in the weekly window):** (1) create ticket → assign a `cli` agent → watch the board; (2) note the plan's five-hour/seven-day windows before and after (`/usage` in Claude Code or claude.ai) — they move, and nothing appears on an API key or credit; (3) `claude --resume <id> "<prompt>"` accepts a positional prompt with `--resume` in interactive mode; (4) hooks and the keychain-backed login work when the parent is the host process, not a terminal; (5) kill the host mid-turn → no orphan, no double run, the ticket returns honestly; (6) a denied Bash call lands the ticket in `review` with the denial visible; (7) check whether `claude --bg` / `claude agents` (2.1.236) is a cleaner native primitive for the same thing. Fixtures for S1b are recorded from this run.
+**Owner smoke (real sessions; a day with headroom in the weekly window — first pass done 2026-09-02, see Smoke results):** (1) create ticket → assign a `cli` agent → watch the board; (2) note the plan's five-hour/seven-day windows before and after (`/usage` in Claude Code or claude.ai) — they move, and nothing appears on an API key or credit; (3) `claude --resume <id> "<prompt>"` accepts a positional prompt with `--resume` in interactive mode; (4) hooks and the keychain-backed login work when the parent is the host process, not a terminal; (5) kill the host mid-turn → no orphan, no double run, the ticket returns honestly; (6) a denied Bash call lands the ticket in `review` with the denial visible; (7) check whether `claude --bg` / `claude agents` (2.1.236) is a cleaner native primitive for the same thing. Fixtures for S1b are recorded from this run.
+
+## Smoke results — owner's machine, 2026-09-02 (S1a + S1b, real Claude Code 2.1.236)
+
+Two tickets ran end to end as supervised interactive sessions on the owner's Max plan; the host was started from a non-terminal parent process.
+
+| Ticket | Directory | Outcome | Evidence |
+|---|---|---|---|
+| #66 "write hello.md" | plain directory under `./workspaces` | `done` in 40 s, 0 denials | `hello.md` written; transcript at `~/.claude/projects/<cwd-key>/9ea5d5a8-….jsonl`; usage recorded as tokens (claude-sonnet-5, 6,136 out, 373k cache read), no price |
+| #67 "git repo + commit, no push" | git repository | `done` in 27 s, 0 denials | Claude Code created worktree `.claude/worktrees/automatos-67` (branch `worktree-automatos-67`, locked), committed `cdf461e "smoke: add changelog"` there; `main` untouched; no push |
+
+What the run settled: (1) the positional pointer prompt with `--session-id` works in interactive mode; (2) the keychain-backed login works when the parent is the host process, not a terminal; (3) `--worktree` needs no extra trust decision — recording trust for the registered directory was enough; (4) the board's approval policy (`always_ask` on this workspace) applies to `cli` tickets exactly as to API tickets — the claim parks the ticket `blocked` behind a grant, the operator approves in the Command Centre, the host claims it again (the host now logs a parked ticket once instead of polling in silence); (5) `ANTHROPIC_API_KEY` was not set on the machine, so the sessions could only have used the owner's own login. Still to observe: which plan window moved (owner checks `/usage`), the kill-host-mid-turn path, a denial landing a ticket in `review` (the fake-`claude` lane covers it), and `claude --bg`.
 
 ## Verification (CI only — sessions cannot run in CI)
 
