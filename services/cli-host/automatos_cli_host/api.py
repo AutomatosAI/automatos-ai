@@ -5,7 +5,9 @@ carries the server's detail so the operator sees the real reason.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -51,6 +53,11 @@ class BackendClient:
             raise BackendError(exc.code, detail, url) from None
         except urllib.error.URLError as exc:
             raise BackendError(0, f"cannot reach the backend: {exc.reason}", url) from None
+        except (OSError, http.client.HTTPException, socket.timeout) as exc:
+            # A backend restart mid-request (connection reset, remote disconnect,
+            # incomplete read) is a transient, not a crash: report it like any
+            # other unreachable-backend condition and let the loop retry.
+            raise BackendError(0, f"backend connection failed: {exc.__class__.__name__}: {exc}", url) from None
         if not raw.strip():
             return {}
         try:
