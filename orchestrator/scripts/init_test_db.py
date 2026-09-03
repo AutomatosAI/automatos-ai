@@ -290,6 +290,50 @@ def init_db():
     # assert the workspace exists. Read the id from the canonical config (no
     # os.getenv here — CLAUDE.md §4) and seed it idempotently so the row is
     # present whatever DEFAULT_WORKSPACE_ID the environment sets.
+    # ``deliverables`` (PRD-129) exists in prod only through
+    # alembic/versions/prd129_deliverables.py — raw DDL, no SQLAlchemy model — so
+    # create_all() never builds it. The PRD-234 S2 real-DB test registers a
+    # session's files through DeliverableService.register(), which needs the
+    # table and its partial unique index. Same shape as the migration EXCEPT
+    # the agent_id foreign key: test_prd164_flywheel.py's transaction-local
+    # stand-in has none and seeds synthetic agent ids (4242) — a prod-only
+    # guarantee no test exercises.
+    with engine.begin() as conn:
+        conn.execute(_raw_sql("""
+            CREATE TABLE IF NOT EXISTS deliverables (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                workspace_id      UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                source_type       VARCHAR(30) NOT NULL,
+                source_id         VARCHAR(255) NULL,
+                agent_id          INTEGER NULL,
+                agent_name        VARCHAR(100) NULL,
+                artifact_type     VARCHAR(30) NOT NULL,
+                title             VARCHAR(255) NOT NULL,
+                summary           VARCHAR(500) NULL,
+                storage_type      VARCHAR(20) NOT NULL DEFAULT 'workspace',
+                file_path         VARCHAR(1024) NOT NULL,
+                file_name         VARCHAR(255) NULL,
+                file_type         VARCHAR(50) NULL,
+                file_size_bytes   BIGINT NULL,
+                preview_url       VARCHAR(1024) NULL,
+                preview_type      VARCHAR(30) NULL,
+                extra             JSONB NOT NULL DEFAULT '{}'::jsonb,
+                status            VARCHAR(20) NOT NULL DEFAULT 'ready',
+                deleted_at        TIMESTAMPTZ NULL,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        conn.execute(_raw_sql("CREATE INDEX IF NOT EXISTS ix_deliverables_workspace ON deliverables(workspace_id)"))
+        conn.execute(_raw_sql("CREATE INDEX IF NOT EXISTS ix_deliverables_agent ON deliverables(agent_id)"))
+        conn.execute(_raw_sql("CREATE INDEX IF NOT EXISTS ix_deliverables_type ON deliverables(workspace_id, artifact_type)"))
+        conn.execute(_raw_sql("CREATE INDEX IF NOT EXISTS ix_deliverables_source ON deliverables(workspace_id, source_type)"))
+        conn.execute(_raw_sql("CREATE INDEX IF NOT EXISTS ix_deliverables_created ON deliverables(workspace_id, created_at DESC)"))
+        conn.execute(_raw_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_deliverables_workspace_path "
+            "ON deliverables(workspace_id, file_path) WHERE deleted_at IS NULL"
+        ))
+
     from config import config as _app_config
 
     _default_ws_id = (_app_config.DEFAULT_WORKSPACE_ID or "").strip()

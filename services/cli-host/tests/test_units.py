@@ -295,3 +295,43 @@ def test_policy_lets_a_session_run_its_own_code(tmp_path):
     ]
     for cmd in refused:
         assert not policy.decide("Bash", {"command": cmd}, ctx).allow, cmd
+
+
+def test_default_session_cwd_is_the_workspace_sessions_folder(tmp_path):
+    """PRD-234 S2: a ticket without a working directory runs where the
+    Deliverables explorer looks — <root>/<workspace id>/sessions/<ticket>."""
+    target = allowlist.default_session_cwd(str(tmp_path), "00000000-0000-0000-0000-0000000000c1", "68")
+    assert target == (tmp_path / "00000000-0000-0000-0000-0000000000c1" / "sessions" / "68").resolve()
+    assert target.is_dir()
+    with pytest.raises(allowlist.NotAllowed):
+        allowlist.default_session_cwd(str(tmp_path), "../escape", "68")
+
+
+def test_emit_subject_is_the_command_or_path_only():
+    from automatos_cli_host.session import _subject_of
+    assert _subject_of({"tool_input": {"command": "python3 hello.py", "timeout": 5}}) == "python3 hello.py"
+    assert _subject_of({"tool_input": {"file_path": "/w/hello.py", "content": "secret body"}}) == "/w/hello.py"
+    assert _subject_of({"tool_input": "junk"}) is None
+    assert len(_subject_of({"tool_input": {"command": "x" * 500}})) == 200
+
+
+def test_hook_server_keeps_only_its_own_socket_and_heals_a_vanished_path(tmp_path):
+    """2026-09-03, ticket 69: the previous host's shutdown unlinked the path the
+    NEW host had just bound, and every hook answered 'host unreachable'."""
+    import os
+    import tempfile
+    from automatos_cli_host.hook_server import HookServer
+    # AF_UNIX paths are capped (~104 bytes on macOS); pytest's tmp_path is too long.
+    sock = Path(tempfile.mkdtemp(dir="/tmp", prefix="ah")) / "hooks.sock"
+    old = HookServer(sock)
+    old.start()
+    new = HookServer(sock)
+    new.start()                       # rebinds the same path — as a restarted host does
+    assert new.owns_socket_file() and not old.owns_socket_file()
+    old.stop()                        # the old host shuts down AFTER the new one bound
+    assert sock.exists() and new.owns_socket_file()   # …and must not take the file away
+    os.unlink(sock)                   # something else removes it anyway
+    assert new.ensure_listening() is True and new.owns_socket_file()
+    assert new.ensure_listening() is False
+    new.stop()
+    assert not sock.exists()

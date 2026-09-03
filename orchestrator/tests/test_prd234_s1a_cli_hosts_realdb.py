@@ -140,6 +140,45 @@ def test_pairing_round_trip_and_token_resolution(seeded, new_session):
     s.close()
 
 
+def test_a_session_file_under_the_workspace_volume_becomes_a_task_deliverable(seeded, new_session, tmp_path, monkeypatch):
+    """PRD-234 S2: files_touched under <volume>/<workspace_id>/… are registered as
+    deliverables of the ticket (source_type=task, source_id=<task id>); files
+    elsewhere stay references only."""
+    from config import config as cfg
+    ws_id, _api_agent, cli_agent = seeded
+    (tmp_path / ws_id / "sessions" / "1").mkdir(parents=True)
+    (tmp_path / ws_id / "sessions" / "1" / "hello.py").write_text("print('hi')\n")
+    monkeypatch.setattr(cfg, "WORKSPACE_VOLUME_PATH", str(tmp_path), raising=False)
+    s = new_session()
+    task_id = s.execute(
+        text("INSERT INTO board_tasks (workspace_id, title, status, assigned_agent_id, priority) "
+             "VALUES (CAST(:w AS uuid), 'deliverable', 'assigned', :a, 'medium') RETURNING id"),
+        {"w": ws_id, "a": cli_agent},
+    ).fetchone()[0]
+    s.commit()
+    host, token = svc.pair_host(s, svc.create_pairing_code(s, ws_id, "h-deliv")[1], "h-deliv", {})
+    claimed = svc.claim_for_host(s, host, 1)["tasks"]
+    assert [t["task_id"] for t in claimed] == [task_id]
+    host_path = f"/Users/me/Development/automatos-ai/workspaces/{ws_id}/sessions/1/hello.py"
+    out = asyncio.run(svc.apply_result(s, host, task_id, {
+        "attempt": claimed[0]["attempt"], "status": "success", "result_text": "wrote hello.py",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+        "files_touched": [host_path, "/Users/me/elsewhere/notes.md"],
+    }))
+    assert out["applied"] is True
+    row = s.query(BoardTask).get(task_id)
+    assert [d["file_path"] for d in row.runtime_ref["deliverables"]] == ["sessions/1/hello.py"]
+    found = s.execute(
+        text("SELECT source_type, source_id, artifact_type, file_size_bytes FROM deliverables "
+             "WHERE workspace_id = CAST(:w AS uuid) AND file_path = 'sessions/1/hello.py' AND deleted_at IS NULL"),
+        {"w": ws_id},
+    ).fetchone()
+    assert found is not None and tuple(found) == ("task", str(task_id), "code", 12)
+    s.execute(text("DELETE FROM deliverables WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
+    s.commit()
+    s.close()
+
+
 def test_host_claim_preassigns_a_session_and_result_applies_once(seeded, new_session):
     ws_id, _, cli_agent = seeded
     s = new_session()

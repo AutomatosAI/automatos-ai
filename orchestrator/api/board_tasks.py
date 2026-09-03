@@ -28,6 +28,7 @@ from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
+from services.session_report import session_report_lines  # PRD-234 S2
 from services.board_dispatcher import notify_task_available
 from services.board_events import board_event_stream, notify_board_event
 
@@ -132,6 +133,7 @@ async def _auto_create_task_report(
             lines.append("## Result")
             lines.append(str(llm_text))
             lines.append("")
+        lines.extend(session_report_lines(exec_result))  # PRD-234 S2 (empty for API runs)
         lines.append("## Execution Metrics")
         lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
         lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
@@ -139,7 +141,10 @@ async def _auto_create_task_report(
                      f"{exec_metrics.get('input_tokens', 0)} / "
                      f"{exec_metrics.get('output_tokens', 0)} / "
                      f"{exec_metrics.get('tokens_used', 0)}")
-        lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
+        if exec_result.get("runtime") == RUNTIME_CLI:
+            lines.append("- Cost: plan usage (subscription) — no dollar figure")
+        else:
+            lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
         if exec_metrics.get("duration_ms") is not None:
             lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
         content = "\n".join(lines)
@@ -162,6 +167,7 @@ async def _auto_create_task_report(
             status=report_status,
             summary=summary,
             metrics=exec_metrics,
+            linked_task_ids=[task.id],
         )
         if not report_result.get("success"):
             logger.warning(
@@ -1268,10 +1274,12 @@ async def finalize_board_task_run(
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
         await _dispatch_task_failed(db, workspace_id, task)
-        # Surface failures the same way successes are surfaced.
+        # Surface failures the same way successes are surfaced. The result text is
+        # blanked (the error is on the task); the session facts stay so a failed
+        # Claude Code session's report still says what ran (PRD-234 S2).
         await _auto_create_task_report(
             db, workspace_id, task,
-            {"result": "", "tokens_used": 0},
+            {**exec_result, "result": "", "tokens_used": 0},
         )
         db.commit()
         return task.status
