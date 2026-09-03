@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Optional, Any, Dict
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -60,6 +60,26 @@ def _notify_dispatch_safe(db: Session, workspace_id: UUID, task_id: int) -> None
         logger.debug(
             "[BoardTasks] dispatch NOTIFY skipped for task %s", task_id, exc_info=True
         )
+
+
+CREATABLE_STATUSES = ("inbox", "assigned", "review")
+
+
+def initial_board_status(requested: Any, assigned_agent_id: Optional[int], planning_data: Any) -> str:
+    """The status a chat-filed ticket starts in — never a state that skips dispatch.
+
+    The tool schema offers inbox / assigned / review, but a model can send anything
+    (ticket 80: Auto passed ``in_progress``, so the ticket was born "running" with
+    no dispatch, no consent and no gate). Anything else collapses to assigned (an
+    agent is set) or inbox; ``assigned`` without an agent is inbox; an
+    ``approval_action`` still means review.
+    """
+    if isinstance(planning_data, dict) and planning_data.get("approval_action"):
+        return "review"
+    status = requested if isinstance(requested, str) and requested in CREATABLE_STATUSES else None
+    if status == "review":
+        return "review"
+    return "assigned" if assigned_agent_id else "inbox"
 
 
 def _consent_for_chat_filed(db: Session, workspace_id: UUID, task, params: Dict[str, Any]) -> None:
@@ -167,10 +187,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if not planning_data and params.get("approval_action"):
         planning_data = {"approval_action": params["approval_action"]}
 
-    # Determine initial status — tasks with approval_action go to review
-    initial_status = params.get("status", "assigned" if assigned_agent_id else "inbox")
-    if planning_data and planning_data.get("approval_action"):
-        initial_status = "review"
+    initial_status = initial_board_status(params.get("status"), assigned_agent_id, planning_data)
 
     task = BoardTask(
         workspace_id=workspace_id,

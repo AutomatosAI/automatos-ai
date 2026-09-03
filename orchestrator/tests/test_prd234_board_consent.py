@@ -141,3 +141,15 @@ def test_created_ticket_is_pre_approved_on_local_only(monkeypatch):
         db, workspace_id="ws", task=inbox, actor="user:1", why=board_consent.WHY_CREATED_AND_ASSIGNED,
     ) == "skipped"
     assert len(created) == 1
+
+
+def test_a_chat_filed_ticket_never_starts_running():
+    from modules.tools.discovery.handlers_board_tasks import initial_board_status as f
+
+    assert f("in_progress", 15, None) == "assigned"
+    assert f("done", None, None) == "inbox"
+    assert f("assigned", None, None) == "inbox"
+    assert f("assigned", 15, None) == "assigned"
+    assert f(None, 15, None) == "assigned"
+    assert f("review", 15, None) == "review"
+    assert f("inbox", 15, {"approval_action": "send"}) == "review"
