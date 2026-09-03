@@ -29,6 +29,7 @@ from uuid import uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.cli_runtime import RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
 from services.board_events import notify_board_event
 
@@ -44,6 +45,23 @@ _PRIORITY_ORDER_SQL = (
     "CASE priority "
     "WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 )
+
+
+def runtime_predicate_sql(runtime: str, alias: str = "board_tasks") -> str:
+    """PRD-234 S1a: which runtime's tickets a claimant may take.
+
+    The dispatch loop runs API agents; a paired CLI host claims the tickets of
+    ``runtime: cli`` agents. The rule reads the agent's JSON configuration (no
+    agents column) and treats a missing/NULL configuration as ``api`` — every
+    agent that exists today.
+    """
+    kind = (
+        f"COALESCE((SELECT a.configuration->>'runtime' FROM agents a "
+        f"WHERE a.id = {alias}.assigned_agent_id), '{RUNTIME_API}')"
+    )
+    if runtime == RUNTIME_CLI:
+        return f"{kind} = '{RUNTIME_CLI}'"
+    return f"{kind} <> '{RUNTIME_CLI}'"
 
 
 def notify_task_available(db: Session, *, workspace_id, task_id: int) -> None:
@@ -68,8 +86,14 @@ def claim_tasks(
     limit: int,
     lease_seconds: int,
     max_slots_per_agent: Optional[int] = None,
+    runtime: str = RUNTIME_API,
+    workspace_id=None,
 ) -> List[BoardTask]:
     """Atomically claim up to ``limit`` assigned tasks for this worker.
+
+    PRD-234 S1a: ``runtime`` selects whose tickets are claimable — ``api`` (the
+    dispatch loop, default: behaviour unchanged) or ``cli`` (a paired CLI host);
+    ``workspace_id`` confines a host's claim to its own workspace.
 
     ``FOR UPDATE SKIP LOCKED`` is the exactly-once guarantee: the locked SELECT
     grabs only rows no other transaction holds, and the surrounding UPDATE flips
@@ -87,6 +111,11 @@ def claim_tasks(
     """
     now = datetime.now(timezone.utc)
     lease_until = now + timedelta(seconds=lease_seconds)
+    runtime_sql = runtime_predicate_sql(runtime, alias="board_tasks")
+    runtime_sql_t = runtime_predicate_sql(runtime, alias="t")
+    ws_sql = "AND workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
+    ws_sql_t = "AND t.workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
+    ws_params = {"ws": str(workspace_id)} if workspace_id is not None else {}
 
     if max_slots_per_agent is None:
         # No cap: single-statement exactly-once claim.
@@ -96,11 +125,13 @@ def claim_tasks(
              WHERE status = 'assigned'
                AND assigned_agent_id IS NOT NULL
                AND source_type <> 'recipe'
+               AND {runtime_sql}
+               {ws_sql}
              ORDER BY {_PRIORITY_ORDER_SQL}, created_at
              FOR UPDATE SKIP LOCKED
              LIMIT :limit
         """
-        params = {"lease_until": lease_until, "now": now, "limit": limit}
+        params = {"lease_until": lease_until, "now": now, "limit": limit, **ws_params}
     else:
         # Slot-aware: rank each agent's assigned tasks and keep only as many as
         # the agent has free slots (slots − currently in_progress). Two steps,
@@ -126,11 +157,13 @@ def claim_tasks(
                      WHERE t.status = 'assigned'
                        AND t.assigned_agent_id IS NOT NULL
                        AND t.source_type <> 'recipe'
+                       AND {runtime_sql_t}
+                       {ws_sql_t}
                 )
                 SELECT id FROM ranked WHERE rn <= free ORDER BY rn, id LIMIT :limit
                 """
             ),
-            {"slots": max_slots_per_agent, "limit": limit},
+            {"slots": max_slots_per_agent, "limit": limit, **ws_params},
         ).fetchall()
         candidate_ids = [r[0] for r in candidate_rows]
         if not candidate_ids:

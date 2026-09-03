@@ -1,5 +1,5 @@
 {
-  "route_count": 776,
+  "route_count": 784,
   "routes": [
     {
       "method": "GET",
@@ -2243,6 +2243,34 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/cli-hosts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cli-hosts/pair"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cli-hosts/pairing-codes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cli-hosts/{host_id}/claim"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cli-hosts/{host_id}/heartbeat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/events"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/result"
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/fleet"
     },
     {
@@ -2416,6 +2444,10 @@
     {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/approve"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/cancel"
     },
     {
       "method": "POST",

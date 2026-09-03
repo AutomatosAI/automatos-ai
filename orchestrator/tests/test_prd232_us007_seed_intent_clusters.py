@@ -330,8 +330,8 @@ CATS = {
 
 
 def test_single_alembic_head_at_our_revision():
-    """Exactly one head after the migration, and it is prd232_cluster_provenance
-    chained onto the prior single head. Uses alembic's own ScriptDirectory (the
+    """Exactly one head after the migration, with prd232_cluster_provenance on its
+    lineage (chained onto the then-single head; later migrations may sit above it). Uses alembic's own ScriptDirectory (the
     same machinery ``alembic heads`` uses) so merges/tuples are handled correctly.
     No DB — ScriptDirectory only reads the version files."""
     from alembic.config import Config
@@ -342,7 +342,15 @@ def test_single_alembic_head_at_our_revision():
     script = ScriptDirectory.from_config(cfg)
 
     heads = list(script.get_heads())
-    assert heads == ["prd232_cluster_provenance"], f"expected single head, got {heads}"
+    assert len(heads) == 1, f"expected single head, got {heads}"
+    # The head's IDENTITY is pinned once, in test_prd209_alembic_single_head
+    # (EXPECTED_HEAD). Here we assert what PRD-232 actually needs: one head, and
+    # our revision on its lineage — later mainline migrations (PRD-234 S1a, …)
+    # legitimately sit above us without making us a rival head.
+    head_lineage = {r.revision for r in script.walk_revisions(base="base", head=heads[0])}
+    assert "prd232_cluster_provenance" in head_lineage, (
+        f"prd232_cluster_provenance is not on the single head's lineage ({heads[0]})"
+    )
     rev = script.get_revision("prd232_cluster_provenance")
     # Chain position is NOT an identity contract: later mainline migrations
     # (PRD-230, workspace-models) legitimately sit between prd225 and us. What

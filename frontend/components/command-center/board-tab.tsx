@@ -52,9 +52,10 @@ const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   blocked:     { label: 'Blocked',     color: 'hsl(15 76% 44%)' },
   done:        { label: 'Done',        color: 'hsl(82 30% 33%)' },
   failed:      { label: 'Failed',      color: 'hsl(0 62% 38%)' },
+  cancelled:   { label: 'Cancelled',   color: 'hsl(30 6% 40%)' }, // PRD-234 S1a
 }
 const COLUMNS_ORDER: BoardStatus[] = [
-  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed',
+  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled',
 ]
 const LANE_COLUMNS = COLUMNS_ORDER.filter((c) => c !== 'done')
 
@@ -289,6 +290,7 @@ function KanbanCard({
             {task.sla_deadline &&
               task.status !== 'done' &&
               task.status !== 'failed' &&
+              task.status !== 'cancelled' &&
               new Date(task.sla_deadline).getTime() < Date.now() && (
                 <span
                   className="high"
