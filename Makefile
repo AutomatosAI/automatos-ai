@@ -20,7 +20,14 @@ DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
 .PHONY: up dev down clean reset status logs cli-host
 
+# PRD-234 S2: the projects folder is bind-mounted INSIDE the read-only workspace
+# mount, so its mountpoint must exist on the host first.
+DEFAULT_WORKSPACE_ID ?= $(shell sed -n 's/^DEFAULT_WORKSPACE_ID=//p' .env 2>/dev/null | tail -1 | tr -d '"')
+LOCAL_PROJECTS_DIR   ?= $(shell sed -n 's/^LOCAL_PROJECTS_DIR=//p' .env 2>/dev/null | tail -1 | tr -d '"')
+_WS_ID = $(if $(DEFAULT_WORKSPACE_ID),$(DEFAULT_WORKSPACE_ID),00000000-0000-0000-0000-0000000000c1)
+
 up:
+	@mkdir -p "$(CURDIR)/workspaces/$(_WS_ID)/projects" "$(CURDIR)/workspaces/projects"
 	$(COMPOSE) up -d --build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
@@ -60,9 +67,11 @@ status:
 # machine (local edition only; CLI_RUNTIME_ENABLED=true in .env).
 #   make cli-host PAIR=XXXX-XXXX   first time — the code comes from Settings → Session mode
 #   make cli-host                  afterwards
-# Registers ./workspaces (the compose default) as a working directory. Add real
-# repositories with CLI_HOST_ARGS="--allow /path/to/repo". Standard library
+# Registers ./workspaces (the compose default) as a working directory; a ticket
+# without one runs in ./workspaces/<workspace id>/sessions/<ticket>, which
+# Deliverables → Explorer shows live. Your own repositories: LOCAL_PROJECTS_DIR
+# in .env (browsable under projects/) or CLI_HOST_ARGS="--allow /path/to/repo". Standard library
 # Python 3.9+; nothing to install. Stop with Ctrl-C.
 cli-host:
 	@mkdir -p "$(CURDIR)/workspaces"
-	@cd services/cli-host && python3 -m automatos_cli_host --allow "$(CURDIR)/workspaces" $(if $(PAIR),--pair $(PAIR),) $(CLI_HOST_ARGS)
+	@cd services/cli-host && python3 -m automatos_cli_host --allow "$(CURDIR)/workspaces" $(if $(LOCAL_PROJECTS_DIR),--allow "$(LOCAL_PROJECTS_DIR)",) $(if $(PAIR),--pair $(PAIR),) $(CLI_HOST_ARGS)

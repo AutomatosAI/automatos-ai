@@ -2,6 +2,7 @@
 
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
+import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -103,6 +104,18 @@ function SessionBlock({ task }: { task: BoardTask }) {
             <p className="text-xs text-muted-foreground mb-1">Files touched</p>
             <ul className="text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto">
               {files.map((f) => <li key={f} className="truncate" title={f}>{f}</li>)}
+            </ul>
+          </div>
+        )}
+        {Array.isArray(ref.recent_tools) && ref.recent_tools.length > 0 && (
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Recent tool calls</p>
+            <ul className="text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto">
+              {(ref.recent_tools as Array<{ at?: string; tool?: string; subject?: string }>).slice(-10).map((r, i) => (
+                <li key={i} className="truncate" title={r.subject || r.tool}>
+                  <span className="text-muted-foreground">{r.at ? new Date(r.at).toLocaleTimeString() : ''}</span> {r.tool}{r.subject ? ` · ${r.subject}` : ''}
+                </li>
+              ))}
             </ul>
           </div>
         )}
@@ -251,6 +264,7 @@ function InProgressContent({ task }: { task: BoardTask }) {
 
       {/* Live output */}
       <SessionBlock task={task} />
+      <TaskDeliverablesPanel taskId={task.id} />
 
       {task.result && (
         <div>
@@ -282,6 +296,7 @@ function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: Bo
       </div>
 
       <SessionBlock task={task} />
+      <TaskDeliverablesPanel taskId={task.id} />
 
       {/* Agent result — the main attraction */}
       {task.result ? (

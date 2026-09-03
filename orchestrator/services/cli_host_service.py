@@ -20,6 +20,7 @@ import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -354,6 +355,11 @@ def record_events(
             ref["last_event"] = name
         if name == "PreToolUse" and ev.get("tool_name"):
             ref["live_tool"] = ev["tool_name"]
+            # PRD-234 S2: the ticket's live log — tool + what it was about, bounded.
+            entry: Dict[str, Any] = {"at": _iso(_now()), "tool": str(ev["tool_name"])[:60]}
+            if ev.get("subject"):
+                entry["subject"] = str(ev["subject"])[:200]
+            ref["recent_tools"] = (list(ref.get("recent_tools") or []) + [entry])[-RECENT_TOOLS_KEPT:]
         elif name in ("PostToolUse", "Stop", "SessionEnd"):
             ref.pop("live_tool", None)
         if ev.get("session_id"):
@@ -376,6 +382,78 @@ def _tokens_used(usage: Dict[str, Any]) -> int:
         return int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+RECENT_TOOLS_KEPT = 30
+
+# register() refuses 'report' — ReportService owns that type; a session's .md is a document.
+_DELIVERABLE_TYPE_OVERRIDES = {"report": "document"}
+
+
+def workspace_relative_path(host_path: str, workspace_id: str) -> Optional[str]:
+    """``…/<AUTOMATOS_WORKSPACE_DIR>/<workspace_id>/sessions/68/hello.py`` → ``sessions/68/hello.py``.
+
+    The host's absolute path means nothing inside the container; the workspace-id
+    segment is the anchor both sides share (the worker's layout is
+    ``<root>/<workspace_id>/<relative path>``). ``None`` when the file is elsewhere —
+    it then stays a reference in ``runtime_ref.files_touched``.
+    """
+    marker = f"/{workspace_id}/"
+    idx = str(host_path).find(marker)
+    if idx < 0:
+        return None
+    rel = str(host_path)[idx + len(marker):].strip("/")
+    if not rel or any(part in ("", ".", "..") for part in rel.split("/")):
+        return None
+    return rel
+
+
+def _register_session_deliverables(
+    db: Session, task: BoardTask, files: Iterable[str], *, agent_id: Optional[int],
+    agent_name: Optional[str], session_id: Optional[str],
+) -> List[Dict[str, Any]]:
+    """PRD-234 S2: every file a session wrote under the workspace volume becomes a
+    deliverable of the ticket (``source_type='task'``), through the same
+    ``DeliverableService.register`` mission promotion uses (#611). Metadata only:
+    the bytes already sit where the worker serves them. Fail-soft per file."""
+    from services.deliverable_service import (
+        AGENT_REGISTERABLE_ARTIFACT_TYPES, DeliverableService, _infer_artifact_type,
+    )
+    workspace_id = str(task.workspace_id)
+    volume = Path(config.WORKSPACE_VOLUME_PATH) / workspace_id
+    service = DeliverableService(db, workspace_id)
+    registered: List[Dict[str, Any]] = []
+    for host_path in files:
+        rel = workspace_relative_path(str(host_path), workspace_id)
+        if rel is None:
+            continue
+        inferred = _infer_artifact_type(rel)
+        if inferred not in AGENT_REGISTERABLE_ARTIFACT_TYPES:
+            continue
+        full = volume / rel
+        try:
+            size = full.stat().st_size if full.is_file() else None
+        except OSError:
+            size = None
+        if size is None:
+            continue  # not visible from this container → reference only
+        artifact_type = _DELIVERABLE_TYPE_OVERRIDES.get(inferred, inferred)
+        try:
+            res = service.register(
+                file_path=rel, source_type="task", source_id=str(task.id),
+                agent_id=agent_id, agent_name=agent_name, artifact_type=artifact_type,
+                file_size_bytes=size,
+                summary=f"Written by a Claude Code session for ticket #{task.id}",
+                extra={"task_id": task.id, "session_id": session_id, "host_path": str(host_path),
+                       "runtime": RUNTIME_CLI},
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad file must not lose the result
+            logger.warning("[CliHost] deliverable registration failed for %s: %s", rel, exc)
+            continue
+        if res.get("success"):
+            registered.append({"id": res.get("deliverable_id"), "file_path": rel,
+                               "title": rel.rsplit("/", 1)[-1], "artifact_type": artifact_type})
+    return registered
 
 
 MAX_DENIALS_KEPT = 20
@@ -448,6 +526,27 @@ async def apply_result(
     )
     if payload.get("transcript_path"):
         ref["transcript_path"] = payload["transcript_path"]
+
+    # PRD-234 S2: files under the workspace volume → the ticket's deliverables;
+    # the session facts ride exec_result so the task report can show them.
+    agent_row = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
+    deliverables = _register_session_deliverables(
+        db, task, files, agent_id=task.assigned_agent_id,
+        agent_name=getattr(agent_row, "name", None), session_id=ref.get("session_id"),
+    )
+    ref["deliverables"] = deliverables
+    exec_result["deliverables"] = deliverables
+    exec_result["session"] = {
+        "session_id": ref.get("session_id"),
+        "host_id": str(host.id),
+        "provider": ref.get("provider"),
+        "model": (usage.get("model") if isinstance(usage, dict) else None) or ref.get("model"),
+        "cwd": ref.get("cwd"),
+        "exit_reason": ref.get("exit_reason"),
+        "transcript_path": ref.get("transcript_path"),
+        "recent_tools": list(ref.get("recent_tools") or []),
+        "permission_denials": list(ref.get("permission_denials") or []),
+    }
     task.runtime_ref = ref
     db.commit()
 

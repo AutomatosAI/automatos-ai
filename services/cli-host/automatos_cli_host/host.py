@@ -196,7 +196,8 @@ class Host:
 
     def _start(self, ticket: Dict[str, Any]) -> None:
         task_id = str(ticket.get("task_id"))
-        session = Session(ticket, self.cfg, self.allow_roots, self.cfg.socket_path, default_root=self.allow_roots[0])
+        session = Session(ticket, self.cfg, self.allow_roots, self.cfg.socket_path, default_root=self.allow_roots[0],
+                          workspace_id=str((self.identity or {}).get("workspace_id") or ""))
         self.sessions[task_id] = session
         self.hooks.register(task_id, session.handle_hook)
 

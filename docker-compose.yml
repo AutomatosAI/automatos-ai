@@ -224,6 +224,10 @@ services:
       # browser and Code Canvas go through the worker's HTTP API instead
       # (WORKER_INTERNAL_URL in envs/api.defaults).
       - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces:ro
+      # PRD-234 S2 (local edition): your own projects folder, read-only, shown by
+      # Deliverables → Explorer under projects/. Sessions write to it through the
+      # CLI host on your machine, never through these containers.
+      - ${LOCAL_PROJECTS_DIR:-./workspaces/projects}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}/projects:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -334,6 +338,8 @@ services:
     volumes:
       # Host directory (bind mount, read-write) — the ONE host-access dial.
       - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces
+      # PRD-234 S2: the same projects folder, read-only here too (browse + serve).
+      - ${LOCAL_PROJECTS_DIR:-./workspaces/projects}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}/projects:ro
     deploy:
       resources:
         limits:

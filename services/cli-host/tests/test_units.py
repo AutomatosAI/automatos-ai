@@ -295,3 +295,21 @@ def test_policy_lets_a_session_run_its_own_code(tmp_path):
     ]
     for cmd in refused:
         assert not policy.decide("Bash", {"command": cmd}, ctx).allow, cmd
+
+
+def test_default_session_cwd_is_the_workspace_sessions_folder(tmp_path):
+    """PRD-234 S2: a ticket without a working directory runs where the
+    Deliverables explorer looks — <root>/<workspace id>/sessions/<ticket>."""
+    target = allowlist.default_session_cwd(str(tmp_path), "00000000-0000-0000-0000-0000000000c1", "68")
+    assert target == (tmp_path / "00000000-0000-0000-0000-0000000000c1" / "sessions" / "68").resolve()
+    assert target.is_dir()
+    with pytest.raises(allowlist.NotAllowed):
+        allowlist.default_session_cwd(str(tmp_path), "../escape", "68")
+
+
+def test_emit_subject_is_the_command_or_path_only():
+    from automatos_cli_host.session import _subject_of
+    assert _subject_of({"tool_input": {"command": "python3 hello.py", "timeout": 5}}) == "python3 hello.py"
+    assert _subject_of({"tool_input": {"file_path": "/w/hello.py", "content": "secret body"}}) == "/w/hello.py"
+    assert _subject_of({"tool_input": "junk"}) is None
+    assert len(_subject_of({"tool_input": {"command": "x" * 500}})) == 200

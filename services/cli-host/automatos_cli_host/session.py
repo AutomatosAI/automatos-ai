@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import __version__
-from .allowlist import NotAllowed, resolve_allowed
+from .allowlist import NotAllowed, resolve_allowed, default_session_cwd
 from .claude_settings import has_completed_onboarding, record_directory_trust, write_settings
 from .config import HostConfig
 from .env import build_session_env, resolve_binary
@@ -157,12 +157,26 @@ def _is_git_repo(path: Path) -> bool:
     return (path / ".git").exists()
 
 
+def _subject_of(payload: Dict[str, Any]) -> Optional[str]:
+    """The one thing a tool call is about — a command, a path, a pattern — for the
+    ticket's live log. Never the whole tool input."""
+    ti = payload.get("tool_input")
+    if not isinstance(ti, dict):
+        return None
+    for key in ("command", "file_path", "notebook_path", "path", "pattern", "url", "query"):
+        value = ti.get(key)
+        if value:
+            return str(value)[:200]
+    return None
+
+
 class Session:
     """Runs one ticket. ``events`` is drained by the host and shipped in batches."""
 
     def __init__(self, ticket: Dict[str, Any], cfg: HostConfig, allow_roots: List[str],
-                 sock_path: Path, default_root: Optional[str]):
+                 sock_path: Path, default_root: Optional[str], workspace_id: str = ""):
         self.ticket = ticket
+        self.workspace_id = workspace_id
         self.cfg = cfg
         self.allow_roots = allow_roots
         self.sock_path = sock_path
@@ -267,6 +281,7 @@ class Session:
             "session_id": payload.get("session_id"),
             "transcript_path": payload.get("transcript_path"),
             "tool_name": payload.get("tool_name"),
+            "subject": _subject_of(payload),
             "notification_type": payload.get("notification_type"),
             "message": (payload.get("message") or "")[:500] or None,
         }
@@ -283,7 +298,13 @@ class Session:
     def _run(self) -> SessionOutcome:
         # 1. where
         try:
-            cwd = resolve_allowed(self.ticket.get("cwd"), self.allow_roots, default_root=self.default_root)
+            cwd_hint = str(self.ticket.get("cwd") or "").strip()
+            if not cwd_hint and self.default_root:
+                # No working directory on the agent → the workspace's own sessions
+                # folder, which the Deliverables explorer shows live (PRD-234 S2).
+                cwd = default_session_cwd(self.default_root, self.workspace_id, self.task_id)
+            else:
+                cwd = resolve_allowed(cwd_hint or None, self.allow_roots, default_root=self.default_root)
         except NotAllowed as exc:
             return self._outcome("error", error=str(exc), exit_reason="cwd_not_allowed")
         if not cwd.is_dir():
