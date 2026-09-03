@@ -354,3 +354,51 @@ def test_service_py_injects_the_assign_directive():
         src = f.read()
     assert 'getattr(complexity_assessment, "context_directive", None)' in src
     assert "_assign_directive" in src
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-02 -- the "JIRA ADMIN" misfire: a target agent must be grounded in
+# the user's own words. "Can you close all the blocked tickets for VECTOR" was
+# classified assign with target_agent "JIRA ADMIN" (inferred from "tickets"),
+# and the lane filed + started a ticket for an agent the user never named.
+# ---------------------------------------------------------------------------
+
+
+def test_match_roster_ungrounded_name_is_ask_signal():
+    """The classifier proposes a roster agent the user never mentioned →
+    unresolved (ask-in-thread), even though the name is a perfect roster hit."""
+    roster = [_agent(93, "JIRA ADMIN"), _agent(577, "VECTOR")]
+    message = "Hey Auto, Can you close all the blocked tickets for VECTOR as it was a token issue?"
+    assert _brain()._match_roster_agent("JIRA ADMIN", roster, message=message) == (None, None)
+
+
+def test_match_roster_grounded_partial_name_still_resolves():
+    """A name the user DID write keeps resolving, including the partial-name
+    contains path ('Jim' → 'Jim Whitfield')."""
+    roster = [_agent(3, "Jim Whitfield"), _agent(7, "Accountant")]
+    assert _brain()._match_roster_agent(
+        "Jim", roster, message="Get Jim to draft the board pack, no rush"
+    ) == (3, "Jim Whitfield")
+    assert _brain()._match_roster_agent(
+        "accountant", roster, message="Have my accountant agent chase the overdue invoices"
+    ) == (7, "Accountant")
+
+
+def test_match_roster_grounding_is_case_insensitive():
+    roster = [_agent(577, "VECTOR")]
+    assert _brain()._match_roster_agent(
+        "vector", roster, message="have VECTOR review the growth pulse"
+    ) == (577, "VECTOR")
+
+
+def test_match_roster_without_message_keeps_old_behaviour():
+    """Callers that cannot supply the message (none today) are unchanged."""
+    roster = [_agent(93, "JIRA ADMIN")]
+    assert _brain()._match_roster_agent("JIRA ADMIN", roster) == (93, "JIRA ADMIN")
+
+
+def test_prompt_forbids_inventing_an_assignee_from_the_topic():
+    prompt = build_assessment_prompt("hi", 0, "")
+    assert "MUST appear in the user's own words" in prompt
+    assert "close all the blocked tickets for VECTOR" in prompt
+    assert "Never invent an assignee from the topic" in prompt

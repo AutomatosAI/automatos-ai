@@ -27,7 +27,7 @@ from core.models.system_settings import SystemSettingResponse, SystemSettingsByC
 
 def _row(**over):
     base = dict(
-        id=100, category="llm_cost_audit", key="trial_spend_2026-09-02", value="0.001",
+        id=100, category="llm_cost_audit", key="spend", value="0.001",
         value_type="number", description="PRD-222 trial daily spend", is_sensitive=None,
         is_required=None, default_value=None, validation_rules=None,
         created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc), created_by=None,

@@ -524,14 +524,29 @@ def _refresh(
 
 # ── Workspace, operator, ledger ──────────────────────────────────────────────
 
+# A brand-new install starts Auto-led onboarding. Without an explicit stage the
+# operator workspace is created stage-less, and the container's own
+# `alembic upgrade heads` then runs PRD-222's veteran backfill over it, which
+# stamps every stage-less workspace `skipped` — so the onboarding chat never
+# appeared on a fresh local install (found 2026-09-03 on the isolated lab).
+# The backfill matches only stage-less docs; a document with a stage is left
+# alone. SaaS never enters this module.
+FRESH_INSTALL_ONBOARDING = '{"stage": "not_started", "stages": {}, "segment": {}}'
+
+
 def _ensure_workspace(db: Session, workspace_id: UUID) -> str:
     result = db.execute(
         text(
-            "INSERT INTO workspaces (id, name, slug, is_personal, is_active) "
-            "VALUES (CAST(:id AS uuid), :name, :slug, TRUE, TRUE) "
+            "INSERT INTO workspaces (id, name, slug, is_personal, is_active, onboarding) "
+            "VALUES (CAST(:id AS uuid), :name, :slug, TRUE, TRUE, CAST(:onboarding AS jsonb)) "
             "ON CONFLICT (id) DO NOTHING"
         ),
-        {"id": str(workspace_id), "name": LOCAL_WORKSPACE_NAME, "slug": LOCAL_WORKSPACE_SLUG},
+        {
+            "id": str(workspace_id),
+            "name": LOCAL_WORKSPACE_NAME,
+            "slug": LOCAL_WORKSPACE_SLUG,
+            "onboarding": FRESH_INSTALL_ONBOARDING,
+        },
     )
     return "created" if result.rowcount == 1 else "present"
 
