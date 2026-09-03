@@ -1,6 +1,6 @@
 # PRD-235 — Automatos, the manager of coding agents (the local "AI OS")
 
-**Status:** DRAFT for owner review · 2026-09-03 · builds on PRD-234 (session mode; S1a/S1b/S4 merged, S2 in #694, S3 in #695).
+**Status:** DRAFT for owner review · 2026-09-03 · builds on PRD-234 (session mode; S1a/S1b/S4 merged, S2 in #694, S3 in #695). **Wave 2 is built on #697** (repo-scoped Canvas, folder-scoped conversation, live session + approval cards both ways, ticket↔chat/takeover/editor links, `LOCAL_PROJECTS_MOUNT` dial for D-B; verified locally on tickets 76–78). Waves 3–6 wait on decisions D-A…D-H (§6).
 **Owner's words (2026-09-03):** "turn this into a super management platform… the Code option more like a Cursor environment — see my files, repos, chat with my agent and fix my code… the full Claude Code builds and manages my code, using Auto and the board, calendar, heartbeats to manage it all… Auto can be Kimi and assigns tasks to Claude or DeepSeek or whoever is best suited… local open-source and SaaS must coexist… research Hermes, OpenClaw, munder and take their best… make Automatos the god of AI management systems."
 
 ## 0. In one paragraph
