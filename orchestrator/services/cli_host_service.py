@@ -378,6 +378,26 @@ def _tokens_used(usage: Dict[str, Any]) -> int:
         return 0
 
 
+MAX_DENIALS_KEPT = 20
+
+
+def _denial_summary(denial: Any) -> Dict[str, Any]:
+    """One denial as the ticket shows it: tool, stage, reason, and the command or
+    path it was about (never the whole tool input)."""
+    if not isinstance(denial, dict):
+        return {"tool": "?", "reason": str(denial)[:300]}
+    raw_input = denial.get("input") if isinstance(denial.get("input"), dict) else {}
+    subject = raw_input.get("command") or raw_input.get("file_path") or raw_input.get("path")
+    out: Dict[str, Any] = {
+        "tool": str(denial.get("tool") or "?")[:60],
+        "stage": str(denial.get("stage") or "")[:40],
+        "reason": str(denial.get("reason") or "")[:300],
+    }
+    if subject:
+        out["subject"] = str(subject)[:300]
+    return out
+
+
 async def apply_result(
     db: Session, host: CliHost, task_id: int, payload: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -421,6 +441,9 @@ async def apply_result(
             "files_touched": files,
             "usage": usage,
             "denials": len(denials),
+            # The reasons, not just the count: a ticket in review must say WHY
+            # ("'python3 hello.py' is outside this ticket's Bash allowlist").
+            "permission_denials": [_denial_summary(d) for d in denials[:MAX_DENIALS_KEPT]],
         }
     )
     if payload.get("transcript_path"):

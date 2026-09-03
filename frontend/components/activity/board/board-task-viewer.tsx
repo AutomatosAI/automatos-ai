@@ -1,6 +1,7 @@
 'use client'
 
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
+import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -80,11 +81,23 @@ function SessionBlock({ task }: { task: BoardTask }) {
           )}
           {typeof ref.denials === 'number' && ref.denials > 0 && (
             <>
-              <span className="text-muted-foreground">Denied tool calls</span>
+              <span className="text-muted-foreground">Refused tool calls</span>
               <span>{ref.denials}</span>
             </>
           )}
         </div>
+        {reviewReason(ref) && (
+          <div className="rounded-md border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-2 text-xs space-y-1">
+            <p>{reviewReason(ref)}</p>
+            {sessionDenials(ref).length > 0 && (
+              <ul className="font-mono space-y-0.5 max-h-32 overflow-y-auto">
+                {sessionDenials(ref).map((d, i) => (
+                  <li key={i} className="truncate" title={denialLine(d)}>{denialLine(d)}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {files.length > 0 && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Files touched</p>
