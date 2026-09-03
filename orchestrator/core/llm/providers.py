@@ -81,8 +81,10 @@ _NVIDIA_TERMS = (
     "§1.2, §1.4, §4.3). Your key is your own agreement with NVIDIA."
 )
 _NVIDIA_RATE_LIMIT = (
-    "NVIDIA's free tier allows about 40 requests per minute per key. Above that "
-    "the call fails; it is never rerouted to a paid provider."
+    "NVIDIA's free tier allows about 40 requests per minute per key, and a popular "
+    "model can be at capacity (429 within a second even on your first call). The "
+    "call fails; it is never rerouted to a paid provider. Wait a minute or pick "
+    "another NVIDIA route — the smaller Nemotron models usually answer at once."
 )
 
 _SPECS: Tuple[ProviderSpec, ...] = (
