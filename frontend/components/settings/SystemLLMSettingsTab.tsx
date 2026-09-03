@@ -33,6 +33,7 @@ import {
 } from '@/lib/api/system-settings'
 import { LLM_DEFAULTS } from '@/lib/llm-defaults'
 import { useWorkspaceModels } from '@/hooks/use-model-api'
+import { chatProviders, hostsVendorModels, useProviderRegistry } from '@/hooks/use-provider-registry'
 import { apiClient } from '@/lib/api-client'
 
 interface SystemLLMSettingsTabProps {
@@ -148,15 +149,20 @@ export default function SystemLLMSettingsTab({
 
   const selectedProvider = orchConfig?.llm?.provider || ''
 
+  // PRD-236: providers come from the backend registry; a provider that hosts
+  // vendor-prefixed ids (OpenRouter, NVIDIA) lists the aggregator-tier models.
+  const registry = useProviderRegistry()
+  const providerOptions = useMemo(() => chatProviders(registry), [registry])
+
   const availableModels = useMemo(() => {
     if (!Array.isArray(allModels)) return []
     if (!selectedProvider) return allModels
-    const isAggregator = selectedProvider === 'openrouter'
+    const isAggregator = hostsVendorModels(registry, selectedProvider)
     return allModels.filter((model: any) =>
       model.provider === selectedProvider ||
       (isAggregator && model.tier === 'aggregator')
     )
-  }, [allModels, selectedProvider])
+  }, [allModels, selectedProvider, registry])
 
   // Self-load settings when in standalone mode
   useEffect(() => {
@@ -434,16 +440,12 @@ export default function SystemLLMSettingsTab({
                       <SelectValue placeholder="Select LLM provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai">OpenAI</SelectItem>
-                      <SelectItem value="anthropic">Anthropic</SelectItem>
-                      <SelectItem value="google">Google</SelectItem>
-                      <SelectItem value="openrouter">OpenRouter</SelectItem>
-                      <SelectItem value="deepseek">DeepSeek</SelectItem>
-                      <SelectItem value="azure">Azure OpenAI</SelectItem>
-                      <SelectItem value="bedrock">AWS Bedrock</SelectItem>
-                      <SelectItem value="grok">Grok / xAI</SelectItem>
-                      <SelectItem value="cohere">Cohere</SelectItem>
-                      <SelectItem value="huggingface">HuggingFace (Free/Testing)</SelectItem>
+                      {providerOptions.map((p) => (
+                        <SelectItem key={p.slug} value={p.slug}>
+                          {p.label}
+                          {p.free ? ' (free tier)' : ''}
+                        </SelectItem>
+                      ))}
                       <SelectItem value="local">Local Model</SelectItem>
                     </SelectContent>
                   </Select>
@@ -458,9 +460,11 @@ export default function SystemLLMSettingsTab({
                     value={orchConfig?.llm?.model_id || ''}
                     onValueChange={(value) => {
                       handleLLMChange('model_id', value)
-                      // If user picks an aggregator model, auto-switch provider to openrouter
+                      // An aggregator-tier model needs a provider that hosts vendor-prefixed
+                      // ids. OpenRouter and NVIDIA both do (PRD-236) — only switch to
+                      // OpenRouter when the chosen provider cannot serve the model.
                       const picked = allModels.find((m: any) => m.model_id === value)
-                      if (picked && (picked as any).tier === 'aggregator' && orchConfig?.llm?.provider !== 'openrouter') {
+                      if (picked && (picked as any).tier === 'aggregator' && !hostsVendorModels(registry, orchConfig?.llm?.provider)) {
                         handleLLMChange('provider', 'openrouter')
                       }
                     }}

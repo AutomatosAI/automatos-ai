@@ -20,15 +20,14 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import UserApiKey
 from core.credentials.encryption import get_encryption_service
+from core.llm import providers as provider_registry
 from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/keys", tags=["API Keys"])
 
-SUPPORTED_PROVIDERS = [
-    "openai", "anthropic", "google", "openrouter", "deepseek",
-    "azure", "bedrock", "grok", "cohere", "huggingface",
-]
+# PRD-236: the registry is the one list of providers (core/llm/providers.py).
+SUPPORTED_PROVIDERS = provider_registry.byok_slugs()
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────
@@ -107,6 +106,16 @@ def _row_to_out(
     )
 
 
+def _openai_compatible_models_list(provider: str) -> bool:
+    """True for registry providers validated by a models-list call on the OpenAI SDK."""
+    spec = provider_registry.get_spec(provider)
+    return bool(
+        spec
+        and spec.adapter == provider_registry.ADAPTER_OPENAI_COMPATIBLE
+        and spec.validation == provider_registry.VALIDATION_MODELS_LIST
+    )
+
+
 async def _validate_provider_key(provider: str, raw_key: str) -> ApiKeyValidation:
     """Make a real, minimal provider call to prove a BYOK key works (PRD-222 US-006).
 
@@ -130,13 +139,16 @@ async def _validate_provider_key(provider: str, raw_key: str) -> ApiKeyValidatio
             import google.generativeai as genai
             genai.configure(api_key=raw_key)
             genai.list_models()
-        elif provider == "openrouter":
+        elif _openai_compatible_models_list(provider):
+            # OpenRouter, NVIDIA, DeepSeek — a models-list call against the
+            # provider's own base URL proves the key (PRD-236 S0.3).
             from openai import OpenAI
-            OpenAI(
-                api_key=raw_key,
-                base_url=config.OPENROUTER_BASE_URL,
-                default_headers={"HTTP-Referer": config.OPENROUTER_SITE_URL, "X-Title": "Automatos AI"},
-            ).models.list()
+            spec = provider_registry.get_spec(provider)
+            kwargs = {"api_key": raw_key, "base_url": provider_registry.base_url_for(spec.slug)}
+            headers = provider_registry.headers_for(spec.slug)
+            if headers:
+                kwargs["default_headers"] = headers
+            OpenAI(**kwargs).models.list()
         else:
             return ApiKeyValidation(
                 valid=True,
@@ -298,7 +310,7 @@ async def get_platform_key_status(
     resolver = get_credential_resolver()
     result = {}
 
-    for provider in SUPPORTED_PROVIDERS:
+    for provider in provider_registry.platform_key_slugs():
         configured = False
         cred_names = [
             f"development_{provider}_api",
@@ -321,6 +333,19 @@ async def get_platform_key_status(
     return {"platform_keys": result}
 
 
+@router.get("/providers")
+async def list_providers(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """The provider registry as the UI renders it (PRD-236 S0.6).
+
+    Labels, key placeholders, docs links, the NVIDIA trial and rate-limit
+    notes, and per-edition flags (``platform_key`` is False for byok_only
+    providers in saas). Never a key, never a config attribute name.
+    """
+    return provider_registry.public_registry()
+
+
 @router.put("/platform", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
 async def set_platform_key(
     body: PlatformKeyCreate,
@@ -340,6 +365,13 @@ async def set_platform_key(
     provider = body.provider.lower()
     if provider not in SUPPORTED_PROVIDERS:
         raise HTTPException(400, f"Unsupported provider. Supported: {SUPPORTED_PROVIDERS}")
+    if not provider_registry.platform_key_allowed(provider):
+        # PRD-236 §Terms: NVIDIA's trial endpoint is BYO key only in saas.
+        raise HTTPException(
+            400,
+            f"'{provider}' is a bring-your-own-key provider in this edition — "
+            "add it under the workspace's own API keys instead of a platform key.",
+        )
 
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
