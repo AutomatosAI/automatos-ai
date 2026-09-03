@@ -1245,10 +1245,12 @@ class PlatformActionExecutor:
         # the memory keys above — never caller-supplied.
         _OPERATOR_CONSENT_ACTIONS = ("platform_create_task", "platform_assign_task", "platform_update_task_status")
         if action_name in _OPERATOR_CONSENT_ACTIONS:
+            from services.board_consent import driver_from_caller_context
+
             params = {k: v for k, v in params.items() if k != "_user_id"}
-            _driver = (caller_context or {}).get("user_id")
+            _driver = driver_from_caller_context(caller_context)
             if _driver:
-                params = {**params, "_user_id": str(_driver)}
+                params = {**params, "_user_id": _driver}
 
         try:
             result = await handler(self.db, self.workspace_id, params)

@@ -166,3 +166,11 @@ def test_reconciler_leaves_live_leased_tickets_alone():
     assert "bt.lease_until IS NULL OR bt.lease_until < :now" in sql
     assert re.search(r"status = 'in_progress'", sql)
     assert ":cutoff" in sql and ":now" in sql
+
+
+def test_driver_is_the_clerk_or_the_local_user_and_never_an_autonomous_run():
+    f = board_consent.driver_from_caller_context
+    assert f({"user_id": "user_clerk"}) == "user_clerk"
+    assert f({"driving_user_id": 1}) == "1"
+    assert f({"user_id": "user_clerk", "driving_user_id": 1}) == "user_clerk"
+    assert f({}) is None and f(None) is None and f({"conversation_id": "c"}) is None
