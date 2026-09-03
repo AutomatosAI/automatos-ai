@@ -1,5 +1,5 @@
 {
-  "route_count": 784,
+  "route_count": 785,
   "routes": [
     {
       "method": "GET",
@@ -2456,6 +2456,10 @@
     {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/run-now"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/session-decision"
     },
     {
       "method": "PATCH",

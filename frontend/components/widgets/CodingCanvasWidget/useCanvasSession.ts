@@ -24,6 +24,7 @@ import {
   parseCanvasEvent,
   CanvasEventType,
   type CanvasEventEnvelope,
+  acceptsCanvasEvent,
 } from './canvasEvents'
 import {
   reduceCanvasEvent,
@@ -115,6 +116,9 @@ function sessionReducer(state: CombinedState, action: SessionAction): CombinedSt
 }
 
 export interface CanvasSessionController {
+  /** PRD-235 W2 S3: true when this Canvas follows a ticket's Claude Code session (no SDK start/stop). */
+  external: boolean
+  taskId: string | number | null
   ui: CanvasSessionUiState
   approvals: DiffApprovalState
   starting: boolean
@@ -129,7 +133,8 @@ export interface CanvasSessionController {
 }
 
 export function useCanvasSession(
-  workspaceId: string | undefined
+  workspaceId: string | undefined,
+  options: { taskId?: string | number | null } = {},
 ): CanvasSessionController {
   const [state, dispatch] = useReducer(sessionReducer, initialCombined)
   const [starting, setStarting] = useState(false)
@@ -148,7 +153,7 @@ export function useCanvasSession(
     } finally {
       setStarting(false)
     }
-  }, [workspaceId])
+  }, [workspaceId, options.taskId])
 
   const stop = useCallback(async () => {
     if (!workspaceId) return
@@ -187,10 +192,15 @@ export function useCanvasSession(
       // decision is what actually applies/reverts in the session.
       dispatch({ kind: 'resolve', requestId, decision })
       try {
-        await apiClient.post(`/api/workspaces/${workspaceId}/canvas/decision`, {
-          request_id: requestId,
-          approved: decision === 'approve',
-        })
+        // PRD-235 W2 S3: a ticket's Claude Code session is answered on the ticket, not the worker.
+        if (options.taskId != null && options.taskId !== '') {
+          await apiClient.post(`/api/v1/tasks/${options.taskId}/session-decision`, { request_id: requestId, approved: decision === 'approve' })
+        } else {
+          await apiClient.post(`/api/workspaces/${workspaceId}/canvas/decision`, {
+            request_id: requestId,
+            approved: decision === 'approve',
+          })
+        }
       } catch {
         // A failed decision leaves the session paused; the pending card returning
         // (on reconnect the server re-emits) lets the user retry.
@@ -251,7 +261,7 @@ export function useCanvasSession(
           buffer = rest
           for (const frame of events) {
             const parsed = parseCanvasEvent(frame.data)
-            if (parsed) dispatch({ kind: 'event', ev: parsed })
+            if (parsed && acceptsCanvasEvent(parsed, options.taskId)) dispatch({ kind: 'event', ev: parsed })
           }
         }
       } catch (err) {
@@ -278,6 +288,9 @@ export function useCanvasSession(
   }, [workspaceId])
 
   return {
+    // PRD-235 W2 S3: a ticket-rooted Canvas follows an external (Claude Code) session.
+    external: options.taskId != null && options.taskId !== '',
+    taskId: options.taskId ?? null,
     ui: state.ui,
     approvals: state.approvals,
     starting,

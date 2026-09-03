@@ -341,7 +341,10 @@ services:
       # Deliverables → Explorer under projects/. Sessions write to it through the
       # CLI host on your machine, never through this container. Nested inside the
       # read-write workspace mount above so Docker can create the mountpoint.
-      - ${LOCAL_PROJECTS_DIR:-./workspaces/projects}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}/projects:ro
+      # PRD-235 S5: read-only by default — sessions write through the CLI host on
+      # your machine. LOCAL_PROJECTS_MOUNT=rw lets the Canvas editor save into
+      # your repositories directly (decision D-B).
+      - ${LOCAL_PROJECTS_DIR:-./workspaces/projects}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}/projects:${LOCAL_PROJECTS_MOUNT:-ro}
     deploy:
       resources:
         limits:

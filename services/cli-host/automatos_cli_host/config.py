@@ -47,6 +47,7 @@ class HostConfig:
     heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS
     event_flush_seconds: float = DEFAULT_EVENT_FLUSH_SECONDS
     session_timeout_seconds: float = DEFAULT_SESSION_TIMEOUT_SECONDS
+    ask_timeout: float = 120.0
     startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS
     claim_batch: int = DEFAULT_CLAIM_BATCH
     claude_binary: Optional[str] = None  # explicit path; default = the user's PATH
@@ -98,6 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
     p.add_argument("--session-timeout", type=float, default=DEFAULT_SESSION_TIMEOUT_SECONDS,
                    help="wall-clock cap per session turn, seconds")
+    p.add_argument("--ask-timeout", type=float, default=120.0,
+                   help="seconds a session waits for the operator to answer a permission card before denying (default 120)")
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
     p.add_argument("--verbose", action="store_true")
@@ -115,6 +118,7 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         max_sessions=max(0, ns.max_sessions),
         poll_seconds=max(1.0, ns.poll_seconds),
         session_timeout_seconds=max(60.0, ns.session_timeout),
+        ask_timeout=max(5.0, ns.ask_timeout),
         startup_timeout_seconds=max(10.0, ns.startup_timeout),
         claude_binary=ns.claude,
         use_worktrees=not ns.no_worktrees,

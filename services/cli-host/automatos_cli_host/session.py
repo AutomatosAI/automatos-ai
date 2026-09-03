@@ -34,6 +34,7 @@ import subprocess
 import termios
 import threading
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -158,6 +159,24 @@ def _is_git_repo(path: Path) -> bool:
     return (path / ".git").exists()
 
 
+def compact_event(event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The event the backend receives: the few facts the board needs, never the
+    whole hook payload. ``cwd`` (PRD-235 W2) is the session's effective working
+    directory — SessionStart carries it — so the ticket can deep-link the editor."""
+    compact = {
+        "event": event,
+        "at": time.time(),
+        "session_id": payload.get("session_id"),
+        "transcript_path": payload.get("transcript_path"),
+        "cwd": payload.get("cwd"),
+        "tool_name": payload.get("tool_name"),
+        "subject": _subject_of(payload),
+        "notification_type": payload.get("notification_type"),
+        "message": (payload.get("message") or "")[:500] or None,
+    }
+    return {k: v for k, v in compact.items() if v is not None}
+
+
 def _subject_of(payload: Dict[str, Any]) -> Optional[str]:
     """The one thing a tool call is about — a command, a path, a pattern — for the
     ticket's live log. Never the whole tool input."""
@@ -199,6 +218,10 @@ class Session:
         self.last_assistant_message: Optional[str] = None
         self.files_touched: List[str] = []
         self.denials: List[Dict[str, Any]] = []
+        # PRD-235 W2 S3: permission questions the operator answers from the Canvas.
+        self._pending_asks: Dict[str, threading.Event] = {}
+        self._ask_answers: Dict[str, bool] = {}
+        self._ask_lock = threading.Lock()
         self.notifications: List[Dict[str, Any]] = []
         self.output_tail: deque = deque(maxlen=_OUTPUT_TAIL_BYTES)
         self.terminal_log: Optional[BoundedLog] = None
@@ -258,9 +281,7 @@ class Session:
         else:
             decision = decide(tool, tool_input, self._policy)
         if decision.behavior == "ask":
-            # Approvals-inbox routing lands with S3; until the backend answers a
-            # hold, an 'ask' is an honest deny the ticket surfaces in review.
-            decision = Decision("deny", decision.reason + " (approval routing not yet available)")
+            decision = self._ask_operator(tool, tool_input, decision.reason)
         if decision.allow:
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
         self.denials.append({"tool": tool, "reason": decision.reason, "stage": "PreToolUse",
@@ -268,6 +289,42 @@ class Session:
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "permissionDecision": "deny",
                                        "permissionDecisionReason": decision.reason}}
+
+    def _ask_operator(self, tool: str, tool_input: Dict[str, Any], reason: str) -> Decision:
+        """PRD-235 W2 S3: hold this tool call while the operator answers a card on the
+        ticket's Canvas. The question travels with the next event flush; the answer
+        comes back on that same channel (``resolve_ask``). No answer within
+        ``ask_timeout`` seconds → deny, honestly worded."""
+        request_id = uuid.uuid4().hex
+        subject = _subject_of({"tool_input": tool_input})
+        done = threading.Event()
+        with self._ask_lock:
+            self._pending_asks[request_id] = done
+        self.events.put({
+            "event": "PermissionRequest", "at": time.time(), "request_id": request_id,
+            "tool_name": tool, "subject": subject, "reason": reason,
+            "session_id": self.reported_session_id or self.session_id,
+        })
+        timeout = float(getattr(self.cfg, "ask_timeout", 120.0) or 120.0)
+        answered = done.wait(timeout)
+        with self._ask_lock:
+            self._pending_asks.pop(request_id, None)
+            approved = self._ask_answers.pop(request_id, None)
+        if answered and approved:
+            return Decision("allow")
+        if answered:
+            return Decision("deny", f"{reason} — denied by the operator")
+        return Decision("deny", f"{reason} — no answer from the operator within {int(timeout)} s")
+
+    def resolve_ask(self, request_id: str, approved: bool) -> bool:
+        """The backend delivered the operator's answer for a pending question."""
+        with self._ask_lock:
+            ev = self._pending_asks.get(str(request_id))
+            if ev is None:
+                return False
+            self._ask_answers[str(request_id)] = bool(approved)
+        ev.set()
+        return True
 
     def _track_file(self, payload: Dict[str, Any]) -> None:
         if payload.get("tool_name") in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
@@ -277,17 +334,7 @@ class Session:
                 self.files_touched.append(str(path))
 
     def _emit(self, event: str, payload: Dict[str, Any]) -> None:
-        compact = {
-            "event": event,
-            "at": time.time(),
-            "session_id": payload.get("session_id"),
-            "transcript_path": payload.get("transcript_path"),
-            "tool_name": payload.get("tool_name"),
-            "subject": _subject_of(payload),
-            "notification_type": payload.get("notification_type"),
-            "message": (payload.get("message") or "")[:500] or None,
-        }
-        self.events.put({k: v for k, v in compact.items() if v is not None})
+        self.events.put(compact_event(event, payload))
 
     # ── the run ─────────────────────────────────────────────────────────────
     def run(self) -> SessionOutcome:

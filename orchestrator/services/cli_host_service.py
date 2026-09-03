@@ -294,6 +294,9 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             "claimed_at": _iso(_now()),
             "cwd": cfg.get(CONFIG_WORKING_DIRECTORY_KEY),
         }
+        ref["explorer_root"] = explorer_root_for(
+            task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+        )
         task.runtime_ref = ref
         out.append(
             {
@@ -366,12 +369,32 @@ def record_events(
             ref["cli_session_id"] = ev["session_id"]
         if ev.get("transcript_path"):
             ref["transcript_path"] = ev["transcript_path"]
+        # PRD-235 W2: the session's effective working directory (SessionStart carries
+        # it) — the absolute host path editor deeplinks need; the explorer root follows.
+        if ev.get("cwd") and not ref.get("cwd"):
+            ref["cwd"] = str(ev["cwd"])
+            ref["explorer_root"] = explorer_root_for(
+                task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+            )
+        if name == "PermissionRequest":
+            note_pending_permission(ref, ev)
     task.runtime_ref = ref
     db.commit()
+    # PRD-235 W2 S3: the same events light up the Code Canvas panel.
+    projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
+    canvas: List[Dict[str, Any]] = []
+    for ev in events:
+        if isinstance(ev, dict):
+            canvas.extend(canvas_events_for(task, ref, ev, projects_dir))
+    publish_canvas_events(task.workspace_id, canvas)
     control: List[str] = []
     if task.status == "cancelled" or ref.get("cancel_requested_at"):
         control.append("cancel")
-    return {"status": task.status, "lease_renewed": bool(renewed), "control": control}
+    decisions = take_undelivered_decisions(ref)
+    if decisions:
+        task.runtime_ref = dict(ref)
+        db.commit()
+    return {"status": task.status, "lease_renewed": bool(renewed), "control": control, "decisions": decisions}
 
 
 def _tokens_used(usage: Dict[str, Any]) -> int:
@@ -422,6 +445,131 @@ def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Opt
         rel = _clean_relative(path[len(root):])
         return f"{PROJECTS_PREFIX}/{rel}" if rel else None
     return None
+
+
+CANVAS_CHANNEL = "workspace:ws:{workspace_id}:canvas:events"
+CANVAS_SCHEMA_VERSION = 1
+_EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+
+def _canvas_envelope(workspace_id: Any, event_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """The workspace-worker's canvas event shape (``canvas_events._envelope``) — the
+    Code Canvas panel renders these unchanged, whichever engine produced them."""
+    return {
+        "schema_version": CANVAS_SCHEMA_VERSION,
+        "event_type": event_type,
+        "workspace_id": str(workspace_id),
+        "data": data,
+        "timestamp": _iso(_now()),
+    }
+
+
+PENDING_PERMISSIONS_KEPT = 20
+
+
+def note_pending_permission(ref: Dict[str, Any], ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A session's permission question (PRD-235 W2 S3) → remembered on the ticket
+    until the operator answers. Returns the stored entry, or None for a malformed event."""
+    request_id = ev.get("request_id")
+    if not request_id:
+        return None
+    entry = {
+        "request_id": str(request_id),
+        "tool": str(ev.get("tool_name") or "?")[:60],
+        "subject": (str(ev["subject"])[:300] if ev.get("subject") else None),
+        "reason": str(ev.get("reason") or "")[:300],
+        "at": _iso(_now()),
+    }
+    pending = [p for p in (ref.get("pending_permissions") or []) if p.get("request_id") != entry["request_id"]]
+    pending.append(entry)
+    ref["pending_permissions"] = pending[-PENDING_PERMISSIONS_KEPT:]
+    return entry
+
+
+def record_permission_decision(ref: Dict[str, Any], request_id: str, approved: bool, actor: str) -> bool:
+    """The operator's answer. False when the question is unknown (already answered or expired)."""
+    pending = ref.get("pending_permissions") or []
+    if not any(p.get("request_id") == str(request_id) for p in pending):
+        return False
+    ref["pending_permissions"] = [p for p in pending if p.get("request_id") != str(request_id)]
+    decisions = dict(ref.get("permission_decisions") or {})
+    decisions[str(request_id)] = {"approved": bool(approved), "by": actor, "at": _iso(_now()), "delivered": False}
+    ref["permission_decisions"] = decisions
+    return True
+
+
+def take_undelivered_decisions(ref: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Answers the host has not received yet; marks them delivered."""
+    decisions = dict(ref.get("permission_decisions") or {})
+    out = []
+    for rid, d in decisions.items():
+        if isinstance(d, dict) and not d.get("delivered"):
+            out.append({"request_id": rid, "approved": bool(d.get("approved"))})
+            decisions[rid] = {**d, "delivered": True}
+    if out:
+        ref["permission_decisions"] = decisions
+    return out
+
+
+def canvas_events_for(task: Any, ref: Dict[str, Any], ev: Dict[str, Any], projects_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+    """PRD-235 W2 S3: one hook event from the CLI host → the canvas events the Code
+    Canvas panel already understands (tool call / result, file edit, session status).
+    Every event carries ``task_id`` and ``session_id`` so a ticket-rooted Canvas can
+    keep only its own session. Pure; never raises on odd input."""
+    name = str(ev.get("event") or ev.get("hook_event_name") or "")
+    base = {"source": "cli", "task_id": task.id, "session_id": ref.get("session_id"), "at": ev.get("at")}
+    ws = task.workspace_id
+    out: List[Dict[str, Any]] = []
+    tool = ev.get("tool_name")
+    subject = ev.get("subject")
+    if name == "SessionStart":
+        out.append(_canvas_envelope(ws, "canvas.session.status", {**base, "status": "running"}))
+    elif name == "PreToolUse" and tool:
+        out.append(_canvas_envelope(ws, "canvas.tool.call", {**base, "tool_name": str(tool), "input": ({"subject": str(subject)} if subject else {})}))
+    elif name == "PostToolUse" and tool:
+        out.append(_canvas_envelope(ws, "canvas.tool.result", {**base, "tool_name": str(tool)}))
+        if tool in _EDIT_TOOLS and subject:
+            rel = workspace_relative_path(str(subject), str(ws), projects_dir)
+            out.append(_canvas_envelope(ws, "canvas.file.edit", {**base, "tool_name": str(tool), "path": rel or str(subject)}))
+    elif name in ("Stop", "SessionEnd"):
+        out.append(_canvas_envelope(ws, "canvas.session.status", {**base, "status": "stopped"}))
+    elif name == "PermissionRequest" and ev.get("request_id"):
+        # The panel renders this as an approval card (a bare permission card for a
+        # command; the DiffCard shape needs old/new content the host does not send).
+        data = {**base, "request_id": str(ev["request_id"]), "tool_name": str(tool or "?"),
+                "reason": str(ev.get("reason") or "")[:300]}
+        if subject:
+            data["command" if tool == "Bash" else "path"] = str(subject)[:300]
+        out.append(_canvas_envelope(ws, "canvas.permission.request", data))
+    return out
+
+
+def publish_canvas_events(workspace_id: Any, events: List[Dict[str, Any]]) -> int:
+    """Fan the events out on the workspace's canvas channel (Redis pub/sub); fail-soft
+    — the board still has ``runtime_ref``; only the live panel goes quiet."""
+    if not events:
+        return 0
+    try:
+        from core.redis.client import get_redis_client
+        client = get_redis_client()
+        if client is None:
+            return 0
+        channel = CANVAS_CHANNEL.format(workspace_id=str(workspace_id))
+        return sum(1 for e in events if client.publish(channel, e))
+    except Exception:  # noqa: BLE001
+        logger.debug("[CliHost] canvas publish skipped", exc_info=True)
+        return 0
+
+
+def explorer_root_for(task_id: int, cwd: Optional[str], workspace_id: Any, projects_dir: Optional[str]) -> Optional[str]:
+    """PRD-235 W2: where the Deliverables explorer (and the chat's Code mode) should
+    open for this session — the worker-relative folder. A session with no working
+    directory runs in ``sessions/<ticket>`` by the host's own rule; one inside the
+    workspace volume or the projects folder maps through ``workspace_relative_path``;
+    anywhere else is not browsable from the platform (``None``)."""
+    if not cwd:
+        return f"sessions/{task_id}"
+    return workspace_relative_path(str(cwd), str(workspace_id), projects_dir)
 
 
 def _register_session_deliverables(
@@ -498,6 +646,26 @@ def _denial_summary(denial: Any) -> Dict[str, Any]:
     return out
 
 
+def decide_session_permission(db: Session, task: BoardTask, request_id: str, approved: bool, actor: str) -> Dict[str, Any]:
+    """PRD-235 W2 S3: the operator's answer to a session's permission question,
+    recorded on the ticket and picked up by the host on its next event flush; the
+    Canvas hears the outcome as a status line."""
+    ref = dict(task.runtime_ref or {})
+    if ref.get("runtime") != RUNTIME_CLI:
+        raise LookupError("this task is not a Claude Code session")
+    if not record_permission_decision(ref, request_id, approved, actor):
+        raise LookupError(f"no pending permission question {request_id}")
+    task.runtime_ref = ref
+    db.commit()
+    publish_canvas_events(task.workspace_id, [
+        _canvas_envelope(task.workspace_id, "canvas.session.status", {
+            "source": "cli", "task_id": task.id, "session_id": ref.get("session_id"),
+            "status": "running", "decision": {"request_id": str(request_id), "approved": bool(approved)},
+        }),
+    ])
+    return {"task_id": task.id, "request_id": str(request_id), "approved": bool(approved), "pending": len(ref.get("pending_permissions") or [])}
+
+
 async def apply_result(
     db: Session, host: CliHost, task_id: int, payload: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -548,6 +716,11 @@ async def apply_result(
     )
     if payload.get("transcript_path"):
         ref["transcript_path"] = payload["transcript_path"]
+    # PRD-235 W2 S3: a question nobody answered before the session ended is stale —
+    # its denial is already on the record (permission_denials); drop it from the queue.
+    if ref.get("pending_permissions"):
+        ref["expired_permissions"] = (ref.get("expired_permissions") or []) + ref["pending_permissions"]
+        ref["pending_permissions"] = []
 
     # PRD-234 S2: files under the workspace volume → the ticket's deliverables;
     # the session facts ride exec_result so the task report can show them.
@@ -571,6 +744,14 @@ async def apply_result(
     }
     task.runtime_ref = ref
     db.commit()
+    # PRD-235 W2 S3: the final message and the end of the turn reach the Canvas too.
+    final_text = payload.get("result_text") or payload.get("error") or ""
+    base = {"source": "cli", "task_id": task.id, "session_id": ref.get("session_id")}
+    publish_canvas_events(task.workspace_id, [
+        _canvas_envelope(task.workspace_id, "canvas.assistant.text", {**base, "text": str(final_text)[:4000]}),
+        _canvas_envelope(task.workspace_id, "canvas.turn.complete", {**base, "status": status}),
+        _canvas_envelope(task.workspace_id, "canvas.session.status", {**base, "status": "stopped" if status != "error" else "failed"}),
+    ])
 
     terminal = await finalize_board_task_run(
         db,

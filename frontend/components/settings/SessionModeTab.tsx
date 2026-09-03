@@ -213,7 +213,9 @@ export function SessionModeTab() {
                   Your own repositories: set <span className="font-mono">LOCAL_PROJECTS_DIR=/path/to/your/projects</span> in{' '}
                   <span className="font-mono">.env</span> and run <span className="font-mono">make up</span> — the explorer shows it
                   under <span className="font-mono">projects/</span> and the host registers it. Point an agent&apos;s working
-                  directory at a repository inside it.
+                  directory at a repository inside it. The folder is read-only inside the platform; sessions write to it
+                  through the host on your machine. <span className="font-mono">LOCAL_PROJECTS_MOUNT=rw</span> lets the Code
+                  Canvas editor save into it directly.
                 </p>
               </div>
 
