@@ -460,9 +460,11 @@ export default function SystemLLMSettingsTab({
                     value={orchConfig?.llm?.model_id || ''}
                     onValueChange={(value) => {
                       handleLLMChange('model_id', value)
-                      // If user picks an aggregator model, auto-switch provider to openrouter
+                      // An aggregator-tier model needs a provider that hosts vendor-prefixed
+                      // ids. OpenRouter and NVIDIA both do (PRD-236) — only switch to
+                      // OpenRouter when the chosen provider cannot serve the model.
                       const picked = allModels.find((m: any) => m.model_id === value)
-                      if (picked && (picked as any).tier === 'aggregator' && orchConfig?.llm?.provider !== 'openrouter') {
+                      if (picked && (picked as any).tier === 'aggregator' && !hostsVendorModels(registry, orchConfig?.llm?.provider)) {
                         handleLLMChange('provider', 'openrouter')
                       }
                     }}
