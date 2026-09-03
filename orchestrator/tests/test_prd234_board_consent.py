@@ -109,13 +109,16 @@ def test_actor_ref_reads_the_request_context_principal():
 
 
 def test_creation_is_consent_follows_the_edition(monkeypatch):
-    import config as _config
+    from config import config as app_config
 
-    target = getattr(_config, "settings", _config)
-    monkeypatch.setattr(target, "AUTH_EDITION", "local", raising=False)
+    assert hasattr(app_config, "AUTH_EDITION"), "the canonical config object carries the edition"
+    monkeypatch.setattr(app_config, "AUTH_EDITION", "local")
+    assert board_consent.edition() == "local"
     assert board_consent.creation_is_consent() is True
-    monkeypatch.setattr(target, "AUTH_EDITION", "saas", raising=False)
+    monkeypatch.setattr(app_config, "AUTH_EDITION", "saas")
     assert board_consent.creation_is_consent() is False
+    monkeypatch.setattr(app_config, "AUTH_EDITION", "LOCAL")
+    assert board_consent.creation_is_consent() is True
 
 
 def test_created_ticket_is_pre_approved_on_local_only(monkeypatch):
