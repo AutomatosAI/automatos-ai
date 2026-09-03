@@ -240,6 +240,10 @@ class Host:
                 continue
             if "cancel" in (out.get("control") or []):
                 session.request_cancel()
+            # PRD-235 W2 S3: answers to the session's permission questions.
+            for d in out.get("decisions") or []:
+                if isinstance(d, dict) and d.get("request_id") is not None:
+                    session.resolve_ask(str(d["request_id"]), bool(d.get("approved")))
 
     def _reap_finished(self, host_id: str) -> None:
         for task_id, thread in list(self.threads.items()):

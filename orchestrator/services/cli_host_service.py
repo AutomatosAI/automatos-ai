@@ -376,6 +376,8 @@ def record_events(
             ref["explorer_root"] = explorer_root_for(
                 task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
             )
+        if name == "PermissionRequest":
+            note_pending_permission(ref, ev)
     task.runtime_ref = ref
     db.commit()
     # PRD-235 W2 S3: the same events light up the Code Canvas panel.
@@ -388,7 +390,11 @@ def record_events(
     control: List[str] = []
     if task.status == "cancelled" or ref.get("cancel_requested_at"):
         control.append("cancel")
-    return {"status": task.status, "lease_renewed": bool(renewed), "control": control}
+    decisions = take_undelivered_decisions(ref)
+    if decisions:
+        task.runtime_ref = dict(ref)
+        db.commit()
+    return {"status": task.status, "lease_renewed": bool(renewed), "control": control, "decisions": decisions}
 
 
 def _tokens_used(usage: Dict[str, Any]) -> int:
@@ -458,6 +464,53 @@ def _canvas_envelope(workspace_id: Any, event_type: str, data: Dict[str, Any]) -
     }
 
 
+PENDING_PERMISSIONS_KEPT = 20
+
+
+def note_pending_permission(ref: Dict[str, Any], ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A session's permission question (PRD-235 W2 S3) → remembered on the ticket
+    until the operator answers. Returns the stored entry, or None for a malformed event."""
+    request_id = ev.get("request_id")
+    if not request_id:
+        return None
+    entry = {
+        "request_id": str(request_id),
+        "tool": str(ev.get("tool_name") or "?")[:60],
+        "subject": (str(ev["subject"])[:300] if ev.get("subject") else None),
+        "reason": str(ev.get("reason") or "")[:300],
+        "at": _iso(_now()),
+    }
+    pending = [p for p in (ref.get("pending_permissions") or []) if p.get("request_id") != entry["request_id"]]
+    pending.append(entry)
+    ref["pending_permissions"] = pending[-PENDING_PERMISSIONS_KEPT:]
+    return entry
+
+
+def record_permission_decision(ref: Dict[str, Any], request_id: str, approved: bool, actor: str) -> bool:
+    """The operator's answer. False when the question is unknown (already answered or expired)."""
+    pending = ref.get("pending_permissions") or []
+    if not any(p.get("request_id") == str(request_id) for p in pending):
+        return False
+    ref["pending_permissions"] = [p for p in pending if p.get("request_id") != str(request_id)]
+    decisions = dict(ref.get("permission_decisions") or {})
+    decisions[str(request_id)] = {"approved": bool(approved), "by": actor, "at": _iso(_now()), "delivered": False}
+    ref["permission_decisions"] = decisions
+    return True
+
+
+def take_undelivered_decisions(ref: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Answers the host has not received yet; marks them delivered."""
+    decisions = dict(ref.get("permission_decisions") or {})
+    out = []
+    for rid, d in decisions.items():
+        if isinstance(d, dict) and not d.get("delivered"):
+            out.append({"request_id": rid, "approved": bool(d.get("approved"))})
+            decisions[rid] = {**d, "delivered": True}
+    if out:
+        ref["permission_decisions"] = decisions
+    return out
+
+
 def canvas_events_for(task: Any, ref: Dict[str, Any], ev: Dict[str, Any], projects_dir: Optional[str] = None) -> List[Dict[str, Any]]:
     """PRD-235 W2 S3: one hook event from the CLI host → the canvas events the Code
     Canvas panel already understands (tool call / result, file edit, session status).
@@ -480,6 +533,14 @@ def canvas_events_for(task: Any, ref: Dict[str, Any], ev: Dict[str, Any], projec
             out.append(_canvas_envelope(ws, "canvas.file.edit", {**base, "tool_name": str(tool), "path": rel or str(subject)}))
     elif name in ("Stop", "SessionEnd"):
         out.append(_canvas_envelope(ws, "canvas.session.status", {**base, "status": "stopped"}))
+    elif name == "PermissionRequest" and ev.get("request_id"):
+        # The panel renders this as an approval card (a bare permission card for a
+        # command; the DiffCard shape needs old/new content the host does not send).
+        data = {**base, "request_id": str(ev["request_id"]), "tool_name": str(tool or "?"),
+                "reason": str(ev.get("reason") or "")[:300]}
+        if subject:
+            data["command" if tool == "Bash" else "path"] = str(subject)[:300]
+        out.append(_canvas_envelope(ws, "canvas.permission.request", data))
     return out
 
 
@@ -583,6 +644,26 @@ def _denial_summary(denial: Any) -> Dict[str, Any]:
     if subject:
         out["subject"] = str(subject)[:300]
     return out
+
+
+def decide_session_permission(db: Session, task: BoardTask, request_id: str, approved: bool, actor: str) -> Dict[str, Any]:
+    """PRD-235 W2 S3: the operator's answer to a session's permission question,
+    recorded on the ticket and picked up by the host on its next event flush; the
+    Canvas hears the outcome as a status line."""
+    ref = dict(task.runtime_ref or {})
+    if ref.get("runtime") != RUNTIME_CLI:
+        raise LookupError("this task is not a Claude Code session")
+    if not record_permission_decision(ref, request_id, approved, actor):
+        raise LookupError(f"no pending permission question {request_id}")
+    task.runtime_ref = ref
+    db.commit()
+    publish_canvas_events(task.workspace_id, [
+        _canvas_envelope(task.workspace_id, "canvas.session.status", {
+            "source": "cli", "task_id": task.id, "session_id": ref.get("session_id"),
+            "status": "running", "decision": {"request_id": str(request_id), "approved": bool(approved)},
+        }),
+    ])
+    return {"task_id": task.id, "request_id": str(request_id), "approved": bool(approved), "pending": len(ref.get("pending_permissions") or [])}
 
 
 async def apply_result(

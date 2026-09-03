@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -965,6 +966,33 @@ async def update_task_status(
         )
 
     return {"id": task.id, "status": task.status}
+
+
+class SessionDecisionBody(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=64)
+    approved: bool
+
+
+@router.post("/{task_id}/session-decision", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def decide_session_permission_route(
+    task_id: int,
+    body: SessionDecisionBody,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-235 W2 S3: answer a Claude Code session's permission question (the card on
+    the ticket's Canvas). The host receives the answer on its next event flush."""
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    from services.cli_host_service import decide_session_permission
+    try:
+        return decide_session_permission(db, task, body.request_id, body.approved, _operator_ref(ctx))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/{task_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:update"))])

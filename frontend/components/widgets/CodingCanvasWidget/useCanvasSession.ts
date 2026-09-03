@@ -192,10 +192,15 @@ export function useCanvasSession(
       // decision is what actually applies/reverts in the session.
       dispatch({ kind: 'resolve', requestId, decision })
       try {
-        await apiClient.post(`/api/workspaces/${workspaceId}/canvas/decision`, {
-          request_id: requestId,
-          approved: decision === 'approve',
-        })
+        // PRD-235 W2 S3: a ticket's Claude Code session is answered on the ticket, not the worker.
+        if (options.taskId != null && options.taskId !== '') {
+          await apiClient.post(`/api/v1/tasks/${options.taskId}/session-decision`, { request_id: requestId, approved: decision === 'approve' })
+        } else {
+          await apiClient.post(`/api/workspaces/${workspaceId}/canvas/decision`, {
+            request_id: requestId,
+            approved: decision === 'approve',
+          })
+        }
       } catch {
         // A failed decision leaves the session paused; the pending card returning
         // (on reconnect the server re-emits) lets the user retry.

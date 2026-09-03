@@ -57,3 +57,17 @@ def test_publish_is_fail_soft(monkeypatch):
     monkeypatch.setattr(rc, "get_redis_client", lambda: c)
     assert publish_canvas_events(WS, [{"a": 1}, {"b": 2}]) == 2
     assert c.sent[0][0] == f"workspace:ws:{WS}:canvas:events"
+
+
+def test_permission_questions_are_remembered_answered_and_delivered_once():
+    from services.cli_host_service import note_pending_permission, record_permission_decision, take_undelivered_decisions
+    ref = {"session_id": "bc25"}
+    ev = {"event": "PermissionRequest", "request_id": "r1", "tool_name": "Bash", "subject": "pip --version", "reason": "outside the allowlist"}
+    assert note_pending_permission(ref, ev)["request_id"] == "r1"
+    assert note_pending_permission(ref, {"event": "PermissionRequest"}) is None
+    card = canvas_events_for(TASK, ref, ev)
+    assert _types(card) == ["canvas.permission.request"] and card[0]["data"]["command"] == "pip --version" and card[0]["data"]["request_id"] == "r1"
+    assert record_permission_decision(ref, "nope", True, "user:2") is False
+    assert record_permission_decision(ref, "r1", True, "user:2") is True and ref["pending_permissions"] == []
+    assert take_undelivered_decisions(ref) == [{"request_id": "r1", "approved": True}]
+    assert take_undelivered_decisions(ref) == []
