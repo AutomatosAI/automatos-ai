@@ -1274,10 +1274,12 @@ async def finalize_board_task_run(
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
         await _dispatch_task_failed(db, workspace_id, task)
-        # Surface failures the same way successes are surfaced.
+        # Surface failures the same way successes are surfaced. The result text is
+        # blanked (the error is on the task); the session facts stay so a failed
+        # Claude Code session's report still says what ran (PRD-234 S2).
         await _auto_create_task_report(
             db, workspace_id, task,
-            {"result": "", "tokens_used": 0},
+            {**exec_result, "result": "", "tokens_used": 0},
         )
         db.commit()
         return task.status

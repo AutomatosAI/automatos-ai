@@ -45,6 +45,7 @@ class HookServer:
         self._server: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
         self._stopping = threading.Event()
+        self._inode: Optional[int] = None  # the socket file WE created (see stop)
 
     # ── registry ────────────────────────────────────────────────────────────
     def register(self, task_id: str, handler: Handler) -> None:
@@ -68,8 +69,31 @@ class HookServer:
         srv.listen(64)
         srv.settimeout(0.5)
         self._server = srv
+        self._inode = os.stat(self.sock_path).st_ino
         self._thread = threading.Thread(target=self._serve, name="automatos-hook-server", daemon=True)
         self._thread.start()
+
+    def owns_socket_file(self) -> bool:
+        """Is the file at ``sock_path`` the one THIS server bound?"""
+        try:
+            return self._inode is not None and os.stat(self.sock_path).st_ino == self._inode
+        except FileNotFoundError:
+            return False
+
+    def ensure_listening(self) -> bool:
+        """Self-heal: if the socket file vanished or was replaced under us (a
+        previous host's shutdown unlinking the path after we bound it — seen
+        2026-09-03, ticket 69: every hook answered 'host unreachable'), bind a
+        fresh socket. Returns True when a re-bind happened."""
+        if self._stopping.is_set() or self._server is None or self.owns_socket_file():
+            return False
+        try:
+            self._server.close()
+        except OSError:
+            pass
+        self._stopping.clear()
+        self.start()
+        return True
 
     def stop(self) -> None:
         self._stopping.set()
@@ -78,10 +102,13 @@ class HookServer:
                 self._server.close()
             except OSError:
                 pass
-        try:
-            self.sock_path.unlink()
-        except FileNotFoundError:
-            pass
+        # Only remove the file if it is still ours: a newer host may already have
+        # bound the same path, and unlinking it would silently take its hooks away.
+        if self.owns_socket_file():
+            try:
+                self.sock_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def _serve(self) -> None:
         assert self._server is not None

@@ -130,6 +130,8 @@ class Host:
             while not self.stop.is_set():
                 now = time.time()
                 try:
+                    if self.hooks.ensure_listening():
+                        log.warning("hook socket %s had vanished — re-bound it (a previous host's shutdown?)", self.cfg.socket_path)
                     if now - self._last_heartbeat >= self.cfg.heartbeat_seconds:
                         self._heartbeat(host_id)
                         self._last_heartbeat = now

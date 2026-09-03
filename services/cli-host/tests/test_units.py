@@ -313,3 +313,25 @@ def test_emit_subject_is_the_command_or_path_only():
     assert _subject_of({"tool_input": {"file_path": "/w/hello.py", "content": "secret body"}}) == "/w/hello.py"
     assert _subject_of({"tool_input": "junk"}) is None
     assert len(_subject_of({"tool_input": {"command": "x" * 500}})) == 200
+
+
+def test_hook_server_keeps_only_its_own_socket_and_heals_a_vanished_path(tmp_path):
+    """2026-09-03, ticket 69: the previous host's shutdown unlinked the path the
+    NEW host had just bound, and every hook answered 'host unreachable'."""
+    import os
+    import tempfile
+    from automatos_cli_host.hook_server import HookServer
+    # AF_UNIX paths are capped (~104 bytes on macOS); pytest's tmp_path is too long.
+    sock = Path(tempfile.mkdtemp(dir="/tmp", prefix="ah")) / "hooks.sock"
+    old = HookServer(sock)
+    old.start()
+    new = HookServer(sock)
+    new.start()                       # rebinds the same path — as a restarted host does
+    assert new.owns_socket_file() and not old.owns_socket_file()
+    old.stop()                        # the old host shuts down AFTER the new one bound
+    assert sock.exists() and new.owns_socket_file()   # …and must not take the file away
+    os.unlink(sock)                   # something else removes it anyway
+    assert new.ensure_listening() is True and new.owns_socket_file()
+    assert new.ensure_listening() is False
+    new.stop()
+    assert not sock.exists()
