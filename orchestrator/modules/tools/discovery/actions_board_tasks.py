@@ -57,6 +57,15 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                     "type": "integer",
                     "description": "Parent task ID if this is a sub-task",
                 },
+                "review_mode": {
+                    "type": "string",
+                    "enum": ["auto", "manual"],
+                    "description": "PRD-234: 'manual' parks the finished ticket in Review for a human; 'auto' (default) closes it Done.",
+                },
+                "sla_deadline": {
+                    "type": "string",
+                    "description": "PRD-234: due date/time as ISO 8601 (e.g. 2026-09-05T17:00:00Z). Shows on the board and the calendar.",
+                },
                 "approval_action": {
                     "type": "object",
                     "description": "If set, task goes to Review status with an approval gate. On user approve, the action executes. Example: {\"type\": \"publish_blog\", \"post_id\": \"uuid\"}",

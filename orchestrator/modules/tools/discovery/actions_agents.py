@@ -8,6 +8,49 @@ def register_agents_actions(registry: ActionRegistry) -> None:
 
     # ── Read ─────────────────────────────────────────────────────────
 
+    # PRD-234 S3: "who is best suited?" — the matcher's ranking with reasons, so
+    # Auto proposes an informed pick instead of guessing (the human still confirms).
+    registry.register(ActionDefinition(
+        name="platform_recommend_agent",
+        description=(
+            "Rank the roster for a piece of work and explain why: skills, connected "
+            "tools, model fit, availability and past outcomes (plus semantic similarity "
+            "to each agent's capabilities when available). Returns the top candidates "
+            "with a score, a one-line reason, their runtime ('cli' = the user's own "
+            "Claude Code session on their machine; 'api' = a platform-run model) and "
+            "model. Use BEFORE proposing an assignee when the user has not named one. "
+            "This is advice: propose the top candidate and let the user confirm; never "
+            "file a ticket for an agent the user did not agree to."
+        ),
+        category="agents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "objective": {
+                    "type": "string",
+                    "description": "What needs doing, in one or two sentences (the ticket's objective).",
+                },
+                "prefer_runtime": {
+                    "type": "string",
+                    "enum": ["any", "cli", "api"],
+                    "description": "Restrict to Claude Code session agents ('cli'), platform-run agents ('api'), or consider all ('any', default).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "How many candidates to return (default 3).",
+                },
+            },
+            "required": ["objective"],
+        },
+        permission_level="read",
+        tags=["agents", "read", "routing", "assign", "recommend"],
+        examples=[
+            "who should take the login-bug fix?",
+            "which agent is best suited to summarise these documents?",
+            "pick the right agent for a refactor in my repo",
+        ],
+    ))
+
     registry.register(ActionDefinition(
         name="platform_list_agents",
         description=(
