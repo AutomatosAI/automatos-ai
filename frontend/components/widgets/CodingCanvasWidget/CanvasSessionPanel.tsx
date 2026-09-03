@@ -72,29 +72,24 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
             {STATUS_LABEL[ui.status]}
           </Badge>
         </div>
-        {isLive ? (
-          {session.external && (
-            <span className="text-xs text-muted-foreground" data-testid="session-external-label">
-              Live · Claude Code session for ticket #{String(session.taskId)} — approvals and takeover live on the ticket.
-            </span>
-          )}
-          {!session.external && (
-            <Button size="sm" variant="outline" onClick={() => void session.stop()} data-testid="session-stop">
-              <Square className="mr-1 h-3.5 w-3.5" />
-              Stop
-            </Button>
-          )}
+        {session.external ? (
+          <span className="text-xs text-muted-foreground" data-testid="session-external-label">
+            Live · Claude Code session for ticket #{String(session.taskId)} — approvals and takeover live on the ticket.
+          </span>
+        ) : isLive ? (
+          <Button size="sm" variant="outline" onClick={() => void session.stop()} data-testid="session-stop">
+            <Square className="mr-1 h-3.5 w-3.5" />
+            Stop
+          </Button>
         ) : (
-          {!session.external && (
-            <Button size="sm" onClick={() => void session.start()} disabled={starting} data-testid="session-start">
-              {starting ? (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="mr-1 h-3.5 w-3.5" />
-              )}
-              Start
-            </Button>
-          )}
+          <Button size="sm" onClick={() => void session.start()} disabled={starting} data-testid="session-start">
+            {starting ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="mr-1 h-3.5 w-3.5" />
+            )}
+            Start
+          </Button>
         )}
       </div>
 
