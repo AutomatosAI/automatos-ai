@@ -372,3 +372,16 @@ def test_a_permission_question_is_held_until_the_operator_answers(tmp_path):
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "no answer from the operator" in out["hookSpecificOutput"]["permissionDecisionReason"]
     assert s.resolve_ask("unknown", True) is False
+
+def test_terminal_log_keeps_the_newest_bytes_and_a_readable_tail(tmp_path):
+    from automatos_cli_host.terminal_log import BoundedLog
+
+    log = BoundedLog(tmp_path / "s" / "terminal.log", max_bytes=8192)
+    for i in range(40):
+        log.write((f"line {i:03d} " + "x" * 400 + "\n").encode())
+    assert (tmp_path / "s" / "terminal.log").stat().st_size <= 8192
+    tail = log.tail(600)  # the newest line is 411 bytes; its prefix sits inside the tail
+    assert "line 039" in tail and "line 000" not in tail
+    log.close()
+    log.write(b"after close")  # ignored, never raises
+    assert oct((tmp_path / "s" / "terminal.log").stat().st_mode & 0o777) == "0o600"
