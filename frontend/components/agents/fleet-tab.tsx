@@ -14,7 +14,7 @@ import { AlertTriangle, Eye, Loader2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { useFleetState } from '@/hooks/use-agent-api'
-import type { FleetAgentRow } from '@/lib/api-client'
+import type { FleetHost, FleetAgentRow } from '@/lib/api-client'
 
 interface FleetTabProps {
   /** Opens the shared AgentDetailsModal (owned by AgentManagement). */
@@ -35,9 +35,44 @@ function liveLine(agent: FleetAgentRow): { text: string; tone: LiveTone } {
     return { text: 'blocked', tone: 'blocked' }
   }
   if (agent.current) {
+    const s = agent.session
+    if (s) {
+      // PRD-234 S3: the user's own Claude Code session — say what it is doing.
+      const doing = s.live_tool || s.last_event || 'running'
+      return { text: `working: ${agent.current.title} · Claude Code (${s.model || 'claude'}) · ${doing}`, tone: 'working' }
+    }
     return { text: `working: ${agent.current.title}`, tone: 'working' }
   }
   return { text: 'idle', tone: 'idle' }
+}
+
+function HostCard({ hosts }: { hosts: FleetHost[] }) {
+  // PRD-234 S3: the CLI host explains every idle Claude Code agent below it.
+  if (hosts.length === 0) {
+    return (
+      <div data-testid="fleet-host-card" className="rounded-xl border border-border/60 bg-card/40 px-4 py-3 text-sm">
+        <span className="font-semibold">CLI host</span>
+        <span className="text-muted-foreground"> · none paired — Claude Code agents cannot run. Pair one in Settings → Session mode.</span>
+      </div>
+    )
+  }
+  return (
+    <div data-testid="fleet-host-card" className="space-y-2">
+      {hosts.map((h) => (
+        <div key={h.id} className="flex items-center gap-3 rounded-xl border border-border/60 bg-card/40 px-4 py-3 text-sm">
+          <span
+            aria-hidden
+            className={'inline-block h-2 w-2 rounded-full ' + (h.online ? 'bg-[hsl(var(--success))]' : 'bg-[hsl(var(--warning))]')}
+          />
+          <span className="font-semibold">CLI host {h.name}</span>
+          <span className="text-muted-foreground">
+            {h.online ? 'online' : 'offline — start it with make cli-host'}
+            {h.capabilities?.claude?.version ? ` · Claude Code ${h.capabilities.claude.version}` : ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 const TONE_CLASS: Record<LiveTone, string> = {
@@ -173,6 +208,7 @@ export function FleetTab({ onViewDetails }: FleetTabProps) {
         </div>
       </div>
       <div className="space-y-2">
+        {data?.hosts !== undefined && <HostCard hosts={data.hosts} />}
         {agents.map((agent) => (
           <FleetRow key={agent.agent_id} agent={agent} onViewDetails={onViewDetails} />
         ))}
