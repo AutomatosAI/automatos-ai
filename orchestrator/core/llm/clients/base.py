@@ -47,6 +47,10 @@ class LLMProvider(Enum):
     AWS_BEDROCK = "aws_bedrock"  # Cost-effective gateway to multiple models
     GROK = "grok"  # xAI Grok models
     OPENROUTER = "openrouter"  # OpenRouter aggregator (200+ models)
+    # PRD-236: OpenAI-compatible providers served by the generic adapter
+    # (core/llm/clients/openai_compatible_client.py); specs in core/llm/providers.py.
+    NVIDIA = "nvidia"  # build.nvidia.com hosted open models (trial endpoint, BYO key)
+    DEEPSEEK = "deepseek"  # DeepSeek direct API
 
 
 class EmbeddingProvider(Enum):

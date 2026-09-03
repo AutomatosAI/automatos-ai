@@ -36,11 +36,23 @@ want AI features:
 
 ```bash
 OPENAI_API_KEY=sk-...          # or
-ANTHROPIC_API_KEY=sk-ant-...   # or an OpenRouter key for 300+ models
+ANTHROPIC_API_KEY=sk-ant-...   # or
+OPENROUTER_API_KEY=sk-or-...   # one key, 400+ models (paid per call)
+NVIDIA_API_KEY=nvapi-...       # build.nvidia.com — open models (Kimi, DeepSeek, Nemotron…) at no charge
+DEEPSEEK_API_KEY=sk-...        # DeepSeek's own API
 ```
 
 You can also add keys later through **Settings → API Keys** in the UI (until
 you do, the chat page shows *"Add an LLM key to bring Auto to life"*).
+
+**About the NVIDIA key.** NVIDIA's hosted endpoint is a trial: its terms allow
+internal testing and evaluation, not production, and no personal, financial or
+health data (NVIDIA API Trial Terms §1.2, §1.4, §4.3); the free tier allows about
+40 requests per minute per key. The key is your own agreement with NVIDIA —
+Automatos only routes to it. A model run on NVIDIA is recorded at zero cost and
+is never silently rerouted to a paid provider when the limit is hit. Pick the
+provider in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*,
+model e.g. `moonshotai/kimi-k3`. (PRD-236)
 
 ## 2. Start the platform
 
