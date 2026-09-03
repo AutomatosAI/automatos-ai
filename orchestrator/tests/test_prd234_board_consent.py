@@ -153,3 +153,13 @@ def test_a_chat_filed_ticket_never_starts_running():
     assert f(None, 15, None) == "assigned"
     assert f("review", 15, None) == "review"
     assert f("inbox", 15, {"approval_action": "send"}) == "review"
+
+
+def test_reconciler_leaves_live_leased_tickets_alone():
+    """PRD-234: a CLI session renews its lease; the orphan sweep must skip it."""
+    import re
+    from services.task_reconciler import ORPHANED_BOARD_SQL as sql
+
+    assert "bt.lease_until IS NULL OR bt.lease_until < :now" in sql
+    assert re.search(r"status = 'in_progress'", sql)
+    assert ":cutoff" in sql and ":now" in sql

@@ -335,3 +335,17 @@ def test_hook_server_keeps_only_its_own_socket_and_heals_a_vanished_path(tmp_pat
     assert new.ensure_listening() is False
     new.stop()
     assert not sock.exists()
+
+
+def test_terminal_log_keeps_the_newest_bytes_and_a_readable_tail(tmp_path):
+    from automatos_cli_host.terminal_log import BoundedLog
+
+    log = BoundedLog(tmp_path / "s" / "terminal.log", max_bytes=8192)
+    for i in range(40):
+        log.write((f"line {i:03d} " + "x" * 400 + "\n").encode())
+    assert (tmp_path / "s" / "terminal.log").stat().st_size <= 8192
+    tail = log.tail(600)  # the newest line is 411 bytes; its prefix sits inside the tail
+    assert "line 039" in tail and "line 000" not in tail
+    log.close()
+    log.write(b"after close")  # ignored, never raises
+    assert oct((tmp_path / "s" / "terminal.log").stat().st_mode & 0o777) == "0o600"

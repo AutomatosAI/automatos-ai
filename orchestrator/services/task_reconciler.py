@@ -22,6 +22,23 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 logger = logging.getLogger(__name__)
 
 
+ORPHANED_BOARD_SQL = """
+    SELECT bt.id, bt.source_type, bt.source_id, bt.started_at
+    FROM board_tasks bt
+    WHERE bt.status = 'in_progress'
+      AND bt.started_at < :cutoff
+      AND (bt.lease_until IS NULL OR bt.lease_until < :now)
+      AND (
+          bt.source_type = 'user'
+          OR (bt.source_type = 'recipe' AND EXISTS (
+              SELECT 1 FROM recipe_executions re
+              WHERE re.execution_id = bt.source_id
+                AND re.status IN ('completed', 'failed', 'cancelled')
+          ))
+      )
+"""
+
+
 class TaskReconciler:
 
     def __init__(self):
@@ -102,23 +119,16 @@ class TaskReconciler:
 
             # 3. Orphaned board tasks — in_progress with no backing async task
             #    (standalone user tasks executed via fire-and-forget, or recipe
-            #    tasks whose execution already finished/failed but bridge missed)
+            #    tasks whose execution already finished/failed but bridge missed).
+            #    PRD-234: a ticket with a LIVE lease is not orphaned — a CLI host
+            #    renews the lease for every session it runs (heartbeat + events),
+            #    and the board dispatcher's lease sweep already re-queues a run
+            #    whose lease lapsed. Without this guard every Claude Code session
+            #    longer than TASK_STALL_TIMEOUT_SECONDS was force-closed as done
+            #    (tickets 79/80, 2026-09-03) and the host's real result refused.
             orphaned_board = db.execute(
-                text("""
-                    SELECT bt.id, bt.source_type, bt.source_id, bt.started_at
-                    FROM board_tasks bt
-                    WHERE bt.status = 'in_progress'
-                      AND bt.started_at < :cutoff
-                      AND (
-                          bt.source_type = 'user'
-                          OR (bt.source_type = 'recipe' AND EXISTS (
-                              SELECT 1 FROM recipe_executions re
-                              WHERE re.execution_id = bt.source_id
-                                AND re.status IN ('completed', 'failed', 'cancelled')
-                          ))
-                      )
-                """),
-                {"cutoff": now - _timedelta_seconds(app_config.TASK_STALL_TIMEOUT_SECONDS)},
+                text(ORPHANED_BOARD_SQL),
+                {"cutoff": now - _timedelta_seconds(app_config.TASK_STALL_TIMEOUT_SECONDS), "now": now},
             ).fetchall()
 
             total = len(stalled_running) + len(stuck_pending) + len(orphaned_board)

@@ -45,6 +45,7 @@ from .claude_settings import has_completed_onboarding, record_directory_trust, w
 from .config import HostConfig
 from .env import build_session_env, resolve_binary
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
+from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import last_assistant_text, read_usage
 
 log = logging.getLogger("automatos.cli_host.session")
@@ -200,6 +201,7 @@ class Session:
         self.denials: List[Dict[str, Any]] = []
         self.notifications: List[Dict[str, Any]] = []
         self.output_tail: deque = deque(maxlen=_OUTPUT_TAIL_BYTES)
+        self.terminal_log: Optional[BoundedLog] = None
         self._contract_injected = False
         self._policy: Optional[PolicyContext] = None
 
@@ -325,6 +327,7 @@ class Session:
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket), encoding="utf-8")
         settings_path = write_settings(session_dir / "settings.json")
+        self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
         try:
             record_directory_trust(cwd)
         except OSError as exc:
@@ -416,11 +419,15 @@ class Session:
                 if not chunk:
                     break
                 self.output_tail.extend(chunk)
+                if self.terminal_log is not None:
+                    self.terminal_log.write(chunk)
         finally:
             try:
                 os.close(master)
             except OSError:
                 pass
+            if self.terminal_log is not None:
+                self.terminal_log.close()
 
     def _terminate(self) -> None:
         if self.proc is None or self.proc.poll() is not None:
