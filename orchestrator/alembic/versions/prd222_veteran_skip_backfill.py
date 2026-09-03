@@ -41,7 +41,12 @@ SET onboarding = COALESCE(onboarding, '{}'::jsonb)
                 to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
               )
        )
-WHERE onboarding IS NULL OR onboarding->>'stage' IS NULL
+WHERE (onboarding IS NULL OR onboarding->>'stage' IS NULL)
+  -- A veteran predates PRD-222. Anything created after it shipped (2026-08-28)
+  -- is a NEW workspace that has simply not started — never stamp it. Found
+  -- 2026-09-03: on a fresh local install the orphan-root chains re-run at the
+  -- container's `alembic upgrade heads` AFTER the operator workspace exists.
+  AND created_at < TIMESTAMP '2026-08-29'
 """
 
 _DOWNGRADE_SQL = """
