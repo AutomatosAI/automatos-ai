@@ -8,6 +8,12 @@ In Progress that means I approve". So those two actions record the grant
 themselves, with the same primitive the Governance button uses, and the gate
 then finds an active grant and proceeds. Nothing else changes: the grant is
 durable, audited on the row (``granted_by``), and expires like any other.
+
+Extended the same day ("all tasks just jump straight to blocked"): on the LOCAL
+edition there is one operator, so a ticket they file and assign — on the board,
+or by asking Auto in chat — is their approval too, and it is recorded at
+creation so the dispatcher's claim finds an active grant. SaaS keeps the
+maker/checker posture: a filed ticket still waits for a Governance approval.
 """
 from __future__ import annotations
 
@@ -18,12 +24,59 @@ logger = logging.getLogger(__name__)
 
 WHY_MOVED_TO_IN_PROGRESS = "the operator moved the ticket to In Progress"
 WHY_RUN_NOW = "the operator pressed Run Now"
+WHY_CREATED_AND_ASSIGNED = "the operator created the ticket and assigned it"
+WHY_ASKED_IN_CHAT = "the operator asked Auto for it in chat"
+
+LOCAL_EDITION = "local"
+SKIPPED = "skipped"
 
 
 def actor_ref(ctx: Any) -> str:
-    """``user:<id>`` — the same shape the approvals API records."""
+    """``user:<id>`` — the same shape the approvals API records.
+
+    ``RequestContext`` carries the principal as ``ctx.user.id`` (the Clerk id, or
+    the local user's id); older callers exposed ``user_id`` directly.
+    """
     uid = getattr(ctx, "user_id", None) or getattr(ctx, "internal_user_id", None)
-    return f"user:{uid}" if uid is not None else "user:unknown"
+    if uid is None:
+        user = getattr(ctx, "user", None)
+        uid = getattr(user, "id", None) or getattr(user, "email", None)
+    return f"user:{uid}" if uid else "user:unknown"
+
+
+def actor_from_user_id(user_id: Any) -> str:
+    """The same ``user:<id>`` shape for a user id threaded through a tool call."""
+    return f"user:{user_id}" if user_id else "user:unknown"
+
+
+def creation_is_consent() -> bool:
+    """True on the local edition only — one operator, so filing a ticket IS approving it."""
+    try:
+        import config as _config
+
+        source = getattr(_config, "settings", _config)
+        return str(getattr(source, "AUTH_EDITION", "saas")).lower() == LOCAL_EDITION
+    except Exception:  # noqa: BLE001 — an unreadable edition keeps the asking posture
+        return False
+
+
+def consent_for_created_ticket(
+    db: Any, *, workspace_id: Any, task: Any, actor: str, why: str,
+) -> str:
+    """Pre-approve a ticket the operator just filed AND assigned (local edition).
+
+    Returns ``"skipped"`` when the edition asks, or the ticket is not about to be
+    dispatched (unassigned, or not in ``assigned``); otherwise the outcome of
+    :func:`record_operator_consent`.
+    """
+    if not creation_is_consent():
+        return SKIPPED
+    agent_id = getattr(task, "assigned_agent_id", None)
+    if getattr(task, "status", None) != "assigned" or not agent_id:
+        return SKIPPED
+    return record_operator_consent(
+        db, workspace_id=workspace_id, task_id=task.id, agent_id=agent_id, actor=actor, why=why,
+    )
 
 
 def record_operator_consent(

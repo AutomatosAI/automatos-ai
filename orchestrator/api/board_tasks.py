@@ -30,7 +30,8 @@ from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
 from services.session_report import session_report_lines  # PRD-234 S2
 from services.board_consent import (  # PRD-234: a human's board action is the approval
-    WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref, record_operator_consent,
+    WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
+    consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import notify_task_available
 from services.board_events import board_event_stream, notify_board_event
@@ -405,6 +406,12 @@ async def create_task(
     # A created-as-assigned task notifies the claimant; the dispatch loop claims
     # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
     if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
+        # PRD-234 D16: the operator created AND assigned it — on the local edition
+        # that is the approval; recorded before the dispatcher can claim the row.
+        consent_for_created_ticket(
+            db, workspace_id=ctx.workspace_id, task=task,
+            actor=_operator_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
+        )
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
