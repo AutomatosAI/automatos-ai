@@ -1,8 +1,8 @@
 /**
  * PRD-233 S6/S7 — the Settings tabs per edition.
  *
- * local → only what exists locally: Profile (S6), System Settings, Orchestrator,
- *         API Keys, Credentials, Notifications. Webhooks / Channels / Widget SDK
+ * local → only what exists locally: Profile (S6), Session mode (PRD-234 S4),
+ *         System Settings, Orchestrator, API Keys, Credentials, Notifications. Webhooks / Channels / Widget SDK
  *         (hosted-edition surfaces) are hidden by the explicit allowlist, not by
  *         role — the local operator is super_admin.
  * saas  → the eight tabs exactly as before; no Profile tab (Clerk owns it).
@@ -46,6 +46,7 @@ vi.mock('../ChannelsSettingsTab', () => ({ ChannelsSettingsTab: () => null }))
 vi.mock('../ApiKeyManager', () => ({ ApiKeyManager: () => null }))
 vi.mock('../WidgetSdkTab', () => ({ WidgetSdkTab: () => null }))
 vi.mock('../NotificationsSettingsTab', () => ({ NotificationsSettingsTab: () => null }))
+vi.mock('../SessionModeTab', () => ({ SessionModeTab: () => null }))  // PRD-234 S4 (local only)
 
 async function loadPanel(edition: 'local' | 'saas') {
   vi.doMock('@/lib/auth-edition', () => ({
@@ -73,6 +74,7 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
 
     expect(tabLabels()).toEqual([
       'Profile',
+      'Session mode',
       'System Settings',
       'Orchestrator',
       'API Keys',
@@ -83,6 +85,8 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
     for (const hidden of ['webhooks', 'channels', 'widget-sdk']) {
       expect(LOCAL_EDITION_SETTINGS_TABS.has(hidden)).toBe(false)
     }
+    // PRD-234 S4: session mode is a local-only surface (the CLI host lane)
+    expect(LOCAL_EDITION_SETTINGS_TABS.has('session-mode')).toBe(true)
   })
 
   it('saas: the eight tabs render exactly as before and there is no Profile tab', async () => {
