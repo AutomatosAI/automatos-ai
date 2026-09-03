@@ -341,18 +341,15 @@ class AgentFactory:
                 self.logger.warning(f"max_output_tokens lookup failed for {model_id}: {e}")
         return DEFAULT_MAX_OUTPUT_TOKENS
 
-    _OPENROUTER_VENDOR_PREFIX = {
-        "openai": "openai/",
-        "anthropic": "anthropic/",
-        "google": "google/",
-        "grok": "x-ai/",
-    }
-
     def _openrouter_model_id(self, vendor_provider: str, model_id: str) -> str:
-        """Vendor model id -> its OpenRouter form (no-op when already prefixed)."""
+        """Vendor model id -> its OpenRouter form (no-op when already prefixed).
+
+        The vendor → prefix map lives in the provider registry (PRD-236).
+        """
         if "/" in model_id:
             return model_id
-        prefix = self._OPENROUTER_VENDOR_PREFIX.get(vendor_provider)
+        from core.llm.providers import openrouter_prefix_for
+        prefix = openrouter_prefix_for(vendor_provider)
         return f"{prefix}{model_id}" if prefix else model_id
 
     def _resolve_provider_for_model(self, provider_str: str, model_id: str) -> tuple[str, str]:
@@ -360,10 +357,10 @@ class AgentFactory:
 
         Returns (provider, model_id) — both may be rewritten.
         """
-        DIRECT_PROVIDERS = {
-            "openai", "anthropic", "google", "grok", "azure", "azure_openai",
-            "aws_bedrock", "bedrock", "huggingface", "openrouter",
-        }
+        # PRD-236: every provider the factory can route to (slugs, aliases, enum
+        # values of registry entries with a chat adapter).
+        from core.llm.providers import routable_provider_names, hosts_vendor_models
+        DIRECT_PROVIDERS = routable_provider_names()
         # Known OpenRouter vendor prefixes for bare model-id recovery
         VENDOR_PREFIX_RULES = (
             ("llama", "meta-llama"),
@@ -400,8 +397,10 @@ class AgentFactory:
             )
             return "openrouter", model_id
 
-        # Slash-format model IDs are OpenRouter marketplace models
-        if "/" in model_id and provider_str != "openrouter":
+        # Slash-format model IDs belong to a provider that hosts vendor-prefixed
+        # ids (OpenRouter, NVIDIA — registry ``hosts_vendor_models``). Any other
+        # provider paired with a slash id is a mismatch → OpenRouter (legacy rule).
+        if "/" in model_id and not hosts_vendor_models(provider_str):
             prefix = model_id.split("/")[0].lower()
             if prefix == provider_str.lower() or prefix not in DIRECT_PROVIDERS:
                 self.logger.info(
@@ -469,6 +468,17 @@ class AgentFactory:
             except Exception as e:
                 self.logger.error(f"BYOK key lookup failed for {provider_name}: {e}")
 
+        # PRD-236 §Terms: a byok_only provider (NVIDIA's trial endpoint) never
+        # resolves from the platform tiers in the saas edition — the platform
+        # must not serve customers on a trial key. Locally the operator IS the
+        # user, so their env/credential key is their own and the tiers apply.
+        from core.llm.providers import platform_key_allowed, env_api_key
+        if not platform_key_allowed(provider_name):
+            self.logger.info(
+                f"No platform key lane for '{provider_name}' in this edition (BYO key only) — {agent_name}"
+            )
+            return None
+
         # 1.5 Operator workspace key (PLATFORM_KEY_WORKSPACE_ID) — the pilot
         # "platform key" lane, read live from user_api_keys instead of a
         # duplicated credential-store copy that can drift (2026-07-30).
@@ -498,20 +508,8 @@ class AgentFactory:
             except Exception:
                 continue
 
-        # 3. Config env vars
-        from config import config as _cfg
-        config_map = {
-            "openai": _cfg.OPENAI_API_KEY,
-            "anthropic": _cfg.ANTHROPIC_API_KEY,
-            "google": _cfg.GOOGLE_API_KEY,
-            "openrouter": _cfg.OPENROUTER_API_KEY,
-            "grok": _cfg.XAI_API_KEY,
-            "azure": _cfg.AZURE_OPENAI_API_KEY,
-            "azure_openai": _cfg.AZURE_OPENAI_API_KEY,
-            "aws_bedrock": _cfg.AWS_ACCESS_KEY_ID,
-            "bedrock": _cfg.AWS_ACCESS_KEY_ID,
-        }
-        key = config_map.get(provider_name)
+        # 3. Config env vars (the registry knows each provider's config attribute)
+        key = env_api_key(provider_name)
         if key:
             self.logger.info(f"Using config API key for {provider_name} for {agent_name}")
             return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
@@ -552,26 +550,14 @@ class AgentFactory:
         """Create LLM manager with API key resolution (PRD-15, PRD-54)."""
         from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
 
-        provider_map = {
-            "openai": LLMProviderEnum.OPENAI,
-            "anthropic": LLMProviderEnum.ANTHROPIC,
-            "google": LLMProviderEnum.GOOGLE,
-            "openrouter": LLMProviderEnum.OPENROUTER,
-            "grok": LLMProviderEnum.GROK,
-            "huggingface": LLMProviderEnum.HUGGINGFACE,
-            "azure": LLMProviderEnum.AZURE,
-            "azure_openai": LLMProviderEnum.AZURE,
-            "aws_bedrock": LLMProviderEnum.AWS_BEDROCK,
-            "bedrock": LLMProviderEnum.AWS_BEDROCK,
-        }
+        from core.llm.providers import enum_for
 
         effective_provider, effective_model_id = self._resolve_provider_for_model(
             model_config.provider, model_config.model_id
         )
-        if effective_provider not in provider_map:
+        provider = enum_for(effective_provider)
+        if provider is None:
             raise ValueError(f"Unsupported provider: {effective_provider}")
-
-        provider = provider_map[effective_provider]
         resolved = await self._resolve_api_key(effective_provider, agent_name, workspace_id=workspace_id)
         if not resolved and effective_provider != "openrouter":
             # 2026-08-29 (Gerard, the Harbourline failure): provider resolution is
@@ -587,7 +573,7 @@ class AgentFactory:
                     f"via OpenRouter (source={or_resolved.source})"
                 )
                 effective_provider = "openrouter"
-                provider = provider_map["openrouter"]
+                provider = LLMProviderEnum.OPENROUTER
                 resolved = or_resolved
         if not resolved:
             raise ValueError(
@@ -930,10 +916,9 @@ class AgentFactory:
                 self.logger.warning(
                     f"No credential for provider '{provider_str}' — falling back to OpenRouter for '{model_id_str}'"
                 )
+                original_provider = (llm_config_dict.get("provider") or "").lower()
+                model_id_str = self._openrouter_model_id(original_provider, model_id_str)
                 provider_str = "openrouter"
-                if "/" not in model_id_str:
-                    original_provider = llm_config_dict.get("provider", "").lower()
-                    model_id_str = f"{original_provider}/{model_id_str}"
                 provider = LLMProvider(provider_str)
                 resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=effective_ws_id)
 

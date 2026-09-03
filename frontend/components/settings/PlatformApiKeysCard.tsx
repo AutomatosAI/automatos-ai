@@ -10,7 +10,7 @@
  * the BYOK surface.
  */
 
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -30,23 +30,11 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { keyPlaceholder, providersForPlatformKeys, useProviderRegistry } from '@/hooks/use-provider-registry'
 
 interface PlatformKeyStatus {
   platform_keys: Record<string, { configured: boolean }>
 }
-
-const PROVIDERS = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'azure', label: 'Azure OpenAI' },
-  { value: 'bedrock', label: 'AWS Bedrock' },
-  { value: 'grok', label: 'Grok / xAI' },
-  { value: 'cohere', label: 'Cohere' },
-  { value: 'huggingface', label: 'HuggingFace' },
-] as const
 
 export function PlatformApiKeysCard() {
   const queryClient = useQueryClient()
@@ -56,6 +44,14 @@ export function PlatformApiKeysCard() {
   const [apiKey, setApiKey] = useState('')
   const [removeTarget, setRemoveTarget] = useState<string | null>(null)
   const apiKeyInputRef = useRef<HTMLInputElement>(null)
+
+  // PRD-236: only providers that may hold a platform key in this edition
+  // (NVIDIA's trial endpoint is BYO key only in saas, so it is absent here).
+  const registry = useProviderRegistry()
+  const PROVIDERS = useMemo(
+    () => providersForPlatformKeys(registry).map((p) => ({ value: p.slug, label: p.label })),
+    [registry],
+  )
 
   const { data: platformStatus } = useQuery<PlatformKeyStatus>({
     queryKey: ['platform-key-status'],
@@ -208,7 +204,7 @@ export function PlatformApiKeysCard() {
                   ref={apiKeyInputRef}
                   id="platform-api-key"
                   type="password"
-                  placeholder="sk-..."
+                  placeholder={provider ? keyPlaceholder(registry, provider) : 'sk-...'}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}

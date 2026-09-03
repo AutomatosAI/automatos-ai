@@ -22,7 +22,8 @@ from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
 from .clients.bedrock_client import BedrockProvider
 from .clients.grok_client import GrokProvider
-from .clients.openrouter_client import OpenRouterProvider
+from .clients.openai_compatible_client import OpenAICompatibleProvider
+from .providers import get_spec, env_api_key, ADAPTER_OPENAI_COMPATIBLE
 
 logger = logging.getLogger(__name__)
 
@@ -501,6 +502,7 @@ class LLMManager:
         organization_id = None
         secret_key = None  # For AWS Bedrock IAM auth
         
+        _spec = get_spec(provider.value)
         if provider == LLMProvider.OPENAI:
             api_key = cred_data.get("api_key")
             base_url = cred_data.get("base_url")
@@ -530,8 +532,11 @@ class LLMManager:
             base_url = aws_region  # Store region in base_url field
         elif provider == LLMProvider.GROK:
             api_key = cred_data.get("api_key") or cred_data.get("api_token")
-        elif provider == LLMProvider.OPENROUTER:
+        elif _spec is not None and _spec.adapter == ADAPTER_OPENAI_COMPATIBLE:
+            # OpenRouter / NVIDIA / DeepSeek (PRD-236): key from the credential,
+            # base URL from the credential if it carries one, else the registry.
             api_key = cred_data.get("api_key") or cred_data.get("api_token")
+            base_url = cred_data.get("base_url") or None
 
         # Operator workspace key overrides a drifted credential-store copy —
         # the stored platform slot held a provider-side-deleted key for months
@@ -546,18 +551,8 @@ class LLMManager:
 
         # Fallback to environment variables if credentials not found (except HuggingFace)
         if not api_key and provider != LLMProvider.HUGGINGFACE:
-            fallback_env_vars = {
-                LLMProvider.OPENAI: "OPENAI_API_KEY",
-                LLMProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
-                LLMProvider.GOOGLE: "GOOGLE_API_KEY",
-                LLMProvider.AZURE: "AZURE_OPENAI_API_KEY",
-                LLMProvider.AWS_BEDROCK: "AWS_ACCESS_KEY_ID",
-                LLMProvider.GROK: "XAI_API_KEY",
-                LLMProvider.OPENROUTER: "OPENROUTER_API_KEY"
-            }
-            env_var = fallback_env_vars.get(provider)
-            if env_var:
-                api_key = getattr(config, env_var, None)
+            # PRD-236: the registry knows each provider's config attribute.
+            api_key = env_api_key(provider.value)
 
         if not api_key and provider == LLMProvider.HUGGINGFACE:
             raise ValueError(
@@ -609,10 +604,11 @@ class LLMManager:
             return BedrockProvider(config)
         elif config.provider == LLMProvider.GROK:
             return GrokProvider(config)
-        elif config.provider == LLMProvider.OPENROUTER:
-            return OpenRouterProvider(config)
-        else:
-            raise ValueError(f"Unsupported provider: {config.provider}")
+        spec = get_spec(config.provider.value if config.provider else None)
+        if spec is not None and spec.adapter == ADAPTER_OPENAI_COMPATIBLE:
+            # OpenRouter / NVIDIA / DeepSeek — one adapter, spec-driven (PRD-236)
+            return OpenAICompatibleProvider(config)
+        raise ValueError(f"Unsupported provider: {config.provider}")
 
     def _is_retriable_model_error(self, exc: Exception) -> bool:
         """Return True if the exception indicates a dead/removed model (not transient)."""
