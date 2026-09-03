@@ -218,7 +218,7 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         from api.llm_marketplace import _get_or_create_from_cache
         from core.llm.model_policy import check_model_for_agent
 
-        resolved = _get_or_create_from_cache(db, model_id)
+        resolved = _get_or_create_from_cache(db, model_id, params.get("provider"))
         if resolved is None:
             # Prod 2026-09-02 (post-#672): told "omit model_id to use the default",
             # the model retried the SAME unknown id twice and the build stalled.
@@ -236,11 +236,12 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         else:
             allowed, reason = check_model_for_agent(
                 db, workspace_id, model_id, orchestrator_seat=False,
+                provider=resolved.serving_provider,
             )
             if not allowed:
                 return {"success": False, "error": f"Model rejected: {reason}"}
             model_config["model_id"] = model_id
-            model_config["provider"] = resolved.provider
+            model_config["provider"] = resolved.serving_provider  # PRD-236 W1: the route, never the vendor
     if temperature is not None:
         model_config["temperature"] = max(0.0, min(2.0, float(temperature)))
 

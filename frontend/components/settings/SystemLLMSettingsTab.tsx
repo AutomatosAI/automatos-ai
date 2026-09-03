@@ -157,10 +157,14 @@ export default function SystemLLMSettingsTab({
   const availableModels = useMemo(() => {
     if (!Array.isArray(allModels)) return []
     if (!selectedProvider) return allModels
+    // PRD-236 W1: an installed row is a ROUTE — list the ones served by the
+    // selected provider. Rows from an older API (no serving_provider) keep the
+    // vendor/aggregator heuristic.
     const isAggregator = hostsVendorModels(registry, selectedProvider)
     return allModels.filter((model: any) =>
-      model.provider === selectedProvider ||
-      (isAggregator && model.tier === 'aggregator')
+      model.serving_provider
+        ? model.serving_provider === selectedProvider
+        : model.provider === selectedProvider || (isAggregator && (model.sourcing ?? model.tier) === 'aggregator')
     )
   }, [allModels, selectedProvider, registry])
 
@@ -459,14 +463,9 @@ export default function SystemLLMSettingsTab({
                   <Select
                     value={orchConfig?.llm?.model_id || ''}
                     onValueChange={(value) => {
+                      // PRD-236 W1: the list is already the selected provider's routes,
+                      // so the pick never changes the provider (the tag is the route).
                       handleLLMChange('model_id', value)
-                      // An aggregator-tier model needs a provider that hosts vendor-prefixed
-                      // ids. OpenRouter and NVIDIA both do (PRD-236) — only switch to
-                      // OpenRouter when the chosen provider cannot serve the model.
-                      const picked = allModels.find((m: any) => m.model_id === value)
-                      if (picked && (picked as any).tier === 'aggregator' && !hostsVendorModels(registry, orchConfig?.llm?.provider)) {
-                        handleLLMChange('provider', 'openrouter')
-                      }
                     }}
                     disabled={modelsLoading || !selectedProvider}
                   >
@@ -481,9 +480,9 @@ export default function SystemLLMSettingsTab({
                     </SelectTrigger>
                     <SelectContent>
                       {availableModels.length > 0 ? (
-                        availableModels.map((model: { model_id: string; display_name: string; context_window: number }) => (
-                          <SelectItem key={model.model_id} value={model.model_id}>
-                            {model.display_name}
+                        availableModels.map((model: { id?: number; model_id: string; display_name: string; context_window: number; is_free?: boolean }) => (
+                          <SelectItem key={model.id ?? model.model_id} value={model.model_id}>
+                            {model.display_name}{model.is_free ? ' · free' : ''}
                             {model.context_window >= 100000 && ` (${(model.context_window / 1000).toFixed(0)}K context)`}
                           </SelectItem>
                         ))

@@ -31,6 +31,7 @@ import { apiClient } from '@/lib/api-client'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { LLMModel } from './llm-model-card'
+import { routeActionPath, routeBadges, sourcingLabel } from './llm-model-card'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -116,11 +117,11 @@ export function LLMModelDetailModal({
     setInstalling(true)
     try {
       if (model.is_installed) {
-        await apiClient.post(`/api/marketplace/llm/models/${model.model_id}/uninstall`)
-        toast.success(`${model.display_name} removed`)
+        await apiClient.post(routeActionPath(model, 'uninstall'))
+        toast.success(`${model.route_label || model.display_name} removed`)
       } else {
-        await apiClient.post(`/api/marketplace/llm/models/${model.model_id}/install`)
-        toast.success(`${model.display_name} installed`)
+        await apiClient.post(routeActionPath(model, 'install'))
+        toast.success(`${model.route_label || model.display_name} installed`)
       }
       queryClient.invalidateQueries({ queryKey: ['marketplaceLlmModels'] })
       queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
@@ -152,9 +153,9 @@ export function LLMModelDetailModal({
           <div className="flex items-start gap-3">
             <Badge
               variant="outline"
-              className={`text-[10px] uppercase font-bold tracking-wider shrink-0 mt-1 ${providerBadgeClass(model.provider)}`}
+              className={`text-[10px] uppercase font-bold tracking-wider shrink-0 mt-1 ${providerBadgeClass(routeBadges(model).routeKey)}`}
             >
-              {model.provider}
+              {routeBadges(model).route}
             </Badge>
             <div className="flex-1 min-w-0">
               <DialogTitle className="flex items-center gap-2 flex-wrap">
@@ -171,16 +172,16 @@ export function LLMModelDetailModal({
 
           {/* Tier + Default + Plan badges */}
           <div className="flex flex-wrap gap-1.5 mt-3">
-            {model.tier && (
+            {sourcingLabel(model) && (
               <Badge
                 variant="outline"
                 className={
-                  model.tier === 'direct'
+                  (model.sourcing ?? model.tier) === 'direct'
                     ? 'text-[10px] border-[hsl(var(--success))]/30 text-[hsl(var(--success))]'
                     : 'text-[10px] border-[hsl(var(--info))]/30 text-[hsl(var(--info))]'
                 }
               >
-                {model.tier === 'direct' ? 'Direct API' : 'Aggregator'}
+                {sourcingLabel(model)}
               </Badge>
             )}
             {model.is_default && (

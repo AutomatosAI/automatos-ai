@@ -35,14 +35,12 @@ _SEED_CAP = 4
 
 
 def _openrouter_served(q):
-    """Filter llm_models to rows the platform OpenRouter key can serve."""
-    return q.filter(
-        or_(
-            LLMModel.provider == "openrouter",
-            LLMModel.tier == "openrouter",
-            LLMModel.model_id.contains("/"),
-        )
-    )
+    """Filter llm_models to rows the platform OpenRouter key can serve.
+
+    PRD-236 W1: the row says who serves it (``serving_provider``); the old
+    string-shape guess (any slash id) is gone with the per-route catalogue.
+    """
+    return q.filter(LLMModel.serving_provider == "openrouter")
 
 
 def pick_base_models(db: Session) -> list[LLMModel]:

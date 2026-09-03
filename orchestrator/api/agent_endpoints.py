@@ -573,15 +573,16 @@ async def update_agent_model_config(
         model_id = model_config.get("model_id")
         if model_id:
             from api.llm_marketplace import _get_or_create_from_cache
-            model = _get_or_create_from_cache(db, model_id)
+            model = _get_or_create_from_cache(db, model_id, model_config.get("provider"))
             if not model:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid model_id: {model_id}"
                 )
-            # PRD-54: Always use the provider from the model registry
-            # The frontend may not know the correct provider for aggregated models
-            model_config["provider"] = model.provider
+            # PRD-236 W1: the stored provider is the ROUTE that serves the row
+            # (openrouter / nvidia / openai …), never the vendor — the factory
+            # routes to it as tagged.
+            model_config["provider"] = model.serving_provider
 
             # PRD-223 W1: policy gate. The Auto agent row is the orchestrator
             # seat — quarantined/unapproved models are rejected at write time
@@ -593,6 +594,7 @@ async def update_agent_model_config(
             )
             _allowed, _reason = check_model_for_agent(
                 db, ctx.workspace_id, model_id, orchestrator_seat=_is_auto_seat,
+                provider=model.serving_provider,
             )
             if not _allowed:
                 raise HTTPException(
