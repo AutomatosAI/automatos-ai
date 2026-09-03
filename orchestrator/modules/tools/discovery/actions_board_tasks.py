@@ -3,6 +3,20 @@
 from .action_registry import ActionDefinition, ActionRegistry
 
 
+def _board_statuses() -> list:
+    """The board's real status vocabulary, from the HTTP path's single source of
+    truth (api.board_tasks.VALID_STATUSES). PRD-227 gave the agent HANDLER parity
+    with it, but these SCHEMAS still listed five of seven: 'blocked' and 'failed'
+    were invisible to the model, so "close all the blocked tickets" could not even
+    list them (2026-09-02). Sorted for a stable schema; the fallback is the same
+    set spelled out, so a registry build never depends on the API module importing."""
+    try:
+        from api.board_tasks import VALID_STATUSES
+        return sorted(VALID_STATUSES)
+    except Exception:  # pragma: no cover — import-order safety only
+        return ["assigned", "blocked", "done", "failed", "in_progress", "inbox", "review"]
+
+
 def register_board_task_actions(registry: ActionRegistry) -> None:
     """Register board task actions (PRD-72)."""
 
@@ -84,7 +98,7 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "status": {
                     "type": "string",
-                    "enum": ["inbox", "assigned", "in_progress", "review", "done"],
+                    "enum": _board_statuses(),
                     "description": "Filter by status (omit for all)",
                 },
                 "priority": {
@@ -98,7 +112,11 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Max results (default 20)",
+                    "description": (
+                        "Max results (default 20, max 200). The result's "
+                        "'total_matching' says how many match in all — raise the "
+                        "limit when you need every one (e.g. to close all blocked tasks)."
+                    ),
                 },
             },
             "required": [],
@@ -200,8 +218,11 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
     registry.register(ActionDefinition(
         name="platform_update_task_status",
         description=(
-            "Change a task's status. Moving to 'in_progress' triggers immediate "
-            "agent execution if an agent is assigned. Moving to 'done' completes it."
+            "Change a task's status — one task via task_id, or MANY tasks to the "
+            "same status in ONE call via task_ids (use this for 'close all …'; "
+            "never loop one call per task). Moving to 'in_progress' triggers "
+            "immediate agent execution if an agent is assigned. Moving to 'done' "
+            "completes it. 'blocked' requires blocked_reason."
         ),
         category="tasks",
         parameters={
@@ -209,15 +230,28 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
             "properties": {
                 "task_id": {
                     "type": "integer",
-                    "description": "The task ID",
+                    "description": "The task ID (single task)",
+                },
+                "task_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": (
+                        "Several task IDs to move to the same status in one call "
+                        "(max 100). The result lists 'updated' and 'failed' ids — "
+                        "report both to the user."
+                    ),
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["inbox", "assigned", "in_progress", "review", "done"],
+                    "enum": _board_statuses(),
                     "description": "New status",
                 },
+                "blocked_reason": {
+                    "type": "string",
+                    "description": "Why the task is blocked (required when status is 'blocked')",
+                },
             },
-            "required": ["task_id", "status"],
+            "required": ["status"],
         },
         permission_level="write",
         requires_confirmation=False,

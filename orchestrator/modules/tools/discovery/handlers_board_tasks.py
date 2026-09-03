@@ -7,6 +7,14 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+# list_board_tasks: the page size the model may ask for. "Close all the blocked
+# tasks" needs to SEE them all; 50 hid 121 blocked tasks behind a page (2026-09-02).
+MAX_LIST_TASKS_LIMIT = 200
+# update_board_task_status: how many task_ids one bulk call may carry. The chat
+# loop caps a tool at 8 calls per turn, so one-id-per-call could never close more
+# than eight tasks — the bulk path exists so "close all …" is one honest call.
+MAX_BULK_TASK_IDS = 100
+
 logger = logging.getLogger(__name__)
 
 
@@ -300,7 +308,13 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
         else:
             return {"success": True, "tasks": [], "total": 0, "note": f"No agent named '{agent_name}' found"}
 
-    limit = min(int(params.get("limit", 20)), 50)
+    limit = min(int(params.get("limit", 20)), MAX_LIST_TASKS_LIMIT)
+    # How many match in all, so the model knows whether it saw everything
+    # (the page is the sample, total_matching is the truth).
+    try:
+        total_matching = int(query.count())
+    except Exception:  # noqa: BLE001 — a count failure never fails the listing
+        total_matching = None
     tasks = query.order_by(BoardTask.created_at.desc()).limit(limit).all()
 
     # Enrich with agent names
@@ -327,7 +341,13 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
             "error_message": t.error_message,
         })
 
-    return {"success": True, "tasks": result, "total": len(result)}
+    return {
+        "success": True,
+        "tasks": result,
+        "total": len(result),
+        "total_matching": total_matching if total_matching is not None else len(result),
+        "limit": limit,
+    }
 
 
 async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -421,14 +441,67 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     }
 
 
+async def _update_many_board_task_statuses(
+    db: Session, workspace_id: UUID, params: Dict[str, Any], task_ids: Any
+) -> Dict[str, Any]:
+    """Bulk form of update_board_task_status: every id goes through the SAME
+    single-task path (validation, blocked_reason rule, atomic in_progress claim,
+    board NOTIFY), so nothing is bypassed — this only removes the one-call-per-task
+    round trip that the per-turn tool cap turned into "closed the ones I could see".
+    Reports success only when EVERY id updated; the failed list names the rest."""
+    if not isinstance(task_ids, (list, tuple)):
+        return {"success": False, "error": "task_ids must be a list of task IDs"}
+    if len(task_ids) > MAX_BULK_TASK_IDS:
+        return {
+            "success": False,
+            "error": (
+                f"task_ids carries {len(task_ids)} ids; the maximum is {MAX_BULK_TASK_IDS} "
+                "per call — split the request and report progress to the user"
+            ),
+        }
+    new_status = params.get("status")
+    if not new_status:
+        return {"success": False, "error": "task_id (or task_ids) and status are required"}
+
+    single = {k: v for k, v in params.items() if k != "task_ids"}
+    updated = []
+    failed = []
+    for raw_id in task_ids:
+        try:
+            tid = int(raw_id)
+        except (TypeError, ValueError):
+            failed.append({"task_id": raw_id, "error": "not an integer task id"})
+            continue
+        result = await update_board_task_status(db, workspace_id, {**single, "task_id": tid})
+        if result.get("success"):
+            updated.append(tid)
+        else:
+            failed.append({"task_id": tid, "error": result.get("error", "unknown error")})
+    return {
+        "success": not failed,
+        "partial": bool(updated) and bool(failed),
+        "status": new_status,
+        "requested": len(task_ids),
+        "updated_count": len(updated),
+        "updated": updated,
+        "failed": failed,
+    }
+
+
 async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Update a board task's status. Moving to in_progress triggers execution."""
+    """Update a board task's status. Moving to in_progress triggers execution.
+    With ``task_ids`` (a list) every id is updated to the same status — see
+    ``_update_many_board_task_statuses``."""
     from core.models.core import BoardTask
+
+    task_ids = params.get("task_ids")
+    if task_ids is not None and task_ids != []:
+        return await _update_many_board_task_statuses(db, workspace_id, params, task_ids)
 
     task_id = params.get("task_id")
     new_status = params.get("status")
     if not task_id or not new_status:
-        return {"success": False, "error": "task_id and status are required"}
+        return {"success": False, "error": "task_id (or task_ids) and status are required"}
 
     # PRD-227 US-001: agent-side vocabulary reaches parity with the HTTP path by
     # reusing its VALID_STATUSES set — so 'blocked'/'failed' are accepted and any

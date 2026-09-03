@@ -219,9 +219,16 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
         resolved = _get_or_create_from_cache(db, model_id)
         if resolved is None:
+            # Live-test 2026-08-29 + 09-02: Auto asked for a model id that is not
+            # in the catalog and retried the SAME id three times — the error named
+            # the problem but not the way out. Name it.
             return {
                 "success": False,
-                "error": f"Unknown model '{model_id}' — not found in the model catalog",
+                "error": (
+                    f"Unknown model '{model_id}' — not found in the model catalog. "
+                    f"Omit model_id to use the workspace default "
+                    f"({model_config.get('model_id')}), or install the model first."
+                ),
             }
         allowed, reason = check_model_for_agent(
             db, workspace_id, model_id, orchestrator_seat=False,

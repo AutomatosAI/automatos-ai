@@ -747,6 +747,7 @@ Prefer an agent that already exists. Before an **assign** or **mission** implies
 - "What agents do I have?" → molecule / respond (platform query)
 - "Search my docs for the Q4 report" → molecule / delegate (search tool, inline)
 - "Have my accountant agent chase the overdue invoices" → assign (named agent, off-thread deliverable), target_agent "accountant"
+- "Can you close all the blocked tickets for VECTOR? It was a token issue" → molecule / respond (addressed to YOU — do it with your platform tools; VECTOR owns the tickets and is not an assignee. Never invent an assignee from the topic, e.g. a Jira agent because the user said "tickets")
 - "Get Jim to draft the board pack, no rush" → assign + deferred (named agent, defer phrasing), target_agent "Jim"
 - "Research competitors, write a report, build a deck, and email the team" → organ / mission (multi-agent project)
 
@@ -766,7 +767,7 @@ Return ONLY valid JSON:
 }}
 
 action mapping: "respond" for atom; "delegate" for inline molecule/cell/organ answers; "assign" for a named/single agent's off-thread board work; "mission" ONLY for a multi-agent project (organ/organism with 4+ agents in phases).
-target_agent: for "assign", the agent name the user named (or the role, e.g. "accountant"); empty otherwise.
+target_agent: for "assign", the agent name the user named (or the role, e.g. "accountant") — it MUST appear in the user's own words; a request addressed to you ("can you…", "please close…") with no named assignee is NOT assign; empty otherwise.
 tool_hints: short domain keywords like "email", "github", "code", "database", "platform". Use "platform" when the user wants to create/list/manage agents, skills, plugins, recipes, or workspace resources. Empty for atom."""
 
 
@@ -984,7 +985,9 @@ class AutoBrain:
             )
             return []
 
-    def _match_roster_agent(self, name: Optional[str], agents=None):
+    def _match_roster_agent(
+        self, name: Optional[str], agents=None, message: Optional[str] = None
+    ):
         """Resolve an agent name from the user's request against the active
         roster (PRD-224 US-004). Case-insensitive: exact name first, then a
         forgiving contains match ("my accountant agent" -> "Accountant"). BOTH
@@ -1003,6 +1006,14 @@ class AutoBrain:
         if not name or not name.strip():
             return None, None
         target = name.strip().lower()
+        # Grounding (2026-09-02, the "JIRA ADMIN" misfire): when the user's
+        # message is supplied, the proposed name must be something they actually
+        # wrote. The classifier inferred a Jira agent from the word "tickets" in
+        # "can you close all the blocked tickets for VECTOR", and the lane filed
+        # and started a ticket for an agent the user never named. An ungrounded
+        # name resolves to nothing — the ask-in-thread signal, never a guess.
+        if message is not None and target not in message.lower():
+            return None, None
         agents = agents if agents is not None else self._active_agents()
         # Exact match wins — but collect EVERY exact (case-insensitive) hit keyed
         # by agent id so two agents sharing a name don't collapse to a first-row
@@ -1122,7 +1133,7 @@ class AutoBrain:
                 if action == Action.ASSIGN:
                     proposed = (data.get("target_agent") or "").strip()
                     target_agent_id, target_agent_name = self._match_roster_agent(
-                        proposed, roster
+                        proposed, roster, message=message
                     )
                     if target_agent_name is None and proposed:
                         target_agent_name = proposed  # keep the name for the ask

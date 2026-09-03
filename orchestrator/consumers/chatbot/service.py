@@ -59,6 +59,8 @@ from services.page_context import (
     page_actions_from_context as _page_actions_from_context,
 )
 
+from consumers.chatbot.empty_completion import is_empty_completion, with_fallback_content
+
 logger = logging.getLogger(__name__)
 
 # PRD-157 S3: token budget for a single tool result fed back into the LLM loop
@@ -2123,9 +2125,12 @@ class StreamingChatService:
             llm_messages.append({
                 "role": "system",
                 "content": (
-                    f"STOP: `{tool_name}` has been called {_attempts} times. "
-                    "You MUST now synthesize a response from the results you have. "
-                    "Do NOT call any more tools."
+                    f"STOP: `{tool_name}` has been called {_attempts} times — this turn's "
+                    "tool budget is exhausted. You MUST now synthesize a response from the "
+                    "results you have and call NO more tools. Be exact about completeness: "
+                    "say what was actually done and what remains undone. If the request "
+                    "needed more calls than you could make, say so plainly and offer to "
+                    "continue — never report the request as done."
                 ),
             })
             logger.warning(f"[tool-loop] Multi-step tool {tool_name} hit hard cap ({_attempts} calls) — forcing synthesis")
@@ -2448,6 +2453,16 @@ class StreamingChatService:
             response = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages, tools=use_tools,
             )
+            if is_empty_completion(response):
+                # Live-test 2026-09-02: zero tokens, finish_reason=stop, streamed as
+                # a successful blank turn mid-onboarding. Retry once, then say so.
+                logger.warning("[chat] empty completion (no text, no tool calls) — retrying once")
+                response = await agent_runtime.llm_manager.generate_response(
+                    messages=llm_messages, tools=use_tools,
+                )
+                if is_empty_completion(response):
+                    logger.error("[chat] empty completion twice — streaming the fallback sentence")
+                    response = with_fallback_content(response)
 
             logger.info(
                 f"Agent LLM Response - has_tool_calls: {bool(response.tool_calls)}, "
