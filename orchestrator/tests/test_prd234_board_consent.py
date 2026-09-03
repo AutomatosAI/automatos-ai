@@ -97,3 +97,47 @@ def test_actor_ref_matches_the_approvals_api_shape():
     assert board_consent.actor_ref(SimpleNamespace(user_id=2)) == "user:2"
     assert board_consent.actor_ref(SimpleNamespace(user_id=None, internal_user_id=7)) == "user:7"
     assert board_consent.actor_ref(SimpleNamespace()) == "user:unknown"
+
+
+def test_actor_ref_reads_the_request_context_principal():
+    ctx = SimpleNamespace(user=SimpleNamespace(id="user_abc", email="a@b.c"))
+    assert board_consent.actor_ref(ctx) == "user:user_abc"
+    assert board_consent.actor_ref(SimpleNamespace(user_id=7)) == "user:7"
+    assert board_consent.actor_ref(SimpleNamespace()) == "user:unknown"
+    assert board_consent.actor_from_user_id("user_x") == "user:user_x"
+    assert board_consent.actor_from_user_id(None) == "user:unknown"
+
+
+def test_creation_is_consent_follows_the_edition(monkeypatch):
+    import config as _config
+
+    target = getattr(_config, "settings", _config)
+    monkeypatch.setattr(target, "AUTH_EDITION", "local", raising=False)
+    assert board_consent.creation_is_consent() is True
+    monkeypatch.setattr(target, "AUTH_EDITION", "saas", raising=False)
+    assert board_consent.creation_is_consent() is False
+
+
+def test_created_ticket_is_pre_approved_on_local_only(monkeypatch):
+    db = _DB()
+    created, granted = _wire(monkeypatch)
+    task = SimpleNamespace(id=79, status="assigned", assigned_agent_id=15)
+
+    monkeypatch.setattr(board_consent, "creation_is_consent", lambda: False)
+    assert board_consent.consent_for_created_ticket(
+        db, workspace_id="ws", task=task, actor="user:1", why=board_consent.WHY_ASKED_IN_CHAT,
+    ) == "skipped"
+    assert created == [] and granted == []
+
+    monkeypatch.setattr(board_consent, "creation_is_consent", lambda: True)
+    assert board_consent.consent_for_created_ticket(
+        db, workspace_id="ws", task=task, actor="user:1", why=board_consent.WHY_ASKED_IN_CHAT,
+    ) == "created"
+    assert len(created) == 1 and created[0].reason == board_consent.WHY_ASKED_IN_CHAT
+    assert granted[-1].granted_by == "user:1"
+
+    inbox = SimpleNamespace(id=80, status="inbox", assigned_agent_id=None)
+    assert board_consent.consent_for_created_ticket(
+        db, workspace_id="ws", task=inbox, actor="user:1", why=board_consent.WHY_CREATED_AND_ASSIGNED,
+    ) == "skipped"
+    assert len(created) == 1

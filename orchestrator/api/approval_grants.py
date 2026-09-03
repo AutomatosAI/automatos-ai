@@ -71,8 +71,11 @@ def _grant_payload(db: Session, grant: ApprovalGrant) -> Dict[str, Any]:
 
 
 def _actor_ref(ctx: RequestContext) -> str:
-    uid = getattr(ctx, "user_id", None) or getattr(ctx, "internal_user_id", None)
-    return f"user:{uid}" if uid is not None else "user:unknown"
+    # PRD-234: RequestContext carries the principal as ctx.user.id — the older
+    # attribute lookup recorded every Governance approval as user:unknown.
+    from services.board_consent import actor_ref
+
+    return actor_ref(ctx)
 
 
 def _audit(db: Session, ctx: RequestContext, action: str, grant: ApprovalGrant) -> None:

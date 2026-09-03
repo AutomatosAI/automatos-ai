@@ -62,6 +62,29 @@ def _notify_dispatch_safe(db: Session, workspace_id: UUID, task_id: int) -> None
         )
 
 
+def _consent_for_chat_filed(db: Session, workspace_id: UUID, task, params: Dict[str, Any]) -> None:
+    """PRD-234 D16: the operator asked Auto for this ticket in a live chat turn.
+
+    ``_user_id`` is server-injected by the platform executor from the driving
+    user (strip-then-inject, never caller-supplied); a heartbeat or scheduled run
+    carries none, so autonomous filings keep asking. Local edition only.
+    """
+    driver = params.get("_user_id") if isinstance(params, dict) else None
+    if not driver:
+        return
+    try:
+        from services.board_consent import (
+            WHY_ASKED_IN_CHAT, actor_from_user_id, consent_for_created_ticket,
+        )
+
+        consent_for_created_ticket(
+            db, workspace_id=workspace_id, task=task,
+            actor=actor_from_user_id(driver), why=WHY_ASKED_IN_CHAT,
+        )
+    except Exception:  # noqa: BLE001 — consent is a convenience; the gate stays the safety net
+        logger.debug("[BoardTasks] chat-filed consent skipped for task %s", getattr(task, "id", "?"), exc_info=True)
+
+
 def _is_dispatch_claimable(task) -> bool:
     """True when a task is in the state the board dispatch loop claims: ``assigned``
     with an agent and not a recipe mirror (the recipe executor drives those). This
@@ -212,6 +235,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     # LISTEN channel (mirrors api/board_tasks.py:397-398) so it is claimed at wake
     # latency, not on the next fallback poll.
     if _is_dispatch_claimable(task):
+        _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
 
     result: Dict[str, Any] = {
@@ -431,6 +455,7 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     # api/board_tasks.py:624-632); the loop claims 'assigned' tasks only, so
     # re-assigning a running ticket is a no-op there.
     if _is_dispatch_claimable(task):
+        _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
 
     return {
@@ -620,6 +645,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # so the ticket is claimed on the LISTEN wake, not the fallback poll — the same
     # claimable guard the HTTP layer notifies on.
     if _is_dispatch_claimable(task):
+        _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
 
     return {
