@@ -8,7 +8,7 @@ Replaces .env file with database-backed settings.
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, Float
 from sqlalchemy.sql import func
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
@@ -91,14 +91,28 @@ class SystemSettingResponse(BaseModel):
     value: Optional[str]
     value_type: str
     description: Optional[str]
-    is_sensitive: bool
-    is_required: bool
+    is_sensitive: bool = False
+    is_required: bool = False
     default_value: Optional[str]
     validation_rules: Optional[Dict[str, Any]]
     created_at: datetime
     updated_at: datetime
-    created_by: str
-    
+    created_by: str = "system"
+
+    # A row written by raw SQL (no ORM defaults, no server defaults) may carry
+    # NULL in these three columns. The contract's defaults apply instead of the
+    # whole by-category response failing validation (one bad row = a 500 for
+    # the entire Settings page, 2026-09-02).
+    @field_validator("is_sensitive", "is_required", mode="before")
+    @classmethod
+    def _flag_none_is_false(cls, v):
+        return False if v is None else v
+
+    @field_validator("created_by", mode="before")
+    @classmethod
+    def _creator_none_is_system(cls, v):
+        return "system" if v is None else v
+
     class Config:
         from_attributes = True
 

@@ -6,3 +6,11 @@
 # string concatenation) right after, but the original literal lives in this
 # one historical commit blob, which the range scan keeps re-reading.
 7f653279595e32516ff1b182a620ffb1e1b258cd:orchestrator/tests/test_prd206_write_contract.py:generic-api-key:242
+
+# 2026-09-02 — test_system_settings_null_flags.py fixture: a system_settings row
+# whose setting NAME was a dated trial-spend string (value "0.001") matched
+# generic-api-key on entropy alone. Defanged in the next commit; the original
+# literal lives only in the first historical blob. The first version of THIS
+# comment quoted the literal and was flagged in turn, hence the second entry.
+8c4e5ccd804ee7cc6a2d8af7987aec0649c60bdb:orchestrator/tests/test_system_settings_null_flags.py:generic-api-key:30
+df73ed7f3fb55842818452019edf2f7270543c20:.gitleaksignore:generic-api-key:11
