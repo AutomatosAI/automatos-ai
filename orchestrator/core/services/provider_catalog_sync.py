@@ -263,7 +263,7 @@ class ProviderCatalogSync:
 
     @staticmethod
     def _display_name(name: str) -> str:
-        return " ".join(part.capitalize() if part.isalpha() else part for part in name.replace("_", "-").split("-"))
+        return " ".join(part[:1].upper() + part[1:] for part in name.replace("_", "-").split("-") if part)
 
     # ------------------------------------------------------------------ #
     # Upsert

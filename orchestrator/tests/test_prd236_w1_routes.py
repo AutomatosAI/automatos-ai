@@ -75,7 +75,13 @@ class _Q:
                 return [r for r in rows if str(getattr(r, col, "")).endswith(val)]
             if op in ("not_in_op", "notin_op"):
                 col = clause.left.name
-                vals = [b.value for b in clause.right.element.clauses] if hasattr(clause.right, "element") else []
+                right = clause.right
+                if hasattr(right, "value") and isinstance(right.value, (list, tuple, set)):
+                    vals = list(right.value)
+                elif hasattr(right, "element") and hasattr(right.element, "clauses"):
+                    vals = [b.value for b in right.element.clauses]
+                else:
+                    vals = []
                 return [r for r in rows if getattr(r, col, None) not in vals]
         except Exception:
             return rows
@@ -425,3 +431,17 @@ def test_route_manifest_lists_the_catalog_and_sync_endpoints():
     ):
         assert entry in routes, entry
     assert manifest["route_count"] == len(routes)
+
+
+def test_audit_cost_estimate_is_zero_on_a_free_route():
+    from core.llm.clients.base import LLMConfig, LLMProvider
+    from core.llm.manager import LLMManager
+
+    free = LLMManager.__new__(LLMManager)
+    free.config = LLMConfig(provider=LLMProvider.NVIDIA, model="moonshotai/kimi-k3", api_key="k")
+    assert free._estimate_cost(30000, 100) == 0.0
+
+    paid = LLMManager.__new__(LLMManager)
+    paid.config = LLMConfig(provider=LLMProvider.OPENROUTER, model="moonshotai/kimi-k3", api_key="k")
+    assert paid._estimate_cost(30000, 100) > 0.0
+

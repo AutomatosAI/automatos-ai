@@ -365,24 +365,33 @@ def test_env_tier_reads_the_registry_for_every_provider(monkeypatch, platform_ti
 
 
 class _FakeQuery:
-    def __init__(self, row):
-        self._row = row
+    """Rows filtered in Python on ``Column == value`` predicates (route-aware, like the DB)."""
 
-    def filter(self, *_a, **_k):
-        return self
+    def __init__(self, rows):
+        self._rows = list(rows) if isinstance(rows, (list, tuple)) else [rows]
+
+    def filter(self, *clauses, **_k):
+        rows = self._rows
+        for c in clauses:
+            try:
+                col, val = c.left.name, c.right.value
+                rows = [r for r in rows if getattr(r, col, None) == val]
+            except Exception:
+                pass
+        return _FakeQuery(rows)
 
     def first(self):
-        return self._row
+        return self._rows[0] if self._rows else None
 
 
 class _FakeSession:
     added: list = []
 
-    def __init__(self, row):
-        self._row = row
+    def __init__(self, rows):
+        self._rows = rows
 
     def query(self, _model):
-        return _FakeQuery(self._row)
+        return _FakeQuery(self._rows)
 
     def add(self, obj):
         type(self).added.append(obj)
@@ -394,17 +403,20 @@ class _FakeSession:
         pass
 
 
-def _track(monkeypatch, provider: str):
+def _track(monkeypatch, provider: str, rows=None):
     from core.llm.usage_tracker import UsageTracker
     from uuid import uuid4
 
-    row = SimpleNamespace(
+    # Only the OpenRouter route row exists — the NVIDIA route has not been
+    # synced — so a call served by NVIDIA must fall back to the registry's
+    # multiplier (W0 S0.5) rather than book OpenRouter's price.
+    rows = rows or [SimpleNamespace(
         input_cost_per_1k_tokens=0.003, output_cost_per_1k_tokens=0.015,
         sourcing="aggregator", serving_provider="openrouter", model_id="moonshotai/kimi-k3",
-    )
+    )]
     _FakeSession.added = []
     monkeypatch.setitem(
-        sys.modules, "core.database.database", types.SimpleNamespace(SessionLocal=lambda: _FakeSession(row))
+        sys.modules, "core.database.database", types.SimpleNamespace(SessionLocal=lambda: _FakeSession(rows))
     )
     UsageTracker.track(
         workspace_id=uuid4(), model_id="moonshotai/kimi-k3", provider=provider,
