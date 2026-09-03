@@ -405,6 +405,23 @@ def onboarding_package_installed(workspace: Any) -> bool:
     return bool((doc.get("funnel") or {}).get("package_installed"))
 
 
+def record_same_stage_reassert(db: Any, workspace: Any, stage: str, *, commit: bool = True) -> int:
+    """Count a same-stage ``advance_to`` re-assert in ``onboarding.reasserts[stage]``.
+
+    Prod 2026-09-02: eight "nothing changed" no-ops across four stalled runs — the
+    model used the spine tool as a progress simulator. The count lets the tool
+    refuse the habit (see handlers_onboarding). Per stage, so a new stage starts
+    at zero; a reset drops it with the document. Rebuild-don't-mutate.
+    """
+    doc = get_onboarding(workspace)  # deep copy
+    counts = dict(doc.get("reasserts") or {})
+    counts[stage] = int(counts.get(stage) or 0) + 1
+    doc["reasserts"] = counts
+    doc["updated_at"] = _now_iso()
+    _persist(db, workspace, doc, commit=commit)
+    return counts[stage]
+
+
 # =========================================================================== #
 # Build evidence — the honesty gate on ``boom`` (live test 2026-08-29)
 # =========================================================================== #

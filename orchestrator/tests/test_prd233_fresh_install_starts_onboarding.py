@@ -35,3 +35,23 @@ def test_existing_workspace_is_left_alone():
     db = _db(0)
     assert _ensure_workspace(db, uuid4()) == "present"
     assert "ON CONFLICT (id) DO NOTHING" in str(db.execute.call_args.args[0])
+
+
+def test_entrypoint_inserts_the_default_workspace_at_not_started():
+    """The entrypoint creates the default workspace BEFORE the migration replay
+    (found on the lab 2026-09-03: a fresh boot still read `skipped` after the
+    seed fix alone) — its INSERT must carry the stage too."""
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[2] / "docker-entrypoint.sh").read_text()
+    insert = next(line for line in src.splitlines() if "INSERT INTO workspaces" in line)
+    assert "onboarding" in insert and "not_started" in insert
+
+
+def test_veteran_backfill_never_touches_workspaces_created_after_prd222():
+    """The migration re-runs on fresh installs (orphan-root chains); a workspace
+    created after PRD-222 shipped cannot be a veteran."""
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[1] / "alembic/versions/prd222_veteran_skip_backfill.py").read_text()
+    assert "AND created_at < TIMESTAMP '2026-08-29'" in src

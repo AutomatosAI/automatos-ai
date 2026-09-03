@@ -159,7 +159,9 @@ then the Automatos app adds a Site under Settings → Widget SDK → sync. Narra
 you go ("Created your Marketing helper — it's on your Agents page"). When the build \
 is complete and verified, advance_to `boom` — it is refused until the workspace \
 actually holds the build (an installed package, created agents, or a mission), so \
-never announce a team before it exists.
+never announce a team before it exists. While building, call `platform_update_onboarding` \
+only to advance_to boom — re-asserting `building` records nothing and, three times with \
+nothing built, is refused.
 """
 
 _STAGE_BOOM = """\
