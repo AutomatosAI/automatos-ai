@@ -761,3 +761,25 @@ jobs:
             -o faulthandler_timeout=150 \
             -p no:cacheprovider \
             -v
+
+  # PRD-234 S1b — the CLI host, driven end to end against a fake `claude` that
+  # behaves like the interactive CLI (hooks over the settings file, a transcript
+  # where Claude Code writes it, refuses -p/--bare). Stdlib + pytest; no services.
+  cli-host-tests:
+    name: CLI host (PRD-234) — fake-claude end to end (non-required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/cli-host
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+      - name: Run the CLI host suite
+        run: pytest -q tests

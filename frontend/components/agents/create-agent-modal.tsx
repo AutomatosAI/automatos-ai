@@ -37,6 +37,7 @@ import { useCreateAgent } from '@/hooks/use-agent-api'
 import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ModelSelector } from './model-selector'
+import { RuntimeSection, DEFAULT_RUNTIME_FIELDS, runtimeConfiguration, type RuntimeFields } from './runtime-section'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { apiClient } from '@/lib/api-client'
 
@@ -79,6 +80,9 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
   // PRD-15: Model configuration state
   const [modelConfig, setModelConfig] = useState(getDefaultModelConfig())
+
+  // PRD-234: runtime — API model (default) or the user's own Claude Code session (local edition)
+  const [runtimeFields, setRuntimeFields] = useState<RuntimeFields>(DEFAULT_RUNTIME_FIELDS)
 
   // Persona state (US-021)
   const [personaMode, setPersonaMode] = useState<PersonaMode>('none')
@@ -205,7 +209,9 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         configuration: {
           category: agentData.category,
           specializations: agentData.specializations || [],
-          tags
+          tags,
+          // PRD-234: the runtime rides the same configuration JSON; the backend validates it
+          ...runtimeConfiguration(runtimeFields),
         }
       }
 
@@ -307,6 +313,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         shareToMarketplace: false
       })
       setModelConfig(getDefaultModelConfig())
+      setRuntimeFields(DEFAULT_RUNTIME_FIELDS)
       setPersonaMode('none')
       setSelectedPersonaId(null)
       setCustomPersonaPrompt('')
@@ -742,6 +749,12 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         </p>
                       </CardHeader>
                       <CardContent className="space-y-6">
+
+                        {/* PRD-234 S4: where this agent runs — API model, or the user's own Claude Code session (local edition) */}
+                        <RuntimeSection
+                          value={runtimeFields}
+                          onChange={(field, value) => setRuntimeFields((prev) => ({ ...prev, [field]: value }))}
+                        />
 
                         <ModelSelector
                           value={modelConfig.model_id}

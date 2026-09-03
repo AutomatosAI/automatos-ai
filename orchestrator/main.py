@@ -1244,6 +1244,10 @@ async def health_check():
         "components": components,
         "metrics": metrics,
         "extensions": deferred_init.as_dict() if deferred_init else None,
+        # PRD-234 S1b: the CLI host refuses to serve anything but a LOCAL edition
+        # with session mode on — it reads both here before pairing. Names only.
+        "edition": config.AUTH_EDITION,
+        "cli_runtime_enabled": bool(getattr(config, "CLI_RUNTIME_ENABLED", False)),
     }
 
 

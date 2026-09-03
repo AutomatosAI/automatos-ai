@@ -14,3 +14,6 @@
 # comment quoted the literal and was flagged in turn, hence the second entry.
 8c4e5ccd804ee7cc6a2d8af7987aec0649c60bdb:orchestrator/tests/test_system_settings_null_flags.py:generic-api-key:30
 df73ed7f3fb55842818452019edf2f7270543c20:.gitleaksignore:generic-api-key:11
+# The same fixture line once more: the PR-682 squash onto the S1b branch carried
+# the pre-defang copy of the test (cherry-picked before #684's fix landed).
+ea1df1ad2defdcbfc11a4cd9b139d218727a3a0a:orchestrator/tests/test_system_settings_null_flags.py:generic-api-key:30

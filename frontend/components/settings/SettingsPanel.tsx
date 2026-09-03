@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight } from 'lucide-react'
+import { Settings, Key, Webhook, KeyRound, Radio, Brain, Puzzle, Bell, UserCircle, ArrowRight, TerminalSquare } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import SystemLLMSettingsTab from './SystemLLMSettingsTab'
@@ -12,6 +12,7 @@ import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 import { ApiKeyManager } from './ApiKeyManager'
 import { WidgetSdkTab } from './WidgetSdkTab'
 import { NotificationsSettingsTab } from './NotificationsSettingsTab'
+import { SessionModeTab } from './SessionModeTab'
 import { useSystemRole } from '@/contexts/role-context'
 import { isLocal } from '@/lib/auth-edition'
 import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
@@ -31,6 +32,7 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'api-keys',
   'credentials',
   'notifications',
+  'session-mode',  // PRD-234 S4 — local only: the CLI host lane
 ])
 
 export function SettingsPanel() {
@@ -39,6 +41,7 @@ export function SettingsPanel() {
 
   const allTabs = [
     ...(isLocal ? [{ value: 'profile', label: 'Profile', icon: UserCircle }] : []),
+    ...(isLocal ? [{ value: 'session-mode', label: 'Session mode', icon: TerminalSquare }] : []),
     ...(isAdmin ? [{ value: 'system-settings', label: 'System Settings', icon: Settings }] : []),
     { value: 'orchestrator', label: 'Orchestrator', icon: Brain },
     { value: 'webhooks', label: 'Webhooks', icon: Webhook },
@@ -97,6 +100,13 @@ export function SettingsPanel() {
         )}
 
         {/* PRD-54/55: Orchestrator Tab (self-loading) */}
+        {/* PRD-234 S4: local edition — session mode (CLI host) status + pairing */}
+        {isLocal && (
+          <TabsContent value="session-mode">
+            <SessionModeTab />
+          </TabsContent>
+        )}
+
         <TabsContent value="orchestrator">
           <SystemLLMSettingsTab />
         </TabsContent>

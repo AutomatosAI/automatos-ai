@@ -61,6 +61,7 @@ import { useTools } from '@/hooks/use-tools-api'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { RuntimeSection, normalizeRuntimeFields, runtimeConfiguration, runtimeFieldsFromConfiguration } from './runtime-section'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -419,7 +420,9 @@ export function AgentConfigurationModal({
         // PRD-15: Model configuration
         model_config: modelConfig,
         // Tools configuration — filter out null IDs (tools without cache entries)
-        assigned_tools: ((agent as any).tools || []).map((tool: any) => tool.id).filter((id: any) => id != null)
+        assigned_tools: ((agent as any).tools || []).map((tool: any) => tool.id).filter((id: any) => id != null),
+        // PRD-234: runtime — API model (default) or the user's own Claude Code session
+        ...runtimeFieldsFromConfiguration((agent as any).configuration),
       })
       setHasChanges(false)
     }
@@ -637,6 +640,8 @@ export function AgentConfigurationModal({
         tags,
         configuration: {
           category: selectedCategory,
+          // PRD-234: the runtime fields ride the same configuration JSON (backend validates)
+          ...runtimeConfiguration(normalizeRuntimeFields(formData)),
           priority_level: formData.priority_level,
           max_concurrent_tasks: formData.max_concurrent_tasks,
           auto_start: formData.auto_start,
@@ -1516,6 +1521,12 @@ export function AgentConfigurationModal({
                       </p>
                     </CardHeader>
                     <CardContent className="space-y-6">
+                      {/* PRD-234 S4: where this agent runs — API model, or the user's own Claude Code session (local edition) */}
+                      <RuntimeSection
+                        value={normalizeRuntimeFields(formData)}
+                        onChange={(field, value) => updateFormData(field, value)}
+                      />
+
                       {/* Model Selection */}
                       <ModelSelector
                         value={formData.model_config?.model_id || LLM_DEFAULTS.model_id}

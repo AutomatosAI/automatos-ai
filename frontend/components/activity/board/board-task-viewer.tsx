@@ -1,6 +1,7 @@
 'use client'
 
-import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play } from 'lucide-react'
+import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
+import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -45,11 +46,75 @@ function useLiveTask(task: BoardTask | null) {
     started_at: data.started_at ?? task.started_at,
     completed_at: data.completed_at ?? task.completed_at,
     step_progress: data.step_progress ?? task.step_progress,
+    runtime_ref: data.runtime_ref ?? task.runtime_ref,
   } as BoardTask
 }
 
 function formatElapsed(startedAt: string): string {
   return formatDistanceToNow(new Date(startedAt), { addSuffix: false })
+}
+
+// ── PRD-234: the session behind a `runtime: cli` ticket ─────────────────────
+
+function SessionBlock({ task }: { task: BoardTask }) {
+  const ref = task.runtime_ref
+  if (!ref || ref.runtime !== 'cli') return null
+  const files: string[] = Array.isArray(ref.files_touched) ? ref.files_touched : []
+  const usage = ref.usage || {}
+  const takeover = ref.session_id
+    ? `${ref.cwd ? `cd ${ref.cwd} && ` : ''}claude --resume ${ref.session_id}`
+    : null
+  return (
+    <div>
+      <SectionLabel icon={<TerminalSquare className="w-3 h-3" />}>Claude Code session</SectionLabel>
+      <div className="glass-card rounded-lg p-4 text-sm space-y-2">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+          <span className="text-muted-foreground">Provider · model</span>
+          <span>{ref.provider || 'claude'}{ref.model ? ` · ${ref.model}` : ''}</span>
+          <span className="text-muted-foreground">State</span>
+          <span>{ref.exit_reason ? `finished (${ref.exit_reason})` : ref.live_tool ? `running · ${ref.live_tool}` : ref.last_event ? `running · ${ref.last_event}` : 'claimed'}</span>
+          {usage.total_tokens != null && (
+            <>
+              <span className="text-muted-foreground">Tokens</span>
+              <span>{Number(usage.total_tokens).toLocaleString()}{usage.model ? ` on ${usage.model}` : ''} · plan usage, no cost</span>
+            </>
+          )}
+          {typeof ref.denials === 'number' && ref.denials > 0 && (
+            <>
+              <span className="text-muted-foreground">Refused tool calls</span>
+              <span>{ref.denials}</span>
+            </>
+          )}
+        </div>
+        {reviewReason(ref) && (
+          <div className="rounded-md border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-2 text-xs space-y-1">
+            <p>{reviewReason(ref)}</p>
+            {sessionDenials(ref).length > 0 && (
+              <ul className="font-mono space-y-0.5 max-h-32 overflow-y-auto">
+                {sessionDenials(ref).map((d, i) => (
+                  <li key={i} className="truncate" title={denialLine(d)}>{denialLine(d)}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {files.length > 0 && (
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Files touched</p>
+            <ul className="text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto">
+              {files.map((f) => <li key={f} className="truncate" title={f}>{f}</li>)}
+            </ul>
+          </div>
+        )}
+        {takeover && (
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Take over in your terminal</p>
+            <code className="block rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 // ── Metadata grid — shared across views ──────────────────────────────
@@ -185,6 +250,8 @@ function InProgressContent({ task }: { task: BoardTask }) {
       )}
 
       {/* Live output */}
+      <SessionBlock task={task} />
+
       {task.result && (
         <div>
           <SectionLabel>Live Output</SectionLabel>
@@ -213,6 +280,8 @@ function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: Bo
           )}
         </div>
       </div>
+
+      <SessionBlock task={task} />
 
       {/* Agent result — the main attraction */}
       {task.result ? (

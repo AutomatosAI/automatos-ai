@@ -167,7 +167,10 @@ def test_host_claim_preassigns_a_session_and_result_applies_once(seeded, new_ses
     # a denial forces review; a duplicate result is a no-op
     first = asyncio.run(svc.apply_result(s, host, task_id, {
         "attempt": ticket["attempt"], "status": "success", "result_text": "changed 2 files",
-        "usage": {"input_tokens": 10, "output_tokens": 5}, "permission_denials": [{"tool": "Bash"}],
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+        "permission_denials": [{"tool": "Bash", "stage": "PreToolUse",
+                                "reason": "'python3 hello.py' is outside this ticket's Bash allowlist",
+                                "input": {"command": "python3 hello.py", "description": "never kept"}}],
     }))
     assert first == {"applied": True, "status": "review"}
     dup = asyncio.run(svc.apply_result(s, host, task_id, {"attempt": ticket["attempt"], "status": "success"}))
@@ -175,6 +178,12 @@ def test_host_claim_preassigns_a_session_and_result_applies_once(seeded, new_ses
     s.refresh(row)
     assert row.status == "review" and row.result == "changed 2 files"
     assert row.runtime_ref["denials"] == 1 and row.runtime_ref["exit_reason"] == "success"
+    # the ticket can say WHY it is in review — reason + the command, never the whole tool input
+    assert row.runtime_ref["permission_denials"] == [{
+        "tool": "Bash", "stage": "PreToolUse",
+        "reason": "'python3 hello.py' is outside this ticket's Bash allowlist",
+        "subject": "python3 hello.py",
+    }]
     s.close()
 
 

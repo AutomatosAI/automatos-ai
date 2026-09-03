@@ -45,6 +45,8 @@ export interface BoardTask {
   blocked_reason?: string
   planning_data?: { playbook_id?: number; execution_id?: string; step_progress?: { current: number; total: number }; approval_action?: { type: string; post_id?: string; [key: string]: any } }
   result?: any
+  // PRD-234: the session reference a `runtime: cli` ticket carries once a CLI host claims it
+  runtime_ref?: Record<string, any> | null
 }
 
 export interface BoardColumn {
