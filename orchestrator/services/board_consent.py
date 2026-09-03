@@ -65,6 +65,19 @@ def edition() -> str:
         return "saas"
 
 
+def driver_from_caller_context(caller_context: Any) -> Optional[str]:
+    """The human behind a chat tool call, or None for an autonomous run.
+
+    ``user_id`` is the driving Clerk principal (SaaS); on the local edition the
+    operator has no Clerk id (``users.clerk_user_id`` is NULL), so the chat
+    service also threads the internal ``driving_user_id``. Heartbeat, schedule
+    and channel runs thread neither — they keep asking.
+    """
+    cc = caller_context if isinstance(caller_context, dict) else {}
+    driver = cc.get("user_id") or cc.get("driving_user_id")
+    return str(driver) if driver else None
+
+
 def creation_is_consent() -> bool:
     """True on the local edition only — one operator, so filing a ticket IS approving it."""
     return edition() == LOCAL_EDITION
