@@ -107,7 +107,10 @@ ensure_local_workspace() {
     echo "🏠 Ensuring local workspace ${DEFAULT_WORKSPACE_ID} exists..."
     export PGPASSWORD="$POSTGRES_PASSWORD"
     if psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
-        "INSERT INTO workspaces (id, name, slug, is_personal, is_active) VALUES ('${DEFAULT_WORKSPACE_ID}', 'Local Workspace', 'local', TRUE, TRUE) ON CONFLICT (id) DO NOTHING;"; then
+        # A brand-new install starts Auto-led onboarding: the row carries an explicit
+        # not_started document, so PRD-222's veteran backfill (stage-less ⇒ skipped),
+        # which the migration replay runs right after this, leaves it alone (2026-09-03).
+        "INSERT INTO workspaces (id, name, slug, is_personal, is_active, onboarding) VALUES ('${DEFAULT_WORKSPACE_ID}', 'Local Workspace', 'local', TRUE, TRUE, '{\"stage\": \"not_started\", \"stages\": {}, \"segment\": {}}'::jsonb) ON CONFLICT (id) DO NOTHING;"; then
         echo "✅ Local workspace present"
         # The single local operator (users id 1 — api/chat.py's own fallback).
         # Idempotent; PRD-233 S6 makes name/email editable in Settings → Profile.
