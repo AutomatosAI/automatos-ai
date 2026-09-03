@@ -209,6 +209,7 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
     # Build model_config from shared defaults (core.llm.defaults is the single source)
     from core.llm.defaults import get_default_model_config
     model_config: Dict[str, Any] = get_default_model_config()
+    model_note = None
     if model_id:
         # PRD-223 W1: this chat tool was an unvalidated model-write path —
         # any string became an agent's brain, provider guessed by substring.
@@ -219,24 +220,27 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
 
         resolved = _get_or_create_from_cache(db, model_id)
         if resolved is None:
-            # Live-test 2026-08-29 + 09-02: Auto asked for a model id that is not
-            # in the catalog and retried the SAME id three times — the error named
-            # the problem but not the way out. Name it.
-            return {
-                "success": False,
-                "error": (
-                    f"Unknown model '{model_id}' — not found in the model catalog. "
-                    f"Omit model_id to use the workspace default "
-                    f"({model_config.get('model_id')}), or install the model first."
-                ),
-            }
-        allowed, reason = check_model_for_agent(
-            db, workspace_id, model_id, orchestrator_seat=False,
-        )
-        if not allowed:
-            return {"success": False, "error": f"Model rejected: {reason}"}
-        model_config["model_id"] = model_id
-        model_config["provider"] = resolved.provider
+            # Prod 2026-09-02 (post-#672): told "omit model_id to use the default",
+            # the model retried the SAME unknown id twice and the build stalled.
+            # An unknown id means the governed default in practice (PRD-223: the
+            # registry decides, never the caller's string) — use it and SAY so,
+            # in the result and in the log. The agent is still created.
+            default_id = model_config.get("model_id")
+            logger.warning(
+                "[create_agent] unknown model %r — using the workspace default %r", model_id, default_id
+            )
+            model_note = (
+                f"Model '{model_id}' is not in the catalog — the agent uses the workspace "
+                f"default ({default_id}) instead."
+            )
+        else:
+            allowed, reason = check_model_for_agent(
+                db, workspace_id, model_id, orchestrator_seat=False,
+            )
+            if not allowed:
+                return {"success": False, "error": f"Model rejected: {reason}"}
+            model_config["model_id"] = model_id
+            model_config["provider"] = resolved.provider
     if temperature is not None:
         model_config["temperature"] = max(0.0, min(2.0, float(temperature)))
 
@@ -289,7 +293,9 @@ async def create_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
             "has_system_prompt": bool(system_prompt),
             "tags": agent.tags or [],
         },
-        "message": f"Agent '{name}' created successfully with ID {agent.id}.",
+        "message": f"Agent '{name}' created successfully with ID {agent.id}."
+        + (f" {model_note}" if model_note else ""),
+        "model_note": model_note,
     }
 
 
