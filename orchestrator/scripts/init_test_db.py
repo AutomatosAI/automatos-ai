@@ -294,7 +294,10 @@ def init_db():
     # alembic/versions/prd129_deliverables.py — raw DDL, no SQLAlchemy model — so
     # create_all() never builds it. The PRD-234 S2 real-DB test registers a
     # session's files through DeliverableService.register(), which needs the
-    # table and its partial unique index. Same shape as the migration.
+    # table and its partial unique index. Same shape as the migration EXCEPT
+    # the agent_id foreign key: test_prd164_flywheel.py's transaction-local
+    # stand-in has none and seeds synthetic agent ids (4242) — a prod-only
+    # guarantee no test exercises.
     with engine.begin() as conn:
         conn.execute(_raw_sql("""
             CREATE TABLE IF NOT EXISTS deliverables (
@@ -302,7 +305,7 @@ def init_db():
                 workspace_id      UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
                 source_type       VARCHAR(30) NOT NULL,
                 source_id         VARCHAR(255) NULL,
-                agent_id          INTEGER NULL REFERENCES agents(id) ON DELETE SET NULL,
+                agent_id          INTEGER NULL,
                 agent_name        VARCHAR(100) NULL,
                 artifact_type     VARCHAR(30) NOT NULL,
                 title             VARCHAR(255) NOT NULL,
