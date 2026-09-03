@@ -22,6 +22,7 @@ from services.onboarding_state import (
     advance_onboarding_stage,
     build_evidence,
     current_stage,
+    record_same_stage_reassert,
     get_onboarding,
     public_snapshot,
     record_plan_event,
@@ -45,6 +46,10 @@ _SAME_STAGE_HINTS = {
     ),
     "boom": "Show the value on their business, then advance_to powerup.",
 }
+
+
+# The third same-stage re-assert at 'building' with nothing built is refused.
+BUILDING_REASSERT_LIMIT = 3
 
 
 def _stage_hint(db: Any, workspace: Any) -> str:
@@ -248,12 +253,36 @@ async def update_onboarding(
             # installing nothing — a bare success read as progress. Say what
             # changed (nothing) and what the stage actually needs.
             snap = public_snapshot(workspace)
+            stage = snap.get("stage")
+            n = record_same_stage_reassert(db, workspace, stage, commit=False)
+            if db is not None:
+                db.commit()  # the only write on this path
+            if (
+                stage == "building"
+                and n >= BUILDING_REASSERT_LIMIT
+                and not build_evidence(db, workspace)["any"]
+            ):
+                # Prod 2026-09-02: saffron re-asserted 'building' four times while
+                # narrating a build that never happened. The tool records progress
+                # — it cannot make it — and now says so as a refusal, which this
+                # model reacts to; a success-with-message it ignores.
+                return {
+                    "success": False,
+                    "noop": True,
+                    "data": snap,
+                    "error": (
+                        f"Refused: 'building' re-asserted {n} times with nothing built. This tool "
+                        "records progress — it cannot make it. Do not call it again until you have "
+                        "installed the matched package (platform_install_package) or created an "
+                        "agent (platform_create_agent); then advance_to boom."
+                    ),
+                }
             hint = _stage_hint(db, workspace)
             return {
                 "success": True,
                 "data": snap,
                 "noop": True,
-                "message": f"Already at '{snap.get('stage')}' — nothing changed. {hint}".strip(),
+                "message": f"Already at '{stage}' — nothing changed (re-assert {n}). {hint}".strip(),
             }
 
     # Reject a non-assignable plan BEFORE any write — honest coming-soon copy.

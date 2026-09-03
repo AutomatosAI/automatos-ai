@@ -204,3 +204,41 @@ def test_building_noop_hint_with_nothing_built_is_unchanged():
     ws = _Workspace("building")
     r = asyncio.run(update_onboarding(_db(0, 0, workspace=ws), ws.id, {"advance_to": "building"}))
     assert "Nothing is built yet" in r["message"]
+
+
+# ── the tool refuses to be a progress simulator ───────────────────────────
+
+def test_third_building_reassert_with_nothing_built_is_refused():
+    ws = _Workspace("building")
+    db = _db(0, 0, workspace=ws)
+    r1 = asyncio.run(update_onboarding(db, ws.id, {"advance_to": "building"}))
+    r2 = asyncio.run(update_onboarding(db, ws.id, {"advance_to": "building"}))
+    assert r1["success"] and r2["success"] and "(re-assert 2)" in r2["message"]
+    r3 = asyncio.run(update_onboarding(db, ws.id, {"advance_to": "building"}))
+    assert r3["success"] is False and r3["noop"] is True
+    assert "re-asserted 3 times" in r3["error"] and "platform_create_agent" in r3["error"]
+    assert ws.onboarding["reasserts"]["building"] == 3
+    assert current_stage(ws) == "building"
+
+
+def test_reasserts_with_a_real_build_are_never_refused():
+    ws = _Workspace("building")
+    db = _db(agents=1, workspace=ws)
+    for _ in range(4):
+        r = asyncio.run(update_onboarding(db, ws.id, {"advance_to": "building"}))
+    assert r["success"] is True and "advance_to boom now" in r["message"]
+    assert ws.onboarding["reasserts"]["building"] == 4
+
+
+def test_reassert_counter_is_per_stage_and_rebuilt_not_mutated():
+    ws = _Workspace("questions")
+    before = ws.onboarding
+    asyncio.run(update_onboarding(_db(workspace=ws), ws.id, {"advance_to": "questions"}))
+    assert ws.onboarding is not before
+    assert ws.onboarding["reasserts"] == {"questions": 1}
+
+
+def test_building_prompt_forbids_reasserting():
+    from modules.context.sections.onboarding import _STAGE_BUILDING
+
+    assert "only to advance_to boom" in _STAGE_BUILDING
