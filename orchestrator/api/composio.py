@@ -869,8 +869,25 @@ async def _dispatch_agent(
     """Execute an agent in the background for a webhook-triggered request."""
     try:
         from modules.agents.factory.agent_factory import AgentFactory
-
         with get_db_session() as db:
+            # PRD-234 S3: a Claude Code agent's trigger becomes a board ticket
+            # (the factory refuses cli agents by design); nothing runs here.
+            from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, source_id_for
+            if is_cli_agent(db, agent_id):
+                from datetime import datetime as _dt, timezone as _tz
+                from core.models.core import Agent as _Agent
+                _meta = metadata or {}
+                _agent = db.query(_Agent).get(agent_id)
+                _ws = _meta.get("workspace_id") or getattr(_agent, "workspace_id", None)
+                _key = _meta.get("trigger_id") or _meta.get("event_id") or agent_id
+                _first = str(content).strip().splitlines()[0][:80] if str(content).strip() else "event"
+                ticket = file_cli_ticket(
+                    db, workspace_id=_ws, agent_id=agent_id,
+                    title=f"Trigger: {_first}", prompt=str(content), source_type="composio_trigger",
+                    source_id=source_id_for("trigger", _key, _dt.now(_tz.utc)),
+                )
+                logger.info(f"[webhook] Agent {agent_id} is a Claude Code agent — filed ticket #{ticket.id}")
+                return
             factory = AgentFactory(db_session=db)
             result = await factory.execute_with_prompt(
                 agent=agent_id,

@@ -420,6 +420,27 @@ class ScheduledTaskService:
         Same pattern as HeartbeatService._agent_tick().
         """
         try:
+            # PRD-234 S3: a Claude Code agent's scheduled task is a board ticket the
+            # paired host runs as the user's own session; the origin conversation
+            # hears that it is queued (the factory refuses cli agents by design).
+            from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, queued_line, source_id_for
+            if is_cli_agent(db, agent_id):
+                from datetime import datetime as _dt, timezone as _tz
+                _first = str(message).strip().splitlines()[0][:80] if str(message).strip() else "task"
+                ticket = file_cli_ticket(
+                    db, workspace_id=workspace_id, agent_id=agent_id,
+                    title=f"Scheduled: {_first}", prompt=str(message), source_type="scheduled_task",
+                    source_id=source_id_for("task", task_id if task_id is not None else "adhoc", _dt.now(_tz.utc)),
+                )
+                logger.info("[ScheduledTask] cli agent %d — filed ticket #%s", agent_id, ticket.id)
+                if origin_chat_id:
+                    from services.chat_messenger import deliver_background_message
+                    deliver_background_message(
+                        db, workspace_id=workspace_id, text=queued_line(ticket),
+                        source={"origin": "scheduled_task"}, chat_id=str(origin_chat_id),
+                        link_type="board_task", link_id=str(ticket.id),
+                    )
+                return
             from modules.agents.factory.agent_factory import AgentFactory
 
             factory = AgentFactory(db_session=db)
