@@ -494,7 +494,9 @@ the `claude --resume` command.
 Your own repositories: set `LOCAL_PROJECTS_DIR=/path/to/your/projects` in
 `.env` and run `make up`. The explorer shows that folder read-only under
 `projects/`, the host registers it, and an agent's working directory can point
-at any repository inside it. Anything else needs
+at any repository inside it. The folder is mounted read-only into the
+platform by default; sessions write to it through the host on your machine.
+`LOCAL_PROJECTS_MOUNT=rw` lets the Code Canvas editor save into it directly. Anything else needs
 `CLI_HOST_ARGS="--allow /path/to/repo"`. A ticket's working directory must sit
 inside a registered directory — the host refuses anything else before a process
 starts, whatever the backend says. Git repositories get a `--worktree` per
