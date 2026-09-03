@@ -37,6 +37,7 @@ export default function ChatPage() {
   const chatIdParam = searchParams?.get('chatId') ?? null
   // PRD-235 W2: /chat?repo=<folder> opens Code mode on that folder (a ticket's session or a repo under projects/).
   const repoParam = normalizeCodeRoot(searchParams?.get('repo')) ?? undefined
+  const ticketParam = (searchParams?.get('ticket') || '').replace(/[^0-9]/g, '') || undefined
 
   // Activate plan mode when arriving via ?mode=plan
   useEffect(() => {
@@ -116,6 +117,7 @@ export default function ChatPage() {
         isReadonly={false}
         autoResume={false}
         initialCodeRoot={repoParam}
+        initialCodeTicket={ticketParam}
         initialLastContext={selectedChat?.lastContext}
       />
     </>

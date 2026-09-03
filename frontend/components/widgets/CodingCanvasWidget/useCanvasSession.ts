@@ -24,6 +24,7 @@ import {
   parseCanvasEvent,
   CanvasEventType,
   type CanvasEventEnvelope,
+  acceptsCanvasEvent,
 } from './canvasEvents'
 import {
   reduceCanvasEvent,
@@ -129,7 +130,8 @@ export interface CanvasSessionController {
 }
 
 export function useCanvasSession(
-  workspaceId: string | undefined
+  workspaceId: string | undefined,
+  options: { taskId?: string | number | null } = {},
 ): CanvasSessionController {
   const [state, dispatch] = useReducer(sessionReducer, initialCombined)
   const [starting, setStarting] = useState(false)
@@ -148,7 +150,7 @@ export function useCanvasSession(
     } finally {
       setStarting(false)
     }
-  }, [workspaceId])
+  }, [workspaceId, options.taskId])
 
   const stop = useCallback(async () => {
     if (!workspaceId) return
@@ -251,7 +253,7 @@ export function useCanvasSession(
           buffer = rest
           for (const frame of events) {
             const parsed = parseCanvasEvent(frame.data)
-            if (parsed) dispatch({ kind: 'event', ev: parsed })
+            if (parsed && acceptsCanvasEvent(parsed, options.taskId)) dispatch({ kind: 'event', ev: parsed })
           }
         }
       } catch (err) {
@@ -278,6 +280,9 @@ export function useCanvasSession(
   }, [workspaceId])
 
   return {
+    // PRD-235 W2 S3: a ticket-rooted Canvas follows an external (Claude Code) session.
+    external: options.taskId != null && options.taskId !== '',
+    taskId: options.taskId ?? null,
     ui: state.ui,
     approvals: state.approvals,
     starting,

@@ -378,6 +378,13 @@ def record_events(
             )
     task.runtime_ref = ref
     db.commit()
+    # PRD-235 W2 S3: the same events light up the Code Canvas panel.
+    projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
+    canvas: List[Dict[str, Any]] = []
+    for ev in events:
+        if isinstance(ev, dict):
+            canvas.extend(canvas_events_for(task, ref, ev, projects_dir))
+    publish_canvas_events(task.workspace_id, canvas)
     control: List[str] = []
     if task.status == "cancelled" or ref.get("cancel_requested_at"):
         control.append("cancel")
@@ -432,6 +439,65 @@ def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Opt
         rel = _clean_relative(path[len(root):])
         return f"{PROJECTS_PREFIX}/{rel}" if rel else None
     return None
+
+
+CANVAS_CHANNEL = "workspace:ws:{workspace_id}:canvas:events"
+CANVAS_SCHEMA_VERSION = 1
+_EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+
+def _canvas_envelope(workspace_id: Any, event_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """The workspace-worker's canvas event shape (``canvas_events._envelope``) — the
+    Code Canvas panel renders these unchanged, whichever engine produced them."""
+    return {
+        "schema_version": CANVAS_SCHEMA_VERSION,
+        "event_type": event_type,
+        "workspace_id": str(workspace_id),
+        "data": data,
+        "timestamp": _iso(_now()),
+    }
+
+
+def canvas_events_for(task: Any, ref: Dict[str, Any], ev: Dict[str, Any], projects_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+    """PRD-235 W2 S3: one hook event from the CLI host → the canvas events the Code
+    Canvas panel already understands (tool call / result, file edit, session status).
+    Every event carries ``task_id`` and ``session_id`` so a ticket-rooted Canvas can
+    keep only its own session. Pure; never raises on odd input."""
+    name = str(ev.get("event") or ev.get("hook_event_name") or "")
+    base = {"source": "cli", "task_id": task.id, "session_id": ref.get("session_id"), "at": ev.get("at")}
+    ws = task.workspace_id
+    out: List[Dict[str, Any]] = []
+    tool = ev.get("tool_name")
+    subject = ev.get("subject")
+    if name == "SessionStart":
+        out.append(_canvas_envelope(ws, "canvas.session.status", {**base, "status": "running"}))
+    elif name == "PreToolUse" and tool:
+        out.append(_canvas_envelope(ws, "canvas.tool.call", {**base, "tool_name": str(tool), "input": ({"subject": str(subject)} if subject else {})}))
+    elif name == "PostToolUse" and tool:
+        out.append(_canvas_envelope(ws, "canvas.tool.result", {**base, "tool_name": str(tool)}))
+        if tool in _EDIT_TOOLS and subject:
+            rel = workspace_relative_path(str(subject), str(ws), projects_dir)
+            out.append(_canvas_envelope(ws, "canvas.file.edit", {**base, "tool_name": str(tool), "path": rel or str(subject)}))
+    elif name in ("Stop", "SessionEnd"):
+        out.append(_canvas_envelope(ws, "canvas.session.status", {**base, "status": "stopped"}))
+    return out
+
+
+def publish_canvas_events(workspace_id: Any, events: List[Dict[str, Any]]) -> int:
+    """Fan the events out on the workspace's canvas channel (Redis pub/sub); fail-soft
+    — the board still has ``runtime_ref``; only the live panel goes quiet."""
+    if not events:
+        return 0
+    try:
+        from core.redis.client import get_redis_client
+        client = get_redis_client()
+        if client is None:
+            return 0
+        channel = CANVAS_CHANNEL.format(workspace_id=str(workspace_id))
+        return sum(1 for e in events if client.publish(channel, e))
+    except Exception:  # noqa: BLE001
+        logger.debug("[CliHost] canvas publish skipped", exc_info=True)
+        return 0
 
 
 def explorer_root_for(task_id: int, cwd: Optional[str], workspace_id: Any, projects_dir: Optional[str]) -> Optional[str]:
@@ -592,6 +658,14 @@ async def apply_result(
     }
     task.runtime_ref = ref
     db.commit()
+    # PRD-235 W2 S3: the final message and the end of the turn reach the Canvas too.
+    final_text = payload.get("result_text") or payload.get("error") or ""
+    base = {"source": "cli", "task_id": task.id, "session_id": ref.get("session_id")}
+    publish_canvas_events(task.workspace_id, [
+        _canvas_envelope(task.workspace_id, "canvas.assistant.text", {**base, "text": str(final_text)[:4000]}),
+        _canvas_envelope(task.workspace_id, "canvas.turn.complete", {**base, "status": status}),
+        _canvas_envelope(task.workspace_id, "canvas.session.status", {**base, "status": "stopped" if status != "error" else "failed"}),
+    ])
 
     terminal = await finalize_board_task_run(
         db,

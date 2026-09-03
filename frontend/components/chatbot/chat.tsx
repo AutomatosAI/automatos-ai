@@ -73,6 +73,8 @@ export interface ChatProps {
   initialLastContext?: AppUsage
   /** PRD-235 W2: open Code mode on this workspace-relative folder on mount (from /chat?repo=…) */
   initialCodeRoot?: string
+  /** PRD-235 W2 S3: the ticket whose Claude Code session this Canvas follows (from /chat?ticket=…) */
+  initialCodeTicket?: string
 }
 
 export function Chat({
@@ -83,6 +85,7 @@ export function Chat({
   autoResume = false,
   initialLastContext,
   initialCodeRoot,
+  initialCodeTicket,
 }: ChatProps) {
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
@@ -116,7 +119,7 @@ export function Chat({
   const { data: agentsData } = useAgents()
   const agents = agentsData ?? []
 
-  const handleOpenCodeCanvas = useCallback((requestedRoot?: unknown) => {
+  const handleOpenCodeCanvas = useCallback((requestedRoot?: unknown, ticketId?: string) => {
     if (!workspace?.id) {
       toast.error('No workspace selected')
       return
@@ -140,7 +143,7 @@ export function Chat({
       return
     }
 
-    const widgetData: CodingCanvasWidgetData = { workspaceId: workspace.id, rootPath: root }
+    const widgetData: CodingCanvasWidgetData = { workspaceId: workspace.id, rootPath: root, ...(ticketId ? { taskId: ticketId } : {}) }
     addWidget({
       type: 'coding_canvas',
       title: canvasTitleFor(root),
@@ -228,9 +231,9 @@ export function Chat({
   useEffect(() => {
     if (initialCodeRoot && workspace?.id && !openedInitialRoot.current) {
       openedInitialRoot.current = true
-      handleOpenCodeCanvas(initialCodeRoot)
+      handleOpenCodeCanvas(initialCodeRoot, initialCodeTicket)
     }
-  }, [initialCodeRoot, workspace?.id, handleOpenCodeCanvas])
+  }, [initialCodeRoot, initialCodeTicket, workspace?.id, handleOpenCodeCanvas])
 
   // PRD-235 W2: while a Code Canvas is open, the conversation is scoped to its folder —
   // the server renders it as the working scope for the workspace tools.

@@ -49,7 +49,7 @@ export function CodingCanvasWidget({
   // a repository under projects/ — and the chat's page context follows it.
   const root = data.rootPath || WORKSPACE_ROOT
   const { invalidateCache, fetchDirectory } = useWorkspaceFiles(workspaceId, root)
-  const session = useCanvasSession(workspaceId)
+  const session = useCanvasSession(workspaceId, { taskId: data.taskId ?? null })
 
   const handleRefresh = useCallback(() => {
     invalidateCache()
