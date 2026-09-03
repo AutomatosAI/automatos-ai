@@ -1204,9 +1204,22 @@ async def _execute_agent_sync(
 ) -> Dict[str, Any]:
     """Execute an agent synchronously and return the result."""
     from modules.agents.factory.agent_factory import AgentFactory
-
     db = next(get_db())
     try:
+        # PRD-234 S3: a Claude Code agent's webhook becomes a board ticket; the
+        # caller gets the ticket id back (the factory refuses cli agents by design).
+        from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, queued_line, source_id_for
+        if is_cli_agent(db, agent_id):
+            from datetime import datetime as _dt, timezone as _tz
+            _meta = metadata or {}
+            _key = _meta.get("delivery_id") or _meta.get("request_id") or _meta.get("event_id") or agent_id
+            _first = str(content).strip().splitlines()[0][:80] if str(content).strip() else "request"
+            ticket = file_cli_ticket(
+                db, workspace_id=workspace_id, agent_id=agent_id,
+                title=f"Webhook: {_first}", prompt=str(content), source_type="webhook",
+                source_id=source_id_for("webhook", _key, _dt.now(_tz.utc)),
+            )
+            return {"status": "queued", "task_id": ticket.id, "result": queued_line(ticket)}
         factory = AgentFactory(db_session=db)
         result = await factory.execute_with_prompt(
             agent=agent_id,

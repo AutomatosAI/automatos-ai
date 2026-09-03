@@ -70,6 +70,10 @@ async def list_agents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -
             "description": (a.description or "")[:200],
             "model_id": mc.get("model_id") or cfg.get("model") or cfg.get("llm_model"),
             "provider": mc.get("provider") or cfg.get("provider"),
+            # PRD-234: which lane runs this agent — 'cli' = the user's own Claude Code
+            # session on their machine, 'api' = a platform-run model.
+            "runtime": _runtime_of(cfg),
+            "working_directory": cfg.get("working_directory") if isinstance(cfg, dict) else None,
             "temperature": mc.get("temperature"),
             "tools_count": tool_counts.get(a.id, 0),
             "skills_count": skill_counts.get(a.id, 0),
@@ -595,3 +599,92 @@ async def unassign_tool_from_agent(db: Session, workspace_id: UUID, params: Dict
         "action": action,
         "message": f"Tool '{target_label}' {action} on agent '{agent.name}'.",
     }
+
+def _runtime_of(cfg: Any) -> str:
+    try:
+        from core.cli_runtime import runtime_kind_of
+        return runtime_kind_of(cfg if isinstance(cfg, dict) else {})
+    except Exception:  # noqa: BLE001
+        return "api"
+
+
+async def recommend_agent(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """platform_recommend_agent — PRD-234 S3.
+
+    Ranks the active roster for an objective with the coordination matcher
+    (skills, tools, model fit, availability, history) blended with semantic
+    similarity to each agent's capability card when embeddings are available.
+    Advice only: the caller proposes, the human confirms (PRD-224 grounding).
+    """
+    from types import SimpleNamespace
+    from core.models import Agent
+
+    objective = str(params.get("objective") or "").strip()
+    if not objective:
+        return {"success": False, "error": "objective is required"}
+    prefer = str(params.get("prefer_runtime") or "any").lower()
+    try:
+        limit = max(1, min(int(params.get("limit") or 3), 10))
+    except (TypeError, ValueError):
+        limit = 3
+
+    agents = (
+        db.query(Agent)
+        .filter(Agent.workspace_id == workspace_id, Agent.status == "active")
+        .order_by(Agent.id)
+        .all()
+    )
+    agents = [a for a in agents if not getattr(a, "is_system_agent", False) and getattr(a, "agent_type", "") != "ephemeral"]
+    if prefer in ("cli", "api"):
+        agents = [a for a in agents if _runtime_of(a.configuration or {}) == prefer]
+    if not agents:
+        return {"success": True, "objective": objective, "candidates": [],
+                "note": "no active agents match" + (f" runtime={prefer}" if prefer != "any" else "")}
+
+    # Semantic similarity to each agent's capability card (fail-soft: no embeddings → skipped).
+    semantic: Dict[int, float] = {}
+    try:
+        from core.routing.semantic_indexer import find_similar_agents
+        for agent, score in await find_similar_agents(objective, workspace_id, db, min_score=0.0):
+            semantic[agent.id] = float(score)
+    except Exception:  # noqa: BLE001
+        semantic = {}
+
+    # The coordination matcher, driven by a duck-typed task (it reads agent_role and input_context only).
+    ranked: Dict[int, Any] = {}
+    try:
+        from modules.coordination.agent_matcher import AgentMatcher
+        task_like = SimpleNamespace(id=0, agent_role=None, input_context={"objective": objective})
+        for r in AgentMatcher.rank(db, task_like, agents, task_spec={"required_tools": [], "agent_role": None}):
+            ranked[r.agent_id] = r
+    except Exception:  # noqa: BLE001
+        ranked = {}
+
+    rows = []
+    for a in agents:
+        r = ranked.get(a.id)
+        matcher_score = float(getattr(r, "total_score", 0.0) or 0.0) if r else 0.0
+        sem = semantic.get(a.id)
+        score = round(0.6 * matcher_score + 0.4 * sem, 3) if sem is not None else round(matcher_score, 3)
+        cfg = a.configuration or {}
+        mc = a.model_config or {}
+        rows.append({
+            "agent_id": a.id,
+            "name": a.name,
+            "runtime": _runtime_of(cfg),
+            "model": (cfg.get("model") if _runtime_of(cfg) == "cli" else (mc.get("model_id") or cfg.get("model"))),
+            "score": score,
+            "matcher_score": round(matcher_score, 3),
+            "semantic_score": round(sem, 3) if sem is not None else None,
+            "busy": bool(getattr(r, "availability", 1.0) is not None and getattr(r, "availability", 1.0) < 0.5) if r else False,
+            "reason": getattr(r, "reason", None) or ("similar capabilities" if sem is not None else "no signal — roster order"),
+        })
+    rows.sort(key=lambda x: (-x["score"], x["agent_id"]))
+    return {
+        "success": True,
+        "objective": objective,
+        "candidates": rows[:limit],
+        "considered": len(rows),
+        "note": "Advice only — propose the top candidate with its reason and let the user confirm before filing a ticket.",
+    }
+

@@ -428,3 +428,16 @@ def test_dispatcher_always_include_defaults_to_fleet_status():
     from modules.tools.tool_router import _dispatcher_always_include
 
     assert "platform_fleet_status" in _dispatcher_always_include()
+
+
+def test_session_agents_and_hosts_are_phrased_for_auto():
+    """PRD-234 S3: Auto can say what the user's own claude is doing and whether the host is up."""
+    from modules.tools.discovery.handlers_fleet import _work_phrase
+    e = _entry(15, "Bob", current={"kind": "board_task", "id": 1, "title": "Hello world", "since": None})
+    e["session"] = {"session_id": "bc25", "model": "fable", "live_tool": "Bash"}
+    assert _work_phrase(e) == "working: Hello world — Claude Code session (fable) · Bash"
+    fleet = _state([e])
+    fleet["hosts"] = [{"id": "1c7e2ab4", "name": "gerard-mac", "online": False}]
+    out = _render_fleet(fleet, now=NOW, stall_seconds=1800)
+    text = out["text"] if isinstance(out, dict) and "text" in out else str(out)
+    assert "CLI host gerard-mac: OFFLINE" in text

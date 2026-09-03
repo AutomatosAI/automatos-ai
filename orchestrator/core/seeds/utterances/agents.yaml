@@ -565,3 +565,38 @@ actions:
     source: authored
   - text: switch the finance agent's description to something clearer
     source: authored
+  platform_recommend_agent:
+  - text: who should take the login-bug fix?
+    source: example
+  - text: which agent is best suited to summarise these documents?
+    source: example
+  - text: pick the right agent for a refactor in my repo
+    source: example
+  - text: who is best suited for this task?
+    source: authored
+  - text: which of my agents should own this?
+    source: authored
+  - text: recommend an agent for fixing the failing tests
+    source: authored
+  - text: who on the team is the right fit for a data migration?
+    source: authored
+  - text: which agent has the skills for a Shopify theme change?
+    source: authored
+  - text: suggest who should write the weekly report
+    source: authored
+  - text: is there a Claude Code agent that can take this coding job?
+    source: authored
+  - text: rank my agents for this piece of work
+    source: authored
+  - text: who's the best match to review this pull request?
+    source: authored
+  - text: which agent would you assign this to and why?
+    source: authored
+  - text: find me the right agent for a Python bug in my repo
+    source: authored
+  - text: who should handle the customer email backlog?
+    source: authored
+  - text: which agent is free and able to do a code review right now?
+    source: authored
+  - text: choose an agent for this ticket based on their skills
+    source: authored
