@@ -849,6 +849,24 @@ async def remove_agent_skill(agent_id: int, skill_id: int, ctx: RequestContext =
         logger.error(f"Error removing skill from agent: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _renamed_to_taken_name(db: Session, workspace_id, agent: Agent, new_name: str) -> bool:
+    """True only when ``new_name`` is a real rename AND another agent in the workspace holds it.
+
+    An unchanged name is never re-validated. Legacy data can hold two agents
+    with one name (two "Bob"s, 2026-08-29); the frontend sends the name on
+    every save, so re-checking it made every Configure -> Save of either agent
+    400 "already exists" for the name it had all along (2026-09-03).
+    """
+    if new_name == agent.name:
+        return False
+    return (
+        db.query(Agent)
+        .filter(Agent.workspace_id == workspace_id, Agent.name == new_name, Agent.id != agent.id)
+        .first()
+        is not None
+    )
+
+
 @router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_workspace_permission("agents:update"))])
 async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Update an existing agent"""
@@ -859,9 +877,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
         
         # Update fields if provided
         if agent_update.name is not None:
-            # Check for name conflicts in workspace
-            existing = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.name == agent_update.name, Agent.id != agent_id).first()
-            if existing:
+            if _renamed_to_taken_name(db, ctx.workspace_id, agent, agent_update.name):
                 raise HTTPException(status_code=400, detail="Agent with this name already exists")
             agent.name = agent_update.name
         
