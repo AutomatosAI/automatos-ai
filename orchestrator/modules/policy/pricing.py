@@ -22,7 +22,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-def price_per_1k(db: Any, model_id: str) -> Optional["ModelPrice"]:
+def price_per_1k(db: Any, model_id: str, provider: Optional[str] = None) -> Optional["ModelPrice"]:
     """Return the (input, output) $/1k-token price for ``model_id`` from the DB.
 
     ``None`` when the model is unknown to the registry or the registry can't be
@@ -33,7 +33,7 @@ def price_per_1k(db: Any, model_id: str) -> Optional["ModelPrice"]:
     try:
         from core.llm.model_registry import get_model_registry
 
-        info = get_model_registry(db).get_model(model_id)
+        info = get_model_registry(db).get_model(model_id, provider=provider)
         if info is None:
             return None
         return ModelPrice(

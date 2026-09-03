@@ -89,6 +89,7 @@ def check_model_for_agent(
     model_id: str,
     *,
     orchestrator_seat: bool,
+    provider: str = None,
 ) -> Tuple[bool, str]:
     """Full W1 predicate: workspace approval row + platform policy.
 
@@ -110,16 +111,22 @@ def check_model_for_agent(
 
     try:
         from core.models.core import LLMModel, WorkspaceModel
+        from core.llm.providers import normalize_slug
 
-        row = (
+        # PRD-236 W1: the same vendor id may be installed once per serving
+        # provider; when the caller knows the route, judge THAT row.
+        q = (
             db.query(WorkspaceModel)
             .join(LLMModel, WorkspaceModel.model_id == LLMModel.id)
             .filter(
                 WorkspaceModel.workspace_id == workspace_id,
                 LLMModel.model_id == candidate,
             )
-            .first()
         )
+        route = normalize_slug(provider) if provider else None
+        if route:
+            q = q.filter(LLMModel.serving_provider == route)
+        row = q.first()
         if row is not None:
             if getattr(row, "approval_status", None) == "quarantined":
                 return False, (

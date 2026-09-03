@@ -730,8 +730,16 @@ class LLMManager:
 
     def _estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
         """Rough USD cost estimate for logging. Not for billing (see F059 note
-        on ``estimate_cost_usd``, which holds the shared price map)."""
-        return estimate_cost_usd(self.config.model, input_tokens, output_tokens)
+        on ``estimate_cost_usd``, which holds the shared price map).
+
+        PRD-236: the estimate is per ROUTE — a call served by a free provider
+        (NVIDIA's trial endpoint) is $0 whatever the vendor model's list price,
+        so the audit line and COST_ALERT never report a free call as spend.
+        """
+        from core.llm.providers import price_multiplier_for
+
+        provider = self.config.provider.value if self.config.provider else None
+        return estimate_cost_usd(self.config.model, input_tokens, output_tokens) * price_multiplier_for(provider)
 
     def _log_cost_audit(
         self,

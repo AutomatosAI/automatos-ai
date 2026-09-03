@@ -50,10 +50,20 @@ class LLMModel(Base):
     Stores model metadata, capabilities, costs, and recommended use cases.
     """
     __tablename__ = 'llm_models'
-    
+    __table_args__ = (
+        # PRD-236 W1: one row per ROUTE — the same vendor id may be served by
+        # several providers ("moonshotai/kimi-k3" on OpenRouter and on NVIDIA).
+        UniqueConstraint('serving_provider', 'model_id', name='uq_llm_models_provider_model'),
+    )
+
     id = Column(Integer, primary_key=True)
-    provider = Column(String(50), nullable=False, index=True)  # 'openai', 'anthropic', 'huggingface'
-    model_id = Column(String(255), nullable=False, unique=True, index=True)  # 'gpt-4', 'claude-3-opus-20240229', etc.
+    # The VENDOR of the model ('openai', 'moonshotai', 'deepseek-ai'…) — for
+    # direct rows it coincides with the serving provider.
+    provider = Column(String(50), nullable=False, index=True)
+    # PRD-236 W1: the registry slug of the API that serves this row
+    # ('openrouter', 'nvidia', 'openai'…). Installs and routing key on it.
+    serving_provider = Column(String(50), nullable=False, index=True, server_default='openrouter', default='openrouter')
+    model_id = Column(String(255), nullable=False, index=True)  # vendor-prefixed for hosted routes
     display_name = Column(String(255), nullable=False)  # Human-readable name
     model_family = Column(String(100), index=True)  # 'gpt-4', 'claude-3', 'llama-2', etc.
     
@@ -81,8 +91,10 @@ class LLMModel(Base):
     min_temperature = Column(Float, default=0.0)
     max_temperature = Column(Float, default=2.0)
 
-    # PRD-54: Marketplace & multi-tier fields
-    tier = Column(String(50), default='direct')  # direct, aggregator, byok_only
+    # PRD-54: Marketplace fields. PRD-236 W1 / PRD-223 Q1: ``tier`` became
+    # ``sourcing`` — the registry kind of the serving provider
+    # (direct | aggregator | hosted_open); the PRICING tier is derived from price.
+    sourcing = Column(String(50), default='direct')
     tags = Column(JSON, default=list)
     category = Column(String(100))  # general, coding, creative, fast, premium
     popularity_score = Column(Integer, default=0)
@@ -91,7 +103,7 @@ class LLMModel(Base):
     is_featured = Column(Boolean, default=False)
     is_default = Column(Boolean, default=False)  # included in all workspaces
     requires_plan = Column(String(50))  # NULL (all plans), pro, enterprise
-    external_id = Column(String(255))  # OpenRouter model ID
+    external_id = Column(String(255))  # the serving provider's native id (PRD-236)
     pricing_updated_at = Column(DateTime)
 
     created_at = Column(DateTime, default=func.now())

@@ -1,6 +1,6 @@
 # PRD-236: Provider registry + per-provider models — "Kimi via NVIDIA is free, Kimi via OpenRouter is paid, and the system routes to the one you picked"
 
-> **Status:** DRAFT 2026-09-03 (owner's ask of the same day). **Depends on:** PRD-54 (LLM marketplace, live), PRD-222 (BYOK validate-on-save, live), PRD-223 W0/W1 (model policy + `workspace_models` approval columns, live), PRD-233 (local edition, live). **Both editions.** **Build:** W0 first (this branch), W1/W2 after the owner's W0 test in both editions (feedback 2026-08-30: a phase is done when it is CI-green, merged and tested by him in both editions).
+> **Status:** W0 BUILT (PR #699, CI green, owner's local test: NVIDIA key added and validated 2026-09-03) · **W1 BUILT** (branch `feat/prd-236-w1`, stacked on W0; owner's go-ahead 2026-09-03: "separate tabs in marketplace for OpenRouter and NVIDIA… so Kimi K3 on OpenRouter is different from NVIDIA Kimi K3"). **Depends on:** PRD-54 (LLM marketplace, live), PRD-222 (BYOK validate-on-save, live), PRD-223 W0/W1 (model policy + `workspace_models` approval columns, live), PRD-233 (local edition, live). **Both editions.** **Build:** W0 first (this branch), W1/W2 after the owner's W0 test in both editions (feedback 2026-08-30: a phase is done when it is CI-green, merged and tested by him in both editions).
 
 ---
 
@@ -78,7 +78,9 @@ This section describes the design, not legal advice.
 
 **Known W0 limitation (fixed by W1):** the marketplace still shows one Kimi K3 card with OpenRouter's price; choosing NVIDIA is done through the provider field (Orchestrator settings / agent config), not through the card. The cost booked is already honest (S0.5).
 
-### W1 — the catalogue knows who serves what
+### W1 — the catalogue knows who serves what (BUILT 2026-09-03)
+
+**As built:** one migration (`prd236_w1_serving_provider`: `serving_provider`, UNIQUE `(serving_provider, model_id)`, `tier`→`sourcing`, data rule direct-keeps-provider / everything-else-OpenRouter); `core/services/provider_catalog_sync.py` (OpenRouter cache → `llm_models` projection; NVIDIA public list → rows at price 0 with metadata borrowed from the same vendor id's OpenRouter row, alias-aware, non-chat ids skipped; job history on `openrouter_sync_jobs.job_type`); `GET /api/marketplace/llm/catalog` (facets: serving provider + vendor + price tier), install/uninstall/detail take `?provider=`, `installed-ids` returns `routes`; `POST /sync/{provider}` + `GET /sync/status`; governance (`check_model_for_agent`), pricing (`price_per_1k`/`ModelRegistry.get_model`) and `UsageTracker` judge/price the tagged route; every write path stores the ROUTE's serving provider (never the vendor); seeding keys on `serving_provider`. UI: provider **tabs** inside Marketplace → LLMs (All · OpenRouter · NVIDIA · OpenAI …) with vendor chips beneath, one card per route with its own price / Free / "add a key" badge, per-provider Sync buttons (admin), route-aware install; Orchestrator settings list the selected provider's installed routes and the auto-switch is gone.
 
 | Story | What ships | Acceptance |
 |---|---|---|

@@ -752,7 +752,8 @@ async def save_orchestrator_settings(
         from api.llm_marketplace import _get_or_create_from_cache
         from core.llm.model_policy import check_model_for_agent
 
-        if not requested_model or _get_or_create_from_cache(db, requested_model) is None:
+        requested_provider = llm_payload.get("provider")
+        if not requested_model or _get_or_create_from_cache(db, requested_model, requested_provider) is None:
             raise HTTPException(
                 422,
                 f"Unknown model '{requested_model}' — not found in the model catalog. "
@@ -760,6 +761,7 @@ async def save_orchestrator_settings(
             )
         allowed, reason = check_model_for_agent(
             db, ctx.workspace_id, requested_model, orchestrator_seat=True,
+            provider=requested_provider,
         )
         if not allowed:
             raise HTTPException(

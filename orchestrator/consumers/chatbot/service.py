@@ -1504,9 +1504,15 @@ class StreamingChatService:
             _in = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0
             _out = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0
             if _in or _out:
-                from core.llm.manager import estimate_cost_usd
-                _model = getattr(getattr(agent_runtime.llm_manager, "config", None), "model", None)
-                turn_llm_cost_usd += estimate_cost_usd(_model, _in, _out)
+                _mgr = agent_runtime.llm_manager
+                if hasattr(_mgr, "_estimate_cost"):
+                    # PRD-236: per ROUTE — a free provider (NVIDIA trial) adds $0,
+                    # so the governor never forces synthesis over money not spent.
+                    turn_llm_cost_usd += _mgr._estimate_cost(_in, _out)
+                else:
+                    from core.llm.manager import estimate_cost_usd
+                    _model = getattr(getattr(_mgr, "config", None), "model", None)
+                    turn_llm_cost_usd += estimate_cost_usd(_model, _in, _out)
             return resp
 
         # State shared by callbacks within this turn.

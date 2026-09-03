@@ -25,7 +25,19 @@ import { toast } from 'sonner'
 
 export interface LLMModel {
   id: number
+  /** The VENDOR of the model ('openai', 'moonshotai', 'deepseek-ai'…). */
   provider: string
+  vendor?: string
+  /** PRD-236 W1: the ROUTE that serves this row ('openrouter', 'nvidia', 'openai'…). */
+  serving_provider?: string
+  serving_provider_label?: string
+  route_label?: string
+  is_free?: boolean
+  price_tier?: string
+  key_available?: boolean
+  sourcing?: string | null
+  terms_note?: string | null
+  rate_limit_note?: string | null
   model_id: string
   display_name: string
   model_family: string | null
@@ -40,7 +52,8 @@ export interface LLMModel {
   supports_vision: boolean
   supports_streaming: boolean
   status: string
-  tier: string | null
+  /** Legacy name of `sourcing`; W1 responses no longer send it. */
+  tier?: string | null
   category: string | null
   tags: string[]
   is_featured: boolean
@@ -68,6 +81,9 @@ const PROVIDER_COLORS: Record<string, string> = {
   anthropic: 'bg-warning/15 text-warning border-warning/30',
   google: 'bg-info/15 text-info border-info/30',
   openrouter: 'bg-agent/15 text-agent border-agent/30',
+  nvidia: 'bg-lime-500/15 text-lime-400 border-lime-500/30',
+  deepseek: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+  moonshotai: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
   meta: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
   mistral: 'bg-warning/15 text-warning border-warning/30',
   cohere: 'bg-pink-500/15 text-pink-400 border-pink-500/30',
@@ -106,6 +122,34 @@ function providerBadgeClass(provider: string): string {
   return PROVIDER_COLORS[key] || 'bg-secondary text-muted-foreground border-border'
 }
 
+/** PRD-236 W1: the route badge — who serves the call — plus the vendor when it differs. */
+export function routeBadges(model: LLMModel): { route: string; routeKey: string; vendor: string | null } {
+  const routeKey = model.serving_provider || model.provider
+  const route = model.serving_provider_label || routeKey
+  const vendor = model.serving_provider && model.provider !== model.serving_provider ? model.provider : null
+  return { route, routeKey, vendor }
+}
+
+const SOURCING_LABELS: Record<string, string> = {
+  direct: 'Direct API',
+  aggregator: 'Aggregator',
+  hosted_open: 'Hosted open model',
+  byok_only: 'BYO key',
+}
+
+export function sourcingLabel(model: LLMModel): string | null {
+  const key = model.sourcing ?? model.tier ?? null
+  if (!key) return null
+  return SOURCING_LABELS[key] || key
+}
+
+/** The install/uninstall path for THIS route (the provider query pins the row). */
+export function routeActionPath(model: LLMModel, action: 'install' | 'uninstall'): string {
+  const encodedId = encodeURIComponent(model.model_id)
+  const provider = model.serving_provider ? `?provider=${encodeURIComponent(model.serving_provider)}` : ''
+  return `/api/marketplace/llm/models/${encodedId}/${action}${provider}`
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -125,13 +169,12 @@ export function LLMModelCard({
     e.stopPropagation()
     setInstalling(true)
     try {
-      const encodedId = encodeURIComponent(model.model_id)
       if (model.is_installed) {
-        await apiClient.post(`/api/marketplace/llm/models/${encodedId}/uninstall`)
-        toast.success(`${model.display_name} removed`)
+        await apiClient.post(routeActionPath(model, 'uninstall'))
+        toast.success(`${model.route_label || model.display_name} removed`)
       } else {
-        await apiClient.post(`/api/marketplace/llm/models/${encodedId}/install`)
-        toast.success(`${model.display_name} installed`)
+        await apiClient.post(routeActionPath(model, 'install'))
+        toast.success(`${model.route_label || model.display_name} installed`)
       }
       queryClient.invalidateQueries({ queryKey: ['marketplaceLlmModels'] })
       queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
@@ -167,15 +210,21 @@ export function LLMModelCard({
                 <span className="font-semibold text-sm truncate">{model.display_name}</span>
                 <Badge
                   variant="outline"
-                  className={`text-[9px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(model.provider)}`}
+                  className={`text-[9px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(routeBadges(model).routeKey)}`}
                 >
-                  {model.provider}
+                  {routeBadges(model).route}
                 </Badge>
+                {routeBadges(model).vendor && (
+                  <span className="text-[10px] text-muted-foreground shrink-0">{routeBadges(model).vendor}</span>
+                )}
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                 <span>{formatTokenCount(model.context_window)} ctx</span>
                 <span>&middot;</span>
-                <span>In: {formatCostPer1M(model.input_cost_per_1k)}/1M</span>
+                <span>{model.is_free ? 'Free' : `In: ${formatCostPer1M(model.input_cost_per_1k)}/1M`}</span>
+                {model.key_available === false && (
+                  <span className="text-[10px] text-warning">· add a {routeBadges(model).route} key</span>
+                )}
               </div>
             </div>
             {model.is_installed ? (
@@ -215,12 +264,12 @@ export function LLMModelCard({
 
       <CardHeader className="pb-3">
         <div className="flex items-start gap-3">
-          {/* Provider badge */}
+          {/* Route badge — who serves the call (PRD-236 W1) */}
           <Badge
             variant="outline"
-            className={`text-[10px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(model.provider)}`}
+            className={`text-[10px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(routeBadges(model).routeKey)}`}
           >
-            {model.provider}
+            {routeBadges(model).route}
           </Badge>
 
           <div className="flex-1 min-w-0">
@@ -235,16 +284,31 @@ export function LLMModelCard({
 
         {/* Tier + Default + Plan badges */}
         <div className="flex flex-wrap gap-1.5 mt-2">
-          {model.tier && (
+          {routeBadges(model).vendor && (
+            <Badge variant="outline" className="text-[10px] border-border/60 text-muted-foreground">
+              by {routeBadges(model).vendor}
+            </Badge>
+          )}
+          {sourcingLabel(model) && (
             <Badge
               variant="outline"
               className={
-                model.tier === 'direct'
+                (model.sourcing ?? model.tier) === 'direct'
                   ? 'text-[10px] border-[hsl(var(--success))]/30 text-[hsl(var(--success))]'
                   : 'text-[10px] border-[hsl(var(--info))]/30 text-[hsl(var(--info))]'
               }
             >
-              {model.tier === 'direct' ? 'Direct' : 'Aggregator'}
+              {sourcingLabel(model)}
+            </Badge>
+          )}
+          {model.is_free && (
+            <Badge variant="outline" className="text-[10px] border-lime-500/40 text-lime-400">
+              Free
+            </Badge>
+          )}
+          {model.key_available === false && (
+            <Badge variant="outline" className="text-[10px] border-warning/40 text-warning">
+              Add a {routeBadges(model).route} key
             </Badge>
           )}
           {model.is_default && (
@@ -291,18 +355,24 @@ export function LLMModelCard({
           </div>
         </div>
 
-        {/* Cost per 1M tokens */}
+        {/* Cost per 1M tokens — per ROUTE (PRD-236 W1) */}
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">Cost / 1M tokens</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[hsl(var(--success))] font-medium">
-              In: {formatCostPer1M(model.input_cost_per_1k)}
+          {model.is_free ? (
+            <span className="text-lime-400 font-medium" title={model.terms_note || undefined}>
+              Free{model.rate_limit_note ? ' · rate-limited' : ''}
             </span>
-            <span className="text-muted-foreground">/</span>
-            <span className="text-[hsl(var(--primary))] font-medium">
-              Out: {formatCostPer1M(model.output_cost_per_1k)}
-            </span>
-          </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-[hsl(var(--success))] font-medium">
+                In: {formatCostPer1M(model.input_cost_per_1k)}
+              </span>
+              <span className="text-muted-foreground">/</span>
+              <span className="text-[hsl(var(--primary))] font-medium">
+                Out: {formatCostPer1M(model.output_cost_per_1k)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Capability bars */}
