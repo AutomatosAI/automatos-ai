@@ -35,3 +35,13 @@ def test_files_outside_the_workspace_stay_references():
 
 def test_live_log_is_bounded():
     assert RECENT_TOOLS_KEPT == 30
+
+
+def test_project_files_map_onto_the_workers_projects_view():
+    root = "/Users/me/Development"
+    assert workspace_relative_path(f"{root}/repo/app.py", WS, root) == "projects/repo/app.py"
+    assert workspace_relative_path(f"{root}/repo/app.py", WS, root + "/") == "projects/repo/app.py"
+    assert workspace_relative_path(f"{root}", WS, root) is None
+    assert workspace_relative_path(f"{root}-other/app.py", WS, root) is None  # prefix, not the folder
+    assert workspace_relative_path(f"{root}/../secret", WS, root) is None
+    assert workspace_relative_path("/Users/me/elsewhere/app.py", WS, None) is None

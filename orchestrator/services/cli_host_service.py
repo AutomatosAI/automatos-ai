@@ -390,22 +390,38 @@ RECENT_TOOLS_KEPT = 30
 _DELIVERABLE_TYPE_OVERRIDES = {"report": "document"}
 
 
-def workspace_relative_path(host_path: str, workspace_id: str) -> Optional[str]:
-    """``…/<AUTOMATOS_WORKSPACE_DIR>/<workspace_id>/sessions/68/hello.py`` → ``sessions/68/hello.py``.
+PROJECTS_PREFIX = "projects"
 
-    The host's absolute path means nothing inside the container; the workspace-id
-    segment is the anchor both sides share (the worker's layout is
-    ``<root>/<workspace_id>/<relative path>``). ``None`` when the file is elsewhere —
-    it then stays a reference in ``runtime_ref.files_touched``.
-    """
-    marker = f"/{workspace_id}/"
-    idx = str(host_path).find(marker)
-    if idx < 0:
-        return None
-    rel = str(host_path)[idx + len(marker):].strip("/")
+
+def _clean_relative(rel: str) -> Optional[str]:
+    rel = rel.strip("/")
     if not rel or any(part in ("", ".", "..") for part in rel.split("/")):
         return None
     return rel
+
+
+def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Optional[str] = None) -> Optional[str]:
+    """A session's file path on the host → the worker's view of it, or ``None``.
+
+    * ``…/<AUTOMATOS_WORKSPACE_DIR>/<workspace_id>/sessions/68/hello.py`` →
+      ``sessions/68/hello.py`` — the workspace-id segment is the anchor both
+      sides share (the worker's layout is ``<root>/<workspace_id>/<relative>``).
+    * ``<LOCAL_PROJECTS_DIR>/repo/app.py`` → ``projects/repo/app.py`` — the owner's
+      projects folder is mounted read-only into the worker under ``projects/``.
+
+    The host's absolute path means nothing inside this container. ``None`` when
+    the file is elsewhere — it then stays a reference in ``runtime_ref.files_touched``.
+    """
+    path = str(host_path)
+    marker = f"/{workspace_id}/"
+    idx = path.find(marker)
+    if idx >= 0:
+        return _clean_relative(path[idx + len(marker):])
+    root = (projects_dir or "").rstrip("/")
+    if root and (path == root or path.startswith(root + "/")):
+        rel = _clean_relative(path[len(root):])
+        return f"{PROJECTS_PREFIX}/{rel}" if rel else None
+    return None
 
 
 def _register_session_deliverables(
@@ -423,20 +439,26 @@ def _register_session_deliverables(
     volume = Path(config.WORKSPACE_VOLUME_PATH) / workspace_id
     service = DeliverableService(db, workspace_id)
     registered: List[Dict[str, Any]] = []
+    projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
     for host_path in files:
-        rel = workspace_relative_path(str(host_path), workspace_id)
+        rel = workspace_relative_path(str(host_path), workspace_id, projects_dir)
         if rel is None:
             continue
         inferred = _infer_artifact_type(rel)
         if inferred not in AGENT_REGISTERABLE_ARTIFACT_TYPES:
             continue
-        full = volume / rel
-        try:
-            size = full.stat().st_size if full.is_file() else None
-        except OSError:
+        if rel.startswith(PROJECTS_PREFIX + "/"):
+            # The projects folder is mounted into the worker, not here: register
+            # without a size; the worker serves the bytes behind preview_url.
             size = None
-        if size is None:
-            continue  # not visible from this container → reference only
+        else:
+            full = volume / rel
+            try:
+                size = full.stat().st_size if full.is_file() else None
+            except OSError:
+                size = None
+            if size is None:
+                continue  # not visible from this container → reference only
         artifact_type = _DELIVERABLE_TYPE_OVERRIDES.get(inferred, inferred)
         try:
             res = service.register(
