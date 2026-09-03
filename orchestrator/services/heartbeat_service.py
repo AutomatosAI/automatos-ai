@@ -563,6 +563,16 @@ class HeartbeatService:
         must burn $0. Returns a VISIBLE skip result (never a silent no-op) or
         ``None`` to proceed. Converted / never-granted workspaces proceed.
         """
+        # PRD-234 S3: the local edition has no platform-paid trial credit to protect —
+        # keys are the operator's own and Claude Code agents run on their subscription —
+        # yet Auto-led onboarding grants a trial record there too, which silently
+        # switched every local heartbeat off (found 2026-09-03). Local runs.
+        try:
+            from config import config as _config
+            if getattr(_config, "AUTH_EDITION", "saas") == "local":
+                return None
+        except Exception:  # noqa: BLE001
+            pass
         try:
             from core.database.database import SessionLocal
             from core.models.workspaces import Workspace

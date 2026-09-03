@@ -183,9 +183,14 @@ class PlaybookSchedulerService:
             try:
                 from core.models.workspaces import Workspace
                 from services.trial_ledger import is_trial_active_workspace
+                # PRD-234 S3: the local edition has no platform-paid trial credit to
+                # protect (operator keys / the user's own Claude subscription) — the
+                # onboarding trial record must not switch scheduled work off there.
+                from config import config as _config
+                _local_edition = getattr(_config, "AUTH_EDITION", "saas") == "local"
 
                 _ws = db.query(Workspace).get(playbook.workspace_id)
-                if is_trial_active_workspace(_ws):
+                if not _local_edition and is_trial_active_workspace(_ws):
                     logger.warning(
                         "[PlaybookScheduler] Skipping playbook %d — trial workspace %s "
                         "(no background burn until converted)",
