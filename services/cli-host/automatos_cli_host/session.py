@@ -40,11 +40,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import __version__
-from .allowlist import NotAllowed, resolve_allowed
+from .allowlist import NotAllowed, resolve_allowed, default_session_cwd
 from .claude_settings import has_completed_onboarding, record_directory_trust, write_settings
 from .config import HostConfig
 from .env import build_session_env, resolve_binary
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
+from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import last_assistant_text, read_usage
 
 log = logging.getLogger("automatos.cli_host.session")
@@ -157,12 +158,26 @@ def _is_git_repo(path: Path) -> bool:
     return (path / ".git").exists()
 
 
+def _subject_of(payload: Dict[str, Any]) -> Optional[str]:
+    """The one thing a tool call is about — a command, a path, a pattern — for the
+    ticket's live log. Never the whole tool input."""
+    ti = payload.get("tool_input")
+    if not isinstance(ti, dict):
+        return None
+    for key in ("command", "file_path", "notebook_path", "path", "pattern", "url", "query"):
+        value = ti.get(key)
+        if value:
+            return str(value)[:200]
+    return None
+
+
 class Session:
     """Runs one ticket. ``events`` is drained by the host and shipped in batches."""
 
     def __init__(self, ticket: Dict[str, Any], cfg: HostConfig, allow_roots: List[str],
-                 sock_path: Path, default_root: Optional[str]):
+                 sock_path: Path, default_root: Optional[str], workspace_id: str = ""):
         self.ticket = ticket
+        self.workspace_id = workspace_id
         self.cfg = cfg
         self.allow_roots = allow_roots
         self.sock_path = sock_path
@@ -186,6 +201,7 @@ class Session:
         self.denials: List[Dict[str, Any]] = []
         self.notifications: List[Dict[str, Any]] = []
         self.output_tail: deque = deque(maxlen=_OUTPUT_TAIL_BYTES)
+        self.terminal_log: Optional[BoundedLog] = None
         self._contract_injected = False
         self._policy: Optional[PolicyContext] = None
 
@@ -267,6 +283,7 @@ class Session:
             "session_id": payload.get("session_id"),
             "transcript_path": payload.get("transcript_path"),
             "tool_name": payload.get("tool_name"),
+            "subject": _subject_of(payload),
             "notification_type": payload.get("notification_type"),
             "message": (payload.get("message") or "")[:500] or None,
         }
@@ -283,7 +300,13 @@ class Session:
     def _run(self) -> SessionOutcome:
         # 1. where
         try:
-            cwd = resolve_allowed(self.ticket.get("cwd"), self.allow_roots, default_root=self.default_root)
+            cwd_hint = str(self.ticket.get("cwd") or "").strip()
+            if not cwd_hint and self.default_root:
+                # No working directory on the agent → the workspace's own sessions
+                # folder, which the Deliverables explorer shows live (PRD-234 S2).
+                cwd = default_session_cwd(self.default_root, self.workspace_id, self.task_id)
+            else:
+                cwd = resolve_allowed(cwd_hint or None, self.allow_roots, default_root=self.default_root)
         except NotAllowed as exc:
             return self._outcome("error", error=str(exc), exit_reason="cwd_not_allowed")
         if not cwd.is_dir():
@@ -304,6 +327,7 @@ class Session:
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket), encoding="utf-8")
         settings_path = write_settings(session_dir / "settings.json")
+        self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
         try:
             record_directory_trust(cwd)
         except OSError as exc:
@@ -395,11 +419,15 @@ class Session:
                 if not chunk:
                     break
                 self.output_tail.extend(chunk)
+                if self.terminal_log is not None:
+                    self.terminal_log.write(chunk)
         finally:
             try:
                 os.close(master)
             except OSError:
                 pass
+            if self.terminal_log is not None:
+                self.terminal_log.close()
 
     def _terminate(self) -> None:
         if self.proc is None or self.proc.poll() is not None:

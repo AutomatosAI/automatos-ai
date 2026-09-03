@@ -130,6 +130,8 @@ class Host:
             while not self.stop.is_set():
                 now = time.time()
                 try:
+                    if self.hooks.ensure_listening():
+                        log.warning("hook socket %s had vanished — re-bound it (a previous host's shutdown?)", self.cfg.socket_path)
                     if now - self._last_heartbeat >= self.cfg.heartbeat_seconds:
                         self._heartbeat(host_id)
                         self._last_heartbeat = now
@@ -196,7 +198,8 @@ class Host:
 
     def _start(self, ticket: Dict[str, Any]) -> None:
         task_id = str(ticket.get("task_id"))
-        session = Session(ticket, self.cfg, self.allow_roots, self.cfg.socket_path, default_root=self.allow_roots[0])
+        session = Session(ticket, self.cfg, self.allow_roots, self.cfg.socket_path, default_root=self.allow_roots[0],
+                          workspace_id=str((self.identity or {}).get("workspace_id") or ""))
         self.sessions[task_id] = session
         self.hooks.register(task_id, session.handle_hook)
 

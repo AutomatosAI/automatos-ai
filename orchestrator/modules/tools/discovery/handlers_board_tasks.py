@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Optional, Any, Dict
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -60,6 +60,49 @@ def _notify_dispatch_safe(db: Session, workspace_id: UUID, task_id: int) -> None
         logger.debug(
             "[BoardTasks] dispatch NOTIFY skipped for task %s", task_id, exc_info=True
         )
+
+
+CREATABLE_STATUSES = ("inbox", "assigned", "review")
+
+
+def initial_board_status(requested: Any, assigned_agent_id: Optional[int], planning_data: Any) -> str:
+    """The status a chat-filed ticket starts in — never a state that skips dispatch.
+
+    The tool schema offers inbox / assigned / review, but a model can send anything
+    (ticket 80: Auto passed ``in_progress``, so the ticket was born "running" with
+    no dispatch, no consent and no gate). Anything else collapses to assigned (an
+    agent is set) or inbox; ``assigned`` without an agent is inbox; an
+    ``approval_action`` still means review.
+    """
+    if isinstance(planning_data, dict) and planning_data.get("approval_action"):
+        return "review"
+    status = requested if isinstance(requested, str) and requested in CREATABLE_STATUSES else None
+    if status == "review":
+        return "review"
+    return "assigned" if assigned_agent_id else "inbox"
+
+
+def _consent_for_chat_filed(db: Session, workspace_id: UUID, task, params: Dict[str, Any]) -> None:
+    """PRD-234 D16: the operator asked Auto for this ticket in a live chat turn.
+
+    ``_user_id`` is server-injected by the platform executor from the driving
+    user (strip-then-inject, never caller-supplied); a heartbeat or scheduled run
+    carries none, so autonomous filings keep asking. Local edition only.
+    """
+    driver = params.get("_user_id") if isinstance(params, dict) else None
+    if not driver:
+        return
+    try:
+        from services.board_consent import (
+            WHY_ASKED_IN_CHAT, actor_from_user_id, consent_for_created_ticket,
+        )
+
+        consent_for_created_ticket(
+            db, workspace_id=workspace_id, task=task,
+            actor=actor_from_user_id(driver), why=WHY_ASKED_IN_CHAT,
+        )
+    except Exception:  # noqa: BLE001 — consent is a convenience; the gate stays the safety net
+        logger.debug("[BoardTasks] chat-filed consent skipped for task %s", getattr(task, "id", "?"), exc_info=True)
 
 
 def _is_dispatch_claimable(task) -> bool:
@@ -144,10 +187,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     if not planning_data and params.get("approval_action"):
         planning_data = {"approval_action": params["approval_action"]}
 
-    # Determine initial status — tasks with approval_action go to review
-    initial_status = params.get("status", "assigned" if assigned_agent_id else "inbox")
-    if planning_data and planning_data.get("approval_action"):
-        initial_status = "review"
+    initial_status = initial_board_status(params.get("status"), assigned_agent_id, planning_data)
 
     task = BoardTask(
         workspace_id=workspace_id,
@@ -212,6 +252,7 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     # LISTEN channel (mirrors api/board_tasks.py:397-398) so it is claimed at wake
     # latency, not on the next fallback poll.
     if _is_dispatch_claimable(task):
+        _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
 
     result: Dict[str, Any] = {
@@ -431,6 +472,7 @@ async def assign_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
     # api/board_tasks.py:624-632); the loop claims 'assigned' tasks only, so
     # re-assigning a running ticket is a no-op there.
     if _is_dispatch_claimable(task):
+        _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
 
     return {
@@ -620,6 +662,7 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     # so the ticket is claimed on the LISTEN wake, not the fallback poll — the same
     # claimable guard the HTTP layer notifies on.
     if _is_dispatch_claimable(task):
+        _consent_for_chat_filed(db, workspace_id, task, params)
         _notify_dispatch_safe(db, workspace_id, task.id)
 
     return {

@@ -825,7 +825,11 @@ class AutoBrain:
         # context: forced ≥ MOLECULE, RESPOND (never delegate/assign away the
         # spine), "platform" hint so the onboarding tools survive narrowing.
         # Checked BEFORE the cache and never cached itself — the stage moves.
-        if self._onboarding_active():
+        # PRD-234 (2026-09-03): a message that NAMES an active agent is work being
+        # handed to that agent, never an onboarding answer — the ASSIGN lane must
+        # see it. A workspace that never ran onboarding reads as not_started and
+        # would otherwise pin every turn forever ("ask Bob to…" became a mission).
+        if self._onboarding_active() and not self._names_active_agent(message):
             return ComplexityAssessment(
                 complexity=Complexity.MOLECULE, action=Action.RESPOND,
                 reasoning="Onboarding active — full context path (spine + platform tools)",
@@ -961,6 +965,25 @@ class AutoBrain:
     # ------------------------------------------------------------------
     # Tier 3: LLM classification
     # ------------------------------------------------------------------
+
+    def _names_active_agent(self, message: str) -> bool:
+        """True when the message contains an active roster agent's name as a whole
+        word (case-insensitive). Names shorter than three characters are ignored
+        so a stray "AI" or "Bo" never counts; a name inside another word
+        ("automatically" for an agent called Auto) does not match. Fail-soft False."""
+        try:
+            text = (message or "").lower()
+            if not text:
+                return False
+            for agent in self._active_agents():
+                name = (getattr(agent, "name", "") or "").strip().lower()
+                if len(name) < 3:
+                    continue
+                if re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])", text):
+                    return True
+        except Exception:
+            logger.debug("[AutoBrain] roster name check failed — pin applies", exc_info=True)
+        return False
 
     def _active_agents(self) -> List[Any]:
         """The capped active-agent roster — the shared source for the Tier-3

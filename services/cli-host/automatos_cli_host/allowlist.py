@@ -69,3 +69,18 @@ def resolve_allowed(cwd: Optional[str], roots: Iterable[str], *, default_root: O
         f"{resolved} is outside every registered directory "
         f"({', '.join(str(r) for r in allowed)}); register it with --allow"
     )
+
+
+def default_session_cwd(default_root: str, workspace_id: str, task_id: str) -> Path:
+    """Where a ticket with no working directory runs:
+    ``<root>/<workspace_id>/sessions/<task_id>`` — the workspace-worker's layout
+    for this workspace, so Deliverables → Explorer shows the session's files live
+    and the backend can register them as the ticket's deliverables (PRD-234 S2).
+    Created on demand; a hostile id cannot escape the root."""
+    root = Path(default_root).expanduser().resolve()
+    ws = (workspace_id or "").strip() or "local"
+    target = (root / ws / "sessions" / str(task_id)).resolve()
+    if not is_inside(target, root):
+        raise NotAllowed(f"default session directory escapes the root: {target}")
+    target.mkdir(parents=True, exist_ok=True)
+    return target

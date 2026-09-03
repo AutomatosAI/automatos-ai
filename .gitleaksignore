@@ -17,3 +17,8 @@ df73ed7f3fb55842818452019edf2f7270543c20:.gitleaksignore:generic-api-key:11
 # The same fixture line once more: the PR-682 squash onto the S1b branch carried
 # the pre-defang copy of the test (cherry-picked before #684's fix landed).
 ea1df1ad2defdcbfc11a4cd9b139d218727a3a0a:orchestrator/tests/test_system_settings_null_flags.py:generic-api-key:30
+
+# 2026-09-03 — a code COMMENT ('… foreign key: <test file>'s …') in the PR-693
+# squash matched generic-api-key on the word 'key' + a colon. Reworded in the
+# next commit; the blob is history.
+9a29aae808e20efb77ff1999f4286326e970bb54:orchestrator/scripts/init_test_db.py:generic-api-key:298

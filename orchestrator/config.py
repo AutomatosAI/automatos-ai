@@ -626,6 +626,11 @@ class Config:
     # LLM factory. Local edition ONLY: validate_auth_edition() aborts a saas boot
     # that sets this (the SaaS path stays byte-identical). Default off everywhere.
     CLI_RUNTIME_ENABLED: bool = os.getenv("CLI_RUNTIME_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    # PRD-234 S2 (local edition): the owner's projects folder on the HOST machine, as
+    # the CLI host sees it. Only used to map a session's file paths onto the
+    # worker's "projects/" view (the folder is bind-mounted read-only into the
+    # workspace-worker, not into this container). Empty = no projects folder.
+    LOCAL_PROJECTS_DIR: str = os.getenv("LOCAL_PROJECTS_DIR", "").strip()
     # S5: done tasks older than this drop off the active board (retained in DB).
     BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
     # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
