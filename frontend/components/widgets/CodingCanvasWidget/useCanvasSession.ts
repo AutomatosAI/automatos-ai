@@ -116,6 +116,9 @@ function sessionReducer(state: CombinedState, action: SessionAction): CombinedSt
 }
 
 export interface CanvasSessionController {
+  /** PRD-235 W2 S3: true when this Canvas follows a ticket's Claude Code session (no SDK start/stop). */
+  external: boolean
+  taskId: string | number | null
   ui: CanvasSessionUiState
   approvals: DiffApprovalState
   starting: boolean
