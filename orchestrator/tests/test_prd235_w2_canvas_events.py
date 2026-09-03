@@ -71,3 +71,15 @@ def test_permission_questions_are_remembered_answered_and_delivered_once():
     assert record_permission_decision(ref, "r1", True, "user:2") is True and ref["pending_permissions"] == []
     assert take_undelivered_decisions(ref) == [{"request_id": "r1", "approved": True}]
     assert take_undelivered_decisions(ref) == []
+
+
+def test_two_questions_are_two_cards_and_each_needs_its_own_answer():
+    """Ticket 78 (2026-09-03): the operator approved 'pip --version'; the session then
+    asked 'python3 -m pip --version' and nobody answered → an honest deny after the
+    timeout. Each request id is independent."""
+    from services.cli_host_service import note_pending_permission, record_permission_decision
+    ref = {"session_id": "s"}
+    note_pending_permission(ref, {"event": "PermissionRequest", "request_id": "a", "tool_name": "Bash", "subject": "pip --version"})
+    note_pending_permission(ref, {"event": "PermissionRequest", "request_id": "b", "tool_name": "Bash", "subject": "python3 -m pip --version"})
+    assert record_permission_decision(ref, "a", True, "user:2") is True
+    assert [p["request_id"] for p in ref["pending_permissions"]] == ["b"]

@@ -716,6 +716,11 @@ async def apply_result(
     )
     if payload.get("transcript_path"):
         ref["transcript_path"] = payload["transcript_path"]
+    # PRD-235 W2 S3: a question nobody answered before the session ended is stale —
+    # its denial is already on the record (permission_denials); drop it from the queue.
+    if ref.get("pending_permissions"):
+        ref["expired_permissions"] = (ref.get("expired_permissions") or []) + ref["pending_permissions"]
+        ref["pending_permissions"] = []
 
     # PRD-234 S2: files under the workspace volume → the ticket's deliverables;
     # the session facts ride exec_result so the task report can show them.
