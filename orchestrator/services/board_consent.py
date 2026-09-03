@@ -49,15 +49,25 @@ def actor_from_user_id(user_id: Any) -> str:
     return f"user:{user_id}" if user_id else "user:unknown"
 
 
+def edition() -> str:
+    """The running edition (``local`` | ``saas``) from the canonical config object.
+
+    ``config.py`` exports the settings instance as ``config.config`` (the name
+    every service imports); the first cut looked for ``settings`` and fell back
+    to the bare module, which has no ``AUTH_EDITION`` — so the local edition read
+    as saas and ticket 85 was parked behind grant #21 like before.
+    """
+    try:
+        from config import config as app_config
+
+        return str(getattr(app_config, "AUTH_EDITION", "saas") or "saas").lower()
+    except Exception:  # noqa: BLE001 — an unreadable edition keeps the asking posture
+        return "saas"
+
+
 def creation_is_consent() -> bool:
     """True on the local edition only — one operator, so filing a ticket IS approving it."""
-    try:
-        import config as _config
-
-        source = getattr(_config, "settings", _config)
-        return str(getattr(source, "AUTH_EDITION", "saas")).lower() == LOCAL_EDITION
-    except Exception:  # noqa: BLE001 — an unreadable edition keeps the asking posture
-        return False
+    return edition() == LOCAL_EDITION
 
 
 def consent_for_created_ticket(
