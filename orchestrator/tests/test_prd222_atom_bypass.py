@@ -162,3 +162,61 @@ async def test_workspace_load_error_fails_soft_to_normal_classification():
     brain = _brain(_BoomSession())
     result = await brain.assess("hello")
     assert result.complexity == Complexity.ATOM
+
+
+# --------------------------------------------------------------------------- #
+# PRD-234: a message naming an active agent is delegation, not onboarding
+# --------------------------------------------------------------------------- #
+
+
+class _Agent:
+    def __init__(self, agent_id, name):
+        self.id = agent_id
+        self.name = name
+
+
+def _brain_with_roster(session, monkeypatch, roster, classified=None):
+    brain = AutoBrain(session, WS_ID)
+    brain._redis = None
+    monkeypatch.setattr(brain, "_active_agents", lambda: roster)
+    monkeypatch.setattr(brain, "_cache_lookup", lambda _m: None)
+    monkeypatch.setattr(brain, "_cache_store", lambda *_a, **_k: None)
+    monkeypatch.setattr(brain, "_run_fast_heuristics", lambda _m: None)
+
+    async def _classify(*_a, **_k):
+        if classified is None:
+            raise AssertionError("LLM tier consulted")
+        return classified
+
+    monkeypatch.setattr(brain, "_llm_classify", _classify)
+    return brain
+
+
+@pytest.mark.asyncio
+async def test_a_message_naming_an_active_agent_bypasses_the_pin(monkeypatch):
+    from consumers.chatbot.auto import ComplexityAssessment
+
+    assign = ComplexityAssessment(
+        complexity=Complexity.MOLECULE, action=Action.ASSIGN, reasoning="named agent",
+        confidence=0.9, target_agent_id=15, target_agent_name="Bob",
+    )
+    brain = _brain_with_roster(_FakeSession(_WS(None)), monkeypatch, [_Agent(15, "Bob")], assign)
+    result = await brain.assess("Can you ask bob to create hello.txt and report back?")
+    assert result.action == Action.ASSIGN
+    assert "Onboarding active" not in result.reasoning
+
+
+@pytest.mark.asyncio
+async def test_the_pin_still_holds_when_no_agent_is_named(monkeypatch):
+    brain = _brain_with_roster(_FakeSession(_WS("questions")), monkeypatch, [_Agent(15, "Bob")])
+    result = await brain.assess(INTRO)
+    assert result.action == Action.RESPOND
+    assert "Onboarding active" in result.reasoning
+
+
+@pytest.mark.asyncio
+async def test_a_name_inside_another_word_or_too_short_does_not_count(monkeypatch):
+    roster = [_Agent(1, "Auto"), _Agent(2, "Bo")]
+    brain = _brain_with_roster(_FakeSession(_WS(None)), monkeypatch, roster)
+    result = await brain.assess("We automate boat bookings — " + INTRO)
+    assert "Onboarding active" in result.reasoning
