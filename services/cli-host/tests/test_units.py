@@ -335,3 +335,12 @@ def test_hook_server_keeps_only_its_own_socket_and_heals_a_vanished_path(tmp_pat
     assert new.ensure_listening() is False
     new.stop()
     assert not sock.exists()
+
+
+def test_compact_event_carries_cwd_and_nothing_more_than_it_should():
+    from automatos_cli_host.session import compact_event
+    ev = compact_event("SessionStart", {"session_id": "s1", "cwd": "/w/sessions/71", "transcript_path": "/t.jsonl",
+                                        "tool_input": {"command": "x"}, "extra": "never"})
+    assert ev["event"] == "SessionStart" and ev["cwd"] == "/w/sessions/71" and ev["session_id"] == "s1"
+    assert "extra" not in ev and "tool_name" not in ev
+    assert "cwd" not in compact_event("PostToolUse", {"tool_name": "Bash"})

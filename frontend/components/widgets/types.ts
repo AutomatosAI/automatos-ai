@@ -577,6 +577,8 @@ export interface OpenFileTab {
 export interface CodingCanvasWidgetData {
   workspaceId: string
   taskId?: string
+  /** PRD-235 W2: the folder this Canvas is rooted at ('.' or undefined = workspace root) */
+  rootPath?: string
   /** Currently selected file path */
   activeFilePath?: string
   /** Open file tabs */

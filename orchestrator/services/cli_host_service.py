@@ -294,6 +294,9 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             "claimed_at": _iso(_now()),
             "cwd": cfg.get(CONFIG_WORKING_DIRECTORY_KEY),
         }
+        ref["explorer_root"] = explorer_root_for(
+            task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+        )
         task.runtime_ref = ref
         out.append(
             {
@@ -366,6 +369,13 @@ def record_events(
             ref["cli_session_id"] = ev["session_id"]
         if ev.get("transcript_path"):
             ref["transcript_path"] = ev["transcript_path"]
+        # PRD-235 W2: the session's effective working directory (SessionStart carries
+        # it) — the absolute host path editor deeplinks need; the explorer root follows.
+        if ev.get("cwd") and not ref.get("cwd"):
+            ref["cwd"] = str(ev["cwd"])
+            ref["explorer_root"] = explorer_root_for(
+                task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+            )
     task.runtime_ref = ref
     db.commit()
     control: List[str] = []
@@ -422,6 +432,17 @@ def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Opt
         rel = _clean_relative(path[len(root):])
         return f"{PROJECTS_PREFIX}/{rel}" if rel else None
     return None
+
+
+def explorer_root_for(task_id: int, cwd: Optional[str], workspace_id: Any, projects_dir: Optional[str]) -> Optional[str]:
+    """PRD-235 W2: where the Deliverables explorer (and the chat's Code mode) should
+    open for this session — the worker-relative folder. A session with no working
+    directory runs in ``sessions/<ticket>`` by the host's own rule; one inside the
+    workspace volume or the projects folder maps through ``workspace_relative_path``;
+    anywhere else is not browsable from the platform (``None``)."""
+    if not cwd:
+        return f"sessions/{task_id}"
+    return workspace_relative_path(str(cwd), str(workspace_id), projects_dir)
 
 
 def _register_session_deliverables(

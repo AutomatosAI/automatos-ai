@@ -157,6 +157,24 @@ def _is_git_repo(path: Path) -> bool:
     return (path / ".git").exists()
 
 
+def compact_event(event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The event the backend receives: the few facts the board needs, never the
+    whole hook payload. ``cwd`` (PRD-235 W2) is the session's effective working
+    directory — SessionStart carries it — so the ticket can deep-link the editor."""
+    compact = {
+        "event": event,
+        "at": time.time(),
+        "session_id": payload.get("session_id"),
+        "transcript_path": payload.get("transcript_path"),
+        "cwd": payload.get("cwd"),
+        "tool_name": payload.get("tool_name"),
+        "subject": _subject_of(payload),
+        "notification_type": payload.get("notification_type"),
+        "message": (payload.get("message") or "")[:500] or None,
+    }
+    return {k: v for k, v in compact.items() if v is not None}
+
+
 def _subject_of(payload: Dict[str, Any]) -> Optional[str]:
     """The one thing a tool call is about — a command, a path, a pattern — for the
     ticket's live log. Never the whole tool input."""
@@ -275,17 +293,7 @@ class Session:
                 self.files_touched.append(str(path))
 
     def _emit(self, event: str, payload: Dict[str, Any]) -> None:
-        compact = {
-            "event": event,
-            "at": time.time(),
-            "session_id": payload.get("session_id"),
-            "transcript_path": payload.get("transcript_path"),
-            "tool_name": payload.get("tool_name"),
-            "subject": _subject_of(payload),
-            "notification_type": payload.get("notification_type"),
-            "message": (payload.get("message") or "")[:500] or None,
-        }
-        self.events.put({k: v for k, v in compact.items() if v is not None})
+        self.events.put(compact_event(event, payload))
 
     # ── the run ─────────────────────────────────────────────────────────────
     def run(self) -> SessionOutcome:

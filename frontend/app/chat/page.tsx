@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { normalizeCodeRoot } from '@/components/widgets/CodingCanvasWidget/code-root'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
@@ -34,6 +35,8 @@ export default function ChatPage() {
   // Deep-link: /chat?chatId=<id> auto-loads that chat using client-side
   // auth (avoids the server-side /chat/[id] route's 404-on-fetch problem).
   const chatIdParam = searchParams?.get('chatId') ?? null
+  // PRD-235 W2: /chat?repo=<folder> opens Code mode on that folder (a ticket's session or a repo under projects/).
+  const repoParam = normalizeCodeRoot(searchParams?.get('repo')) ?? undefined
 
   // Activate plan mode when arriving via ?mode=plan
   useEffect(() => {
@@ -112,6 +115,7 @@ export default function ChatPage() {
         initialVisibilityType={selectedChat?.visibility || 'private'}
         isReadonly={false}
         autoResume={false}
+        initialCodeRoot={repoParam}
         initialLastContext={selectedChat?.lastContext}
       />
     </>
