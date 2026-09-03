@@ -29,6 +29,9 @@ from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
 from services.session_report import session_report_lines  # PRD-234 S2
+from services.board_consent import (  # PRD-234: a human's board action is the approval
+    WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref, record_operator_consent,
+)
 from services.board_dispatcher import notify_task_available
 from services.board_events import board_event_stream, notify_board_event
 
@@ -878,6 +881,12 @@ async def run_task_now(
     if task.status == "in_progress":
         raise HTTPException(status_code=409, detail="Task is already running")
 
+    # PRD-234: pressing Run Now is the operator's approval — record it so the
+    # gate lets the ticket through instead of parking it behind a grant.
+    record_operator_consent(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
+        actor=_operator_ref(ctx), why=WHY_RUN_NOW,
+    )
     _redispatch_task(db, task)
 
     logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s",
@@ -941,6 +950,11 @@ async def update_task_status(
         and task.assigned_agent_id
         and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
     ):
+        # PRD-234: dragging a ticket to In Progress is the operator's approval.
+        record_operator_consent(
+            db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
+            actor=_operator_ref(ctx), why=WHY_MOVED_TO_IN_PROGRESS,
+        )
         _launch_task_execution(
             task_id=task.id,
             agent_id=task.assigned_agent_id,

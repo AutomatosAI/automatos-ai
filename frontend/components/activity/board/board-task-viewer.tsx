@@ -3,6 +3,10 @@
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
+import Link from 'next/link'
+import { toast } from 'sonner'
+import { parseBlockedReason } from './blocked-reason'
+import { useGrantApproval } from '@/hooks/use-approval-grants'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -188,6 +192,51 @@ function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: str
 }
 
 // ── Status-specific content panels ───────────────────────────────────
+
+function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
+  const grantApproval = useGrantApproval()
+  const { grantId, text } = parseBlockedReason(task.blocked_reason)
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-4 space-y-3" data-testid="blocked-banner">
+        <p className="text-sm font-medium">
+          {grantId ? `Waiting for your approval (grant #${grantId})` : 'Waiting for the operator'}
+        </p>
+        {text && <p className="text-xs text-muted-foreground">{text}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          {grantId && (
+            <Button
+              size="sm"
+              disabled={grantApproval.isLoading}
+              onClick={() => grantApproval.mutate(grantId, {
+                onSuccess: () => toast.success(`Approved — the ticket goes back to the queue and starts on the next claim`),
+                onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not grant the approval'),
+              })}
+            >
+              {grantApproval.isLoading ? 'Approving…' : `Approve #${grantId}`}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={() => onStatusChange('in_progress')}>
+            Move to In Progress
+          </Button>
+          <Link href="/command-center" className="text-xs text-muted-foreground hover:text-foreground">
+            Open Command Center → Governance
+          </Link>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Moving the ticket to In Progress or pressing Run Now counts as your approval too; the policy only holds tickets nobody clicked.
+        </p>
+      </div>
+      {task.description && (
+        <div>
+          <SectionLabel>Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm whitespace-pre-wrap">{task.description}</div>
+        </div>
+      )}
+      <SessionBlock task={task} />
+    </div>
+  )
+}
 
 function AssignedContent({ task }: { task: BoardTask }) {
   return (
@@ -600,6 +649,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
+          {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}
           {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} onApprove={handleApprove} onReject={handleReject} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}
