@@ -49,6 +49,15 @@ DEFAULT_BASH_ALLOW = (
     "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
 )
 
+# A code ticket must be able to RUN what it just wrote — that is "build and
+# test", not "publish". An interpreter may run a file inside the session
+# directory; inline code (``python -c``, ``node -e``) stays refused so the
+# never-allowed list cannot be bypassed inside a string. This is a guardrail
+# against accidents on the user's own machine, not a sandbox.
+_INTERPRETER_RE = re.compile(r"^(python(\d+(\.\d+)?)?|node)$")
+INLINE_CODE_FLAGS = frozenset({"-c", "-e", "--eval", "-p", "--print"})
+OWN_CODE_MODULES = frozenset({"doctest", "unittest", "pytest", "py_compile"})
+
 
 @dataclass
 class PolicyContext:
@@ -104,6 +113,37 @@ def _split_compound(command: str) -> List[str]:
     return [seg.strip() for seg in re.split(r"&&|\|\||;|\|", command) if seg.strip()]
 
 
+def _absolute_args_inside(args: Sequence[str], roots: Iterable[Path]) -> bool:
+    """Relative arguments resolve under the session directory by construction
+    ('..' is refused before we get here); every ABSOLUTE path must sit inside it."""
+    roots = list(roots)
+    return all(_inside(a, roots) for a in args if a.startswith("/") or a.startswith("~"))
+
+
+def _runs_own_code(segment: str, roots: Iterable[Path]) -> bool:
+    """``cd`` within the session directory, or an interpreter run on a file inside it."""
+    roots = list(roots)
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        return False
+    if not words:
+        return False
+    head = Path(words[0]).name  # tolerate /usr/bin/python3
+    if head == "cd":
+        return len(words) == 2 and _inside(words[1], roots)
+    if not _INTERPRETER_RE.match(head):
+        return False
+    args = words[1:]
+    if not args or any(a in INLINE_CODE_FLAGS for a in args):
+        return False
+    if args[0] == "-m":
+        return len(args) >= 2 and args[1] in OWN_CODE_MODULES and _absolute_args_inside(args[2:], roots)
+    if args[0].startswith("-"):
+        return False  # unknown interpreter flag: not a plain "run this file"
+    return _inside(args[0], roots) and _absolute_args_inside(args[1:], roots)
+
+
 def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     for pattern in NEVER_ALLOWED_BASH:
         if pattern.search(command):
@@ -111,7 +151,8 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     if ".." in command and re.search(r"(^|[\s'\"=:;|&(])\.\.([/\\]|[\s'\");|&]|$)", command):
         return Decision("deny", "path traversal ('..') in a shell command")
     segments = _split_compound(command)
-    if all(_matches_prefix(seg, ctx.allowed_bash) for seg in segments):
+    roots = [ctx.cwd, *ctx.extra_dirs]
+    if all(_matches_prefix(seg, ctx.allowed_bash) or _runs_own_code(seg, roots) for seg in segments):
         return Decision("allow")
     if any(_matches_prefix(seg, ctx.ask_bash) for seg in segments):
         return Decision("ask", f"{_first_words(command)!r} needs the operator's approval")

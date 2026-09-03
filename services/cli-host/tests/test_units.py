@@ -261,3 +261,37 @@ def test_host_loop_survives_a_failing_tick(short_tmp, monkeypatch):
     monkeypatch.setattr(host.hooks, "stop", lambda: None)
     assert host.run_forever() == 0
     assert calls["n"] >= 1  # the first tick raised and the loop went on
+
+
+def test_policy_lets_a_session_run_its_own_code(tmp_path):
+    """Ticket 68 (2026-09-03): the session wrote hello.py and was refused
+    ``cd session-68 && python3 hello.py`` and ``python3 <abs>/hello.py`` — so a
+    finished deliverable landed in review. Running a file inside the session
+    directory is "test what you built"; inline code and files outside stay refused."""
+    ctx = _ctx(tmp_path)
+    (tmp_path / "session-68").mkdir()
+    ok = [
+        "cd session-68 && python3 hello.py",
+        f"cd {tmp_path / 'session-68'} && python3 hello.py && python3 -m doctest hello.py",
+        f"python3 {tmp_path / 'session-68' / 'hello.py'}",
+        "python hello.py --count 3",
+        "/usr/bin/python3.12 hello.py",
+        "node app.js",
+        "python3 -m unittest discover -s tests",
+        "python3 -m py_compile hello.py",
+    ]
+    for cmd in ok:
+        assert policy.decide("Bash", {"command": cmd}, ctx).allow, cmd
+    refused = [
+        "python3 -c 'import os; os.system(\"git push\")'",
+        "node -e 'process.exit(0)'",
+        "python3 /etc/hello.py",
+        f"python3 hello.py --out {tmp_path.parent / 'elsewhere'}",
+        "cd /tmp && python3 hello.py",
+        "cd .. && python3 hello.py",
+        "python3 -m http.server 8000",
+        "python3 -i hello.py",
+        "ruby app.rb",
+    ]
+    for cmd in refused:
+        assert not policy.decide("Bash", {"command": cmd}, ctx).allow, cmd
