@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -45,7 +45,8 @@ JOB_TYPES = {"openrouter": "full_sync", "nvidia": "nvidia_sync"}
 # NVIDIA lists embeddings, rerankers, reward models, OCR/parsers and safety
 # classifiers next to chat models. None of them answer chat completions.
 _NON_CHAT_ID = re.compile(
-    r"(embed|reward|rerank|parse|ocr|deplot|kosmos|fuyu|safety|guard|diffusion)", re.I
+    r"(embed|reward|rerank|parse|ocr|deplot|kosmos|fuyu|safety|guard|diffusion|detector|nvclip|calibration)",
+    re.I,
 )
 # NVIDIA vendor slug → OpenRouter vendor slug, for metadata borrowing.
 _VENDOR_ALIASES = {"deepseek-ai": "deepseek", "meta": "meta-llama"}
@@ -81,7 +82,10 @@ class ProviderCatalogSync:
                 .order_by(OpenRouterSyncJob.completed_at.desc().nullslast())
                 .first()
             )
-            out[slug] = job.completed_at.isoformat() if job and job.completed_at else None
+            # Naive UTC in the DB → explicit UTC on the wire, or the browser reads it as local time.
+            out[slug] = (
+                job.completed_at.replace(tzinfo=timezone.utc).isoformat() if job and job.completed_at else None
+            )
         return out
 
     # ------------------------------------------------------------------ #
@@ -143,6 +147,7 @@ class ProviderCatalogSync:
         try:
             ids = self._fetch_nvidia_ids(api_key)
             synced = borrowed = skipped = 0
+            kept: List[str] = []
             for model_id in ids:
                 if _NON_CHAT_ID.search(model_id):
                     skipped += 1
@@ -151,7 +156,19 @@ class ProviderCatalogSync:
                 if cached is not None:
                     borrowed += 1
                 self._upsert_route("nvidia", model_id, self._values_for_nvidia(model_id, cached))
+                kept.append(model_id)
                 synced += 1
+            # Routes NVIDIA no longer lists (or that the chat filter now excludes)
+            # stop being offered; installs keep their row, marked deprecated.
+            deprecated = (
+                self.db.query(LLMModel)
+                .filter(
+                    LLMModel.serving_provider == "nvidia",
+                    LLMModel.status == "active",
+                    ~LLMModel.model_id.in_(kept),
+                )
+                .update({"status": "deprecated"}, synchronize_session=False)
+            )
 
             finished = datetime.utcnow()
             job.status = "completed"
@@ -159,15 +176,19 @@ class ProviderCatalogSync:
             job.models_updated = synced
             job.completed_at = finished
             job.duration_ms = int((finished - started).total_seconds() * 1000)
-            job.job_metadata = {"skipped_non_chat": skipped, "borrowed_metadata": borrowed, "listed": len(ids)}
+            job.job_metadata = {
+                "skipped_non_chat": skipped, "borrowed_metadata": borrowed,
+                "listed": len(ids), "deprecated": int(deprecated or 0),
+            }
             self.db.commit()
             logger.info(
-                "[CatalogSync] NVIDIA: %d routes (%d with borrowed metadata, %d non-chat skipped)",
-                synced, borrowed, skipped,
+                "[CatalogSync] NVIDIA: %d routes (%d with borrowed metadata, %d non-chat skipped, %d deprecated)",
+                synced, borrowed, skipped, int(deprecated or 0),
             )
             return {
                 "provider": "nvidia", "status": "completed", "models_synced": synced,
                 "borrowed_metadata": borrowed, "skipped_non_chat": skipped, "listed": len(ids),
+                "deprecated": int(deprecated or 0),
             }
         except Exception as exc:
             self.db.rollback()

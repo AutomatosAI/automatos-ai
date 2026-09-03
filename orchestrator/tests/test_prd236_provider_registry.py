@@ -398,7 +398,10 @@ def _track(monkeypatch, provider: str):
     from core.llm.usage_tracker import UsageTracker
     from uuid import uuid4
 
-    row = SimpleNamespace(input_cost_per_1k_tokens=0.003, output_cost_per_1k_tokens=0.015, tier="aggregator")
+    row = SimpleNamespace(
+        input_cost_per_1k_tokens=0.003, output_cost_per_1k_tokens=0.015,
+        sourcing="aggregator", serving_provider="openrouter", model_id="moonshotai/kimi-k3",
+    )
     _FakeSession.added = []
     monkeypatch.setitem(
         sys.modules, "core.database.database", types.SimpleNamespace(SessionLocal=lambda: _FakeSession(row))

@@ -51,27 +51,47 @@ def _row(**kw):
 class _Q:
     """A query whose filters are evaluated in Python over a row list.
 
-    Only the predicate shapes used by the code under test are understood:
-    ``Column == value`` comparisons on ``model_id`` / ``serving_provider`` /
-    ``workspace_id`` / ``status``. Everything else is a no-op filter.
+    Like SQLAlchemy, ``filter()`` returns a NEW query and never mutates the
+    receiver (the code under test reuses a base query for several probes).
+    Understood predicate shapes: ``Column == value`` on any attribute,
+    ``Column.endswith(x)``, ``~Column.in_(xs)``; anything else is a no-op.
     """
 
     def __init__(self, rows):
         self._rows = list(rows)
 
-    def _apply(self, clause):
+    @staticmethod
+    def _apply(rows, clause):
         try:
-            col = clause.left.name
-            val = clause.right.value
+            op = clause.operator.__name__
         except Exception:
-            return self._rows
-        return [r for r in self._rows if getattr(r, col, None) == val]
+            op = ""
+        try:
+            if op == "eq":
+                col, val = clause.left.name, clause.right.value
+                return [r for r in rows if getattr(r, col, None) == val]
+            if op in ("endswith_op", "endswith"):
+                col, val = clause.left.name, clause.right.value
+                return [r for r in rows if str(getattr(r, col, "")).endswith(val)]
+            if op in ("not_in_op", "notin_op"):
+                col = clause.left.name
+                vals = [b.value for b in clause.right.element.clauses] if hasattr(clause.right, "element") else []
+                return [r for r in rows if getattr(r, col, None) not in vals]
+        except Exception:
+            return rows
+        return rows
 
     def filter(self, *clauses):
         rows = self._rows
         for c in clauses:
-            self._rows = rows = _Q(rows)._apply(c)
-        return self
+            rows = self._apply(rows, c)
+        return _Q(rows)
+
+    def update(self, values, synchronize_session=False):
+        for r in self._rows:
+            for k, v in values.items():
+                setattr(r, k, v)
+        return len(self._rows)
 
     def join(self, *_a, **_k):
         return self
@@ -268,10 +288,11 @@ def test_non_chat_ids_are_skipped():
     from core.services.provider_catalog_sync import _NON_CHAT_ID
 
     for skipped in ("nvidia/nemotron-3-embed-1b", "nvidia/nemotron-4-340b-reward", "nvidia/nemotron-parse",
-                    "nvidia/llama-3.1-nemotron-safety-guard-8b-v3", "google/deplot", "adept/fuyu-8b"):
+                    "nvidia/llama-3.1-nemotron-safety-guard-8b-v3", "google/deplot", "adept/fuyu-8b",
+                    "nvidia/ai-synthetic-video-detector", "nvidia/nvclip", "nvidia/ising-calibration-1.5-31b"):
         assert _NON_CHAT_ID.search(skipped), skipped
     for kept in ("moonshotai/kimi-k3", "deepseek-ai/deepseek-v4-pro-0813", "openai/gpt-oss-20b",
-                 "nvidia/nemotron-3-ultra-550b-a55b"):
+                 "nvidia/nemotron-3-ultra-550b-a55b", "meta/llama-3.2-11b-vision-instruct", "nvidia/vila"):
         assert not _NON_CHAT_ID.search(kept), kept
 
 
@@ -316,9 +337,13 @@ def test_sync_nvidia_upserts_routes_and_records_a_job(monkeypatch):
     upserts = []
     monkeypatch.setattr(sync, "_upsert_route", lambda sp, mid, values: upserts.append((sp, mid, values)))
 
+    stale = _row(id=9, serving_provider="nvidia", model_id="nvidia/gone-model", status="active")
+    kept_row = _row(id=8, serving_provider="nvidia", model_id="moonshotai/kimi-k3", status="active")
+    db.rows = [stale, kept_row]
     result = sync.sync_nvidia()
     assert result["status"] == "completed"
     assert result["models_synced"] == 2 and result["skipped_non_chat"] == 1 and result["borrowed_metadata"] == 1
+    assert result["deprecated"] == 1 and stale.status == "deprecated" and kept_row.status == "active"
     assert [(sp, mid) for sp, mid, _ in upserts] == [("nvidia", "moonshotai/kimi-k3"), ("nvidia", "openai/gpt-oss-20b")]
     job = db.added[0]
     assert job.job_type == "nvidia_sync" and job.status == "completed" and job.models_synced == 2
