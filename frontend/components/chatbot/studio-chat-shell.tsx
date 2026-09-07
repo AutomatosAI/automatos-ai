@@ -26,9 +26,10 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { getChatHistory, getChatMessages } from '@/lib/chat/api'
+import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
 import { useMission } from '@/hooks/use-missions-api'
 import { useMissionStore } from '@/stores/mission-store'
 import {
@@ -44,6 +45,11 @@ export interface StudioChatShellProps {
   selectedChat: ChatType | null
   onSelectChat: (chat: ChatType, messages: ChatMessage[]) => void
   onNewChat: () => void
+  /** PRD-237: the open tabs, shown above the recent list. */
+  openChatIds?: string[]
+  unreadChatIds?: string[]
+  titles?: Record<string, string>
+  onCloseTab?: (chatId: string) => void
 }
 
 const THREADS_KEY = 'studioChatThreadsCollapsed'
@@ -55,6 +61,10 @@ export function StudioChatShell({
   selectedChat,
   onSelectChat,
   onNewChat,
+  openChatIds = [],
+  unreadChatIds = [],
+  titles = {},
+  onCloseTab,
 }: StudioChatShellProps) {
   const [threads, setThreads] = useState<ChatType[]>([])
   const [loadingThreads, setLoadingThreads] = useState(true)
@@ -125,7 +135,27 @@ export function StudioChatShell({
     }
   }
 
-  const activeTitle = selectedChat?.title ?? 'New conversation'
+  // PRD-237: an open tab may not be in the recent rows — fetch it on click.
+  const handleOpenTabClick = async (chatId: string) => {
+    if (chatId === selectedChatId || openingThreadId) return
+    const known = threads.find((t) => t.id === chatId)
+    if (known) {
+      await handleThreadClick(known)
+      return
+    }
+    setOpeningThreadId(chatId)
+    try {
+      const [chat, messages] = await Promise.all([getChat(chatId), getChatMessages(chatId)])
+      onSelectChat(chat, messages)
+    } catch (err) {
+      console.error('Failed to load chat:', err)
+      toast.error('Failed to load chat')
+    } finally {
+      setOpeningThreadId(null)
+    }
+  }
+
+  const activeTitle = selectedChat?.title ?? titles[selectedChatId] ?? 'New conversation'
 
   return (
     <div
@@ -190,6 +220,55 @@ export function StudioChatShell({
                 <span>New</span>
               </button>
             </div>
+            {openChatIds.length > 0 && (
+              <div className="sh-chat-thread-list" aria-label="Open conversations">
+                <div className="sh-chat-thread-empty" style={{ paddingBottom: 2 }}>Open</div>
+                {openChatIds.map((chatId) => {
+                  const isActive = chatId === selectedChatId
+                  const isOpening = chatId === openingThreadId
+                  const title = titles[chatId] ?? threads.find((t) => t.id === chatId)?.title ?? 'Conversation'
+                  const unread = unreadChatIds.includes(chatId)
+                  return (
+                    <div
+                      key={chatId}
+                      role="button"
+                      tabIndex={0}
+                      className={'sh-chat-thread' + (isActive ? ' active' : '') + (isOpening ? ' opening' : '')}
+                      onClick={() => handleOpenTabClick(chatId)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          handleOpenTabClick(chatId)
+                        }
+                      }}
+                      title={title}
+                    >
+                      <span
+                        className={`sh-chat-thread-dot${isActive || unread ? ' warn' : ' ok'}`}
+                        aria-hidden
+                      />
+                      <span className="sh-chat-thread-title">{title}</span>
+                      {unread && <span className="sh-chat-pill brand">new</span>}
+                      {onCloseTab && (
+                        <button
+                          type="button"
+                          className="sh-chat-thread-close"
+                          aria-label={`Close ${title}`}
+                          title="Close tab"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onCloseTab(chatId)
+                          }}
+                        >
+                          <X style={{ width: 11, height: 11 }} />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+                <div className="sh-chat-thread-empty" style={{ paddingTop: 8, paddingBottom: 2 }}>Recent</div>
+              </div>
+            )}
             <div className="sh-chat-thread-list">
               {loadingThreads ? (
                 <div className="sh-chat-thread-empty">Loading…</div>

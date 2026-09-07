@@ -1034,6 +1034,11 @@ class User(Base):
     avatar_url = Column(String(500), nullable=True)
     last_sign_in = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
+    # PRD-237 S6: the hosted edition's open-conversation tabs, keyed by
+    # workspace id — {"<ws>": {activeChatId, draftOpen, openChatIds, lastReadAt,
+    # updatedAt}}. NULL until the user opens a chat; NULL forever in the local
+    # edition, which keeps its session in the browser (owner decision D1).
+    chat_sessions = Column(JSONB, nullable=True)
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

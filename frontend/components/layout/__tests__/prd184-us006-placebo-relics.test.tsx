@@ -38,7 +38,7 @@ describe('PRD-184 US-006 · test_no_placebo_routes — placebo relics removed', 
     expect(src).not.toContain('sh-meta')
   })
 
-  it('the held /chat/[id] route (S10) is untouched', () => {
+  it('the live /chat route is untouched (PRD-237 later retired the server-side /chat/[id] variant)', () => {
     // Boundary proof: US-006 must NOT delete the live chat route.
     expect(fs.existsSync(path.join(FRONTEND, 'app', 'chat'))).toBe(true)
   })

@@ -99,7 +99,7 @@ function formatDuration(seconds: number | null): string | null {
 function getViewUrl(item: ActivityFeedItem): string | null {
   switch (item.type) {
     case 'chat':
-      return item.source_id ? `/chat/${item.source_id}` : null
+      return item.source_id ? `/chat?chatId=${item.source_id}` : null
     case 'recipe':
       return item.source_url ?? null
     case 'routine':

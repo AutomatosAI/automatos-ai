@@ -330,7 +330,7 @@ export function ExecutionDetail({ item, onClose }: ExecutionDetailProps) {
 
   const handleViewSource = () => {
     if (item.type === 'chat' && item.source_id) {
-      router.push(`/chat/${item.source_id}`)
+      router.push(`/chat?chatId=${item.source_id}`)
     } else if (item.type === 'recipe' && item.source_id) {
       const execId = item.id?.replace('recipe-', '') || ''
       router.push(`/activity/execution?id=${execId}&recipeId=${item.source_id}`)
