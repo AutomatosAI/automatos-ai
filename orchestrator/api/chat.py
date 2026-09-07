@@ -7,14 +7,16 @@ Secured with hybrid auth (Clerk JWT + API key).
 """
 
 import logging
-from typing import List, Optional
+import uuid as _uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func, or_
 from pydantic import BaseModel
 
-from core.database.database import get_db
+from core.database.database import SessionLocal, get_db
 from consumers.chatbot import ChatService, StreamingChatService
 from consumers.chatbot.auto import Action, AutoBrain, apply_assign_bias
 from core.auth.hybrid import get_request_context_hybrid
@@ -23,7 +25,10 @@ from core.auth.dependencies import RequestContext
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
+from core.models.core import User
 from core.session_queue import get_session_queue
+from services.board_events import notify_chat_event
+from services.chat_turns import get_turn_registry, run_detached_turn
 from services.page_context import inject_page_preamble, sanitize_page_context
 
 logger = logging.getLogger(__name__)
@@ -78,6 +83,27 @@ class VoteRequest(BaseModel):
     chatId: str
     messageId: str
     isUpvoted: bool
+
+
+# PRD-237 S6: the hosted edition's open-conversation tabs (per user, per
+# workspace). Mirrors frontend/lib/chat/chat-session.ts — ids and timestamps
+# only, never message content.
+MAX_OPEN_CHATS = 8
+MAX_TRACKED_THREADS = 50
+_EMPTY_SESSION_DOC: Dict[str, Any] = {
+    "activeChatId": None,
+    "draftOpen": False,
+    "openChatIds": [],
+    "lastReadAt": {},
+    "updatedAt": None,
+}
+
+
+class ChatSessionRequest(BaseModel):
+    activeChatId: Optional[str] = None
+    draftOpen: bool = False
+    openChatIds: List[str] = []
+    lastReadAt: Dict[str, Any] = {}
 
 
 # Helper function to get user ID from database
@@ -221,7 +247,6 @@ async def stream_chat(
     # caller_context=None lets PlatformActionExecutor fall through to
     # _workspace_has_admin_owner() which checks if the workspace has an
     # admin/owner member.  Admin workspace → all tools; user workspace → restricted.
-    streaming_service = StreamingChatService(db, workspace_id=ctx.workspace_id)
     user_id = get_user_id(db, ctx)
 
     def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:
@@ -515,43 +540,67 @@ async def stream_chat(
         and complexity_assessment.action == Action.RESPOND
     )
 
-    async def _guarded_stream():
-        import json as _json
+    # PRD-237 S7: the turn is a producer task with its own DB session — the HTTP
+    # response only consumes it (services.chat_turns). A reload or navigation
+    # that drops the connection no longer kills the reply; Stop is explicit via
+    # POST /{chat_id}/cancel. The request-scoped ``db`` must not be touched here:
+    # FastAPI closes it when the response ends, which may be before the turn.
+    _ws_id = ctx.workspace_id
+    _mission_mode = bool(request.missionMode)
+    _plan_mode = bool(request.planMode)
 
-        async with session_queue.acquire(session_key):
-            # PRD-125: Emit mission suggestion data event (for frontend to render card)
-            if _suggest_mission:
-                suggestion_event = streaming_service.streaming_handler.format_aisdk_data(
-                    "mission-suggestion",
-                    {
-                        "goal": message_text,
-                        "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
-                        "agent_id": effective_agent_id,
-                    },
-                )
-                yield suggestion_event
+    async def _produce():
+        task_db = SessionLocal()
+        try:
+            task_service = StreamingChatService(task_db, workspace_id=_ws_id)
+            async with session_queue.acquire(session_key):
+                # PRD-125: Emit mission suggestion data event (for frontend to render card)
+                if _suggest_mission:
+                    yield task_service.streaming_handler.format_aisdk_data(
+                        "mission-suggestion",
+                        {
+                            "goal": message_text,
+                            "complexity": complexity_assessment.complexity.value if complexity_assessment else "organ",
+                            "agent_id": effective_agent_id,
+                        },
+                    )
 
-            # Normal agent streaming (RESPOND, DELEGATE, or MISSION fallback)
-            async for chunk in streaming_service.stream_response_with_agent(
-                chat_id=chat_id,
-                messages=message_history,
-                agent_id=effective_agent_id,
-                user_id=user_id,
-                use_orchestrator_llm=use_orchestrator_llm,
-                skip_composio=_skip_composio,
-                complexity_assessment=complexity_assessment,
-                mission_mode=bool(request.missionMode),
-                plan_mode=bool(request.planMode),
-                suggest_mission=_suggest_mission,
-                is_super_admin=_is_super_admin,
-                # PRD-221 S3/S4: the sanitized reference set rides into the
-                # turn's context_trace and the page-prior action exposure.
-                page_context=_page_ctx,
-            ):
-                yield chunk
+                # Normal agent streaming (RESPOND, DELEGATE, or MISSION fallback)
+                async for chunk in task_service.stream_response_with_agent(
+                    chat_id=chat_id,
+                    messages=message_history,
+                    agent_id=effective_agent_id,
+                    user_id=user_id,
+                    use_orchestrator_llm=use_orchestrator_llm,
+                    skip_composio=_skip_composio,
+                    complexity_assessment=complexity_assessment,
+                    mission_mode=_mission_mode,
+                    plan_mode=_plan_mode,
+                    suggest_mission=_suggest_mission,
+                    is_super_admin=_is_super_admin,
+                    # PRD-221 S3/S4: the sanitized reference set rides into the
+                    # turn's context_trace and the page-prior action exposure.
+                    page_context=_page_ctx,
+                ):
+                    yield chunk
+        finally:
+            task_db.close()
+
+    async def _on_complete(*, completed: bool, cancelled: bool, client_gone: bool) -> None:
+        # The client missed the end of the turn (reload, navigation): tell the
+        # reloaded page the reply landed — the PRD-205 S7 lane merges it live.
+        # A connected client already has the reply; notifying it would duplicate.
+        if not (completed and client_gone):
+            return
+        notify_db = SessionLocal()
+        try:
+            notify_chat_event(notify_db, workspace_id=_ws_id, chat_id=chat_id, user_id=user_id)
+            notify_db.commit()
+        finally:
+            notify_db.close()
 
     return StreamingResponse(
-        _guarded_stream(),
+        run_detached_turn(chat_id=chat_id, produce=_produce, on_complete=_on_complete),
         media_type="text/plain; charset=utf-8",
         headers=response_headers,
     )
@@ -585,6 +634,89 @@ async def get_chat_history(
         }
         for chat in chats
     ]
+
+
+# ---------------------------------------------------------------------------
+# PRD-237 S6: open-conversation tabs, server-side for the hosted edition so they
+# follow the user across devices (owner decision D1, 2026-09-07). The local
+# edition keeps its session in the browser and never calls these. MUST stay
+# above ``GET /{chat_id}`` — the PRD-220 /search failure mode.
+# ---------------------------------------------------------------------------
+
+def _validate_chat_ids(ids: List[Any], *, cap: int, field: str) -> List[str]:
+    """Canonical, de-duplicated chat ids — or a 422 that names the field."""
+    out: List[str] = []
+    for raw in ids:
+        try:
+            cid = str(_uuid.UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=422, detail=f"{field}: {raw!r} is not a chat id")
+        if cid not in out:
+            out.append(cid)
+    if len(out) > cap:
+        raise HTTPException(status_code=422, detail=f"{field}: at most {cap} entries")
+    return out
+
+
+def _read_stamps(raw: Dict[str, Any]) -> Dict[str, float]:
+    stamps: Dict[str, float] = {}
+    for raw_id, raw_ts in raw.items():
+        if isinstance(raw_ts, bool) or not isinstance(raw_ts, (int, float)):
+            raise HTTPException(status_code=422, detail="lastReadAt values must be timestamps (ms)")
+        stamps[_validate_chat_ids([raw_id], cap=1, field="lastReadAt")[0]] = float(raw_ts)
+    if len(stamps) > MAX_TRACKED_THREADS:
+        keep = sorted(stamps, key=stamps.__getitem__, reverse=True)[:MAX_TRACKED_THREADS]
+        stamps = {k: stamps[k] for k in keep}
+    return stamps
+
+
+def _session_doc_from_request(body: ChatSessionRequest) -> Dict[str, Any]:
+    open_ids = _validate_chat_ids(body.openChatIds, cap=MAX_OPEN_CHATS, field="openChatIds")
+    active = None
+    if body.activeChatId is not None:
+        active = _validate_chat_ids([body.activeChatId], cap=1, field="activeChatId")[0]
+        if active not in open_ids:
+            raise HTTPException(status_code=422, detail="activeChatId must be one of openChatIds")
+    return {
+        "activeChatId": active,
+        "draftOpen": bool(body.draftOpen),
+        "openChatIds": open_ids,
+        "lastReadAt": _read_stamps(body.lastReadAt),
+    }
+
+
+@router.get("/session")
+async def get_chat_session(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """The caller's open-conversation tabs in this workspace (empty doc when none)."""
+    user_id = get_user_id(db, ctx)
+    row = db.query(User).filter(User.id == user_id).first()
+    sessions = (getattr(row, "chat_sessions", None) or {}) if row is not None else {}
+    doc = sessions.get(str(ctx.workspace_id))
+    if not isinstance(doc, dict):
+        return dict(_EMPTY_SESSION_DOC)
+    return {**_EMPTY_SESSION_DOC, **doc}
+
+
+@router.put("/session")
+async def put_chat_session(
+    body: ChatSessionRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Replace the caller's tabs for this workspace (validated: ids, cap, active ∈ open)."""
+    doc = _session_doc_from_request(body)
+    user_id = get_user_id(db, ctx)
+    row = db.query(User).filter(User.id == user_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    stored = {**doc, "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    # Rebuild, never mutate: SQLAlchemy only sees a JSONB change on reassignment.
+    row.chat_sessions = {**(row.chat_sessions or {}), str(ctx.workspace_id): stored}
+    db.commit()
+    return stored
 
 
 @router.get("/search")
@@ -764,6 +896,10 @@ async def get_chat(
         "lastContext": chat.last_context,
         # PRD-205 S7: 'auto' marks the thread where Auto speaks unprompted.
         "kind": chat.kind,
+        # PRD-237 S7: a turn is still being produced for this chat (the page
+        # reloaded mid-reply) — the client shows the typing state until the
+        # reply merges in via chat_changed.
+        "turnInFlight": await get_turn_registry().is_in_flight(chat_id),
     }
 
 
@@ -918,3 +1054,25 @@ async def switch_agent(
             "message": f"Switched to {new_agent.name}. How can I help?"
         }
     }
+
+
+@router.post("/{chat_id}/cancel", dependencies=[Depends(require_workspace_permission("agents:execute"))])
+async def cancel_chat_turn(
+    chat_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-237 S7: Stop. The reply no longer dies with the connection, so the
+    frontend's Stop must say so — this reaches whichever worker holds the turn
+    (process-local cancel, plus the Redis marker the producer polls)."""
+    chat_service = ChatService(db)
+    user_id = get_user_id(db, ctx)
+
+    chat = chat_service.get_chat(chat_id, workspace_id=ctx.workspace_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    cancelled = await get_turn_registry().request_cancel(chat_id)
+    return {"cancelled": cancelled}

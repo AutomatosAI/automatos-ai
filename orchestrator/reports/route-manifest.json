@@ -1,5 +1,5 @@
 {
-  "route_count": 790,
+  "route_count": 793,
   "routes": [
     {
       "method": "GET",
@@ -658,6 +658,14 @@
       "path": "/api/chat/search"
     },
     {
+      "method": "GET",
+      "path": "/api/chat/session"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/chat/session"
+    },
+    {
       "method": "PATCH",
       "path": "/api/chat/vote"
     },
@@ -672,6 +680,10 @@
     {
       "method": "PATCH",
       "path": "/api/chat/{chat_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/{chat_id}/cancel"
     },
     {
       "method": "GET",

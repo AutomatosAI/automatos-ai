@@ -1361,6 +1361,25 @@
     transition: background 140ms ease; min-width: 0;
   }
   .studio .sh-chat-thread:hover { background: hsl(38 45% 96%); }
+  /* PRD-237: close control on an open-tab row */
+  .studio .sh-chat-thread-close {
+    margin-left: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    opacity: 0;
+    cursor: pointer;
+    transition: opacity 120ms ease, background 120ms ease;
+  }
+  .studio .sh-chat-thread:hover .sh-chat-thread-close,
+  .studio .sh-chat-thread-close:focus-visible { opacity: 0.85; }
+  .studio .sh-chat-thread-close:hover { background: hsl(38 30% 88%); opacity: 1; }
   .studio .sh-chat-thread.active {
     background: hsl(var(--card));
     box-shadow: 0 1px 0 hsla(30 50% 18% / 0.05);

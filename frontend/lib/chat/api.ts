@@ -4,6 +4,7 @@
  */
 
 import type { Chat, ChatMessage, Vote } from '@/types'
+import type { ServerChatSession } from '@/lib/chat/chat-session'
 import { apiClient } from '@/lib/api-client'
 
 /**
@@ -76,4 +77,28 @@ export async function updateChatTitle(id: string, title: string): Promise<void> 
     method: 'PATCH',
     body: { title } as any,
   })
+}
+
+/**
+ * PRD-237 S6: the hosted edition's open-conversation tabs (per user, per
+ * workspace). The local edition never calls these — its session lives in the
+ * browser only (owner decision D1).
+ */
+export async function getChatSession(): Promise<ServerChatSession> {
+  return apiClient.request<ServerChatSession>('/api/chat/session')
+}
+
+export async function putChatSession(session: ServerChatSession): Promise<ServerChatSession> {
+  return apiClient.request<ServerChatSession>('/api/chat/session', {
+    method: 'PUT',
+    body: session as any,
+  })
+}
+
+/**
+ * PRD-237 S7: Stop. A turn no longer dies with the connection, so stopping the
+ * model is an explicit request that reaches whichever worker holds the turn.
+ */
+export async function cancelChatTurn(chatId: string): Promise<{ cancelled: boolean }> {
+  return apiClient.request<{ cancelled: boolean }>(`/api/chat/${chatId}/cancel`, { method: 'POST' })
 }

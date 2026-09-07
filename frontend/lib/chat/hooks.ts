@@ -7,6 +7,11 @@ import type { PageContext } from '@/lib/page-context'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import { toast } from 'sonner'
 
+/** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
+export const AWAITING_REPLY_ID = 'awaiting-reply'
+/** Give up waiting for a detached reply after this long (the turn itself is capped server-side). */
+const AWAITING_REPLY_GUARD_MS = 5 * 60_000
+
 export function useChat({
   id,
   initialMessages = [],
@@ -17,6 +22,7 @@ export function useChat({
   onData,
   onChatIdUpdate,
   onRoutingDecision,
+  initialAwaitingReply = false,
 }: {
   id: string
   initialMessages?: ChatMessage[]
@@ -30,6 +36,9 @@ export function useChat({
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
   onRoutingDecision?: (info: RoutingInfo) => void
+  // PRD-237 S7: the server is still producing a reply for this chat (the page
+  // reloaded mid-turn) — show the typing state until it merges in.
+  initialAwaitingReply?: boolean
 }) {
   const { getToken, isLoaded } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
@@ -42,6 +51,35 @@ export function useChat({
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [chatId, setChatId] = useState(id)
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  // PRD-237 S7: a reload mid-reply. The turn finishes detached on the server;
+  // hold a typing placeholder until chat_changed brings the reply (or a guard
+  // gives up). Mirrored in a ref so the merge listener needn't resubscribe.
+  const [awaitingReply, setAwaitingReply] = useState(initialAwaitingReply)
+  const awaitingRef = useRef(initialAwaitingReply)
+  useEffect(() => {
+    awaitingRef.current = awaitingReply
+  }, [awaitingReply])
+  useEffect(() => {
+    if (!initialAwaitingReply) return
+    setMessages((prev) =>
+      prev.some((m) => m.id === AWAITING_REPLY_ID)
+        ? prev
+        : [...prev, { id: AWAITING_REPLY_ID, role: 'assistant', content: '', parts: [] } as ChatMessage],
+    )
+    const guard = setTimeout(() => {
+      awaitingRef.current = false
+      setAwaitingReply(false)
+      setMessages((prev) => prev.filter((m) => m.id !== AWAITING_REPLY_ID))
+    }, AWAITING_REPLY_GUARD_MS)
+    return () => clearTimeout(guard)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // PRD-237 S7: leaving the surface (route change, tab switch) drops the
+  // connection on purpose — the server finishes the turn detached and the
+  // reply arrives via chat_changed. Stop is the only intentional cancel.
+  useEffect(() => () => abortControllerRef.current?.abort(), [])
 
   // PRD-207: the id prop can move mid-mount (a live call binds the screen to
   // its thread) — follow it so the chat_changed merge listener and sends
@@ -56,7 +94,14 @@ export function useChat({
       setIsLoading(false)
       setStatus('idle')
     }
-  }, [])
+    // PRD-237 S7: the turn no longer dies with the connection, so Stop has to
+    // say so — the cancel reaches whichever worker holds the turn.
+    if (chatId) {
+      void import('@/lib/chat/api')
+        .then(({ cancelChatTurn }) => cancelChatTurn(chatId))
+        .catch(() => {})
+    }
+  }, [chatId])
 
   // PRD-205 S7: a background producer posted into a chat (watcher verdict,
   // scheduled-task output). The SSE lane fans it out as a window event; when
@@ -72,6 +117,15 @@ export function useChat({
         try {
           const { getChatMessages } = await import('@/lib/chat/api')
           const serverMessages = await getChatMessages(chatId)
+          const last = serverMessages[serverMessages.length - 1]
+          // PRD-237 S7: the awaited (detached) reply landed — the server list
+          // is the truth now; the placeholder goes with it.
+          if (awaitingRef.current && last?.role === 'assistant') {
+            awaitingRef.current = false
+            setAwaitingReply(false)
+            setMessages(serverMessages)
+            return
+          }
           setMessages((prev) => {
             const known = new Set(prev.map((m) => m.id))
             const missing = serverMessages.filter((m) => !known.has(m.id))
@@ -97,7 +151,7 @@ export function useChat({
 
   const sendMessage = useCallback(
     async (message: any) => {
-      if (isLoading) return
+      if (isLoading || awaitingRef.current) return
 
       const messageObj = typeof message === 'string'
         ? { role: 'user', content: message }
@@ -450,9 +504,11 @@ export function useChat({
     setMessages,
     sendMessage,
     reload,
-    status,
+    // PRD-237 S7: an awaited detached reply reads as streaming to the surfaces.
+    status: awaitingReply ? 'streaming' : status,
     stop,
-    isLoading,
+    isLoading: isLoading || awaitingReply,
+    awaitingReply,
     usage,
     // PRD-222 US-014: 'trial_exhausted' when the last send was blocked by a
     // spent trial; null otherwise. Drives the deterministic exhausted banner.

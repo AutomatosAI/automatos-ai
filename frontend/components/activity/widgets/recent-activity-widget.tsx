@@ -68,7 +68,7 @@ export function RecentActivityWidget({ period, onViewAll, className }: RecentAct
 
   const handleView = (item: ActivityFeedItem) => {
     if (item.type === 'chat' && item.source_id) {
-      router.push(`/chat/${item.source_id}`)
+      router.push(`/chat?chatId=${item.source_id}`)
     } else {
       // Navigate to Board tab with task focused
       const taskId = item.id.replace(/^(recipe|routine)-/, '')

@@ -20,9 +20,13 @@ export interface AppSidebarProps {
   }
   onChatSelect?: (chat: Chat, messages: any[]) => void
   onNewChat?: () => void
+  /** PRD-237: the conversation on screen — highlighted in the list. */
+  activeChatId?: string | null
+  /** PRD-237: a deleted conversation also leaves the tab strip. */
+  onChatClosed?: (chatId: string) => void
 }
 
-export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
+export function AppSidebar({ user, onChatSelect, onNewChat, activeChatId = null, onChatClosed }: AppSidebarProps) {
   const router = useRouter()
   const [chats, setChats] = useState<Chat[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -54,6 +58,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
 
   const handleChatDelete = (chatId: string) => {
     setChats(prev => prev.filter(c => c.id !== chatId))
+    onChatClosed?.(chatId)
   }
 
   const filteredChats = searchQuery
@@ -148,6 +153,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
                         chat={chat}
                         onDelete={handleChatDelete}
                         onSelect={onChatSelect}
+                        isActive={chat.id === activeChatId}
                       />
                     ))}
                   </div>
@@ -166,6 +172,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
                         chat={chat}
                         onDelete={handleChatDelete}
                         onSelect={onChatSelect}
+                        isActive={chat.id === activeChatId}
                       />
                     ))}
                   </div>
@@ -184,6 +191,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
                         chat={chat}
                         onDelete={handleChatDelete}
                         onSelect={onChatSelect}
+                        isActive={chat.id === activeChatId}
                       />
                     ))}
                   </div>
