@@ -700,7 +700,7 @@ async def get_chat_session(
     return {**_EMPTY_SESSION_DOC, **doc}
 
 
-@router.put("/session")
+@router.put("/session", dependencies=[Depends(require_workspace_permission("agents:execute"))])
 async def put_chat_session(
     body: ChatSessionRequest,
     ctx: RequestContext = Depends(get_request_context_hybrid),

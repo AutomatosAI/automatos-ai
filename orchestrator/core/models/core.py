@@ -1038,7 +1038,7 @@ class User(Base):
     # workspace id — {"<ws>": {activeChatId, draftOpen, openChatIds, lastReadAt,
     # updatedAt}}. NULL until the user opens a chat; NULL forever in the local
     # edition, which keeps its session in the browser (owner decision D1).
-    chat_sessions = Column(JSONB, nullable=True)
+    chat_sessions = Column(JSON().with_variant(JSONB(), "postgresql"), nullable=True)
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
