@@ -338,6 +338,33 @@ export interface FleetAgentRow {
   last_activity_at: string | null
   // Omitted when the cost source is unavailable (fail-soft).
   cost_24h?: { tokens: number; usd: number }
+  // PRD-234 S3: which lane runs the agent, and the live facts of its current
+  // Claude Code session (null for API work).
+  runtime?: 'api' | 'cli'
+  session?: FleetSession | null
+}
+
+export interface FleetSession {
+  task_id?: number
+  session_id?: string
+  host_id?: string
+  provider?: string
+  model?: string
+  live_tool?: string
+  last_event?: string
+  last_event_at?: string
+  exit_reason?: string
+  cwd?: string
+  recent_tools?: Array<{ at?: string; tool?: string; subject?: string }>
+}
+
+export interface FleetHost {
+  id: string
+  name: string
+  status: string
+  online: boolean
+  last_seen_at?: string | null
+  capabilities?: { claude?: { version?: string | null } | null } | null
 }
 
 export interface FleetStateResponse {
@@ -352,6 +379,8 @@ export interface FleetStateResponse {
   watches_available: boolean
   asks_available: boolean
   agents: FleetAgentRow[]
+  // PRD-234 S3: present only when session mode is on (local edition).
+  hosts?: FleetHost[]
 }
 
 export interface WatchDetailResponse {

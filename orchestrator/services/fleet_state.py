@@ -62,6 +62,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from core.cli_runtime import RUNTIME_CLI, runtime_kind_of  # PRD-234 S3
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_
@@ -274,6 +276,44 @@ def _safe_asks(db: Session, workspace_id: UUID) -> Optional[List[Any]]:
 # Assembly (pure) — no database access; testable with plain row objects
 # ---------------------------------------------------------------------------
 
+SESSION_KEYS = ("session_id", "host_id", "provider", "model", "live_tool", "last_event", "last_event_at", "exit_reason", "cwd")
+
+
+def _session_from_current(current: Optional[Dict[str, Any]], board_tasks: List[Any]) -> Optional[Dict[str, Any]]:
+    """PRD-234 S3: the compact session block for the agent's current board task,
+    read from ``runtime_ref`` (written by the CLI host lane); ``None`` for API work."""
+    if not current or current.get("kind") != "board_task":
+        return None
+    task = next((t for t in board_tasks if t.id == current.get("id")), None)
+    ref = getattr(task, "runtime_ref", None) if task is not None else None
+    if not isinstance(ref, dict) or ref.get("runtime") != RUNTIME_CLI:
+        return None
+    out = {k: ref.get(k) for k in SESSION_KEYS if ref.get(k) is not None}
+    out["task_id"] = current.get("id")
+    recent = ref.get("recent_tools")
+    if isinstance(recent, list) and recent:
+        out["recent_tools"] = recent[-5:]
+    return out
+
+
+def _hosts_block(db: Any, workspace_id: Any) -> Optional[List[Dict[str, Any]]]:
+    """PRD-234 S3: the workspace's paired CLI hosts (online flag included), or
+    ``None`` when session mode is off or the source failed (fail-soft, like costs)."""
+    try:
+        from config import config as _config
+        if not bool(getattr(_config, "CLI_RUNTIME_ENABLED", False)):
+            return None
+        from core.models.cli_hosts import CliHost, CliHostStatus
+        rows = (
+            db.query(CliHost)
+            .filter(CliHost.workspace_id == workspace_id, CliHost.status == CliHostStatus.PAIRED.value)
+            .all()
+        )
+        return [h.to_dict() for h in rows]
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _current_from_board(board_tasks: List[Any]) -> Optional[Dict[str, Any]]:
     """The agent's current board work item, or ``None``.
 
@@ -405,9 +445,15 @@ def _assemble_fleet(
             + [t.completed_at for t in my_orch]
         )
 
+        # PRD-234 S3: which lane runs this agent, and — when its current board
+        # task is a Claude Code session — the live session facts the host reports.
+        runtime = runtime_kind_of(getattr(agent, "configuration", None) or {})
+        session = _session_from_current(current, my_board)
         entry: Dict[str, Any] = {
             "agent_id": agent.id,
             "name": agent.name,
+            "runtime": runtime,
+            "session": session,
             "current": current,
             "queue_depth": queue_depth,
             "blocked": {"count": blocked_count, "open_asks": open_asks},
@@ -560,7 +606,11 @@ def get_fleet_state(db: Session, workspace_id: UUID) -> Dict[str, Any]:
     cost_since = datetime.utcnow() - timedelta(hours=COST_WINDOW_HOURS)
     costs = _safe_cost(db, workspace_id, agent_ids, cost_since)
 
-    return _assemble_fleet(
+    state = _assemble_fleet(
         agents, board_tasks, orch_tasks, watches, asks, costs,
         generated_at=generated_at,
     )
+    hosts = _hosts_block(db, workspace_id)  # PRD-234 S3
+    if hosts is not None:
+        state["hosts"] = hosts
+    return state

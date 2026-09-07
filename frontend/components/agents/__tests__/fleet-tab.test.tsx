@@ -157,4 +157,27 @@ describe('FleetTab — PRD-228', () => {
     render(<FleetTab onViewDetails={vi.fn()} />)
     expect(screen.getByText(/Loading fleet/)).toBeInTheDocument()
   })
+
+  it('PRD-234: a Claude Code agent shows its live session and the host card explains an idle fleet', () => {
+    setFleet(
+      [
+        agent({
+          agent_id: 15, name: 'Bob', runtime: 'cli',
+          current: { kind: 'board_task', id: 71, title: 'Hello world', since: null },
+          session: { task_id: 71, session_id: 'bc25', model: 'fable', live_tool: 'Bash' },
+        }),
+      ],
+      { hosts: [{ id: '1c7e2ab4', name: 'gerard-mac', status: 'paired', online: false }] },
+    )
+    render(<FleetTab onViewDetails={vi.fn()} />)
+    expect(screen.getByText('working: Hello world · Claude Code (fable) · Bash')).toBeInTheDocument()
+    expect(screen.getByTestId('fleet-host-card')).toHaveTextContent('CLI host gerard-mac')
+    expect(screen.getByTestId('fleet-host-card')).toHaveTextContent('offline')
+  })
+
+  it('PRD-234: without session mode there is no host card', () => {
+    setFleet([agent({ agent_id: 2, name: 'Bench' })])
+    render(<FleetTab onViewDetails={vi.fn()} />)
+    expect(screen.queryByTestId('fleet-host-card')).not.toBeInTheDocument()
+  })
 })
