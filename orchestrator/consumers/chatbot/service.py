@@ -113,6 +113,7 @@ def build_tool_caller_context(
     est_input_tokens: int = 0,
     est_output_tokens: int = 0,
     assign_lane: bool = False,
+    driving_user_id: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build the caller_context threaded into every chat tool execution (PRD-177 S2 / F017).
 
@@ -146,6 +147,10 @@ def build_tool_caller_context(
         ctx["turn_id"] = turn_id
     if driving_clerk:
         ctx["user_id"] = driving_clerk
+    # PRD-234 D16: the internal id of the person typing — the local edition has
+    # no Clerk id, and the board-task consent needs to know a human drove the turn.
+    if driving_user_id is not None:
+        ctx["driving_user_id"] = str(driving_user_id)
     if prior_action:
         ctx["prior_action"] = prior_action
     if model_id:
@@ -1616,6 +1621,7 @@ class StreamingChatService:
                     conversation_id=conversation_id,
                     turn_id=_turn_id,
                     driving_clerk=_driving_clerk,
+                    driving_user_id=user_id,
                     prior_action=_prior_action,
                     model_id=_turn_budget.get("model_id"),
                     est_input_tokens=_turn_budget.get("est_input_tokens", 0),

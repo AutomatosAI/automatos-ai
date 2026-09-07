@@ -1,0 +1,176 @@
+"""PRD-234: a human's Run Now / drag to In Progress records the board-task grant."""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+os.environ.setdefault("POSTGRES_USER", "test")
+os.environ.setdefault("POSTGRES_PASSWORD", "test")
+os.environ.setdefault("POSTGRES_HOST", "127.0.0.1")
+os.environ.setdefault("POSTGRES_PORT", "59432")
+os.environ.setdefault("POSTGRES_DB", "test")
+
+_ORCH = Path(__file__).resolve().parents[1]
+if str(_ORCH) not in sys.path:
+    sys.path.insert(0, str(_ORCH))
+
+import core.services.approval_grants as grants  # noqa: E402
+from services import board_consent  # noqa: E402
+
+
+class _DB:
+    def __init__(self):
+        self.commits = 0
+        self.rollbacks = 0
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+def _wire(monkeypatch, *, active=None, pending=None):
+    created = []
+    granted = []
+    monkeypatch.setattr(grants, "find_active_grant", lambda db, ws, **kw: active)
+    monkeypatch.setattr(grants, "find_pending_grant", lambda db, ws, **kw: pending)
+
+    def _create(db, ws, **kw):
+        g = SimpleNamespace(id=99, status="pending", **kw)
+        created.append(g)
+        return g
+
+    def _grant(g, *, granted_by, now=None):
+        g.status = "granted"
+        g.granted_by = granted_by
+        granted.append(g)
+        return g
+
+    monkeypatch.setattr(grants, "create_grant", _create)
+    monkeypatch.setattr(grants, "grant_grant", _grant)
+    return created, granted
+
+
+def test_an_active_grant_means_nothing_to_do(monkeypatch):
+    created, granted = _wire(monkeypatch, active=SimpleNamespace(id=1))
+    db = _DB()
+    assert board_consent.record_operator_consent(db, workspace_id="ws", task_id=71, agent_id=15,
+                                                 actor="user:2", why=board_consent.WHY_RUN_NOW) == "active"
+    assert not created and not granted and db.commits == 0
+
+
+def test_a_pending_grant_is_approved_by_the_operator(monkeypatch):
+    pending = SimpleNamespace(id=11, status="pending")
+    created, granted = _wire(monkeypatch, pending=pending)
+    db = _DB()
+    out = board_consent.record_operator_consent(db, workspace_id="ws", task_id=71, agent_id=15,
+                                                actor="user:2", why=board_consent.WHY_MOVED_TO_IN_PROGRESS)
+    assert out == "granted" and pending.status == "granted" and pending.granted_by == "user:2"
+    assert not created and db.commits == 1
+
+
+def test_no_grant_yet_creates_one_already_granted(monkeypatch):
+    created, granted = _wire(monkeypatch)
+    db = _DB()
+    out = board_consent.record_operator_consent(db, workspace_id="ws", task_id=72, agent_id=15,
+                                                actor="user:2", why=board_consent.WHY_RUN_NOW)
+    assert out == "created" and len(created) == 1
+    assert created[0].subject_type == "board_task" and created[0].subject_id == "72"
+    assert created[0].reason == board_consent.WHY_RUN_NOW and created[0].status == "granted"
+    assert db.commits == 1
+
+
+def test_consent_never_raises(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(grants, "find_active_grant", _boom)
+    db = _DB()
+    assert board_consent.record_operator_consent(db, workspace_id="ws", task_id=1, agent_id=None,
+                                                 actor="user:2", why="x") == "error"
+    assert db.rollbacks == 1
+
+
+def test_actor_ref_matches_the_approvals_api_shape():
+    assert board_consent.actor_ref(SimpleNamespace(user_id=2)) == "user:2"
+    assert board_consent.actor_ref(SimpleNamespace(user_id=None, internal_user_id=7)) == "user:7"
+    assert board_consent.actor_ref(SimpleNamespace()) == "user:unknown"
+
+
+def test_actor_ref_reads_the_request_context_principal():
+    ctx = SimpleNamespace(user=SimpleNamespace(id="user_abc", email="a@b.c"))
+    assert board_consent.actor_ref(ctx) == "user:user_abc"
+    assert board_consent.actor_ref(SimpleNamespace(user_id=7)) == "user:7"
+    assert board_consent.actor_ref(SimpleNamespace()) == "user:unknown"
+    assert board_consent.actor_from_user_id("user_x") == "user:user_x"
+    assert board_consent.actor_from_user_id(None) == "user:unknown"
+
+
+def test_creation_is_consent_follows_the_edition(monkeypatch):
+    from config import config as app_config
+
+    assert hasattr(app_config, "AUTH_EDITION"), "the canonical config object carries the edition"
+    monkeypatch.setattr(app_config, "AUTH_EDITION", "local")
+    assert board_consent.edition() == "local"
+    assert board_consent.creation_is_consent() is True
+    monkeypatch.setattr(app_config, "AUTH_EDITION", "saas")
+    assert board_consent.creation_is_consent() is False
+    monkeypatch.setattr(app_config, "AUTH_EDITION", "LOCAL")
+    assert board_consent.creation_is_consent() is True
+
+
+def test_created_ticket_is_pre_approved_on_local_only(monkeypatch):
+    db = _DB()
+    created, granted = _wire(monkeypatch)
+    task = SimpleNamespace(id=79, status="assigned", assigned_agent_id=15)
+
+    monkeypatch.setattr(board_consent, "creation_is_consent", lambda: False)
+    assert board_consent.consent_for_created_ticket(
+        db, workspace_id="ws", task=task, actor="user:1", why=board_consent.WHY_ASKED_IN_CHAT,
+    ) == "skipped"
+    assert created == [] and granted == []
+
+    monkeypatch.setattr(board_consent, "creation_is_consent", lambda: True)
+    assert board_consent.consent_for_created_ticket(
+        db, workspace_id="ws", task=task, actor="user:1", why=board_consent.WHY_ASKED_IN_CHAT,
+    ) == "created"
+    assert len(created) == 1 and created[0].reason == board_consent.WHY_ASKED_IN_CHAT
+    assert granted[-1].granted_by == "user:1"
+
+    inbox = SimpleNamespace(id=80, status="inbox", assigned_agent_id=None)
+    assert board_consent.consent_for_created_ticket(
+        db, workspace_id="ws", task=inbox, actor="user:1", why=board_consent.WHY_CREATED_AND_ASSIGNED,
+    ) == "skipped"
+    assert len(created) == 1
+
+
+def test_a_chat_filed_ticket_never_starts_running():
+    from modules.tools.discovery.handlers_board_tasks import initial_board_status as f
+
+    assert f("in_progress", 15, None) == "assigned"
+    assert f("done", None, None) == "inbox"
+    assert f("assigned", None, None) == "inbox"
+    assert f("assigned", 15, None) == "assigned"
+    assert f(None, 15, None) == "assigned"
+    assert f("review", 15, None) == "review"
+    assert f("inbox", 15, {"approval_action": "send"}) == "review"
+
+
+def test_reconciler_leaves_live_leased_tickets_alone():
+    """PRD-234: a CLI session renews its lease; the orphan sweep must skip it."""
+    import re
+    from services.task_reconciler import ORPHANED_BOARD_SQL as sql
+
+    assert "bt.lease_until IS NULL OR bt.lease_until < :now" in sql
+    assert re.search(r"status = 'in_progress'", sql)
+    assert ":cutoff" in sql and ":now" in sql
+
+
+def test_driver_is_the_clerk_or_the_local_user_and_never_an_autonomous_run():
+    f = board_consent.driver_from_caller_context
+    assert f({"user_id": "user_clerk"}) == "user_clerk"
+    assert f({"driving_user_id": 1}) == "1"
+    assert f({"user_id": "user_clerk", "driving_user_id": 1}) == "user_clerk"
+    assert f({}) is None and f(None) is None and f({"conversation_id": "c"}) is None

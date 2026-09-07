@@ -5,6 +5,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import type { BoardTask, BoardStatus, BoardColumn } from '@/types/board'
 import { BOARD_COLUMNS } from '@/types/board'
@@ -190,6 +191,11 @@ export function useRunTask() {
         method: 'POST',
         body: JSON.stringify({}),
       })
+    },
+    // PRD-234: a refused Run Now (409 "Task is already running", 422 "Assign an
+    // agent…") must never look like nothing happened.
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Run Now was refused')
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: boardQueryKeys.all })

@@ -201,6 +201,22 @@ export function SessionModeTab() {
                 )}
               </div>
 
+              <div className="rounded-lg border border-border/40 p-4 space-y-2 text-xs text-muted-foreground">
+                <p className="text-sm font-medium text-foreground">Where sessions work</p>
+                <p>
+                  A ticket whose agent names no working directory runs in{' '}
+                  <span className="font-mono">./workspaces/&lt;workspace id&gt;/sessions/&lt;ticket&gt;</span> — the folder
+                  Deliverables → Explorer shows live. Files the session writes there are registered as the ticket&apos;s
+                  deliverables when it finishes, and the task report carries the session log.
+                </p>
+                <p>
+                  Your own repositories: set <span className="font-mono">LOCAL_PROJECTS_DIR=/path/to/your/projects</span> in{' '}
+                  <span className="font-mono">.env</span> and run <span className="font-mono">make up</span> — the explorer shows it
+                  under <span className="font-mono">projects/</span> and the host registers it. Point an agent&apos;s working
+                  directory at a repository inside it.
+                </p>
+              </div>
+
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>
                   A session uses the unmodified <span className="font-mono">claude</span> on your machine and your own login;

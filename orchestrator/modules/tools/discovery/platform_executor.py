@@ -1239,6 +1239,19 @@ class PlatformActionExecutor:
             if _mem_chat:
                 params = {**params, "_origin_chat_id": str(_mem_chat)}
 
+        # PRD-234 D16: a ticket the operator asks Auto to file, assign or re-queue
+        # in a live chat turn carries the driving user, so the local edition can
+        # record the board-task consent before dispatch. Strip-then-inject, like
+        # the memory keys above — never caller-supplied.
+        _OPERATOR_CONSENT_ACTIONS = ("platform_create_task", "platform_assign_task", "platform_update_task_status")
+        if action_name in _OPERATOR_CONSENT_ACTIONS:
+            from services.board_consent import driver_from_caller_context
+
+            params = {k: v for k, v in params.items() if k != "_user_id"}
+            _driver = driver_from_caller_context(caller_context)
+            if _driver:
+                params = {**params, "_user_id": _driver}
+
         try:
             result = await handler(self.db, self.workspace_id, params)
             # PRD-143 S8: an invocation that ran only because the full-autonomy

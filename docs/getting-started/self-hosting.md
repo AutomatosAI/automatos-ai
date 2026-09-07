@@ -482,11 +482,24 @@ stop it with Ctrl-C. The fleet shows the host as connected while it runs.
 
 ### Where sessions work
 
-`make cli-host` registers `./workspaces` (the compose default). Register real
-repositories with `CLI_HOST_ARGS="--allow /path/to/repo"`. A ticket's working
-directory must sit inside a registered directory — the host refuses anything
-else before a process starts, whatever the backend says. Git repositories get a
-`--worktree` per session; sessions never push — you (or Auto) integrate.
+`make cli-host` registers `./workspaces` (the compose default). A ticket whose
+agent names no working directory runs in
+`./workspaces/<workspace id>/sessions/<ticket>` — the folder **Deliverables →
+Explorer** shows live. When the ticket finishes, every file the session wrote
+there is registered as one of the ticket's deliverables (the ticket's
+Deliverables block, the Deliverables gallery) and the task report carries the
+session log: model, tokens, files, refused tool calls, the last tool calls and
+the `claude --resume` command.
+
+Your own repositories: set `LOCAL_PROJECTS_DIR=/path/to/your/projects` in
+`.env` and run `make up`. The explorer shows that folder read-only under
+`projects/`, the host registers it, and an agent's working directory can point
+at any repository inside it. Anything else needs
+`CLI_HOST_ARGS="--allow /path/to/repo"`. A ticket's working directory must sit
+inside a registered directory — the host refuses anything else before a process
+starts, whatever the backend says. Git repositories get a `--worktree` per
+session; sessions never push — you (or Auto) integrate. Files outside the
+workspace folder are listed on the ticket as references (path only).
 
 ### Using it
 
