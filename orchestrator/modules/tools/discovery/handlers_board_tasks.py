@@ -117,6 +117,19 @@ def _resolve_active_agent_by_name(db: Session, workspace_id: UUID, agent_name: s
     return None, None
 
 
+
+def _parse_deadline(value: Any):
+    """ISO 8601 → aware datetime, or None (a bad value is ignored, never a 500)."""
+    if not value or not isinstance(value, str):
+        return None
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Create a board task (called by agents via platform_create_task)."""
     from core.models.core import BoardTask
@@ -161,6 +174,9 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
         parent_task_id=params.get("parent_task_id"),
         tags=params.get("tags", []),
         planning_data=planning_data,
+        # PRD-234 S3: Auto can set the review gate and a due date when filing.
+        review_mode=params.get("review_mode") if params.get("review_mode") in ("auto", "manual") else "auto",
+        sla_deadline=_parse_deadline(params.get("sla_deadline")),
     )
     db.add(task)
     db.commit()

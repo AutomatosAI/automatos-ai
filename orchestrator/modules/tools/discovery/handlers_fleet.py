@@ -66,6 +66,12 @@ def _work_phrase(entry: Dict[str, Any]) -> str:
         return "blocked"
     current = entry.get("current")
     if current:
+        session = entry.get("session") or {}
+        if session:
+            # PRD-234 S3: a Claude Code session — say what the user's own claude is doing.
+            tool = session.get("live_tool") or session.get("last_event") or "running"
+            model = session.get("model") or "claude"
+            return f"working: {current['title']} — Claude Code session ({model}) · {tool}"
         return f"working: {current['title']}"
     return "idle"
 
@@ -95,6 +101,15 @@ def _render_fleet(
     blocked_with_ask: List[Dict[str, Any]] = []
     blocked_no_ask: List[Dict[str, Any]] = []
 
+    hosts = state.get("hosts")
+    if hosts is not None:
+        # PRD-234 S3: the CLI host line comes first — an offline host explains
+        # every idle Claude Code agent below it.
+        if not hosts:
+            lines.append("CLI host: none paired — Claude Code agents cannot run (Settings → Session mode)")
+        for h in hosts:
+            state_word = "online" if h.get("online") else "OFFLINE — start it with `make cli-host`"
+            lines.append(f"CLI host {h.get('name') or h.get('id', '')[:8]}: {state_word}")
     for entry in state.get("agents", []):
         name = entry["name"]
         queue = entry["queue_depth"]

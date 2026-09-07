@@ -166,19 +166,34 @@ class BaseChannelAdapter(ABC):
                     return
 
                 # ── Execute ──
-                factory = AgentFactory(db_session=db)
-                result = await factory.execute_with_prompt(
-                    agent=decision.agent_id,
-                    prompt=envelope.content,
-                    context={
-                        "source": envelope.source.value if hasattr(envelope.source, "value") else str(envelope.source),
-                        "workspace_id": str(envelope.workspace_id),
-                        "connection_id": self.connection_id,
-                    },
-                    attachment_ids=attachment_ids if attachment_ids else None,  # PRD-127
-                )
-
-                response_text = (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
+                # PRD-234 S3: a Claude Code agent's mention becomes a board ticket the
+                # paired host runs as the user's own session; the channel hears that
+                # it is queued (the factory refuses cli agents by design).
+                from services.cli_ticket_lane import file_cli_ticket, is_cli_agent, queued_line, source_id_for
+                if is_cli_agent(db, decision.agent_id):
+                    _text = (envelope.content or "").strip()
+                    _first = _text.splitlines()[0][:80] if _text else "request"
+                    _src = envelope.source.value if hasattr(envelope.source, "value") else str(envelope.source)
+                    _msg_key = platform_message.get("message_id") or platform_message.get("ts") or platform_message.get("id") or str(id(envelope))
+                    ticket = file_cli_ticket(
+                        db, workspace_id=envelope.workspace_id, agent_id=decision.agent_id,
+                        title=f"{_src}: {_first}", prompt=envelope.content,
+                        source_type="channel", source_id=source_id_for("channel", f"{self.connection_id}:{_msg_key}"),
+                    )
+                    response_text = queued_line(ticket)
+                else:
+                    factory = AgentFactory(db_session=db)
+                    result = await factory.execute_with_prompt(
+                        agent=decision.agent_id,
+                        prompt=envelope.content,
+                        context={
+                            "source": envelope.source.value if hasattr(envelope.source, "value") else str(envelope.source),
+                            "workspace_id": str(envelope.workspace_id),
+                            "connection_id": self.connection_id,
+                        },
+                        attachment_ids=attachment_ids if attachment_ids else None,  # PRD-127
+                    )
+                    response_text = (result or {}).get("result") or (result or {}).get("response") or (result or {}).get("content") or ""
 
                 # ── Respond ──
                 reply_channel = (

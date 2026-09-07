@@ -563,6 +563,16 @@ class HeartbeatService:
         must burn $0. Returns a VISIBLE skip result (never a silent no-op) or
         ``None`` to proceed. Converted / never-granted workspaces proceed.
         """
+        # PRD-234 S3: the local edition has no platform-paid trial credit to protect —
+        # keys are the operator's own and Claude Code agents run on their subscription —
+        # yet Auto-led onboarding grants a trial record there too, which silently
+        # switched every local heartbeat off (found 2026-09-03). Local runs.
+        try:
+            from config import config as _config
+            if getattr(_config, "AUTH_EDITION", "saas") == "local":
+                return None
+        except Exception:  # noqa: BLE001
+            pass
         try:
             from core.database.database import SessionLocal
             from core.models.workspaces import Workspace
@@ -993,53 +1003,59 @@ class HeartbeatService:
                     )
                 )
 
-                # Execute through AgentFactory so the agent has its full toolset
-                try:
-                    from modules.agents.factory.agent_factory import AgentFactory
-
-                    from modules.context.modes import ContextMode
-
-                    factory = AgentFactory(db_session=db)
-                    exec_result = await factory.execute_with_prompt(
-                        agent=agent_id,
-                        prompt=prompt,
-                        context={"source": "heartbeat", "workspace_id": workspace_id},
-                        context_mode=ContextMode.HEARTBEAT_AGENT,
+                # PRD-234 S3: a Claude Code agent's heartbeat is a board ticket the
+                # paired host runs as the user's own session — never a factory call
+                # (the factory refuses cli agents by design). One open heartbeat
+                # ticket per agent at a time.
+                from core.cli_runtime import RUNTIME_CLI, runtime_kind_of
+                cli_ticket_filed = False
+                if runtime_kind_of(agent.configuration or {}) == RUNTIME_CLI:
+                    from services.cli_ticket_lane import file_cli_ticket, queued_line, source_id_for
+                    ticket = file_cli_ticket(
+                        db, workspace_id=workspace_id, agent_id=agent_id,
+                        title=f"Heartbeat: {agent.name}", prompt=prompt,
+                        source_type="heartbeat", source_id=source_id_for("agent", agent_id),
+                        priority="low",
                     )
-
-                    # Extract the actual text from nested result
-                    llm_text = ""
-                    if isinstance(exec_result, dict):
-                        llm_text = (
-                            exec_result.get("result")
-                            or exec_result.get("response")
-                            or exec_result.get("output")
-                            or exec_result.get("content")
-                            or ""
+                    result["findings"].append({"check": "cli_ticket", "detail": queued_line(ticket)})
+                    result["actions_taken"].append({"action": "file_cli_ticket", "task_id": ticket.id})
+                    cli_ticket_filed = True
+                else:
+                    # Execute through AgentFactory so the agent has its full toolset
+                    try:
+                        from modules.agents.factory.agent_factory import AgentFactory
+                        from modules.context.modes import ContextMode
+                        from services.heartbeat_outcome import read_exec_outcome, tokens_of
+                        factory = AgentFactory(db_session=db)
+                        exec_result = await factory.execute_with_prompt(
+                            agent=agent_id,
+                            prompt=prompt,
+                            context={"source": "heartbeat", "workspace_id": workspace_id},
+                            context_mode=ContextMode.HEARTBEAT_AGENT,
                         )
-                        # Handle nested dict in result
-                        if isinstance(llm_text, dict):
-                            llm_text = llm_text.get("result") or llm_text.get("response") or str(llm_text)
-                    if not llm_text:
-                        llm_text = str(exec_result)[:500]
-
-                    result["findings"].append(
-                        {"check": "llm_analysis", "detail": str(llm_text)[:1000]}
-                    )
-                    result["tokens_used"] = exec_result.get("tokens_used", 0) if isinstance(exec_result, dict) else 0
-
-                except Exception as exec_err:
-                    logger.warning(
-                        "[Heartbeat] Agent execution failed for agent=%s: %s",
-                        agent_id,
-                        exec_err,
-                    )
-                    result["findings"].append(
-                        {
-                            "check": "exec_error",
-                            "detail": f"Agent execution failed: {str(exec_err)[:200]}",
-                        }
-                    )
+                        # PRD-234 S3: an error dict is an error — it used to be filed as a
+                        # green 'llm_analysis' finding, so a failing agent looked healthy.
+                        llm_text, is_error, error_detail = read_exec_outcome(exec_result)
+                        if is_error:
+                            result["status"] = "error"
+                            result["findings"].append({"check": "exec_error", "detail": error_detail})
+                        else:
+                            result["findings"].append(
+                                {"check": "llm_analysis", "detail": llm_text or str(exec_result)[:500]}
+                            )
+                        result["tokens_used"] = tokens_of(exec_result)
+                    except Exception as exec_err:
+                        logger.warning(
+                            "[Heartbeat] Agent execution failed for agent=%s: %s",
+                            agent_id,
+                            exec_err,
+                        )
+                        result["findings"].append(
+                            {
+                                "check": "exec_error",
+                                "detail": f"Agent execution failed: {str(exec_err)[:200]}",
+                            }
+                        )
             finally:
                 db.close()
 

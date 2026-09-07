@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from modules.tools.discovery.handlers_agents import (
     list_agents,
+    recommend_agent,
     get_agent,
     create_agent,
     update_agent,
@@ -428,6 +429,7 @@ class PlatformActionExecutor:
         self._handlers: Dict[str, Callable] = {
             # Read actions
             "platform_list_agents": list_agents,
+            "platform_recommend_agent": recommend_agent,  # PRD-234 S3
             "platform_get_agent": get_agent,
             "platform_list_recipes": list_playbooks,
             "platform_list_playbooks": list_playbooks,

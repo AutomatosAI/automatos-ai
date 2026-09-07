@@ -603,3 +603,22 @@ def test_reuses_canonical_busy_derivation_no_rival():
 
     assert fs.BUSY_TASK_STATES is ENUM_BUSY is MATCHER_BUSY
     assert fs.BUSY_TASK_STATES == ("assigned", "running")
+
+
+def test_claude_code_agent_carries_runtime_and_its_live_session():
+    """PRD-234 S3: a cli agent's row says so, and its current session's facts come
+    from runtime_ref; an API agent carries runtime 'api' and session None."""
+    now = datetime.now(timezone.utc)
+    cli_agent = SimpleNamespace(id=15, name="Bob", configuration={"runtime": "cli", "provider": "claude", "model": "fable"})
+    api_agent = SimpleNamespace(id=16, name="Ann", configuration={})
+    running = _board(1, agent_id=15, status="in_progress", started_at=now - timedelta(minutes=3))
+    running.title = "Hello world"
+    running.runtime_ref = {"runtime": "cli", "session_id": "bc25", "host_id": "1c7e", "provider": "claude",
+                           "model": "fable", "live_tool": "Bash", "recent_tools": [{"tool": "Read"}, {"tool": "Bash"}]}
+    api_running = _board(2, agent_id=16, status="in_progress", started_at=now - timedelta(minutes=1))
+    state = fs._assemble_fleet([cli_agent, api_agent], [running, api_running], [], [], [], {}, generated_at=now)
+    by_id = {e["agent_id"]: e for e in state["agents"]}
+    assert by_id[15]["runtime"] == "cli"
+    assert by_id[15]["session"]["session_id"] == "bc25" and by_id[15]["session"]["live_tool"] == "Bash"
+    assert by_id[15]["session"]["task_id"] == 1 and by_id[15]["session"]["recent_tools"][-1] == {"tool": "Bash"}
+    assert by_id[16]["runtime"] == "api" and by_id[16]["session"] is None

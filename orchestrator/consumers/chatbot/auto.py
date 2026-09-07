@@ -132,11 +132,14 @@ def build_assign_directive(
         "\n\n## Manager directive — confirm the agent first\n"
         "The user wants a single agent to own this on the board, but no agent name "
         "resolved to your roster. Do NOT guess or auto-pick an agent. Call "
-        "platform_list_agents, then ask the user which agent should own it — name "
-        "2-3 plausible candidates from the roster. Once they choose, file the "
-        "ticket (platform_create_task with assigned_agent_name), written as the "
-        "4-part dispatch contract below, start it unless they deferred, and "
-        "confirm in one line with the task id.\n"
+        "platform_recommend_agent with the request (it ranks the roster by skills, "
+        "tools, runtime and past outcomes and explains why; platform_list_agents is "
+        "the plain roster), then PROPOSE the top candidate in one line with its "
+        "reason — say whether it is a Claude Code session agent on the user's "
+        "machine or a platform-run agent — and name 1-2 alternatives. Ask the user "
+        "to confirm. Once they choose, file the ticket (platform_create_task with "
+        "assigned_agent_name), written as the 4-part dispatch contract below, start "
+        "it unless they deferred, and confirm in one line with the task id.\n"
         f"\n{DISPATCH_CONTRACT_FRAGMENT}\n"
     )
 
@@ -1073,7 +1076,11 @@ class AutoBrain:
             desc = (getattr(a, "description", None) or "").strip()
             label = f"{name} ({role})" if role else str(name)
             summary = f": {desc[:80]}" if desc else ""
-            lines.append(f"- {label}{summary}")
+            # PRD-234: a Claude Code session agent is a different kind of worker —
+            # it runs on the user's machine under their own login. Say so.
+            cfg = getattr(a, "configuration", None) or {}
+            lane = " [Claude Code session]" if isinstance(cfg, dict) and cfg.get("runtime") == "cli" else ""
+            lines.append(f"- {label}{lane}{summary}")
         return (
             "\n## Available agents (for routing)\n"
             + "\n".join(lines)
