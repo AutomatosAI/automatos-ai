@@ -33,7 +33,13 @@ interface DirListResponse {
   truncated: boolean
 }
 
-export function useWorkspaceFiles(workspaceId: string | undefined) {
+/**
+ * @param rootPath PRD-235 W2: the folder the tree is rooted at ('.' = the workspace
+ *   root; e.g. 'sessions/71' or 'projects/my-repo'). Paths stay workspace-relative,
+ *   so the editor, saves and the terminal work unchanged under any root.
+ */
+export function useWorkspaceFiles(workspaceId: string | undefined, rootPath: string = '.') {
+  const root = rootPath || '.'
   const [tree, setTree] = useState<WorkspaceFileEntry[]>([])
   const [isLoadingTree, setIsLoadingTree] = useState(false)
   const [treeError, setTreeError] = useState<string | null>(null)
@@ -45,13 +51,13 @@ export function useWorkspaceFiles(workspaceId: string | undefined) {
    * For subdirectories, merges children into the existing tree.
    */
   const fetchDirectory = useCallback(
-    async (dirPath: string = '.') => {
+    async (dirPath: string = root) => {
       if (!workspaceId) return
 
       // Check cache
       const cached = dirCacheRef.current.get(dirPath)
       if (cached) {
-        if (dirPath === '.') {
+        if (dirPath === root) {
           setTree(cached)
         } else {
           setTree((prev) => mergeChildren(prev, dirPath, cached))
@@ -59,10 +65,10 @@ export function useWorkspaceFiles(workspaceId: string | undefined) {
         return
       }
 
-      if (dirPath === '.') setIsLoadingTree(true)
+      if (dirPath === root) setIsLoadingTree(true)
 
       // Mark directory as loading in the tree
-      if (dirPath !== '.') {
+      if (dirPath !== root) {
         setTree((prev) => setNodeLoading(prev, dirPath, true))
       }
 
@@ -83,7 +89,7 @@ export function useWorkspaceFiles(workspaceId: string | undefined) {
         // Cache it
         dirCacheRef.current.set(dirPath, entries)
 
-        if (dirPath === '.') {
+        if (dirPath === root) {
           setTree(entries)
         } else {
           setTree((prev) => mergeChildren(prev, dirPath, entries))
@@ -92,15 +98,15 @@ export function useWorkspaceFiles(workspaceId: string | undefined) {
         setTreeError(null)
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to load directory'
-        if (dirPath === '.') setTreeError(msg)
-        if (dirPath !== '.') {
+        if (dirPath === root) setTreeError(msg)
+        if (dirPath !== root) {
           setTree((prev) => setNodeLoading(prev, dirPath, false))
         }
       } finally {
-        if (dirPath === '.') setIsLoadingTree(false)
+        if (dirPath === root) setIsLoadingTree(false)
       }
     },
-    [workspaceId]
+    [workspaceId, root]
   )
 
   /**

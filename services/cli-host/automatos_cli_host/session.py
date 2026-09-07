@@ -34,17 +34,19 @@ import subprocess
 import termios
 import threading
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import __version__
-from .allowlist import NotAllowed, resolve_allowed
+from .allowlist import NotAllowed, resolve_allowed, default_session_cwd
 from .claude_settings import has_completed_onboarding, record_directory_trust, write_settings
 from .config import HostConfig
 from .env import build_session_env, resolve_binary
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
+from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import last_assistant_text, read_usage
 
 log = logging.getLogger("automatos.cli_host.session")
@@ -157,12 +159,44 @@ def _is_git_repo(path: Path) -> bool:
     return (path / ".git").exists()
 
 
+def compact_event(event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The event the backend receives: the few facts the board needs, never the
+    whole hook payload. ``cwd`` (PRD-235 W2) is the session's effective working
+    directory — SessionStart carries it — so the ticket can deep-link the editor."""
+    compact = {
+        "event": event,
+        "at": time.time(),
+        "session_id": payload.get("session_id"),
+        "transcript_path": payload.get("transcript_path"),
+        "cwd": payload.get("cwd"),
+        "tool_name": payload.get("tool_name"),
+        "subject": _subject_of(payload),
+        "notification_type": payload.get("notification_type"),
+        "message": (payload.get("message") or "")[:500] or None,
+    }
+    return {k: v for k, v in compact.items() if v is not None}
+
+
+def _subject_of(payload: Dict[str, Any]) -> Optional[str]:
+    """The one thing a tool call is about — a command, a path, a pattern — for the
+    ticket's live log. Never the whole tool input."""
+    ti = payload.get("tool_input")
+    if not isinstance(ti, dict):
+        return None
+    for key in ("command", "file_path", "notebook_path", "path", "pattern", "url", "query"):
+        value = ti.get(key)
+        if value:
+            return str(value)[:200]
+    return None
+
+
 class Session:
     """Runs one ticket. ``events`` is drained by the host and shipped in batches."""
 
     def __init__(self, ticket: Dict[str, Any], cfg: HostConfig, allow_roots: List[str],
-                 sock_path: Path, default_root: Optional[str]):
+                 sock_path: Path, default_root: Optional[str], workspace_id: str = ""):
         self.ticket = ticket
+        self.workspace_id = workspace_id
         self.cfg = cfg
         self.allow_roots = allow_roots
         self.sock_path = sock_path
@@ -184,8 +218,13 @@ class Session:
         self.last_assistant_message: Optional[str] = None
         self.files_touched: List[str] = []
         self.denials: List[Dict[str, Any]] = []
+        # PRD-235 W2 S3: permission questions the operator answers from the Canvas.
+        self._pending_asks: Dict[str, threading.Event] = {}
+        self._ask_answers: Dict[str, bool] = {}
+        self._ask_lock = threading.Lock()
         self.notifications: List[Dict[str, Any]] = []
         self.output_tail: deque = deque(maxlen=_OUTPUT_TAIL_BYTES)
+        self.terminal_log: Optional[BoundedLog] = None
         self._contract_injected = False
         self._policy: Optional[PolicyContext] = None
 
@@ -242,9 +281,7 @@ class Session:
         else:
             decision = decide(tool, tool_input, self._policy)
         if decision.behavior == "ask":
-            # Approvals-inbox routing lands with S3; until the backend answers a
-            # hold, an 'ask' is an honest deny the ticket surfaces in review.
-            decision = Decision("deny", decision.reason + " (approval routing not yet available)")
+            decision = self._ask_operator(tool, tool_input, decision.reason)
         if decision.allow:
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
         self.denials.append({"tool": tool, "reason": decision.reason, "stage": "PreToolUse",
@@ -252,6 +289,42 @@ class Session:
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "permissionDecision": "deny",
                                        "permissionDecisionReason": decision.reason}}
+
+    def _ask_operator(self, tool: str, tool_input: Dict[str, Any], reason: str) -> Decision:
+        """PRD-235 W2 S3: hold this tool call while the operator answers a card on the
+        ticket's Canvas. The question travels with the next event flush; the answer
+        comes back on that same channel (``resolve_ask``). No answer within
+        ``ask_timeout`` seconds → deny, honestly worded."""
+        request_id = uuid.uuid4().hex
+        subject = _subject_of({"tool_input": tool_input})
+        done = threading.Event()
+        with self._ask_lock:
+            self._pending_asks[request_id] = done
+        self.events.put({
+            "event": "PermissionRequest", "at": time.time(), "request_id": request_id,
+            "tool_name": tool, "subject": subject, "reason": reason,
+            "session_id": self.reported_session_id or self.session_id,
+        })
+        timeout = float(getattr(self.cfg, "ask_timeout", 120.0) or 120.0)
+        answered = done.wait(timeout)
+        with self._ask_lock:
+            self._pending_asks.pop(request_id, None)
+            approved = self._ask_answers.pop(request_id, None)
+        if answered and approved:
+            return Decision("allow")
+        if answered:
+            return Decision("deny", f"{reason} — denied by the operator")
+        return Decision("deny", f"{reason} — no answer from the operator within {int(timeout)} s")
+
+    def resolve_ask(self, request_id: str, approved: bool) -> bool:
+        """The backend delivered the operator's answer for a pending question."""
+        with self._ask_lock:
+            ev = self._pending_asks.get(str(request_id))
+            if ev is None:
+                return False
+            self._ask_answers[str(request_id)] = bool(approved)
+        ev.set()
+        return True
 
     def _track_file(self, payload: Dict[str, Any]) -> None:
         if payload.get("tool_name") in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
@@ -261,16 +334,7 @@ class Session:
                 self.files_touched.append(str(path))
 
     def _emit(self, event: str, payload: Dict[str, Any]) -> None:
-        compact = {
-            "event": event,
-            "at": time.time(),
-            "session_id": payload.get("session_id"),
-            "transcript_path": payload.get("transcript_path"),
-            "tool_name": payload.get("tool_name"),
-            "notification_type": payload.get("notification_type"),
-            "message": (payload.get("message") or "")[:500] or None,
-        }
-        self.events.put({k: v for k, v in compact.items() if v is not None})
+        self.events.put(compact_event(event, payload))
 
     # ── the run ─────────────────────────────────────────────────────────────
     def run(self) -> SessionOutcome:
@@ -283,7 +347,13 @@ class Session:
     def _run(self) -> SessionOutcome:
         # 1. where
         try:
-            cwd = resolve_allowed(self.ticket.get("cwd"), self.allow_roots, default_root=self.default_root)
+            cwd_hint = str(self.ticket.get("cwd") or "").strip()
+            if not cwd_hint and self.default_root:
+                # No working directory on the agent → the workspace's own sessions
+                # folder, which the Deliverables explorer shows live (PRD-234 S2).
+                cwd = default_session_cwd(self.default_root, self.workspace_id, self.task_id)
+            else:
+                cwd = resolve_allowed(cwd_hint or None, self.allow_roots, default_root=self.default_root)
         except NotAllowed as exc:
             return self._outcome("error", error=str(exc), exit_reason="cwd_not_allowed")
         if not cwd.is_dir():
@@ -304,6 +374,7 @@ class Session:
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket), encoding="utf-8")
         settings_path = write_settings(session_dir / "settings.json")
+        self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
         try:
             record_directory_trust(cwd)
         except OSError as exc:
@@ -395,11 +466,15 @@ class Session:
                 if not chunk:
                     break
                 self.output_tail.extend(chunk)
+                if self.terminal_log is not None:
+                    self.terminal_log.write(chunk)
         finally:
             try:
                 os.close(master)
             except OSError:
                 pass
+            if self.terminal_log is not None:
+                self.terminal_log.close()
 
     def _terminate(self) -> None:
         if self.proc is None or self.proc.poll() is not None:

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID
 
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -28,6 +29,11 @@ from core.models import Agent
 from core.utils.exception_telemetry import record_error
 from core.utils.background_tasks import launch_guarded
 from core.cli_runtime import RUNTIME_API, RUNTIME_CLI, runtime_kind_of  # PRD-234 S1a
+from services.session_report import session_report_lines  # PRD-234 S2
+from services.board_consent import (  # PRD-234: a human's board action is the approval
+    WHY_CREATED_AND_ASSIGNED, WHY_MOVED_TO_IN_PROGRESS, WHY_RUN_NOW, actor_ref as _operator_ref,
+    consent_for_created_ticket, record_operator_consent,
+)
 from services.board_dispatcher import notify_task_available
 from services.board_events import board_event_stream, notify_board_event
 
@@ -132,6 +138,7 @@ async def _auto_create_task_report(
             lines.append("## Result")
             lines.append(str(llm_text))
             lines.append("")
+        lines.extend(session_report_lines(exec_result))  # PRD-234 S2 (empty for API runs)
         lines.append("## Execution Metrics")
         lines.append(f"- Model: {exec_metrics.get('model') or 'unknown'}")
         lines.append(f"- LLM calls: {exec_metrics.get('llm_calls', 0)}")
@@ -139,7 +146,10 @@ async def _auto_create_task_report(
                      f"{exec_metrics.get('input_tokens', 0)} / "
                      f"{exec_metrics.get('output_tokens', 0)} / "
                      f"{exec_metrics.get('tokens_used', 0)}")
-        lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
+        if exec_result.get("runtime") == RUNTIME_CLI:
+            lines.append("- Cost: plan usage (subscription) — no dollar figure")
+        else:
+            lines.append(f"- Cost: ${exec_metrics.get('cost_usd', 0):.4f}")
         if exec_metrics.get("duration_ms") is not None:
             lines.append(f"- Duration: {exec_metrics['duration_ms']} ms")
         content = "\n".join(lines)
@@ -162,6 +172,7 @@ async def _auto_create_task_report(
             status=report_status,
             summary=summary,
             metrics=exec_metrics,
+            linked_task_ids=[task.id],
         )
         if not report_result.get("success"):
             logger.warning(
@@ -396,6 +407,12 @@ async def create_task(
     # A created-as-assigned task notifies the claimant; the dispatch loop claims
     # it (FOR UPDATE SKIP LOCKED) and runs it — no inline launch, no heartbeat wait.
     if task.status == "assigned" and task.assigned_agent_id and task.source_type != "recipe":
+        # PRD-234 D16: the operator created AND assigned it — on the local edition
+        # that is the approval; recorded before the dispatcher can claim the row.
+        consent_for_created_ticket(
+            db, workspace_id=ctx.workspace_id, task=task,
+            actor=_operator_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
+        )
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
@@ -872,6 +889,12 @@ async def run_task_now(
     if task.status == "in_progress":
         raise HTTPException(status_code=409, detail="Task is already running")
 
+    # PRD-234: pressing Run Now is the operator's approval — record it so the
+    # gate lets the ticket through instead of parking it behind a grant.
+    record_operator_consent(
+        db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
+        actor=_operator_ref(ctx), why=WHY_RUN_NOW,
+    )
     _redispatch_task(db, task)
 
     logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s",
@@ -935,6 +958,11 @@ async def update_task_status(
         and task.assigned_agent_id
         and task.source_type not in _NON_EXECUTABLE_SOURCE_TYPES
     ):
+        # PRD-234: dragging a ticket to In Progress is the operator's approval.
+        record_operator_consent(
+            db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
+            actor=_operator_ref(ctx), why=WHY_MOVED_TO_IN_PROGRESS,
+        )
         _launch_task_execution(
             task_id=task.id,
             agent_id=task.assigned_agent_id,
@@ -945,6 +973,33 @@ async def update_task_status(
         )
 
     return {"id": task.id, "status": task.status}
+
+
+class SessionDecisionBody(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=64)
+    approved: bool
+
+
+@router.post("/{task_id}/session-decision", dependencies=[Depends(require_workspace_permission("missions:update"))])
+async def decide_session_permission_route(
+    task_id: int,
+    body: SessionDecisionBody,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """PRD-235 W2 S3: answer a Claude Code session's permission question (the card on
+    the ticket's Canvas). The host receives the answer on its next event flush."""
+    task = db.query(BoardTask).filter(
+        BoardTask.id == task_id,
+        BoardTask.workspace_id == ctx.workspace_id,
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    from services.cli_host_service import decide_session_permission
+    try:
+        return decide_session_permission(db, task, body.request_id, body.approved, _operator_ref(ctx))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/{task_id}/cancel", dependencies=[Depends(require_workspace_permission("missions:update"))])
@@ -1268,10 +1323,12 @@ async def finalize_board_task_run(
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
         await _dispatch_task_failed(db, workspace_id, task)
-        # Surface failures the same way successes are surfaced.
+        # Surface failures the same way successes are surfaced. The result text is
+        # blanked (the error is on the task); the session facts stay so a failed
+        # Claude Code session's report still says what ran (PRD-234 S2).
         await _auto_create_task_report(
             db, workspace_id, task,
-            {"result": "", "tokens_used": 0},
+            {**exec_result, "result": "", "tokens_used": 0},
         )
         db.commit()
         return task.status

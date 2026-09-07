@@ -103,3 +103,14 @@ export function toolCallData(ev: CanvasEventEnvelope): ToolCallData {
     path: typeof ev.data.path === 'string' ? ev.data.path : null,
   }
 }
+
+/**
+ * PRD-235 W2 S3 — which events a Canvas should show. A Canvas rooted at a ticket's
+ * session shows only that ticket's Claude Code events (they carry `data.task_id`);
+ * a workspace-rooted Canvas shows the SDK session's events, which carry none.
+ */
+export function acceptsCanvasEvent(ev: CanvasEventEnvelope, taskId?: string | number | null): boolean {
+  const evTask = ev.data?.task_id
+  if (taskId == null || taskId === '') return evTask == null
+  return evTask != null && String(evTask) === String(taskId)
+}

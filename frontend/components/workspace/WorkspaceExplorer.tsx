@@ -55,6 +55,8 @@ export interface WorkspaceExplorerProps {
   initialFilePath?: string | null
   /** Minimum height CSS class (default: h-full) */
   className?: string
+  /** PRD-235 W2: root the tree (and the terminal) at this workspace-relative folder */
+  rootPath?: string
 }
 
 export function WorkspaceExplorer({
@@ -62,7 +64,9 @@ export function WorkspaceExplorer({
   lastEvent,
   initialFilePath,
   className = 'h-full',
+  rootPath,
 }: WorkspaceExplorerProps) {
+  const root = rootPath || '.'
   // File system hook
   const {
     tree,
@@ -71,7 +75,7 @@ export function WorkspaceExplorer({
     fetchDirectory,
     fetchFileContent,
     invalidateCache,
-  } = useWorkspaceFiles(workspaceId)
+  } = useWorkspaceFiles(workspaceId, root)
 
   // Editor state
   const [openTabs, setOpenTabs] = useState<OpenFileTab[]>([])
@@ -104,9 +108,9 @@ export function WorkspaceExplorer({
   // Fetch root directory on mount
   useEffect(() => {
     if (workspaceId) {
-      fetchDirectory('.')
+      fetchDirectory(root)
     }
-  }, [workspaceId, fetchDirectory])
+  }, [workspaceId, root, fetchDirectory])
 
   // Deep-link: auto-open file from URL ?path= param after tree loads
   const initialFileOpened = useRef(false)
@@ -123,7 +127,7 @@ export function WorkspaceExplorer({
     if (lastEvent?.path && lastEvent.type === 'file_write') {
       handleFileSelect(lastEvent.path, { forceReload: true })
       invalidateCache()
-      fetchDirectory('.')
+      fetchDirectory(root)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastEvent?.timestamp])
@@ -227,7 +231,7 @@ export function WorkspaceExplorer({
     (_taskId: string) => {
       setTimeout(() => {
         invalidateCache()
-        fetchDirectory('.')
+        fetchDirectory(root)
       }, 3000)
     },
     [invalidateCache, fetchDirectory]
@@ -264,8 +268,13 @@ export function WorkspaceExplorer({
         {/* File Explorer Panel */}
         <Panel defaultSize={25} minSize={15} maxSize={50}>
           <div className="h-full border-r border-border/30 bg-muted/10 overflow-hidden flex flex-col">
-            <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/20">
-              Explorer
+            <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/20 flex items-center gap-2">
+              <span>Explorer</span>
+              {root !== '.' && (
+                <span className="font-mono normal-case tracking-normal text-[10px] text-foreground/80 truncate" title={root} data-testid="explorer-root">
+                  {root}
+                </span>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto">
               {isWorkspaceEmpty ? (
@@ -381,7 +390,7 @@ export function WorkspaceExplorer({
               <>
                 <PanelResizeHandle className="h-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-row-resize" />
                 <Panel defaultSize={30} minSize={10}>
-                  <InteractiveTerminal workspaceId={workspaceId} className="h-full" />
+                  <InteractiveTerminal workspaceId={workspaceId} initialCwd={root} className="h-full" />
                 </Panel>
               </>
             )}

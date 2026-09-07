@@ -2,6 +2,11 @@
 
 import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, ExternalLink, Tag, Calendar, User, Shield, Workflow, Play, TerminalSquare } from 'lucide-react'
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
+import { TaskDeliverablesPanel } from './task-deliverables-panel'
+import Link from 'next/link'
+import { toast } from 'sonner'
+import { parseBlockedReason } from './blocked-reason'
+import { useGrantApproval } from '@/hooks/use-approval-grants'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { PremiumIcon } from '@/components/shared'
@@ -106,10 +111,51 @@ function SessionBlock({ task }: { task: BoardTask }) {
             </ul>
           </div>
         )}
+        {Array.isArray(ref.recent_tools) && ref.recent_tools.length > 0 && (
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Recent tool calls</p>
+            <ul className="text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto">
+              {(ref.recent_tools as Array<{ at?: string; tool?: string; subject?: string }>).slice(-10).map((r, i) => (
+                <li key={i} className="truncate" title={r.subject || r.tool}>
+                  <span className="text-muted-foreground">{r.at ? new Date(r.at).toLocaleTimeString() : ''}</span> {r.tool}{r.subject ? ` · ${r.subject}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {takeover && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Take over in your terminal</p>
-            <code className="block rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
+            <div className="flex items-center gap-2">
+              <code className="block flex-1 rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
+              <Button
+                type="button" size="sm" variant="outline" aria-label="Copy the takeover command"
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(takeover); toast.success('Copied') } catch { toast.error('Could not copy — select the text instead') }
+                }}
+              >
+                Copy
+              </Button>
+            </div>
+          </div>
+        )}
+        {/* PRD-235 W2: the session's folder in chat (Code mode) and in your own editor */}
+        {(ref.explorer_root || ref.cwd) && (
+          <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="session-links">
+            {ref.explorer_root && (
+              <Link
+                href={`/chat?repo=${encodeURIComponent(ref.explorer_root)}&ticket=${task.id}`}
+                className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40"
+              >
+                <TerminalSquare className="w-3 h-3" /> Open this session in chat
+              </Link>
+            )}
+            {ref.cwd && (
+              <>
+                <a href={`vscode://file${ref.cwd}`} className="rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40">Open in VS Code</a>
+                <a href={`cursor://file${ref.cwd}`} className="rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40">Open in Cursor</a>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -175,6 +221,51 @@ function MetaItem({ icon, label, children }: { icon: React.ReactNode; label: str
 }
 
 // ── Status-specific content panels ───────────────────────────────────
+
+function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusChange: (status: string) => void }) {
+  const grantApproval = useGrantApproval()
+  const { grantId, text } = parseBlockedReason(task.blocked_reason)
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border border-[hsl(var(--warning))]/40 bg-[hsl(var(--warning))]/10 p-4 space-y-3" data-testid="blocked-banner">
+        <p className="text-sm font-medium">
+          {grantId ? `Waiting for your approval (grant #${grantId})` : 'Waiting for the operator'}
+        </p>
+        {text && <p className="text-xs text-muted-foreground">{text}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          {grantId && (
+            <Button
+              size="sm"
+              disabled={grantApproval.isLoading}
+              onClick={() => grantApproval.mutate(grantId, {
+                onSuccess: () => toast.success(`Approved — the ticket goes back to the queue and starts on the next claim`),
+                onError: (err) => toast.error(err instanceof Error ? err.message : 'Could not grant the approval'),
+              })}
+            >
+              {grantApproval.isLoading ? 'Approving…' : `Approve #${grantId}`}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={() => onStatusChange('in_progress')}>
+            Move to In Progress
+          </Button>
+          <Link href="/command-center" className="text-xs text-muted-foreground hover:text-foreground">
+            Open Command Center → Governance
+          </Link>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Moving the ticket to In Progress or pressing Run Now counts as your approval too; the policy only holds tickets nobody clicked.
+        </p>
+      </div>
+      {task.description && (
+        <div>
+          <SectionLabel>Description</SectionLabel>
+          <div className="glass-card rounded-lg p-4 text-sm whitespace-pre-wrap">{task.description}</div>
+        </div>
+      )}
+      <SessionBlock task={task} />
+    </div>
+  )
+}
 
 function AssignedContent({ task }: { task: BoardTask }) {
   return (
@@ -251,6 +342,7 @@ function InProgressContent({ task }: { task: BoardTask }) {
 
       {/* Live output */}
       <SessionBlock task={task} />
+      <TaskDeliverablesPanel taskId={task.id} />
 
       {task.result && (
         <div>
@@ -282,6 +374,7 @@ function ReviewContent({ task, onStatusChange, onApprove, onReject }: { task: Bo
       </div>
 
       <SessionBlock task={task} />
+      <TaskDeliverablesPanel taskId={task.id} />
 
       {/* Agent result — the main attraction */}
       {task.result ? (
@@ -585,6 +678,7 @@ export function BoardTaskViewer({ task: propTask, open, onOpenChange }: BoardTas
         {/* Scrollable content area */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {(task.status === 'inbox' || task.status === 'assigned') && <AssignedContent task={task} />}
+          {task.status === 'blocked' && <BlockedContent task={task} onStatusChange={handleStatusChange} />}
           {task.status === 'in_progress' && <InProgressContent task={task} />}
           {task.status === 'review' && <ReviewContent task={task} onStatusChange={handleStatusChange} onApprove={handleApprove} onReject={handleReject} />}
           {task.status === 'done' && <DoneContent task={task} onStatusChange={handleStatusChange} />}

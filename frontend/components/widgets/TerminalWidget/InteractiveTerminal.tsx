@@ -38,13 +38,15 @@ interface ExecResult {
 interface InteractiveTerminalProps {
   workspaceId: string
   className?: string
+  /** PRD-235 W2: the workspace-relative folder to start in ('.' = root) */
+  initialCwd?: string
 }
 
-export function InteractiveTerminal({ workspaceId, className }: InteractiveTerminalProps) {
+export function InteractiveTerminal({ workspaceId, className, initialCwd }: InteractiveTerminalProps) {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [input, setInput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
-  const [cwd, setCwd] = useState('.')
+  const [cwd, setCwd] = useState(initialCwd && initialCwd !== '.' ? initialCwd : '.')
   const [historyIndex, setHistoryIndex] = useState(-1)
 
   const scrollRef = useRef<HTMLDivElement>(null)

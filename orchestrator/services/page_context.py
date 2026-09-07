@@ -133,7 +133,19 @@ def render_page_preamble(sanitized: Dict[str, Any]) -> str:
         bits.append(f"Tab: {tab}.")
     selected = sanitized.get("selected")
     if selected:
-        bits.append(f"Selected {selected['type']}: {selected['id']}.")
+        if selected["type"] == "repo":
+            # PRD-235 W2: the chat's Code mode is open on a folder of the workspace
+            # (a session's directory or a repository under projects/). That folder
+            # is the working scope for the workspace tools, not just a reference.
+            bits.append(
+                f"Code mode is open on the folder `{selected['id']}`. Work there: read, grep, "
+                "edit, run and use git through the workspace tools (workspace_list_dir, "
+                "workspace_read_file, workspace_grep, workspace_write_file, workspace_exec, "
+                "workspace_git) with paths under that folder, and ground answers about the "
+                "code in those files."
+            )
+        else:
+            bits.append(f"Selected {selected['type']}: {selected['id']}.")
     filters = sanitized.get("filters")
     if filters:
         rendered = "; ".join(f"{k}={v}" for k, v in filters.items())

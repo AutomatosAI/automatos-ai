@@ -11,6 +11,9 @@
  */
 
 import { useCallback, useMemo } from 'react'
+import { RootPicker } from './RootPicker'
+import { WORKSPACE_ROOT, canvasTitleFor } from './code-root'
+import { useWorkspaceStore } from '@/stores/workspace-store'
 import { Code2 } from 'lucide-react'
 
 import { WidgetBase } from '../WidgetBase'
@@ -42,14 +45,19 @@ export function CodingCanvasWidget({
   onMaximize,
 }: WidgetBaseProps<CodingCanvasWidgetData>) {
   const { workspaceId } = data
-
-  const { invalidateCache, fetchDirectory } = useWorkspaceFiles(workspaceId)
-  const session = useCanvasSession(workspaceId)
+  // PRD-235 W2: the Canvas is rooted at a folder — a ticket's session directory or
+  // a repository under projects/ — and the chat's page context follows it.
+  const root = data.rootPath || WORKSPACE_ROOT
+  const { invalidateCache, fetchDirectory } = useWorkspaceFiles(workspaceId, root)
+  const session = useCanvasSession(workspaceId, { taskId: data.taskId ?? null })
 
   const handleRefresh = useCallback(() => {
     invalidateCache()
-    fetchDirectory('.')
-  }, [invalidateCache, fetchDirectory])
+    fetchDirectory(root)
+  }, [invalidateCache, fetchDirectory, root])
+  const handleRootChange = useCallback((next: string) => {
+    useWorkspaceStore.getState().updateWidget(id, { data: { ...data, rootPath: next }, title: canvasTitleFor(next) })
+  }, [id, data])
 
   // Bridge the session's latest file edit to WorkspaceExplorer's refresh signal:
   // the tree re-fetches when this `timestamp` (the session's tree-refresh tick)
@@ -93,13 +101,17 @@ export function CodingCanvasWidget({
       widgetType="coding_canvas"
       contentClassName="p-0"
     >
-      <div className="grid h-full min-h-[300px] grid-cols-1 md:grid-cols-[1fr_360px]">
+      <div className="flex h-full min-h-[300px] flex-col">
+      <RootPicker workspaceId={workspaceId} value={root} onChange={handleRootChange} />
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_360px]">
         <WorkspaceExplorer
           workspaceId={workspaceId}
+          rootPath={root}
           lastEvent={lastEvent}
           className="h-full min-h-[300px]"
         />
         <CanvasSessionPanel session={session} workspaceId={workspaceId} />
+      </div>
       </div>
     </WidgetBase>
   )
