@@ -14,7 +14,7 @@ from .azure_client import AzureProvider
 from .huggingface_client import HuggingFaceProvider
 from .bedrock_client import BedrockProvider
 from .grok_client import GrokProvider
-from .openrouter_client import OpenRouterProvider
+from .openai_compatible_client import OpenAICompatibleProvider, ProviderRateLimitError
 
 __all__ = [
     # Base classes
@@ -35,6 +35,7 @@ __all__ = [
     'HuggingFaceProvider',
     'BedrockProvider',
     'GrokProvider',
-    'OpenRouterProvider',
+    'OpenAICompatibleProvider',  # OpenRouter / NVIDIA / DeepSeek (PRD-236)
+    'ProviderRateLimitError',
 ]
 

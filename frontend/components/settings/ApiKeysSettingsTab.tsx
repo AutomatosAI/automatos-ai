@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -29,6 +29,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import {
+  keyPlaceholder,
+  providerNotes,
+  providersForByok,
+  useProviderRegistry,
+} from '@/hooks/use-provider-registry'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,19 +65,6 @@ interface ByokPreferences {
   byok_overrides: Record<string, boolean>
 }
 
-const PROVIDERS = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'azure', label: 'Azure OpenAI' },
-  { value: 'bedrock', label: 'AWS Bedrock' },
-  { value: 'grok', label: 'Grok / xAI' },
-  { value: 'cohere', label: 'Cohere' },
-  { value: 'huggingface', label: 'HuggingFace' },
-] as const
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -88,6 +81,14 @@ export function ApiKeysSettingsTab() {
 
   // Track which key is currently being tested
   const [testingKeyId, setTestingKeyId] = useState<number | null>(null)
+
+  // PRD-236: the provider list is the backend registry (static fallback while loading)
+  const registry = useProviderRegistry()
+  const PROVIDERS = useMemo(
+    () => providersForByok(registry).map((p) => ({ value: p.slug, label: p.label })),
+    [registry],
+  )
+  const selectedNotes = providerNotes(registry, provider)
 
   // ---- Queries & Mutations ------------------------------------------------
 
@@ -274,11 +275,20 @@ export function ApiKeysSettingsTab() {
                       <Input
                         id="api-key"
                         type="password"
-                        placeholder="sk-..."
+                        placeholder={provider ? keyPlaceholder(registry, provider) : 'sk-...'}
                         value={apiKey}
                         onChange={(e) => setApiKey(e.target.value)}
                         autoComplete="off"
                       />
+                      {selectedNotes.length > 0 && (
+                        <div className="space-y-1" data-testid="provider-notes">
+                          {selectedNotes.map((note) => (
+                            <p key={note} className="text-xs text-muted-foreground">
+                              {note}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Display Name */}

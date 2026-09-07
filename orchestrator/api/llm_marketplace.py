@@ -153,11 +153,9 @@ def _get_available_providers(db: Session, workspace_id) -> set:
     """
     available: set = set()
 
-    ALL_PROVIDERS = [
-        "openai", "anthropic", "google", "openrouter", "deepseek",
-        "azure", "bedrock", "grok", "x-ai", "cohere", "huggingface",
-        "meta-llama", "qwen",
-    ]
+    # PRD-236: the registry is the one list of providers (core/llm/providers.py).
+    from core.llm.providers import all_slugs
+    ALL_PROVIDERS = all_slugs()
 
     # 1. BYOK keys stored in DB for this workspace
     if workspace_id:

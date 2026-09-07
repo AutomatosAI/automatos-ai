@@ -1,5 +1,5 @@
 {
-  "route_count": 784,
+  "route_count": 785,
   "routes": [
     {
       "method": "GET",
@@ -1264,6 +1264,10 @@
     {
       "method": "DELETE",
       "path": "/api/keys/platform/{provider}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/keys/providers"
     },
     {
       "method": "DELETE",

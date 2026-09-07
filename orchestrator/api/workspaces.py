@@ -391,7 +391,9 @@ async def save_integrations(
 
 # ── BYOK Preferences ──────────────────────────────────────────────────
 
-_ALLOWED_PROVIDERS = {"openai", "anthropic", "google", "openrouter", "azure", "grok"}
+# PRD-236: the registry is the one list of providers (core/llm/providers.py).
+from core.llm.providers import byok_slugs as _byok_slugs
+_ALLOWED_PROVIDERS = frozenset(_byok_slugs())
 
 
 @router.get("/current/byok-preferences")

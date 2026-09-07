@@ -239,6 +239,12 @@ class Config:
     AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
     XAI_API_KEY: str = os.getenv("XAI_API_KEY")
+    # PRD-236: BYO-key providers served through the generic OpenAI-compatible
+    # adapter. NVIDIA (build.nvidia.com) is a TRIAL endpoint — the key is the
+    # user's own agreement with NVIDIA; the saas edition never holds one
+    # (core/llm/providers.py marks it byok_only).
+    NVIDIA_API_KEY: str = os.getenv("NVIDIA_API_KEY")
+    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY")
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY")
 
     # LLM settings - loaded from database system_settings
@@ -516,6 +522,9 @@ class Config:
     # EXTERNAL SERVICE URLS
     # =============================================================================
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    # PRD-236 — base URLs of the other OpenAI-compatible providers (registry reads these).
+    NVIDIA_BASE_URL: str = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+    DEEPSEEK_BASE_URL: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     OPENROUTER_SITE_URL: str = os.getenv("OPENROUTER_SITE_URL", "https://automatos.app")
     # OpenRouter routes embeddings by PRICE by default, so the slowest upstream
     # can win ties (qwen3-embedding-8b measured 37-67s/call, 2026-07-09).

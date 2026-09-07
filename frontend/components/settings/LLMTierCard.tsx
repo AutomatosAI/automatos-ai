@@ -30,6 +30,7 @@ import { ChevronDown, Save, RotateCcw, Loader2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { HelpCircle } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
+import { chatProviders, useProviderRegistry } from '@/hooks/use-provider-registry'
 
 const LLM_BASIC = ['provider', 'model', 'temperature', 'max_tokens'] as const
 const EMBEDDINGS_BASIC = ['provider', 'model', 'dimensions', 'chunk_size'] as const
@@ -49,10 +50,10 @@ const TIER_FIELD_GROUPS: Record<string, { basic: string[]; order: string[] }> = 
   },
 }
 
-const PROVIDER_OPTIONS: Record<string, string[]> = {
-  llm: ['openai', 'anthropic', 'google', 'openrouter', 'deepseek', 'azure', 'bedrock', 'grok', 'cohere', 'huggingface', 'local'],
-  embeddings: ['openrouter', 'openai', 'google', 'cohere', 'huggingface_local', 'huggingface_api', 'disabled'],
-}
+// PRD-236: LLM providers come from the backend registry (see LLMTierCard body);
+// embeddings keep their own list until W2 puts them on the registry too.
+const EMBEDDING_PROVIDER_OPTIONS = ['openrouter', 'openai', 'google', 'cohere', 'huggingface_local', 'huggingface_api', 'disabled']
+const LOCAL_MODEL_OPTION = 'local'
 
 const VECTOR_STORE_OPTIONS = ['pgvector', 'faiss', 'chroma', 'pinecone', 'weaviate']
 
@@ -94,6 +95,7 @@ function renderField(
   category: string,
   value: string,
   onChange: (next: string) => void,
+  llmProviderOptions: string[],
 ) {
   const id = `${category}_${setting.key}`
   const label = humanizeKey(setting.key)
@@ -112,7 +114,7 @@ function renderField(
   )
 
   if (isProvider) {
-    const options = category === 'embeddings' ? PROVIDER_OPTIONS.embeddings : PROVIDER_OPTIONS.llm
+    const options = category === 'embeddings' ? EMBEDDING_PROVIDER_OPTIONS : llmProviderOptions
     return (
       <div className="space-y-2" key={id}>
         {labelEl}
@@ -203,6 +205,13 @@ export default function LLMTierCard({
   const [formData, setFormData] = useState<Record<string, string>>({})
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
+  // PRD-236: the LLM provider options are the registry's chat providers + local.
+  const registry = useProviderRegistry()
+  const llmProviderOptions = useMemo(
+    () => [...chatProviders(registry).map((p) => p.slug), LOCAL_MODEL_OPTION],
+    [registry],
+  )
+
   useEffect(() => {
     const initial: Record<string, string> = {}
     settings.forEach((s) => {
@@ -253,7 +262,7 @@ export default function LLMTierCard({
         {/* Basic fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {basicSettings.map((s) =>
-            renderField(s, category, formData[s.key] ?? '', (v) => handleChange(s.key, v)),
+            renderField(s, category, formData[s.key] ?? '', (v) => handleChange(s.key, v), llmProviderOptions),
           )}
         </div>
 
@@ -269,7 +278,7 @@ export default function LLMTierCard({
             <CollapsibleContent className="mt-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {advancedSettings.map((s) =>
-                  renderField(s, category, formData[s.key] ?? '', (v) => handleChange(s.key, v)),
+                  renderField(s, category, formData[s.key] ?? '', (v) => handleChange(s.key, v), llmProviderOptions),
                 )}
               </div>
             </CollapsibleContent>

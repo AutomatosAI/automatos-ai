@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Sparkles,
@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
 import { useWorkspace } from '@/components/workspace-provider'
 import { isSaaS } from '@/lib/auth-edition'
+import { keyPlaceholder, providersForByok, useProviderRegistry } from '@/hooks/use-provider-registry'
 
 /**
  * PRD-222 US-013 (W1·S3) — the power-up card.
@@ -33,17 +34,11 @@ import { isSaaS } from '@/lib/auth-edition'
  * successful save.
  */
 
-type Provider = 'openrouter' | 'openai' | 'anthropic' | 'google'
+type Provider = string
 
 interface KeySaveResponse {
   validation?: { valid: boolean; message: string } | null
 }
-
-const OTHER_PROVIDERS: { value: Provider; label: string }[] = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-]
 
 export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
   const { workspace, refreshWorkspace } = useWorkspace()
@@ -55,6 +50,19 @@ export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
   const [showOthers, setShowOthers] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  // PRD-236: every BYO-key provider the registry knows, OpenRouter first
+  // (static fallback = the pre-registry list when the call is unavailable).
+  const registry = useProviderRegistry()
+  const providerChips = useMemo(
+    () => [
+      { value: 'openrouter', label: 'OpenRouter' },
+      ...providersForByok(registry)
+        .filter((p) => p.slug !== 'openrouter')
+        .map((p) => ({ value: p.slug, label: p.label })),
+    ],
+    [registry],
+  )
 
   // In chat the card only appears at the powerup stage; the exhausted banner
   // (US-014) renders it embedded regardless of stage.
@@ -170,7 +178,7 @@ export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
           autoComplete="off"
           spellCheck={false}
           placeholder={
-            provider === 'openrouter' ? 'sk-or-…' : 'Paste your API key'
+            provider === 'openrouter' ? 'sk-or-…' : keyPlaceholder(registry, provider)
           }
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
@@ -232,14 +240,11 @@ export function PowerUpCard({ embedded = false }: { embedded?: boolean }) {
           <ChevronDown
             className={`w-3 h-3 transition-transform ${showOthers ? 'rotate-180' : ''}`}
           />
-          I already use OpenAI, Anthropic or Google
+          I already use another provider (OpenAI, Anthropic, Google, NVIDIA…)
         </button>
         {showOthers && (
           <div className="mt-2 flex flex-wrap gap-1.5" data-testid="power-up-others">
-            {([{ value: 'openrouter', label: 'OpenRouter' }, ...OTHER_PROVIDERS] as {
-              value: Provider
-              label: string
-            }[]).map((p) => (
+            {providerChips.map((p) => (
               <button
                 key={p.value}
                 type="button"

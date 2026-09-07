@@ -48,8 +48,13 @@ class UsageTracker:
                 # Look up cost from model registry
                 model_row = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
                 if model_row:
-                    input_cost = (input_tokens / 1000) * float(model_row.input_cost_per_1k_tokens or 0)
-                    output_cost = (output_tokens / 1000) * float(model_row.output_cost_per_1k_tokens or 0)
+                    # PRD-236 S0.5 (W0 interim): the catalogue row carries ONE price
+                    # per model id; the serving provider's registry multiplier makes
+                    # a free route (NVIDIA) book zero. W1 prices per (provider, model).
+                    from core.llm.providers import price_multiplier_for
+                    multiplier = price_multiplier_for(provider)
+                    input_cost = (input_tokens / 1000) * float(model_row.input_cost_per_1k_tokens or 0) * multiplier
+                    output_cost = (output_tokens / 1000) * float(model_row.output_cost_per_1k_tokens or 0) * multiplier
                     tier = model_row.tier or tier
                 else:
                     input_cost = 0.0
