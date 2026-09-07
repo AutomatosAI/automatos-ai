@@ -126,7 +126,36 @@ function SessionBlock({ task }: { task: BoardTask }) {
         {takeover && (
           <div>
             <p className="text-xs text-muted-foreground mb-1">Take over in your terminal</p>
-            <code className="block rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
+            <div className="flex items-center gap-2">
+              <code className="block flex-1 rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
+              <Button
+                type="button" size="sm" variant="outline" aria-label="Copy the takeover command"
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(takeover); toast.success('Copied') } catch { toast.error('Could not copy — select the text instead') }
+                }}
+              >
+                Copy
+              </Button>
+            </div>
+          </div>
+        )}
+        {/* PRD-235 W2: the session's folder in chat (Code mode) and in your own editor */}
+        {(ref.explorer_root || ref.cwd) && (
+          <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="session-links">
+            {ref.explorer_root && (
+              <Link
+                href={`/chat?repo=${encodeURIComponent(ref.explorer_root)}&ticket=${task.id}`}
+                className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40"
+              >
+                <TerminalSquare className="w-3 h-3" /> Open this session in chat
+              </Link>
+            )}
+            {ref.cwd && (
+              <>
+                <a href={`vscode://file${ref.cwd}`} className="rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40">Open in VS Code</a>
+                <a href={`cursor://file${ref.cwd}`} className="rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40">Open in Cursor</a>
+              </>
+            )}
           </div>
         )}
       </div>
