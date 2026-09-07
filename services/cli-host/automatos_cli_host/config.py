@@ -54,9 +54,16 @@ class HostConfig:
     use_worktrees: bool = True
     verbose: bool = False
 
+    # service actions (PRD-235 W3): install | uninstall | status | restart | nudge | None (= run)
+    service_action: Optional[str] = None
+
     @property
     def token_path(self) -> Path:
         return self.state_dir / "host.json"
+
+    @property
+    def pid_path(self) -> Path:
+        return self.state_dir / "host.pid"
 
     @property
     def allowlist_path(self) -> Path:
@@ -104,6 +111,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
     p.add_argument("--verbose", action="store_true")
+    svc = p.add_mutually_exclusive_group()
+    svc.add_argument("--install", dest="service_action", action="store_const", const="install",
+                     help="run this host as a login service (launchd on macOS, systemd --user on Linux) with these arguments")
+    svc.add_argument("--uninstall", dest="service_action", action="store_const", const="uninstall",
+                     help="remove the login service")
+    svc.add_argument("--service-status", dest="service_action", action="store_const", const="status",
+                     help="is the login service installed and running?")
+    svc.add_argument("--restart-service", dest="service_action", action="store_const", const="restart",
+                     help="restart the login service now")
+    svc.add_argument("--nudge", dest="service_action", action="store_const", const="nudge",
+                     help="ask the running host to drain and restart (SIGHUP) — `make up` does this after a rebuild")
     return p
 
 
@@ -123,6 +141,7 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         claude_binary=ns.claude,
         use_worktrees=not ns.no_worktrees,
         verbose=ns.verbose,
+        service_action=ns.service_action,
     )
     if ns.name:
         cfg.name = ns.name

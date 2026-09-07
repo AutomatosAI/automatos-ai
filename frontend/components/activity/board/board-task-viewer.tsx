@@ -270,6 +270,18 @@ function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusCha
 function AssignedContent({ task }: { task: BoardTask }) {
   return (
     <div className="space-y-6">
+      {/* PRD-234: a Claude Code agent's ticket waits for the paired host; when
+          none is online the backend writes why on the ticket — show it instead
+          of a silent 'assigned'. */}
+      {task.blocked_reason && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/30" data-testid="assigned-waiting-host">
+          <TerminalSquare className="w-4 h-4 mt-0.5 text-[hsl(var(--warning))] shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-[hsl(var(--warning))]">Waiting for your Claude Code host</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{task.blocked_reason}</p>
+          </div>
+        </div>
+      )}
       <MetadataGrid task={task} />
 
       {task.description && (

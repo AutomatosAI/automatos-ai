@@ -158,6 +158,80 @@ def revoke_host(db: Session, host: CliHost) -> None:
     db.commit()
 
 
+# ── PRD-235 W3: the host restarts itself when this contract moves ────────────
+# The host is a process on the operator's machine loaded from a checkout; the
+# app is rebuilt from a branch. Every heartbeat answer carries a fingerprint of
+# the host↔backend contract (these modules) and the host version this backend
+# was built for. A host that sees the fingerprint change drains and exits; its
+# service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
+# whenever the wire contract changes so a stale checkout is told, not surprised.
+EXPECTED_CLI_HOST_VERSION = "0.2.0"
+
+_CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py")
+
+
+def _compute_host_contract() -> str:
+    import hashlib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    h = hashlib.sha1()
+    for rel in _CONTRACT_MODULES:
+        try:
+            h.update(rel.encode())
+            h.update((root / rel).read_bytes())
+        except OSError:
+            h.update(b"missing")
+    return h.hexdigest()[:16]
+
+
+HOST_CONTRACT = _compute_host_contract()
+
+
+def contract_fields() -> Dict[str, Any]:
+    """Appended to every heartbeat answer (and the health view)."""
+    return {"host_contract": HOST_CONTRACT, "expected_host_version": EXPECTED_CLI_HOST_VERSION}
+
+
+def host_health(db: Session, workspace_id: Any) -> Dict[str, Any]:
+    """The executor view the board needs: is any paired host online, since when
+    was it last seen, and how many Claude Code tickets are waiting for it."""
+    from core.cli_runtime import RUNTIME_CLI
+    from core.models.core import Agent
+
+    hosts = (
+        db.query(CliHost)
+        .filter(CliHost.workspace_id == workspace_id, CliHost.status == CliHostStatus.PAIRED.value)
+        .all()
+    )
+    online = [h for h in hosts if h.is_online()]
+    last_seen = max((h.last_seen_at for h in hosts if h.last_seen_at), default=None)
+    cli_agent_ids = [
+        a.id for a in db.query(Agent).filter(Agent.workspace_id == workspace_id).all()
+        if (a.configuration or {}).get("runtime") == RUNTIME_CLI
+    ]
+    waiting = 0
+    if cli_agent_ids:
+        waiting = (
+            db.query(BoardTask)
+            .filter(
+                BoardTask.workspace_id == workspace_id,
+                BoardTask.assigned_agent_id.in_(cli_agent_ids),
+                BoardTask.status == "assigned",
+            )
+            .count()
+        )
+    return {
+        "online": bool(online),
+        "paired_hosts": len(hosts),
+        "online_hosts": [h.to_dict() for h in online],
+        "last_seen_at": last_seen.isoformat() if last_seen else None,
+        "cli_agents": len(cli_agent_ids),
+        "waiting_tickets": waiting,
+        **contract_fields(),
+    }
+
+
 def list_hosts(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
     rows = (
         db.query(CliHost)
@@ -281,6 +355,9 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             db.refresh(task)
             parked.append({"task_id": task.id, "title": task.title, "reason": task.blocked_reason})
             continue  # parked ``blocked`` by the gate; the answered-resume loop returns it
+        from services.cli_ticket_lane import NO_HOST_REASON
+        if task.blocked_reason == NO_HOST_REASON:
+            task.blocked_reason = None  # a host is here now
         agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
         cfg = (getattr(agent, "configuration", None) if agent else None) or {}
         session_id = str(uuid4())

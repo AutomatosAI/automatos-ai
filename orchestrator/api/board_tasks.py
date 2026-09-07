@@ -413,6 +413,8 @@ async def create_task(
             db, workspace_id=ctx.workspace_id, task=task,
             actor=_operator_ref(ctx), why=WHY_CREATED_AND_ASSIGNED,
         )
+        if _note_no_host_for_cli(db, task):
+            db.commit()
         notify_task_available(db, workspace_id=ctx.workspace_id, task_id=task.id)
 
     logger.info("[BoardTasks] Created task %d in workspace %s", task.id, ctx.workspace_id)
@@ -859,6 +861,7 @@ def _redispatch_task(db: Session, task: BoardTask) -> None:
     task.attempts = 0
     task.completed_at = None
     task.started_at = None
+    _note_no_host_for_cli(db, task)  # a Claude Code agent's ticket says who it waits for
     db.commit()
     db.refresh(task)
 
@@ -1255,14 +1258,40 @@ def _agent_runtime_kind(db: Session, agent_id: int) -> str:
     return runtime_kind_of(configuration)
 
 
+def _note_no_host_for_cli(db: Session, task: "BoardTask") -> bool:
+    """A ``cli`` agent's ticket waits for the paired host; while none is online
+    the ticket says so (the lane's own line), cleared once one is back. Returns
+    True when the row changed. No-op for API-runtime agents."""
+    if task is None or not task.assigned_agent_id:
+        return False
+    if _agent_runtime_kind(db, task.assigned_agent_id) != RUNTIME_CLI:
+        return False
+    from services.cli_ticket_lane import NO_HOST_REASON, host_online
+    if not host_online(db, task.workspace_id):
+        if task.blocked_reason != NO_HOST_REASON:
+            task.blocked_reason = NO_HOST_REASON
+            return True
+    elif task.blocked_reason == NO_HOST_REASON:
+        task.blocked_reason = None
+        return True
+    return False
+
+
 def _park_for_cli_host(db: Session, task_id: int, workspace_id: str, agent_id: int) -> None:
     """A ``cli`` agent's ticket is never executed by this process. Leave it
     ``assigned`` (reverting a direct-launch flip to ``in_progress``) so a paired
     CLI host claims it, and wake claimants. PRD-234 §Terms / review §B3."""
     task = db.query(BoardTask).get(task_id)
+    changed = False
     if task is not None and task.status == "in_progress":
         task.status = "assigned"
         task.lease_until = None
+        changed = True
+    # 2026-09-07 (owner: "it just goes back to assigned"): a parked ticket with
+    # no host online says so instead of sitting silently in 'assigned'.
+    if _note_no_host_for_cli(db, task):
+        changed = True
+    if changed:
         db.commit()
         notify_board_event(
             db, workspace_id=workspace_id, task_id=task_id, status="assigned",

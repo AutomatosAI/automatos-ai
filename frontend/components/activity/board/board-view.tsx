@@ -8,6 +8,7 @@ import { BoardColumn } from './board-column'
 import { BoardFiltersBar } from './board-filters'
 import { BoardTaskViewer } from './board-task-viewer'
 import { CreateTaskDialog } from './create-task-dialog'
+import { HostOfflineBanner } from './host-offline-banner'
 import { useBoardTasks, useUpdateTaskStatus, type BoardFilters } from '@/hooks/use-board-tasks'
 import { useDeleteTask } from '@/hooks/use-board-tasks-api'
 import type { BoardTask, BoardStatus } from '@/types/board'
@@ -66,6 +67,8 @@ export function BoardView({ period, className }: BoardViewProps) {
 
   return (
     <div className={cn('space-y-3', className)}>
+      {/* PRD-235 W3: Claude Code agents need the paired host; say so once, at the top */}
+      <HostOfflineBanner />
       {/* Filters + Create */}
       <div className="flex items-center gap-2">
         <BoardFiltersBar

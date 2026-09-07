@@ -74,6 +74,18 @@ def save_allowlist(path: Path, dirs: List[str]) -> None:
 
 # ── process table ────────────────────────────────────────────────────────────
 
+def write_pid(path: Path) -> None:
+    """The running host's pid, for ``--nudge`` (SIGHUP → drain and restart)."""
+    path.write_text(f"{os.getpid()}\n")
+
+
+def clear_pid(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
 def load_process_table(path: Path) -> Dict[str, Dict[str, Any]]:
     """task_id (str) → ``{pid, pgid, session_id, attempt, cwd, started_at}``."""
     data = _read_json(path, {})

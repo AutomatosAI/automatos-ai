@@ -26,6 +26,7 @@ WHY_MOVED_TO_IN_PROGRESS = "the operator moved the ticket to In Progress"
 WHY_RUN_NOW = "the operator pressed Run Now"
 WHY_CREATED_AND_ASSIGNED = "the operator created the ticket and assigned it"
 WHY_ASKED_IN_CHAT = "the operator asked Auto for it in chat"
+WHY_SCHEDULED_LANE = "the operator's standing schedule filed it (heartbeat / lane)"
 
 LOCAL_EDITION = "local"
 SKIPPED = "skipped"
@@ -81,6 +82,21 @@ def driver_from_caller_context(caller_context: Any) -> Optional[str]:
 def creation_is_consent() -> bool:
     """True on the local edition only — one operator, so filing a ticket IS approving it."""
     return edition() == LOCAL_EDITION
+
+
+def consent_for_lane_ticket(db: Any, *, workspace_id: Any, task: Any, source_type: str) -> str:
+    """Pre-approve a ticket a scheduled lane just filed (local edition).
+
+    Owner's words (2026-09-07): "if I ask Auto to create a task then just do it —
+    less approval, more automation." On the local edition the operator enabled
+    the heartbeat / schedule that files the ticket, so the standing schedule IS
+    the approval; ``always_ask`` keeps holding only work nobody asked for.
+    SaaS is untouched (``creation_is_consent`` is False there).
+    """
+    return consent_for_created_ticket(
+        db, workspace_id=workspace_id, task=task,
+        actor=f"lane:{source_type or 'schedule'}", why=WHY_SCHEDULED_LANE,
+    )
 
 
 def consent_for_created_ticket(

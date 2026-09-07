@@ -1,5 +1,5 @@
 {
-  "route_count": 789,
+  "route_count": 790,
   "routes": [
     {
       "method": "GET",
@@ -2260,6 +2260,10 @@
     {
       "method": "GET",
       "path": "/api/v1/cli-hosts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/cli-hosts/health"
     },
     {
       "method": "POST",
