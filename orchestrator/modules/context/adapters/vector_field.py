@@ -78,6 +78,11 @@ class VectorFieldSharedContext(SharedContextPort):
     """
 
     def __init__(self) -> None:
+        # PRD-238 S10: no Qdrant, no field memory — refuse at construction so the
+        # factory / callers take their existing "unavailable" branch instead of
+        # dialling a host that does not exist on every operation.
+        if not config.QDRANT_URL:
+            raise RuntimeError("field memory not configured (QDRANT_URL empty)")
         self._client = AsyncQdrantClient(
             url=config.QDRANT_URL,
             api_key=config.QDRANT_API_KEY or None,

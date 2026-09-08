@@ -292,7 +292,7 @@ hidden locally by an explicit list (`frontend/lib/auth-edition.ts`,
 | Team, invitations, Workspace Admin, plan/trial pills, plugin moderation | Multi-tenant and commercial machinery of the hosted edition. |
 | Settings → Webhooks, Channels, Widget SDK | Inbound webhooks and channel callbacks need a public URL; the widget embed needs the hosted loader. |
 | The community hub | **Planned, not shipped.** The seeded catalogue is local and offline. The hub — sharing and pulling other people's agents, packages and Playbooks — is a network service: pulling will need no account and nothing will be paywalled; publishing will need a free account and pass moderation. |
-| Durable memory (mem0) and field memory (Qdrant) | Neither ships in the default stack. `MEM0_API_URL` / `QDRANT_URL` in `envs/api.defaults` point at names that do not resolve, and the backend degrades cleanly. Point them at your own instances via `envs/api.local` and the features light up. |
+| Durable memory and field memory (Qdrant) | Off by default: `QDRANT_URL` is empty in `envs/api.defaults`, so the backend attempts no writes and schedules no probe (PRD-238 S10). Switch it on with `docker compose --profile memory up -d` and `QDRANT_URL=http://qdrant:6333` in `envs/api.local`, or point that variable at your own Qdrant. |
 | S3 Vectors RAG | Hosted-only; local RAG runs on pgvector (`S3_VECTORS_ENABLED=false`). Never enable it against MinIO. |
 | Auto Live voice (Retell) | The switch and the Retell credentials live in the hosted edition's system settings; nothing in the local stack configures them. |
 | Loki / Prometheus / log relay, the agent-opt worker | Hosted telemetry and prompt-optimisation services — silenced by empty URLs in `envs/api.defaults`. |

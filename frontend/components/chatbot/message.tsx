@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { User, Code, FileText, Database, ChevronRight, CheckCircle2, XCircle, Loader2, Zap } from 'lucide-react'
+import { User, Code, FileText, Database, ChevronRight, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { ChatMessage, Artifact, CodeSnippet, DocumentReference, DatabaseResult, ToolCall, UseChatHelpers } from '@/types'
 import ReactMarkdown from 'react-markdown'
@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm'
 import { chatMarkdownComponents } from './markdown-components'
 import { ImageGallery, type ChatImage } from './image-gallery'
 import { MessageActions } from './message-actions'
+import { ActivityTrail, LimitReachedNote } from './activity-trail'
 
 export interface MessageProps {
   chatId: string
@@ -179,40 +180,18 @@ export function Message({
     return base
   }
 
+  // PRD-238 S3: the activity trail — every tool call of the turn stays
+  // visible, in order, with its one-line result. Replaces the running/error-
+  // only chips that vanished the moment a call finished.
   const renderToolCalls = () => {
     if (message.role !== 'assistant') return null
     const toolCalls = message.toolCalls || []
-    if (toolCalls.length === 0) return null
-
-    // PRD-180 S4 (F037): no longer filter out ``composio_execute`` — every
-    // external-app action must be visible while it runs and when it errors.
-    const runningTools = toolCalls.filter(tc => tc.state === 'running')
-    const errorTools = toolCalls.filter(tc => tc.state === 'error')
-
-    if (runningTools.length === 0 && errorTools.length === 0) return null
-
+    const limit = message.limitReached
+    if (toolCalls.length === 0 && !limit) return null
     return (
-      <div className="flex flex-wrap items-center gap-2">
-        {runningTools.length > 0 && (
-          <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-primary/10 border border-primary/30 text-primary">
-            <Loader2 className="w-3 h-3 animate-spin text-[hsl(var(--info))]" />
-            <span>
-              {runningTools.length === 1
-                ? formatToolLabel(runningTools[0])
-                : `Working (${runningTools.length} tools)`}
-            </span>
-          </div>
-        )}
-        {errorTools.map((tc) => (
-          <div
-            key={tc.toolCallId}
-            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-destructive/10 border border-destructive/30 text-destructive/80"
-            title={tc.error || 'Tool failed'}
-          >
-            <XCircle className="w-3 h-3" />
-            <span>{formatToolLabel(tc)} failed</span>
-          </div>
-        ))}
+      <div className="space-y-1.5">
+        <ActivityTrail toolCalls={toolCalls} formatLabel={formatToolLabel} />
+        {limit && <LimitReachedNote limit={limit} />}
       </div>
     )
   }
