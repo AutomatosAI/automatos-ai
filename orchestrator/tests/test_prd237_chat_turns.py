@@ -132,7 +132,10 @@ def test_registry_without_redis_is_honest_about_unknown_turns():
 
 
 def test_error_frame_is_the_ai_sdk_error_line():
-    assert error_frame('bad "quote"') == 'e:"bad \\"quote\\""\n'
+    # PRD-239 S4: the same {"message", "code"} object the streaming handler emits,
+    # so the client parses one shape wherever a turn fails.
+    assert error_frame('bad "quote"') == 'e:{"message": "bad \\"quote\\""}\n'
+    assert error_frame("turn died", code="turn_failed") == 'e:{"message": "turn died", "code": "turn_failed"}\n'
 
 
 def test_singleton_registry():
