@@ -12,6 +12,7 @@ import { ImageGallery, type ChatImage } from './image-gallery'
 import { MessageActions } from './message-actions'
 import { ActivityTrail, LimitReachedNote } from './activity-trail'
 import { ReasoningBlock } from './reasoning-block'
+import { TaskCard } from './task-card'
 
 export interface MessageProps {
   chatId: string
@@ -200,11 +201,12 @@ export function Message({
   const renderToolCalls = () => {
     if (message.role !== 'assistant') return null
     const toolCalls = message.toolCalls || []
+    const progress = message.progress || []
     const limit = message.limitReached
-    if (toolCalls.length === 0 && !limit) return null
+    if (toolCalls.length === 0 && progress.length === 0 && !limit) return null
     return (
       <div className="space-y-1.5">
-        <ActivityTrail toolCalls={toolCalls} formatLabel={formatToolLabel} />
+        <ActivityTrail toolCalls={toolCalls} formatLabel={formatToolLabel} progress={progress} />
         {limit && <LimitReachedNote limit={limit} />}
       </div>
     )
@@ -271,6 +273,15 @@ export function Message({
 
             {/* Tool calls (lifecycle transparency) */}
             {renderToolCalls()}
+
+            {/* PRD-238 S6: tickets this reply filed or checked, live */}
+            {message.role === 'assistant' && message.taskCards && message.taskCards.length > 0 && (
+              <div className="space-y-2">
+                {message.taskCards.map((card) => (
+                  <TaskCard key={card.id} card={card} />
+                ))}
+              </div>
+            )}
 
             {/* Routing indicator (auto-routed messages) */}
             {renderRoutingIndicator()}

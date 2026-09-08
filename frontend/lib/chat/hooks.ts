@@ -5,13 +5,15 @@ import { useAuth } from '@/lib/auth-hooks'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import type { PageContext } from '@/lib/page-context'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
-import { completeRunningToolCalls, upsertToolCall } from '@/lib/chat/tool-calls'
+import { completeRunningToolCalls, upsertTaskCard, upsertToolCall } from '@/lib/chat/tool-calls'
 import { toast } from 'sonner'
 
 /** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
 export const AWAITING_REPLY_ID = 'awaiting-reply'
 /** Give up waiting for a detached reply after this long (the turn itself is capped server-side). */
 const AWAITING_REPLY_GUARD_MS = 5 * 60_000
+/** PRD-238 S4: progress lines kept per message (the newest win). */
+const PROGRESS_LINES_KEPT = 6
 
 export function useChat({
   id,
@@ -377,6 +379,10 @@ export function useChat({
                           documents: data.data.documents || m.documents,
                           // Convert snake_case from backend to camelCase for frontend
                           codeSnippets: data.data.code_snippets || m.codeSnippets,
+                          // PRD-238 S6: a ticket card (filed / checked / awaited), one per ticket id
+                          taskCards: data.data.task_card
+                            ? upsertTaskCard(m.taskCards, data.data.task_card)
+                            : m.taskCards,
                         }
                         : m
                     )
@@ -412,6 +418,17 @@ export function useChat({
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === assistantMessageId ? { ...m, reasoning: (m.reasoning ?? '') + delta } : m
+                    )
+                  )
+                }
+                // PRD-238 S4: a progress line from inside a long-running tool call.
+                else if (data.type === 'progress' && typeof data.data?.text === 'string') {
+                  const line = data.data.text as string
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? { ...m, progress: [...(m.progress ?? []).slice(-(PROGRESS_LINES_KEPT - 1)), line] }
+                        : m
                     )
                   )
                 }

@@ -192,6 +192,39 @@ def register_board_task_actions(registry: ActionRegistry) -> None:
         ],
     ))
 
+    registry.register(ActionDefinition(
+        name="platform_wait_for_task",
+        description=(
+            "Wait for a board task to finish and report how it ended. Re-checks the "
+            "ticket every few seconds for up to a bounded budget, narrating progress "
+            "(last tool, files touched) while it runs. Returns the final status when "
+            "the task ends, or 'still running' when the budget is used up — say so "
+            "and let the watcher report back later."
+        ),
+        category="tasks",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "integer",
+                    "description": "The task ID to wait for",
+                },
+                "max_wait_seconds": {
+                    "type": "integer",
+                    "description": "Upper bound on the wait in seconds (capped by the workspace budget)",
+                },
+            },
+            "required": ["task_id"],
+        },
+        permission_level="read",
+        tags=["tasks", "read", "wait", "progress"],
+        examples=[
+            "wait for task 92 to finish",
+            "keep checking ticket 92 until it's done",
+            "let me know when task 15 completes",
+        ],
+    ))
+
     # ── Board write tools ───────────────────────────────────────────
 
     registry.register(ActionDefinition(

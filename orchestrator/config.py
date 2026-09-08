@@ -661,6 +661,11 @@ class Config:
     # Sweep cadence. The S3 hooks are the fast path; the tick is the
     # fallback and the missed-run/trend brain, so 5 minutes is plenty.
     WATCHER_TICK_SECONDS: int = int(os.getenv("WATCHER_TICK_SECONDS", "300"))
+    # PRD-238 S4: how long Auto may wait inside ONE turn for a ticket to finish
+    # (platform_wait_for_task), and how often it re-checks while waiting. Beyond
+    # the budget Auto reports "still running" and the watcher takes over.
+    CHATBOT_WAIT_BUDGET_S: int = int(os.getenv("CHATBOT_WAIT_BUDGET_S", "90"))
+    CHATBOT_WAIT_POLL_S: int = int(os.getenv("CHATBOT_WAIT_POLL_S", "5"))
     # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
     # board ticket Auto files, so an assigned ticket reports its verdict back
     # into the originating thread. Default ON — an unsupervised assigned ticket

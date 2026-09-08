@@ -323,6 +323,14 @@ async def create_board_task(db: Session, workspace_id: UUID, params: Dict[str, A
                 result["supervised"] = False
                 result["supervision"] = "supervision unavailable — the ticket will run unwatched"
 
+    # PRD-238 S6: the chat renders a live card for the ticket Auto just filed.
+    try:
+        result.setdefault("frontend_data", {})["task_card"] = task_card(
+            task, _agent_name_for(db, getattr(task, "assigned_agent_id", None))
+        )
+    except Exception:  # noqa: BLE001 — the card is a courtesy, never a failure
+        pass
+
     return result
 
 
@@ -407,6 +415,132 @@ async def list_board_tasks(db: Session, workspace_id: UUID, params: Dict[str, An
     }
 
 
+#: PRD-238 S4: statuses at which a ticket has nothing more to wait for.
+WAIT_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled", "review", "blocked"})
+
+
+def _agent_name_for(db: Session, agent_id: Optional[int]) -> Optional[str]:
+    if not agent_id:
+        return None
+    from core.models import Agent
+
+    agent = db.query(Agent).get(agent_id)
+    return agent.name if agent else None
+
+
+def task_card(task: Any, agent_name: Optional[str] = None) -> Dict[str, Any]:
+    """PRD-238 S6: the compact, live-updatable card the chat renders for a ticket.
+
+    Only ids, status, names, timestamps and the session's own counters from
+    ``runtime_ref`` — never descriptions, transcripts or file contents.
+    """
+    ref = getattr(task, "runtime_ref", None) or {}
+    ref = ref if isinstance(ref, dict) else {}
+    tools = ref.get("recent_tools") or []
+    last_tool = None
+    if isinstance(tools, (list, tuple)) and tools:
+        last = tools[-1]
+        last_tool = last.get("name") if isinstance(last, dict) else str(last)
+    files = ref.get("files_touched") or []
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "assigned_agent": agent_name or "unassigned",
+        "runtime": ref.get("runtime"),
+        "last_tool": last_tool,
+        "files_touched": len(files) if isinstance(files, (list, tuple)) else 0,
+        "exit_reason": ref.get("exit_reason"),
+        "denials": int(ref.get("denials") or 0) if isinstance(ref.get("denials"), int) else 0,
+        "started_at": str(task.started_at) if getattr(task, "started_at", None) else None,
+        "completed_at": str(task.completed_at) if getattr(task, "completed_at", None) else None,
+    }
+
+
+def _progress_line(card: Dict[str, Any], waited_s: int) -> str:
+    who = card.get("assigned_agent") or "the agent"
+    bits = [f"{who} is working on #{card['id']} · {waited_s} s"]
+    if card.get("last_tool"):
+        bits.append(f"last tool: {card['last_tool']}")
+    if card.get("files_touched"):
+        n = card["files_touched"]
+        bits.append(f"{n} file{'s' if n != 1 else ''} touched")
+    return " · ".join(bits)
+
+
+async def wait_for_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-238 S4: wait, inside this turn, for a ticket to end — bounded, narrated.
+
+    Re-reads the ticket every ``CHATBOT_WAIT_POLL_S`` seconds for at most
+    ``max_wait_seconds`` (capped by ``CHATBOT_WAIT_BUDGET_S``), sending a
+    progress line to the turn's stream each time (``services.turn_progress``;
+    headless callers get no lines and nothing else changes). Returns the final
+    card when the ticket reaches a terminal status, or ``terminal: False`` with
+    ``status: still running`` when the budget is spent.
+    """
+    import asyncio
+    import time
+
+    from config import config
+    from core.models.core import BoardTask
+    from services import turn_progress
+
+    task_id = params.get("task_id")
+    if not task_id:
+        return {"success": False, "error": "task_id is required"}
+    try:
+        task_id = int(task_id)
+    except (TypeError, ValueError):
+        return {"success": False, "error": f"task_id must be an integer, got {task_id!r}"}
+
+    budget = max(1, int(config.CHATBOT_WAIT_BUDGET_S))
+    requested = params.get("max_wait_seconds")
+    try:
+        limit = min(budget, int(requested)) if requested else budget
+    except (TypeError, ValueError):
+        limit = budget
+    poll = max(1, int(config.CHATBOT_WAIT_POLL_S))
+    turn_id = params.get("_turn_id")
+
+    def _load():
+        db.expire_all()  # see other workers' writes, not this session's cache
+        return db.query(BoardTask).filter(
+            BoardTask.id == task_id, BoardTask.workspace_id == workspace_id,
+        ).first()
+
+    task = _load()
+    if not task:
+        return {"success": False, "error": f"Task {task_id} not found"}
+    agent_name = _agent_name_for(db, task.assigned_agent_id)
+
+    started = time.monotonic()
+    waited = 0
+    while task.status not in WAIT_TERMINAL_STATUSES and waited < limit:
+        await turn_progress.emit(turn_id, _progress_line(task_card(task, agent_name), waited))
+        await asyncio.sleep(min(poll, limit - waited))
+        waited = int(time.monotonic() - started)
+        task = _load()
+        if not task:
+            return {"success": False, "error": f"Task {task_id} disappeared while waiting"}
+
+    card = task_card(task, agent_name)
+    terminal = task.status in WAIT_TERMINAL_STATUSES
+    return {
+        "success": True,
+        "terminal": terminal,
+        "status": task.status if terminal else "still running",
+        "waited_seconds": waited,
+        "budget_seconds": limit,
+        "task": card,
+        "message": (
+            f"Task #{task.id} ended: {task.status}."
+            if terminal
+            else f"Task #{task.id} is still running after {waited} s — the watcher will report back when it ends."
+        ),
+        "frontend_data": {"task_card": card},
+    }
+
+
 async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Get full details of a single board task."""
     from core.models.core import BoardTask
@@ -448,6 +582,8 @@ async def get_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]
             "started_at": str(task.started_at) if task.started_at else None,
             "completed_at": str(task.completed_at) if task.completed_at else None,
         },
+        # PRD-238 S6: the chat renders a live card for the ticket it just checked.
+        "frontend_data": {"task_card": task_card(task, agent_name)},
     }
 
 
