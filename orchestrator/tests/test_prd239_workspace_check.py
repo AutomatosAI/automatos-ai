@@ -142,3 +142,15 @@ def test_route_is_declared_in_the_mount_manifest():
     manifest = json.loads((_ORCH / "reports" / "route-manifest.json").read_text())
     routes = {(r["method"], r["path"]) for r in manifest["routes"]}
     assert ("GET", "/api/v1/cli-hosts/workspace-check") in routes
+
+
+def test_the_projects_folder_itself_is_a_browsable_root_in_the_verdict_too(monkeypatch):
+    """PRD-239 S6b: an agent rooted at LOCAL_PROJECTS_DIR browses all of it — the
+    form's verdict and the Canvas (explorer_root_for) must say the same thing."""
+    monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_DIR", "/Users/me/Development", raising=False)
+    db = _DB([_host("/Users/me/Development", "/Users/me/ws/workspaces")])
+    out = svc.workspace_check(db, WS, "/Users/me/Development")
+    assert out["valid"] and out["explorer_root"] == "projects" and out["browsable"] is True and out["allowed"] is True
+    assert svc.explorer_root_for(7, "/Users/me/Development/", WS, "/Users/me/Development") == "projects"
+    # a FILE at the root is still nothing — deliverables never live there
+    assert svc.workspace_relative_path("/Users/me/Development", str(WS), "/Users/me/Development") is None
