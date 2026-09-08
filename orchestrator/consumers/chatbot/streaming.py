@@ -153,9 +153,16 @@ class StreamingHandler:
         tool_name: str,
         success: bool,
         error: Optional[str] = None,
-        duration_ms: Optional[int] = None
+        duration_ms: Optional[int] = None,
+        summary: Optional[str] = None,
+        skipped: bool = False,
     ) -> str:
-        """Format tool-end event for AI SDK (tool lifecycle UI)."""
+        """Format tool-end event for AI SDK (tool lifecycle UI).
+
+        PRD-238 S3: ``summary`` is the one-line result headline the activity
+        trail shows; ``skipped`` marks a de-duplicated call so the client can
+        close its chip instead of spinning forever.
+        """
         payload: Dict[str, Any] = {
             "toolCallId": tool_call_id,
             "toolName": tool_name,
@@ -165,6 +172,10 @@ class StreamingHandler:
             payload["error"] = error
         if duration_ms is not None:
             payload["durationMs"] = int(duration_ms)
+        if summary:
+            payload["summary"] = summary
+        if skipped:
+            payload["skipped"] = True
         return self.format_aisdk_data("tool-end", payload)
 
     def format_aisdk_usage(self, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> str:

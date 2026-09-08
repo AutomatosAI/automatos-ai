@@ -46,6 +46,17 @@ export interface ToolCall {
   durationMs?: number
   startedAt?: string
   endedAt?: string
+  /** PRD-238 S3: one-line result headline from the server (never raw payloads). */
+  summary?: string
+  /** PRD-238 S3: the loop de-duplicated this call — it never ran. */
+  skipped?: boolean
+}
+
+/** PRD-238 S3: a cap ended the turn; the chat says so instead of going quiet. */
+export interface LimitReached {
+  limit: string
+  value: number
+  message: string
 }
 
 /**
@@ -158,6 +169,7 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   database_results?: DatabaseResult[]
   toolCalls?: ToolCall[]
   routingInfo?: RoutingInfo
+  limitReached?: LimitReached
 }
 
 /**

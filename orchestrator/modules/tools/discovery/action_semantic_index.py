@@ -212,6 +212,23 @@ class ActionSemanticIndex:
             and (include_super_admin or not a.super_admin_only)
         ]
 
+    def lexical_rank(
+        self,
+        query: str,
+        top_k: int = 15,
+        exclude_admin: bool = True,
+        exclude_promoted: bool = True,
+        include_super_admin: bool = False,
+    ) -> List[str]:
+        """PRD-238 S11: the no-embedding shortlist — plain token overlap over the
+        same su-gated eligible set ``rank_actions`` uses. Used when the live
+        query embed times out or fails, so narrowing degrades to a reasonable
+        shortlist instead of the full enum. Sync and I/O-free."""
+        from .lexical_rank import lexical_rank as _lexical
+
+        eligible = self._eligible_actions(exclude_admin, exclude_promoted, include_super_admin)
+        return [name for name, _score in _lexical(query, eligible, top_k=top_k)]
+
     async def ensure_indexed(
         self,
         exclude_admin: bool = True,

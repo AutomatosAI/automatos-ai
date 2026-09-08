@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -1244,6 +1244,38 @@ def _park_for_cli_host(db: Session, task_id: int, workspace_id: str, agent_id: i
     )
 
 
+def ending_summary(task: Any) -> Optional[str]:
+    """PRD-238 S5: one honest line about how a session ended, from ``runtime_ref``.
+
+    Reads only what the CLI host recorded (exit reason, permission denials,
+    the last tool, files touched, attempt) — never transcript text. Returns
+    None when the ticket carries no runtime reference (an API-run ticket).
+    """
+    ref = getattr(task, "runtime_ref", None)
+    if not isinstance(ref, dict) or not ref:
+        return None
+    bits: List[str] = []
+    reason = ref.get("exit_reason")
+    if reason:
+        bits.append(f"exit: {reason}")
+    denials = ref.get("denials")
+    if isinstance(denials, int) and denials > 0:
+        bits.append(f"{denials} permission denial{'s' if denials != 1 else ''}")
+    tools = ref.get("recent_tools")
+    if isinstance(tools, (list, tuple)) and tools:
+        last = tools[-1]
+        last_name = last.get("name") if isinstance(last, dict) else str(last)
+        if last_name:
+            bits.append(f"last tool: {last_name}")
+    files = ref.get("files_touched")
+    if isinstance(files, (list, tuple)) and files:
+        bits.append(f"{len(files)} file{'s' if len(files) != 1 else ''} touched")
+    attempt = ref.get("attempt")
+    if isinstance(attempt, int) and attempt > 1:
+        bits.append(f"attempt {attempt}")
+    return "; ".join(bits)[:500] or None
+
+
 async def finalize_board_task_run(
     db: Session,
     *,
@@ -1310,6 +1342,20 @@ async def finalize_board_task_run(
         notify_board_event(
             db, workspace_id=workspace_id, task_id=task_id, status="cancelled",
             event="task_cancelled",
+        )
+        # PRD-238 S5: "supervised — I'll report back when it's done" must hold
+        # for EVERY ending. A cancelled session only fired a board event; its
+        # watch stayed `watching` forever and the chat never heard. Fail-soft,
+        # like the completed/failed dispatches above.
+        from services.watch_hooks import watch_ingest_terminal
+
+        watch_ingest_terminal(
+            db,
+            workspace_id=workspace_id,
+            target_type="board_task",
+            target_id=str(task.id),
+            terminal_state="cancelled",
+            summary=ending_summary(task),
         )
         return task.status
 
