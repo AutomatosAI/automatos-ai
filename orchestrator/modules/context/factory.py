@@ -29,6 +29,13 @@ def get_shared_context(backend: Optional[str] = None) -> Optional[InstrumentedSh
 
     if backend in _instances:
         return _instances[backend]
+    # PRD-238 S10: the vector backend is honestly OFF without a Qdrant URL
+    # (the local edition's default). Say so once, never retry per call.
+    if backend == "vector_field" and not getattr(config, "QDRANT_URL", ""):
+        if not _instances.get("_vector_field_off_logged"):
+            _instances["_vector_field_off_logged"] = True  # type: ignore[assignment]
+            logger.info("[Factory] QDRANT_URL is empty — field memory is off in this edition")
+        return None
 
     try:
         if backend == "vector_field":

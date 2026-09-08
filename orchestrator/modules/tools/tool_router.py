@@ -264,17 +264,63 @@ async def _rank_actions_for_dispatcher_async(
             include_super_admin=include_super_admin,
             workspace_id=workspace_id,
         )
-        if not ranked:
-            return None
-        return [name for name, _score in ranked]
+        if ranked:
+            return [name for name, _score in ranked]
+        # PRD-238 S11: the embed timed out or matched nothing above the floor.
+        # A lexical shortlist keeps the enum small; only when even that is
+        # empty does the caller fall back to the full enum.
+        return _lexical_shortlist(index, query, top_k, exclude_admin, exclude_promoted, include_super_admin)
     except Exception as exc:
         logger.warning(
             "_rank_actions_for_dispatcher failed (query=%r): %s — "
-            "falling back to full enum",
+            "trying the lexical shortlist",
             (query or "")[:80],
             exc,
         )
+        try:
+            from modules.tools.discovery.action_semantic_index import get_action_semantic_index
+
+            return _lexical_shortlist(
+                get_action_semantic_index(), query, top_k, exclude_admin, exclude_promoted, include_super_admin
+            )
+        except Exception:  # noqa: BLE001 — full-enum fallback stays the last resort
+            return None
+
+
+def _lexical_shortlist(
+    index: Any,
+    query: str,
+    top_k: int,
+    exclude_admin: bool,
+    exclude_promoted: bool,
+    include_super_admin: bool,
+) -> Optional[List[str]]:
+    """PRD-238 S11: names from the index's lexical ranking, or None when empty.
+
+    Only a real, non-empty list of action names counts — an index without a
+    lexical ranking (or one answering anything else) leaves the caller on its
+    full-enum fallback exactly as before.
+    """
+    ranker = getattr(index, "lexical_rank", None)
+    if not callable(ranker):
         return None
+    names = ranker(
+        query,
+        top_k=top_k,
+        exclude_admin=exclude_admin,
+        exclude_promoted=exclude_promoted,
+        include_super_admin=include_super_admin,
+    )
+    if not isinstance(names, (list, tuple)):
+        return None
+    kept = [n for n in names if isinstance(n, str) and n]
+    if not kept:
+        return None
+    logger.info(
+        "[tool-router] semantic narrowing unavailable — lexical shortlist narrowed to %d action(s)",
+        len(kept),
+    )
+    return kept
 
 
 def _rank_actions_for_dispatcher(

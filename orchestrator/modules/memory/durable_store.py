@@ -83,15 +83,35 @@ class DurableMemoryStore:
     """
 
     def __init__(self) -> None:
-        self._client = AsyncQdrantClient(
-            url=config.QDRANT_URL,
-            api_key=config.QDRANT_API_KEY or None,
-            timeout=30,
+        # PRD-238 S10: an empty QDRANT_URL means durable (L3) memory is OFF —
+        # the local edition ships no Qdrant by default. Every public operation
+        # then answers with its empty shape instead of dialling a host that
+        # does not exist (which logged a traceback per turn). SaaS sets a real
+        # URL and is unchanged.
+        self._enabled = bool(config.QDRANT_URL)
+        self._client = (
+            AsyncQdrantClient(
+                url=config.QDRANT_URL,
+                api_key=config.QDRANT_API_KEY or None,
+                timeout=30,
+            )
+            if self._enabled
+            else None
         )
         self._embedder = EmbeddingManager()
         self._collection = config.DURABLE_MEMORY_COLLECTION
         self._dimension = config.FIELD_EMBEDDING_DIM
         self._bootstrap_done = False
+        if not self._enabled:
+            logger.info("[Durable] QDRANT_URL is empty — durable memory is off in this edition")
+
+    @property
+    def enabled(self) -> bool:
+        """True when a Qdrant URL is configured (durable memory is on)."""
+        return self._enabled
+
+    #: What a disabled store answers, per operation shape.
+    _DISABLED_ADD = {"success": False, "skipped": True, "error": "durable memory not configured (QDRANT_URL empty)"}
 
     # ── Bootstrap ───────────────────────────────────────────────
 
@@ -100,6 +120,8 @@ class DurableMemoryStore:
         if missing. Safe to call on every operation."""
         if self._bootstrap_done:
             return
+        if not self._enabled:
+            raise RuntimeError("durable memory not configured (QDRANT_URL empty)")
 
         try:
             exists = await self._client.collection_exists(self._collection)
@@ -201,6 +223,8 @@ class DurableMemoryStore:
         Untagged writes (heartbeat / playbook / agent-internal) store a null tag
         and are reported as untagged history on a subject erase, never as erased.
         """
+        if not self._enabled:
+            return dict(self._DISABLED_ADD)
         await self.ensure_collection()
 
         text_parts = []
@@ -252,6 +276,8 @@ class DurableMemoryStore:
         workspace_id: Optional[str] = None,
     ) -> List[Dict]:
         """Semantic search within a namespace, floor-filtered (PRD-159 S3)."""
+        if not self._enabled:
+            return []
         await self.ensure_collection()
 
         # PRD-197 S4: memory-seam substrate telemetry — candidates/latency/
@@ -318,6 +344,8 @@ class DurableMemoryStore:
         workspace_id: Optional[str] = None,
     ) -> List[Dict]:
         """Every memory in a namespace (unscored, scroll order)."""
+        if not self._enabled:
+            return []
         await self.ensure_collection()
 
         out: List[Dict] = []
@@ -348,6 +376,8 @@ class DurableMemoryStore:
     ) -> bool:
         """Delete memories by id, only where the point belongs to ``user_id``
         (preserves the namespace-ownership check the old bulk API enforced)."""
+        if not self._enabled:
+            return False
         await self.ensure_collection()
 
         points = await self._client.retrieve(self._collection, ids=list(memory_ids))
@@ -366,6 +396,8 @@ class DurableMemoryStore:
     async def erase_workspace(self, workspace_id: str) -> int:
         """GDPR erasure — one filter delete over the ``workspace_id`` payload
         index (no namespace enumeration; the whole point of the un-split)."""
+        if not self._enabled:
+            return 0
         await self.ensure_collection()
         flt = self._workspace_filter(workspace_id)
         count = await self._count_by_filter(flt)
@@ -384,6 +416,8 @@ class DurableMemoryStore:
         ``workspace_id`` AND ``subject_id`` payload indexes. Fail-closed: never
         workspace-wide. Returns the number of memories erased (0 if the subject
         has no tagged rows — e.g. only untagged pre-tag history exists)."""
+        if not self._enabled:
+            return 0
         await self.ensure_collection()
         flt = self._subject_filter(workspace_id, subject_id)
         count = await self._count_by_filter(flt)
@@ -401,6 +435,8 @@ class DurableMemoryStore:
         """Delete every memory in one exact namespace (e.g. a deleted
         playbook's ``mem:{ws}:recipe:{id}`` bucket). Same filter-delete shape
         as ``erase_workspace``."""
+        if not self._enabled:
+            return 0
         await self.ensure_collection()
         flt = self._namespace_filter(user_id)
         count = await self._count_by_filter(flt)
@@ -413,6 +449,8 @@ class DurableMemoryStore:
 
     async def export_workspace(self, workspace_id: str, limit: int = 10000) -> List[Dict]:
         """GDPR export — every durable memory for a workspace, portable dicts."""
+        if not self._enabled:
+            return []
         await self.ensure_collection()
         out: List[Dict] = []
         next_offset: Any = None
@@ -447,6 +485,14 @@ class DurableMemoryStore:
     async def health(self) -> Dict[str, Any]:
         """Real backend health — pings Qdrant, mirrors the field adapter's
         contract so monitoring can tell live-but-empty from down."""
+        if not self._enabled:
+            return {
+                "healthy": False,
+                "configured": False,
+                "backend": "durable_memory",
+                "collection": self._collection,
+                "error": "QDRANT_URL empty — durable memory is off in this edition",
+            }
         try:
             await self._client.get_collections()
             return {
@@ -464,6 +510,8 @@ class DurableMemoryStore:
     # ── Internals ───────────────────────────────────────────────
 
     async def _find_by_hash(self, user_id: str, content_hash: str):
+        if not self._enabled:
+            return None
         results, _ = await self._client.scroll(
             collection_name=self._collection,
             scroll_filter=Filter(must=[

@@ -91,6 +91,10 @@ def _export_sql_tables(db: Any, workspace_id: UUID | str) -> Dict[str, List[dict
 
 
 def _export_field_memory(workspace_id: UUID | str, subject_id: Optional[str] = None) -> List[dict]:
+    from config import config as _config
+
+    if not getattr(_config, "QDRANT_URL", ""):
+        return []  # PRD-238 S10: field memory is off in this edition — nothing to export
     from modules.context.adapters.vector_field import VectorFieldSharedContext
 
     svc = VectorFieldSharedContext()

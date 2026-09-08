@@ -113,6 +113,25 @@ services:
   # use for every bucket against any S3-compatible endpoint, so the one-shot mc
   # container was an extra 82 MB image doing work the app now does itself.)
 
+  # ===========================================================================
+  # Qdrant — durable (L3) + field memory. OPT-IN (PRD-238 S10):
+  #   docker compose --profile memory up -d
+  # and QDRANT_URL=http://qdrant:6333 in envs/api.local. With the profile off
+  # the backend keeps memory honestly off (QDRANT_URL is empty by default).
+  # Prod is unchanged (hosted Qdrant via its own QDRANT_URL).
+  # ===========================================================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: automatos_qdrant
+    restart: unless-stopped
+    profiles: ["memory"]
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - automatos
+
   backend:
     build:
       context: ./orchestrator
@@ -406,6 +425,9 @@ volumes:
   minio_data:
     driver: local
     name: automatos_minio_data
+  qdrant_data:
+    driver: local
+    name: automatos_qdrant_data
   backend_logs:
     driver: local
     name: automatos_backend_logs
