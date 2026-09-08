@@ -666,6 +666,12 @@ class Config:
     # the budget Auto reports "still running" and the watcher takes over.
     CHATBOT_WAIT_BUDGET_S: int = int(os.getenv("CHATBOT_WAIT_BUDGET_S", "90"))
     CHATBOT_WAIT_POLL_S: int = int(os.getenv("CHATBOT_WAIT_POLL_S", "5"))
+    # PRD-239 S1: the cap on the skills text rendered into a session agent's
+    # appended system prompt (persona + skills ride it, stable per agent).
+    CLI_SESSION_SKILLS_MAX_CHARS: int = int(os.getenv("CLI_SESSION_SKILLS_MAX_CHARS", "24000"))
+    # PRD-239 S3: how often a playbook step or mission task re-reads the ticket it
+    # filed for a session agent while it waits for the session to end.
+    CLI_LANE_POLL_SECONDS: int = int(os.getenv("CLI_LANE_POLL_SECONDS", "5"))
     # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
     # board ticket Auto files, so an assigned ticket reports its verdict back
     # into the originating thread. Default ON — an unsupervised assigned ticket

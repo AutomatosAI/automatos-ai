@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { User, Code, FileText, Database, ChevronRight, Zap } from 'lucide-react'
+import { User, Code, FileText, Database, ChevronRight, Zap, AlertCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { ChatMessage, Artifact, CodeSnippet, DocumentReference, DatabaseResult, ToolCall, UseChatHelpers } from '@/types'
 import ReactMarkdown from 'react-markdown'
@@ -111,6 +111,11 @@ export function Message({
           // PRD-238 S1: the stored reasoning part renders above the answer (ReasoningBlock), never here.
           if (part.type === 'reasoning') {
             return null
+          }
+
+          // PRD-239 S2: a ticket card persisted with the reply (a session agent's turn)
+          if (part.type === 'task_card' && 'card' in part) {
+            return <TaskCard key={index} card={part.card} />
           }
 
           if (part.type === 'file' && 'filename' in part) {
@@ -270,6 +275,17 @@ export function Message({
 
             {/* Assistant state (Thinking animation) — only until reasoning or text arrives */}
             {!reasoningText && renderAssistantState()}
+
+            {/* PRD-239 S4: a failed turn says so, in the bubble */}
+            {message.role === 'assistant' && message.error && (
+              <div
+                className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                data-testid="turn-error"
+              >
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span>{message.error.message}</span>
+              </div>
+            )}
 
             {/* Tool calls (lifecycle transparency) */}
             {renderToolCalls()}

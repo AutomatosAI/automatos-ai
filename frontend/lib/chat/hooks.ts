@@ -6,6 +6,7 @@ import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import type { PageContext } from '@/lib/page-context'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
 import { completeRunningToolCalls, upsertTaskCard, upsertToolCall } from '@/lib/chat/tool-calls'
+import { errorFromDataPayload, parseErrorFrame } from '@/lib/chat/errors'
 import { toast } from 'sonner'
 
 /** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
@@ -500,6 +501,12 @@ export function useChat({
                   if (onData) onData({ type: 'mission-suggestion', data: payload.data })
                 } else if (payload.type === 'error') {
                   setStatus('error')
+                  // PRD-239 S4: the failure lands in the reply bubble and a toast.
+                  const turnError = errorFromDataPayload(payload)
+                  setMessages((prev) =>
+                    prev.map((m) => (m.id === assistantMessageId ? { ...m, error: turnError } : m))
+                  )
+                  toast.error(turnError.message)
                   // PRD-222 US-014: mid-stream trial block carries the typed code.
                   if (
                     payload.error_code === TRIAL_EXHAUSTED_CODE ||
@@ -516,12 +523,20 @@ export function useChat({
                 // Skip parse errors
               }
             } else if (line.startsWith('e:')) {
-              // Error
+              // PRD-239 S4: a failed turn is shown in the reply bubble and toasted —
+              // never only logged. The placeholder stays so the sentence has a home.
               const errLine = line.slice(2)
+              const turnError = parseErrorFrame(errLine)
               console.error('[Chat] Error:', errLine)
               setStatus('error')
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantMessageId ? { ...m, error: turnError } : m))
+              )
+              toast.error(turnError.message)
               // PRD-222 US-014: mid-stream trial block → typed code for the banner.
-              if (errLine.includes(TRIAL_EXHAUSTED_CODE)) setErrorCode(TRIAL_EXHAUSTED_CODE)
+              if (turnError.code === TRIAL_EXHAUSTED_CODE || errLine.includes(TRIAL_EXHAUSTED_CODE)) {
+                setErrorCode(TRIAL_EXHAUSTED_CODE)
+              }
             }
           }
         }

@@ -91,18 +91,31 @@ def _slug(text: str, limit: int = 40) -> str:
     return _SLUG_RE.sub("-", text).strip("-")[:limit] or "ticket"
 
 
+SESSION_RULES = (
+    "The ticket you are working is described in the file named in your first message; "
+    "read it fully before acting.\n"
+    "Rules of the session: work only inside the directory you were started in; "
+    "never push, publish or open pull requests — the manager integrates your work; "
+    "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
+    "reply with a concise summary of what changed, what you verified, and anything left open.\n"
+)
+
+
 def build_system_prompt(ticket: Dict[str, Any]) -> str:
-    """Stable per agent: no ids, no dates, no counters (prompt-cache invariant)."""
+    """Stable per agent: no ids, no dates, no counters (prompt-cache invariant).
+
+    PRD-239 S1: the backend renders the agent's soul — description, persona and
+    skills — as ``system_prompt`` on the ticket (stable per agent); it sits
+    between the introduction and the session rules. Without it the prompt is
+    exactly the name and the rules, as before.
+    """
     name = ticket.get("agent_name") or "an Automatos agent"
-    return (
-        f"You are {name}, working as a supervised Claude Code session managed by Automatos.\n"
-        "The ticket you are working is described in the file named in your first message; "
-        "read it fully before acting.\n"
-        "Rules of the session: work only inside the directory you were started in; "
-        "never push, publish or open pull requests — the manager integrates your work; "
-        "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
-        "reply with a concise summary of what changed, what you verified, and anything left open.\n"
-    )
+    intro = f"You are {name}, working as a supervised Claude Code session managed by Automatos.\n"
+    soul = ticket.get("system_prompt")
+    soul = soul.strip() if isinstance(soul, str) else ""
+    if soul:
+        return intro + "\n" + soul + "\n\n" + SESSION_RULES
+    return intro + SESSION_RULES
 
 
 def build_ticket_file(ticket: Dict[str, Any]) -> str:

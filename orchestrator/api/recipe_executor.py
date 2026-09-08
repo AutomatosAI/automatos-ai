@@ -339,6 +339,15 @@ def _get_workspace_semaphore(workspace_id: str, max_concurrent: int = 3) -> asyn
 # Step executor — uses chatbot's exact component path
 # ---------------------------------------------------------------------------
 
+def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str:
+    """The ticket title for a playbook step a session agent works (PRD-239 S3)."""
+    first = next((line.strip() for line in (clean_prompt or "").splitlines() if line.strip()), "")
+    if len(first) > 60:
+        first = first[:60].rstrip() + "…"
+    head = f"{recipe_name or 'Playbook'} · step {step_order}"
+    return f"{head}: {first}" if first else head
+
+
 async def _execute_step(
     db: Session,
     agent: Agent,
@@ -380,6 +389,26 @@ async def _execute_step(
     if max_iterations is None:
         from config import config as _app_config
         max_iterations = _app_config.RECIPE_DEFAULT_MAX_ITERATIONS
+
+    # PRD-239 S3: a session agent's step is a ticket its Claude Code session
+    # works; the step waits for it to end (the caller's step timeout bounds the
+    # wait — the session carries on and its result lands on the board). Before
+    # the tool/LLM imports: a session step touches none of them.
+    from services.cli_ticket_lane import RECIPE_SOURCE_TYPE, is_cli_agent, run_cli_ticket_and_wait
+    if is_cli_agent(db, agent.id):
+        import uuid as _uuid
+
+        return await run_cli_ticket_and_wait(
+            db,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            title=_cli_step_title(recipe_name, step_order, clean_prompt),
+            prompt=clean_prompt,
+            source_type=RECIPE_SOURCE_TYPE,
+            source_id=f"{RECIPE_SOURCE_TYPE}:{recipe_execution_id or _uuid.uuid4().hex}:{step_order}",
+            tags=["playbook"],
+        )
+
     # Lazy imports to avoid circular deps
     from modules.tools.tool_router import get_tool_router
     from modules.tools.services.composio_hint_service import ComposioHintService

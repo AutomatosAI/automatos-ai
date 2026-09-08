@@ -159,9 +159,13 @@ def get_turn_registry() -> TurnRegistry:
     return _registry
 
 
-def error_frame(message: str) -> str:
-    """The AI-SDK data-stream error line the frontend already parses (``e:``)."""
-    return "e:" + json.dumps(message) + "\n"
+def error_frame(message: str, code: Optional[str] = None) -> str:
+    """The AI-SDK data-stream error line the frontend parses (``e:``) — the same
+    ``{"message", "code"}`` shape the streaming handler emits (PRD-239 S4)."""
+    payload = {"message": message}
+    if code:
+        payload["code"] = code
+    return "e:" + json.dumps(payload) + "\n"
 
 
 async def _produce_into(

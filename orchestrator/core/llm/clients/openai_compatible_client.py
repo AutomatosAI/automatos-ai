@@ -45,6 +45,31 @@ def _is_rate_limited(exc: Exception) -> bool:
     return "429" in text or "rate limit" in text.lower() or "rate_limit" in text.lower()
 
 
+class ProviderModelUnavailableError(ValueError):
+    """The serving provider does not offer the requested model (a 404, or a 400
+    that says the id is not a valid / known model). PRD-239 S4."""
+
+
+_MODEL_UNAVAILABLE_MARKERS = (
+    "not a valid model",
+    "model not found",
+    "no such model",
+    "does not exist",
+    "unknown model",
+    "is not available",
+    "not supported model",
+)
+
+
+def _is_model_unavailable(exc: Exception) -> bool:
+    text = str(exc).lower()
+    if "model" not in text:
+        return False
+    if getattr(exc, "status_code", None) == 404:
+        return True
+    return any(marker in text for marker in _MODEL_UNAVAILABLE_MARKERS)
+
+
 class _StreamAssembler:
     """Folds chat-completion stream chunks into one ``LLMResponse``.
 
@@ -181,6 +206,20 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             f"{self.spec.label} rate limit reached for model '{self.config.model}'. {note}"
         )
 
+    def _model_unavailable_error(self, exc: Exception) -> ProviderModelUnavailableError:
+        return ProviderModelUnavailableError(
+            f"{self.spec.label} does not offer the model '{self.config.model}' (any more). "
+            "Pick another model in the agent's Model tab."
+        )
+
+    def _classified(self, exc: Exception) -> Optional[ValueError]:
+        """The typed error for a provider refusal we recognise, else None."""
+        if _is_rate_limited(exc):
+            return self._rate_limit_error(exc)
+        if _is_model_unavailable(exc):
+            return self._model_unavailable_error(exc)
+        return None
+
     # ------------------------------------------------------------------ #
     # Requests
     # ------------------------------------------------------------------ #
@@ -232,8 +271,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 try:
                     return self.client.chat.completions.create(**kwargs)
                 except Exception as exc:
-                    if _is_rate_limited(exc):
-                        raise self._rate_limit_error(exc) from exc
+                    typed = self._classified(exc)
+                    if typed is not None:
+                        raise typed from exc
                     err_str = str(exc)
                     if tools and ("not support tool use" in err_str or "No endpoints found that support tool" in err_str):
                         logger.warning(
@@ -374,8 +414,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             try:
                 iterator = self.client.chat.completions.create(**kwargs)
             except Exception as exc:
-                if _is_rate_limited(exc):
-                    raise self._rate_limit_error(exc) from exc
+                typed = self._classified(exc)
+                if typed is not None:
+                    raise typed from exc
                 if "stream_options" in str(exc):
                     kwargs.pop("stream_options", None)
                     iterator = self.client.chat.completions.create(**kwargs)
@@ -417,8 +458,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             try:
                 response = self.client.chat.completions.create(**self._base_kwargs(messages))
             except Exception as exc:
-                if _is_rate_limited(exc):
-                    raise self._rate_limit_error(exc) from exc
+                typed = self._classified(exc)
+                if typed is not None:
+                    raise typed from exc
                 raise
             return LLMResponse(
                 content=response.choices[0].message.content,

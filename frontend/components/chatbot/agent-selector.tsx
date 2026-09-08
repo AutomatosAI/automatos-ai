@@ -39,7 +39,12 @@ export interface Agent {
   is_system_agent?: boolean
   slug?: string
   required_role?: string
+  /** PRD-234: `runtime: 'cli'` marks a session agent (the operator's own Claude Code). */
+  configuration?: { runtime?: string | null } | null
 }
+
+/** PRD-239 S2: a session agent answers through a ticket its Claude Code session works. */
+export const isSessionAgent = (agent?: Agent | null): boolean => agent?.configuration?.runtime === 'cli'
 
 export interface AgentSelectorProps {
   selectedAgentId?: number | null
@@ -135,6 +140,11 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                   <span className="truncate max-w-[120px] font-medium">
                     {selectedAgent.name}
                   </span>
+                  {isSessionAgent(selectedAgent) && (
+                    <span className="text-[10px] text-muted-foreground" data-testid="agent-selector-session">
+                      · session
+                    </span>
+                  )}
                 </>
               ) : (
                 <>
@@ -221,9 +231,16 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-sm">{agent.name}</div>
-                    <span className="text-[10px] text-muted-foreground/70 bg-secondary/30 px-1.5 py-0.5 rounded border border-border/30">
-                      {getModelDisplayName(agent.agent_model_config?.model_id || agent.model_config?.model_id)}
-                    </span>
+                    {isSessionAgent(agent) ? (
+                      // PRD-239 S2: the reply comes back through a ticket the session works
+                      <span className="text-[10px] text-primary/80 bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                        Claude Code session
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground/70 bg-secondary/30 px-1.5 py-0.5 rounded border border-border/30">
+                        {getModelDisplayName(agent.agent_model_config?.model_id || agent.model_config?.model_id)}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground truncate">
                     {agent.description}

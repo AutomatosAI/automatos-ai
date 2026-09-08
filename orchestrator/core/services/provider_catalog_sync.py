@@ -98,17 +98,38 @@ class ProviderCatalogSync:
         return result
 
     def project_openrouter_cache(self) -> Dict[str, Any]:
-        """Every active cache row becomes an OpenRouter-served catalogue row."""
+        """Every active cache row becomes an OpenRouter-served catalogue row.
+
+        PRD-239 S5: routes OpenRouter no longer lists stop being offered — marked
+        ``deprecated`` (installs keep their row), exactly as the NVIDIA sync does.
+        An empty cache (a failed fetch) deprecates nothing.
+        """
         rows = (
             self.db.query(OpenRouterModelCache)
             .filter(OpenRouterModelCache.status == "active")
             .all()
         )
+        kept = []
         for cached in rows:
             self._upsert_route("openrouter", cached.model_id, self._values_from_cache(cached))
+            kept.append(cached.model_id)
+        deprecated = 0
+        if kept:
+            deprecated = (
+                self.db.query(LLMModel)
+                .filter(
+                    LLMModel.serving_provider == "openrouter",
+                    LLMModel.status == "active",
+                    ~LLMModel.model_id.in_(kept),
+                )
+                .update({"status": "deprecated"}, synchronize_session=False)
+            )
         self.db.commit()
-        logger.info("[CatalogSync] projected %d OpenRouter rows into llm_models", len(rows))
-        return {"provider": "openrouter", "rows": len(rows)}
+        logger.info(
+            "[CatalogSync] projected %d OpenRouter rows into llm_models (%d deprecated)",
+            len(rows), int(deprecated or 0),
+        )
+        return {"provider": "openrouter", "rows": len(rows), "deprecated": int(deprecated or 0)}
 
     @staticmethod
     def _values_from_cache(cached: OpenRouterModelCache) -> Dict[str, Any]:
