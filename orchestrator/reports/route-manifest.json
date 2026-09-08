@@ -1,5 +1,5 @@
 {
-  "route_count": 788,
+  "route_count": 789,
   "routes": [
     {
       "method": "GET",
@@ -2359,6 +2359,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/scheduled-tasks"
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/scheduled-tasks"
     },
     {
