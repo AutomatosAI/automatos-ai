@@ -35,7 +35,10 @@ vi.mock('@/hooks/use-scheduled-tasks-api', () => ({
 
 import { CalendarTab } from '../calendar-tab'
 
+// Code only: the header comment is allowed to NAME the endpoint it no longer calls.
 const src = readFileSync(path.resolve(__dirname, '..', 'calendar-tab.tsx'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '')
 
 function routine(id: number, name: string, intervalMinutes: number, nextRunAt: Date): ScheduleItem {
   return {
