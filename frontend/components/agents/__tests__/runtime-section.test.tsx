@@ -63,7 +63,7 @@ describe('RuntimeSection', () => {
     const { RuntimeSection, DEFAULT_RUNTIME_FIELDS } = await load('local')
     render(<RuntimeSection value={DEFAULT_RUNTIME_FIELDS} onChange={vi.fn()} />)
     expect(screen.getByLabelText('Runtime')).toBeInTheDocument()
-    expect(screen.queryByLabelText(/Working directory/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Workspace folder/)).not.toBeInTheDocument()
   })
 
   it('shows the session fields for a cli agent and reports edits field by field', async () => {
@@ -76,7 +76,7 @@ describe('RuntimeSection', () => {
       />,
     )
     fireEvent.change(screen.getByLabelText(/Model \(optional\)/), { target: { value: 'fable' } })
-    fireEvent.change(screen.getByLabelText(/Working directory/), { target: { value: '/w/repo' } })
+    fireEvent.change(screen.getByLabelText(/Workspace folder/), { target: { value: '/w/repo' } })
     expect(onChange).toHaveBeenCalledWith('cli_model', 'fable')
     expect(onChange).toHaveBeenCalledWith('cli_working_directory', '/w/repo')
   })
