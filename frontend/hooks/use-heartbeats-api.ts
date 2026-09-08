@@ -124,6 +124,9 @@ export function useToggleHeartbeat() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: heartbeatQueryKeys.all })
       queryClient.invalidateQueries({ queryKey: heartbeatQueryKeys.detail(data.agent_id) })
+      // The Command Centre calendar derives its routine rows from the schedule
+      // feed (not from this hook), so a pause/resume must refresh that too.
+      queryClient.invalidateQueries({ queryKey: ['activity', 'schedule'] })
       toast.success(data.message)
     },
     onError: (error) => {

@@ -30,9 +30,24 @@ interface BoardResponse {
 export const boardQueryKeys = {
   all: ['board'] as const,
   tasks: (filters?: any) => ['board', 'tasks', filters] as const,
+  task: (taskId: string) => ['board', 'task', taskId] as const,
 }
 
 // ============= HOOKS =============
+
+/**
+ * One board task by id (GET /api/v1/tasks/{id}) — for deep links such as the
+ * calendar's "Open on board" (?task_id=), which must open the card even when
+ * the loaded columns are filtered and don't contain it. Disabled without an id.
+ */
+export function useBoardTask(taskId: string | null) {
+  return useQuery<BoardTask>({
+    queryKey: boardQueryKeys.task(taskId ?? ''),
+    queryFn: async () => mapTaskToBoardTask(await apiClient.request<any>(`/api/v1/tasks/${taskId}`)),
+    enabled: Boolean(taskId),
+    staleTime: 30000,
+  })
+}
 
 /**
  * Fetch all board tasks from /api/v1/tasks and group into columns.

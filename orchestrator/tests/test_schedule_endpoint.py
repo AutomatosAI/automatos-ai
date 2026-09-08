@@ -133,11 +133,13 @@ class _FakeScheduleDB:
     calls so a test can prove there is no per-row N+1.
     """
 
-    def __init__(self, agents=None, templates=None, tasks=None, missions=None, raise_on_query=None):
+    def __init__(self, agents=None, templates=None, tasks=None, missions=None, board_tasks=None,
+                 raise_on_query=None):
         self._agents = agents or []
         self._templates = templates or []
         self._tasks = tasks or []
         self._missions = missions or []
+        self._board_tasks = board_tasks or []
         self._raise_on_query = raise_on_query
         self.query_calls = 0
         self.execute_calls = 0
@@ -151,9 +153,10 @@ class _FakeScheduleDB:
 
     def execute(self, stmt, params=None):
         self.execute_calls += 1
-        # get_schedule calls execute() in a fixed order: scheduled_tasks first,
-        # then mission SLAs.
-        rows = self._tasks if self.execute_calls == 1 else self._missions
+        # get_schedule calls execute() in a fixed order: scheduled_tasks, then
+        # mission SLAs, then board-task SLAs.
+        by_call = {1: self._tasks, 2: self._missions, 3: self._board_tasks}
+        rows = by_call.get(self.execute_calls, [])
         return _FakeResult(rows)
 
     def rollback(self):
@@ -200,7 +203,7 @@ def test_get_schedule_no_n_plus_one_at_scale():
     out = _svc(db).get_schedule(range_days=7)
     assert len(out["scheduled"]) == 200
     assert db.query_calls == 2      # agents + templates, regardless of row count
-    assert db.execute_calls == 2    # scheduled tasks + mission SLAs (one each)
+    assert db.execute_calls == 3    # scheduled tasks + mission SLAs + board SLAs (one each)
 
 
 @_needs_croniter
@@ -265,9 +268,63 @@ def test_get_schedule_includes_mission_sla_deadlines():
     out = _svc(db).get_schedule(range_days=30)
     mission = next(i for i in out["scheduled"] if i["type"] == "mission")
     assert mission["id"] == "mission-7"
+    assert mission["mission_id"] == 7  # explicit id: the calendar's 'Open mission' action
     assert mission["name"] == "Ship PRD-162"  # first line of the goal only
     assert mission["frequency"] == "SLA deadline"
     assert mission["next_run_at"] == soon.isoformat()
+
+
+# ── Board-task SLA deadlines (the 6th feed source) ─────────────────────────
+
+@_needs_croniter
+def test_get_schedule_includes_board_task_sla_deadlines():
+    """Open board tasks with an SLA deadline appear as 'task_due' items — the
+    same rule as missions: within the horizon, overdue included, closed never."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    soon = now + timedelta(hours=6)
+    overdue = now - timedelta(hours=3)
+    far = now + timedelta(days=90)
+    db = _FakeScheduleDB(
+        board_tasks=[
+            _Row(id=42, title="  Fix the calendar  ", status="assigned", priority="high",
+                 sla_deadline=soon, assigned_agent_id=3, agent_name="Ops"),
+            _Row(id=43, title="Stale inbox item", status="inbox", priority="medium",
+                 sla_deadline=overdue, assigned_agent_id=None, agent_name=None),
+            _Row(id=44, title="Next quarter", status="assigned", priority="low",
+                 sla_deadline=far, assigned_agent_id=None, agent_name=None),
+        ],
+    )
+    out = _svc(db).get_schedule(range_days=30)
+    due = {i["board_task_id"]: i for i in out["scheduled"] if i["type"] == "task_due"}
+    assert set(due) == {42, 43}  # 44 is past the horizon
+    assert due[42]["id"] == "board-42"
+    assert due[42]["name"] == "Fix the calendar"
+    assert due[42]["frequency"] == "SLA deadline"
+    assert due[42]["next_run_at"] == soon.isoformat()
+    assert due[42]["agent_name"] == "Ops" and due[42]["agent_id"] == 3
+    assert due[42]["status"] == "assigned" and due[42]["priority"] == "high"
+    assert due[43]["next_run_at"] == overdue.isoformat()  # overdue stays visible
+    assert db.execute_calls == 3
+
+
+def test_board_task_sla_source_only_reads_open_tasks():
+    """Closed tasks are excluded in SQL, not in Python — the query carries the
+    closed-status list, so a done task's deadline never reaches the calendar."""
+    from datetime import datetime, timezone
+    from services import activity_service as mod
+
+    class _CaptureDB(_FakeScheduleDB):
+        def execute(self, stmt, params=None):
+            self.last_sql = str(stmt)
+            return super().execute(stmt, params)
+
+    db = _CaptureDB()
+    now = datetime.now(timezone.utc)
+    _svc(db)._board_task_sla_items(now, now)
+    for status in mod._BOARD_CLOSED_STATUSES:
+        assert f"'{status}'" in db.last_sql
+    assert "sla_deadline IS NOT NULL" in db.last_sql
 
 
 def test_scheduler_health_returns_none_when_unknown():

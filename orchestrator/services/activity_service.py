@@ -26,6 +26,11 @@ from core.models.core import (
 )
 from services.schedule_util import interval_to_cron, is_valid_cron, next_run
 
+# Board tasks in these states are closed: their SLA deadline is history, not a
+# due time the calendar should show. Mirrors api.board_tasks.VALID_STATUSES.
+_BOARD_CLOSED_STATUSES = ("done", "failed", "cancelled")
+_BOARD_CLOSED_SQL = ", ".join(f"'{status}'" for status in _BOARD_CLOSED_STATUSES)
+
 logger = logging.getLogger(__name__)
 
 
@@ -782,6 +787,7 @@ class ActivityService:
             self._playbook_cron_items,
             self._scheduled_task_items,
             self._mission_sla_items,
+            self._board_task_sla_items,
         ):
             try:
                 items.extend(source(now, horizon))
@@ -856,6 +862,7 @@ class ActivityService:
             goal = ((row.goal or "").strip() or "Mission").splitlines()[0]
             items.append({
                 "id": f"mission-{row.id}",
+                "mission_id": row.id,
                 "name": goal[:80],
                 "type": "mission",
                 "next_run_at": deadline.isoformat(),
@@ -938,6 +945,7 @@ class ActivityService:
                 continue
             items.append({
                 "id": f"recipe-{tpl.id}",
+                "playbook_id": tpl.id,
                 "name": tpl.name,
                 "type": "recipe",
                 "next_run_at": nxt.isoformat(),
@@ -978,6 +986,8 @@ class ActivityService:
             label = (row.description or row.task_type or "Scheduled task").strip()
             items.append({
                 "id": f"task-{row.id}",
+                "scheduled_task_id": row.id,
+                "task_type": row.task_type,
                 "name": label[:80],
                 "type": "task",
                 "next_run_at": nxt.isoformat(),
@@ -986,6 +996,57 @@ class ActivityService:
                 "agent_id": None,
                 "recurrence": {
                     "cron_expression": cron,
+                    "interval_minutes": None,
+                    "timezone": "UTC",
+                    "active_hours": None,
+                },
+            })
+        return items
+
+    def _board_task_sla_items(
+        self, now: datetime, horizon: datetime
+    ) -> List[Dict[str, Any]]:
+        """Board-task SLA deadlines — ONE query over open tasks with a deadline.
+
+        Every board task carries an ``sla_deadline`` (stamped from its priority at
+        creation, or set explicitly by ``platform_create_task``) and the board
+        card shows it, but until now the calendar never did. Same rule as the
+        mission SLA source: a past deadline on a still-open task is included as
+        overdue (the frontend styles past-due items distinctly); a deadline past
+        the horizon is not."""
+        rows = self.db.execute(
+            text(
+                f"""
+                SELECT t.id, t.title, t.status, t.priority, t.sla_deadline,
+                       t.assigned_agent_id, a.name AS agent_name
+                FROM board_tasks t
+                LEFT JOIN agents a ON a.id = t.assigned_agent_id
+                WHERE t.workspace_id = :ws
+                  AND t.sla_deadline IS NOT NULL
+                  AND t.status NOT IN ({_BOARD_CLOSED_SQL})
+                """
+            ),
+            {"ws": self._ws_str},
+        ).fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            deadline = _as_utc(row.sla_deadline)
+            if deadline is None or deadline > horizon:
+                continue
+            title = (row.title or "").strip() or "Task"
+            items.append({
+                "id": f"board-{row.id}",
+                "board_task_id": row.id,
+                "name": title[:80],
+                "type": "task_due",
+                "next_run_at": deadline.isoformat(),
+                "frequency": "SLA deadline",
+                "agent_name": row.agent_name,
+                "agent_id": row.assigned_agent_id,
+                "status": row.status,
+                "priority": row.priority,
+                "recurrence": {
+                    "cron_expression": None,
                     "interval_minutes": None,
                     "timezone": "UTC",
                     "active_hours": None,

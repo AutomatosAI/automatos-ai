@@ -89,15 +89,32 @@ export interface ScheduleRecurrence {
   active_hours: Record<string, unknown> | null
 }
 
+/**
+ * The five sources of the schedule feed (PRD-162 + the board-task SLA source):
+ * routine = agent heartbeat, recipe = cron playbook, task = agent-scheduled task,
+ * mission = a mission's SLA deadline, task_due = a board task's SLA deadline.
+ */
+export type ScheduleItemType = 'routine' | 'recipe' | 'task' | 'mission' | 'task_due'
+
 export interface ScheduleItem {
   id: string
   name: string
-  type: 'routine' | 'recipe' | 'task' | 'mission'
+  type: ScheduleItemType
   next_run_at: string | null
   frequency: string
   agent_name: string | null
   agent_id: number | null
   recurrence?: ScheduleRecurrence
+  /** The row behind the item, so the calendar can act on it (pause, cancel,
+   *  open) without parsing the composite `id`. Each source sets its own. */
+  scheduled_task_id?: number
+  task_type?: 'one_shot' | 'recurring'
+  mission_id?: number
+  playbook_id?: number
+  board_task_id?: number
+  /** task_due only: the board card's status and priority */
+  status?: string
+  priority?: string
 }
 
 export interface ScheduleResponse {

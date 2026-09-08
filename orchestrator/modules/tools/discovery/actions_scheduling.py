@@ -113,10 +113,12 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
         name="platform_get_schedule",
         description=(
             "Show everything scheduled in the workspace right now — agent heartbeat "
-            "routines, cron-scheduled playbooks, and scheduled tasks — each with its "
-            "next run time. This is the same source of truth the calendar shows. Use "
-            "when asked 'what's scheduled?', 'what runs next?', or to review what "
-            "automations are set up."
+            "routines, cron-scheduled playbooks, scheduled tasks, and the SLA "
+            "deadlines on open missions and board tasks — each with its next run "
+            "or due time (a past due time on an open item means it is overdue). "
+            "This is the same source of truth the calendar shows. Use when asked "
+            "'what's scheduled?', 'what runs next?', 'what is due?', or to review "
+            "what automations are set up."
         ),
         category="scheduling",
         parameters={
