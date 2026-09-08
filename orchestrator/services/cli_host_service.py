@@ -856,8 +856,7 @@ def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Opt
     root = (projects_dir or "").rstrip("/")
     if root and (path == root or path.startswith(root + "/")):
         rel = _clean_relative(path[len(root):])
-        # PRD-239: an agent rooted at the projects folder itself browses all of it.
-        return f"{PROJECTS_PREFIX}/{rel}" if rel else PROJECTS_PREFIX
+        return f"{PROJECTS_PREFIX}/{rel}" if rel else None
     return None
 
 
@@ -983,6 +982,11 @@ def explorer_root_for(task_id: int, cwd: Optional[str], workspace_id: Any, proje
     anywhere else is not browsable from the platform (``None``)."""
     if not cwd:
         return f"sessions/{task_id}"
+    root = (projects_dir or "").rstrip("/")
+    if root and str(cwd).rstrip("/") == root:
+        # PRD-239 S6b: an agent rooted at the projects folder itself browses all of it
+        # (a FILE path is never the root, so workspace_relative_path keeps saying None).
+        return PROJECTS_PREFIX
     return workspace_relative_path(str(cwd), str(workspace_id), projects_dir)
 
 

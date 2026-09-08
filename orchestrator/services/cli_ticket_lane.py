@@ -262,7 +262,8 @@ def open_session_ticket(
     cwd = cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or None
     existing = session_ticket_for(db, workspace_id, chat_id, int(agent.id))
     if existing is not None:
-        ref = existing.runtime_ref if isinstance(existing.runtime_ref, dict) else {}
+        ref = getattr(existing, "runtime_ref", None)
+        ref = ref if isinstance(ref, dict) else {}
         if (ref.get("cwd") or None) != cwd:
             # The agent's folder changed: a Claude Code session belongs to the
             # folder its transcript lives in, so this conversation gets a NEW

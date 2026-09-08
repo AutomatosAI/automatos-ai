@@ -204,11 +204,16 @@ def test_the_sessions_route_is_declared_in_the_mount_manifest():
 
 # ── the agent's folder is the workspace ──────────────────────────────────────
 
-def test_the_projects_folder_itself_and_its_repos_are_browsable():
-    assert svc.workspace_relative_path("/Users/me/Development", "ws", "/Users/me/Development") == "projects"
-    assert svc.workspace_relative_path("/Users/me/Development/Automatos-AI-Platform", "ws", "/Users/me/Development") == "projects/Automatos-AI-Platform"
-    assert svc.workspace_relative_path("/Users/me/Elsewhere/repo", "ws", "/Users/me/Development") is None
-    assert svc.workspace_relative_path("/Users/me/Development-other/x", "ws", "/Users/me/Development") is None
+def test_the_projects_folder_itself_and_its_repos_are_browsable_explorer_roots():
+    root = "/Users/me/Development"
+    assert svc.explorer_root_for(93, root, "ws", root) == "projects"
+    assert svc.explorer_root_for(93, root + "/", "ws", root) == "projects"
+    assert svc.explorer_root_for(93, f"{root}/Automatos-AI-Platform", "ws", root) == "projects/Automatos-AI-Platform"
+    assert svc.explorer_root_for(93, "/Users/me/Elsewhere/repo", "ws", root) is None
+    assert svc.explorer_root_for(93, f"{root}-other/x", "ws", root) is None
+    assert svc.explorer_root_for(93, None, "ws", root) == "sessions/93"
+    # a FILE path equal to the root is still nothing (deliverables never live at the root)
+    assert svc.workspace_relative_path(root, "ws", root) is None
 
 
 def test_a_session_ticket_follows_the_agents_folder_with_a_fresh_session(monkeypatch):
