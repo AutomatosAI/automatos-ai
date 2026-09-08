@@ -170,6 +170,8 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   toolCalls?: ToolCall[]
   routingInfo?: RoutingInfo
   limitReached?: LimitReached
+  /** PRD-238 S1: live reasoning text while a reply streams (persisted as a part). */
+  reasoning?: string
 }
 
 /**
@@ -177,6 +179,8 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
  */
 export type MessagePart =
   | { type: 'text'; text: string }
+  /** PRD-238 S1: the model's deliberation, stored beside the answer, shown collapsed. */
+  | { type: 'reasoning'; reasoning: string }
   | { type: 'file'; filename: string; mediaType: string; url: string }
   | { type: 'tool-result'; toolName: string; result: any }
   | { type: 'artifact'; artifact: Artifact }

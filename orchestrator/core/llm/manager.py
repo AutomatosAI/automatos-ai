@@ -620,16 +620,29 @@ class LLMManager:
 
     # No fallback helpers — errors surface directly to the user.
 
-    async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> Any:
+    async def generate_response(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[Dict] = None,
+        on_delta=None,
+    ) -> Any:
         """Generate response using the configured provider, with automatic usage tracking.
 
         No silent fallbacks — errors surface directly to the user with
         actionable messages so they can fix their configuration.
+
+        PRD-238 S2: pass ``on_delta(kind, text)`` to receive text and reasoning
+        deltas live when the provider can stream; providers without a
+        ``stream_response`` answer whole, exactly as before.
         """
         self._ensure_provider_initialized()
         start = time.monotonic()
         try:
-            response = await self.provider.generate_response(messages, tools)
+            stream = getattr(self.provider, "stream_response", None) if on_delta is not None else None
+            if stream is not None:
+                response = await stream(messages, tools, on_delta=on_delta)
+            else:
+                response = await self.provider.generate_response(messages, tools)
             self._track_usage(response, start)
             return response
         except Exception as exc:
