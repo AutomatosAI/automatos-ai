@@ -45,7 +45,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # chains onto prd_workspace_models_backfill and is the new single head.
 # PRD-236 W1 (2026-09-03): prd236_w1_serving_provider chains onto the PRD-234 S1a
 # head — the catalogue keyed by (serving_provider, model_id).
-EXPECTED_HEAD = "prd236_w1_serving_provider"
+# 2026-09-08: prd236_w1_serving_provider and prd237_users_chat_sessions both chain
+# onto the S1a head (#700 landed on its stacked base after that base had merged);
+# prd236w1_prd237_merge joins them and is the single head.
+EXPECTED_HEAD = "prd236w1_prd237_merge"
 
 
 def _literal(node: ast.AST):
