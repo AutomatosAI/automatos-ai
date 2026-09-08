@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { isSessionAgent, type Agent } from './agent-selector'
+import { runtimeCanvasData, runtimeCanvasTitle, type RuntimeSession } from '@/lib/chat/runtime-canvas'
 import { WORKSPACE_ROOT, canvasTitleFor, normalizeCodeRoot } from '@/components/widgets/CodingCanvasWidget/code-root'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowDown, Target, X } from 'lucide-react'
@@ -76,6 +78,8 @@ export interface ChatProps {
   initialCodeRoot?: string
   /** PRD-235 W2 S3: the ticket whose Claude Code session this Canvas follows (from /chat?ticket=…) */
   initialCodeTicket?: string
+  /** PRD-239 S7 v2: open that ticket as a Runtime Canvas — explorer + its session in a terminal, fullscreen */
+  initialCodeRuntime?: boolean
   /** PRD-237 S7: the server is still producing a reply (page reloaded mid-turn). */
   initialAwaitingReply?: boolean
 }
@@ -89,6 +93,7 @@ export function Chat({
   initialLastContext,
   initialCodeRoot,
   initialCodeTicket,
+  initialCodeRuntime = false,
   initialAwaitingReply = false,
 }: ChatProps) {
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
@@ -123,7 +128,7 @@ export function Chat({
   const { data: agentsData } = useAgents()
   const agents = agentsData ?? []
 
-  const handleOpenCodeCanvas = useCallback((requestedRoot?: unknown, ticketId?: string) => {
+  const handleOpenCodeCanvas = useCallback((requestedRoot?: unknown, ticketId?: string, runtime = false) => {
     if (!workspace?.id) {
       toast.error('No workspace selected')
       return
@@ -147,10 +152,16 @@ export function Chat({
       return
     }
 
-    const widgetData: CodingCanvasWidgetData = { workspaceId: workspace.id, rootPath: root, ...(ticketId ? { taskId: ticketId } : {}) }
+    // PRD-239 S7 v2: a Runtime Canvas covers the page and opens the session itself.
+    const widgetData: CodingCanvasWidgetData = {
+      workspaceId: workspace.id,
+      rootPath: root,
+      ...(ticketId ? { taskId: ticketId } : {}),
+      ...(runtime && ticketId ? { runtime: true, openFullscreen: true } : {}),
+    }
     addWidget({
       type: 'coding_canvas',
-      title: canvasTitleFor(root),
+      title: runtime && ticketId ? `Session · ticket #${ticketId}` : canvasTitleFor(root),
       data: widgetData,
       metadata: {
         source: { type: 'user', name: 'code_canvas' },
@@ -235,9 +246,42 @@ export function Chat({
   useEffect(() => {
     if (initialCodeRoot && workspace?.id && !openedInitialRoot.current) {
       openedInitialRoot.current = true
-      handleOpenCodeCanvas(initialCodeRoot, initialCodeTicket)
+      handleOpenCodeCanvas(initialCodeRoot, initialCodeTicket, initialCodeRuntime)
     }
-  }, [initialCodeRoot, initialCodeTicket, workspace?.id, handleOpenCodeCanvas])
+  }, [initialCodeRoot, initialCodeTicket, initialCodeRuntime, workspace?.id, handleOpenCodeCanvas])
+
+  // PRD-239 S7 v2: a session agent (runtime: cli) is not a chat partner — picking it
+  // opens the Runtime Canvas on this conversation's session ticket (created once,
+  // resumed after), with the agent's Claude Code session already running.
+  const openSessionCanvas = useCallback(async (agentId: number) => {
+    if (!workspace?.id) {
+      toast.error('No workspace selected')
+      return
+    }
+    try {
+      const session = await apiClient.request<RuntimeSession>('/api/v1/cli-hosts/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ agent_id: agentId, chat_id: activeChatId }),
+      })
+      const existing = Object.values(useWorkspaceStore.getState().widgets).find(
+        (w: Widget) => w.type === 'coding_canvas' && (w.data as CodingCanvasWidgetData).taskId === String(session.task_id),
+      )
+      if (existing) {
+        useWorkspaceStore.getState().setActiveWidget(existing.id)
+        return
+      }
+      addWidget({
+        type: 'coding_canvas',
+        title: runtimeCanvasTitle(session),
+        data: runtimeCanvasData(workspace.id, session),
+        metadata: { source: { type: 'user', name: 'runtime_canvas' }, createdAt: new Date() },
+        state: 'ready',
+        createdAt: new Date().toISOString(),
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open the session')
+    }
+  }, [workspace?.id, activeChatId, addWidget])
 
   // PRD-235 W2: while a Code Canvas is open, the conversation is scoped to its folder —
   // the server renders it as the working scope for the workspace tools.
@@ -673,6 +717,11 @@ export function Chat({
   // PRD-50: Handle agent change — fire correction API when overriding auto-routed agent
   const handleAgentChange = useCallback((newAgentId: number | null) => {
     const prev = lastRoutingDecision.current
+    // PRD-239 S7 v2: a session agent opens its Runtime Canvas; the composer stays on Auto.
+    if (newAgentId && isSessionAgent(agents.find((a) => a.id === newAgentId) as unknown as Agent | undefined)) {
+      void openSessionCanvas(newAgentId)
+      return
+    }
     setSelectedAgentId(newAgentId)
 
     // If user selects a specific agent after an auto-route, record the correction
@@ -689,7 +738,7 @@ export function Chat({
         })
       }
     }
-  }, [messages])
+  }, [messages, agents, openSessionCanvas])
 
   // Track scroll - ensure listener is always attached to the current container
   useEffect(() => {

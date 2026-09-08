@@ -72,3 +72,19 @@ export async function connectWithRetry(
   }
   throw lastError ?? new Error('could not connect to the terminal')
 }
+
+/** PRD-239 S7 v2: what the grant launches in the PTY (the backend never sends the prompt). */
+export interface TerminalLaunch {
+  kind: 'claude'
+  session_id: string
+  agent_name?: string | null
+}
+
+/** The header line for a live terminal: who runs in it, or just the folder. */
+export function describeLaunch(launch: TerminalLaunch | null | undefined, cwd: string | null | undefined, fallback: string): string {
+  if (launch?.kind === 'claude') {
+    const who = launch.agent_name ? `${launch.agent_name} · Claude Code` : 'Claude Code'
+    return cwd ? `${who} · ${cwd}` : who
+  }
+  return cwd ?? fallback
+}

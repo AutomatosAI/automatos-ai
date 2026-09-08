@@ -4,6 +4,7 @@ import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, Ex
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import Link from 'next/link'
+import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
 import { parseBlockedReason } from './blocked-reason'
 import { useGrantApproval } from '@/hooks/use-approval-grants'
@@ -66,14 +67,10 @@ function SessionBlock({ task }: { task: BoardTask }) {
   if (!ref || ref.runtime !== 'cli') return null
   const files: string[] = Array.isArray(ref.files_touched) ? ref.files_touched : []
   const usage = ref.usage || {}
-  // Claude Code keeps transcripts per project directory, so `--resume` only
-  // works from the session's own cwd — which the host reports at SessionStart.
-  // Until then there is nothing to resume: say so instead of a command that
-  // answers "No conversation found".
-  const takeover = ref.session_id && ref.cwd
-    ? `cd ${ref.cwd} && claude --resume ${ref.session_id}`
-    : null
-  const takeoverPending = Boolean(ref.session_id && !ref.cwd && !ref.exit_reason)
+  // PRD-239 S7 v2: the session opens in the Runtime Canvas — the host starts or
+  // resumes it in the ticket's own folder, no command to copy.
+  const sessionId = ref.cli_session_id || ref.session_id
+  const interactive = ref.mode === 'terminal'
   return (
     <div>
       <SectionLabel icon={<TerminalSquare className="w-3 h-3" />}>Claude Code session</SectionLabel>
@@ -128,38 +125,22 @@ function SessionBlock({ task }: { task: BoardTask }) {
             </ul>
           </div>
         )}
-        {takeoverPending && (
-          <p className="text-xs text-muted-foreground" data-testid="takeover-pending">
-            Take-over becomes available once the session has started (the command needs its working directory).
-          </p>
-        )}
-        {takeover && (
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">Take over in your terminal (run it as one line — the transcript lives in that directory)</p>
-            <div className="flex items-center gap-2">
-              <code className="block flex-1 rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
-              <Button
-                type="button" size="sm" variant="outline" aria-label="Copy the takeover command"
-                onClick={async () => {
-                  try { await navigator.clipboard.writeText(takeover); toast.success('Copied') } catch { toast.error('Could not copy — select the text instead') }
-                }}
-              >
-                Copy
-              </Button>
-            </div>
+        {sessionId && (
+          <div className="flex flex-wrap items-center gap-2" data-testid="session-open">
+            <Link
+              href={sessionCanvasHref(task.id, ref.explorer_root)}
+              className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              <TerminalSquare className="w-3 h-3" /> {interactive && ref.terminal_attached_at ? 'Back to the session' : 'Open the session in the Canvas'}
+            </Link>
+            <span className="text-xs text-muted-foreground">
+              {interactive ? 'An interactive session — you type, on your machine.' : 'Continues this session in a terminal on your machine.'}
+            </span>
           </div>
         )}
         {/* PRD-235 W2: the session's folder in chat (Code mode) and in your own editor */}
-        {(ref.explorer_root || ref.cwd) && (
+        {ref.cwd && (
           <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="session-links">
-            {ref.explorer_root && (
-              <Link
-                href={`/chat?repo=${encodeURIComponent(ref.explorer_root)}&ticket=${task.id}`}
-                className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40"
-              >
-                <TerminalSquare className="w-3 h-3" /> Open this session in chat
-              </Link>
-            )}
             {ref.cwd && (
               <>
                 <a href={`vscode://file${ref.cwd}`} className="rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40">Open in VS Code</a>

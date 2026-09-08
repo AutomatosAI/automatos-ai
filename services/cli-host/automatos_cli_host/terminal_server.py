@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import pty
+import re
 import signal
 import socket
 import struct
@@ -44,7 +45,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed
-from .env import build_session_env
+from .claude_settings import record_directory_trust
+from .env import build_session_env, resolve_binary
+from .session import assert_args_honour_invariant
+from .transcript import transcript_path
 
 log = logging.getLogger("automatos.cli_host.terminal")
 
@@ -172,6 +176,10 @@ class Grant:
     cwd: Optional[str]
     task_id: Optional[str]
     expires_at: float
+    # PRD-239 S7 (Runtime Canvas): what to run in the PTY — ``None`` = the login
+    # shell; ``{"kind": "claude", "session_id": ..., ...}`` = the agent's own
+    # Claude Code session, started or resumed, with the human at the keyboard.
+    launch: Optional[Dict[str, Any]] = None
 
 
 class GrantStore:
@@ -200,6 +208,7 @@ class GrantStore:
                     cwd=str(raw["cwd"]) if raw.get("cwd") else None,
                     task_id=str(raw["task_id"]) if raw.get("task_id") is not None else None,
                     expires_at=expires_at,
+                    launch=dict(raw["launch"]) if isinstance(raw.get("launch"), dict) else None,
                 )
                 added += 1
             self._sweep(now)
@@ -220,6 +229,55 @@ class GrantStore:
             return len(self._grants)
 
 
+# ── launching the agent's own Claude Code session (PRD-239 S7 v2) ───────────
+
+_SESSION_ID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
+
+
+class LaunchError(RuntimeError):
+    """The grant asked for a session this host cannot start."""
+
+
+def build_terminal_args(
+    claude: str,
+    *,
+    session_id: str,
+    resume: bool,
+    system_prompt_path: Optional[Path],
+    model: Optional[str],
+    task_id: Optional[str],
+) -> List[str]:
+    """The interactive command for a Runtime Canvas terminal.
+
+    The same session the host runs for a ticket — the agent's soul appended,
+    the user's own settings, no MCP surprises — minus everything that assumed
+    nobody was at the keyboard: no ``--permission-mode acceptEdits`` (the
+    human answers Claude's own prompts), no hooks, no ``--worktree``, no
+    positional prompt. ``--resume`` continues a session whose transcript
+    exists on this machine; otherwise ``--session-id`` starts it under the
+    id the backend recorded on the ticket, so the next open resumes it.
+    """
+    args = [claude, "--resume" if resume else "--session-id", session_id]
+    if system_prompt_path is not None:
+        args += ["--append-system-prompt-file", str(system_prompt_path)]
+    args += ["--setting-sources", "user", "--strict-mcp-config"]
+    if task_id:
+        args += ["--name", f"automatos #{task_id}"]
+    if model:
+        args += ["--model", str(model)]
+    return args
+
+
+def transcript_exists(cwd: Path, session_id: str, home: Optional[Path] = None) -> bool:
+    """Whether ``claude --resume <session_id>`` would find its conversation
+    for a session started in ``cwd``: the exact path first, then any project
+    folder (a session can be resumed from a different directory by id)."""
+    if transcript_path(str(cwd), session_id, home).exists():
+        return True
+    root = (home or Path.home()) / ".claude" / "projects"
+    return any(root.glob(f"*/{session_id}.jsonl")) if root.is_dir() else False
+
+
 # ── the server ───────────────────────────────────────────────────────────────
 
 class TerminalServer:
@@ -233,9 +291,20 @@ class TerminalServer:
         shell: Optional[str] = None,
         max_terminals: int = MAX_TERMINALS,
         idle_timeout: float = IDLE_TIMEOUT_SECONDS,
+        claude: Optional[str] = None,
+        sessions_dir: Optional[Path] = None,
+        on_event: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
+        claude_home: Optional[Path] = None,
     ) -> None:
         self.allow_roots = list(allow_roots)
         self.default_root = default_root
+        # PRD-239 S7 v2: the Runtime Canvas launches the agent's Claude Code
+        # session in the PTY; ``on_event`` receives TerminalOpened/TerminalClosed
+        # for the ticket so the backend can show the session as attached.
+        self._claude = claude
+        self._sessions_dir = sessions_dir
+        self._on_event = on_event
+        self._claude_home = claude_home
         self.requested_port = int(port or 0)
         self.port: Optional[int] = None
         self.grants = GrantStore()
@@ -358,6 +427,11 @@ class TerminalServer:
         if not cwd.is_dir():
             self._refuse(conn, "404 Not Found", f"directory does not exist: {cwd}")
             return
+        try:
+            command, launched = self.command_for(grant, cwd)
+        except LaunchError as exc:
+            self._refuse(conn, "503 Service Unavailable", str(exc))
+            return
         with self._lock:
             if self._active >= self._max:
                 self._refuse(conn, "429 Too Many Requests", f"at most {self._max} terminals at a time")
@@ -368,13 +442,61 @@ class TerminalServer:
                 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                 f"Sec-WebSocket-Accept: {accept_key(headers['sec-websocket-key'])}\r\n\r\n".encode("ascii")
             )
-            self._bridge(conn, cwd, grant)
+            self._bridge(conn, cwd, grant, command, launched)
         finally:
             with self._lock:
                 self._active -= 1
 
+    def command_for(self, grant: Grant, cwd: Path) -> Tuple[List[str], Optional[Dict[str, Any]]]:
+        """The PTY's command: the login shell, or — for a launch grant — the
+        agent's Claude Code session. Returns ``(argv, launched)`` where
+        ``launched`` describes the session (``session_id``, ``resumed``) or is
+        ``None`` for a plain shell."""
+        launch = grant.launch
+        if not launch:
+            return [self._shell, "-l"], None
+        if launch.get("kind") != "claude":
+            raise LaunchError(f"unknown launch kind: {launch.get('kind')!r}")
+        session_id = str(launch.get("session_id") or "")
+        if not _SESSION_ID_RE.match(session_id):
+            raise LaunchError("the grant carries no valid session id")
+        claude = self._claude or resolve_binary("claude")
+        if not claude:
+            raise LaunchError("Claude Code is not installed on this machine (no `claude` on your PATH)")
+        system_prompt_path: Optional[Path] = None
+        soul = launch.get("system_prompt")
+        if isinstance(soul, str) and soul.strip() and self._sessions_dir is not None and grant.task_id:
+            session_dir = self._sessions_dir / grant.task_id
+            session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            system_prompt_path = session_dir / "system_prompt.md"
+            system_prompt_path.write_text(soul, encoding="utf-8")
+        resumed = transcript_exists(cwd, session_id, self._claude_home)
+        args = build_terminal_args(
+            claude,
+            session_id=session_id,
+            resume=resumed,
+            system_prompt_path=system_prompt_path,
+            model=str(launch["model"]) if launch.get("model") else None,
+            task_id=grant.task_id,
+        )
+        assert_args_honour_invariant(args)
+        try:
+            record_directory_trust(cwd)
+        except OSError as exc:
+            log.warning("could not record trust for %s: %s", cwd, exc)
+        return args, {"session_id": session_id, "resumed": resumed, "agent_name": launch.get("agent_name")}
+
+    def _emit(self, grant: Grant, event: str, payload: Dict[str, Any]) -> None:
+        if self._on_event is None or not grant.task_id:
+            return
+        try:
+            self._on_event(grant.task_id, event, payload)
+        except Exception:  # noqa: BLE001 — never let reporting break the terminal
+            log.debug("terminal event %s for ticket %s not delivered", event, grant.task_id, exc_info=True)
+
     # ── the PTY bridge ──────────────────────────────────────────────────────
-    def _bridge(self, conn: socket.socket, cwd: Path, grant: Grant) -> None:
+    def _bridge(self, conn: socket.socket, cwd: Path, grant: Grant, command: List[str],
+                launched: Optional[Dict[str, Any]]) -> None:
         env = build_session_env(extra={"TERM": "xterm-256color", "AUTOMATOS_TERMINAL": "1",
                                        **({"AUTOMATOS_TASK_ID": grant.task_id} if grant.task_id else {})})
         master, slave = pty.openpty()
@@ -390,11 +512,16 @@ class TerminalServer:
                 pass
 
         proc = subprocess.Popen(
-            [self._shell, "-l"], stdin=slave, stdout=slave, stderr=slave, cwd=str(cwd), env=env,
+            command, stdin=slave, stdout=slave, stderr=slave, cwd=str(cwd), env=env,
             start_new_session=True, preexec_fn=_child_setup, close_fds=True,
         )
         os.close(slave)
-        log.info("terminal opened in %s (pid %s%s)", cwd, proc.pid, f", ticket {grant.task_id}" if grant.task_id else "")
+        if launched:
+            log.info("terminal: Claude Code session %s %s in %s (pid %s, ticket %s)", launched["session_id"],
+                     "resumed" if launched["resumed"] else "started", cwd, proc.pid, grant.task_id)
+            self._emit(grant, "TerminalOpened", {**launched, "cwd": str(cwd), "pid": proc.pid})
+        else:
+            log.info("terminal opened in %s (pid %s%s)", cwd, proc.pid, f", ticket {grant.task_id}" if grant.task_id else "")
         closed = threading.Event()
 
         def _pump_output() -> None:
@@ -457,6 +584,8 @@ class TerminalServer:
             except OSError:
                 pass
             log.info("terminal in %s closed", cwd)
+            if launched:
+                self._emit(grant, "TerminalClosed", {**launched, "cwd": str(cwd), "exit_code": proc.returncode})
 
     @staticmethod
     def _control(master: int, payload: bytes) -> None:

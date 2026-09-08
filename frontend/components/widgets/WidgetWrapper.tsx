@@ -25,7 +25,10 @@ export function WidgetWrapper({ widget, isActive }: WidgetWrapperProps) {
   const removeWidget = useWorkspaceStore((s) => s.removeWidget)
   const setActiveWidget = useWorkspaceStore((s) => s.setActiveWidget)
   const bringToFront = useWorkspaceStore((s) => s.bringToFront)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  // PRD-239 S7 v2: a Runtime Canvas opens covering the page (no chat beside it).
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(
+    () => Boolean((widget.data as { openFullscreen?: boolean } | undefined)?.openFullscreen),
+  )
 
   // Get widget definition from registry
   const definition = useMemo(() => getWidget(widget.type), [widget.type])

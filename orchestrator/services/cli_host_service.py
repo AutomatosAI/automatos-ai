@@ -37,7 +37,7 @@ from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
 from services.board_dispatcher import claim_tasks, renew_lease
 from services.board_events import notify_board_event
-from services.cli_ticket_lane import CHAT_SOURCE_TYPE
+from services.cli_ticket_lane import SESSION_MODE_TERMINAL
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ def revoke_host(db: Session, host: CliHost) -> None:
 # was built for. A host that sees the fingerprint change drains and exits; its
 # service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
 # whenever the wire contract changes so a stale checkout is told, not surprised.
-EXPECTED_CLI_HOST_VERSION = "0.3.0"  # PRD-239: system_prompt + resume_session_id on the claim
+EXPECTED_CLI_HOST_VERSION = "0.4.0"  # PRD-239 S7 v2: terminal grants carry a launch; TerminalOpened/Closed events
 
 _CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py")
 
@@ -366,6 +366,7 @@ def mint_terminal_grant(
     if not port:
         raise LookupError("this host does not serve a terminal — update the host to 0.3.0+ and restart it")
     resolved_cwd: Optional[str] = None
+    launch: Optional[Dict[str, Any]] = None
     if task_id is not None:
         task = (
             db.query(BoardTask)
@@ -376,6 +377,7 @@ def mint_terminal_grant(
             raise LookupError(f"task {task_id} not found in this workspace")
         ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
         resolved_cwd = str(ref["cwd"]) if ref.get("cwd") else None
+        launch = _terminal_launch_for(db, task, ref, host)
     elif cwd:
         errors = validate_working_directory(cwd)
         if errors:
@@ -392,9 +394,13 @@ def mint_terminal_grant(
         "cwd": resolved_cwd,
         "task_id": str(task_id) if task_id is not None else None,
         "expires_at": expires_at,
+        # PRD-239 S7 v2: what the host runs in the PTY (None = the login shell).
+        "launch": launch,
     }
     push_terminal_grant(host.id, grant)
+    db.commit()
     return {
+        "launch": _launch_summary(launch),
         "token": token,
         "port": int(port),
         "ws_url": f"ws://127.0.0.1:{int(port)}/terminal?token={token}",
@@ -415,6 +421,61 @@ def list_hosts(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
 
 
 # ── heartbeat + reconciliation ───────────────────────────────────────────────
+
+def _host_version_at_least(raw: Any, minimum: Tuple[int, ...]) -> bool:
+    try:
+        parts = tuple(int(x) for x in str(raw or "").split("."))
+    except ValueError:
+        return False
+    return bool(parts) and parts >= minimum
+
+
+def _terminal_launch_for(db: Session, task: BoardTask, ref: Dict[str, Any], host: CliHost) -> Optional[Dict[str, Any]]:
+    """PRD-239 S7 v2: what the Canvas terminal runs for this ticket — the agent's
+    own Claude Code session under the ticket's session id (the host resumes it
+    when the transcript exists on that machine, else starts it under that id so
+    the next open resumes it). A ticket without a cli session → a plain shell."""
+    if ref.get("runtime") != RUNTIME_CLI and ref.get("mode") != SESSION_MODE_TERMINAL:
+        return None
+    session_id = ref.get("cli_session_id") or ref.get("session_id")
+    if not session_id:
+        return None
+    caps = host.capabilities if isinstance(host.capabilities, dict) else {}
+    if not _host_version_at_least(caps.get("host_version"), (0, 4, 0)):
+        raise LookupError("this host cannot launch a session in the terminal — update the host to 0.4.0+ and restart it")
+    agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
+    if ref.get("mode") == SESSION_MODE_TERMINAL and ref.get("host_id") != str(host.id):
+        # The session moves with the operator: the host that opens it owns its events.
+        task.runtime_ref = {**ref, "host_id": str(host.id)}
+    return {
+        "kind": "claude",
+        "session_id": str(session_id),
+        "system_prompt": _session_system_prompt(agent),
+        "model": ref.get("model"),
+        "agent_name": getattr(agent, "name", None),
+    }
+
+
+def _launch_summary(launch: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """What the browser may know about the launch (never the prompt)."""
+    if not launch:
+        return None
+    return {"kind": launch.get("kind"), "session_id": launch.get("session_id"), "agent_name": launch.get("agent_name")}
+
+
+def newest_online_host(db: Session, workspace_id: Any) -> Optional[CliHost]:
+    """The paired host that heartbeated most recently — where a Runtime Canvas
+    session opens — or None when no host is online."""
+    from core.models.cli_hosts import CliHostStatus
+
+    hosts = db.query(CliHost).filter(
+        CliHost.workspace_id == workspace_id, CliHost.status == CliHostStatus.PAIRED.value,
+    ).all()
+    online = [h for h in hosts if h.is_online()]
+    if not online:
+        return None
+    return max(online, key=lambda h: h.last_seen_at or datetime.min.replace(tzinfo=timezone.utc))
+
 
 def record_heartbeat(
     db: Session,
@@ -533,26 +594,13 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             db.refresh(task)
             parked.append({"task_id": task.id, "title": task.title, "reason": task.blocked_reason})
             continue  # parked ``blocked`` by the gate; the answered-resume loop returns it
-        from services.cli_ticket_lane import NO_HOST_REASON, running_predecessor_of
+        from services.cli_ticket_lane import NO_HOST_REASON
         if task.blocked_reason == NO_HOST_REASON:
             task.blocked_reason = None  # a host is here now
-        # PRD-239 S2: one session takes one turn at a time — a chat ticket whose
-        # predecessor in the same conversation is still running goes back to
-        # 'assigned' and is claimed once that session has ended.
-        predecessor = running_predecessor_of(db, task)
-        if predecessor is not None:
-            _release_claim(task)
-            logger.info("[cli-host] ticket #%s waits for #%s (same conversation) — released", task.id, predecessor.id)
-            continue
         agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
         cfg = (getattr(agent, "configuration", None) if agent else None) or {}
         prior = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
         resume_session_id = _resume_session_for(prior, host)
-        if resume_session_id is None and task.source_type == CHAT_SOURCE_TYPE:
-            # The previous turn was still running when this message was filed
-            # (the hold above waited for it): resolve the session to continue
-            # NOW that it has ended — again only when this host ran it.
-            resume_session_id = _resume_previous_chat_session(db, task, host)
         session_id = str(uuid4())
         ref = {
             "runtime": RUNTIME_CLI,
@@ -590,8 +638,8 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
                 # PRD-239 S1: the agent's soul (description, persona, skills),
                 # stable per agent — the host appends it to the session prompt.
                 "system_prompt": _session_system_prompt(agent),
-                # PRD-239 S2: continue this conversation's previous session on
-                # this host (``claude --resume``); None starts a fresh one.
+                # PRD-239: continue the session a lane asked to resume, on the
+                # host that ran it (``claude --resume``); None starts a fresh one.
                 "resume_session_id": resume_session_id,
             }
         )
@@ -624,45 +672,6 @@ def _resume_session_for(prior: Dict[str, Any], host: CliHost) -> Optional[str]:
     return str(session_id)
 
 
-def _resume_previous_chat_session(db: Session, task: BoardTask, host: CliHost) -> Optional[str]:
-    """The ended session of this conversation's previous turn, when THIS host ran
-    it — resolved at claim time for a chat ticket filed while that turn was
-    still running (so the filing could not know the session yet)."""
-    from services.cli_ticket_lane import chat_origin_of, previous_session_of
-
-    chat_id = chat_origin_of(task)
-    if not chat_id or not getattr(task, "assigned_agent_id", None):
-        return None
-    previous = previous_session_of(db, task.workspace_id, chat_id, task.assigned_agent_id)
-    if not previous or str(previous[1]) != str(host.id):
-        return None
-    return str(previous[0])
-
-
-def _release_claim(task: BoardTask) -> None:
-    """Undo this claim: back to ``assigned`` with no lease, so the next claim
-    (this host's or another's) takes the ticket when its turn comes. The
-    pre-claim ``runtime_ref`` (resume hints) is untouched."""
-    task.status = "assigned"
-    task.lease_until = None
-
-
-# ── events + results ─────────────────────────────────────────────────────────
-
-def _owned_task(db: Session, host: CliHost, task_id: int) -> BoardTask:
-    task = (
-        db.query(BoardTask)
-        .filter(BoardTask.id == task_id, BoardTask.workspace_id == host.workspace_id)
-        .first()
-    )
-    if task is None:
-        raise LookupError(f"task {task_id} not found in this host's workspace")
-    ref = task.runtime_ref or {}
-    if ref.get("host_id") != str(host.id):
-        raise PermissionError(f"task {task_id} is not claimed by this host")
-    return task
-
-
 def _record_session_cwd(ref: Dict[str, Any], task: BoardTask, cwd: str) -> None:
     """The directory the session actually runs in, plus the explorer root that
     follows from it. One writer for SessionStart and the result (PRD-239)."""
@@ -672,6 +681,57 @@ def _record_session_cwd(ref: Dict[str, Any], task: BoardTask, cwd: str) -> None:
     )
 
 
+TERMINAL_EVENTS = ("TerminalOpened", "TerminalClosed")
+
+
+def _terminal_event_name(ev: Any) -> Optional[str]:
+    name = (ev.get("hook_event_name") or ev.get("event")) if isinstance(ev, dict) else None
+    return name if name in TERMINAL_EVENTS else None
+
+
+def _record_terminal_events(db: Session, host: CliHost, task_id: int, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """PRD-239 S7 v2: the Runtime Canvas attached to / left a ticket. No lease is
+    ever set (the sweeper and the claim loop must never touch a session the
+    human drives); an interactive session ticket is ``in_progress`` while a
+    terminal is attached and ``done`` otherwise. A host-run ticket reopened in
+    the terminal keeps its status and only records where the session runs."""
+    task = _owned_task(db, host, task_id)
+    ref = dict(task.runtime_ref or {})
+    interactive = ref.get("mode") == SESSION_MODE_TERMINAL
+    status_before = task.status
+    for ev in events:
+        name = _terminal_event_name(ev)
+        if ev.get("session_id"):
+            ref["cli_session_id"] = str(ev["session_id"])
+        if ev.get("cwd"):
+            _record_session_cwd(ref, task, str(ev["cwd"]))
+        ref["last_event"] = name
+        ref["last_event_at"] = _iso(_now())
+        if name == "TerminalOpened":
+            ref["terminal_attached_at"] = _iso(_now())
+            ref["terminal_resumed"] = bool(ev.get("resumed"))
+            ref.pop("terminal_closed_at", None)
+            if interactive:
+                task.status = "in_progress"
+                task.lease_until = None
+                task.completed_at = None
+        elif name == "TerminalClosed":
+            ref["terminal_closed_at"] = _iso(_now())
+            ref.pop("terminal_attached_at", None)
+            if interactive:
+                task.status = "done"
+                task.completed_at = _now()
+                task.lease_until = None
+    task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
+    db.commit()
+    if task.status != status_before:
+        notify_board_event(
+            db, workspace_id=host.workspace_id, task_id=task.id, status=task.status,
+            event="task_claimed" if task.status == "in_progress" else "task_completed",
+        )
+    return {"status": task.status, "lease_renewed": False, "control": {}, "decisions": []}
+
+
 def record_events(
     db: Session, host: CliHost, task_id: int, events: Optional[List[Dict[str, Any]]]
 ) -> Dict[str, Any]:
@@ -679,10 +739,12 @@ def record_events(
     in ``runtime_ref`` (live tool, transcript path, counts), and hand back control
     (``cancel``) the host must act on. Events are not persisted individually here
     — S2 maps them to board events and the fleet."""
+    events = events or []
+    if events and all(_terminal_event_name(ev) for ev in events):
+        return _record_terminal_events(db, host, task_id, events)
     task = _owned_task(db, host, task_id)
     renewed = renew_lease(db, task_id, lease_seconds=config.BOARD_DISPATCH_LEASE_SECONDS)
     ref = dict(task.runtime_ref or {})
-    events = events or []
     ref["events_seen"] = int(ref.get("events_seen") or 0) + len(events)
     ref["last_event_at"] = _iso(_now())
     for ev in events:
@@ -1101,10 +1163,4 @@ async def apply_result(
         review_mode=task.review_mode or "auto",
         force_review=bool(denials),
     )
-    # PRD-239 S2: a chat ticket's ending IS the reply the conversation is
-    # waiting for — post it there (fail-soft; the board keeps the record).
-    if terminal is not None and task.source_type == CHAT_SOURCE_TYPE:
-        from services.session_agent_chat import deliver_session_reply
-
-        deliver_session_reply(db, task, exec_result, str(terminal), agent_name=getattr(agent_row, "name", None))
     return {"applied": terminal is not None, "status": terminal or task.status}

@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional, Sequence
+from typing import Tuple, Any, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-from core.cli_runtime import RUNTIME_CLI, runtime_kind_of
+from core.cli_runtime import (
+    CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, RUNTIME_CLI, runtime_kind_of,
+)
 from core.models.core import Agent, BoardTask
 
 logger = logging.getLogger(__name__)
@@ -197,24 +199,30 @@ RUNNING_STATUSES: Sequence[str] = ("assigned", "in_progress", "blocked")
 DEFAULT_LANE_POLL_SECONDS = 5
 
 
-def chat_source_id(chat_id: Any, message_key: Any) -> str:
-    """``chat:<chat id>:<message key>`` — one ticket per chat message."""
-    return f"{CHAT_SOURCE_TYPE}:{chat_id}:{message_key}"
+SESSION_MODE_TERMINAL = "terminal"
 
 
-def chat_origin_of(task: Any) -> Optional[str]:
-    """The conversation a chat ticket belongs to (from its source id), else None."""
-    if getattr(task, "source_type", None) != CHAT_SOURCE_TYPE:
-        return None
-    raw = str(getattr(task, "source_id", "") or "")
-    parts = raw.split(":", 2)
-    if len(parts) < 2 or parts[0] != CHAT_SOURCE_TYPE or not parts[1]:
-        return None
-    return parts[1]
+def session_agent_terminal_message(db: Session, agent_id: Any) -> str:
+    """PRD-239 S7 v2: what a chat message to a session agent gets back — the
+    agent talks in the Runtime Canvas terminal, not through the chat lane."""
+    try:
+        name = db.query(Agent.name).filter(Agent.id == int(agent_id)).scalar() or "This agent"
+    except Exception:  # noqa: BLE001
+        name = "This agent"
+    return (
+        f"{name} runs as a Claude Code session in the Canvas terminal. Pick {name} in the agent menu "
+        f"or open the session from the board to talk to {name} there."
+    )
 
 
-def chat_tickets(db: Session, workspace_id: Any, chat_id: Any, agent_id: int, statuses: Sequence[str]):
-    """This conversation's tickets for this agent, newest first."""
+def session_source_id(chat_id: Any) -> str:
+    """``chat:<chat id>:session`` — ONE session ticket per conversation and agent
+    (PRD-239 S7 v2): the Runtime Canvas resumes it every time it opens."""
+    return f"{CHAT_SOURCE_TYPE}:{chat_id}:session"
+
+
+def session_ticket_for(db: Session, workspace_id: Any, chat_id: Any, agent_id: int) -> Optional[BoardTask]:
+    """This conversation's session ticket for this agent, whatever its status."""
     try:
         return (
             db.query(BoardTask)
@@ -222,42 +230,87 @@ def chat_tickets(db: Session, workspace_id: Any, chat_id: Any, agent_id: int, st
                 BoardTask.workspace_id == workspace_id,
                 BoardTask.assigned_agent_id == int(agent_id),
                 BoardTask.source_type == CHAT_SOURCE_TYPE,
-                BoardTask.source_id.like(f"{CHAT_SOURCE_TYPE}:{chat_id}:%"),
-                BoardTask.status.in_(list(statuses)),
+                BoardTask.source_id == session_source_id(chat_id),
             )
             .order_by(BoardTask.id.desc())
-            .all()
+            .first()
         )
-    except Exception:  # noqa: BLE001 — a broken query means "no history", never a failed turn
-        logger.debug("[CliTicketLane] chat ticket lookup failed", exc_info=True)
-        return []
-
-
-def previous_session_of(db: Session, workspace_id: Any, chat_id: Any, agent_id: int):
-    """``(session id, host id)`` of the newest ENDED chat ticket of this
-    conversation and agent, or ``None``. The session id the hooks reported wins
-    over the pre-assigned one (a resumed session keeps its own id)."""
-    for task in chat_tickets(db, workspace_id, chat_id, agent_id, TERMINAL_STATUSES):
-        ref = getattr(task, "runtime_ref", None)
-        if not isinstance(ref, dict):
-            continue
-        session_id = ref.get("cli_session_id") or ref.get("session_id")
-        host_id = ref.get("host_id")
-        if session_id and host_id:
-            return str(session_id), str(host_id)
-    return None
-
-
-def running_predecessor_of(db: Session, task: Any) -> Optional[BoardTask]:
-    """An OLDER chat ticket of the same conversation + agent that is still
-    running (``in_progress``), or None. One session takes one turn at a time."""
-    chat_id = chat_origin_of(task)
-    if not chat_id or not getattr(task, "assigned_agent_id", None):
+    except Exception:  # noqa: BLE001 — a broken lookup means "no session yet"
+        logger.debug("[CliTicketLane] session ticket lookup failed", exc_info=True)
         return None
-    for other in chat_tickets(db, task.workspace_id, chat_id, task.assigned_agent_id, ("in_progress",)):
-        if other.id != task.id and other.id < task.id:
-            return other
-    return None
+
+
+def open_session_ticket(
+    db: Session, *, workspace_id: Any, agent: Any, chat_id: Any, host: Any, actor: Optional[str],
+) -> Tuple[BoardTask, bool]:
+    """The ticket behind a Runtime Canvas session with ``agent`` in ``chat_id``:
+    the existing one (resumed), or a new one — ``(ticket, created)``.
+
+    The ticket is the session's record: its ``runtime_ref`` carries the Claude
+    Code session id the host starts or resumes, the working directory and the
+    host. It is NEVER dispatched: no lease (the sweeper leaves ``in_progress``
+    tickets without one alone) and no ``assigned`` phase for the claim loop.
+    ``TerminalOpened``/``TerminalClosed`` from the host move it between
+    ``in_progress`` and ``done``.
+    """
+    from uuid import uuid4
+
+    existing = session_ticket_for(db, workspace_id, chat_id, int(agent.id))
+    if existing is not None:
+        return existing, False
+    cfg = getattr(agent, "configuration", None) or {}
+    cwd = cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or None
+    from config import config
+    from services.cli_host_service import explorer_root_for
+
+    name = getattr(agent, "name", None) or "the agent"
+    task = BoardTask(
+        workspace_id=workspace_id,
+        title=f"Session with {name}"[:255],
+        description=(
+            f"Interactive Claude Code session with {name}, opened from the chat. "
+            "You type in the Canvas terminal; the session runs on your machine under your own login."
+        ),
+        priority="medium",
+        assigned_agent_id=int(agent.id),
+        status="in_progress",
+        lease_until=None,
+        created_by_type="user",
+        created_by_id=actor or "operator",
+        source_type=CHAT_SOURCE_TYPE,
+        source_id=session_source_id(chat_id),
+        review_mode="manual",
+        tags=["session"],
+    )
+    session_id = str(uuid4())
+    task.runtime_ref = {
+        "runtime": "cli",
+        "mode": SESSION_MODE_TERMINAL,
+        "host_id": str(host.id),
+        "session_id": session_id,
+        "cwd": cwd,
+        "provider": cfg.get(CONFIG_PROVIDER_KEY),
+        "model": cfg.get(CONFIG_MODEL_KEY),
+        "explorer_root": None,
+    }
+    db.add(task)
+    db.flush()
+    task.runtime_ref = {
+        **task.runtime_ref,
+        "explorer_root": explorer_root_for(task.id, cwd, workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None),
+    }
+    db.commit()
+    db.refresh(task)
+    from services.board_consent import WHY_ASKED_IN_CHAT, consent_for_created_ticket
+    if actor:
+        consent_for_created_ticket(db, workspace_id=workspace_id, task=task, actor=actor, why=WHY_ASKED_IN_CHAT)
+    try:
+        from services.board_events import notify_board_event
+        notify_board_event(db, workspace_id=str(workspace_id), task_id=task.id, status=task.status, event="task_created")
+    except Exception:  # noqa: BLE001
+        logger.debug("[CliTicketLane] board notify skipped", exc_info=True)
+    logger.info("[CliTicketLane] opened session ticket #%s for agent %s in chat %s", task.id, agent.id, chat_id)
+    return task, True
 
 
 def exec_result_for(task: Any) -> dict:

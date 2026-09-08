@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import os
 import signal
 import sys
@@ -99,6 +100,9 @@ class Host:
         self.exit_code = 0
         # PRD-239 S7: the Canvas terminal (the operator's own shell on the loopback)
         self.terminal: Optional[TerminalServer] = None
+        # PRD-239 S7 v2: TerminalOpened/TerminalClosed per ticket, shipped with the
+        # session events (same endpoint, same batches).
+        self.terminal_events: "queue.Queue[tuple]" = queue.Queue()
 
     # ── setup ───────────────────────────────────────────────────────────────
     def prepare(self) -> None:
@@ -120,6 +124,10 @@ class Host:
             self.terminal = TerminalServer(
                 self.allow_roots, self.allow_roots[0], port=self.cfg.terminal_port,
                 workspace_id=lambda: str((self.identity or {}).get("workspace_id") or ""),
+                # PRD-239 S7 v2: the Runtime Canvas launches the agent's own Claude
+                # Code session in the PTY; its open/close reach the ticket as events.
+                claude=self.cfg.claude_binary, sessions_dir=self.cfg.sessions_dir,
+                on_event=self._terminal_event,
             )
             log.info("terminal server on 127.0.0.1:%s (the Canvas terminal)", self.terminal.start())
 
@@ -298,7 +306,22 @@ class Host:
                           "started_at": session.started_at}
         state.save_process_table(self.cfg.process_table_path, table)
 
+    def _terminal_event(self, task_id: str, event: str, payload: Dict[str, Any]) -> None:
+        self.terminal_events.put((str(task_id), {"hook_event_name": event, **payload}))
+
+    def _flush_terminal_events(self, host_id: str) -> None:
+        batches: Dict[str, List[Dict[str, Any]]] = {}
+        while not self.terminal_events.empty():
+            task_id, ev = self.terminal_events.get_nowait()
+            batches.setdefault(task_id, []).append(ev)
+        for task_id, batch in batches.items():
+            try:
+                self.api.events(host_id, int(task_id), batch)
+            except (BackendError, ValueError) as exc:
+                log.warning("terminal events for ticket %s failed (%s) — dropped", task_id, exc)
+
     def _flush_events(self, host_id: str) -> None:
+        self._flush_terminal_events(host_id)
         for task_id, session in list(self.sessions.items()):
             batch: List[Dict[str, Any]] = []
             while not session.events.empty() and len(batch) < 200:

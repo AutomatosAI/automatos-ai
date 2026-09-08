@@ -59,7 +59,10 @@ export function CodingCanvasWidget({
   const root = data.rootPath || WORKSPACE_ROOT
   const { invalidateCache, fetchDirectory } = useWorkspaceFiles(workspaceId, root)
   const session = useCanvasSession(workspaceId, { taskId: data.taskId ?? null })
-  // PRD-239 S7: a ticket's Canvas opens on the terminal; the SDK canvas on its session.
+  // PRD-239 S7 v2: a Runtime Canvas is explorer + the agent's Claude Code session in
+  // a wide terminal, opened for you — no chat, no session log (nothing is dispatched).
+  const runtime = Boolean(data.runtime)
+  // A ticket's Canvas opens on the terminal; the SDK canvas on its session.
   const [rightTab, setRightTab] = useState<'terminal' | 'session'>(session.external ? 'terminal' : 'session')
 
   const handleRefresh = useCallback(() => {
@@ -113,8 +116,13 @@ export function CodingCanvasWidget({
       contentClassName="p-0"
     >
       <div className="flex h-full min-h-[300px] flex-col">
-      <RootPicker workspaceId={workspaceId} value={root} onChange={handleRootChange} />
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_420px]">
+      <RootPicker
+        workspaceId={workspaceId}
+        value={root}
+        onChange={handleRootChange}
+        note={runtime ? 'Your session runs on your machine, in this folder.' : undefined}
+      />
+      <div className={`grid min-h-0 flex-1 grid-cols-1 ${runtime ? 'md:grid-cols-[minmax(320px,2fr)_minmax(560px,3fr)]' : 'md:grid-cols-[1fr_420px]'}`} data-testid={runtime ? 'runtime-canvas' : 'code-canvas'}>
         <WorkspaceExplorer
           workspaceId={workspaceId}
           rootPath={root}
@@ -124,6 +132,7 @@ export function CodingCanvasWidget({
         {/* PRD-239 S7: the right column is a real terminal (your own shell on your
             machine, via the CLI host) or the session view — one at a time. */}
         <div className="flex h-full min-h-0 flex-col border-l border-border">
+          {!runtime && (
           <div className="flex items-center gap-1 border-b border-border px-2 py-1" role="tablist" data-testid="canvas-right-tabs">
             <button
               type="button"
@@ -144,9 +153,10 @@ export function CodingCanvasWidget({
               {session.external ? 'Session log' : 'Auto session'}
             </button>
           </div>
+          )}
           <div className="min-h-0 flex-1">
-            {rightTab === 'terminal' ? (
-              <CanvasTerminal taskId={data.taskId ?? null} />
+            {runtime || rightTab === 'terminal' ? (
+              <CanvasTerminal taskId={data.taskId ?? null} autoOpen={runtime} runtime={runtime} />
             ) : (
               <CanvasSessionPanel session={session} workspaceId={workspaceId} />
             )}

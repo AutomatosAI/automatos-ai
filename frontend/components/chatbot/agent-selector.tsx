@@ -43,7 +43,7 @@ export interface Agent {
   configuration?: { runtime?: string | null } | null
 }
 
-/** PRD-239 S2: a session agent answers through a ticket its Claude Code session works. */
+/** PRD-239: a session agent (runtime: cli) opens in the Runtime Canvas — you talk to it in the terminal. */
 export const isSessionAgent = (agent?: Agent | null): boolean => agent?.configuration?.runtime === 'cli'
 
 export interface AgentSelectorProps {
@@ -232,8 +232,8 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-sm">{agent.name}</div>
                     {isSessionAgent(agent) ? (
-                      // PRD-239 S2: the reply comes back through a ticket the session works
-                      <span className="text-[10px] text-primary/80 bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
+                      // PRD-239 S7 v2: picking it opens the Runtime Canvas (explorer + terminal)
+                      <span className="text-[10px] text-primary/80 bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20" title="Opens the session in the Canvas terminal">
                         Claude Code session
                       </span>
                     ) : (
