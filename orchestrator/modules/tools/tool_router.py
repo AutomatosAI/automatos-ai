@@ -295,21 +295,32 @@ def _lexical_shortlist(
     exclude_promoted: bool,
     include_super_admin: bool,
 ) -> Optional[List[str]]:
-    """PRD-238 S11: names from the index's lexical ranking, or None when empty."""
-    names = index.lexical_rank(
+    """PRD-238 S11: names from the index's lexical ranking, or None when empty.
+
+    Only a real, non-empty list of action names counts — an index without a
+    lexical ranking (or one answering anything else) leaves the caller on its
+    full-enum fallback exactly as before.
+    """
+    ranker = getattr(index, "lexical_rank", None)
+    if not callable(ranker):
+        return None
+    names = ranker(
         query,
         top_k=top_k,
         exclude_admin=exclude_admin,
         exclude_promoted=exclude_promoted,
         include_super_admin=include_super_admin,
     )
-    if names:
-        logger.info(
-            "[tool-router] semantic narrowing unavailable — lexical shortlist narrowed to %d action(s)",
-            len(names),
-        )
-        return list(names)
-    return None
+    if not isinstance(names, (list, tuple)):
+        return None
+    kept = [n for n in names if isinstance(n, str) and n]
+    if not kept:
+        return None
+    logger.info(
+        "[tool-router] semantic narrowing unavailable — lexical shortlist narrowed to %d action(s)",
+        len(kept),
+    )
+    return kept
 
 
 def _rank_actions_for_dispatcher(

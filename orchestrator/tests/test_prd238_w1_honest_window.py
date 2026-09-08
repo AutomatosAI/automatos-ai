@@ -254,7 +254,7 @@ def test_lexical_rank_orders_by_overlap_and_ignores_stopwords():
     assert "platform_fleet_status" in names
     assert "platform_list_agents" not in names  # no overlap at all
     assert lexical_rank("the and of", actions) == []
-    assert lexical_rank("system", actions, top_k=1) == [ranked[0]]
+    assert [n for n, _ in lexical_rank("system", actions, top_k=1)] == [names[0]]
 
 
 def test_router_falls_back_to_the_lexical_shortlist(monkeypatch):
