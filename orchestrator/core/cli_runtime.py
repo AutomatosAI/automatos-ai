@@ -110,11 +110,13 @@ def validate_working_directory(value: Any) -> List[str]:
         return []
     if not isinstance(value, str):
         return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} must be a string path, got {type(value).__name__}"]
+    # Control characters are checked on the value as typed — strip() would hide a
+    # trailing newline and let it through.
+    if any(ch in value for ch in ("\x00", "\n", "\r")):
+        return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} contains a control character"]
     path = value.strip()
     if not path.startswith("/"):
         return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} must be an absolute path, got {value!r}"]
-    if any(ch in path for ch in ("\x00", "\n", "\r")):
-        return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} contains a control character"]
     if any(segment == ".." for segment in path.split("/")):
         return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} must not contain '..' segments, got {value!r}"]
     return []
