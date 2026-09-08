@@ -99,7 +99,13 @@ class TaskReconciler:
                            execution_metadata, started_at
                     FROM recipe_executions
                     WHERE status = 'running'
-                      AND started_at < :cutoff
+                      -- PRD-239 S3b: a run that keeps marking progress is not stalled —
+                      -- a session agent's step legitimately runs for many minutes and
+                      -- stamps execution_metadata.last_progress_at while it waits.
+                      AND GREATEST(
+                            started_at,
+                            COALESCE((execution_metadata->>'last_progress_at')::timestamp, started_at)
+                          ) < :cutoff
                 """),
                 {"cutoff": now - _timedelta_seconds(app_config.TASK_STALL_TIMEOUT_SECONDS)},
             ).fetchall()

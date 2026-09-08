@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Tuple, Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -374,12 +374,17 @@ async def run_cli_ticket_and_wait(
     source_id: str,
     timeout_s: Optional[float] = None,
     poll_s: Optional[float] = None,
+    on_poll: Optional[Callable[[Any], None]] = None,
     **file_kwargs: Any,
 ) -> dict:
     """File the ticket a step or mission task owes a session agent and wait for
     it to end (PRD-239 S3). Returns ``exec_result_for`` the ended ticket, or an
     error result that names the still-running ticket when ``timeout_s`` passes
     — the session carries on; its result lands on the board.
+
+    ``on_poll(ticket)`` runs on every poll while waiting (S3b): the caller marks
+    progress on its own record so a stall watchdog does not mistake a long
+    session for a dead run. Its failures are logged, never raised.
     """
     import asyncio
     import time
@@ -406,6 +411,11 @@ async def run_cli_ticket_and_wait(
                     "runtime": RUNTIME_CLI, "task_id": task_id}
         if current.status in TERMINAL_STATUSES:
             return exec_result_for(current)
+        if on_poll is not None:
+            try:
+                on_poll(current)
+            except Exception:  # noqa: BLE001 — progress marking must never end the wait
+                logger.debug("[CliTicketLane] on_poll failed for ticket #%s", task_id, exc_info=True)
         waited = time.monotonic() - started
         if timeout_s is not None and waited >= timeout_s:
             return {
