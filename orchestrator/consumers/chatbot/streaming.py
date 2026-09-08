@@ -114,6 +114,10 @@ class StreamingHandler:
             payload["data"] = data
         return f'd:{json.dumps(payload)}\n'
 
+    def format_aisdk_reasoning(self, delta: str) -> str:
+        """PRD-238 S1: a reasoning delta — the thinking channel, never the answer."""
+        return self.format_aisdk_data("reasoning", {"delta": delta})
+
     def format_aisdk_limit_reached(self, limit: str, value: int, message: str) -> str:
         """Format a limit_reached event so the user is told an agent stopped
         because it hit a cap (instead of silently bailing). Carries limit/value

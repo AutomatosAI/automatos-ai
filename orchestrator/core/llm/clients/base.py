@@ -103,6 +103,12 @@ class LLMResponse:
     tool_calls: List[Dict[str, Any]] = None  # PRD-17: Support function calling
     finish_reason: str = None  # PRD-17: Track if stopped for tool use
     additional_blocks: List[Dict[str, Any]] = None  # Additional content blocks (images, documents, etc.)
+    # PRD-238 S1: the model's deliberation, separated from the answer — never
+    # part of ``content``. None for models without a reasoning channel.
+    reasoning: Optional[str] = None
+    # PRD-238 S2: True when the text/reasoning were already delivered live to
+    # an ``on_delta`` callback, so the caller must not emit them a second time.
+    streamed: bool = False
 
 
 class BaseLLMProvider(ABC):

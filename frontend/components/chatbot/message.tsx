@@ -11,6 +11,7 @@ import { chatMarkdownComponents } from './markdown-components'
 import { ImageGallery, type ChatImage } from './image-gallery'
 import { MessageActions } from './message-actions'
 import { ActivityTrail, LimitReachedNote } from './activity-trail'
+import { ReasoningBlock } from './reasoning-block'
 
 export interface MessageProps {
   chatId: string
@@ -59,6 +60,14 @@ export function Message({
     return textParts?.join('\n') || message.content || ''
   }, [message.parts, message.content])
 
+  // PRD-238 S1: reasoning comes live on `message.reasoning`, or from the stored part.
+  const reasoningText = useMemo(() => {
+    if (message.reasoning) return message.reasoning
+    const part = message.parts?.find((p) => p.type === 'reasoning')
+    return part && 'reasoning' in part ? part.reasoning : ''
+  }, [message.reasoning, message.parts])
+  const answerStarted = plainContent.trim().length > 0
+
   const proseClass = "prose prose-sm md:prose-base max-w-none space-y-3 break-words [overflow-wrap:anywhere] dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-primary dark:prose-a:text-primary"
 
   const renderMarkdownWithImages = (text: string, keyPrefix = '') => {
@@ -96,6 +105,11 @@ export function Message({
         {message.parts.map((part, index) => {
           if (part.type === 'text' && 'text' in part) {
             return <div key={index}>{renderMarkdownWithImages(part.text, `p${index}`)}</div>
+          }
+
+          // PRD-238 S1: the stored reasoning part renders above the answer (ReasoningBlock), never here.
+          if (part.type === 'reasoning') {
+            return null
           }
 
           if (part.type === 'file' && 'filename' in part) {
@@ -245,10 +259,15 @@ export function Message({
               ? 'bg-primary/10 border border-primary/10 rounded-tr-sm'
               : 'bg-card/40 backdrop-blur-sm border border-border/30 rounded-tl-sm'
           }`}>
+            {/* PRD-238 S1: the thinking channel, above the answer */}
+            {message.role === 'assistant' && reasoningText && (
+              <ReasoningBlock text={reasoningText} streaming={Boolean(isLoading)} answerStarted={answerStarted} />
+            )}
+
             {renderMessageContent()}
 
-            {/* Assistant state (Thinking animation) */}
-            {renderAssistantState()}
+            {/* Assistant state (Thinking animation) — only until reasoning or text arrives */}
+            {!reasoningText && renderAssistantState()}
 
             {/* Tool calls (lifecycle transparency) */}
             {renderToolCalls()}
