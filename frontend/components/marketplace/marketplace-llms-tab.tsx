@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -36,7 +36,7 @@ import { ArrowRightLeft, CheckCircle } from 'lucide-react'
 import { LLMModelCard } from './llm-model-card'
 import { LLMModelDetailModal } from './llm-model-detail-modal'
 import type { LLMModel } from './llm-model-card'
-import { useSyncOpenRouterCache } from '@/hooks/use-openrouter-api'
+import { useProviderRegistry, providerLabel } from '@/hooks/use-provider-registry'
 import { useSystemRole } from '@/contexts/role-context'
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ const CATEGORY_OPTIONS = [
 ]
 
 const TIER_OPTIONS = [
-  { value: 'all', label: 'All Tiers' },
+  { value: 'all', label: 'All Prices' },
   { value: 'free', label: 'Free' },
   { value: 'budget', label: 'Budget' },
   { value: 'mid', label: 'Mid-range' },
@@ -73,77 +73,17 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 ]
 
 // ---------------------------------------------------------------------------
-// Types for OpenRouter cache response
+// Catalog response (PRD-236 W1): one row per ROUTE — (serving provider, model)
 // ---------------------------------------------------------------------------
 
-interface OpenRouterModel {
-  id: number
-  model_id: string
-  slug: string | null
-  display_name: string
-  description: string | null
-  provider: string
-  prompt_cost: number
-  completion_cost: number
-  image_cost: number
-  request_cost: number
-  cache_read_cost: number
-  cache_write_cost: number
-  context_length: number
-  max_completion_tokens: number
-  modality: string | null
-  input_modalities: string[]
-  output_modalities: string[]
-  tokenizer: string | null
-  supports_tools: boolean
-  supports_vision: boolean
-  supports_streaming: boolean
-  supports_json_mode: boolean
-  supports_reasoning: boolean
-  category: string | null
-  tier: string | null
-  tags: string[]
-  status: string
-  is_moderated: boolean
-  last_synced_at: string | null
-}
-
-interface OpenRouterMarketplaceResponse {
-  models: OpenRouterModel[]
+interface CatalogResponse {
+  models: LLMModel[]
   total: number
   providers: Record<string, number>
-  last_synced: string | null
-}
-
-// Adapt OpenRouter model to the existing LLMModel card interface
-function adaptToLLMModel(m: OpenRouterModel, installedIds?: Set<string>): LLMModel {
-  return {
-    id: m.id,
-    provider: m.provider,
-    model_id: m.model_id,
-    display_name: m.display_name,
-    model_family: null,
-    description: m.description,
-    context_window: m.context_length,
-    max_output_tokens: m.max_completion_tokens,
-    // Convert per-token cost to per-1K-token cost
-    input_cost_per_1k: m.prompt_cost * 1000,
-    output_cost_per_1k: m.completion_cost * 1000,
-    capabilities: {},
-    recommended_for: m.tags || [],
-    supports_functions: m.supports_tools,
-    supports_vision: m.supports_vision,
-    supports_streaming: m.supports_streaming,
-    status: m.status,
-    tier: m.tier,
-    category: m.category,
-    tags: m.tags || [],
-    is_featured: false,
-    is_default: false,
-    requires_plan: null,
-    install_count: 0,
-    is_installed: installedIds ? installedIds.has(m.model_id) : false,
-  }
+  provider_labels: Record<string, string>
+  vendors: Record<string, number>
+  last_synced: Record<string, string | null>
+  syncable: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -161,11 +101,13 @@ interface MarketplaceLlmsTabProps {
 export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   const queryClient = useQueryClient()
   const { isAdmin } = useSystemRole()
-  const syncMutation = useSyncOpenRouterCache()
   const [viewMode, setViewMode] = useViewMode('mp-llms')
+  const registry = useProviderRegistry()
 
-  // Filter state
+  // Filter state — the provider TAB is the serving provider (who you pay), the
+  // vendor chip is who made the model (PRD-236 W1)
   const [selectedProvider, setSelectedProvider] = useState('all')
+  const [selectedVendor, setSelectedVendor] = useState('all')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedTier, setSelectedTier] = useState('all')
   const [sortBy, setSortBy] = useState<SortKey>('popularity')
@@ -190,22 +132,23 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   // Data fetching
   // -----------------------------------------------------------------------
 
-  // Fetch installed model IDs for this workspace (lightweight)
-  const { data: installedData } = useQuery<{ model_ids: string[] }>({
+  // Installed ROUTES for this workspace ("provider:model_id" keys)
+  const { data: installedData } = useQuery<{ model_ids: string[]; routes?: string[] }>({
     queryKey: ['installed-model-ids'],
     queryFn: () => apiClient.get('/api/marketplace/llm/installed-ids'),
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
   })
-  const installedIds = useMemo(
-    () => new Set(installedData?.model_ids ?? []),
+  const installedRoutes = useMemo(
+    () => new Set(installedData?.routes ?? []),
     [installedData]
   )
 
-  const { data: response, isLoading } = useQuery<OpenRouterMarketplaceResponse>({
+  const { data: response, isLoading } = useQuery<CatalogResponse>({
     queryKey: [
-      'openrouterModels',
+      'marketplaceLlmCatalog',
       selectedProvider,
+      selectedVendor,
       selectedCategory,
       selectedTier,
       combinedSearch,
@@ -217,99 +160,94 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
     queryFn: async () => {
       const params = new URLSearchParams()
       if (selectedProvider !== 'all') params.append('provider', selectedProvider)
+      if (selectedVendor !== 'all') params.append('vendor', selectedVendor)
       if (selectedCategory !== 'all') params.append('category', selectedCategory)
-      if (selectedTier !== 'all') params.append('tier', selectedTier)
+      if (selectedTier !== 'all') params.append('price_tier', selectedTier)
       if (combinedSearch) params.append('search', combinedSearch)
       if (sortBy) params.append('sort_by', sortBy)
       if (filterTools) params.append('supports_tools', 'true')
       if (filterVision) params.append('supports_vision', 'true')
-      if (filterReasoning) params.append('supports_reasoning', 'true')
+      if (filterReasoning) params.append('category', 'reasoning')
       params.append('limit', '500')
       const qs = params.toString()
-
-      // Try OpenRouter cache first, fall back to legacy LLM endpoint
-      try {
-        return await apiClient.get(`/api/openrouter/models${qs ? `?${qs}` : ''}`)
-      } catch {
-        // Fallback: legacy endpoint (returns LLMModel[] array, not wrapped)
-        const legacyParams = new URLSearchParams()
-        if (selectedProvider !== 'all') legacyParams.append('provider', selectedProvider)
-        if (selectedCategory !== 'all') legacyParams.append('category', selectedCategory)
-        if (selectedTier !== 'all') legacyParams.append('tier', selectedTier)
-        if (combinedSearch) legacyParams.append('search', combinedSearch)
-        const lqs = legacyParams.toString()
-        const legacyModels = await apiClient.get(`/api/marketplace/llm/models${lqs ? `?${lqs}` : ''}`)
-
-        // Wrap in the expected response shape
-        const providerMap: Record<string, number> = {}
-        for (const m of legacyModels) {
-          providerMap[m.provider] = (providerMap[m.provider] || 0) + 1
-        }
-        return {
-          models: legacyModels.map((m: any) => ({
-            id: m.id,
-            model_id: m.model_id,
-            slug: null,
-            display_name: m.display_name,
-            description: m.description,
-            provider: m.provider,
-            prompt_cost: (m.input_cost_per_1k || 0) / 1000,
-            completion_cost: (m.output_cost_per_1k || 0) / 1000,
-            image_cost: 0,
-            request_cost: 0,
-            cache_read_cost: 0,
-            cache_write_cost: 0,
-            context_length: m.context_window || 0,
-            max_completion_tokens: m.max_output_tokens || 0,
-            modality: null,
-            input_modalities: [],
-            output_modalities: [],
-            tokenizer: null,
-            supports_tools: m.supports_functions || false,
-            supports_vision: m.supports_vision || false,
-            supports_streaming: m.supports_streaming ?? true,
-            supports_json_mode: false,
-            supports_reasoning: false,
-            category: m.category,
-            tier: m.tier,
-            tags: m.tags || [],
-            status: m.status || 'active',
-            is_moderated: false,
-            last_synced_at: null,
-          })),
-          total: legacyModels.length,
-          providers: providerMap,
-          last_synced: null,
-        } as OpenRouterMarketplaceResponse
-      }
+      return apiClient.get(`/api/marketplace/llm/catalog${qs ? `?${qs}` : ''}`)
     },
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   })
 
+  // Sync one provider's catalogue (admin). OpenRouter and NVIDIA are syncable.
+  const syncMutation = useMutation({
+    mutationFn: (slug: string) => apiClient.post(`/api/marketplace/llm/sync/${encodeURIComponent(slug)}`),
+    onSuccess: (_data, slug) => {
+      toast.success(`${providerLabel(registry, slug)} catalogue synced`)
+      queryClient.invalidateQueries({ queryKey: ['marketplaceLlmCatalog'] })
+      queryClient.invalidateQueries({ queryKey: ['openrouterModels'] })
+    },
+    onError: (err: Error, slug) => {
+      toast.error(`${providerLabel(registry, slug)} sync failed`, { description: err.message })
+    },
+  })
+
   const rawModels = response?.models ?? []
   const providerCounts = response?.providers ?? {}
-  const lastSynced = response?.last_synced ?? null
+  const providerLabels = response?.provider_labels ?? {}
+  const vendorCounts = response?.vendors ?? {}
+  const syncable = response?.syncable ?? ['openrouter', 'nvidia']
+  const lastSyncedByProvider = response?.last_synced ?? {}
   const totalCount = response?.total ?? 0
-
-  // Build dynamic provider filter chips from actual data
-  const providerFilters = useMemo(() => {
-    const providers = Object.entries(providerCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 12)
-      .map(([id, count]) => ({ id, name: id.charAt(0).toUpperCase() + id.slice(1), count }))
-    return [{ id: 'all', name: 'All', count: totalCount }, ...providers]
-  }, [providerCounts, totalCount])
-
-  // Adapt to existing card format (with installed status)
-  const models = useMemo(
-    () => rawModels.map((m) => adaptToLLMModel(m, installedIds)),
-    [rawModels, installedIds]
+  const catalogTotal = useMemo(
+    () => Object.values(providerCounts).reduce((a, b) => a + b, 0),
+    [providerCounts]
   )
+
+  // Provider TABS: every registered chat provider, in registry order, with the
+  // number of routes it serves. Providers with no rows yet still get a tab so
+  // the "Sync" action has somewhere to live.
+  const providerTabs = useMemo(() => {
+    const ordered = registry.providers.filter((p) => p.chat).map((p) => p.slug)
+    const extra = Object.keys(providerCounts).filter((slug) => !ordered.includes(slug))
+    const tabs = [...ordered, ...extra]
+      .filter((slug) => (providerCounts[slug] ?? 0) > 0 || syncable.includes(slug))
+      .map((slug) => ({
+        id: slug,
+        name: providerLabels[slug] || providerLabel(registry, slug),
+        count: providerCounts[slug] ?? 0,
+      }))
+    return [{ id: 'all', name: 'All providers', count: catalogTotal }, ...tabs]
+  }, [registry, providerCounts, providerLabels, syncable, catalogTotal])
+
+  // Vendor chips within the selected provider tab
+  const vendorFilters = useMemo(() => {
+    const vendors = Object.entries(vendorCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 16)
+      .map(([id, count]) => ({ id, name: id.charAt(0).toUpperCase() + id.slice(1), count }))
+    return [{ id: 'all', name: 'All vendors', count: totalCount }, ...vendors]
+  }, [vendorCounts, totalCount])
+
+  // The catalog rows already match the card shape; installed is per ROUTE
+  const models = useMemo(
+    () =>
+      rawModels.map((m) => ({
+        ...m,
+        is_installed: installedRoutes.has(`${m.serving_provider || m.provider}:${m.model_id}`),
+      })),
+    [rawModels, installedRoutes]
+  )
+
+  // Which providers may be synced from the current tab
+  const syncTargets = useMemo(
+    () => (selectedProvider === 'all' ? syncable : syncable.filter((slug) => slug === selectedProvider)),
+    [selectedProvider, syncable]
+  )
+  const lastSynced = selectedProvider === 'all'
+    ? (lastSyncedByProvider['openrouter'] ?? null)
+    : (lastSyncedByProvider[selectedProvider] ?? null)
 
   // Active filter count (for indicator)
   const activeFilterCount = [
-    selectedProvider !== 'all',
+    selectedVendor !== 'all',
     selectedCategory !== 'all',
     selectedTier !== 'all',
     filterTools,
@@ -343,14 +281,14 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   }
 
   const handleInstall = () => {
-    queryClient.invalidateQueries({ queryKey: ['openrouterModels'] })
+    queryClient.invalidateQueries({ queryKey: ['marketplaceLlmCatalog'] })
     queryClient.invalidateQueries({ queryKey: ['marketplaceLlmModels'] })
     queryClient.invalidateQueries({ queryKey: ['installed-model-ids'] })
     queryClient.invalidateQueries({ queryKey: ['workspace-models'] })
   }
 
   const clearAllFilters = () => {
-    setSelectedProvider('all')
+    setSelectedVendor('all')
     setSelectedCategory('all')
     setSelectedTier('all')
     setFilterTools(false)
@@ -395,39 +333,70 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
         </div>
         <div className="flex items-center gap-3">
           <ViewToggle value={viewMode} onChange={setViewMode} />
-          {isAdmin && (
+          {isAdmin && syncTargets.map((slug) => (
             <Button
+              key={slug}
               variant="outline"
               size="sm"
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
+              onClick={() => syncMutation.mutate(slug)}
+              disabled={syncMutation.isLoading}
               className="gap-2 text-muted-foreground hover:text-foreground"
+              data-testid={`sync-${slug}`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-              {syncMutation.isPending ? 'Syncing...' : 'Sync OpenRouter'}
+              <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isLoading && syncMutation.variables === slug ? 'animate-spin' : ''}`} />
+              {syncMutation.isLoading && syncMutation.variables === slug ? 'Syncing...' : `Sync ${providerLabels[slug] || providerLabel(registry, slug)}`}
             </Button>
-          )}
+          ))}
         </div>
       </div>
 
       {/* Filter bar */}
       <div className="space-y-4">
-        {/* Provider buttons (dynamic from cache) */}
+        {/* Provider TABS — who serves (and bills) the call. "Kimi K3 · NVIDIA" and
+            "Kimi K3 · OpenRouter" are different routes with different prices. */}
+        <div
+          role="tablist"
+          aria-label="Serving provider"
+          data-testid="provider-tabs"
+          className="flex gap-1 overflow-x-auto pb-1 border-b border-border/40 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent"
+        >
+          {providerTabs.map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={selectedProvider === tab.id}
+              onClick={() => {
+                setSelectedProvider(tab.id)
+                setSelectedVendor('all')
+              }}
+              className={`whitespace-nowrap flex-shrink-0 px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
+                selectedProvider === tab.id
+                  ? 'border-primary text-foreground font-semibold'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab.name}
+              <span className="ml-1.5 text-[10px] opacity-60">{tab.count}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Vendor chips within the tab — who made the model */}
         <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent">
-          {providerFilters.map((provider) => (
+          {vendorFilters.map((vendor) => (
             <Button
-              key={provider.id}
-              variant={selectedProvider === provider.id ? 'default' : 'outline'}
+              key={vendor.id}
+              variant={selectedVendor === vendor.id ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setSelectedProvider(provider.id)}
+              onClick={() => setSelectedVendor(vendor.id)}
               className={`whitespace-nowrap flex-shrink-0 ${
-                selectedProvider === provider.id
+                selectedVendor === vendor.id
                   ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                   : 'border-secondary text-muted-foreground hover:bg-secondary'
               }`}
             >
-              {provider.name}
-              <span className="ml-1.5 text-[10px] opacity-60">{provider.count}</span>
+              {vendor.name}
+              <span className="ml-1.5 text-[10px] opacity-60">{vendor.count}</span>
             </Button>
           ))}
         </div>
@@ -605,7 +574,8 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
                       </thead>
                       <tbody>
                         {[
-                          { label: 'Provider', render: (m: LLMModel) => m.provider },
+                          { label: 'Route', render: (m: LLMModel) => m.route_label || `${m.display_name} · ${m.serving_provider || m.provider}` },
+                          { label: 'Vendor', render: (m: LLMModel) => m.provider },
                           { label: 'Context Window', render: (m: LLMModel) => {
                             const n = m.context_window
                             return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(0)}K` : String(n)
@@ -684,20 +654,21 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
           <p className="font-medium">No LLM models found</p>
           <p className="text-sm mt-1">
             {totalCount === 0
-              ? 'Cache is empty. Click "Sync OpenRouter" to load models.'
+              ? `No routes in this catalogue yet. ${isAdmin ? 'Sync a provider to load its models.' : 'Ask an admin to sync a provider.'}`
               : 'Try adjusting your filters or search query.'}
           </p>
-          {totalCount === 0 && isAdmin && (
+          {totalCount === 0 && isAdmin && syncTargets.map((slug) => (
             <Button
+              key={slug}
               variant="outline"
-              className="mt-4"
-              onClick={() => syncMutation.mutate()}
-              disabled={syncMutation.isPending}
+              className="mt-4 mr-2"
+              onClick={() => syncMutation.mutate(slug)}
+              disabled={syncMutation.isLoading}
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-              {syncMutation.isPending ? 'Syncing...' : 'Sync OpenRouter Models'}
+              <RefreshCw className={`w-4 h-4 mr-2 ${syncMutation.isLoading && syncMutation.variables === slug ? 'animate-spin' : ''}`} />
+              {syncMutation.isLoading && syncMutation.variables === slug ? 'Syncing...' : `Sync ${providerLabels[slug] || providerLabel(registry, slug)} models`}
             </Button>
-          )}
+          ))}
         </div>
       ) : (
         <>

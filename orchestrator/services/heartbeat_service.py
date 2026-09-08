@@ -1432,6 +1432,10 @@ class HeartbeatService:
             )
             db.add(task)
             db.commit()
+            # Local edition: the operator's heartbeat schedule is the approval
+            # (PRD-234 board_consent) — Auto's review ticket runs on the next tick.
+            from services.board_consent import consent_for_lane_ticket
+            consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type="heartbeat")
             logger.info(
                 "[Heartbeat] report_to=auto: created BoardTask id=%s assigned to Auto "
                 "(agent_id=%s) for source_agent=%s",

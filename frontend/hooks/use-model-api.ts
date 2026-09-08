@@ -14,6 +14,14 @@ import { useWorkspace } from '@/hooks/use-workspace'
 export interface ModelInfo {
   id: number
   provider: string
+  /** PRD-236 W1: the route that serves this row (openrouter, nvidia, openai…). */
+  serving_provider?: string
+  serving_provider_label?: string
+  route_label?: string
+  is_free?: boolean
+  price_tier?: string
+  key_available?: boolean
+  sourcing?: string
   model_id: string
   display_name: string
   model_family: string

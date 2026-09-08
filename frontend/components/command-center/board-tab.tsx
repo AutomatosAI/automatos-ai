@@ -38,6 +38,7 @@ import {
 import { useBoardTasks, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
+import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { toneFor } from './agent-tones'
 
@@ -97,6 +98,8 @@ export function BoardTab() {
 
   return (
     <>
+      {/* PRD-235 W3: Claude Code agents need the paired host — say so once, at the top */}
+      <HostOfflineBanner />
       <div className="cc-toolbar">
         <div className="cc-seg" role="group" aria-label="Board mode">
           <button

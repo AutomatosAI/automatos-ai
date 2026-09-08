@@ -566,8 +566,16 @@ async def install_model(db: Session, workspace_id: UUID, params: Dict[str, Any])
 
     # Find or create LLMModel from OpenRouter cache
     # Try exact match first, then suffix match (seed data may omit provider prefix)
-    llm = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
-    if not llm:
+    # PRD-236 W1: one row per route — honour an explicit provider, else prefer
+    # the OpenRouter route (the platform key everyone has), else any row.
+    from core.llm.providers import normalize_slug
+    route = normalize_slug(params.get("provider"))
+    q = db.query(LLMModel).filter(LLMModel.model_id == model_id)
+    if route:
+        llm = q.filter(LLMModel.serving_provider == route).first()
+    else:
+        llm = q.filter(LLMModel.serving_provider == "openrouter").first() or q.first()
+    if not llm and not route:
         # Suffix match: "llama-3.3-70b-instruct" → "meta-llama/llama-3.3-70b-instruct"
         llm = db.query(LLMModel).filter(LLMModel.model_id.endswith(f"/{model_id}")).first()
 
@@ -597,7 +605,8 @@ async def install_model(db: Session, workspace_id: UUID, params: Dict[str, Any])
             supports_vision=cached.supports_vision or False,
             supports_streaming=cached.supports_streaming if cached.supports_streaming is not None else True,
             status="active",
-            tier="aggregator",
+            sourcing="aggregator",
+            serving_provider="openrouter",
             category=cached.category,
             tags=cached.tags or [],
             capabilities={},

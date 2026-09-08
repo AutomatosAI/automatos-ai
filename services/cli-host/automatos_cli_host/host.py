@@ -22,12 +22,30 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import state
+from . import __version__
 from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import HookServer
 from .session import Session, host_capabilities
 
 log = logging.getLogger("automatos.cli_host")
+
+
+RESTART_EXIT_CODE = 75  # EX_TEMPFAIL: "bring me back" — the service manager restarts non-zero exits
+
+
+def source_fingerprint() -> str:
+    """A cheap identity of the host's own code on disk (path, size, mtime of
+    every module). When it changes under a running host — a branch switch, a
+    pull, a rebuild — the host drains and exits so it comes back on the new
+    code. No hashing of file contents: this runs every heartbeat."""
+    import hashlib
+    root = Path(__file__).resolve().parent
+    h = hashlib.sha1()
+    for f in sorted(root.glob("*.py")):
+        st = f.stat()
+        h.update(f"{f.name}:{st.st_size}:{int(st.st_mtime)}\n".encode())
+    return h.hexdigest()[:16]
 
 
 class HostRefused(RuntimeError):
@@ -73,6 +91,11 @@ class Host:
         self._claimed_once = False
         self._capabilities: Optional[Dict[str, Any]] = None
         self._announced_parked: set = set()
+        # PRD-235 W3: drift → drain → restart
+        self._source_fingerprint = source_fingerprint()
+        self._backend_contract: Optional[str] = None
+        self.draining: Optional[str] = None  # the reason, once a restart is requested
+        self.exit_code = 0
 
     # ── setup ───────────────────────────────────────────────────────────────
     def prepare(self) -> None:
@@ -125,11 +148,16 @@ class Host:
     # ── loop ────────────────────────────────────────────────────────────────
     def run_forever(self) -> int:
         host_id = self.identity["host_id"]
-        log.info("CLI host %s serving %s — directories: %s", host_id, self.cfg.url, ", ".join(self.allow_roots))
+        log.info("CLI host %s (v%s) serving %s — directories: %s", host_id, __version__, self.cfg.url, ", ".join(self.allow_roots))
+        state.write_pid(self.cfg.pid_path)
         try:
             while not self.stop.is_set():
                 now = time.time()
                 try:
+                    if self.draining and not self.sessions and not self.pending_results:
+                        log.info("drained — exiting for restart (%s)", self.draining)
+                        self.exit_code = RESTART_EXIT_CODE
+                        break
                     if self.hooks.ensure_listening():
                         log.warning("hook socket %s had vanished — re-bound it (a previous host's shutdown?)", self.cfg.socket_path)
                     if now - self._last_heartbeat >= self.cfg.heartbeat_seconds:
@@ -156,7 +184,31 @@ class Host:
             self._flush_events(host_id)
             self._reap_finished(host_id)
             self.hooks.stop()
-        return 0
+            state.clear_pid(self.cfg.pid_path)
+        return self.exit_code
+
+    def request_restart(self, reason: str) -> None:
+        """Stop claiming, let running sessions finish, then exit for the service
+        manager to bring the host back — on new code, or a new backend contract."""
+        if self.draining:
+            return
+        self.draining = reason
+        log.warning("restart requested (%s) — no new claims; %d session(s) still running",
+                    reason, len(self.sessions))
+
+    def _check_drift(self, out: Dict[str, Any]) -> None:
+        contract = out.get("host_contract")
+        if contract:
+            if self._backend_contract is None:
+                self._backend_contract = contract
+            elif contract != self._backend_contract:
+                self.request_restart("the backend's host contract changed (app rebuilt)")
+        expected = out.get("expected_host_version")
+        if expected and expected != __version__:
+            log.warning("backend expects host v%s, this is v%s — update the checkout (git pull) and restart",
+                        expected, __version__)
+        if source_fingerprint() != self._source_fingerprint:
+            self.request_restart("the host's own code changed on disk")
 
     def _heartbeat(self, host_id: str) -> None:
         running = [{"task_id": int(tid), "session_id": s.session_id, "attempt": s.attempt}
@@ -166,6 +218,7 @@ class Host:
         except BackendError as exc:
             log.warning("heartbeat failed: %s", exc)
             return
+        self._check_drift(out)
         for stale in out.get("stale") or []:
             s = self.sessions.get(str(stale))
             if s is not None:
@@ -178,6 +231,8 @@ class Host:
         return max(0, self.cfg.max_sessions - len(self.sessions))
 
     def _claim_and_start(self, host_id: str) -> None:
+        if self.draining:
+            return
         free = self._free_slots()
         if free <= 0 or (self.cfg.once and self._claimed_once):
             return
@@ -240,6 +295,10 @@ class Host:
                 continue
             if "cancel" in (out.get("control") or []):
                 session.request_cancel()
+            # PRD-235 W2 S3: answers to the session's permission questions.
+            for d in out.get("decisions") or []:
+                if isinstance(d, dict) and d.get("request_id") is not None:
+                    session.resolve_ask(str(d["request_id"]), bool(d.get("approved")))
 
     def _reap_finished(self, host_id: str) -> None:
         for task_id, thread in list(self.threads.items()):
@@ -280,12 +339,47 @@ class Host:
             log.info("task %s → %s (applied=%s)", task_id, out.get("status"), out.get("applied"))
 
 
+def _service_command(cfg: HostConfig) -> int:
+    """``--install`` / ``--uninstall`` / ``--service-status`` / ``--restart-service`` / ``--nudge``."""
+    from . import service
+    action = cfg.service_action
+    try:
+        if action == "install":
+            if not cfg.allow_dirs:
+                log.error("give the service its directories: --allow <dir> (make cli-host-install registers ./workspaces)")
+                return 2
+            path = service.install(cfg)
+            print(f"installed {path}\nthe host now starts at login and restarts itself; log: {cfg.state_dir / 'host.log'}")
+            return 0
+        if action == "uninstall":
+            print("removed" if service.uninstall() else "no service was installed")
+            return 0
+        if action == "status":
+            st = service.status()
+            print(f"{st['manager']}: installed={st['installed']} running={st['running']} pid={st['pid']} unit={st['unit']}")
+            return 0 if st["running"] else 1
+        if action == "restart":
+            ok = service.restart()
+            print("restarting" if ok else "no running service to restart")
+            return 0 if ok else 1
+        if action == "nudge":
+            ok = service.nudge(cfg)
+            print("host asked to drain and restart" if ok else "no running host (no pid file)")
+            return 0 if ok else 1
+    except RuntimeError as exc:
+        log.error("%s", exc)
+        return 2
+    return 2
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     cfg = parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if cfg.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if cfg.service_action:
+        return _service_command(cfg)
     host = Host(cfg)
     try:
         host.prepare()
@@ -299,8 +393,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     def _sigterm(_signum, _frame):
         host.stop.set()
 
+    def _sighup(_signum, _frame):
+        host.request_restart("SIGHUP (make up / --nudge)")
+
     signal.signal(signal.SIGTERM, _sigterm)
     signal.signal(signal.SIGINT, _sigterm)
+    signal.signal(signal.SIGHUP, _sighup)
     return host.run_forever()
 
 

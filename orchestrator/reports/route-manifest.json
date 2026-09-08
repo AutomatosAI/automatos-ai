@@ -1,5 +1,5 @@
 {
-  "route_count": 788,
+  "route_count": 793,
   "routes": [
     {
       "method": "GET",
@@ -1531,6 +1531,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/marketplace/llm/catalog"
+    },
+    {
+      "method": "GET",
       "path": "/api/marketplace/llm/categories"
     },
     {
@@ -1564,6 +1568,14 @@
     {
       "method": "GET",
       "path": "/api/marketplace/llm/providers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/marketplace/llm/sync/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/marketplace/llm/sync/{provider}"
     },
     {
       "method": "GET",
@@ -2262,6 +2274,10 @@
       "path": "/api/v1/cli-hosts"
     },
     {
+      "method": "GET",
+      "path": "/api/v1/cli-hosts/health"
+    },
+    {
       "method": "POST",
       "path": "/api/v1/cli-hosts/pair"
     },
@@ -2472,6 +2488,10 @@
     {
       "method": "POST",
       "path": "/api/v1/tasks/{task_id}/run-now"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tasks/{task_id}/session-decision"
     },
     {
       "method": "PATCH",
