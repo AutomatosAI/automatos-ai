@@ -123,7 +123,9 @@ def test_a_grant_opens_a_shell_in_the_directory_and_the_output_streams_back(tmp_
         assert head.startswith(b"HTTP/1.1 101"), head
         s.settimeout(5)
         s.sendall(_client_frame(b'{"type":"resize","cols":100,"rows":30}', ts.OPCODE_TEXT))
-        s.sendall(_client_frame(b"pwd; echo AUTOMATOS_OK\r", ts.OPCODE_BINARY))
+        # The PTY echoes the typed line back, so the marker is split in the command
+        # (AUTOMATOS_O"K") and whole only in the shell's own output.
+        s.sendall(_client_frame(b'pwd; echo AUTOMATOS_O"K"\r', ts.OPCODE_BINARY))
         reader = ts.FrameReader()
         seen = b""
         deadline = time.time() + 10
