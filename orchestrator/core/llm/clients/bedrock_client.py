@@ -313,6 +313,7 @@ class BedrockProvider(BaseLLMProvider):
         content = ""
         tool_calls = None
         additional_blocks = []
+        reasoning_parts: List[str] = []  # PRD-238 S1: the reasoning channel
         
         for block in response_body.get("content", []):
             block_type = block.get("type")
@@ -386,8 +387,9 @@ class BedrockProvider(BaseLLMProvider):
                 # Reasoning content block (for models with reasoning capabilities)
                 reasoning_text = block.get("content", "") or block.get("text", "")
                 if reasoning_text:
-                    # Append reasoning to content with a marker
-                    content += f"\n[Reasoning: {reasoning_text}]\n"
+                    # PRD-238 S1: reasoning is its own channel — never inlined
+                    # into the answer text any more.
+                    reasoning_parts.append(reasoning_text)
                 additional_blocks.append({
                     "type": "reasoningContent",
                     "content": reasoning_text,
@@ -439,7 +441,8 @@ class BedrockProvider(BaseLLMProvider):
             provider="aws_bedrock",
             tool_calls=tool_calls,
             finish_reason=response_body.get("stop_reason"),
-            additional_blocks=additional_blocks if additional_blocks else None
+            additional_blocks=additional_blocks if additional_blocks else None,
+            reasoning="\n\n".join(reasoning_parts) or None,
         )
     
     def _parse_llama_response(self, response_body: Dict) -> LLMResponse:

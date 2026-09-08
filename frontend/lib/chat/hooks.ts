@@ -406,6 +406,15 @@ export function useChat({
                 else if (data.type === 'mission-suggestion' && data.data) {
                   if (onData) onData({ type: 'mission-suggestion', data: data.data })
                 }
+                // PRD-238 S1: the thinking channel — shown live, never as the answer.
+                else if (data.type === 'reasoning' && typeof data.data?.delta === 'string') {
+                  const delta = data.data.delta as string
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId ? { ...m, reasoning: (m.reasoning ?? '') + delta } : m
+                    )
+                  )
+                }
                 // PRD-238 S3: the turn is over — nothing may keep spinning.
                 else if (data.type === 'finish') {
                   const endedAt = new Date().toISOString()
