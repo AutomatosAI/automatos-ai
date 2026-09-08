@@ -183,6 +183,21 @@ def test_system_prompt_is_stable_per_agent():
     assert a == b and "never push" in a
 
 
+def test_system_prompt_carries_the_agents_soul_between_intro_and_rules():
+    """PRD-239 S1: the backend's persona + skills text rides the ticket and sits
+    between "You are …" and the session rules; without it the prompt is unchanged."""
+    soul = "## Persona & Communication Style\nBlunt and precise.\n\n## Skills\n### automatos-platform\nKnows the platform."
+    with_soul = session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": soul})
+    assert with_soul.startswith("You are Bob, working as a supervised Claude Code session")
+    assert with_soul.index("Blunt and precise") < with_soul.index("never push")
+    assert "### automatos-platform" in with_soul
+    again = session.build_system_prompt({"agent_name": "Bob", "task_id": 9, "system_prompt": soul})
+    assert again == with_soul  # stable per agent — ids never leak in
+    plain = session.build_system_prompt({"agent_name": "Bob", "task_id": 1})
+    assert plain == session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": "   "})
+    assert "Persona" not in plain and "never push" in plain
+
+
 # ── backend preflight ────────────────────────────────────────────────────────
 
 class _Api:

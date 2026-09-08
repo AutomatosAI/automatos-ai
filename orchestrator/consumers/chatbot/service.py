@@ -2689,12 +2689,43 @@ class StreamingChatService:
             )
 
         except Exception as e:
+            # PRD-239 S4: a failed turn is visible — one plain sentence with a
+            # code on the stream, and a note in the conversation so a reload
+            # (or the detached-turn path) shows it too. The raw text stays here.
+            from consumers.chatbot.turn_errors import describe_turn_error
+
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
-            yield self.streaming_handler.format_aisdk_error(str(e))
+            err = describe_turn_error(e, agent_name=self._agent_display_name(agent_id))
+            yield self.streaming_handler.format_aisdk_error(err.message, code=err.code)
+            self._persist_turn_error(chat_id, err)
             # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
             _emit_chat_primitive(
                 self.workspace_id, success=False, detail=str(e),
             )
+
+    def _agent_display_name(self, agent_id: Any) -> Optional[str]:
+        """The agent's name for a user-facing error line; None when unknown."""
+        try:
+            from core.models import Agent as _AgentModel
+
+            row = self.db.query(_AgentModel.name).filter(_AgentModel.id == int(agent_id)).first()
+            return row[0] if row else None
+        except Exception:  # noqa: BLE001 — a name is a courtesy
+            return None
+
+    def _persist_turn_error(self, chat_id: str, err: Any) -> None:
+        """PRD-239 S4: keep the failure in the conversation (an assistant note with
+        provenance) so it survives a reload and the detached-turn path. Fail-soft."""
+        try:
+            self.chat_service.save_message(
+                chat_id=chat_id,
+                role="assistant",
+                parts=[{"type": "text", "text": f"⚠️ {err.message}"}],
+                workspace_id=self.workspace_id,
+                source={"origin": "turn_error", "label": "Error", "code": err.code},
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[Chat] could not persist the turn error note", exc_info=True)
 
     async def stream_response(
         self,

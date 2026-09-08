@@ -579,6 +579,19 @@ async def update_agent_model_config(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid model_id: {model_id}"
                 )
+            # PRD-239 S5: a route the provider no longer offers is refused with the
+            # reason — saving it would only fail at the first chat turn.
+            if getattr(model, "status", "active") == "deprecated":
+                from core.llm import providers as _registry
+                _spec = _registry.get_spec(model.serving_provider)
+                _route = _spec.label if _spec else (model.serving_provider or "the provider")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"{getattr(model, 'display_name', None) or model_id} is no longer offered by "
+                        f"{_route}. Pick another model."
+                    ),
+                )
             # PRD-236 W1: the stored provider is the ROUTE that serves the row
             # (openrouter / nvidia / openai …), never the vendor — the factory
             # routes to it as tagged.

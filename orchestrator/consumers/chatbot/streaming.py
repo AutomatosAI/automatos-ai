@@ -199,9 +199,13 @@ class StreamingHandler:
         """Format finish event."""
         return f'd:{{"type":"finish","finishReason":"{reason}"}}\n'
 
-    def format_aisdk_error(self, error: str) -> str:
-        """Format error event for AI SDK."""
-        return f'e:{json.dumps({"message": error})}\n'
+    def format_aisdk_error(self, error: str, code: Optional[str] = None) -> str:
+        """Format error event for AI SDK. PRD-239 S4: ``code`` is the stable
+        classification the client can branch on (``turn_errors``)."""
+        payload: Dict[str, Any] = {"message": error}
+        if code:
+            payload["code"] = code
+        return f'e:{json.dumps(payload)}\n'
 
     # ==========================================================================
     # WIDGET SSE EVENTS (US-015)

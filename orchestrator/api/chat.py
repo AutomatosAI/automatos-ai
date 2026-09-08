@@ -408,10 +408,15 @@ async def stream_chat(
 
     _fallback_agent_id = get_default_agent_id(db, ctx.workspace_id)
 
+    _session_agent = False
     if request.agentId:
         # User explicitly selected an agent — skip Auto, use directly
         effective_agent_id = request.agentId
         logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
+        # PRD-239 S2: a session agent (runtime: cli) never runs in the LLM
+        # runtime — its turn files a ticket its Claude Code session works.
+        from services.cli_ticket_lane import is_cli_agent
+        _session_agent = is_cli_agent(db, effective_agent_id)
     else:
         # --- Auto mode: the brain decides (admins included, PRD-67 CTO is fallback) ---
         auto_brain = AutoBrain(db, str(ctx.workspace_id))
@@ -554,6 +559,23 @@ async def stream_chat(
         try:
             task_service = StreamingChatService(task_db, workspace_id=_ws_id)
             async with session_queue.acquire(session_key):
+                # PRD-239 S2: the message becomes a ticket for the agent's Claude
+                # Code session; the reply lands in this chat when the session ends.
+                if _session_agent:
+                    from services.session_agent_chat import produce_session_agent_turn
+
+                    async for chunk in produce_session_agent_turn(
+                        db=task_db,
+                        workspace_id=_ws_id,
+                        chat_id=chat_id,
+                        agent_id=effective_agent_id,
+                        message_history=message_history,
+                        user_text=message_text,
+                        user_id=user_id,
+                    ):
+                        yield chunk
+                    return
+
                 # PRD-125: Emit mission suggestion data event (for frontend to render card)
                 if _suggest_mission:
                     yield task_service.streaming_handler.format_aisdk_data(

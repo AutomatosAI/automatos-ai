@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { getDefaultModelConfig, LLM_DEFAULTS } from '@/lib/llm-defaults'
 import {
@@ -185,13 +185,18 @@ export function AgentConfiguration({
     }
   }, [agentConfig, agent])
 
-  // PRD-15: Initialize model config data
+  // PRD-15: Initialize model config data — once per agent. PRD-239 S5: a refetch
+  // of the model config (window focus, an invalidation) must not wipe a pick in
+  // progress; the guard resets after a save so the stored route shows.
+  const modelConfigInitFor = useRef<string | null>(null)
   useEffect(() => {
-    if (agentModelConfig) {
-      const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
-      setModelConfigData(modelConfig)
-    }
-  }, [agentModelConfig])
+    if (!agentModelConfig) return
+    const key = selectedAgentId ? String(selectedAgentId) : null
+    if (modelConfigInitFor.current === key) return
+    modelConfigInitFor.current = key
+    const modelConfig = (agentModelConfig as any)?.model_config || getDefaultModelConfig()
+    setModelConfigData(modelConfig)
+  }, [agentModelConfig, selectedAgentId])
 
   // Handle form changes
   const handleConfigChange = (key: string, value: any) => {
@@ -335,6 +340,8 @@ export function AgentConfiguration({
             agentId: Number(selectedAgentId),
             modelConfig: modelConfigData
           })
+          // PRD-239 S5: let the refetch apply the stored (route-resolved) config.
+          modelConfigInitFor.current = null
         } catch (error) {
           modelConfigFailed = true
           console.error('Failed to save model config:', error)
@@ -1058,7 +1065,12 @@ export function AgentConfiguration({
             <Label>AI Model</Label>
             <ModelSelector
               value={modelConfigData?.model_id || LLM_DEFAULTS.model_id}
-              onChange={(modelId) => handleModelConfigChange('model_id', modelId)}
+              provider={modelConfigData?.provider}
+              onChange={(modelId, servingProvider) => {
+                // PRD-239 S5: the pick is a route — store the model AND who serves it
+                handleModelConfigChange('model_id', modelId)
+                handleModelConfigChange('provider', servingProvider)
+              }}
               agentType={(agent as any)?.agent_type}
             />
           </div>

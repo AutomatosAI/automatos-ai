@@ -37,6 +37,7 @@ from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
 from services.board_dispatcher import claim_tasks, renew_lease
 from services.board_events import notify_board_event
+from services.cli_ticket_lane import CHAT_SOURCE_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ def revoke_host(db: Session, host: CliHost) -> None:
 # was built for. A host that sees the fingerprint change drains and exits; its
 # service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
 # whenever the wire contract changes so a stale checkout is told, not surprised.
-EXPECTED_CLI_HOST_VERSION = "0.2.0"
+EXPECTED_CLI_HOST_VERSION = "0.3.0"  # PRD-239: system_prompt + resume_session_id on the claim
 
 _CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py")
 
@@ -355,11 +356,21 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             db.refresh(task)
             parked.append({"task_id": task.id, "title": task.title, "reason": task.blocked_reason})
             continue  # parked ``blocked`` by the gate; the answered-resume loop returns it
-        from services.cli_ticket_lane import NO_HOST_REASON
+        from services.cli_ticket_lane import NO_HOST_REASON, running_predecessor_of
         if task.blocked_reason == NO_HOST_REASON:
             task.blocked_reason = None  # a host is here now
+        # PRD-239 S2: one session takes one turn at a time — a chat ticket whose
+        # predecessor in the same conversation is still running goes back to
+        # 'assigned' and is claimed once that session has ended.
+        predecessor = running_predecessor_of(db, task)
+        if predecessor is not None:
+            _release_claim(task)
+            logger.info("[cli-host] ticket #%s waits for #%s (same conversation) — released", task.id, predecessor.id)
+            continue
         agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
         cfg = (getattr(agent, "configuration", None) if agent else None) or {}
+        prior = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
+        resume_session_id = _resume_session_for(prior, host)
         session_id = str(uuid4())
         ref = {
             "runtime": RUNTIME_CLI,
@@ -371,6 +382,8 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             "claimed_at": _iso(_now()),
             "cwd": cfg.get(CONFIG_WORKING_DIRECTORY_KEY),
         }
+        if resume_session_id:
+            ref["resume_session_id"] = resume_session_id
         ref["explorer_root"] = explorer_root_for(
             task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
         )
@@ -392,10 +405,49 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
                 "session_id": session_id,
                 "attempt": ref["attempt"],
                 "lease_seconds": config.BOARD_DISPATCH_LEASE_SECONDS,
+                # PRD-239 S1: the agent's soul (description, persona, skills),
+                # stable per agent — the host appends it to the session prompt.
+                "system_prompt": _session_system_prompt(agent),
+                # PRD-239 S2: continue this conversation's previous session on
+                # this host (``claude --resume``); None starts a fresh one.
+                "resume_session_id": resume_session_id,
             }
         )
     db.commit()
     return {"tasks": out, "parked": parked}
+
+
+def _session_system_prompt(agent: Optional[Agent]) -> str:
+    """Never lets a rendering problem block a claim — the host falls back to
+    name + rules when this is empty."""
+    if agent is None:
+        return ""
+    try:
+        from services.cli_session_prompt import session_system_prompt
+
+        return session_system_prompt(agent)
+    except Exception:  # noqa: BLE001
+        logger.warning("[cli-host] session prompt rendering failed for agent %s", getattr(agent, "id", "?"), exc_info=True)
+        return ""
+
+
+def _resume_session_for(prior: Dict[str, Any], host: CliHost) -> Optional[str]:
+    """The session id the ticket asked to resume — only when THIS host ran it
+    (a Claude Code transcript lives on one machine)."""
+    session_id = prior.get("resume_session_id") if isinstance(prior, dict) else None
+    if not session_id:
+        return None
+    if str(prior.get("resume_host_id") or "") != str(host.id):
+        return None
+    return str(session_id)
+
+
+def _release_claim(task: BoardTask) -> None:
+    """Undo this claim: back to ``assigned`` with no lease, so the next claim
+    (this host's or another's) takes the ticket when its turn comes. The
+    pre-claim ``runtime_ref`` (resume hints) is untouched."""
+    task.status = "assigned"
+    task.lease_until = None
 
 
 # ── events + results ─────────────────────────────────────────────────────────
@@ -839,4 +891,10 @@ async def apply_result(
         review_mode=task.review_mode or "auto",
         force_review=bool(denials),
     )
+    # PRD-239 S2: a chat ticket's ending IS the reply the conversation is
+    # waiting for — post it there (fail-soft; the board keeps the record).
+    if terminal is not None and task.source_type == CHAT_SOURCE_TYPE:
+        from services.session_agent_chat import deliver_session_reply
+
+        deliver_session_reply(db, task, exec_result, str(terminal), agent_name=getattr(agent_row, "name", None))
     return {"applied": terminal is not None, "status": terminal or task.status}
