@@ -84,6 +84,9 @@ class SessionOutcome:
             "session_id": self.session_id,
             "exit_reason": self.exit_reason,
             "transcript_path": self.transcript_path,
+            # PRD-239: where the session REALLY ran (a --worktree for a git repo) —
+            # the directory `claude --resume` and the editor links must open.
+            "effective_cwd": self.effective_cwd,
         }
 
 

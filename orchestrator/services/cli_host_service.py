@@ -486,6 +486,15 @@ def _owned_task(db: Session, host: CliHost, task_id: int) -> BoardTask:
     return task
 
 
+def _record_session_cwd(ref: Dict[str, Any], task: BoardTask, cwd: str) -> None:
+    """The directory the session actually runs in, plus the explorer root that
+    follows from it. One writer for SessionStart and the result (PRD-239)."""
+    ref["cwd"] = cwd
+    ref["explorer_root"] = explorer_root_for(
+        task.id, cwd, task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+    )
+
+
 def record_events(
     db: Session, host: CliHost, task_id: int, events: Optional[List[Dict[str, Any]]]
 ) -> Dict[str, Any]:
@@ -520,11 +529,10 @@ def record_events(
             ref["transcript_path"] = ev["transcript_path"]
         # PRD-235 W2: the session's effective working directory (SessionStart carries
         # it) — the absolute host path editor deeplinks need; the explorer root follows.
-        if ev.get("cwd") and not ref.get("cwd"):
-            ref["cwd"] = str(ev["cwd"])
-            ref["explorer_root"] = explorer_root_for(
-                task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
-            )
+        # PRD-239: it always wins over the configured directory — a git repo runs in
+        # a --worktree, and that is where the transcript and the edits live.
+        if name == "SessionStart" and ev.get("cwd"):
+            _record_session_cwd(ref, task, str(ev["cwd"]))
         if name == "PermissionRequest":
             note_pending_permission(ref, ev)
     task.runtime_ref = ref
@@ -865,6 +873,11 @@ async def apply_result(
     )
     if payload.get("transcript_path"):
         ref["transcript_path"] = payload["transcript_path"]
+    # PRD-239: the directory the session really ran in (a git repo gets a
+    # --worktree) wins over the configured one — it is where `claude --resume`
+    # finds the transcript and where the editor links should open.
+    if payload.get("effective_cwd"):
+        _record_session_cwd(ref, task, str(payload["effective_cwd"]))
     # PRD-235 W2 S3: a question nobody answered before the session ended is stale —
     # its denial is already on the record (permission_denials); drop it from the queue.
     if ref.get("pending_permissions"):

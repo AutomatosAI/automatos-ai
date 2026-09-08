@@ -183,6 +183,15 @@ def test_system_prompt_is_stable_per_agent():
     assert a == b and "never push" in a
 
 
+def test_result_payload_names_the_directory_the_session_ran_in():
+    """PRD-239: a git repo runs in a --worktree; the backend must learn that path so
+    `claude --resume` and the editor links open where the transcript is."""
+    out = session.SessionOutcome(status="success", result_text="done", effective_cwd="/repo/.claude/worktrees/automatos-7")
+    payload = out.as_result_payload(1)
+    assert payload["effective_cwd"] == "/repo/.claude/worktrees/automatos-7"
+    assert session.SessionOutcome(status="error", error="x").as_result_payload(1)["effective_cwd"] is None
+
+
 def test_system_prompt_carries_the_agents_soul_between_intro_and_rules():
     """PRD-239 S1: the backend's persona + skills text rides the ticket and sits
     between "You are …" and the session rules; without it the prompt is unchanged."""
