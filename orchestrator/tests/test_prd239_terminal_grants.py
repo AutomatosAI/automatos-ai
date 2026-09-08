@@ -132,13 +132,13 @@ def _client(monkeypatch, host):
 def test_route_mints_a_grant_and_maps_the_refusals(monkeypatch):
     host = _host()
     client, mod = _client(monkeypatch, host)
-    monkeypatch.setattr(mod.svc, "mint_terminal_grant", lambda db, h, cwd=None, task_id=None: {"token": "t", "ws_url": "ws://127.0.0.1:1/terminal?token=t", "cwd": cwd, "task_id": task_id})
+    monkeypatch.setattr(mod.svc, "mint_terminal_grant", lambda db, h, cwd=None, task_id=None, shell=False: {"token": "t", "ws_url": "ws://127.0.0.1:1/terminal?token=t", "cwd": cwd, "task_id": task_id})
     # the route's own host lookup uses the fake db's CliHost query (first() → the list) — patch it to return the host
     monkeypatch.setattr(_Query, "first", lambda self: (self._result[0] if isinstance(self._result, list) and self._result else self._result))
     r = client.post(f"/api/v1/cli-hosts/{host.id}/terminal", json={"task_id": 95})
     assert r.status_code == 200 and r.json()["ws_url"].startswith("ws://127.0.0.1:")
 
-    def _refuse(db, h, cwd=None, task_id=None):
+    def _refuse(db, h, cwd=None, task_id=None, **kw):
         raise PermissionError("outside")
 
     monkeypatch.setattr(mod.svc, "mint_terminal_grant", _refuse)
