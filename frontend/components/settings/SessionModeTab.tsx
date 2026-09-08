@@ -37,11 +37,41 @@ interface PairingCode {
   pair_command: string
 }
 
+/** PRD-239 S6c: Settings → Session mode — where tickets run, and the projects folder the stack was started with. */
+export interface SessionModeSettings {
+  default_folder: 'projects' | 'sessions'
+  default_folder_explicit: boolean
+  local_projects_dir: string | null
+  projects_mount: string | null
+  host_allowed_roots: string[]
+}
+
+export const PROJECTS_ENV_LINES = (folder: string) => `LOCAL_PROJECTS_DIR=${folder}\nLOCAL_PROJECTS_MOUNT=rw`
+
+/** The one-line state of the projects folder for the tab. */
+export function describeProjectsFolder(s: SessionModeSettings | undefined): { tone: 'ok' | 'warn' | 'muted'; text: string } {
+  if (!s) return { tone: 'muted', text: 'Checking…' }
+  if (!s.local_projects_dir) return { tone: 'warn', text: 'No projects folder yet — agents can only work in the per-ticket sessions folders.' }
+  const allowed = s.host_allowed_roots.some((r) => s.local_projects_dir === r || s.local_projects_dir!.startsWith(r.replace(/\/$/, '') + '/'))
+  const mount = s.projects_mount === 'rw' ? 'the Canvas editor can save into it' : 'read-only in the Canvas editor (LOCAL_PROJECTS_MOUNT=rw to save)'
+  if (!allowed) return { tone: 'warn', text: `${s.local_projects_dir} — mounted, ${mount}, but your CLI host does not allow it yet: run make cli-host-install again.` }
+  return { tone: 'ok', text: `${s.local_projects_dir} — mounted, ${mount}, and your CLI host may run sessions anywhere inside it.` }
+}
+
 function useSessionModeHealth() {
   return useQuery({
     queryKey: ['health', 'session-mode'],
     queryFn: () => apiClient.request<{ edition?: string; cli_runtime_enabled?: boolean }>('/health'),
     staleTime: 10_000,
+    refetchInterval: 30_000,
+  })
+}
+
+function useSessionModeSettings(enabled: boolean) {
+  return useQuery({
+    queryKey: ['cli-hosts', 'settings'],
+    queryFn: () => apiClient.request<SessionModeSettings>('/api/v1/cli-hosts/settings'),
+    enabled,
     refetchInterval: 30_000,
   })
 }
@@ -83,7 +113,22 @@ export function SessionModeTab() {
   const health = useSessionModeHealth()
   const enabled = health.data?.cli_runtime_enabled === true
   const hosts = useCliHosts(enabled)
+  const settings = useSessionModeSettings(enabled)
   const [hostName, setHostName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const folderState = describeProjectsFolder(settings.data)
+  const saveDefaultFolder = async (choice: 'projects' | 'sessions') => {
+    setSaving(true)
+    try {
+      await apiClient.request('/api/v1/cli-hosts/settings', { method: 'PUT', body: JSON.stringify({ default_folder: choice }) })
+      queryClient.invalidateQueries({ queryKey: ['cli-hosts', 'settings'] })
+      toast.success(choice === 'projects' ? 'New tickets run in your projects folder' : 'New tickets get their own sessions folder')
+    } catch (err) {
+      toast.error(`Could not save: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSaving(false)
+    }
+  }
   const [pairing, setPairing] = useState<PairingCode | null>(null)
   const [minting, setMinting] = useState(false)
 
@@ -116,9 +161,9 @@ export function SessionModeTab() {
             )}
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            Agents with the runtime <span className="font-mono">Claude Code session</span> run their tickets as
-            your own Claude Code sessions on your machine, under your own login. Automatos assigns the ticket,
-            tracks it on the board and records the result; nothing runs through an API key.
+            Agents with the runtime <span className="font-mono">Claude Code session</span> are your own Claude Code, on your
+            machine, under your own login. Auto files tickets for them and they work in your folders; you can open any of
+            their sessions in the Canvas and type alongside. Nothing runs through an API key.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -171,8 +216,13 @@ export function SessionModeTab() {
               <div className="rounded-lg border border-border/40 p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <Plug className="w-4 h-4" />
-                  <p className="text-sm font-medium">Pair a host</p>
+                  <p className="text-sm font-medium">Connect Claude Code</p>
                 </div>
+                <ol className="list-decimal pl-5 text-xs text-muted-foreground space-y-1">
+                  <li>On the machine with your repositories, run <span className="font-mono">claude</span> once and log in — that is the login every session uses.</li>
+                  <li>Get a pairing code here and run the command it gives you from the repository root. It installs a small host service that starts at login.</li>
+                  <li>The host appears above as connected. Set your projects folder below, and each agent&apos;s workspace folder in its configuration.</li>
+                </ol>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <Input
                     placeholder="Name for this machine (optional)"
@@ -194,31 +244,71 @@ export function SessionModeTab() {
                       <CopyButton value={pairing.pair_command} label="Copy the pair command" />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      From the repository root. The host registers <span className="font-mono">./workspaces</span>; add a real
-                      repository with <span className="font-mono">CLI_HOST_ARGS=&quot;--allow /path/to/repo&quot;</span>.
+                      From the repository root. The host may run sessions in <span className="font-mono">./workspaces</span> and in
+                      your projects folder (below).
                     </p>
                   </div>
                 )}
               </div>
 
-              <div className="rounded-lg border border-border/40 p-4 space-y-2 text-xs text-muted-foreground">
-                <p className="text-sm font-medium text-foreground">Where sessions work</p>
-                <p>
-                  A ticket whose agent names no working directory runs in{' '}
-                  <span className="font-mono">./workspaces/&lt;workspace id&gt;/sessions/&lt;ticket&gt;</span> — the folder
-                  Deliverables → Explorer shows live. Files the session writes there are registered as the ticket&apos;s
-                  deliverables when it finishes, and the task report carries the session log.
+              <div className="rounded-lg border border-border/40 p-4 space-y-3 text-xs text-muted-foreground" data-testid="projects-folder">
+                <p className="text-sm font-medium text-foreground">Your projects folder</p>
+                <p className={folderState.tone === 'ok' ? 'text-[hsl(var(--success))]' : folderState.tone === 'warn' ? 'text-[hsl(var(--warning))]' : ''} data-testid="projects-folder-state">
+                  {folderState.text}
                 </p>
                 <p>
-                  Your own repositories: set <span className="font-mono">LOCAL_PROJECTS_DIR=/path/to/your/projects</span> in{' '}
-                  <span className="font-mono">.env</span> and run <span className="font-mono">make up</span> — the explorer shows it
-                  under <span className="font-mono">projects/</span> and the host registers it. Point an agent&apos;s working
-                  directory at a repository inside it. The folder is read-only inside the platform; sessions write to it
-                  through the host on your machine. <span className="font-mono">LOCAL_PROJECTS_MOUNT=rw</span> lets the Code
-                  Canvas editor save into it directly.
+                  The folder Automatos may show and work in — one parent for everything: your repositories, a workspace of
+                  many repos, anything Claude should be able to open. Each agent then gets its own workspace folder inside it
+                  (Agent → Model → Workspace folder); the Canvas explorer and the agent&apos;s Claude Code session both open there.
+                </p>
+                <p>
+                  This one lives in <span className="font-mono">.env</span>, not here: it is a Docker mount, fixed when the
+                  containers start, so it cannot be changed from a running page. Set it once:
+                </p>
+                <div className="flex items-start gap-2">
+                  <code className="flex-1 whitespace-pre rounded bg-muted px-3 py-2 font-mono text-xs overflow-x-auto">{PROJECTS_ENV_LINES(settings.data?.local_projects_dir || '/Users/you/Development')}</code>
+                  <CopyButton value={PROJECTS_ENV_LINES(settings.data?.local_projects_dir || '/Users/you/Development')} label="Copy the .env lines" />
+                </div>
+                <p>
+                  then <span className="font-mono">make up</span> (remounts it) and <span className="font-mono">make cli-host-install</span> (lets
+                  the host run sessions there). Come back here: the line above turns green.
                 </p>
               </div>
-
+              <div className="rounded-lg border border-border/40 p-4 space-y-3 text-xs text-muted-foreground" data-testid="default-folder">
+                <p className="text-sm font-medium text-foreground">Where a ticket runs when its agent names no folder</p>
+                <div className="space-y-2" role="radiogroup" aria-label="Default folder for tickets">
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="default-folder"
+                      className="mt-0.5"
+                      checked={settings.data?.default_folder === 'projects'}
+                      disabled={saving || !settings.data?.local_projects_dir}
+                      onChange={() => saveDefaultFolder('projects')}
+                    />
+                    <span>
+                      <span className="text-foreground">Your projects folder</span>{settings.data?.local_projects_dir ? '' : ' (set it first)'} — the default. Most
+                      tickets fix something in a repository or start a new one; the session runs at the top of your projects folder
+                      and works from there.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="radio"
+                      name="default-folder"
+                      className="mt-0.5"
+                      checked={settings.data?.default_folder === 'sessions'}
+                      disabled={saving}
+                      onChange={() => saveDefaultFolder('sessions')}
+                    />
+                    <span>
+                      <span className="text-foreground">A fresh folder per ticket</span> — <span className="font-mono">./workspaces/&lt;workspace&gt;/sessions/&lt;ticket&gt;</span>.
+                      Keeps experiments apart; whatever the session writes there is registered as the ticket&apos;s deliverables.
+                    </span>
+                  </label>
+                </div>
+                <p>An agent with its own workspace folder always uses that folder; this only decides for agents without one.</p>
+              </div>
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>
                   A session uses the unmodified <span className="font-mono">claude</span> on your machine and your own login;

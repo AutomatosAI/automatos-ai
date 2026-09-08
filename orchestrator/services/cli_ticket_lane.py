@@ -256,10 +256,10 @@ def open_session_ticket(
     from uuid import uuid4
 
     from config import config
-    from services.cli_host_service import explorer_root_for
+    from services.cli_host_service import default_session_folder, explorer_root_for
 
     cfg = getattr(agent, "configuration", None) or {}
-    cwd = cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or None
+    cwd = cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or default_session_folder(db, workspace_id)
     existing = session_ticket_for(db, workspace_id, chat_id, int(agent.id))
     if existing is not None:
         ref = getattr(existing, "runtime_ref", None)

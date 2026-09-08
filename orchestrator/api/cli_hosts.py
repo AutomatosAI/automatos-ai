@@ -110,6 +110,11 @@ class SessionRequest(BaseModel):
     chat_id: str = Field(..., min_length=1, max_length=128)
 
 
+class SessionModeSettingsRequest(BaseModel):
+    """PRD-239 S6c: Settings → Session mode — where tickets run when their agent names no folder."""
+    default_folder: str = Field(..., pattern="^(projects|sessions)$")
+
+
 class ResultRequest(BaseModel):
     attempt: Optional[int] = None
     status: str = Field("success", pattern="^(success|error|cancelled)$")
@@ -185,6 +190,30 @@ async def open_terminal(
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/settings")
+async def session_mode_settings(
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S6c: the session-mode settings and the projects-folder state the
+    Settings tab explains (the folder itself is a Docker mount from .env)."""
+    return svc.session_mode_settings(db, ctx.workspace_id)
+
+
+@router.put("/settings")
+async def save_session_mode_settings(
+    body: SessionModeSettingsRequest,
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    try:
+        return svc.save_session_mode_settings(db, ctx.workspace_id, default_folder=body.default_folder)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/sessions")

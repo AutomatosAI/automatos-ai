@@ -1,5 +1,5 @@
 {
-  "route_count": 796,
+  "route_count": 798,
   "routes": [
     {
       "method": "GET",
@@ -2288,6 +2288,14 @@
     {
       "method": "POST",
       "path": "/api/v1/cli-hosts/sessions"
+    },
+    {
+      "path": "/api/v1/cli-hosts/settings",
+      "method": "GET"
+    },
+    {
+      "path": "/api/v1/cli-hosts/settings",
+      "method": "PUT"
     },
     {
       "method": "GET",

@@ -423,6 +423,71 @@ def list_hosts(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
 
 # ── heartbeat + reconciliation ───────────────────────────────────────────────
 
+# ── Settings → Session mode (PRD-239 S6c) ───────────────────────────────────
+SESSION_MODE_SETTINGS_KEY = "session_mode"
+DEFAULT_FOLDER_PROJECTS = "projects"   # tickets for agents without a folder run in LOCAL_PROJECTS_DIR
+DEFAULT_FOLDER_SESSIONS = "sessions"   # … in a fresh ./workspaces/<ws>/sessions/<ticket>
+DEFAULT_FOLDER_CHOICES = (DEFAULT_FOLDER_PROJECTS, DEFAULT_FOLDER_SESSIONS)
+
+
+def _workspace_row(db: Session, workspace_id: Any):
+    from core.models.workspaces import Workspace
+
+    return db.query(Workspace).filter(Workspace.id == workspace_id).first()
+
+
+def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
+    """What the operator sees and sets on Settings → Session mode: where tickets
+    run when their agent names no folder, plus the projects folder as the stack
+    was started with (a Docker mount — set in .env, read here) and how it is
+    mounted. The default is the projects folder when one is configured — most
+    tickets are "fix a bug in a repo" or "start a new repo" — else a fresh
+    sessions folder per ticket."""
+    ws = _workspace_row(db, workspace_id)
+    stored = ((getattr(ws, "settings", None) or {}).get(SESSION_MODE_SETTINGS_KEY) or {}) if ws is not None else {}
+    projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
+    choice = stored.get("default_folder")
+    if choice not in DEFAULT_FOLDER_CHOICES:
+        choice = DEFAULT_FOLDER_PROJECTS if projects_dir else DEFAULT_FOLDER_SESSIONS
+    return {
+        "default_folder": choice,
+        "default_folder_explicit": stored.get("default_folder") in DEFAULT_FOLDER_CHOICES,
+        "local_projects_dir": projects_dir,
+        "projects_mount": (getattr(config, "LOCAL_PROJECTS_MOUNT", "") or None),
+        "host_allowed_roots": host_allow_dirs(db, workspace_id),
+    }
+
+
+def save_session_mode_settings(db: Session, workspace_id: Any, *, default_folder: str) -> Dict[str, Any]:
+    if default_folder not in DEFAULT_FOLDER_CHOICES:
+        raise ValueError(f"default_folder must be one of {list(DEFAULT_FOLDER_CHOICES)}")
+    ws = _workspace_row(db, workspace_id)
+    if ws is None:
+        raise LookupError("workspace not found")
+    from sqlalchemy.orm.attributes import flag_modified
+
+    current = dict(getattr(ws, "settings", None) or {})
+    section = dict(current.get(SESSION_MODE_SETTINGS_KEY) or {})
+    ws.settings = {**current, SESSION_MODE_SETTINGS_KEY: {**section, "default_folder": default_folder}}  # rebuild, never mutate (JSONB)
+    flag_modified(ws, "settings")
+    db.commit()
+    return session_mode_settings(db, workspace_id)
+
+
+def default_session_folder(db: Session, workspace_id: Any) -> Optional[str]:
+    """The folder a ticket runs in when its agent names none: the projects
+    folder when the workspace says so and one is configured, else ``None`` —
+    the host then uses its per-ticket ``sessions/<ticket>`` folder."""
+    try:
+        settings = session_mode_settings(db, workspace_id)
+    except Exception:  # noqa: BLE001 — a settings problem must never block a claim
+        logger.warning("[cli-host] session-mode settings unreadable for workspace %s", workspace_id, exc_info=True)
+        return None
+    if settings["default_folder"] == DEFAULT_FOLDER_PROJECTS and settings["local_projects_dir"]:
+        return settings["local_projects_dir"]
+    return None
+
+
 def _host_version_at_least(raw: Any, minimum: Tuple[int, ...]) -> bool:
     try:
         parts = tuple(int(x) for x in str(raw or "").split("."))
@@ -611,7 +676,9 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             "session_id": session_id,
             "attempt": int(task.attempts or 0),
             "claimed_at": _iso(_now()),
-            "cwd": cfg.get(CONFIG_WORKING_DIRECTORY_KEY),
+            # PRD-239 S6c: an agent without a folder runs where the workspace says
+            # (the projects folder by default), else the host's sessions/<ticket>.
+            "cwd": cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or default_session_folder(db, task.workspace_id),
         }
         if resume_session_id:
             ref["resume_session_id"] = resume_session_id
