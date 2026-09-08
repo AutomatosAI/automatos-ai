@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from config import config
 from core.cli_runtime import (
     CONFIG_ALLOWED_TOOLS_KEY,
+    CONFIG_WORKTREE_KEY,
     CONFIG_MODEL_KEY,
     CONFIG_PROVIDER_KEY,
     CONFIG_WORKING_DIRECTORY_KEY,
@@ -632,6 +633,8 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
                 "model": ref["model"],
                 "allowed_tools": cfg.get(CONFIG_ALLOWED_TOOLS_KEY),
                 "cwd": ref["cwd"],
+                # PRD-239: worktree per ticket is the agent's choice (default on).
+                "worktree": cfg.get(CONFIG_WORKTREE_KEY, True) is not False,
                 "session_id": session_id,
                 "attempt": ref["attempt"],
                 "lease_seconds": config.BOARD_DISPATCH_LEASE_SECONDS,
@@ -853,7 +856,8 @@ def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Opt
     root = (projects_dir or "").rstrip("/")
     if root and (path == root or path.startswith(root + "/")):
         rel = _clean_relative(path[len(root):])
-        return f"{PROJECTS_PREFIX}/{rel}" if rel else None
+        # PRD-239: an agent rooted at the projects folder itself browses all of it.
+        return f"{PROJECTS_PREFIX}/{rel}" if rel else PROJECTS_PREFIX
     return None
 
 

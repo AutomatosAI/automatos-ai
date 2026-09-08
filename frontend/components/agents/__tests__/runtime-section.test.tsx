@@ -31,11 +31,11 @@ describe('runtime configuration helpers', () => {
   it('a cli agent saves provider/model/working_directory with blanks as null, trimmed', async () => {
     const { runtimeConfiguration } = await load('local')
     expect(
-      runtimeConfiguration({ runtime: 'cli', cli_provider: 'claude', cli_model: '  ', cli_working_directory: '' }),
-    ).toEqual({ runtime: 'cli', provider: 'claude', model: null, working_directory: null })
+      runtimeConfiguration({ runtime: 'cli', cli_provider: 'claude', cli_model: '  ', cli_working_directory: '', cli_worktree: true }),
+    ).toEqual({ runtime: 'cli', provider: 'claude', model: null, working_directory: null, worktree_per_ticket: true })
     expect(
-      runtimeConfiguration({ runtime: 'cli', cli_provider: '', cli_model: ' fable ', cli_working_directory: ' /w/repo ' }),
-    ).toEqual({ runtime: 'cli', provider: 'claude', model: 'fable', working_directory: '/w/repo' })
+      runtimeConfiguration({ runtime: 'cli', cli_provider: '', cli_model: ' fable ', cli_working_directory: ' /w/repo ', cli_worktree: true }),
+    ).toEqual({ runtime: 'cli', provider: 'claude', model: 'fable', working_directory: '/w/repo', worktree_per_ticket: true })
   })
 
   it('reads the fields back from an agent configuration, defaulting anything missing', async () => {
@@ -44,10 +44,11 @@ describe('runtime configuration helpers', () => {
     expect(runtimeFieldsFromConfiguration({ runtime: 'api', model: 'gpt-4o' })).toEqual({
       ...DEFAULT_RUNTIME_FIELDS,
       cli_model: 'gpt-4o',
+      cli_worktree: true,
     })
     expect(
       runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', model: 'opus', working_directory: '/w' }),
-    ).toEqual({ runtime: 'cli', cli_provider: 'claude', cli_model: 'opus', cli_working_directory: '/w' })
+    ).toEqual({ runtime: 'cli', cli_provider: 'claude', cli_model: 'opus', cli_working_directory: '/w', cli_worktree: true })
   })
 })
 
@@ -132,5 +133,15 @@ describe('describeWorkspaceCheck', () => {
     const verdict = describeWorkspaceCheck({ ...base, valid: false, errors: ['must be an absolute path'] })
     expect(verdict.tone).toBe('error')
     expect(verdict.text).toBe('must be an absolute path')
+  })
+})
+
+describe('worktree per ticket (PRD-239)', () => {
+  it('round-trips the agent choice and defaults to on', async () => {
+    const { runtimeConfiguration, runtimeFieldsFromConfiguration } = await import('@/components/agents/runtime-section')
+    const off = runtimeConfiguration({ runtime: 'cli', cli_provider: 'claude', cli_model: '', cli_working_directory: '/Users/me/Development', cli_worktree: false })
+    expect(off.worktree_per_ticket).toBe(false)
+    expect(runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', working_directory: '/w', worktree_per_ticket: false }).cli_worktree).toBe(false)
+    expect(runtimeFieldsFromConfiguration({ runtime: 'cli', provider: 'claude', working_directory: '/w' }).cli_worktree).toBe(true)
   })
 })

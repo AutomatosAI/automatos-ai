@@ -403,7 +403,11 @@ class Session:
         )
 
         # 4. spawn
-        worktree = f"automatos-{_slug(str(self.task_id))}" if (self.cfg.use_worktrees and _is_git_repo(cwd)) else None
+        # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
+        # (the checkout stays untouched); a workspace of many repos, whose own
+        # git tracks next to nothing, must not (the worktree would be empty).
+        wants_worktree = self.ticket.get("worktree", True) is not False
+        worktree = f"automatos-{_slug(str(self.task_id))}" if (self.cfg.use_worktrees and wants_worktree and _is_git_repo(cwd)) else None
         args = build_args(
             claude,
             session_id=self.session_id,

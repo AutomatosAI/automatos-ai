@@ -200,3 +200,44 @@ def test_the_sessions_route_is_declared_in_the_mount_manifest():
 
     manifest = json.loads((_ORCH / "reports" / "route-manifest.json").read_text())
     assert {"path": "/api/v1/cli-hosts/sessions", "method": "POST"} in manifest["routes"]
+
+
+# ── the agent's folder is the workspace ──────────────────────────────────────
+
+def test_the_projects_folder_itself_and_its_repos_are_browsable():
+    assert svc.workspace_relative_path("/Users/me/Development", "ws", "/Users/me/Development") == "projects"
+    assert svc.workspace_relative_path("/Users/me/Development/Automatos-AI-Platform", "ws", "/Users/me/Development") == "projects/Automatos-AI-Platform"
+    assert svc.workspace_relative_path("/Users/me/Elsewhere/repo", "ws", "/Users/me/Development") is None
+    assert svc.workspace_relative_path("/Users/me/Development-other/x", "ws", "/Users/me/Development") is None
+
+
+def test_a_session_ticket_follows_the_agents_folder_with_a_fresh_session(monkeypatch):
+    existing = SimpleNamespace(id=93, status="done", runtime_ref={
+        "runtime": "cli", "mode": "terminal", "cwd": "/Users/me/Development/old-repo",
+        "session_id": "old-sid", "cli_session_id": "old-real", "host_id": "h",
+    })
+    db = _DB(ticket=existing)
+    task, created = lane.open_session_ticket(
+        db, workspace_id=WS, agent=_agent(working_directory="/Users/me/Development/Automatos-AI-Platform"),
+        chat_id="c1", host=_host(), actor="user:1",
+    )
+    assert task is existing and created is False and db.commits == 1
+    ref = task.runtime_ref
+    assert ref["cwd"] == "/Users/me/Development/Automatos-AI-Platform"
+    assert ref["session_id"] != "old-sid" and UUID(ref["session_id"]) and ref["cli_session_id"] is None
+    assert ref["previous_session"] == {"cwd": "/Users/me/Development/old-repo", "session_id": "old-real"}
+    assert ref["mode"] == "terminal" and ref["host_id"] == "h"  # nothing else lost
+    # unchanged folder → untouched
+    same, _ = lane.open_session_ticket(db, workspace_id=WS, agent=_agent(working_directory="/Users/me/Development/Automatos-AI-Platform"), chat_id="c1", host=_host(), actor="user:1")
+    assert same.runtime_ref is ref and db.commits == 1
+
+
+def test_worktree_per_ticket_is_a_boolean_agent_choice():
+    from core.cli_runtime import CONFIG_WORKTREE_KEY, validate_runtime_configuration
+
+    base = {"runtime": "cli", "provider": "claude", "model": None, "working_directory": None}
+    assert validate_runtime_configuration({**base, CONFIG_WORKTREE_KEY: False}, cli_enabled=True) == []
+    assert validate_runtime_configuration({**base, CONFIG_WORKTREE_KEY: True}, cli_enabled=True) == []
+    assert validate_runtime_configuration(base, cli_enabled=True) == []
+    errors = validate_runtime_configuration({**base, CONFIG_WORKTREE_KEY: "no"}, cli_enabled=True)
+    assert errors and "worktree_per_ticket" in errors[0]

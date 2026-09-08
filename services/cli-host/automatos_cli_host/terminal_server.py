@@ -249,18 +249,19 @@ def build_terminal_args(
 ) -> List[str]:
     """The interactive command for a Runtime Canvas terminal.
 
-    The same session the host runs for a ticket — the agent's soul appended,
-    the user's own settings, no MCP surprises — minus everything that assumed
-    nobody was at the keyboard: no ``--permission-mode acceptEdits`` (the
-    human answers Claude's own prompts), no hooks, no ``--worktree``, no
-    positional prompt. ``--resume`` continues a session whose transcript
-    exists on this machine; otherwise ``--session-id`` starts it under the
-    id the backend recorded on the ticket, so the next open resumes it.
+    Exactly what the operator gets by typing ``claude`` in that folder — their
+    settings at every scope, the folder's CLAUDE.md files, its ``.mcp.json``
+    servers — plus the agent's soul appended. Nothing that assumed nobody was
+    at the keyboard: no ``--permission-mode acceptEdits`` (the human answers
+    Claude's own prompts), no hooks, no ``--worktree``, no positional prompt,
+    and none of the unattended lane's ``--setting-sources user`` /
+    ``--strict-mcp-config`` narrowing. ``--resume`` continues a session whose
+    transcript exists in this folder; otherwise ``--session-id`` starts it
+    under the id the backend recorded on the ticket, so the next open resumes it.
     """
     args = [claude, "--resume" if resume else "--session-id", session_id]
     if system_prompt_path is not None:
         args += ["--append-system-prompt-file", str(system_prompt_path)]
-    args += ["--setting-sources", "user", "--strict-mcp-config"]
     if task_id:
         args += ["--name", f"automatos #{task_id}"]
     if model:
@@ -269,13 +270,11 @@ def build_terminal_args(
 
 
 def transcript_exists(cwd: Path, session_id: str, home: Optional[Path] = None) -> bool:
-    """Whether ``claude --resume <session_id>`` would find its conversation
-    for a session started in ``cwd``: the exact path first, then any project
-    folder (a session can be resumed from a different directory by id)."""
-    if transcript_path(str(cwd), session_id, home).exists():
-        return True
-    root = (home or Path.home()) / ".claude" / "projects"
-    return any(root.glob(f"*/{session_id}.jsonl")) if root.is_dir() else False
+    """Whether ``claude --resume <session_id>`` run in ``cwd`` would find its
+    conversation. Claude Code keeps transcripts per project directory, so only
+    the exact path counts — a transcript elsewhere would make ``--resume``
+    answer "No conversation found" and the terminal die."""
+    return transcript_path(str(cwd), session_id, home).exists()
 
 
 # ── the server ───────────────────────────────────────────────────────────────
