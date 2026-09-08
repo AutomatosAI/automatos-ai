@@ -353,7 +353,7 @@ def pop_terminal_grants(host_id: Any) -> List[Dict[str, Any]]:
 
 
 def mint_terminal_grant(
-    db: Session, host: CliHost, *, cwd: Optional[str] = None, task_id: Optional[int] = None,
+    db: Session, host: CliHost, *, cwd: Optional[str] = None, task_id: Optional[int] = None, shell: bool = False,
 ) -> Dict[str, Any]:
     """A grant for one terminal on ``host``: in a ticket's real directory
     (``task_id``), in an agent's working directory (``cwd``, checked against
@@ -378,7 +378,9 @@ def mint_terminal_grant(
             raise LookupError(f"task {task_id} not found in this workspace")
         ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
         resolved_cwd = str(ref["cwd"]) if ref.get("cwd") else None
-        launch = _terminal_launch_for(db, task, ref, host)
+        # ``shell`` = the operator wants a plain shell in the ticket's folder (an
+        # extra terminal tab beside the session), not the session itself.
+        launch = None if shell else _terminal_launch_for(db, task, ref, host)
     elif cwd:
         errors = validate_working_directory(cwd)
         if errors:

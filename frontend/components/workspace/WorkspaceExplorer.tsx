@@ -57,6 +57,9 @@ export interface WorkspaceExplorerProps {
   className?: string
   /** PRD-235 W2: root the tree (and the terminal) at this workspace-relative folder */
   rootPath?: string
+  /** PRD-239: offer the worker shell (a terminal INSIDE the platform's worker container).
+   *  The Runtime Canvas turns it off — its terminal is the operator's own machine. */
+  terminal?: boolean
 }
 
 export function WorkspaceExplorer({
@@ -65,6 +68,7 @@ export function WorkspaceExplorer({
   initialFilePath,
   className = 'h-full',
   rootPath,
+  terminal = true,
 }: WorkspaceExplorerProps) {
   const root = rootPath || '.'
   // File system hook
@@ -95,6 +99,7 @@ export function WorkspaceExplorer({
 
   // Ctrl+` to toggle terminal
   useEffect(() => {
+    if (!terminal) return
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === '`') {
         e.preventDefault()
@@ -103,7 +108,7 @@ export function WorkspaceExplorer({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [terminal])
 
   // Fetch root directory on mount
   useEffect(() => {
@@ -353,15 +358,18 @@ export function WorkspaceExplorer({
                       <Save className={`h-3.5 w-3.5 ${isSaving ? 'animate-pulse text-muted-foreground' : 'text-warning'}`} />
                     </Button>
                   )}
+                  {terminal && (
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 shrink-0 mr-1"
                     onClick={() => setShowTerminal(prev => !prev)}
-                    title={`${showTerminal ? 'Hide' : 'Show'} Terminal (Ctrl+\`)`}
+                    title={`${showTerminal ? 'Hide' : 'Show'} the worker shell — a terminal inside the platform, not your machine (Ctrl+\`)`}
+                    data-testid="worker-shell-toggle"
                   >
                     <Terminal className={`h-3.5 w-3.5 ${showTerminal ? 'text-primary' : 'text-muted-foreground'}`} />
                   </Button>
+                  )}
                 </div>
 
                 {/* Monaco source OR FilePreview, depending on per-tab view mode */}
@@ -386,7 +394,7 @@ export function WorkspaceExplorer({
             </Panel>
 
             {/* Terminal panel (conditional) */}
-            {showTerminal && (
+            {terminal && showTerminal && (
               <>
                 <PanelResizeHandle className="h-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-row-resize" />
                 <Panel defaultSize={30} minSize={10}>

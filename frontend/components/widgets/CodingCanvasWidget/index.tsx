@@ -28,15 +28,10 @@ import { WorkspaceExplorer } from '../../workspace/WorkspaceExplorer'
 import { useWorkspaceFiles } from './useWorkspaceFiles'
 import { useCanvasSession } from './useCanvasSession'
 import { CanvasSessionPanel } from './CanvasSessionPanel'
-import dynamic from 'next/dynamic'
-import type { CanvasTerminalProps } from './CanvasTerminal'
-
-// PRD-239 S7: xterm.js reads `self` at import time and the chat page is still
-// server-rendered, so the terminal pane only ever loads in the browser.
-const CanvasTerminal = dynamic<CanvasTerminalProps>(
-  () => import('./CanvasTerminal').then((m) => m.CanvasTerminal),
-  { ssr: false, loading: () => <div className="p-3 text-xs text-muted-foreground">Loading the terminal…</div> },
-)
+import { CanvasTerminals } from './CanvasTerminals'
+import { useCanvasSdkAvailable } from './useCanvasSdk'
+import { useCliHostHealth } from '@/hooks/use-cli-host-health'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -62,8 +57,15 @@ export function CodingCanvasWidget({
   // PRD-239 S7 v2: a Runtime Canvas is explorer + the agent's Claude Code session in
   // a wide terminal, opened for you — no chat, no session log (nothing is dispatched).
   const runtime = Boolean(data.runtime)
-  // A ticket's Canvas opens on the terminal; the SDK canvas on its session.
-  const [rightTab, setRightTab] = useState<'terminal' | 'session'>(session.external ? 'terminal' : 'session')
+  // PRD-239 S7b: the SDK "Auto session" (a second engine, run by the worker with its
+  // own credential) is offered only where the worker can run it; the terminal is
+  // the operator's own machine and is always there when a host is paired.
+  const sdkAvailable = useCanvasSdkAvailable(workspaceId)
+  const showSdk = !runtime && sdkAvailable !== false
+  const { data: hostHealth } = useCliHostHealth()
+  const maxTerminals = hostHealth?.online_hosts?.[0]?.capabilities?.max_terminals ?? null
+  // A ticket's Canvas opens on the terminal; the SDK canvas on its session (when it has one).
+  const [rightTab, setRightTab] = useState<'terminal' | 'session'>(session.external || sdkAvailable === false ? 'terminal' : 'session')
 
   const handleRefresh = useCallback(() => {
     invalidateCache()
@@ -122,17 +124,24 @@ export function CodingCanvasWidget({
         onChange={handleRootChange}
         note={runtime ? 'Your session runs on your machine, in this folder.' : undefined}
       />
-      <div className={`grid min-h-0 flex-1 grid-cols-1 ${runtime ? 'md:grid-cols-[minmax(320px,2fr)_minmax(560px,3fr)]' : 'md:grid-cols-[1fr_420px]'}`} data-testid={runtime ? 'runtime-canvas' : 'code-canvas'}>
-        <WorkspaceExplorer
-          workspaceId={workspaceId}
-          rootPath={root}
-          lastEvent={lastEvent}
-          className="h-full min-h-[300px]"
-        />
-        {/* PRD-239 S7: the right column is a real terminal (your own shell on your
-            machine, via the CLI host) or the session view — one at a time. */}
+      {/* PRD-239 S7b: explorer + file view | terminals, resizable; the explorer's own
+          tree | editor split is resizable too. */}
+      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1" data-testid={runtime ? 'runtime-canvas' : 'code-canvas'}>
+        <ResizablePanel defaultSize={runtime ? 45 : 65} minSize={20}>
+          <WorkspaceExplorer
+            workspaceId={workspaceId}
+            rootPath={root}
+            lastEvent={lastEvent}
+            className="h-full min-h-[300px]"
+            terminal={!runtime}
+          />
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel defaultSize={runtime ? 55 : 35} minSize={20}>
+        {/* The right column: your own terminals (the CLI host, on your machine) and,
+            where the worker can run one, the SDK session view — one at a time. */}
         <div className="flex h-full min-h-0 flex-col border-l border-border">
-          {!runtime && (
+          {showSdk && (
           <div className="flex items-center gap-1 border-b border-border px-2 py-1" role="tablist" data-testid="canvas-right-tabs">
             <button
               type="button"
@@ -141,7 +150,7 @@ export function CodingCanvasWidget({
               onClick={() => setRightTab('terminal')}
               className={`rounded px-2 py-1 text-xs ${rightTab === 'terminal' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              Terminal
+              Your machine
             </button>
             <button
               type="button"
@@ -150,19 +159,20 @@ export function CodingCanvasWidget({
               onClick={() => setRightTab('session')}
               className={`rounded px-2 py-1 text-xs ${rightTab === 'session' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              {session.external ? 'Session log' : 'Auto session'}
+              {session.external ? 'Session log' : 'Auto session (SDK)'}
             </button>
           </div>
           )}
           <div className="min-h-0 flex-1">
-            {runtime || rightTab === 'terminal' ? (
-              <CanvasTerminal taskId={data.taskId ?? null} autoOpen={runtime} runtime={runtime} />
+            {!showSdk || rightTab === 'terminal' ? (
+              <CanvasTerminals taskId={data.taskId ?? null} runtime={runtime} maxTerminals={maxTerminals} />
             ) : (
               <CanvasSessionPanel session={session} workspaceId={workspaceId} />
             )}
           </div>
         </div>
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
       </div>
     </WidgetBase>
   )

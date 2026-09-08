@@ -101,6 +101,9 @@ class TerminalRequest(BaseModel):
     directory, or an agent's working directory; neither = the host's default."""
     task_id: Optional[int] = None
     cwd: Optional[str] = Field(None, max_length=1024)
+    # PRD-239: a plain shell in the ticket's folder even when the ticket has a
+    # session to launch — the Runtime Canvas's extra terminal tabs.
+    shell: bool = False
 
 
 class SessionRequest(BaseModel):
@@ -183,7 +186,7 @@ async def open_terminal(
     if host is None:
         raise HTTPException(status_code=404, detail="no paired CLI host with that id in this workspace")
     try:
-        return svc.mint_terminal_grant(db, host, cwd=body.cwd, task_id=body.task_id)
+        return svc.mint_terminal_grant(db, host, cwd=body.cwd, task_id=body.task_id, shell=body.shell)
     except LookupError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except PermissionError as exc:
