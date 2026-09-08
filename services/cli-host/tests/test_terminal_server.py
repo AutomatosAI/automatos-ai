@@ -1,6 +1,8 @@
 """PRD-239 S7 — the Canvas terminal: the RFC 6455 pieces, single-use grants,
-directory resolution, and one real shell through a real WebSocket on the
-loopback (``/bin/sh``, no Claude involved)."""
+directory resolution, one real shell through a real WebSocket on the loopback
+(``/bin/sh``, no Claude involved), and — S7 v2, the Runtime Canvas — a launch
+grant that starts or resumes the agent's Claude Code session (a fake ``claude``
+that prints its argv)."""
 from __future__ import annotations
 
 import base64
@@ -171,5 +173,122 @@ def test_an_unknown_or_reused_grant_and_a_foreign_origin_are_refused(tmp_path):
         s = _handshake(port, "once")
         assert _read_response(s).startswith(b"HTTP/1.1 403")   # single use
         s.close()
+    finally:
+        server.stop()
+
+
+# ── S7 v2: launch grants — the agent's own Claude Code session in the PTY ────
+
+def test_terminal_args_start_or_resume_and_honour_the_subscription_invariant(tmp_path):
+    prompt = tmp_path / "system_prompt.md"
+    started = ts.build_terminal_args("/usr/local/bin/claude", session_id="abc", resume=False,
+                                     system_prompt_path=prompt, model="opus", task_id="93")
+    assert started[:3] == ["/usr/local/bin/claude", "--session-id", "abc"]
+    assert started[3:5] == ["--append-system-prompt-file", str(prompt)]
+    assert "--setting-sources" in started and "--strict-mcp-config" in started
+    assert started[-4:] == ["--name", "automatos #93", "--model", "opus"]
+    resumed = ts.build_terminal_args("claude", session_id="abc", resume=True, system_prompt_path=None, model=None, task_id=None)
+    assert resumed == ["claude", "--resume", "abc", "--setting-sources", "user", "--strict-mcp-config"]
+    # nothing that assumes nobody is at the keyboard, nothing the subscription rules forbid
+    for args in (started, resumed):
+        assert "--permission-mode" not in args and "--settings" not in args and "--worktree" not in args
+        assert "-p" not in args and "--print" not in args and "--bare" not in args
+        ts.assert_args_honour_invariant(args)
+
+
+def test_transcript_lookup_finds_the_session_in_its_project_or_anywhere(tmp_path):
+    home = tmp_path / "home"
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    assert ts.transcript_exists(cwd, "11111111-1111-1111-1111-111111111111", home) is False
+    elsewhere = home / ".claude" / "projects" / "-some-other-folder"
+    elsewhere.mkdir(parents=True)
+    (elsewhere / "11111111-1111-1111-1111-111111111111.jsonl").write_text("{}\n")
+    assert ts.transcript_exists(cwd, "11111111-1111-1111-1111-111111111111", home) is True
+
+
+def _fake_claude(tmp_path) -> str:
+    script = tmp_path / "claude"
+    script.write_text('#!/bin/sh\necho "FAKE_CLAUDE_ARGS: $*"\necho "FAKE_CLAUDE_CWD: $(pwd)"\n')
+    script.chmod(0o755)
+    return str(script)
+
+
+def _run_launch(server, port, token) -> bytes:
+    s = _handshake(port, token)
+    head = _read_response(s)
+    assert head.startswith(b"HTTP/1.1 101"), head
+    s.settimeout(5)
+    reader = ts.FrameReader()
+    seen = b""
+    deadline = time.time() + 10
+    while b"FAKE_CLAUDE_CWD" not in seen and time.time() < deadline:
+        try:
+            data = s.recv(65536)
+        except socket.timeout:
+            continue
+        if not data:
+            break
+        for opcode, payload in reader.feed(data):
+            if opcode == ts.OPCODE_BINARY:
+                seen += payload
+    s.close()
+    deadline = time.time() + 5
+    while server.active and time.time() < deadline:
+        time.sleep(0.05)
+    return seen
+
+
+def test_a_launch_grant_runs_the_agents_session_and_reports_open_and_close(tmp_path):
+    root = tmp_path / "ws"
+    root.mkdir()
+    home = tmp_path / "home"
+    events = []
+    server = ts.TerminalServer(
+        [str(root)], str(root), shell="/bin/sh", claude=_fake_claude(tmp_path),
+        sessions_dir=tmp_path / "sessions", on_event=lambda task_id, ev, payload: events.append((task_id, ev, payload)),
+        claude_home=home,
+    )
+    port = server.start()
+    sid = "22222222-2222-2222-2222-222222222222"
+    launch = {"kind": "claude", "session_id": sid, "system_prompt": "You are Bob.", "model": "opus", "agent_name": "Bob"}
+    try:
+        server.admit([{"token": "first", "cwd": str(root), "task_id": 93, "launch": launch}])
+        out = _run_launch(server, port, "first")
+        assert b"--session-id " + sid.encode() in out and b"--resume" not in out, out
+        assert b"--append-system-prompt-file" in out and b"--model opus" in out and b"automatos #93" in out
+        assert (tmp_path / "sessions" / "93" / "system_prompt.md").read_text() == "You are Bob."
+        assert str(root.resolve()).encode() in out
+        # the transcript now exists → the next open resumes the same session
+        project = home / ".claude" / "projects" / "-anything"
+        project.mkdir(parents=True)
+        (project / f"{sid}.jsonl").write_text("{}\n")
+        server.admit([{"token": "second", "cwd": str(root), "task_id": 93, "launch": launch}])
+        out = _run_launch(server, port, "second")
+        assert b"--resume " + sid.encode() in out and b"--session-id" not in out, out
+    finally:
+        server.stop()
+    names = [(t, e, p["resumed"]) for t, e, p in events]
+    assert names == [("93", "TerminalOpened", False), ("93", "TerminalClosed", False),
+                     ("93", "TerminalOpened", True), ("93", "TerminalClosed", True)]
+    assert all(p["session_id"] == sid and p["cwd"] == str(root.resolve()) for _, _, p in events)
+
+
+def test_a_launch_the_host_cannot_honour_is_refused_before_any_shell_runs(tmp_path):
+    root = tmp_path / "ws"
+    root.mkdir()
+    server = ts.TerminalServer([str(root)], str(root), shell="/bin/sh", claude=str(tmp_path / "missing-claude"))
+    port = server.start()
+    try:
+        server.admit([
+            {"token": "kind", "cwd": str(root), "task_id": 1, "launch": {"kind": "codex", "session_id": "x"}},
+            {"token": "sid", "cwd": str(root), "task_id": 1, "launch": {"kind": "claude", "session_id": "not-a-uuid"}},
+            {"token": "bin", "cwd": str(root), "task_id": 1, "launch": {"kind": "claude", "session_id": "33333333-3333-3333-3333-333333333333"}},
+        ])
+        for token in ("kind", "sid", "bin"):
+            s = _handshake(port, token)
+            assert _read_response(s).startswith(b"HTTP/1.1 503"), token
+            s.close()
+        assert server.active == 0
     finally:
         server.stop()

@@ -413,8 +413,8 @@ async def stream_chat(
         # User explicitly selected an agent — skip Auto, use directly
         effective_agent_id = request.agentId
         logger.info(f"[chat] Direct mode: agent_id={effective_agent_id}")
-        # PRD-239 S2: a session agent (runtime: cli) never runs in the LLM
-        # runtime — its turn files a ticket its Claude Code session works.
+        # PRD-239: a session agent (runtime: cli) never runs in the LLM runtime —
+        # it talks in the Runtime Canvas terminal (S7 v2).
         from services.cli_ticket_lane import is_cli_agent
         _session_agent = is_cli_agent(db, effective_agent_id)
     else:
@@ -559,21 +559,16 @@ async def stream_chat(
         try:
             task_service = StreamingChatService(task_db, workspace_id=_ws_id)
             async with session_queue.acquire(session_key):
-                # PRD-239 S2: the message becomes a ticket for the agent's Claude
-                # Code session; the reply lands in this chat when the session ends.
+                # PRD-239 S7 v2: a session agent lives in the Runtime Canvas — the
+                # operator talks to it in the terminal, never through this lane.
+                # Say so (S4 renders `e:` frames) and end the turn.
                 if _session_agent:
-                    from services.session_agent_chat import produce_session_agent_turn
+                    from services.cli_ticket_lane import session_agent_terminal_message
 
-                    async for chunk in produce_session_agent_turn(
-                        db=task_db,
-                        workspace_id=_ws_id,
-                        chat_id=chat_id,
-                        agent_id=effective_agent_id,
-                        message_history=message_history,
-                        user_text=message_text,
-                        user_id=user_id,
-                    ):
-                        yield chunk
+                    yield task_service.streaming_handler.format_aisdk_error(
+                        session_agent_terminal_message(task_db, effective_agent_id),
+                        code="session_agent_terminal",
+                    )
                     return
 
                 # PRD-125: Emit mission suggestion data event (for frontend to render card)

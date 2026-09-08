@@ -52,12 +52,19 @@ class _DB:
         self.hosts = hosts or []
 
     def query(self, model):
-        return _Query(self.hosts if model.__name__ == "CliHost" else self.task)
+        if model.__name__ == "CliHost":
+            return _Query(self.hosts)
+        if model.__name__ == "Agent":
+            return _Query(getattr(self, "agent", None))
+        return _Query(self.task)
+
+    def commit(self):
+        pass
 
 
-def _host(port=48123, allow_dirs=("/Users/me/Development",)):
+def _host(port=48123, allow_dirs=("/Users/me/Development",), version="0.4.0"):
     return SimpleNamespace(id=uuid4(), workspace_id=WS, status="paired",
-                           capabilities={"terminal_port": port, "allow_dirs": list(allow_dirs)})
+                           capabilities={"terminal_port": port, "allow_dirs": list(allow_dirs), "host_version": version})
 
 
 @pytest.fixture(autouse=True)
@@ -144,3 +151,49 @@ def test_route_is_declared_in_the_mount_manifest():
     manifest = json.loads((_ORCH / "reports" / "route-manifest.json").read_text())
     routes = {(r["method"], r["path"]) for r in manifest["routes"]}
     assert ("POST", "/api/v1/cli-hosts/{host_id}/terminal") in routes
+
+
+# ── S7 v2: launch grants for the Runtime Canvas ──────────────────────────────
+
+def _cli_ticket(**ref):
+    return SimpleNamespace(id=93, workspace_id=WS, assigned_agent_id=7, title="Session with Bob",
+                           runtime_ref={"runtime": "cli", "session_id": "0b0b0b0b-0000-4000-8000-000000000093", "cwd": "/Users/me/Development/repo", **ref})
+
+
+def test_a_cli_tickets_grant_carries_the_launch_and_the_browser_only_its_summary(monkeypatch):
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "SOUL")
+    task = _cli_ticket(model="opus")
+    db = _DB(task=task)
+    db.agent = SimpleNamespace(id=7, name="Bob")
+    host = _host()
+    out = svc.mint_terminal_grant(db, host, task_id=93)
+    assert out["launch"] == {"kind": "claude", "session_id": task.runtime_ref["session_id"], "agent_name": "Bob"}
+    assert "system_prompt" not in out["launch"]
+    delivered = svc.pop_terminal_grants(host.id)[0]
+    assert delivered["launch"]["system_prompt"] == "SOUL" and delivered["launch"]["model"] == "opus"
+    assert delivered["cwd"] == "/Users/me/Development/repo" and delivered["task_id"] == "93"
+
+
+def test_the_hooks_reported_session_id_wins_and_a_ticket_without_a_session_gets_a_plain_shell(monkeypatch):
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    db = _DB(task=_cli_ticket(cli_session_id="real-1"))
+    assert svc.mint_terminal_grant(db, _host(), task_id=93)["launch"]["session_id"] == "real-1"
+    plain = SimpleNamespace(id=5, workspace_id=WS, assigned_agent_id=None, title="x", runtime_ref={"cwd": "/Users/me/Development/repo"})
+    assert svc.mint_terminal_grant(_DB(task=plain), _host(), task_id=5)["launch"] is None
+
+
+def test_a_launch_needs_a_host_that_can_run_it(monkeypatch):
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    with pytest.raises(LookupError, match="0.4.0"):
+        svc.mint_terminal_grant(_DB(task=_cli_ticket()), _host(version="0.3.0"), task_id=93)
+    with pytest.raises(LookupError):
+        svc.mint_terminal_grant(_DB(task=_cli_ticket()), _host(version=None), task_id=93)
+
+
+def test_an_interactive_session_ticket_follows_the_host_that_opens_it(monkeypatch):
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    task = _cli_ticket(mode="terminal", host_id="some-old-host")
+    host = _host()
+    svc.mint_terminal_grant(_DB(task=task), host, task_id=93)
+    assert task.runtime_ref["host_id"] == str(host.id)
+    assert task.runtime_ref["mode"] == "terminal"  # rebuilt, nothing else lost

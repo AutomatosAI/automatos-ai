@@ -134,14 +134,13 @@ def _task(host_id, **over):
     return SimpleNamespace(**base)
 
 
-def _claim_env(monkeypatch, task, predecessor=None, soul="SOUL"):
+def _claim_env(monkeypatch, task, soul="SOUL"):
     import services.cli_ticket_lane as lane
 
     monkeypatch.setattr(svc, "claim_tasks", lambda db, **kw: [task])
     monkeypatch.setattr(svc, "_blocked_pending_approval", lambda db, t: False)
     monkeypatch.setattr(svc, "explorer_root_for", lambda *a, **k: None)
     monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: soul)
-    monkeypatch.setattr(lane, "running_predecessor_of", lambda db, t: predecessor)
 
 
 def _agent_row():
@@ -166,38 +165,6 @@ def test_claim_never_resumes_a_session_another_host_ran(monkeypatch):
     assert out["resume_session_id"] is None and "resume_session_id" not in task.runtime_ref
 
 
-def test_claim_holds_a_chat_ticket_while_its_predecessor_still_runs(monkeypatch):
-    host = SimpleNamespace(id=uuid4(), workspace_id=WS)
-    task = _task(host.id)
-    _claim_env(monkeypatch, task, predecessor=SimpleNamespace(id=3))
-    out = svc.claim_for_host(_DB(_agent_row()), host, 1)
-    assert out["tasks"] == [] and out["parked"] == []
-    assert task.status == "assigned" and task.lease_until is None
-    assert task.runtime_ref["resume_session_id"] == "sess-1"  # the hint survives the release
-
-
-def test_a_chat_ticket_filed_mid_turn_resumes_the_session_that_has_since_ended(monkeypatch):
-    """The message arrived while the previous turn still ran (no session to name at
-    filing); by claim time that turn has ended — continue it, on the same host."""
-    import services.cli_ticket_lane as lane
-
-    host = SimpleNamespace(id=uuid4(), workspace_id=WS)
-    task = _task(host.id, runtime_ref=None)  # no hint from the filing
-    _claim_env(monkeypatch, task)
-    monkeypatch.setattr(lane, "previous_session_of", lambda db, ws, cid, aid: ("sess-prev", str(host.id)))
-    out = svc.claim_for_host(_DB(_agent_row()), host, 1)["tasks"][0]
-    assert out["resume_session_id"] == "sess-prev" and task.runtime_ref["resume_session_id"] == "sess-prev"
-    # …but never a session another host ran, and never for a non-chat ticket.
-    monkeypatch.setattr(lane, "previous_session_of", lambda db, ws, cid, aid: ("sess-prev", "other-host"))
-    task2 = _task(host.id, runtime_ref=None)
-    _claim_env(monkeypatch, task2)
-    assert svc.claim_for_host(_DB(_agent_row()), host, 1)["tasks"][0]["resume_session_id"] is None
-    heartbeat = _task(host.id, runtime_ref=None, source_type="heartbeat", source_id="agent:15")
-    _claim_env(monkeypatch, heartbeat)
-    monkeypatch.setattr(lane, "previous_session_of", lambda db, ws, cid, aid: ("sess-prev", str(host.id)))
-    assert svc.claim_for_host(_DB(_agent_row()), host, 1)["tasks"][0]["resume_session_id"] is None
-
-
 def test_a_prompt_rendering_failure_never_blocks_a_claim(monkeypatch):
     import services.cli_session_prompt as prompt_mod
 
@@ -220,4 +187,4 @@ def test_the_sessions_real_directory_always_wins(monkeypatch):
 
 
 def test_host_contract_version_moved_with_the_claim_shape():
-    assert svc.EXPECTED_CLI_HOST_VERSION == "0.3.0"
+    assert svc.EXPECTED_CLI_HOST_VERSION == "0.4.0"

@@ -18,11 +18,15 @@ import { Loader2, TerminalSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiClient } from '@/lib/api-client'
 import { useCliHostHealth } from '@/hooks/use-cli-host-health'
-import { connectWithRetry, encodeInput, encodeResize } from './terminal-protocol'
+import { connectWithRetry, describeLaunch, encodeInput, encodeResize, type TerminalLaunch } from './terminal-protocol'
 
 export interface CanvasTerminalProps {
   taskId?: string | number | null
   cwd?: string | null
+  /** PRD-239 S7 v2: open as soon as a host is online (the Runtime Canvas). */
+  autoOpen?: boolean
+  /** The terminal IS the session: the agent's Claude Code runs in it (no shell prompt first). */
+  runtime?: boolean
 }
 
 interface TerminalGrant {
@@ -30,13 +34,14 @@ interface TerminalGrant {
   cwd: string | null
   task_id: string | null
   expires_at: string
+  launch?: TerminalLaunch | null
 }
 
 type TerminalStatus = 'idle' | 'opening' | 'connected' | 'closed' | 'error'
 
 const CONNECT_BUDGET_MS = 20_000
 
-export function CanvasTerminal({ taskId, cwd }: CanvasTerminalProps) {
+export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false }: CanvasTerminalProps) {
   const { data: health } = useCliHostHealth()
   const host = health?.online_hosts?.[0] ?? null
   const [status, setStatus] = useState<TerminalStatus>('idle')
@@ -45,6 +50,7 @@ export function CanvasTerminal({ taskId, cwd }: CanvasTerminalProps) {
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const autoOpened = useRef(false)
 
   const closeSocket = useCallback(() => {
     const ws = wsRef.current
@@ -86,7 +92,7 @@ export function CanvasTerminal({ taskId, cwd }: CanvasTerminalProps) {
       ws.onclose = () => {
         if (wsRef.current === ws) wsRef.current = null
         setStatus('closed')
-        setNote('The shell ended. Open a new terminal to continue.')
+        setNote(grant.launch?.kind === 'claude' ? 'The session ended. Reopen to continue it.' : 'The shell ended. Open a new terminal to continue.')
       }
       ws.onerror = () => {
         setStatus('error')
@@ -101,12 +107,19 @@ export function CanvasTerminal({ taskId, cwd }: CanvasTerminalProps) {
       ws.send(encodeResize(term.cols, term.rows))
       term.focus()
       setStatus('connected')
-      setNote(grant.cwd ?? (taskId != null ? `ticket #${taskId}'s session folder` : 'the host’s first allowed folder'))
+      setNote(describeLaunch(grant.launch, grant.cwd, taskId != null ? `ticket #${taskId}'s session folder` : 'the host’s first allowed folder'))
     } catch (err) {
       setStatus('error')
       setNote(err instanceof Error ? err.message : 'Could not open a terminal')
     }
   }, [host, taskId, cwd, closeSocket])
+
+  // PRD-239 S7 v2: the Runtime Canvas opens the session itself, once, when a host is online.
+  useEffect(() => {
+    if (!autoOpen || autoOpened.current || !host || status !== 'idle') return
+    autoOpened.current = true
+    void open()
+  }, [autoOpen, host, status, open])
 
   // Keep the terminal sized to its pane.
   useEffect(() => {
@@ -132,7 +145,7 @@ export function CanvasTerminal({ taskId, cwd }: CanvasTerminalProps) {
           <TerminalSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="font-medium">Terminal</span>
           <span className="truncate text-muted-foreground" data-testid="canvas-terminal-note">
-            {status === 'connected' && note ? `on your machine · ${note}` : note}
+            {status === 'connected' && note ? `on your machine · ${note}` : status === 'opening' && runtime ? 'Starting the session on your machine…' : note}
           </span>
         </div>
         {!host ? (
@@ -142,13 +155,18 @@ export function CanvasTerminal({ taskId, cwd }: CanvasTerminalProps) {
         ) : (
           <Button size="sm" variant={live ? 'outline' : 'default'} onClick={() => void (live ? closeSocket() : open())} disabled={status === 'opening'} data-testid="canvas-terminal-toggle">
             {status === 'opening' ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-            {live ? 'Close' : status === 'opening' ? 'Opening…' : 'Open terminal'}
+            {live ? 'Close' : status === 'opening' ? 'Opening…' : status === 'closed' || status === 'error' ? (runtime ? 'Reopen the session' : 'Open terminal') : runtime ? 'Open the session' : 'Open terminal'}
           </Button>
         )}
       </div>
-      {status === 'idle' && host && (
+      {status === 'idle' && host && !runtime && (
         <p className="px-3 py-2 text-xs text-muted-foreground">
           Opens your own shell here, in {taskId != null ? `ticket #${taskId}'s folder` : cwd ? cwd : 'the host’s folder'}. Run <code className="font-mono">claude</code> or <code className="font-mono">codex</code> yourself — your login, your subscription.
+        </p>
+      )}
+      {status === 'idle' && host && runtime && !autoOpen && (
+        <p className="px-3 py-2 text-xs text-muted-foreground">
+          Opens the agent’s Claude Code session here, on your machine, under your own login — resumed where it left off.
         </p>
       )}
       <div ref={containerRef} className="min-h-0 flex-1 px-1 py-1" />

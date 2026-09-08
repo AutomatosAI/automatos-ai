@@ -103,6 +103,13 @@ class TerminalRequest(BaseModel):
     cwd: Optional[str] = Field(None, max_length=1024)
 
 
+class SessionRequest(BaseModel):
+    """PRD-239 S7 v2: open (or resume) the Runtime Canvas session with a session
+    agent in a conversation — one ticket per chat and agent."""
+    agent_id: int
+    chat_id: str = Field(..., min_length=1, max_length=128)
+
+
 class ResultRequest(BaseModel):
     attempt: Optional[int] = None
     status: str = Field("success", pattern="^(success|error|cancelled)$")
@@ -178,6 +185,48 @@ async def open_terminal(
         raise HTTPException(status_code=403, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/sessions")
+async def open_session(
+    body: SessionRequest,
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S7 v2: the Runtime Canvas. Picking a session agent in a chat (or
+    reopening it) gets ONE ticket per chat + agent whose Claude Code session the
+    Canvas terminal starts or resumes on the operator's paired host. Nothing is
+    dispatched: the human drives the session."""
+    from core.models.core import Agent
+    from services.board_consent import actor_from_user_id
+    from services.cli_ticket_lane import is_cli_agent, open_session_ticket
+
+    agent = (
+        db.query(Agent)
+        .filter(Agent.id == body.agent_id, Agent.workspace_id == ctx.workspace_id)
+        .first()
+    )
+    if agent is None:
+        raise HTTPException(status_code=404, detail="no agent with that id in this workspace")
+    if not is_cli_agent(db, agent.id):
+        raise HTTPException(status_code=422, detail=f"{agent.name} is not a session agent (runtime: cli)")
+    host = svc.newest_online_host(db, ctx.workspace_id)
+    if host is None:
+        raise HTTPException(status_code=409, detail="no CLI host is online — start it with `make cli-host` and try again")
+    task, created = open_session_ticket(
+        db, workspace_id=ctx.workspace_id, agent=agent, chat_id=body.chat_id, host=host,
+        actor=actor_from_user_id(getattr(ctx.user, "id", None)),
+    )
+    ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
+    return {
+        "task_id": task.id,
+        "host_id": str(host.id),
+        "created": created,
+        "status": task.status,
+        "agent_name": agent.name,
+        "cwd": ref.get("cwd"),
+        "explorer_root": ref.get("explorer_root"),
+    }
 
 
 @router.post("/pairing-codes")

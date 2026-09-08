@@ -1,5 +1,5 @@
 {
-  "route_count": 795,
+  "route_count": 796,
   "routes": [
     {
       "method": "GET",
@@ -2284,6 +2284,10 @@
     {
       "method": "POST",
       "path": "/api/v1/cli-hosts/pairing-codes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cli-hosts/sessions"
     },
     {
       "method": "GET",

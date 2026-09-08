@@ -65,6 +65,8 @@ export default function ChatPage() {
   // PRD-235 W2: /chat?repo=<folder> opens Code mode on that folder (a ticket's session or a repo under projects/).
   const repoParam = normalizeCodeRoot(searchParams?.get('repo')) ?? undefined
   const ticketParam = (searchParams?.get('ticket') || '').replace(/[^0-9]/g, '') || undefined
+  // PRD-239 S7 v2: /chat?ticket=…&runtime=1 opens the Runtime Canvas (explorer + the session's terminal)
+  const runtimeParam = searchParams?.get('runtime') === '1'
 
   // Activate plan mode when arriving via ?mode=plan
   useEffect(() => {
@@ -245,6 +247,7 @@ export default function ChatPage() {
       initialAwaitingReply={view.awaitingReply}
       initialCodeRoot={repoParam}
       initialCodeTicket={ticketParam}
+      initialCodeRuntime={runtimeParam}
     />
   ) : (
     <div className="flex h-full items-center justify-center" role="status" aria-label="Loading conversation">
