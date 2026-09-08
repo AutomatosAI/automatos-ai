@@ -758,12 +758,12 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
                         <ModelSelector
                           value={modelConfig.model_id}
-                          onChange={(modelId) => {
-                            const model = (models as any)?.find((m: any) => m.model_id === modelId)
+                          provider={modelConfig.provider}
+                          onChange={(modelId, servingProvider) => {
+                            // PRD-239 S5: the pick is a route — the model AND who serves it
+                            // (never the vendor: "moonshotai" is not a route)
                             handleModelConfigChange('model_id', modelId)
-                            if (model) {
-                              handleModelConfigChange('provider', model.provider)
-                            }
+                            handleModelConfigChange('provider', servingProvider)
                           }}
                           agentType={agentData.category}
                         />

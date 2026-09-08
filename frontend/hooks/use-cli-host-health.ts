@@ -7,7 +7,7 @@ import { apiClient } from '@/lib/api-client'
 export interface CliHostHealth {
   online: boolean
   paired_hosts: number
-  online_hosts: Array<{ id: string; name?: string | null; last_seen_at?: string | null }>
+  online_hosts: Array<{ id: string; name?: string | null; last_seen_at?: string | null; capabilities?: { max_terminals?: number | null } | null }>
   last_seen_at: string | null
   cli_agents: number
   waiting_tickets: number

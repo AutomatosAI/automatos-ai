@@ -84,6 +84,9 @@ class SessionOutcome:
             "session_id": self.session_id,
             "exit_reason": self.exit_reason,
             "transcript_path": self.transcript_path,
+            # PRD-239: where the session REALLY ran (a --worktree for a git repo) —
+            # the directory `claude --resume` and the editor links must open.
+            "effective_cwd": self.effective_cwd,
         }
 
 
@@ -91,18 +94,31 @@ def _slug(text: str, limit: int = 40) -> str:
     return _SLUG_RE.sub("-", text).strip("-")[:limit] or "ticket"
 
 
+SESSION_RULES = (
+    "The ticket you are working is described in the file named in your first message; "
+    "read it fully before acting.\n"
+    "Rules of the session: work only inside the directory you were started in; "
+    "never push, publish or open pull requests — the manager integrates your work; "
+    "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
+    "reply with a concise summary of what changed, what you verified, and anything left open.\n"
+)
+
+
 def build_system_prompt(ticket: Dict[str, Any]) -> str:
-    """Stable per agent: no ids, no dates, no counters (prompt-cache invariant)."""
+    """Stable per agent: no ids, no dates, no counters (prompt-cache invariant).
+
+    PRD-239 S1: the backend renders the agent's soul — description, persona and
+    skills — as ``system_prompt`` on the ticket (stable per agent); it sits
+    between the introduction and the session rules. Without it the prompt is
+    exactly the name and the rules, as before.
+    """
     name = ticket.get("agent_name") or "an Automatos agent"
-    return (
-        f"You are {name}, working as a supervised Claude Code session managed by Automatos.\n"
-        "The ticket you are working is described in the file named in your first message; "
-        "read it fully before acting.\n"
-        "Rules of the session: work only inside the directory you were started in; "
-        "never push, publish or open pull requests — the manager integrates your work; "
-        "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
-        "reply with a concise summary of what changed, what you verified, and anything left open.\n"
-    )
+    intro = f"You are {name}, working as a supervised Claude Code session managed by Automatos.\n"
+    soul = ticket.get("system_prompt")
+    soul = soul.strip() if isinstance(soul, str) else ""
+    if soul:
+        return intro + "\n" + soul + "\n\n" + SESSION_RULES
+    return intro + SESSION_RULES
 
 
 def build_ticket_file(ticket: Dict[str, Any]) -> str:
@@ -387,7 +403,11 @@ class Session:
         )
 
         # 4. spawn
-        worktree = f"automatos-{_slug(str(self.task_id))}" if (self.cfg.use_worktrees and _is_git_repo(cwd)) else None
+        # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
+        # (the checkout stays untouched); a workspace of many repos, whose own
+        # git tracks next to nothing, must not (the worktree would be empty).
+        wants_worktree = self.ticket.get("worktree", True) is not False
+        worktree = f"automatos-{_slug(str(self.task_id))}" if (self.cfg.use_worktrees and wants_worktree and _is_git_repo(cwd)) else None
         args = build_args(
             claude,
             session_id=self.session_id,
@@ -554,4 +574,7 @@ def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:
         "claude": {"path": claude, "version": version, "onboarded": has_completed_onboarding()} if claude else None,
         "providers": ["claude"] if claude else [],
         "worktrees": cfg.use_worktrees,
+        # PRD-239 S6: the directories this host may run sessions in — the backend
+        # checks an agent's working_directory against them before it is saved.
+        "allow_dirs": [str(p) for p in (cfg.allow_dirs or [])],
     }

@@ -577,6 +577,10 @@ export interface OpenFileTab {
 export interface CodingCanvasWidgetData {
   workspaceId: string
   taskId?: string
+  /** PRD-239 S7 v2: a Runtime Canvas — explorer + the agent's Claude Code session in a terminal, no chat */
+  runtime?: boolean
+  /** Open covering the page (the Runtime Canvas replaces the chat while it is open) */
+  openFullscreen?: boolean
   /** PRD-235 W2: the folder this Canvas is rooted at ('.' or undefined = workspace root) */
   rootPath?: string
   /** Currently selected file path */

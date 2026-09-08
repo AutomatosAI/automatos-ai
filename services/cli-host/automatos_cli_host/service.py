@@ -48,6 +48,10 @@ def service_argv(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> Li
         argv += ["--claude", cfg.claude_binary]
     if not cfg.use_worktrees:
         argv.append("--no-worktrees")
+    if not cfg.terminal_enabled:
+        argv.append("--no-terminal")
+    if cfg.terminal_port:
+        argv += ["--terminal-port", str(cfg.terminal_port)]
     argv += list(passthrough or [])
     return argv
 

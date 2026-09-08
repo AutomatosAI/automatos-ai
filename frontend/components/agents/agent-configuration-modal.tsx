@@ -1530,7 +1530,12 @@ export function AgentConfigurationModal({
                       {/* Model Selection */}
                       <ModelSelector
                         value={formData.model_config?.model_id || LLM_DEFAULTS.model_id}
-                        onChange={(modelId) => updateModelConfig('model_id', modelId)}
+                        provider={formData.model_config?.provider}
+                        onChange={(modelId, servingProvider) => {
+                          // PRD-239 S5: the pick is a route — store the model AND who serves it
+                          updateModelConfig('model_id', modelId)
+                          updateModelConfig('provider', servingProvider)
+                        }}
                         agentType={formData.agent_type}
                       />
 

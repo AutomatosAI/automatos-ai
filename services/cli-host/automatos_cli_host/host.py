@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import os
 import signal
 import sys
@@ -27,6 +28,7 @@ from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import HookServer
 from .session import Session, host_capabilities
+from .terminal_server import MAX_TERMINALS, TerminalServer
 
 log = logging.getLogger("automatos.cli_host")
 
@@ -96,6 +98,11 @@ class Host:
         self._backend_contract: Optional[str] = None
         self.draining: Optional[str] = None  # the reason, once a restart is requested
         self.exit_code = 0
+        # PRD-239 S7: the Canvas terminal (the operator's own shell on the loopback)
+        self.terminal: Optional[TerminalServer] = None
+        # PRD-239 S7 v2: TerminalOpened/TerminalClosed per ticket, shipped with the
+        # session events (same endpoint, same batches).
+        self.terminal_events: "queue.Queue[tuple]" = queue.Queue()
 
     # ── setup ───────────────────────────────────────────────────────────────
     def prepare(self) -> None:
@@ -110,6 +117,19 @@ class Host:
         self.allow_roots = saved
         if not self.allow_roots:
             raise HostRefused("no directories registered — start with `--allow <dir>` (make cli-host registers ./workspaces)")
+
+        # PRD-239 S7: start the terminal before the first capabilities announce so
+        # the backend learns the port at pairing / on the first heartbeat.
+        if self.cfg.terminal_enabled:
+            self.terminal = TerminalServer(
+                self.allow_roots, self.allow_roots[0], port=self.cfg.terminal_port,
+                workspace_id=lambda: str((self.identity or {}).get("workspace_id") or ""),
+                # PRD-239 S7 v2: the Runtime Canvas launches the agent's own Claude
+                # Code session in the PTY; its open/close reach the ticket as events.
+                claude=self.cfg.claude_binary, sessions_dir=self.cfg.sessions_dir,
+                on_event=self._terminal_event,
+            )
+            log.info("terminal server on 127.0.0.1:%s (the Canvas terminal)", self.terminal.start())
 
         self.identity = state.load_host_identity(self.cfg.token_path)
         if self.identity and self.identity.get("url") not in (None, self.cfg.url):
@@ -130,7 +150,11 @@ class Host:
 
     def capabilities(self) -> Dict[str, Any]:
         if self._capabilities is None:
-            self._capabilities = host_capabilities(self.cfg)
+            caps = host_capabilities(self.cfg)
+            # PRD-239 S7: where the Canvas terminal listens (loopback only).
+            caps["terminal_port"] = self.terminal.port if self.terminal is not None else None
+            caps["max_terminals"] = MAX_TERMINALS if self.terminal is not None else 0
+            self._capabilities = caps
         return self._capabilities
 
     def _reap_previous_run(self) -> None:
@@ -184,6 +208,8 @@ class Host:
             self._flush_events(host_id)
             self._reap_finished(host_id)
             self.hooks.stop()
+            if self.terminal is not None:
+                self.terminal.stop()
             state.clear_pid(self.cfg.pid_path)
         return self.exit_code
 
@@ -219,6 +245,11 @@ class Host:
             log.warning("heartbeat failed: %s", exc)
             return
         self._check_drift(out)
+        # PRD-239 S7: terminal grants the operator asked for since the last beat.
+        if self.terminal is not None:
+            admitted = self.terminal.admit(out.get("terminal_grants") or [])
+            if admitted:
+                log.info("terminal: %d grant(s) admitted", admitted)
         for stale in out.get("stale") or []:
             s = self.sessions.get(str(stale))
             if s is not None:
@@ -276,7 +307,22 @@ class Host:
                           "started_at": session.started_at}
         state.save_process_table(self.cfg.process_table_path, table)
 
+    def _terminal_event(self, task_id: str, event: str, payload: Dict[str, Any]) -> None:
+        self.terminal_events.put((str(task_id), {"hook_event_name": event, **payload}))
+
+    def _flush_terminal_events(self, host_id: str) -> None:
+        batches: Dict[str, List[Dict[str, Any]]] = {}
+        while not self.terminal_events.empty():
+            task_id, ev = self.terminal_events.get_nowait()
+            batches.setdefault(task_id, []).append(ev)
+        for task_id, batch in batches.items():
+            try:
+                self.api.events(host_id, int(task_id), batch)
+            except (BackendError, ValueError) as exc:
+                log.warning("terminal events for ticket %s failed (%s) — dropped", task_id, exc)
+
     def _flush_events(self, host_id: str) -> None:
+        self._flush_terminal_events(host_id)
         for task_id, session in list(self.sessions.items()):
             batch: List[Dict[str, Any]] = []
             while not session.events.empty() and len(batch) < 200:

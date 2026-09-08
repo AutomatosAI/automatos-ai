@@ -640,6 +640,11 @@ class Config:
     # worker's "projects/" view (the folder is bind-mounted read-only into the
     # workspace-worker, not into this container). Empty = no projects folder.
     LOCAL_PROJECTS_DIR: str = os.getenv("LOCAL_PROJECTS_DIR", "").strip()
+    # PRD-239: how the projects folder is mounted into the worker (ro|rw) — shown in Settings → Session mode.
+    LOCAL_PROJECTS_MOUNT: str = os.getenv("LOCAL_PROJECTS_MOUNT", "").strip().lower()
+    # PRD-239 S3b: how long a playbook step waits for a session agent's Claude Code session
+    # (a real session runs for minutes; API steps keep the recipe's own step timeout).
+    CLI_LANE_STEP_TIMEOUT_SECONDS: int = int(os.getenv("CLI_LANE_STEP_TIMEOUT_SECONDS", "1800"))
     # S5: done tasks older than this drop off the active board (retained in DB).
     BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
     # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the
@@ -666,6 +671,12 @@ class Config:
     # the budget Auto reports "still running" and the watcher takes over.
     CHATBOT_WAIT_BUDGET_S: int = int(os.getenv("CHATBOT_WAIT_BUDGET_S", "90"))
     CHATBOT_WAIT_POLL_S: int = int(os.getenv("CHATBOT_WAIT_POLL_S", "5"))
+    # PRD-239 S1: the cap on the skills text rendered into a session agent's
+    # appended system prompt (persona + skills ride it, stable per agent).
+    CLI_SESSION_SKILLS_MAX_CHARS: int = int(os.getenv("CLI_SESSION_SKILLS_MAX_CHARS", "24000"))
+    # PRD-239 S3: how often a playbook step or mission task re-reads the ticket it
+    # filed for a session agent while it waits for the session to end.
+    CLI_LANE_POLL_SECONDS: int = int(os.getenv("CLI_LANE_POLL_SECONDS", "5"))
     # PRD-224 US-005: auto-attach a run_and_report watch to every ASSIGN-lane
     # board ticket Auto files, so an assigned ticket reports its verdict back
     # into the originating thread. Default ON — an unsupervised assigned ticket

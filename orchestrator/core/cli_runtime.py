@@ -30,6 +30,9 @@ CONFIG_PROVIDER_KEY = "provider"
 CONFIG_MODEL_KEY = "model"
 CONFIG_WORKING_DIRECTORY_KEY = "working_directory"
 CONFIG_ALLOWED_TOOLS_KEY = "allowed_tools"
+# PRD-239: a single repo gets a worktree per ticket (default); a workspace of many
+# repos must not — its own git tracks next to nothing, the worktree would be empty.
+CONFIG_WORKTREE_KEY = "worktree_per_ticket"
 
 PROVIDER_CLAUDE = "claude"
 PROVIDER_CODEX = "codex"
@@ -98,6 +101,30 @@ def is_valid_cli_model(provider: str, model: Optional[str]) -> bool:
     return False
 
 
+def validate_working_directory(value: Any) -> List[str]:
+    """PRD-239 S6: the errors for a cli agent's ``working_directory``.
+
+    Host-agnostic — the backend cannot see the operator's disk. It refuses what
+    can never work (a relative path, a ``..`` segment, control characters); the
+    host's allow-list and the Canvas mapping are reported separately by
+    ``cli_host_service.workspace_check``.
+    """
+    if value is None or value == "":
+        return []
+    if not isinstance(value, str):
+        return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} must be a string path, got {type(value).__name__}"]
+    # Control characters are checked on the value as typed — strip() would hide a
+    # trailing newline and let it through.
+    if any(ch in value for ch in ("\x00", "\n", "\r")):
+        return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} contains a control character"]
+    path = value.strip()
+    if not path.startswith("/"):
+        return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} must be an absolute path, got {value!r}"]
+    if any(segment == ".." for segment in path.split("/")):
+        return [f"configuration.{CONFIG_WORKING_DIRECTORY_KEY} must not contain '..' segments, got {value!r}"]
+    return []
+
+
 def validate_runtime_configuration(
     configuration: Optional[Mapping[str, Any]], *, cli_enabled: bool
 ) -> List[str]:
@@ -137,4 +164,8 @@ def validate_runtime_configuration(
             f"configuration.model {configuration.get(CONFIG_MODEL_KEY)!r} is not a "
             f"{provider} model alias or id"
         )
+    errors.extend(validate_working_directory(configuration.get(CONFIG_WORKING_DIRECTORY_KEY)))
+    worktree = configuration.get(CONFIG_WORKTREE_KEY)
+    if worktree is not None and not isinstance(worktree, bool):
+        errors.append(f"configuration.{CONFIG_WORKTREE_KEY} must be true or false, got {worktree!r}")
     return errors

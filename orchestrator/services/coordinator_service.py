@@ -1654,11 +1654,18 @@ class CoordinatorService:
             # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
             if prepared:
                 agent_coros = [
-                    self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
-                                       p["task"], p["attachment_ids"],
-                                       mode_caps=p["mode_caps"],
-                                       agent_runtime=p.get("agent_runtime"),
-                                       field_context=p.get("field_context"))
+                    # PRD-239 S3: a session agent's task runs as a ticket the Claude
+                    # Code session works (its own DB session, the same timeout).
+                    self._run_cli_ticket(
+                        p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
+                        (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                    )
+                    if p.get("cli_agent")
+                    else self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
+                                            p["task"], p["attachment_ids"],
+                                            mode_caps=p["mode_caps"],
+                                            agent_runtime=p.get("agent_runtime"),
+                                            field_context=p.get("field_context"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -2149,6 +2156,22 @@ class CoordinatorService:
         else:
             prompt = MissionDispatcher.build_task_prompt(task)
 
+        # PRD-178 S1 (F020): bind the agent's field tools to THIS task's run,
+        # resolved on the serial DB path. Threaded into execute_with_prompt →
+        # the tool loop → PlatformActionExecutor so field_id no longer comes
+        # from a `.first()` guess over concurrent running missions.
+        # PRD-229: also carry the calling task/run/agent identity so
+        # ask_orchestrator resolves its clarification subject from server
+        # context (never a tool param) — present even when the run has no
+        # field. field_id is added only when the mission actually has one.
+        field_context = {
+            "run_id": str(run.id),
+            "task_id": str(task.id),
+            "agent_id": agent_id,
+            "mission_id": str(run.id),
+            **({"field_id": field_id} if field_id else {}),
+        }
+
         # Activate agent with power-mode overrides
         factory = AgentFactory(db_session=db)
         run_config = run.config or {}
@@ -2161,6 +2184,24 @@ class CoordinatorService:
             or "standard"
         )
         mode_caps = _get_power_mode_caps(power_mode, db)
+
+        # PRD-239 S3: a session agent's task is a ticket its Claude Code session
+        # works — nothing to activate here; the I/O phase files it and waits.
+        from services.cli_ticket_lane import is_cli_agent
+        if is_cli_agent(db, agent_id):
+            return {
+                "task": task,
+                "agent_id": agent_id,
+                "agent_runtime": None,
+                "prompt": prompt,
+                "factory": factory,
+                "attachment_ids": task_attachment_ids,
+                "mode_caps": mode_caps,
+                "field_context": field_context,
+                "cli_agent": True,
+                "workspace_id": run.workspace_id,
+                "run_id": run.id,
+            }
 
         force_tier = mode_caps.get("force_llm_tier")
         if force_tier:
@@ -2203,21 +2244,7 @@ class CoordinatorService:
             # Caps resolved here (serial DB path) so the concurrent I/O phase
             # never touches the DB — see _get_power_mode_caps / _run_agent_io.
             "mode_caps": mode_caps,
-            # PRD-178 S1 (F020): bind the agent's field tools to THIS task's run,
-            # resolved on the serial DB path. Threaded into execute_with_prompt →
-            # the tool loop → PlatformActionExecutor so field_id no longer comes
-            # from a `.first()` guess over concurrent running missions.
-            # PRD-229: also carry the calling task/run/agent identity so
-            # ask_orchestrator resolves its clarification subject from server
-            # context (never a tool param) — present even when the run has no
-            # field. field_id is added only when the mission actually has one.
-            "field_context": {
-                "run_id": str(run.id),
-                "task_id": str(task.id),
-                "agent_id": agent_id,
-                "mission_id": str(run.id),
-                **({"field_id": field_id} if field_id else {}),
-            },
+            "field_context": field_context,
         }
 
     async def _run_agent_io(
@@ -2235,7 +2262,8 @@ class CoordinatorService:
 
         No DB access here — only the LLM + tool loop. ``mode_caps`` is resolved
         upstream in _prepare_task (the serial DB phase) and passed in, so this
-        concurrent path never reads system_settings.
+        concurrent path never reads system_settings. (A session agent's task
+        never comes here — the tick routes it to ``_run_cli_ticket``.)
         """
         caps = mode_caps or _POWER_MODE_DEFAULTS["standard"]
         max_iters = caps["max_tool_iterations"]
@@ -2279,6 +2307,38 @@ class CoordinatorService:
             )
             result = {"status": "error", "error": str(exc)}
         return result
+
+    @staticmethod
+    async def _run_cli_ticket(
+        task: Any, prompt: str, agent_id: int, workspace_id: Any, run_id: Any, timeout_s: Any,
+    ) -> Dict[str, Any]:
+        """PRD-239 S3: a mission task assigned to a session agent — file the
+        ticket on the board (tied to this run) and wait for the Claude Code
+        session to end, on a DB session of our own. The task's timeout bounds the
+        wait; the ticket carries on and its result lands on the board."""
+        from core.database.database import SessionLocal
+        from services.cli_ticket_lane import MISSION_SOURCE_TYPE, run_cli_ticket_and_wait
+
+        own = SessionLocal()
+        try:
+            return await run_cli_ticket_and_wait(
+                own,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=(getattr(task, "title", None) or f"Mission task {task.id}")[:255],
+                prompt=prompt,
+                source_type=MISSION_SOURCE_TYPE,
+                source_id=f"{MISSION_SOURCE_TYPE}:{run_id}:{task.id}",
+                timeout_s=float(timeout_s) if timeout_s else None,
+                tags=["mission"],
+                orchestration_run_id=run_id,
+                orchestration_task_id=task.id,
+            )
+        except Exception as exc:  # noqa: BLE001 — recorded like any other task failure
+            logger.error("session-agent ticket failed for task %s: %s", task.id, exc, exc_info=True)
+            return {"status": "error", "error": str(exc)}
+        finally:
+            own.close()
 
     async def _record_task_result(
         self,

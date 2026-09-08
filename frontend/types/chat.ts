@@ -74,6 +74,12 @@ export interface LimitReached {
   message: string
 }
 
+/** PRD-239 S4: a turn that failed — one plain sentence and a stable code. */
+export interface TurnError {
+  message: string
+  code?: string | null
+}
+
 /**
  * Database query result
  */
@@ -191,6 +197,8 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   progress?: string[]
   /** PRD-238 S6: tickets this reply filed or checked — rendered as live cards. */
   taskCards?: TaskCardData[]
+  /** PRD-239 S4: the turn failed; shown in the bubble instead of silence. */
+  error?: TurnError
 }
 
 /**
@@ -200,6 +208,8 @@ export type MessagePart =
   | { type: 'text'; text: string }
   /** PRD-238 S1: the model's deliberation, stored beside the answer, shown collapsed. */
   | { type: 'reasoning'; reasoning: string }
+  /** PRD-239 S2: a ticket card persisted with the reply (a session agent's turn). */
+  | { type: 'task_card'; card: TaskCardData }
   | { type: 'file'; filename: string; mediaType: string; url: string }
   | { type: 'tool-result'; toolName: string; result: any }
   | { type: 'artifact'; artifact: Artifact }

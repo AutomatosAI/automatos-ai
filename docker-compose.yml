@@ -193,6 +193,7 @@ services:
       # PRD-234 S2: where the owner's projects folder lives on the HOST (a string for
       # path mapping only — the folder itself is mounted into the workspace-worker).
       LOCAL_PROJECTS_DIR: ${LOCAL_PROJECTS_DIR:-}
+      LOCAL_PROJECTS_MOUNT: ${LOCAL_PROJECTS_MOUNT:-ro}
 
       # Object storage — local MinIO via the S3 seam (PRD-176 F089).
       # S3_ENDPOINT_URL points boto at MinIO. The store's credentials are mapped

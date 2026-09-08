@@ -18,7 +18,8 @@ from services import cli_host_service as svc
 def test_contract_fields_are_stable_and_versioned():
     f = svc.contract_fields()
     assert re.fullmatch(r"[0-9a-f]{16}", f["host_contract"])
-    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.2.0"
+    # 0.4.0: PRD-239 S7 v2 — terminal grants carry a launch; TerminalOpened/Closed events.
+    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.4.0"
     assert svc.contract_fields() == f
 
 

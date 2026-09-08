@@ -183,6 +183,43 @@ def test_system_prompt_is_stable_per_agent():
     assert a == b and "never push" in a
 
 
+def test_capabilities_announce_the_allowed_directories(tmp_path):
+    """PRD-239 S6: the backend checks an agent's working_directory against these."""
+    from automatos_cli_host.config import HostConfig
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cfg = HostConfig(url="http://127.0.0.1:8000", state_dir=tmp_path / "state", allow_dirs=[repo],
+                     name="mac", claude_binary=str(tmp_path / "no-such-claude"))
+    caps = session.host_capabilities(cfg)
+    assert caps["allow_dirs"] == [str(repo.resolve())] or caps["allow_dirs"] == [str(repo)]
+    assert caps["host_version"] == session.__version__
+
+
+def test_result_payload_names_the_directory_the_session_ran_in():
+    """PRD-239: a git repo runs in a --worktree; the backend must learn that path so
+    `claude --resume` and the editor links open where the transcript is."""
+    out = session.SessionOutcome(status="success", result_text="done", effective_cwd="/repo/.claude/worktrees/automatos-7")
+    payload = out.as_result_payload(1)
+    assert payload["effective_cwd"] == "/repo/.claude/worktrees/automatos-7"
+    assert session.SessionOutcome(status="error", error="x").as_result_payload(1)["effective_cwd"] is None
+
+
+def test_system_prompt_carries_the_agents_soul_between_intro_and_rules():
+    """PRD-239 S1: the backend's persona + skills text rides the ticket and sits
+    between "You are …" and the session rules; without it the prompt is unchanged."""
+    soul = "## Persona & Communication Style\nBlunt and precise.\n\n## Skills\n### automatos-platform\nKnows the platform."
+    with_soul = session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": soul})
+    assert with_soul.startswith("You are Bob, working as a supervised Claude Code session")
+    assert with_soul.index("Blunt and precise") < with_soul.index("never push")
+    assert "### automatos-platform" in with_soul
+    again = session.build_system_prompt({"agent_name": "Bob", "task_id": 9, "system_prompt": soul})
+    assert again == with_soul  # stable per agent — ids never leak in
+    plain = session.build_system_prompt({"agent_name": "Bob", "task_id": 1})
+    assert plain == session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": "   "})
+    assert "Persona" not in plain and "never push" in plain
+
+
 # ── backend preflight ────────────────────────────────────────────────────────
 
 class _Api:

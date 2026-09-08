@@ -6,7 +6,7 @@ import { useRepoRoots } from './useRepoRoots'
 import { WORKSPACE_ROOT } from './code-root'
 
 /** PRD-235 W2 — choose the folder the Canvas (tree, terminal, and the chat's scope) is rooted at. */
-export function RootPicker({ workspaceId, value, onChange }: { workspaceId: string; value: string; onChange: (root: string) => void }) {
+export function RootPicker({ workspaceId, value, onChange, note }: { workspaceId: string; value: string; onChange: (root: string) => void; note?: string | null }) {
   const { data } = useRepoRoots(workspaceId)
   const options = data ?? [{ value: WORKSPACE_ROOT, label: 'Workspace root', group: 'workspace' as const }]
   const known = options.some((o) => o.value === value)
@@ -36,7 +36,7 @@ export function RootPicker({ workspaceId, value, onChange }: { workspaceId: stri
           )}
         </SelectContent>
       </Select>
-      <span className="text-muted-foreground">Auto works in this folder while Code mode is open.</span>
+      <span className="text-muted-foreground">{note === undefined ? 'The chat sees this folder while Code mode is open.' : note}</span>
     </div>
   )
 }
