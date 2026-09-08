@@ -465,6 +465,9 @@ class ToolLoopExecutor:
                 "tool_name": name,
                 "success": success,
                 "duration_ms": duration_ms,
+                # PRD-238 S3: the raw result rides the in-process event only;
+                # the chat layer reduces it to a one-line summary for the wire.
+                "result": result,
             })
 
             # Followup messages from the caller post-hook (chat: Composio retry hints)

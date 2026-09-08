@@ -21,6 +21,15 @@ from apscheduler.triggers.cron import CronTrigger
 logger = logging.getLogger(__name__)
 
 
+def durable_probe_enabled(app_config: Any) -> bool:
+    """PRD-238 S10: the durable-memory probe only makes sense with a Qdrant URL."""
+    return bool(getattr(app_config, "QDRANT_URL", ""))
+
+
+class _ProbeNotConfigured(Exception):
+    """Control-flow only: the probe was deliberately not scheduled."""
+
+
 # ---------------------------------------------------------------------------
 # Primitive-mapped heartbeat findings (PRD-142 Wave 3 · WS-M · W3-S1)
 #
@@ -195,6 +204,12 @@ class HeartbeatService:
             from apscheduler.triggers.interval import IntervalTrigger
 
             probe_interval = int(_app_config.DURABLE_MEMORY_PROBE_INTERVAL_SECONDS)
+            if not durable_probe_enabled(_app_config):
+                logger.info(
+                    "[Heartbeat] Durable-memory probe not scheduled — QDRANT_URL is empty "
+                    "(memory is off in this edition)"
+                )
+                raise _ProbeNotConfigured()
             self._scheduler.add_job(
                 self._durable_memory_probe_tick,
                 IntervalTrigger(seconds=probe_interval),
@@ -206,6 +221,8 @@ class HeartbeatService:
             logger.info(
                 "[Heartbeat] Durable-memory health probe scheduled every %ds", probe_interval
             )
+        except _ProbeNotConfigured:
+            pass
         except Exception:
             logger.error("[Heartbeat] Failed to schedule Mem0 health probe", exc_info=True)
 

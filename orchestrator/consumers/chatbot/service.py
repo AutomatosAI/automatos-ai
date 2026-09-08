@@ -43,6 +43,7 @@ from config import config
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
 from consumers.chatbot.primitive_heartbeat import _emit_chat_primitive
 from consumers.chatbot.streaming import get_streaming_handler
+from consumers.chatbot.tool_summary import SKIPPED_SUMMARY, tool_result_summary
 from consumers.chatbot.tool_router import get_tool_router
 
 # Import from modules — SINGLE SOURCE for tool schemas
@@ -114,6 +115,7 @@ def build_tool_caller_context(
     est_output_tokens: int = 0,
     assign_lane: bool = False,
     driving_user_id: Optional[Any] = None,
+    system_role: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build the caller_context threaded into every chat tool execution (PRD-177 S2 / F017).
 
@@ -162,6 +164,14 @@ def build_tool_caller_context(
     # create-task handler auto-attaches supervision. The LLM cannot set this.
     if assign_lane:
         ctx["assign_lane"] = True
+    # PRD-238 S9: the PRD-143 super-admin gate reads a LITERAL
+    # ``system_role == 'super_admin'`` from this context. The chat path only
+    # ever *offered* su tools (include_super_admin) without saying who was
+    # asking, so a real super admin — the local operator, or a SaaS su — was
+    # denied at execution and paid a wasted LLM round. Only the literal su role
+    # is written; every other principal stays fail-closed exactly as before.
+    if system_role == "super_admin":
+        ctx["system_role"] = "super_admin"
     return ctx or None
 
 
@@ -1474,6 +1484,7 @@ class StreamingChatService:
         user_id: Optional[int] = None,
         conversation_id: Optional[str] = None,
         assign_lane: bool = False,
+        is_super_admin: bool = False,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1568,14 +1579,19 @@ class StreamingChatService:
                     tool_input=event.get("tool_input", {}),
                 ))
             elif et == "tool-end":
-                # tool-result frame mirrors what the legacy loop emitted.
-                if not event.get("skipped"):
-                    await sse_queue.put(self.streaming_handler.format_aisdk_tool_end(
-                        tool_call_id=event["tool_call_id"],
-                        tool_name=event["tool_name"],
-                        success=bool(event.get("success")),
-                        duration_ms=int(event.get("duration_ms", 0)),
-                    ))
+                # PRD-238 S3: every call closes its line — a de-duplicated
+                # (skipped) call used to emit nothing and left its chip
+                # spinning forever. The one-line summary is derived here from
+                # the in-process result; raw payloads never ride the wire.
+                skipped = bool(event.get("skipped"))
+                await sse_queue.put(self.streaming_handler.format_aisdk_tool_end(
+                    tool_call_id=event["tool_call_id"],
+                    tool_name=event["tool_name"],
+                    success=bool(event.get("success")),
+                    duration_ms=int(event.get("duration_ms", 0)),
+                    summary=SKIPPED_SUMMARY if skipped else tool_result_summary(event.get("result")),
+                    skipped=skipped,
+                ))
 
         def _is_chat_composio_action(name: str) -> bool:
             """A per-action Composio tool from this turn's SDK schema set."""
@@ -1633,6 +1649,7 @@ class StreamingChatService:
                     est_input_tokens=_turn_budget.get("est_input_tokens", 0),
                     est_output_tokens=_turn_budget.get("est_output_tokens", 0),
                     assign_lane=assign_lane,
+                    system_role="super_admin" if is_super_admin else None,
                 ),
             )
             # PRD-185 S7: capture retrieved doc ids (retrieval tools only).
@@ -2504,6 +2521,7 @@ class StreamingChatService:
                     user_id=user_id,
                     conversation_id=chat_id,
                     assign_lane=_assign_lane,
+                    is_super_admin=is_super_admin,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']

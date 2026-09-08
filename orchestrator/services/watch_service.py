@@ -103,6 +103,42 @@ def watch_auto_create_enabled(db: Session, workspace_id: UUID | str) -> bool:
         return True
 
 
+def cancelled_report_text(
+    watch: Any, target_type: str, target_id: str, summary: Optional[str]
+) -> str:
+    """PRD-238 S5: the one-paragraph report for a cancelled target."""
+    title = (getattr(watch, "title", None) or f"{target_type} {target_id}").strip()
+    head = f"{title} ended: cancelled."
+    if target_type == "board_task":
+        head = f"{title} (#{target_id}) ended: cancelled."
+    return f"{head} {summary}".strip() if summary else head
+
+
+def _say_cancelled_in_chat(
+    db: Session, watch: Any, target_type: str, target_id: str, summary: Optional[str]
+) -> None:
+    try:
+        from services.chat_messenger import deliver_background_message
+
+        origin_chat = getattr(watch, "origin_chat_id", None)
+        deliver_background_message(
+            db,
+            workspace_id=watch.workspace_id,
+            text=cancelled_report_text(watch, target_type, target_id, summary),
+            source={"origin": "watcher", "event": "watch_cancelled"},
+            chat_id=str(origin_chat) if origin_chat else None,
+            clerk_user_id=getattr(watch, "created_by", None),
+            link_type="watch",
+            link_id=str(getattr(watch, "id", "")) or None,
+        )
+    except Exception:  # noqa: BLE001 -- the report is an optimisation
+        logger.warning(
+            "[WatchService] cancelled report-back failed for watch %s",
+            getattr(watch, "id", "?"),
+            exc_info=True,
+        )
+
+
 class WatchService:
     """Stateless service over the watch registry (caller manages sessions)."""
 
@@ -465,6 +501,10 @@ class WatchService:
             WatchService.transition(
                 db, watch, WatchStatus.CANCELLED, reason="target cancelled"
             )
+            # PRD-238 S5: the person who was promised a report-back hears
+            # about a cancellation too -- in the chat that asked, else their
+            # Auto thread. Fail-soft: a chat failure never breaks the close.
+            _say_cancelled_in_chat(db, watch, target_type, target_id, summary)
             return event
 
         # Scorable terminal: hand to the decision step (S6/S10) by pulling
