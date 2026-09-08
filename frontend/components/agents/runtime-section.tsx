@@ -27,6 +27,8 @@ export interface RuntimeFields {
   cli_provider: string
   cli_model: string
   cli_working_directory: string
+  /** PRD-239: tickets run in a git worktree of the workspace folder (a single repo), or in the folder itself (a workspace of many repos) */
+  cli_worktree: boolean
 }
 
 const DEFAULT_CLI_PROVIDER = 'claude'
@@ -36,6 +38,7 @@ export const DEFAULT_RUNTIME_FIELDS: RuntimeFields = {
   cli_provider: DEFAULT_CLI_PROVIDER,
   cli_model: '',
   cli_working_directory: '',
+  cli_worktree: true,
 }
 
 /** The aliases Claude Code itself resolves (`claude --model`); a full `claude-…` id also works. */
@@ -53,6 +56,7 @@ export function normalizeRuntimeFields(source: object | null | undefined): Runti
     cli_provider: str(src.cli_provider) || DEFAULT_CLI_PROVIDER,
     cli_model: str(src.cli_model),
     cli_working_directory: str(src.cli_working_directory),
+    cli_worktree: src.cli_worktree !== false,
   }
 }
 
@@ -64,6 +68,7 @@ export function runtimeFieldsFromConfiguration(configuration: object | null | un
     cli_provider: cfg.provider,
     cli_model: cfg.model,
     cli_working_directory: cfg.working_directory,
+    cli_worktree: cfg.worktree_per_ticket,
   })
 }
 
@@ -79,6 +84,7 @@ export function runtimeConfiguration(fields: RuntimeFields): Record<string, unkn
     provider: fields.cli_provider || DEFAULT_CLI_PROVIDER,
     model: fields.cli_model.trim() || null,
     working_directory: fields.cli_working_directory.trim() || null,
+    worktree_per_ticket: fields.cli_worktree,
   }
 }
 
@@ -111,7 +117,7 @@ export function describeWorkspaceCheck(check: WorkspaceCheck): WorkspaceVerdict 
     const roots = check.allowed_roots.join(', ')
     return {
       tone: 'error',
-      text: `Outside the directories your CLI host may run in (${roots}). Sessions here would be refused — add it with --allow or pick a folder inside one of them.`,
+      text: `Your CLI host may only run sessions inside: ${roots}. To allow this folder, set LOCAL_PROJECTS_DIR in the stack's .env to it (or a parent of it) and run \`make cli-host-install\` again; the Canvas explorer then shows it as projects/… too.`,
       canvasRoot: null,
     }
   }
@@ -236,16 +242,27 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
             </div>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="cli-working-directory" className="text-xs">Working directory (absolute path, inside a directory the host registered)</Label>
+            <Label htmlFor="cli-working-directory" className="text-xs">Workspace folder (absolute path on your machine, inside a folder your CLI host allows)</Label>
             <Input
               id="cli-working-directory"
-              placeholder="/Users/you/Development/your-repo"
+              placeholder="/Users/you/Development/your-workspace"
               value={value.cli_working_directory}
               onChange={(e) => onChange('cli_working_directory', e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Blank = the host&apos;s default <span className="font-mono">./workspaces</span>. Git repositories get their own worktree per session; sessions never push.
+              Claude Code starts here and loads this folder&apos;s CLAUDE.md files; the Canvas explorer opens here. One repo or a whole workspace of repos — your choice. Blank = the host&apos;s default <span className="font-mono">./workspaces</span>.
             </p>
+            <label className="flex items-start gap-2 text-xs text-muted-foreground" data-testid="cli-worktree">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={value.cli_worktree}
+                onChange={(e) => onChange('cli_worktree', e.target.checked)}
+              />
+              <span>
+                Run each ticket in its own git worktree of this folder (your checkout stays untouched; sessions never push). Turn this off for a workspace of many repos — its own git tracks next to nothing, so a worktree would be empty. Your own sessions from the agent menu always run in the folder itself.
+              </span>
+            </label>
             {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
             {value.cli_working_directory.trim() && (
               <p className="text-xs" data-testid="workspace-check">

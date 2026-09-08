@@ -183,26 +183,34 @@ def test_terminal_args_start_or_resume_and_honour_the_subscription_invariant(tmp
                                      system_prompt_path=prompt, model="opus", task_id="93")
     assert started[:3] == ["/usr/local/bin/claude", "--session-id", "abc"]
     assert started[3:5] == ["--append-system-prompt-file", str(prompt)]
-    assert "--setting-sources" in started and "--strict-mcp-config" in started
     assert started[-4:] == ["--name", "automatos #93", "--model", "opus"]
     resumed = ts.build_terminal_args("claude", session_id="abc", resume=True, system_prompt_path=None, model=None, task_id=None)
-    assert resumed == ["claude", "--resume", "abc", "--setting-sources", "user", "--strict-mcp-config"]
+    assert resumed == ["claude", "--resume", "abc"]
+    # the operator's own `claude` in that folder: no unattended-lane narrowing,
     # nothing that assumes nobody is at the keyboard, nothing the subscription rules forbid
     for args in (started, resumed):
+        assert "--setting-sources" not in args and "--strict-mcp-config" not in args
         assert "--permission-mode" not in args and "--settings" not in args and "--worktree" not in args
         assert "-p" not in args and "--print" not in args and "--bare" not in args
         ts.assert_args_honour_invariant(args)
 
 
-def test_transcript_lookup_finds_the_session_in_its_project_or_anywhere(tmp_path):
+def test_transcript_lookup_counts_only_the_sessions_own_folder(tmp_path):
+    from automatos_cli_host.transcript import transcript_path
+
     home = tmp_path / "home"
     cwd = tmp_path / "repo"
     cwd.mkdir()
-    assert ts.transcript_exists(cwd, "11111111-1111-1111-1111-111111111111", home) is False
+    sid = "11111111-1111-1111-1111-111111111111"
+    assert ts.transcript_exists(cwd, sid, home) is False
     elsewhere = home / ".claude" / "projects" / "-some-other-folder"
     elsewhere.mkdir(parents=True)
-    (elsewhere / "11111111-1111-1111-1111-111111111111.jsonl").write_text("{}\n")
-    assert ts.transcript_exists(cwd, "11111111-1111-1111-1111-111111111111", home) is True
+    (elsewhere / f"{sid}.jsonl").write_text("{}\n")
+    assert ts.transcript_exists(cwd, sid, home) is False   # --resume here would say "No conversation found"
+    own = transcript_path(str(cwd), sid, home)
+    own.parent.mkdir(parents=True, exist_ok=True)
+    own.write_text("{}\n")
+    assert ts.transcript_exists(cwd, sid, home) is True
 
 
 def _fake_claude(tmp_path) -> str:
@@ -257,10 +265,11 @@ def test_a_launch_grant_runs_the_agents_session_and_reports_open_and_close(tmp_p
         assert b"--append-system-prompt-file" in out and b"--model opus" in out and b"automatos #93" in out
         assert (tmp_path / "sessions" / "93" / "system_prompt.md").read_text() == "You are Bob."
         assert str(root.resolve()).encode() in out
-        # the transcript now exists → the next open resumes the same session
-        project = home / ".claude" / "projects" / "-anything"
-        project.mkdir(parents=True)
-        (project / f"{sid}.jsonl").write_text("{}\n")
+        # the transcript now exists in this folder → the next open resumes the same session
+        from automatos_cli_host.transcript import transcript_path
+        own = transcript_path(str(root.resolve()), sid, home)
+        own.parent.mkdir(parents=True, exist_ok=True)
+        own.write_text("{}\n")
         server.admit([{"token": "second", "cwd": str(root), "task_id": 93, "launch": launch}])
         out = _run_launch(server, port, "second")
         assert b"--resume " + sid.encode() in out and b"--session-id" not in out, out

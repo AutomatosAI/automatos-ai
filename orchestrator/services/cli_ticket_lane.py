@@ -255,13 +255,29 @@ def open_session_ticket(
     """
     from uuid import uuid4
 
-    existing = session_ticket_for(db, workspace_id, chat_id, int(agent.id))
-    if existing is not None:
-        return existing, False
-    cfg = getattr(agent, "configuration", None) or {}
-    cwd = cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or None
     from config import config
     from services.cli_host_service import explorer_root_for
+
+    cfg = getattr(agent, "configuration", None) or {}
+    cwd = cfg.get(CONFIG_WORKING_DIRECTORY_KEY) or None
+    existing = session_ticket_for(db, workspace_id, chat_id, int(agent.id))
+    if existing is not None:
+        ref = existing.runtime_ref if isinstance(existing.runtime_ref, dict) else {}
+        if (ref.get("cwd") or None) != cwd:
+            # The agent's folder changed: a Claude Code session belongs to the
+            # folder its transcript lives in, so this conversation gets a NEW
+            # session there (the old one stays resumable from its own folder).
+            existing.runtime_ref = {
+                **ref,
+                "cwd": cwd,
+                "explorer_root": explorer_root_for(existing.id, cwd, workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None),
+                "session_id": str(uuid4()),
+                "cli_session_id": None,
+                "previous_session": {"cwd": ref.get("cwd"), "session_id": ref.get("cli_session_id") or ref.get("session_id")},
+            }
+            db.commit()
+            logger.info("[CliTicketLane] session ticket #%s follows agent %s to %s", existing.id, agent.id, cwd)
+        return existing, False
 
     name = getattr(agent, "name", None) or "the agent"
     task = BoardTask(

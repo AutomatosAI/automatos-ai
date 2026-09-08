@@ -30,6 +30,9 @@ CONFIG_PROVIDER_KEY = "provider"
 CONFIG_MODEL_KEY = "model"
 CONFIG_WORKING_DIRECTORY_KEY = "working_directory"
 CONFIG_ALLOWED_TOOLS_KEY = "allowed_tools"
+# PRD-239: a single repo gets a worktree per ticket (default); a workspace of many
+# repos must not — its own git tracks next to nothing, the worktree would be empty.
+CONFIG_WORKTREE_KEY = "worktree_per_ticket"
 
 PROVIDER_CLAUDE = "claude"
 PROVIDER_CODEX = "codex"
@@ -162,4 +165,7 @@ def validate_runtime_configuration(
             f"{provider} model alias or id"
         )
     errors.extend(validate_working_directory(configuration.get(CONFIG_WORKING_DIRECTORY_KEY)))
+    worktree = configuration.get(CONFIG_WORKTREE_KEY)
+    if worktree is not None and not isinstance(worktree, bool):
+        errors.append(f"configuration.{CONFIG_WORKTREE_KEY} must be true or false, got {worktree!r}")
     return errors
