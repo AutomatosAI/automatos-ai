@@ -45,7 +45,7 @@
     "vitest": "^2.1.9"
   },
   "dependencies": {
-    "@ai-sdk/react": "^2.0.87",
+    "@ai-sdk/react": "^2.0.256",
     "@anthropic-ai/sdk": "^0.65.0",
     "@clerk/nextjs": "^6.37.3",
     "@floating-ui/react": "0.26.0",
@@ -86,7 +86,7 @@
     "@tiptap/starter-kit": "^3.20.0",
     "@types/papaparse": "^5.5.2",
     "@types/three": "^0.183.1",
-    "ai": "^5.0.87",
+    "ai": "^5.0.253",
     "ansi-to-react": "^6.2.6",
     "autoprefixer": "10.4.15",
     "class-variance-authority": "0.7.0",
