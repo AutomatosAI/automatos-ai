@@ -80,3 +80,57 @@ describe('RuntimeSection', () => {
     expect(onChange).toHaveBeenCalledWith('cli_working_directory', '/w/repo')
   })
 })
+
+// PRD-239 S6: the verdict line the operator reads under the working directory.
+describe('describeWorkspaceCheck', () => {
+  const base = {
+    path: '/Users/me/Development/repo',
+    valid: true,
+    errors: [] as string[],
+    explorer_root: 'projects/repo' as string | null,
+    browsable: true,
+    allowed: true as boolean | null,
+    allowed_roots: ['/Users/me/Development'],
+    projects_dir: '/Users/me/Development' as string | null,
+  }
+
+  it('names the Canvas root when the folder is browsable and allowed', async () => {
+    const { describeWorkspaceCheck } = await load('local')
+    const verdict = describeWorkspaceCheck(base)
+    expect(verdict.tone).toBe('ok')
+    expect(verdict.text).toContain('projects/repo')
+    expect(verdict.canvasRoot).toBe('projects/repo')
+  })
+
+  it('says when no host could confirm the folder', async () => {
+    const { describeWorkspaceCheck } = await load('local')
+    const verdict = describeWorkspaceCheck({ ...base, allowed: null, allowed_roots: [] })
+    expect(verdict.tone).toBe('ok')
+    expect(verdict.text).toContain('no host online')
+  })
+
+  it('refuses a folder outside the host allow-list before anything else', async () => {
+    const { describeWorkspaceCheck } = await load('local')
+    const verdict = describeWorkspaceCheck({ ...base, allowed: false, allowed_roots: ['/Users/me/ws'] })
+    expect(verdict.tone).toBe('error')
+    expect(verdict.text).toContain('/Users/me/ws')
+    expect(verdict.canvasRoot).toBeNull()
+  })
+
+  it('warns when sessions can run but the folder is not browsable', async () => {
+    const { describeWorkspaceCheck } = await load('local')
+    const verdict = describeWorkspaceCheck({ ...base, explorer_root: null, browsable: false })
+    expect(verdict.tone).toBe('warn')
+    expect(verdict.text).toContain('not browsable')
+    expect(describeWorkspaceCheck({ ...base, explorer_root: null, browsable: false, projects_dir: null }).text).toContain(
+      'LOCAL_PROJECTS_DIR is not set',
+    )
+  })
+
+  it('surfaces the validation error verbatim', async () => {
+    const { describeWorkspaceCheck } = await load('local')
+    const verdict = describeWorkspaceCheck({ ...base, valid: false, errors: ['must be an absolute path'] })
+    expect(verdict.tone).toBe('error')
+    expect(verdict.text).toBe('must be an absolute path')
+  })
+})

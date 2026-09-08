@@ -233,6 +233,55 @@ def host_health(db: Session, workspace_id: Any) -> Dict[str, Any]:
     }
 
 
+def host_allow_dirs(db: Session, workspace_id: Any) -> List[str]:
+    """The directories the workspace's paired hosts announced they may run in
+    (``capabilities.allow_dirs``, PRD-239 S6). Empty when no host reported any."""
+    hosts = (
+        db.query(CliHost)
+        .filter(CliHost.workspace_id == workspace_id, CliHost.status == CliHostStatus.PAIRED.value)
+        .all()
+    )
+    roots: List[str] = []
+    for host in hosts:
+        caps = host.capabilities if isinstance(host.capabilities, dict) else {}
+        for raw in caps.get("allow_dirs") or []:
+            if isinstance(raw, str) and raw and raw not in roots:
+                roots.append(raw)
+    return sorted(roots)
+
+
+def _inside(path: str, root: str) -> bool:
+    root = root.rstrip("/") or "/"
+    return path == root or path.startswith(root + "/")
+
+
+def workspace_check(db: Session, workspace_id: Any, path: str) -> Dict[str, Any]:
+    """PRD-239 S6: what a cli agent's ``working_directory`` would mean, before it
+    is saved — valid or not, browsable in the Canvas as which root, and inside
+    the paired host's allowed directories or not (``None`` when no host has
+    announced them)."""
+    from core.cli_runtime import validate_working_directory
+
+    path = (path or "").strip()
+    errors = validate_working_directory(path)
+    projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
+    root = None if errors else workspace_relative_path(path, str(workspace_id), projects_dir)
+    roots = host_allow_dirs(db, workspace_id)
+    allowed: Optional[bool] = None
+    if roots and not errors:
+        allowed = any(_inside(path, r) for r in roots)
+    return {
+        "path": path,
+        "valid": not errors,
+        "errors": errors,
+        "explorer_root": root,
+        "browsable": root is not None,
+        "allowed": allowed,
+        "allowed_roots": roots,
+        "projects_dir": projects_dir,
+    }
+
+
 def list_hosts(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
     rows = (
         db.query(CliHost)

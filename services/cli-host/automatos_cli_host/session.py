@@ -570,4 +570,7 @@ def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:
         "claude": {"path": claude, "version": version, "onboarded": has_completed_onboarding()} if claude else None,
         "providers": ["claude"] if claude else [],
         "worktrees": cfg.use_worktrees,
+        # PRD-239 S6: the directories this host may run sessions in — the backend
+        # checks an agent's working_directory against them before it is saved.
+        "allow_dirs": [str(p) for p in (cfg.allow_dirs or [])],
     }
