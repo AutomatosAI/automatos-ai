@@ -1654,15 +1654,18 @@ class CoordinatorService:
             # --- Phase 2: Agent I/O (parallel via asyncio.gather) ---
             if prepared:
                 agent_coros = [
-                    self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
-                                       p["task"], p["attachment_ids"],
-                                       mode_caps=p["mode_caps"],
-                                       agent_runtime=p.get("agent_runtime"),
-                                       field_context=p.get("field_context"),
-                                       # PRD-239 S3: a session agent's task runs as a ticket
-                                       cli_agent=bool(p.get("cli_agent")),
-                                       workspace_id=p.get("workspace_id"),
-                                       run_id=p.get("run_id"))
+                    # PRD-239 S3: a session agent's task runs as a ticket the Claude
+                    # Code session works (its own DB session, the same timeout).
+                    self._run_cli_ticket(
+                        p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
+                        (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                    )
+                    if p.get("cli_agent")
+                    else self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
+                                            p["task"], p["attachment_ids"],
+                                            mode_caps=p["mode_caps"],
+                                            agent_runtime=p.get("agent_runtime"),
+                                            field_context=p.get("field_context"))
                     for p in prepared
                 ]
                 results = await asyncio.gather(*agent_coros, return_exceptions=True)
@@ -2254,25 +2257,18 @@ class CoordinatorService:
         mode_caps: Optional[Dict[str, Any]] = None,
         agent_runtime: Optional[Any] = None,
         field_context: Optional[Dict[str, Any]] = None,
-        cli_agent: bool = False,
-        workspace_id: Any = None,
-        run_id: Any = None,
     ) -> Dict[str, Any]:
         """Execute agent I/O — safe to run concurrently via asyncio.gather().
 
         No DB access here — only the LLM + tool loop. ``mode_caps`` is resolved
         upstream in _prepare_task (the serial DB phase) and passed in, so this
-        concurrent path never reads system_settings. A session agent's task
-        (``cli_agent``) is the one exception: it files a ticket and polls it on
-        a session of its OWN (never the shared one).
+        concurrent path never reads system_settings. (A session agent's task
+        never comes here — the tick routes it to ``_run_cli_ticket``.)
         """
         caps = mode_caps or _POWER_MODE_DEFAULTS["standard"]
         max_iters = caps["max_tool_iterations"]
         # PRD-163 S5: per-power-mode timeout (falls back to the global default).
         task_timeout = caps.get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT
-
-        if cli_agent:
-            return await self._run_cli_ticket(task, prompt, agent_id, workspace_id, run_id, task_timeout)
 
         # Pass runtime directly when we have it so the factory cache can't
         # swap in a stale cached runtime under us mid-flight.
