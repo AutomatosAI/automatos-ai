@@ -10,7 +10,7 @@
  * WorkspaceExplorer's `lastEvent` (a `file_write` with a changing timestamp).
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { RootPicker } from './RootPicker'
 import { WORKSPACE_ROOT, canvasTitleFor } from './code-root'
 import { useWorkspaceStore } from '@/stores/workspace-store'
@@ -28,6 +28,7 @@ import { WorkspaceExplorer } from '../../workspace/WorkspaceExplorer'
 import { useWorkspaceFiles } from './useWorkspaceFiles'
 import { useCanvasSession } from './useCanvasSession'
 import { CanvasSessionPanel } from './CanvasSessionPanel'
+import { CanvasTerminal } from './CanvasTerminal'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -50,6 +51,8 @@ export function CodingCanvasWidget({
   const root = data.rootPath || WORKSPACE_ROOT
   const { invalidateCache, fetchDirectory } = useWorkspaceFiles(workspaceId, root)
   const session = useCanvasSession(workspaceId, { taskId: data.taskId ?? null })
+  // PRD-239 S7: a ticket's Canvas opens on the terminal; the SDK canvas on its session.
+  const [rightTab, setRightTab] = useState<'terminal' | 'session'>(session.external ? 'terminal' : 'session')
 
   const handleRefresh = useCallback(() => {
     invalidateCache()
@@ -103,14 +106,44 @@ export function CodingCanvasWidget({
     >
       <div className="flex h-full min-h-[300px] flex-col">
       <RootPicker workspaceId={workspaceId} value={root} onChange={handleRootChange} />
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_360px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1fr_420px]">
         <WorkspaceExplorer
           workspaceId={workspaceId}
           rootPath={root}
           lastEvent={lastEvent}
           className="h-full min-h-[300px]"
         />
-        <CanvasSessionPanel session={session} workspaceId={workspaceId} />
+        {/* PRD-239 S7: the right column is a real terminal (your own shell on your
+            machine, via the CLI host) or the session view — one at a time. */}
+        <div className="flex h-full min-h-0 flex-col border-l border-border">
+          <div className="flex items-center gap-1 border-b border-border px-2 py-1" role="tablist" data-testid="canvas-right-tabs">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === 'terminal'}
+              onClick={() => setRightTab('terminal')}
+              className={`rounded px-2 py-1 text-xs ${rightTab === 'terminal' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Terminal
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === 'session'}
+              onClick={() => setRightTab('session')}
+              className={`rounded px-2 py-1 text-xs ${rightTab === 'session' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {session.external ? 'Session log' : 'Auto session'}
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            {rightTab === 'terminal' ? (
+              <CanvasTerminal taskId={data.taskId ?? null} />
+            ) : (
+              <CanvasSessionPanel session={session} workspaceId={workspaceId} />
+            )}
+          </div>
+        </div>
       </div>
       </div>
     </WidgetBase>

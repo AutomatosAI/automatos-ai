@@ -14,7 +14,6 @@ import { generateTitle } from '@/lib/utils'
 import { updateChatTitle } from '@/lib/chat/api'
 import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, DocumentReference, DatabaseResult, RoutingInfo } from '@/types'
 import { apiClient } from '@/lib/api-client'
-import { onCanvasCompose } from '@/lib/chat/canvas-compose'
 import { toast } from 'sonner'
 import { useUser } from '@/lib/auth-hooks'
 import { useRouter } from 'next/navigation'
@@ -670,46 +669,6 @@ export function Chat({
     },
     [sendMessage, createMission, setActivePlanningMissionId, setMissionMode]
   )
-
-  // PRD-239 S7: a message typed beside a ticket's Claude Code session in the Canvas
-  // goes through this chat: select the ticket's agent, then send it as a turn (the
-  // session lane files a follow-up ticket that resumes the session).
-  const pendingCanvasSend = useRef<{ agentId: number; text: string } | null>(null)
-  const chatStatusRef = useRef(status)
-  chatStatusRef.current = status
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    return onCanvasCompose(({ taskId, text }) => {
-      void (async () => {
-        if (chatStatusRef.current === 'streaming') {
-          toast.error('Wait for the current reply to finish, then send again')
-          return
-        }
-        try {
-          const task = await apiClient.request<{ assigned_agent_id?: number | null }>(`/api/v1/tasks/${taskId}`)
-          const agentId = task?.assigned_agent_id ?? null
-          if (!agentId) {
-            toast.error('This ticket has no agent to continue with')
-            return
-          }
-          if (selectedAgentId === agentId) {
-            handleSendMessage(text)
-            return
-          }
-          pendingCanvasSend.current = { agentId, text }
-          setSelectedAgentId(agentId)
-        } catch {
-          toast.error('Could not read the ticket behind this session')
-        }
-      })()
-    })
-  }, [selectedAgentId, handleSendMessage])
-  useEffect(() => {
-    const pending = pendingCanvasSend.current
-    if (!pending || selectedAgentId !== pending.agentId) return
-    pendingCanvasSend.current = null
-    handleSendMessage(pending.text)
-  }, [selectedAgentId, handleSendMessage])
 
   // PRD-50: Handle agent change — fire correction API when overriding auto-routed agent
   const handleAgentChange = useCallback((newAgentId: number | null) => {
