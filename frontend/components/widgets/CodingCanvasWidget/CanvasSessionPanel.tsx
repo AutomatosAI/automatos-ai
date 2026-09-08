@@ -138,8 +138,17 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
         </div>
       </ScrollArea>
 
+      {/* PRD-239: a ticket's Claude Code session is a read-only mirror here (PRD-234:
+          the host never types into the session). The composer below reaches only the
+          workspace-worker's own Auto session — for a ticket it would swallow the text. */}
+      {isLive && session.external && (
+        <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground" data-testid="canvas-composer-external">
+          This is a Claude Code session running on your machine. To continue it, message the agent in the chat — the reply comes back there.
+        </p>
+      )}
+
       {/* Prompt composer (PRD-203 C·S7) — the box to instruct Auto. */}
-      {isLive && (
+      {isLive && !session.external && (
         <form
           className="flex items-end gap-2 border-t border-border p-2"
           onSubmit={(e) => {

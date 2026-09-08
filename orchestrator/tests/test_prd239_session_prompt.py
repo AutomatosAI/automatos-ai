@@ -209,5 +209,15 @@ def test_a_prompt_rendering_failure_never_blocks_a_claim(monkeypatch):
     assert svc._session_system_prompt(None) == ""
 
 
+def test_the_sessions_real_directory_always_wins(monkeypatch):
+    """PRD-239: the SessionStart / result cwd (a --worktree for a repo) replaces the
+    configured one, and the explorer root follows it."""
+    monkeypatch.setattr(svc, "explorer_root_for", lambda task_id, cwd, ws, projects: f"root-for:{cwd}")
+    ref = {"cwd": "/repo", "explorer_root": "projects/repo"}
+    svc._record_session_cwd(ref, SimpleNamespace(id=7, workspace_id=WS), "/repo/.claude/worktrees/automatos-7")
+    assert ref["cwd"] == "/repo/.claude/worktrees/automatos-7"
+    assert ref["explorer_root"] == "root-for:/repo/.claude/worktrees/automatos-7"
+
+
 def test_host_contract_version_moved_with_the_claim_shape():
     assert svc.EXPECTED_CLI_HOST_VERSION == "0.3.0"
