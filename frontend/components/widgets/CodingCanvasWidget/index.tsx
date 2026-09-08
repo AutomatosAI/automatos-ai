@@ -28,7 +28,15 @@ import { WorkspaceExplorer } from '../../workspace/WorkspaceExplorer'
 import { useWorkspaceFiles } from './useWorkspaceFiles'
 import { useCanvasSession } from './useCanvasSession'
 import { CanvasSessionPanel } from './CanvasSessionPanel'
-import { CanvasTerminal } from './CanvasTerminal'
+import dynamic from 'next/dynamic'
+import type { CanvasTerminalProps } from './CanvasTerminal'
+
+// PRD-239 S7: xterm.js reads `self` at import time and the chat page is still
+// server-rendered, so the terminal pane only ever loads in the browser.
+const CanvasTerminal = dynamic<CanvasTerminalProps>(
+  () => import('./CanvasTerminal').then((m) => m.CanvasTerminal),
+  { ssr: false, loading: () => <div className="p-3 text-xs text-muted-foreground">Loading the terminal…</div> },
+)
 
 // ---------------------------------------------------------------------------
 // Component
