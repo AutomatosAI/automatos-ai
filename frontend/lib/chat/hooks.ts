@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-hooks'
 import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import type { PageContext } from '@/lib/page-context'
 import { TRIAL_EXHAUSTED_CODE } from '@/lib/trial'
+import { completeRunningToolCalls, upsertToolCall } from '@/lib/chat/tool-calls'
 import { toast } from 'sonner'
 
 /** PRD-237 S7: the client-side placeholder shown while the server finishes a turn. */
@@ -276,16 +277,6 @@ export function useChat({
         let buffer = ''
         let accumulatedContent = ''
 
-        const upsertToolCall = (current: ToolCall[] | undefined, next: ToolCall): ToolCall[] => {
-          const list = current ? [...current] : []
-          const idx = list.findIndex((t) => t.toolCallId === next.toolCallId)
-          if (idx >= 0) {
-            list[idx] = { ...list[idx], ...next }
-            return list
-          }
-          return [...list, next]
-        }
-
         while (reader) {
           const { done, value } = await reader.read()
           if (done) break
@@ -354,9 +345,13 @@ export function useChat({
                   const toolCall: ToolCall = {
                     toolCallId: data.data.toolCallId,
                     toolName: data.data.toolName || 'tool',
-                    state: data.data.success ? 'completed' : 'error',
+                    // PRD-238 S3: a skipped (de-duplicated) call closes its line
+                    // as done-without-running, never as an error.
+                    state: data.data.success || data.data.skipped ? 'completed' : 'error',
                     error: data.data.error,
                     durationMs: data.data.durationMs,
+                    summary: data.data.summary,
+                    skipped: Boolean(data.data.skipped),
                     endedAt: now,
                   }
 
@@ -410,6 +405,28 @@ export function useChat({
                 // PRD-125 Phase 1: Forward mission-suggestion to onData for chat card
                 else if (data.type === 'mission-suggestion' && data.data) {
                   if (onData) onData({ type: 'mission-suggestion', data: data.data })
+                }
+                // PRD-238 S3: the turn is over — nothing may keep spinning.
+                else if (data.type === 'finish') {
+                  const endedAt = new Date().toISOString()
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? { ...m, toolCalls: completeRunningToolCalls(m.toolCalls, endedAt) }
+                        : m
+                    )
+                  )
+                }
+                // PRD-238 S3: a cap ended the turn — say so instead of going quiet.
+                else if (data.type === 'limit_reached' && data.data?.message) {
+                  const limit = {
+                    limit: String(data.data.limit ?? ''),
+                    value: Number(data.data.value ?? 0),
+                    message: String(data.data.message),
+                  }
+                  setMessages((prev) =>
+                    prev.map((m) => (m.id === assistantMessageId ? { ...m, limitReached: limit } : m))
+                  )
                 }
               } catch (e) {
                 // Skip parse errors
