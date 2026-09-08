@@ -35,21 +35,10 @@ import { useChat } from '@/lib/chat/hooks'
 import { usePageContext } from '@/lib/page-context'
 import { getPageEntry } from '@/lib/generated/page-manifest'
 import { useSystemRole } from '@/contexts/role-context'
-import { getChatHistory, getChatMessages } from '@/lib/chat/api'
-import {
-  EMPTY_WIDGET_SESSION,
-  isThreadUnread,
-  loadWidgetSession,
-  saveWidgetSession,
-  threadTimeAgo,
-  visibleThreads,
-  widgetSessionKey,
-  withActiveChat,
-  withThreadClosed,
-  withThreadRead,
-  withoutActiveChat,
-  type WidgetChatSession,
-} from '@/lib/chat/widget-session'
+import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
+import { useChatSessionHydration } from '@/hooks/use-chat-session'
+import { useChatSessionStore } from '@/stores/chat-session-store'
+import { sessionTabs, threadTimeAgo } from '@/lib/chat/chat-session'
 import type { Chat, ChatMessage } from '@/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -83,160 +72,122 @@ const PAGE_LABELS: Record<string, string> = {
 }
 
 // =============================================================================
-// Mini Auto Chat Tab — persistent & multi-threaded (PRD-220)
+// Mini Auto Chat Tab — the same conversation session as the chat page (PRD-237)
 // =============================================================================
 
-function widgetWorkspaceId(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('last_active_workspace')
+interface WidgetView {
+  chatId: string | null
+  messages: ChatMessage[]
+  awaitingReply: boolean
 }
+
+const WIDGET_DRAFT_VIEW: WidgetView = { chatId: null, messages: [], awaitingReply: false }
+/** Recent rows fetched for row metadata (kind badge, time, preview). */
+const WIDGET_HISTORY_ROWS = 10
 
 function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: () => void }) {
   const router = useRouter()
-  const { user, isLoaded: userLoaded } = useUser()
 
-  // Session key is workspace+user scoped; until Clerk resolves, run ephemeral.
-  const storageKey = userLoaded ? widgetSessionKey(widgetWorkspaceId(), user?.id) : null
+  // PRD-237: one session store for the page and the widget — same active
+  // conversation, same open tabs. The widget remounts on every navigation
+  // (MainLayout is per page), so the store is what makes it "keep going".
+  const { hydrated } = useChatSessionHydration()
+  const session = useChatSessionStore((s) => s.session)
+  const openChat = useChatSessionStore((s) => s.openChat)
+  const newDraft = useChatSessionStore((s) => s.newDraft)
+  const closeTab = useChatSessionStore((s) => s.closeTab)
+  const chatIdAssigned = useChatSessionStore((s) => s.chatIdAssigned)
+  const setTitles = useChatSessionStore((s) => s.setTitles)
 
-  const [session, setSession] = useState<WidgetChatSession | null>(null)
-  const [activeChatId, setActiveChatId] = useState<string | null>(null)
-  const [seedMessages, setSeedMessages] = useState<ChatMessage[]>([])
-  const [reconnecting, setReconnecting] = useState(false)
+  const [view, setView] = useState<WidgetView | null>(null)
   const [threads, setThreads] = useState<Chat[]>([])
   const [threadsOpen, setThreadsOpen] = useState(false)
-  // Bumped only on explicit thread changes — remounts the conversation below.
-  const [conversationInstance, setConversationInstance] = useState(0)
-  // Monotonic token so a slow history fetch can't stomp a newer thread change.
+  const [draftInstance, setDraftInstance] = useState(0)
+  // Monotonic token so a slow fetch can't stomp a newer thread change.
   const loadSeqRef = useRef(0)
-
-  const updateSession = useCallback(
-    (mutate: (s: WidgetChatSession) => WidgetChatSession) => {
-      if (!storageKey) return
-      setSession((prev) => {
-        const next = mutate(prev ?? EMPTY_WIDGET_SESSION)
-        saveWidgetSession(storageKey, next)
-        return next
-      })
-    },
-    [storageKey]
-  )
 
   const refreshThreads = useCallback(async () => {
     try {
-      setThreads(await getChatHistory(10))
+      const rows = await getChatHistory(WIDGET_HISTORY_ROWS)
+      setThreads(rows)
+      setTitles(Object.fromEntries(rows.map((row) => [row.id, row.title])))
     } catch {
-      // Thread list is best-effort — the active conversation still works.
+      // Row metadata is best-effort — the active conversation still works.
     }
-  }, [])
+  }, [setTitles])
 
-  // S1: restore the session and reconnect to the active thread on mount.
   useEffect(() => {
-    if (!storageKey) return
-    const restored = loadWidgetSession(storageKey)
-    setSession(restored)
-    refreshThreads().catch(() => {})
-    if (!restored.activeChatId) return
+    if (hydrated) refreshThreads().catch(() => {})
+  }, [hydrated, refreshThreads])
 
-    const chatId = restored.activeChatId
-    setReconnecting(true)
+  // Reconnect to the active conversation whenever the pointer moves.
+  useEffect(() => {
+    if (!hydrated) return
+    const activeId = session.activeChatId
+    if (activeId === null) {
+      setView((current) => (current && current.chatId === null ? current : WIDGET_DRAFT_VIEW))
+      return
+    }
+    if (view?.chatId === activeId) return
     const seq = ++loadSeqRef.current
     let cancelled = false
-    ;(async () => {
-      try {
-        const history = await getChatMessages(chatId)
+    Promise.all([getChatMessages(activeId), getChat(activeId)])
+      .then(([messages, chat]) => {
         if (cancelled || seq !== loadSeqRef.current) return
-        setSeedMessages(history)
-        setActiveChatId(chatId)
-        setConversationInstance((v) => v + 1)
-      } catch {
-        // Stale or inaccessible chat (deleted, workspace switch) — start fresh.
-        if (!cancelled && seq === loadSeqRef.current) updateSession((s) => withoutActiveChat(s))
-      } finally {
-        if (!cancelled && seq === loadSeqRef.current) setReconnecting(false)
-      }
-    })()
+        setView({ chatId: activeId, messages, awaitingReply: Boolean(chat.turnInFlight) })
+        setTitles({ [activeId]: chat.title })
+      })
+      .catch(() => {
+        // Stale or inaccessible chat (deleted, workspace switch) — drop the tab.
+        if (!cancelled && seq === loadSeqRef.current) closeTab(activeId)
+      })
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey])
-
-  // Backend assigned (or confirmed) the conversation id — persist it. Fires
-  // each turn, which also keeps the active thread's read marker current.
-  const handleChatIdAssigned = useCallback(
-    (chatId: string) => {
-      setActiveChatId(chatId)
-      updateSession((s) => withActiveChat(s, chatId))
-      refreshThreads().catch(() => {})
-    },
-    [updateSession, refreshThreads]
-  )
+  }, [hydrated, session.activeChatId, view?.chatId, closeTab, setTitles])
 
   const switchThread = useCallback(
-    async (thread: Chat) => {
+    (chatId: string) => {
       setThreadsOpen(false)
-      if (thread.id === activeChatId) return
-      // Leaving a thread the user was just viewing — stamp it read.
-      updateSession((s) => withActiveChat(withThreadRead(s, activeChatId), thread.id))
-      setReconnecting(true)
-      const seq = ++loadSeqRef.current
-      try {
-        const history = await getChatMessages(thread.id)
-        if (seq !== loadSeqRef.current) return
-        setSeedMessages(history)
-        setActiveChatId(thread.id)
-        setConversationInstance((v) => v + 1)
-      } catch {
-        if (seq === loadSeqRef.current) updateSession((s) => withoutActiveChat(s))
-      } finally {
-        if (seq === loadSeqRef.current) setReconnecting(false)
-      }
+      openChat(chatId)
     },
-    [activeChatId, updateSession]
+    [openChat]
   )
 
   const startNewThread = useCallback(() => {
     setThreadsOpen(false)
-    loadSeqRef.current++ // invalidate any in-flight thread load
-    setReconnecting(false)
-    updateSession((s) => withoutActiveChat(withThreadRead(s, activeChatId)))
-    setActiveChatId(null)
-    setSeedMessages([])
-    setConversationInstance((v) => v + 1)
-  }, [activeChatId, updateSession])
+    loadSeqRef.current++ // invalidate any in-flight load
+    newDraft()
+    setView(WIDGET_DRAFT_VIEW)
+    setDraftInstance((v) => v + 1)
+  }, [newDraft])
 
-  // Hides the thread from the switcher — the conversation stays in full chat.
+  // Closes the tab everywhere — the conversation itself stays in history.
   const closeThread = useCallback(
-    (thread: Chat, e: React.MouseEvent) => {
+    (chatId: string, e: React.MouseEvent) => {
       e.stopPropagation()
-      updateSession((s) => withThreadClosed(s, thread.id))
-      if (thread.id === activeChatId) {
-        loadSeqRef.current++ // invalidate any in-flight thread load
-        setReconnecting(false)
-        setActiveChatId(null)
-        setSeedMessages([])
-        setConversationInstance((v) => v + 1)
-      }
+      closeTab(chatId)
     },
-    [activeChatId, updateSession]
+    [closeTab]
   )
 
-  // S3: promote — the full chat page loads the thread via ?chatId= deep-link.
+  // S3: promote — the full chat page reads the same session, so it lands on this thread.
   const openFullChat = useCallback(() => {
     setThreadsOpen(false)
     onClose?.()
-    router.push(activeChatId ? `/chat?chatId=${activeChatId}` : '/chat')
-  }, [activeChatId, onClose, router])
+    router.push('/chat')
+  }, [onClose, router])
 
-  const effectiveSession = session ?? EMPTY_WIDGET_SESSION
-  const listedThreads = visibleThreads(threads, effectiveSession)
-  const activeThread = threads.find((t) => t.id === activeChatId)
-  const hasUnread = listedThreads.some((t) => isThreadUnread(effectiveSession, t))
+  const openTabs = sessionTabs(session).filter((tab) => !tab.isDraft).map((tab) => tab.id as string)
+  const threadById = new Map(threads.map((row) => [row.id, row]))
+  const activeChatId = session.activeChatId
+  const activeTitle = activeChatId ? session.titles[activeChatId] ?? 'Conversation' : 'New conversation'
+  const hasUnread = session.unreadChatIds.length > 0
   const pageLabel = PAGE_LABELS[currentPage] || currentPage
 
   return (
     <div className="flex flex-col h-[400px]">
-      {/* Thread switcher toolbar (S2) */}
+      {/* Thread switcher toolbar — the open tabs, shared with the chat page */}
       <div className="relative px-3 pb-1.5">
         <div className="flex items-center gap-1">
           <button
@@ -250,9 +201,7 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
             <ChevronDown
               className={`w-3 h-3 shrink-0 transition-transform ${threadsOpen ? 'rotate-180' : ''}`}
             />
-            <span className="truncate">
-              {activeThread?.title || (activeChatId ? 'Conversation' : 'New conversation')}
-            </span>
+            <span className="truncate">{activeTitle}</span>
             {hasUnread && (
               <span
                 className="w-1.5 h-1.5 rounded-full bg-primary shrink-0"
@@ -292,56 +241,62 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
                 <Plus className="w-3 h-3" />
                 New thread
               </button>
-              {listedThreads.length > 0 && <div className="h-px bg-border/50" />}
+              {openTabs.length > 0 && <div className="h-px bg-border/50" />}
               <div className="max-h-56 overflow-y-auto">
-                {listedThreads.map((thread) => (
-                  <div
-                    key={thread.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => switchThread(thread)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        switchThread(thread)
-                      }
-                    }}
-                    className={`group flex w-full cursor-pointer flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-secondary/40 ${
-                      thread.id === activeChatId ? 'bg-secondary/30' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      {isThreadUnread(effectiveSession, thread) && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                        {thread.title}
-                      </span>
-                      {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
-                      {thread.kind === 'auto' && (
-                        <span className="shrink-0 rounded-full border border-warning/20 bg-warning/10 px-1.5 text-[9px] leading-4 text-warning">
-                          Auto
+                {openTabs.map((chatId) => {
+                  const row = threadById.get(chatId)
+                  const title = session.titles[chatId] ?? row?.title ?? 'Conversation'
+                  return (
+                    <div
+                      key={chatId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => switchThread(chatId)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          switchThread(chatId)
+                        }
+                      }}
+                      className={`group flex w-full cursor-pointer flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-secondary/40 ${
+                        chatId === activeChatId ? 'bg-secondary/30' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        {session.unreadChatIds.includes(chatId) && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" aria-label="Unread" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                          {title}
                         </span>
+                        {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
+                        {row?.kind === 'auto' && (
+                          <span className="shrink-0 rounded-full border border-warning/20 bg-warning/10 px-1.5 text-[9px] leading-4 text-warning">
+                            Auto
+                          </span>
+                        )}
+                        {row && (
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {threadTimeAgo(row.updatedAt)}
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => closeThread(chatId, e)}
+                          className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                          title="Close thread"
+                          aria-label={`Close thread ${title}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {row?.lastMessagePreview && (
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {row.lastMessagePreview}
+                        </p>
                       )}
-                      <span className="shrink-0 text-[10px] text-muted-foreground">
-                        {threadTimeAgo(thread.updatedAt)}
-                      </span>
-                      <button
-                        onClick={(e) => closeThread(thread, e)}
-                        className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                        title="Close thread"
-                        aria-label={`Close thread ${thread.title}`}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
                     </div>
-                    {thread.lastMessagePreview && (
-                      <p className="truncate text-[11px] text-muted-foreground">
-                        {thread.lastMessagePreview}
-                      </p>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               <div className="h-px bg-border/50" />
               <button
@@ -356,18 +311,19 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
         )}
       </div>
 
-      {reconnecting ? (
+      {!view ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
           <Loader2 className="w-4 h-4 animate-spin" />
           <p className="text-xs">Continuing conversation…</p>
         </div>
       ) : (
         <WidgetConversation
-          key={conversationInstance}
-          initialChatId={activeChatId}
-          initialMessages={seedMessages}
+          key={view.chatId ?? `draft-${draftInstance}`}
+          initialChatId={view.chatId}
+          initialMessages={view.messages}
+          initialAwaitingReply={view.awaitingReply}
           pageLabel={pageLabel}
-          onChatIdAssigned={handleChatIdAssigned}
+          onChatIdAssigned={chatIdAssigned}
         />
       )}
     </div>
@@ -377,11 +333,14 @@ function AutoChatTab({ currentPage, onClose }: { currentPage: string; onClose?: 
 function WidgetConversation({
   initialChatId,
   initialMessages,
+  initialAwaitingReply = false,
   pageLabel,
   onChatIdAssigned,
 }: {
   initialChatId: string | null
   initialMessages: ChatMessage[]
+  /** PRD-237 S7: the server is still producing a reply for this chat. */
+  initialAwaitingReply?: boolean
   pageLabel: string
   onChatIdAssigned: (chatId: string) => void
 }) {
@@ -410,6 +369,7 @@ function WidgetConversation({
     // Empty id → the backend creates the chat and streams its id back.
     id: initialChatId ?? '',
     initialMessages,
+    initialAwaitingReply,
     selectedAgentId: undefined, // Routes to Auto (default agent)
     pageContext,
     onChatIdUpdate: onChatIdAssigned,

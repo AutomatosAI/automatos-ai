@@ -36,11 +36,11 @@ describe('placebo model selector removed (F035)', () => {
   })
 
   it('no chat surface hardcodes initialChatModel="gpt-4"', () => {
+    // PRD-237 retired the dead chat-page-content.tsx and the broken server-side
+    // /chat/[id] route (it fetched with the browser client and always 404'd).
     for (const f of [
-      'components/chatbot/chat-page-content.tsx',
       'components/chatbot/chat.tsx',
       'app/chat/page.tsx',
-      'app/chat/[id]/page.tsx',
     ]) {
       const src = read(f)
       expect(src).not.toContain('initialChatModel')

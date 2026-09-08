@@ -62,6 +62,7 @@ import type { VoiceLevels } from '@/hooks/use-retell-call'
 import type { OrbState } from '@/lib/voice/orb-state'
 import type { MutableRefObject } from 'react'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
+import { useChatSessionStore } from '@/stores/chat-session-store'
 
 export interface ChatProps {
   id: string
@@ -70,6 +71,8 @@ export interface ChatProps {
   isReadonly?: boolean
   autoResume?: boolean
   initialLastContext?: AppUsage
+  /** PRD-237 S7: the server is still producing a reply (page reloaded mid-turn). */
+  initialAwaitingReply?: boolean
 }
 
 export function Chat({
@@ -79,6 +82,7 @@ export function Chat({
   isReadonly = false,
   autoResume = false,
   initialLastContext,
+  initialAwaitingReply = false,
 }: ChatProps) {
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
@@ -224,6 +228,7 @@ export function Chat({
     selectedAgentId,
     missionMode: isMissionMode,
     planMode: isPlanMode,
+    initialAwaitingReply,
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
@@ -253,7 +258,7 @@ export function Chat({
             metadata: {
               source: { type: 'tool', name: 'platform_create_mission' },
               createdAt: new Date(),
-              conversationId: id,
+              conversationId: activeChatId,
             },
             state: 'ready',
             createdAt: new Date().toISOString(),
@@ -272,7 +277,7 @@ export function Chat({
             metadata: {
               source: { type: 'tool', name: ta.action || 'platform_action' },
               createdAt: new Date(),
-              conversationId: id,
+              conversationId: activeChatId,
             },
             state: 'ready',
             createdAt: new Date().toISOString(),
@@ -311,7 +316,7 @@ export function Chat({
               metadata: {
                 source: { type: 'tool', name: 'smart_query_database', provider: 'nl2sql' },
                 createdAt: new Date(),
-                conversationId: id,
+                conversationId: activeChatId,
               },
               state: 'ready',
               createdAt: new Date().toISOString(),
@@ -348,7 +353,7 @@ export function Chat({
               metadata: {
                 source: { type: 'tool', name: 'search_knowledge', provider: 'rag' },
                 createdAt: new Date(),
-                conversationId: id,
+                conversationId: activeChatId,
               },
               state: doc.has_full_content ? 'ready' : 'ready',
               createdAt: new Date().toISOString(),
@@ -373,7 +378,7 @@ export function Chat({
               metadata: {
                 source: { type: 'tool', name: 'search_codebase', provider: 'codegraph' },
                 createdAt: new Date(),
-                conversationId: id,
+                conversationId: activeChatId,
               },
               state: 'ready',
               createdAt: new Date().toISOString(),
@@ -436,7 +441,7 @@ export function Chat({
             metadata: {
               source: { type: 'tool', name: 'composio_execute', provider: 'gmail' },
               createdAt: new Date(),
-              conversationId: id,
+              conversationId: activeChatId,
             },
             state: 'ready',
             createdAt: new Date().toISOString(),
@@ -460,7 +465,7 @@ export function Chat({
             metadata: {
               source: { type: 'tool', name: 'generate_document', provider: 'document_generation' },
               createdAt: new Date(),
-              conversationId: id,
+              conversationId: activeChatId,
             },
             state: 'ready',
             createdAt: new Date().toISOString(),
@@ -485,7 +490,7 @@ export function Chat({
             metadata: {
               source: { type: 'tool', name: 'execute_command', provider: 'shell' },
               createdAt: new Date(),
-              conversationId: id,
+              conversationId: activeChatId,
             },
             state: 'ready',
             createdAt: new Date().toISOString(),
@@ -515,6 +520,9 @@ export function Chat({
     },
     onChatIdUpdate: (newChatId) => {
       setActiveChatId(newChatId)
+      // PRD-237: the session store is the channel to the page/tabs/widget —
+      // a draft becomes this conversation, every later turn is a no-op.
+      useChatSessionStore.getState().chatIdAssigned(newChatId)
     },
     onRoutingDecision: (info: RoutingInfo) => {
       // Store for correction API
@@ -690,6 +698,7 @@ export function Chat({
         if (textPart && 'text' in textPart) {
           const title = generateTitle(textPart.text)
           updateChatTitle(activeChatId, title).catch(console.error)
+          useChatSessionStore.getState().setTitles({ [activeChatId]: title }) // PRD-237: tab label follows
           setHasGeneratedTitle(true)
         }
       }
@@ -803,7 +812,7 @@ export function Chat({
       metadata: {
         source: { type: 'tool', name: 'search_codebase', provider: 'codegraph' },
         createdAt: new Date(),
-        conversationId: id,
+        conversationId: activeChatId,
       },
       state: 'ready',
       createdAt: new Date().toISOString(),
@@ -852,7 +861,7 @@ export function Chat({
       metadata: {
         source: { type: 'tool', name: 'search_knowledge', provider: 'rag' },
         createdAt: new Date(),
-        conversationId: id,
+        conversationId: activeChatId,
       },
       state: doc.has_full_content ? 'ready' : 'loading',
       createdAt: new Date().toISOString(),
@@ -922,7 +931,7 @@ export function Chat({
       metadata: {
         source: { type: 'tool', name: 'smart_query_database', provider: 'nl2sql' },
         createdAt: new Date(),
-        conversationId: id,
+        conversationId: activeChatId,
       },
       state: 'ready',
       createdAt: new Date().toISOString(),
@@ -1001,7 +1010,7 @@ export function Chat({
                       {messages.map((message, index) => (
                         <Message
                           key={message.id}
-                          chatId={id}
+                          chatId={activeChatId}
                           message={message}
                           isLoading={isTyping && index === messages.length - 1}
                           setMessages={setMessages}
@@ -1026,7 +1035,7 @@ export function Chat({
                             goal={missionSuggestion.goal}
                             complexity={missionSuggestion.complexity}
                             agentId={missionSuggestion.agentId}
-                            chatId={id}
+                            chatId={activeChatId}
                             recentMessages={messages.slice(-5).map(m => { const textPart = m.parts?.find(p => p.type === 'text'); return { role: m.role, content: textPart && 'text' in textPart ? textPart.text : '' } })}
                           />
                         </motion.div>
@@ -1084,7 +1093,7 @@ export function Chat({
                         )}
                       </AnimatePresence>
                       <MultimodalInput
-                        chatId={id}
+                        chatId={activeChatId}
                         status={status}
                         stop={stop}
                         sendMessage={handleSendMessage}
@@ -1132,7 +1141,7 @@ export function Chat({
                         {messages.map((message, index) => (
                           <Message
                             key={message.id}
-                            chatId={id}
+                            chatId={activeChatId}
                             message={message}
                             isLoading={isTyping && index === messages.length - 1}
                             setMessages={setMessages}
@@ -1182,7 +1191,7 @@ export function Chat({
                           )}
                         </AnimatePresence>
                         <MultimodalInput
-                          chatId={id}
+                          chatId={activeChatId}
                           status={status}
                           stop={stop}
                           sendMessage={handleSendMessage}
@@ -1297,7 +1306,10 @@ export function Chat({
                     <LiveVoiceMode
                       chatId={hasSentMessage ? activeChatId : undefined}
                       agentId={selectedAgentId}
-                      onChatId={(cid) => setActiveChatId(cid)}
+                      onChatId={(cid) => {
+                        setActiveChatId(cid)
+                        useChatSessionStore.getState().chatIdAssigned(cid)
+                      }}
                       onLiveTurn={handleLiveTurn}
                       onPresence={setVoicePresence}
                       onLevelsRef={setVoiceLevels}
@@ -1342,7 +1354,7 @@ export function Chat({
                   )}
                 </AnimatePresence>
                 <MultimodalInput
-                  chatId={id}
+                  chatId={activeChatId}
                   status={status}
                   stop={stop}
                   sendMessage={handleSendMessage}
@@ -1396,7 +1408,7 @@ export function Chat({
                   {messages.map((message, index) => (
                     <Message
                       key={message.id}
-                      chatId={id}
+                      chatId={activeChatId}
                       message={message}
                       isLoading={isTyping && index === messages.length - 1}
                       setMessages={setMessages}
@@ -1423,7 +1435,7 @@ export function Chat({
                       goal={missionSuggestion.goal}
                       complexity={missionSuggestion.complexity}
                       agentId={missionSuggestion.agentId}
-                      chatId={id}
+                      chatId={activeChatId}
                       recentMessages={messages.slice(-5).map(m => { const textPart = m.parts?.find(p => p.type === 'text'); return { role: m.role, content: textPart && 'text' in textPart ? textPart.text : '' } })}
                     />
                   </motion.div>
@@ -1481,7 +1493,10 @@ export function Chat({
                     <LiveVoiceMode
                       chatId={hasSentMessage ? activeChatId : undefined}
                       agentId={selectedAgentId}
-                      onChatId={(cid) => setActiveChatId(cid)}
+                      onChatId={(cid) => {
+                        setActiveChatId(cid)
+                        useChatSessionStore.getState().chatIdAssigned(cid)
+                      }}
                       onLiveTurn={handleLiveTurn}
                       onPresence={setVoicePresence}
                       onLevelsRef={setVoiceLevels}
@@ -1528,7 +1543,7 @@ export function Chat({
                 </AnimatePresence>
 
                 <MultimodalInput
-                  chatId={id}
+                  chatId={activeChatId}
                   status={status}
                   stop={stop}
                   sendMessage={handleSendMessage}

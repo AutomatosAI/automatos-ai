@@ -199,6 +199,8 @@ export interface Chat {
   lastMessagePreview?: string | null
   /** PRD-205: 'auto' marks the per-user thread where Auto speaks unprompted. */
   kind?: 'user' | 'auto'
+  /** PRD-237 S7: a reply is still being produced server-side (page reloaded mid-turn). */
+  turnInFlight?: boolean
 }
 
 /**

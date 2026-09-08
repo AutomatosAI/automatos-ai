@@ -233,7 +233,7 @@ export function ActivityFeed({ period = '1d', openExecution, deepLinkRecipeId }:
     }
     // For chats, navigate to the chat
     if (item.type === 'chat' && item.source_id) {
-      router.push(`/chat/${item.source_id}`)
+      router.push(`/chat?chatId=${item.source_id}`)
       return
     }
     // For tasks, jump to the kanban board with the task highlighted

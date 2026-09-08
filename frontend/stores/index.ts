@@ -17,3 +17,5 @@ export {
   useWidgetPosition,
   useWidgetSize,
 } from './workspace-store'
+
+export { useChatSessionStore } from './chat-session-store'

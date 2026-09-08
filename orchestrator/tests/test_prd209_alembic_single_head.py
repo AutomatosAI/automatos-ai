@@ -43,7 +43,8 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # deliberate act that must update this pin — that is the point of the guard.
 # PRD-232 (2026-09-02): the one authorized 232 revision, prd232_cluster_provenance,
 # chains onto prd_workspace_models_backfill and is the new single head.
-EXPECTED_HEAD = "prd234_s1a_cli_hosts_runtime_ref"
+# PRD-237 (2026-09-07): prd237_users_chat_sessions chains onto the PRD-234 S1a head.
+EXPECTED_HEAD = "prd237_users_chat_sessions"
 
 
 def _literal(node: ast.AST):
