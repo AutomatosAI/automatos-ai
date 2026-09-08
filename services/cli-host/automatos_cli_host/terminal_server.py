@@ -461,8 +461,8 @@ class TerminalServer:
         if not _SESSION_ID_RE.match(session_id):
             raise LaunchError("the grant carries no valid session id")
         claude = self._claude or resolve_binary("claude")
-        if not claude:
-            raise LaunchError("Claude Code is not installed on this machine (no `claude` on your PATH)")
+        if not claude or not (os.path.isfile(claude) and os.access(claude, os.X_OK)):
+            raise LaunchError("Claude Code is not installed on this machine (no runnable `claude` found)")
         system_prompt_path: Optional[Path] = None
         soul = launch.get("system_prompt")
         if isinstance(soul, str) and soul.strip() and self._sessions_dir is not None and grant.task_id:
@@ -481,7 +481,7 @@ class TerminalServer:
         )
         assert_args_honour_invariant(args)
         try:
-            record_directory_trust(cwd)
+            record_directory_trust(cwd, self._claude_home)
         except OSError as exc:
             log.warning("could not record trust for %s: %s", cwd, exc)
         return args, {"session_id": session_id, "resumed": resumed, "agent_name": launch.get("agent_name")}
