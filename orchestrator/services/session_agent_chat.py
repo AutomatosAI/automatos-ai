@@ -62,12 +62,19 @@ def conversation_context(history: Sequence[Dict[str, Any]], agent_name: str) -> 
         return ""
     lines = []
     for turn in turns:
-        who = "Operator" if turn.get("role") == "user" else agent_name
+        # Earlier replies in this chat may have come from Auto or another agent
+        # (the operator can switch agents mid-conversation) — never attribute
+        # them to this agent by name.
+        who = "Operator" if turn.get("role") == "user" else "Assistant"
         text = _text_of(turn)
         if len(text) > CONTEXT_CHARS:
             text = text[:CONTEXT_CHARS].rstrip() + "…"
         lines.append(f"- **{who}:** {text}")
-    return "## Conversation so far\n" + "\n".join(lines)
+    return (
+        "## Conversation so far\n"
+        f"(earlier assistant replies may have come from Auto or another agent, not from {agent_name})\n"
+        + "\n".join(lines)
+    )
 
 
 def ticket_title(agent_name: str, user_text: str) -> str:

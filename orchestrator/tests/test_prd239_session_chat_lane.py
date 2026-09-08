@@ -48,7 +48,8 @@ def test_conversation_context_excludes_the_message_itself_and_caps_each_turn():
     history = [_msg("user", "hi"), _msg("assistant", "hello"), _msg("user", "z" * 900), _msg("user", "the new one")]
     text = chat.conversation_context(history, "Bob")
     assert text.startswith("## Conversation so far")
-    assert "- **Operator:** hi" in text and "- **Bob:** hello" in text
+    assert "not from Bob" in text  # earlier replies may be Auto's or another agent's
+    assert "- **Operator:** hi" in text and "- **Assistant:** hello" in text and "- **Bob:**" not in text
     assert "the new one" not in text and "…" in text and "z" * 700 not in text
     assert chat.conversation_context([_msg("user", "only me")], "Bob") == ""
 
