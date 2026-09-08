@@ -266,7 +266,7 @@ def workspace_check(db: Session, workspace_id: Any, path: str) -> Dict[str, Any]
     path = (path or "").strip()
     errors = validate_working_directory(path)
     projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
-    root = None if errors else workspace_relative_path(path, str(workspace_id), projects_dir)
+    root = None if errors else browsable_root(path, str(workspace_id), projects_dir)
     roots = host_allow_dirs(db, workspace_id)
     allowed: Optional[bool] = None
     if roots and not errors:
@@ -982,12 +982,18 @@ def explorer_root_for(task_id: int, cwd: Optional[str], workspace_id: Any, proje
     anywhere else is not browsable from the platform (``None``)."""
     if not cwd:
         return f"sessions/{task_id}"
+    return browsable_root(str(cwd), str(workspace_id), projects_dir)
+
+
+def browsable_root(folder: str, workspace_id: str, projects_dir: Optional[str]) -> Optional[str]:
+    """The explorer root for a FOLDER on the host: the projects folder itself is
+    ``projects`` (PRD-239 S6b — an agent rooted there browses all of it; a FILE
+    path is never the root, so ``workspace_relative_path`` keeps saying None),
+    anything else maps like a file path."""
     root = (projects_dir or "").rstrip("/")
-    if root and str(cwd).rstrip("/") == root:
-        # PRD-239 S6b: an agent rooted at the projects folder itself browses all of it
-        # (a FILE path is never the root, so workspace_relative_path keeps saying None).
+    if root and folder.rstrip("/") == root:
         return PROJECTS_PREFIX
-    return workspace_relative_path(str(cwd), str(workspace_id), projects_dir)
+    return workspace_relative_path(folder, workspace_id, projects_dir)
 
 
 def _register_session_deliverables(
