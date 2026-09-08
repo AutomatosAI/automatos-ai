@@ -1892,14 +1892,26 @@ class StreamingChatService:
             finally:
                 await sse_queue.put(DONE)
 
+        # PRD-238 S4: a long-running tool (platform_wait_for_task) narrates
+        # through the turn's progress emitter — registered for exactly the
+        # life of this loop, keyed by the turn id the executor hands handlers.
+        from services import turn_progress as _turn_progress
+
+        async def _emit_progress(text: str) -> None:
+            await sse_queue.put(self.streaming_handler.format_aisdk_progress(text))
+
+        _turn_progress.register(_turn_id, _emit_progress)
         runner_task = asyncio.create_task(_runner())
 
-        while True:
-            item = await sse_queue.get()
-            if item is DONE:
-                break
-            yield item
-            await asyncio.sleep(0)
+        try:
+            while True:
+                item = await sse_queue.get()
+                if item is DONE:
+                    break
+                yield item
+                await asyncio.sleep(0)
+        finally:
+            _turn_progress.unregister(_turn_id)
 
         try:
             result = await runner_task

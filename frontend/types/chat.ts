@@ -52,6 +52,21 @@ export interface ToolCall {
   skipped?: boolean
 }
 
+/** PRD-238 S6: the compact, live-updatable card for a board ticket in the chat. */
+export interface TaskCardData {
+  id: number
+  title: string
+  status: string
+  assigned_agent: string
+  runtime?: string | null
+  last_tool?: string | null
+  files_touched?: number
+  exit_reason?: string | null
+  denials?: number
+  started_at?: string | null
+  completed_at?: string | null
+}
+
 /** PRD-238 S3: a cap ended the turn; the chat says so instead of going quiet. */
 export interface LimitReached {
   limit: string
@@ -172,6 +187,10 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   limitReached?: LimitReached
   /** PRD-238 S1: live reasoning text while a reply streams (persisted as a part). */
   reasoning?: string
+  /** PRD-238 S4: progress lines from a long-running tool call (device-only, not persisted). */
+  progress?: string[]
+  /** PRD-238 S6: tickets this reply filed or checked — rendered as live cards. */
+  taskCards?: TaskCardData[]
 }
 
 /**

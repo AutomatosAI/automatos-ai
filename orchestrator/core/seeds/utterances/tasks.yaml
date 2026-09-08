@@ -149,6 +149,41 @@ actions:
     source: authored
   - text: spin up a follow-up item for next week
     source: authored
+  platform_wait_for_task:
+  - text: wait for task 92 to finish
+    source: example
+  - text: keep checking ticket 92 until it's done
+    source: example
+  - text: let me know when task 15 completes
+    source: example
+  - text: wait until bob finishes the webpage ticket
+    source: authored
+  - text: hang on for task 42 and tell me how it ends
+    source: authored
+  - text: stay on ticket 7 until it's finished
+    source: authored
+  - text: watch task 92 and report back when it's done
+    source: authored
+  - text: wait for the ticket to complete then summarise
+    source: authored
+  - text: keep an eye on task 15 for me
+    source: authored
+  - text: poll task 92 until it finishes
+    source: authored
+  - text: don't reply until ticket 42 is done
+    source: authored
+  - text: wait for bob's task to finish
+    source: authored
+  - text: check back on task 92 every few seconds
+    source: authored
+  - text: block until the card is done
+    source: authored
+  - text: sit on ticket 15 and tell me when it lands
+    source: authored
+  - text: wait for the item to close out
+    source: authored
+  - text: how long until task 92 is done? wait for it
+    source: authored
   platform_get_task:
   - text: show me task 42
     source: example
