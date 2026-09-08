@@ -24,7 +24,7 @@ import logging
 import time
 import uuid as uuid_mod
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -339,6 +339,40 @@ def _get_workspace_semaphore(workspace_id: str, max_concurrent: int = 3) -> asyn
 # Step executor — uses chatbot's exact component path
 # ---------------------------------------------------------------------------
 
+def _is_session_step(db, agent) -> bool:
+    """Whether this step's agent runs as a Claude Code session (runtime: cli)."""
+    from services.cli_ticket_lane import is_cli_agent
+
+    try:
+        return is_cli_agent(db, getattr(agent, "id", None))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _step_deadline(step_timeout_sec: float, session_step: bool, cfg) -> float:
+    """PRD-239 S3b: an API step keeps the recipe's step timeout; a session step
+    gets at least CLI_LANE_STEP_TIMEOUT_SECONDS — a real Claude Code session
+    takes minutes, and 300 s produced "timed out → retry → stalled"."""
+    if not session_step:
+        return float(step_timeout_sec)
+    return max(float(step_timeout_sec), float(getattr(cfg, "CLI_LANE_STEP_TIMEOUT_SECONDS", 1800)))
+
+
+def _stamp_progress(db, execution) -> None:
+    """Record that the run is alive (execution_metadata.last_progress_at, naive UTC
+    like started_at); the reconciler's stall rule reads it. Rebuild the JSONB,
+    never mutate; a failure to stamp must never end the step."""
+    from datetime import datetime as _dt
+
+    try:
+        meta = dict(getattr(execution, "execution_metadata", None) or {})
+        meta["last_progress_at"] = _dt.utcnow().replace(microsecond=0).isoformat()
+        execution.execution_metadata = meta
+        db.commit()
+    except Exception:  # noqa: BLE001
+        logger.debug("[recipe_direct] progress stamp failed", exc_info=True)
+
+
 def _cli_step_title(recipe_name: str, step_order: int, clean_prompt: str) -> str:
     """The ticket title for a playbook step a session agent works (PRD-239 S3)."""
     first = next((line.strip() for line in (clean_prompt or "").splitlines() if line.strip()), "")
@@ -362,6 +396,7 @@ async def _execute_step(
     recipe_name: str = "",
     total_steps: int = 1,
     recipe_execution_id: Optional[str] = None,
+    progress: Optional[Callable[[], None]] = None,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -407,6 +442,9 @@ async def _execute_step(
             source_type=RECIPE_SOURCE_TYPE,
             source_id=f"{RECIPE_SOURCE_TYPE}:{recipe_execution_id or _uuid.uuid4().hex}:{step_order}",
             tags=["playbook"],
+            # S3b: the run keeps marking progress while the session works, so the
+            # stall watchdog (started_at + 300 s) does not fail a live playbook.
+            on_poll=(lambda _ticket: progress()) if progress is not None else None,
         )
 
     # Lazy imports to avoid circular deps
@@ -1380,6 +1418,16 @@ async def _execute_recipe_inner(
             execution.current_step = idx + 1
             db.commit()
 
+            # PRD-239 S3b: a session agent's step is a Claude Code session on the
+            # operator's machine — minutes, not seconds. It gets its own bound and
+            # the total budget grows by the same allowance; while it waits, the run
+            # stamps progress so the stall watchdog leaves it alone.
+            step_deadline = _step_deadline(step_timeout_sec, _is_session_step(db, agent), app_config)
+            total_timeout_sec += max(0.0, step_deadline - step_timeout_sec)
+
+            def _mark_progress(_execution=execution) -> None:
+                _stamp_progress(db, _execution)
+
             step_start = time.time()
             step_result: Dict[str, Any] = {
                 "step_id": step_id,
@@ -1643,8 +1691,9 @@ async def _execute_recipe_inner(
                             recipe_name=recipe.name,
                             total_steps=total_steps,
                             recipe_execution_id=recipe_execution_id,
+                            progress=_mark_progress,
                         ),
-                        timeout=step_timeout_sec,
+                        timeout=step_deadline,
                     )
 
                     if result.get("status") == "cancelled":
@@ -1693,8 +1742,8 @@ async def _execute_recipe_inner(
                         logger.warning(f"[recipe_direct] Step {step_order} failed: {last_error}")
 
                 except asyncio.TimeoutError:
-                    last_error = f"Step timed out after {step_timeout_sec}s"
-                    logger.warning(f"[recipe_direct] Step {step_order} timed out ({step_timeout_sec}s)")
+                    last_error = f"Step timed out after {step_deadline:.0f}s"
+                    logger.warning(f"[recipe_direct] Step {step_order} timed out ({step_deadline:.0f}s)")
                 except Exception as e:
                     last_error = str(e)
                     logger.error(f"[recipe_direct] Step {step_order} exception: {e}", exc_info=True)

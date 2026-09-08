@@ -642,6 +642,9 @@ class Config:
     LOCAL_PROJECTS_DIR: str = os.getenv("LOCAL_PROJECTS_DIR", "").strip()
     # PRD-239: how the projects folder is mounted into the worker (ro|rw) — shown in Settings → Session mode.
     LOCAL_PROJECTS_MOUNT: str = os.getenv("LOCAL_PROJECTS_MOUNT", "").strip().lower()
+    # PRD-239 S3b: how long a playbook step waits for a session agent's Claude Code session
+    # (a real session runs for minutes; API steps keep the recipe's own step timeout).
+    CLI_LANE_STEP_TIMEOUT_SECONDS: int = int(os.getenv("CLI_LANE_STEP_TIMEOUT_SECONDS", "1800"))
     # S5: done tasks older than this drop off the active board (retained in DB).
     BOARD_ARCHIVE_DONE_DAYS: int = int(os.getenv("BOARD_ARCHIVE_DONE_DAYS", "30"))
     # PRD-180 S1: board SSE is now LISTEN/NOTIFY-driven; this is only the

@@ -64,6 +64,15 @@ def runtime_predicate_sql(runtime: str, alias: str = "board_tasks") -> str:
     return f"{kind} <> '{RUNTIME_CLI}'"
 
 
+def recipe_exclusion_sql(runtime: str, alias: str = "board_tasks") -> str:
+    """Recipe-mirror tickets of API agents are driven by the recipe executor, never
+    the board. A session agent's playbook step IS a ticket its CLI host must claim
+    (PRD-239 S3), so the exclusion applies to the API runtime only."""
+    if runtime == RUNTIME_CLI:
+        return ""
+    return f"AND {alias}.source_type <> 'recipe'"
+
+
 def notify_task_available(db: Session, *, workspace_id, task_id: int) -> None:
     """Fire ``pg_notify`` so a listening claimant wakes immediately.
 
@@ -113,6 +122,11 @@ def claim_tasks(
     lease_until = now + timedelta(seconds=lease_seconds)
     runtime_sql = runtime_predicate_sql(runtime, alias="board_tasks")
     runtime_sql_t = runtime_predicate_sql(runtime, alias="t")
+    # Recipe-mirror tickets of API agents are driven by the recipe executor, never
+    # the board — but a session agent's playbook step IS a ticket its host must
+    # claim (PRD-239 S3): the exclusion applies to the API runtime only.
+    recipe_sql = recipe_exclusion_sql(runtime, alias="board_tasks")
+    recipe_sql_t = recipe_exclusion_sql(runtime, alias="t")
     ws_sql = "AND workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_sql_t = "AND t.workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_params = {"ws": str(workspace_id)} if workspace_id is not None else {}
@@ -124,7 +138,7 @@ def claim_tasks(
               FROM board_tasks
              WHERE status = 'assigned'
                AND assigned_agent_id IS NOT NULL
-               AND source_type <> 'recipe'
+               {recipe_sql}
                AND {runtime_sql}
                {ws_sql}
              ORDER BY {_PRIORITY_ORDER_SQL}, created_at
@@ -156,7 +170,7 @@ def claim_tasks(
                       LEFT JOIN running r ON r.assigned_agent_id = t.assigned_agent_id
                      WHERE t.status = 'assigned'
                        AND t.assigned_agent_id IS NOT NULL
-                       AND t.source_type <> 'recipe'
+                       {recipe_sql_t}
                        AND {runtime_sql_t}
                        {ws_sql_t}
                 )
