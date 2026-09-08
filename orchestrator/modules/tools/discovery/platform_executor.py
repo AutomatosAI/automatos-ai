@@ -334,6 +334,18 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 }
 
 
+# PRD-234 D16: tool calls that file, assign or re-queue a board ticket carry the
+# driving human so the local edition can record consent before dispatch.
+# platform_schedule_task joins them (calendar): a scheduled board ticket is
+# filed at fire time, and the operator who scheduled it is that consent.
+OPERATOR_CONSENT_ACTIONS = (
+    "platform_create_task",
+    "platform_assign_task",
+    "platform_update_task_status",
+    "platform_schedule_task",
+)
+
+
 def _workspace_role_for_clerk(db, workspace_id, clerk_user_id) -> Optional[str]:
     """Resolve the driving user's workspace role, fresh, at the gate.
 
@@ -1247,8 +1259,7 @@ class PlatformActionExecutor:
         # in a live chat turn carries the driving user, so the local edition can
         # record the board-task consent before dispatch. Strip-then-inject, like
         # the memory keys above — never caller-supplied.
-        _OPERATOR_CONSENT_ACTIONS = ("platform_create_task", "platform_assign_task", "platform_update_task_status")
-        if action_name in _OPERATOR_CONSENT_ACTIONS:
+        if action_name in OPERATOR_CONSENT_ACTIONS:
             from services.board_consent import driver_from_caller_context
 
             params = {k: v for k, v in params.items() if k != "_user_id"}

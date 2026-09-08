@@ -17,6 +17,7 @@ import { PremiumIcon } from '@/components/shared/premium-icon'
 import type { PlanResponse, RefineResponse } from '@/hooks/use-board-tasks-api'
 import type { TaskPriority, ReviewMode } from '@/types/board'
 import { cn } from '@/lib/utils'
+import { SCHEDULE_MODE_OPTIONS, type ScheduleMode } from './schedule-choice'
 
 // ============= QUICK CREATE =============
 
@@ -34,6 +35,12 @@ export interface QuickCreateFormProps {
   onAgentIdChange: (v: string) => void
   onTagsChange: (v: string) => void
   onReviewModeChange: (v: ReviewMode) => void
+  /** When to file it: now, or a scheduled task that waits on the calendar. */
+  scheduleMode: ScheduleMode
+  /** `datetime-local` value for every mode but `now` */
+  scheduleAt: string
+  onScheduleModeChange: (v: ScheduleMode) => void
+  onScheduleAtChange: (v: string) => void
   onSubmit: () => void
   onPlan: () => void
   isSubmitting: boolean
@@ -128,6 +135,42 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label className="text-xs">When</Label>
+          <Select value={props.scheduleMode} onValueChange={(v) => props.onScheduleModeChange(v as ScheduleMode)}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SCHEDULE_MODE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {props.scheduleMode !== 'now' && (
+          <div className="space-y-2">
+            <Label htmlFor="task-schedule-at" className="text-xs">
+              {props.scheduleMode === 'later' ? 'Date and time' : 'Starting'}
+            </Label>
+            <Input
+              id="task-schedule-at"
+              type="datetime-local"
+              value={props.scheduleAt}
+              onChange={(e) => props.onScheduleAtChange(e.target.value)}
+              className="h-8 text-xs"
+            />
+          </div>
+        )}
+      </div>
+
+      {props.scheduleMode !== 'now' && (
+        <p className="text-[11px] text-muted-foreground">
+          Waits on the calendar and is filed on the board when it fires
+          {props.scheduleMode === 'later' ? '.' : ', every time.'}
+        </p>
+      )}
+
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="outline" size="sm" onClick={props.onPlan} disabled={props.isPlanning || props.isSubmitting} className="text-xs">
           {props.isPlanning ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1.5" />}
@@ -135,7 +178,7 @@ export function QuickCreateForm(props: QuickCreateFormProps) {
         </Button>
         <Button size="sm" onClick={props.onSubmit} disabled={props.isSubmitting || props.isPlanning} className="text-xs">
           {props.isSubmitting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-          Create
+          {props.scheduleMode === 'now' ? 'Create' : 'Schedule'}
         </Button>
       </div>
     </motion.div>

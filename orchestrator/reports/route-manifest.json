@@ -1,5 +1,5 @@
 {
-  "route_count": 798,
+  "route_count": 799,
   "routes": [
     {
       "method": "GET",
@@ -2290,12 +2290,12 @@
       "path": "/api/v1/cli-hosts/sessions"
     },
     {
-      "path": "/api/v1/cli-hosts/settings",
-      "method": "GET"
+      "method": "GET",
+      "path": "/api/v1/cli-hosts/settings"
     },
     {
-      "path": "/api/v1/cli-hosts/settings",
-      "method": "PUT"
+      "method": "PUT",
+      "path": "/api/v1/cli-hosts/settings"
     },
     {
       "method": "GET",
@@ -2395,6 +2395,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/scheduled-tasks"
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/scheduled-tasks"
     },
     {

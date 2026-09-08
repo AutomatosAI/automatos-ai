@@ -969,6 +969,7 @@ class ActivityService:
             text(
                 """
                 SELECT t.id, t.task_type, t.description, t.schedule, t.next_run_at,
+                       t.deliver_as, t.payload->>'title' AS payload_title,
                        ta.name AS target_name
                 FROM agent_scheduled_tasks t
                 LEFT JOIN agents ta ON ta.id = t.target_agent_id
@@ -983,11 +984,15 @@ class ActivityService:
             nxt = next_run(cron, now=now) if cron else _as_utc(row.next_run_at)
             if nxt is None or nxt > horizon:
                 continue
-            label = (row.description or row.task_type or "Scheduled task").strip()
+            # A board-delivery row is the ticket it will file: name it by the title.
+            label = (
+                getattr(row, "payload_title", None) or row.description or row.task_type or "Scheduled task"
+            ).strip()
             items.append({
                 "id": f"task-{row.id}",
                 "scheduled_task_id": row.id,
                 "task_type": row.task_type,
+                "deliver_as": getattr(row, "deliver_as", None) or "chat",
                 "name": label[:80],
                 "type": "task",
                 "next_run_at": nxt.isoformat(),

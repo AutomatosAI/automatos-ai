@@ -27,6 +27,7 @@ WHY_RUN_NOW = "the operator pressed Run Now"
 WHY_CREATED_AND_ASSIGNED = "the operator created the ticket and assigned it"
 WHY_ASKED_IN_CHAT = "the operator asked Auto for it in chat"
 WHY_SCHEDULED_LANE = "the operator's standing schedule filed it (heartbeat / lane)"
+WHY_SCHEDULED_AND_ASSIGNED = "the operator scheduled the ticket and assigned it"
 
 LOCAL_EDITION = "local"
 SKIPPED = "skipped"

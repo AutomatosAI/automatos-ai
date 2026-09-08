@@ -35,6 +35,7 @@ from services.board_consent import (  # PRD-234: a human's board action is the a
     consent_for_created_ticket, record_operator_consent,
 )
 from services.board_dispatcher import notify_task_available
+from services.board_sla import PRIORITY_SLA_HOURS
 from services.board_events import board_event_stream, notify_board_event
 
 logger = logging.getLogger(__name__)
@@ -52,13 +53,9 @@ _NON_EXECUTABLE_SOURCE_TYPES = frozenset(
     {"recipe", "orchestration", "orchestration_task"}
 )
 
-# Priority → SLA deadline hours
-_PRIORITY_SLA_HOURS: dict[str, int] = {
-    "urgent": 4,
-    "high": 12,
-    "medium": 24,
-    "low": 72,
-}
+# Priority → SLA deadline hours: the shared table (services.board_sla), so the
+# scheduled-task lane files tickets with the same deadlines this route stamps.
+_PRIORITY_SLA_HOURS = PRIORITY_SLA_HOURS
 
 
 # ── Auto-report creation (mirrors heartbeat_service._auto_create_report) ───

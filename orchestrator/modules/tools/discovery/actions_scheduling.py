@@ -12,7 +12,12 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
             "Schedule a follow-up task for yourself or another agent. "
             "One-shot tasks run once at a specific time. Recurring tasks use "
             "cron expressions (e.g. '0 9 * * 1' = every Monday at 9am). "
-            "Use this when you discover something that needs revisiting later."
+            "Use this when you discover something that needs revisiting later. "
+            "deliver_as='chat' (default) opens a chat with the target agent when it "
+            "fires; deliver_as='board_task' files a ticket on the board instead — "
+            "assigned to target_agent_name if given, otherwise into the Inbox — so "
+            "use it when the user wants a task on the board on a date ('put a "
+            "ticket on the board for Thursday'). Both show on the calendar."
         ),
         category="scheduling",
         parameters={
@@ -38,6 +43,30 @@ def register_scheduling_actions(registry: ActionRegistry) -> None:
                 "max_runs": {
                     "type": "integer",
                     "description": "For recurring: max number of executions before auto-cancel. Omit for unlimited.",
+                },
+                "deliver_as": {
+                    "type": "string",
+                    "enum": ["chat", "board_task"],
+                    "description": "chat = open a chat with the target agent when it fires (default); board_task = file a board ticket when it fires.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "board_task only: the ticket title (defaults to the first line of the description).",
+                },
+                "priority": {
+                    "type": "string",
+                    "enum": ["urgent", "high", "medium", "low"],
+                    "description": "board_task only: the ticket priority (default medium).",
+                },
+                "review_mode": {
+                    "type": "string",
+                    "enum": ["auto", "human", "llm"],
+                    "description": "board_task only: the ticket's review gate (default auto).",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "board_task only: tags for the ticket.",
                 },
             },
             "required": ["task_type", "description", "schedule"],

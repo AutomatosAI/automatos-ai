@@ -150,6 +150,12 @@ actions:
   - text: pull up the tasks that finished running
     source: authored
   platform_schedule_task:
+  - text: put a ticket on the board for Thursday morning
+    source: authored
+  - text: schedule a board task for next Monday to review the invoices
+    source: authored
+  - text: every Friday at 4pm file a task to send the weekly report
+    source: authored
   - text: schedule a follow-up check for tomorrow morning
     source: example
   - text: remind me to review this in 3 days
