@@ -16,7 +16,9 @@
 
 import { useState } from 'react'
 import { Loader2, Play, Send, Square, Sparkles } from 'lucide-react'
+import { toast } from 'sonner'
 
+import { dispatchCanvasCompose } from '@/lib/chat/canvas-compose'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
@@ -59,6 +61,20 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
     if (!text) return
     void session.send(text)
     setPrompt('')
+  }
+
+  // PRD-239 S7: beside a ticket's Claude Code session the text goes through the
+  // chat lane — the chat page selects the ticket's agent and sends it as a turn,
+  // which files a follow-up ticket that resumes this session.
+  const submitToChat = () => {
+    const text = prompt.trim()
+    if (!text || session.taskId == null) return
+    if (dispatchCanvasCompose(session.taskId, text)) {
+      toast.success('Sent to the chat — the reply lands there')
+      setPrompt('')
+    } else {
+      toast.error('Open this session from the chat page to message the agent')
+    }
   }
 
   return (
@@ -138,13 +154,36 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
         </div>
       </ScrollArea>
 
-      {/* PRD-239: a ticket's Claude Code session is a read-only mirror here (PRD-234:
-          the host never types into the session). The composer below reaches only the
-          workspace-worker's own Auto session — for a ticket it would swallow the text. */}
-      {isLive && session.external && (
-        <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground" data-testid="canvas-composer-external">
-          This is a Claude Code session running on your machine. To continue it, message the agent in the chat — the reply comes back there.
-        </p>
+      {/* PRD-239 S7: a ticket's Claude Code session is a read-only mirror here (PRD-234:
+          the host never types into the session). A message typed beside it goes through
+          the chat lane and continues the session as a follow-up ticket. */}
+      {session.external && (
+        <form
+          className="flex items-end gap-2 border-t border-border p-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            submitToChat()
+          }}
+          data-testid="canvas-composer-external"
+        >
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                submitToChat()
+              }
+            }}
+            rows={2}
+            placeholder="Message the agent — continues this session through the chat; the reply lands there"
+            className="flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+            data-testid="canvas-composer-external-input"
+          />
+          <Button type="submit" size="sm" disabled={!prompt.trim()} data-testid="canvas-composer-external-send">
+            <Send className="h-3.5 w-3.5" />
+          </Button>
+        </form>
       )}
 
       {/* Prompt composer (PRD-203 C·S7) — the box to instruct Auto. */}

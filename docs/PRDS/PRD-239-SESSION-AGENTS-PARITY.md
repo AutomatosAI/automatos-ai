@@ -54,6 +54,19 @@ Parity today for a session agent: tickets, heartbeats, schedules, channels, webh
 **Test:** picker emits the route; deprecated rows vanish from the projection; the endpoint refuses a deprecated model with the message.
 **Editions:** both.
 
+### S6 · The agent's working directory is validated and explained (S) — owner 2026-09-08 "happy with 1"
+**Files:** `core/cli_runtime.py:validate_working_directory` (absolute, no `..`, no control characters; refused at save for cli agents); `services/cli_host_service.py:workspace_check` + `host_allow_dirs` (the host announces `capabilities.allow_dirs`); `GET /api/v1/cli-hosts/workspace-check?path=` (operator, gated by session mode); `frontend/components/agents/runtime-section.tsx` (`describeWorkspaceCheck`, live verdict under the field: browsable as `projects/<repo>` with "Open in the Canvas", not browsable, or outside the host's allowed directories).
+**Test:** rules; check shapes (browsable/allowed/unknown/invalid); route + manifest; host capabilities carry `allow_dirs`.
+
+### S7 · Chat from the Canvas (S) — owner 2026-09-08 "happy with 3"
+**Files:** `frontend/lib/chat/canvas-compose.ts` (one window event, handled flag); `CanvasSessionPanel.tsx` (a ticket's session gets a composer that sends through the chat; the SDK composer no longer swallows text for a ticket); `chat.tsx` (select the ticket's agent, then send the text as a turn — the session lane files the follow-up ticket that resumes the session).
+**Not done on purpose:** typing into the running session (PRD-234 invariant) — the message waits its turn like any chat message.
+
+### Fixed on the way (2026-09-08 test)
+- A chat ticket filed while the previous turn still ran now resumes that session (resolved at claim, after the hold).
+- The context block no longer attributes earlier replies to the agent (they may be Auto's or another agent's).
+- The session's real directory (a `--worktree` for a repo) is what the ticket records: `claude --resume` and the editor links open where the transcript is; the take-over command waits for it.
+
 ## Not in this PRD (owner decisions)
 
 - **D-4 · Platform tools inside a session** (an Automatos MCP server in the session settings). Must not break the subscription invariants (no `-p`, no identity games, hooks-only settings). To be looked at after S1–S5 test.

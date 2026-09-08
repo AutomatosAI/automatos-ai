@@ -13,6 +13,7 @@
  * bad alias is refused at save, not discovered at claim.
  */
 
+import { useEffect, useState } from 'react'
 import { TerminalSquare } from 'lucide-react'
 import { isLocal } from '@/lib/auth-edition'
 import { Input } from '@/components/ui/input'
@@ -81,12 +82,106 @@ export function runtimeConfiguration(fields: RuntimeFields): Record<string, unkn
   }
 }
 
+/** PRD-239 S6: what the backend says a working directory would mean (`GET /api/v1/cli-hosts/workspace-check`). */
+export interface WorkspaceCheck {
+  path: string
+  valid: boolean
+  errors: string[]
+  explorer_root: string | null
+  browsable: boolean
+  /** null = no paired host has announced its allowed directories yet */
+  allowed: boolean | null
+  allowed_roots: string[]
+  projects_dir: string | null
+}
+
+export interface WorkspaceVerdict {
+  tone: 'ok' | 'warn' | 'error'
+  text: string
+  /** The Canvas root to open when the folder is browsable. */
+  canvasRoot: string | null
+}
+
+/** One line the operator can act on, from the check result. Pure. */
+export function describeWorkspaceCheck(check: WorkspaceCheck): WorkspaceVerdict {
+  if (!check.valid) {
+    return { tone: 'error', text: check.errors[0] || 'This path cannot be used.', canvasRoot: null }
+  }
+  if (check.allowed === false) {
+    const roots = check.allowed_roots.join(', ')
+    return {
+      tone: 'error',
+      text: `Outside the directories your CLI host may run in (${roots}). Sessions here would be refused — add it with --allow or pick a folder inside one of them.`,
+      canvasRoot: null,
+    }
+  }
+  if (check.browsable && check.explorer_root) {
+    const where = check.allowed === null ? ' (no host online to confirm it is allowed)' : ''
+    return { tone: 'ok', text: `Browsable in the Canvas as ${check.explorer_root}${where}.`, canvasRoot: check.explorer_root }
+  }
+  const why = check.projects_dir
+    ? `outside LOCAL_PROJECTS_DIR (${check.projects_dir}) and the workspace folder`
+    : 'LOCAL_PROJECTS_DIR is not set on this instance'
+  return {
+    tone: 'warn',
+    text: `Sessions can run here, but the folder is not browsable from the platform: ${why}. Deliverables stay references only.`,
+    canvasRoot: null,
+  }
+}
+
+const CHECK_DEBOUNCE_MS = 400
+
+/** Ask the backend what a typed working directory means; debounced, never throws. */
+function useWorkspaceCheck(path: string, enabled: boolean): { check: WorkspaceCheck | null; loading: boolean } {
+  const [check, setCheck] = useState<WorkspaceCheck | null>(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    const trimmed = path.trim()
+    if (!enabled || !trimmed) {
+      setCheck(null)
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const { apiClient } = await import('@/lib/api-client')
+          const result = await apiClient.request<WorkspaceCheck>(
+            `/api/v1/cli-hosts/workspace-check?path=${encodeURIComponent(trimmed)}`,
+          )
+          if (!cancelled) setCheck(result)
+        } catch {
+          if (!cancelled) setCheck(null)
+        } finally {
+          if (!cancelled) setLoading(false)
+        }
+      })()
+    }, CHECK_DEBOUNCE_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [path, enabled])
+  return { check, loading }
+}
+
+const VERDICT_CLASS: Record<WorkspaceVerdict['tone'], string> = {
+  ok: 'text-[hsl(var(--success))]',
+  warn: 'text-[hsl(var(--warning))]',
+  error: 'text-[hsl(var(--destructive))]',
+}
+
 interface RuntimeSectionProps {
   value: RuntimeFields
   onChange: <K extends keyof RuntimeFields>(field: K, value: RuntimeFields[K]) => void
 }
 
 export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
+  // PRD-239 S6: the verdict on the typed working directory, live.
+  const { check, loading } = useWorkspaceCheck(value.cli_working_directory, isLocal && value.runtime === 'cli')
+  const verdict = check ? describeWorkspaceCheck(check) : null
   if (!isLocal) return null
   return (
     <div className="space-y-4 rounded-lg border border-border/40 p-4" data-testid="runtime-section">
@@ -151,6 +246,32 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
             <p className="text-xs text-muted-foreground">
               Blank = the host&apos;s default <span className="font-mono">./workspaces</span>. Git repositories get their own worktree per session; sessions never push.
             </p>
+            {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
+            {value.cli_working_directory.trim() && (
+              <p className="text-xs" data-testid="workspace-check">
+                {loading && !verdict ? (
+                  <span className="text-muted-foreground">Checking…</span>
+                ) : verdict ? (
+                  <span className={VERDICT_CLASS[verdict.tone]}>
+                    {verdict.text}
+                    {verdict.canvasRoot && (
+                      <>
+                        {' '}
+                        <a
+                          href={`/chat?repo=${encodeURIComponent(verdict.canvasRoot)}`}
+                          className="underline underline-offset-2"
+                          data-testid="workspace-open-canvas"
+                        >
+                          Open in the Canvas
+                        </a>
+                      </>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Could not check this folder right now (is session mode on?).</span>
+                )}
+              </p>
+            )}
           </div>
         </div>
       )}

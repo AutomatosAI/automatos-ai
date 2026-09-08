@@ -18,7 +18,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -128,6 +128,18 @@ async def cli_host_health(
     was one last seen, and how many CLI tickets are waiting. The board banner
     reads it; the ticket line says the same thing per ticket."""
     return svc.host_health(db, ctx.workspace_id)
+
+
+@router.get("/workspace-check")
+async def workspace_check(
+    path: str = Query(..., min_length=1, max_length=1024, description="An agent's working_directory as typed"),
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S6: what a cli agent's working directory would mean before it is
+    saved — valid, browsable in the Canvas (as which root), and inside the
+    paired host's allowed directories. Read-only; nothing is written."""
+    return svc.workspace_check(db, ctx.workspace_id, path)
 
 
 @router.post("/pairing-codes")

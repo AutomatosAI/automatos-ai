@@ -183,6 +183,19 @@ def test_system_prompt_is_stable_per_agent():
     assert a == b and "never push" in a
 
 
+def test_capabilities_announce_the_allowed_directories(tmp_path):
+    """PRD-239 S6: the backend checks an agent's working_directory against these."""
+    from automatos_cli_host.config import HostConfig
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cfg = HostConfig(url="http://127.0.0.1:8000", state_dir=tmp_path / "state", allow_dirs=[repo],
+                     name="mac", claude_binary=str(tmp_path / "no-such-claude"))
+    caps = session.host_capabilities(cfg)
+    assert caps["allow_dirs"] == [str(repo.resolve())] or caps["allow_dirs"] == [str(repo)]
+    assert caps["host_version"] == session.__version__
+
+
 def test_result_payload_names_the_directory_the_session_ran_in():
     """PRD-239: a git repo runs in a --worktree; the backend must learn that path so
     `claude --resume` and the editor links open where the transcript is."""
