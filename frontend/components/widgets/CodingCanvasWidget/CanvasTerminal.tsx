@@ -39,7 +39,8 @@ interface TerminalGrant {
 
 type TerminalStatus = 'idle' | 'opening' | 'connected' | 'closed' | 'error'
 
-const CONNECT_BUDGET_MS = 20_000
+// The host learns the grant on its heartbeat (every 30 s): wait for a full one plus slack.
+const CONNECT_BUDGET_MS = 50_000
 
 export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false }: CanvasTerminalProps) {
   const { data: health } = useCliHostHealth()

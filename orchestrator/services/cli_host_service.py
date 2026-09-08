@@ -672,6 +672,20 @@ def _resume_session_for(prior: Dict[str, Any], host: CliHost) -> Optional[str]:
     return str(session_id)
 
 
+def _owned_task(db: Session, host: CliHost, task_id: int) -> BoardTask:
+    task = (
+        db.query(BoardTask)
+        .filter(BoardTask.id == task_id, BoardTask.workspace_id == host.workspace_id)
+        .first()
+    )
+    if task is None:
+        raise LookupError(f"task {task_id} not found in this host's workspace")
+    ref = task.runtime_ref or {}
+    if ref.get("host_id") != str(host.id):
+        raise PermissionError(f"task {task_id} is not claimed by this host")
+    return task
+
+
 def _record_session_cwd(ref: Dict[str, Any], task: BoardTask, cwd: str) -> None:
     """The directory the session actually runs in, plus the explorer root that
     follows from it. One writer for SessionStart and the result (PRD-239)."""
