@@ -156,7 +156,10 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
         return Decision("allow")
     if any(_matches_prefix(seg, ctx.ask_bash) for seg in segments):
         return Decision("ask", f"{_first_words(command)!r} needs the operator's approval")
-    return Decision("deny", f"{_first_words(command)!r} is outside this ticket's Bash allowlist")
+    # PRD-235 W2 S3: outside the allowlist is a QUESTION for the operator, not a
+    # refusal — the session holds the call while a card is shown on the ticket's
+    # Canvas; no answer in time is a deny (the ticket lands in review, as before).
+    return Decision("ask", f"{_first_words(command)!r} is outside this ticket's Bash allowlist")
 
 
 def decide(tool_name: str, tool_input: dict, ctx: PolicyContext) -> Decision:

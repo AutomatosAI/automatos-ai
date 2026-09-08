@@ -874,6 +874,7 @@ class AgentFactory:
                     getattr(db_agent, "workspace_id", None),
                     llm_config_dict.get("model"),
                     orchestrator_seat=True,
+                    provider=llm_config_dict.get("provider"),
                 )
                 if not allowed:
                     blocked_model = llm_config_dict.get("model")

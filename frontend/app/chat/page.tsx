@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { normalizeCodeRoot } from '@/components/widgets/CodingCanvasWidget/code-root'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
@@ -61,6 +62,9 @@ export default function ChatPage() {
   const fromParam = searchParams?.get('from') ?? null
   // Deep-link: /chat?chatId=<id> opens that conversation as a tab (Activity links).
   const chatIdParam = searchParams?.get('chatId') ?? null
+  // PRD-235 W2: /chat?repo=<folder> opens Code mode on that folder (a ticket's session or a repo under projects/).
+  const repoParam = normalizeCodeRoot(searchParams?.get('repo')) ?? undefined
+  const ticketParam = (searchParams?.get('ticket') || '').replace(/[^0-9]/g, '') || undefined
 
   // Activate plan mode when arriving via ?mode=plan
   useEffect(() => {
@@ -239,6 +243,8 @@ export default function ChatPage() {
       autoResume={false}
       initialLastContext={view.chat?.lastContext}
       initialAwaitingReply={view.awaitingReply}
+      initialCodeRoot={repoParam}
+      initialCodeTicket={ticketParam}
     />
   ) : (
     <div className="flex h-full items-center justify-center" role="status" aria-label="Loading conversation">

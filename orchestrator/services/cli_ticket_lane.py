@@ -119,6 +119,11 @@ def file_cli_ticket(
     db.add(task)
     db.commit()
     db.refresh(task)
+    # PRD-234 (2026-09-07): the operator's standing schedule is their approval on
+    # the local edition — the dispatcher's claim finds an active grant instead of
+    # parking the heartbeat behind 'always_ask'. No-op on SaaS.
+    from services.board_consent import consent_for_lane_ticket
+    consent_for_lane_ticket(db, workspace_id=workspace_id, task=task, source_type=source_type)
     _notify(db, workspace_id, task)
     logger.info("[CliTicketLane] filed ticket #%s for agent %s from %s/%s", task.id, agent_id, source_type, source_id)
     return task

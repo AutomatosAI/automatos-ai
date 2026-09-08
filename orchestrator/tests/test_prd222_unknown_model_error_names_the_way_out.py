@@ -20,7 +20,7 @@ from modules.tools.discovery.handlers_agents import create_agent
 
 
 def test_unknown_model_creates_the_agent_on_the_default_and_says_so(monkeypatch, caplog):
-    monkeypatch.setattr(marketplace, "_get_or_create_from_cache", lambda db, model_id: None)
+    monkeypatch.setattr(marketplace, "_get_or_create_from_cache", lambda db, model_id, provider=None: None)
     with caplog.at_level(logging.WARNING, logger="modules.tools.discovery.handlers_agents"):
         res = asyncio.run(create_agent(MagicMock(), uuid4(), {"name": "Booking Assistant", "model_id": "anthropic/claude-sonnet-4-20250514"}))
     assert res["success"] is True
@@ -31,10 +31,13 @@ def test_unknown_model_creates_the_agent_on_the_default_and_says_so(monkeypatch,
 
 
 def test_known_model_still_passes_the_policy_gate(monkeypatch):
-    monkeypatch.setattr(marketplace, "_get_or_create_from_cache", lambda db, model_id: SimpleNamespace(provider="openrouter"))
+    monkeypatch.setattr(
+        marketplace, "_get_or_create_from_cache",
+        lambda db, model_id, provider=None: SimpleNamespace(provider="openrouter", serving_provider="openrouter"),
+    )
     seen = {}
 
-    def gate(db, workspace_id, model_id, orchestrator_seat=False):
+    def gate(db, workspace_id, model_id, orchestrator_seat=False, provider=None):
         seen["model_id"] = model_id
         return False, "not allowed on this plan"
 

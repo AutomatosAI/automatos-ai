@@ -18,7 +18,7 @@
 COMPOSE      ?= docker compose
 DEV_COMPOSE  ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: up dev down clean reset status logs cli-host
+.PHONY: up dev down clean reset status logs cli-host cli-host-install cli-host-uninstall cli-host-status cli-host-restart cli-host-nudge
 
 # PRD-234 S2: LOCAL_PROJECTS_DIR (root .env) is the owner's projects folder; the
 # default bind source ./workspaces/projects must exist before compose mounts it.
@@ -29,6 +29,7 @@ up:
 	$(COMPOSE) up -d --build --remove-orphans
 	@$(MAKE) --no-print-directory clean
 	@$(MAKE) --no-print-directory status
+	@$(MAKE) --no-print-directory cli-host-nudge
 
 dev:
 	$(DEV_COMPOSE) up -d --build --remove-orphans
@@ -73,3 +74,24 @@ status:
 cli-host:
 	@mkdir -p "$(CURDIR)/workspaces"
 	@cd services/cli-host && python3 -m automatos_cli_host --allow "$(CURDIR)/workspaces" $(if $(LOCAL_PROJECTS_DIR),--allow "$(LOCAL_PROJECTS_DIR)",) $(if $(PAIR),--pair $(PAIR),) $(CLI_HOST_ARGS)
+
+# PRD-235 W3: the host as a login service — starts at login, restarts on exit,
+# restarts itself when its code or the backend's contract changed. Pair once
+# with `make cli-host PAIR=<code>` (Ctrl-C after "paired"), then install.
+cli-host-install:
+	@mkdir -p "$(CURDIR)/workspaces"
+	@cd services/cli-host && python3 -m automatos_cli_host --install --allow "$(CURDIR)/workspaces" $(if $(LOCAL_PROJECTS_DIR),--allow "$(LOCAL_PROJECTS_DIR)",) $(CLI_HOST_ARGS)
+
+cli-host-uninstall:
+	@cd services/cli-host && python3 -m automatos_cli_host --uninstall
+
+cli-host-status:
+	@cd services/cli-host && python3 -m automatos_cli_host --service-status
+
+cli-host-restart:
+	@cd services/cli-host && python3 -m automatos_cli_host --restart-service
+
+# After the app rebuilt: a running host drains and comes back on the new code.
+# Silent when no host is running.
+cli-host-nudge:
+	-@cd services/cli-host && python3 -m automatos_cli_host --nudge >/dev/null 2>&1 || true

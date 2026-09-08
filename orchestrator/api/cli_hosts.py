@@ -119,6 +119,17 @@ async def list_cli_hosts(
     return {"hosts": svc.list_hosts(db, ctx.workspace_id)}
 
 
+@router.get("/health")
+async def cli_host_health(
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-235 W3: is a Claude Code host online for this workspace, since when
+    was one last seen, and how many CLI tickets are waiting. The board banner
+    reads it; the ticket line says the same thing per ticket."""
+    return svc.host_health(db, ctx.workspace_id)
+
+
 @router.post("/pairing-codes")
 async def create_pairing_code(
     body: PairingCodeCreate,
@@ -160,7 +171,9 @@ async def heartbeat(
     db: Session = Depends(get_db),
 ):
     running = [r.model_dump() if hasattr(r, "model_dump") else r.dict() for r in body.running]
-    return svc.record_heartbeat(db, host, body.capabilities, running)
+    out = svc.record_heartbeat(db, host, body.capabilities, running)
+    out.update(svc.contract_fields())  # PRD-235 W3: the host restarts itself when this moves
+    return out
 
 
 @router.post("/{host_id}/claim")

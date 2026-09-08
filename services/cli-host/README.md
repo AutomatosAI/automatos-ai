@@ -7,7 +7,34 @@ manager above them. Standard-library Python 3.9+, nothing to install.
 ```
 make cli-host PAIR=XXXX-XXXX   # first time — the code comes from Settings → Session mode
 make cli-host                  # afterwards; Ctrl-C to stop
+make cli-host-install          # or: run it as a login service — always on (below)
 ```
+
+## Always on: the host as a login service
+
+One host per machine serves every `runtime: cli` agent of the workspace, so
+"my agents are always available" means "this process is always running". A
+terminal window is not that. `make cli-host-install` registers the host with
+your login session manager — a launchd LaunchAgent on macOS, a `systemd --user`
+unit on Linux — with the same directories `make cli-host` would use:
+
+- starts at login, restarts within 15 s whenever it exits non-zero (a crash,
+  the backend not being up yet, or a deliberate drift restart);
+- logs to `~/.automatos/cli-host/host.log`;
+- `make cli-host-status` / `make cli-host-restart` / `make cli-host-uninstall`.
+
+A clean exit stays down on purpose: that is the host telling you it needs you
+(not paired yet, no directory allowed). Pair first with `make cli-host PAIR=…`.
+
+**It keeps itself current.** Every ticket spawns a fresh `claude`, so a Claude
+Code update is used by the next session with no restart. The host's own code
+is different: it is loaded at start. So the host drains and exits for a restart
+when (a) its own files changed on disk (you switched branches or pulled), or
+(b) the backend answers a heartbeat with a different host contract (the app was
+rebuilt). `make up` also sends it a nudge (`SIGHUP`) after every rebuild.
+"Drain" means: no new claims, running sessions finish, then exit `75` — the
+service manager restarts it on the new code. In a terminal, `make cli-host`
+simply exits; start it again.
 
 ## What it does, in one turn
 

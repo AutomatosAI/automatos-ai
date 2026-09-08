@@ -45,17 +45,30 @@ class UsageTracker:
 
             db = SessionLocal()
             try:
-                # Look up cost from model registry
-                model_row = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
-                if model_row:
-                    # PRD-236 S0.5 (W0 interim): the catalogue row carries ONE price
-                    # per model id; the serving provider's registry multiplier makes
-                    # a free route (NVIDIA) book zero. W1 prices per (provider, model).
-                    from core.llm.providers import price_multiplier_for
+                # PRD-236 W1: price the ROUTE that served the call — the row for
+                # (serving_provider, model_id). A vendor id may exist once per
+                # provider with different prices (Kimi K3: OpenRouter $3/M, NVIDIA 0).
+                from core.llm.providers import normalize_slug, price_multiplier_for
+                route = normalize_slug(provider)
+                model_row = None
+                if route:
+                    model_row = (
+                        db.query(LLMModel)
+                        .filter(LLMModel.model_id == model_id, LLMModel.serving_provider == route)
+                        .first()
+                    )
+                if model_row is None:
+                    # No route row yet (catalogue not synced for this provider):
+                    # fall back to any row for the id, corrected by the registry's
+                    # multiplier so a free route still books zero.
+                    model_row = db.query(LLMModel).filter(LLMModel.model_id == model_id).first()
                     multiplier = price_multiplier_for(provider)
+                else:
+                    multiplier = 1.0
+                if model_row:
                     input_cost = (input_tokens / 1000) * float(model_row.input_cost_per_1k_tokens or 0) * multiplier
                     output_cost = (output_tokens / 1000) * float(model_row.output_cost_per_1k_tokens or 0) * multiplier
-                    tier = model_row.tier or tier
+                    tier = model_row.sourcing or tier
                 else:
                     input_cost = 0.0
                     output_cost = 0.0

@@ -50,9 +50,12 @@ internal testing and evaluation, not production, and no personal, financial or
 health data (NVIDIA API Trial Terms §1.2, §1.4, §4.3); the free tier allows about
 40 requests per minute per key. The key is your own agreement with NVIDIA —
 Automatos only routes to it. A model run on NVIDIA is recorded at zero cost and
-is never silently rerouted to a paid provider when the limit is hit. Pick the
-provider in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*,
-model e.g. `moonshotai/kimi-k3`. (PRD-236)
+is never silently rerouted to a paid provider when the limit is hit. In
+**Marketplace → LLMs** open the *NVIDIA* tab, press *Sync NVIDIA* once, and add
+the models you want — "Kimi K3 · NVIDIA" is a different route from
+"Kimi K3 · OpenRouter" and installs with its own (zero) price. Then pick the
+route in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*, model
+*Kimi K3*. (PRD-236)
 
 ## 2. Start the platform
 
