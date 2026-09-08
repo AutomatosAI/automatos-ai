@@ -152,7 +152,10 @@ def test_status_and_stop_unknown_workspace_not_found(tmp_path):
     async def scenario():
         mgr = _manager(tmp_path)
         status = await mgr.get_status("ws-none")
-        assert status["success"] is False and status["not_found"] is True
+        # PRD-239 S7b: "no session yet" is a normal answer (session null), and the
+    # status says whether an SDK session could start at all.
+    assert status["success"] is True and status["not_found"] is True and status["session"] is None
+    assert isinstance(status["sdk_available"], bool)
         stop = await mgr.stop_session("ws-none")
         assert stop["success"] is False and stop["not_found"] is True
 
