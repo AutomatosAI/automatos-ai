@@ -14,6 +14,8 @@ import { formatDuration } from '@/lib/chat/tool-calls'
 export interface ActivityTrailProps {
   toolCalls: ToolCall[]
   formatLabel: (tc: ToolCall) => string
+  /** PRD-238 S4: progress lines from a long-running tool call, newest last. */
+  progress?: string[]
 }
 
 function stateIcon(tc: ToolCall) {
@@ -23,8 +25,8 @@ function stateIcon(tc: ToolCall) {
   return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success/80" aria-label="Done" />
 }
 
-export function ActivityTrail({ toolCalls, formatLabel }: ActivityTrailProps) {
-  if (toolCalls.length === 0) return null
+export function ActivityTrail({ toolCalls, formatLabel, progress = [] }: ActivityTrailProps) {
+  if (toolCalls.length === 0 && progress.length === 0) return null
   return (
     <ol className="space-y-0.5 text-xs" aria-label="Activity">
       {toolCalls.map((tc) => {
@@ -62,6 +64,12 @@ export function ActivityTrail({ toolCalls, formatLabel }: ActivityTrailProps) {
           </li>
         )
       })}
+      {progress.map((line, index) => (
+        <li key={`progress-${index}`} className="flex items-center gap-1.5 px-1.5 py-0.5 text-muted-foreground/80" data-testid="progress-line">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" aria-hidden />
+          <span className="truncate">{line}</span>
+        </li>
+      ))}
     </ol>
   )
 }

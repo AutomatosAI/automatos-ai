@@ -114,6 +114,10 @@ class StreamingHandler:
             payload["data"] = data
         return f'd:{json.dumps(payload)}\n'
 
+    def format_aisdk_progress(self, text: str) -> str:
+        """PRD-238 S4: a progress line from inside a long-running tool call."""
+        return self.format_aisdk_data("progress", {"text": text})
+
     def format_aisdk_reasoning(self, delta: str) -> str:
         """PRD-238 S1: a reasoning delta — the thinking channel, never the answer."""
         return self.format_aisdk_data("reasoning", {"delta": delta})
