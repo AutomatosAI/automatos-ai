@@ -1,17 +1,28 @@
 'use client'
 
 /**
- * CalendarTab — Studio calendar for scheduled routines.
+ * CalendarTab — Studio calendar for scheduled work.
  *
  * Three real view modes (all wired):
  *  - Day: single column for the selected day, hour-by-hour
  *  - Week: 7 columns (Sun–Sat), hour-by-hour (default)
  *  - Month: classic 6×7 grid with event chips per day
  *
- * Events come from `useActivitySchedule`. Always-on heartbeats from
- * `useHeartbeats()` render in a band above week/day views. Events are
- * clickable — clicking routes to the assigned agent's detail page so the
- * user can inspect / pause / tune the routine.
+ * ONE data source: `useActivitySchedule` (GET /api/activity/schedule), the
+ * DB-first feed PRD-162 made identical on every worker. It carries five kinds
+ * of item (see ScheduleItemType): heartbeat routines with a structured
+ * recurrence, cron playbooks, agent-scheduled tasks, mission SLA deadlines and
+ * board-task SLA deadlines. The always-on band and the grid's routine rows are
+ * built from the routine items' `recurrence.interval_minutes` — NOT from
+ * /api/heartbeat/workspace, which sits behind the PRD-143 router-wide
+ * super-admin lock (a 403 for every other user, polled every 30s) and read
+ * `next_run_at` from the one worker that hosts APScheduler (null on the others,
+ * so routines anchored at "now" and shifted on every refresh).
+ *
+ * Events are actionable: clicking one opens a small menu — open the agent /
+ * playbook / mission / board card, pause a routine, pause or cancel a
+ * scheduled task. Every action rides an endpoint that already exists (see
+ * calendar-actions.ts). Deadline items carry a DUE tag; overdue ones go amber.
  *
  * Prev / Today / Next actually move the visible window. No speculative
  * "Schedule task" / "Filter" / "Export" CTAs — those don't belong on a
@@ -24,12 +35,29 @@
  * the classic Command Centre renders the grid as a stack of unstyled divs.
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Zap } from 'lucide-react'
-import { useActivitySchedule, useSchedulerHealth } from '@/hooks/use-activity-api'
-import { useHeartbeats } from '@/hooks/use-heartbeats-api'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  useActivitySchedule,
+  useSchedulerHealth,
+  type ScheduleItem,
+} from '@/hooks/use-activity-api'
+import { useToggleHeartbeat } from '@/hooks/use-heartbeats-api'
+import { useUpdateScheduledTaskStatus } from '@/hooks/use-scheduled-tasks-api'
 import { toneFor } from './agent-tones'
+import {
+  buildEventActions,
+  isDeadlineItem,
+  type EventAction,
+  type EventActionDeps,
+} from './calendar-actions'
 
 type ViewMode = 'day' | 'week' | 'month'
 
@@ -37,6 +65,18 @@ const HOUR_PX = 44
 const START_HR = 0
 const END_HR = 22
 const HOURS = Array.from({ length: END_HR - START_HR + 1 }, (_, i) => i + START_HR)
+/** Routines more frequent than this stay in the always-on band: on the grid
+ *  they would clutter every column. */
+const GRID_MIN_INTERVAL_MIN = 30
+/** Routines at least this frequent are summarised in the always-on band. */
+const BAND_MAX_INTERVAL_MIN = 60
+/** Safety cap per item so a frequent routine can't run away across a month. */
+const MAX_OCCURRENCES = 200
+const ROUTINE_MIN_DUR_MIN = 15
+const ROUTINE_MAX_DUR_MIN = 45
+const RECURRING_DUR_MIN = 20
+const SINGLE_DUR_MIN = 15
+const OVERDUE_TONE = 'hsl(45 80% 55%)'
 
 interface DayCell {
   short: string
@@ -54,11 +94,19 @@ interface CalEvent {
   durMin: number
   name: string
   agent: string | null
-  agentId: number | null
   dayKey: string
   date: Date
+  /** the feed item behind this occurrence — the event menu acts on it */
+  item: ScheduleItem
   /** true when this event is a synthesised recurrence (not the literal next_run_at) */
   recurring?: boolean
+  /** an SLA deadline (mission or board task), not a run */
+  due?: boolean
+}
+
+interface WindowSpan {
+  start: Date
+  end: Date
 }
 
 /**
@@ -130,34 +178,25 @@ function addDays(d: Date, n: number): Date {
   return out
 }
 
+function toDayCell(d: Date): DayCell {
+  return {
+    short: d.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase(),
+    iso: d.toISOString().slice(0, 10),
+    n: d.getDate(),
+    month: d.getMonth(),
+    today: d.toDateString() === new Date().toDateString(),
+    date: d,
+  }
+}
+
 function buildWeek(anchor: Date): DayCell[] {
   const sun = startOfWeek(anchor)
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = addDays(sun, i)
-    return {
-      short: d.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase(),
-      iso: d.toISOString().slice(0, 10),
-      n: d.getDate(),
-      month: d.getMonth(),
-      today: d.toDateString() === new Date().toDateString(),
-      date: d,
-    }
-  })
+  return Array.from({ length: 7 }, (_, i) => toDayCell(addDays(sun, i)))
 }
 
 function buildMonthGrid(anchor: Date): DayCell[] {
   const start = startOfMonthGrid(anchor)
-  return Array.from({ length: 42 }, (_, i) => {
-    const d = addDays(start, i)
-    return {
-      short: d.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase(),
-      iso: d.toISOString().slice(0, 10),
-      n: d.getDate(),
-      month: d.getMonth(),
-      today: d.toDateString() === new Date().toDateString(),
-      date: d,
-    }
-  })
+  return Array.from({ length: 42 }, (_, i) => toDayCell(addDays(start, i)))
 }
 
 /** Relative "in 12m / in 3h / in 2d" label for the Next Up list. */
@@ -173,6 +212,133 @@ function formatNextRun(iso: string | null): string {
   return `in ${Math.round(hrs / 24)}d`
 }
 
+function occurrence(item: ScheduleItem, d: Date, durMin: number, recurring: boolean): CalEvent {
+  return {
+    id: `${item.id}-${d.getTime()}`,
+    hour: d.getHours(),
+    min: d.getMinutes(),
+    durMin,
+    name: item.name,
+    agent: item.agent_name,
+    dayKey: d.toDateString(),
+    date: d,
+    item,
+    recurring,
+    due: isDeadlineItem(item),
+  }
+}
+
+/** Walk an interval backwards and forwards from its anchor across the window. */
+function expandInterval(
+  item: ScheduleItem,
+  anchor: Date,
+  intervalMin: number,
+  span: WindowSpan,
+  durMin: number,
+): CalEvent[] {
+  const out: CalEvent[] = []
+  const step = intervalMin * 60_000
+  let count = 0
+  let t = anchor.getTime()
+  while (t >= span.start.getTime() && count < MAX_OCCURRENCES) {
+    if (t <= span.end.getTime()) {
+      out.push(occurrence(item, new Date(t), durMin, true))
+      count++
+    }
+    t -= step
+  }
+  t = anchor.getTime() + step
+  while (t <= span.end.getTime() && count < MAX_OCCURRENCES) {
+    if (t >= span.start.getTime()) {
+      out.push(occurrence(item, new Date(t), durMin, true))
+      count++
+    }
+    t += step
+  }
+  return out
+}
+
+/** Every occurrence of one feed item inside the window. */
+function expandItem(item: ScheduleItem, span: WindowSpan): CalEvent[] {
+  if (item.type === 'routine') {
+    // Structured recurrence from the feed — no string parsing. Sub-30-minute
+    // routines live in the always-on band only; a routine with no next run
+    // (outside its active hours for the whole horizon) has nothing to place.
+    const interval = item.recurrence?.interval_minutes ?? null
+    if (interval === null || interval < GRID_MIN_INTERVAL_MIN || !item.next_run_at) return []
+    const dur = Math.min(Math.max(interval, ROUTINE_MIN_DUR_MIN), ROUTINE_MAX_DUR_MIN)
+    return expandInterval(item, new Date(item.next_run_at), interval, span, dur)
+  }
+
+  const interval = parseIntervalMinutes(item.frequency)
+  if (interval !== null && interval > 60) {
+    const anchorDate = item.next_run_at ? new Date(item.next_run_at) : new Date()
+    return expandInterval(item, anchorDate, interval, span, RECURRING_DUR_MIN)
+  }
+
+  // Cron with day-of-week + hour fields (e.g. "0 9 * * 1-5") — an event on
+  // every matching day in the window.
+  const dow = cronDaysOfWeek(item.frequency)
+  const cronHm = cronHourMin(item.frequency)
+  if (dow && cronHm) {
+    const out: CalEvent[] = []
+    for (let i = 0; i < 42; i++) {
+      const d = addDays(span.start, i)
+      if (d > span.end) break
+      if (!dow.includes(d.getDay())) continue
+      d.setHours(cronHm.h, cronHm.m, 0, 0)
+      out.push(occurrence(item, new Date(d), RECURRING_DUR_MIN, true))
+    }
+    return out
+  }
+
+  // Single occurrence at next_run_at (one-shot tasks, SLA deadlines).
+  if (item.next_run_at) {
+    const d = new Date(item.next_run_at)
+    if (d >= span.start && d <= span.end) return [occurrence(item, d, SINGLE_DUR_MIN, false)]
+  }
+  return []
+}
+
+function EventMenu({ actions, children }: { actions: EventAction[]; children: ReactNode }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[180px]">
+        {actions.map((a) => (
+          <DropdownMenuItem
+            key={a.label}
+            onSelect={() => a.run()}
+            className={a.tone === 'danger' ? 'text-destructive focus:text-destructive' : undefined}
+          >
+            {a.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function DueTag({ overdue }: { overdue: boolean }) {
+  const tone = overdue ? 'hsl(var(--destructive))' : OVERDUE_TONE
+  return (
+    <span
+      className="due"
+      style={{
+        marginLeft: 6,
+        padding: '0 4px',
+        borderRadius: 3,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        background: overdue ? 'hsl(var(--destructive) / 0.15)' : 'hsl(45 80% 55% / 0.18)',
+        color: tone,
+      }}
+    >
+      {overdue ? 'OVERDUE' : 'DUE'}
+    </span>
+  )
+}
+
 export function CalendarTab() {
   const router = useRouter()
   const [mode, setMode] = useState<ViewMode>('week')
@@ -180,8 +346,18 @@ export function CalendarTab() {
 
   const range = mode === 'month' ? '30d' : '7d'
   const { data: schedule, isLoading, isError, refetch } = useActivitySchedule(range)
-  const { data: heartbeats } = useHeartbeats()
   const { data: health } = useSchedulerHealth()
+  const { mutate: toggleHeartbeat } = useToggleHeartbeat()
+  const { mutate: updateScheduledTask } = useUpdateScheduledTaskStatus()
+
+  const actionDeps = useMemo<EventActionDeps>(
+    () => ({
+      navigate: (href) => router.push(href as any),
+      pauseRoutine: (agentId) => toggleHeartbeat(agentId),
+      setScheduledTaskStatus: (taskId, status) => updateScheduledTask({ taskId, status }),
+    }),
+    [router, toggleHeartbeat, updateScheduledTask],
+  )
 
   const week = useMemo(() => buildWeek(anchor), [anchor])
   const monthCells = useMemo(() => buildMonthGrid(anchor), [anchor])
@@ -200,26 +376,13 @@ export function CalendarTab() {
       .slice(0, 6)
   }, [schedule])
 
-  const visibleDays = useMemo<DayCell[]>(() => {
-    if (mode === 'day') {
-      return [
-        {
-          short: anchor
-            .toLocaleDateString('en-GB', { weekday: 'short' })
-            .toUpperCase(),
-          iso: anchor.toISOString().slice(0, 10),
-          n: anchor.getDate(),
-          month: anchor.getMonth(),
-          today: anchor.toDateString() === new Date().toDateString(),
-          date: new Date(anchor),
-        },
-      ]
-    }
-    return week
-  }, [mode, anchor, week])
+  const visibleDays = useMemo<DayCell[]>(
+    () => (mode === 'day' ? [toDayCell(new Date(anchor))] : week),
+    [mode, anchor, week],
+  )
 
   // Window covered by the current view (used to expand recurring events).
-  const windowSpan = useMemo(() => {
+  const windowSpan = useMemo<WindowSpan>(() => {
     if (mode === 'day') {
       const start = new Date(anchor)
       start.setHours(0, 0, 0, 0)
@@ -240,196 +403,25 @@ export function CalendarTab() {
     return { start, end }
   }, [mode, anchor])
 
-  const events = useMemo<CalEvent[]>(() => {
-    const out: CalEvent[] = []
-    const MAX_OCCURRENCES = 200 // safety cap so a 5-min heartbeat doesn't run away
+  const events = useMemo<CalEvent[]>(
+    () => (schedule?.scheduled ?? []).flatMap((item) => expandItem(item, windowSpan)),
+    [schedule, windowSpan],
+  )
 
-    // Pass 1: heartbeats (routines). Use structured interval_minutes — no
-    // string parsing — and expand across the visible window.
-    if (heartbeats?.heartbeats) {
-      heartbeats.heartbeats
-        .filter((h) => h.enabled)
-        .forEach((h) => {
-          const interval = h.interval_minutes
-          // Sub-30min heartbeats are summarised in the always-on band only.
-          // Putting them on the grid would clutter every column.
-          if (interval < 30) return
-          const anchorDate = h.next_run_at
-            ? new Date(h.next_run_at)
-            : new Date()
-          const name = `${h.agent_name} routine`
-          let count = 0
-          // Walk back
-          let t = anchorDate.getTime()
-          while (t >= windowSpan.start.getTime() && count < MAX_OCCURRENCES) {
-            if (t <= windowSpan.end.getTime()) {
-              const d = new Date(t)
-              out.push({
-                id: `hb-${h.id}-${t}`,
-                hour: d.getHours(),
-                min: d.getMinutes(),
-                durMin: Math.min(Math.max(interval, 15), 45),
-                name,
-                agent: h.agent_name,
-                agentId: h.agent_id,
-                dayKey: d.toDateString(),
-                date: d,
-                recurring: true,
-              })
-              count++
-            }
-            t -= interval * 60_000
-          }
-          // Walk forward
-          t = anchorDate.getTime() + interval * 60_000
-          while (t <= windowSpan.end.getTime() && count < MAX_OCCURRENCES) {
-            if (t >= windowSpan.start.getTime()) {
-              const d = new Date(t)
-              out.push({
-                id: `hb-${h.id}-${t}`,
-                hour: d.getHours(),
-                min: d.getMinutes(),
-                durMin: Math.min(Math.max(interval, 15), 45),
-                name,
-                agent: h.agent_name,
-                agentId: h.agent_id,
-                dayKey: d.toDateString(),
-                date: d,
-                recurring: true,
-              })
-              count++
-            }
-            t += interval * 60_000
-          }
-        })
-    }
-
-    // Pass 2: items from the schedule endpoint that aren't heartbeats
-    // (recipes / one-offs). Fall through if next_run_at is in window.
-    if (!schedule?.scheduled) return out
-    schedule.scheduled.forEach((s, idx) => {
-      // Skip routine items — heartbeats already cover those above and
-      // contain structured interval data we don't need to re-parse.
-      if (s.type === 'routine') return
-
-      const interval = parseIntervalMinutes(s.frequency)
-      const dow = cronDaysOfWeek(s.frequency)
-      const cronHm = cronHourMin(s.frequency)
-
-      if (interval !== null && interval > 60) {
-        // Anchor at next_run_at and walk backwards + forwards across window.
-        const anchorDate = s.next_run_at ? new Date(s.next_run_at) : new Date()
-        // Walk back
-        let t = anchorDate.getTime()
-        while (t > windowSpan.start.getTime() - 1) {
-          if (t <= windowSpan.end.getTime()) {
-            const d = new Date(t)
-            out.push({
-              id: `${s.id}-${t}`,
-              hour: d.getHours(),
-              min: d.getMinutes(),
-              durMin: 20,
-              name: s.name,
-              agent: s.agent_name,
-              agentId: s.agent_id,
-              dayKey: d.toDateString(),
-              date: d,
-              recurring: true,
-            })
-          }
-          t -= interval * 60_000
-        }
-        // Walk forward
-        t = anchorDate.getTime() + interval * 60_000
-        while (t < windowSpan.end.getTime() + 1) {
-          if (t >= windowSpan.start.getTime()) {
-            const d = new Date(t)
-            out.push({
-              id: `${s.id}-${t}`,
-              hour: d.getHours(),
-              min: d.getMinutes(),
-              durMin: 20,
-              name: s.name,
-              agent: s.agent_name,
-              agentId: s.agent_id,
-              dayKey: d.toDateString(),
-              date: d,
-              recurring: true,
-            })
-          }
-          t += interval * 60_000
-        }
-        return
-      }
-
-      // Cron with day-of-week + hour fields (e.g. "0 9 * * 1-5") — render
-      // an event on every matching day in the window.
-      if (dow && cronHm) {
-        for (let i = 0; i < 42; i++) {
-          const d = addDays(windowSpan.start, i)
-          if (d > windowSpan.end) break
-          if (!dow.includes(d.getDay())) continue
-          d.setHours(cronHm.h, cronHm.m, 0, 0)
-          out.push({
-            id: `${s.id}-${d.toISOString()}`,
-            hour: cronHm.h,
-            min: cronHm.m,
-            durMin: 20,
-            name: s.name,
-            agent: s.agent_name,
-            agentId: s.agent_id,
-            dayKey: d.toDateString(),
-            date: new Date(d),
-            recurring: true,
-          })
-        }
-        return
-      }
-
-      // Fallback: single occurrence at next_run_at when we can't parse
-      // anything else. Better than nothing — the user still sees something.
-      if (s.next_run_at) {
-        const d = new Date(s.next_run_at)
-        if (d >= windowSpan.start && d <= windowSpan.end) {
-          out.push({
-            id: `${s.id}-${idx}`,
-            hour: d.getHours(),
-            min: d.getMinutes(),
-            durMin: 15,
-            name: s.name,
-            agent: s.agent_name,
-            agentId: s.agent_id,
-            dayKey: d.toDateString(),
-            date: d,
-          })
-        }
-      }
-    })
-    return out
-  }, [schedule, windowSpan, heartbeats])
-
-  const alwaysOn = useMemo(() => {
-    if (!heartbeats?.heartbeats) return []
-    return heartbeats.heartbeats
-      .filter((h) => h.enabled && h.interval_minutes <= 60)
-      .map((h) => ({
-        id: h.id,
-        name: `${h.agent_name} · every ${h.interval_minutes}m`,
-        agent: h.agent_name,
-      }))
-  }, [heartbeats])
+  // Routines frequent enough to summarise rather than plot, from the same feed.
+  const alwaysOn = useMemo(
+    () =>
+      (schedule?.scheduled ?? []).filter(
+        (s) =>
+          s.type === 'routine' &&
+          (s.recurrence?.interval_minutes ?? Number.POSITIVE_INFINITY) <= BAND_MAX_INTERVAL_MIN,
+      ),
+    [schedule],
+  )
 
   const now = new Date()
   const nowHourPos =
     (now.getHours() - START_HR) * HOUR_PX + (now.getMinutes() / 60) * HOUR_PX
-
-  const handleEventClick = (evt: CalEvent) => {
-    if (evt.agentId) {
-      router.push(`/agents?agent=${evt.agentId}` as any)
-    } else {
-      router.push('/command-center?tab=activity' as any)
-    }
-  }
 
   const shiftAnchor = (direction: -1 | 0 | 1) => {
     if (direction === 0) {
@@ -541,7 +533,7 @@ export function CalendarTab() {
             border: '1px solid hsl(45 80% 55% / 0.4)',
             borderRadius: 8,
             background: 'hsl(45 80% 55% / 0.08)',
-            color: 'hsl(45 80% 55%)',
+            color: OVERDUE_TONE,
           }}
         >
           <Zap style={{ width: 12, height: 12 }} />
@@ -565,21 +557,24 @@ export function CalendarTab() {
       {mode !== 'month' && alwaysOn.length > 0 && (
         <div className="cc-cal-alwayson">
           <div className="lbl">
-            <Zap style={{ width: 12, height: 12, color: 'hsl(45 80% 55%)' }} />
+            <Zap style={{ width: 12, height: 12, color: OVERDUE_TONE }} />
             24/7
           </div>
           <div className="pills">
-            {alwaysOn.map((p) => {
-              const tone = toneFor(p.agent)
+            {alwaysOn.map((s) => {
+              const tone = toneFor(s.agent_name)
               return (
-                <span
-                  key={p.id}
-                  className="pill"
-                  style={{ borderLeftColor: tone.bg }}
-                >
-                  <span className="dot" />
-                  {p.name}
-                </span>
+                <EventMenu key={s.id} actions={buildEventActions(s, actionDeps)}>
+                  <button
+                    type="button"
+                    className="pill"
+                    style={{ borderLeftColor: tone.bg, cursor: 'pointer' }}
+                    title={`${s.agent_name} routine — click for actions`}
+                  >
+                    <span className="dot" />
+                    {s.agent_name} · every {s.recurrence?.interval_minutes}m
+                  </button>
+                </EventMenu>
               )
             })}
           </div>
@@ -616,7 +611,8 @@ export function CalendarTab() {
             const overdue = item.next_run_at
               ? new Date(item.next_run_at).getTime() < Date.now()
               : false
-            const accent = overdue ? 'hsl(45 80% 55%)' : 'hsl(var(--muted-foreground))'
+            const accent = overdue ? OVERDUE_TONE : 'hsl(var(--muted-foreground))'
+            const due = isDeadlineItem(item)
             return (
               <span
                 key={item.id}
@@ -627,7 +623,7 @@ export function CalendarTab() {
                 />
                 <span style={{ fontWeight: 500 }}>{item.name}</span>
                 <span style={{ color: accent }}>
-                  {overdue ? 'overdue' : formatNextRun(item.next_run_at)}
+                  {overdue ? (due ? 'overdue' : 'missed') : `${due ? 'due ' : ''}${formatNextRun(item.next_run_at)}`}
                 </span>
               </span>
             )
@@ -640,7 +636,7 @@ export function CalendarTab() {
           cells={monthCells}
           events={events}
           anchorMonth={anchor.getMonth()}
-          onEventClick={handleEventClick}
+          actionDeps={actionDeps}
         />
       ) : (
         <div className="cc-cal-frame">
@@ -708,31 +704,33 @@ export function CalendarTab() {
                       (evt.min / 60) * HOUR_PX
                     const height = Math.max((evt.durMin / 60) * HOUR_PX, 28)
                     const tone = toneFor(evt.agent)
+                    const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
                     return (
-                      <button
-                        key={evt.id}
-                        type="button"
-                        className="cc-cal-event"
-                        style={{
-                          top,
-                          height,
-                          borderLeftColor: tone.bg,
-                          background: 'hsl(var(--secondary))',
-                        }}
-                        title={`${evt.name} — click for agent details`}
-                        onClick={() => handleEventClick(evt)}
-                      >
-                        <div className="nm">
-                          {String(evt.hour).padStart(2, '0')}:
-                          {String(evt.min).padStart(2, '0')}
-                          {evt.agent && (
-                            <span style={{ marginLeft: 6, opacity: 0.85 }}>
-                              · {evt.agent}
-                            </span>
-                          )}
-                        </div>
-                        <div className="ttl">{evt.name}</div>
-                      </button>
+                      <EventMenu key={evt.id} actions={buildEventActions(evt.item, actionDeps)}>
+                        <button
+                          type="button"
+                          className="cc-cal-event"
+                          style={{
+                            top,
+                            height,
+                            borderLeftColor: overdue ? OVERDUE_TONE : tone.bg,
+                            background: 'hsl(var(--secondary))',
+                          }}
+                          title={`${evt.name} — click for actions`}
+                        >
+                          <div className="nm">
+                            {String(evt.hour).padStart(2, '0')}:
+                            {String(evt.min).padStart(2, '0')}
+                            {evt.agent && (
+                              <span style={{ marginLeft: 6, opacity: 0.85 }}>
+                                · {evt.agent}
+                              </span>
+                            )}
+                            {evt.due && <DueTag overdue={overdue} />}
+                          </div>
+                          <div className="ttl">{evt.name}</div>
+                        </button>
+                      </EventMenu>
                     )
                   })}
                   {d.today && (
@@ -749,7 +747,7 @@ export function CalendarTab() {
           {isLoading && events.length === 0 && (
             <div className="cc-panel-empty">Loading schedule…</div>
           )}
-          {!isLoading && events.length === 0 && alwaysOn.length === 0 && (
+          {!isLoading && !isError && events.length === 0 && alwaysOn.length === 0 && (
             <div className="cc-panel-empty">
               No scheduled work in this window. Enable a heartbeat in /agents
               to populate the calendar.
@@ -765,12 +763,12 @@ function MonthGrid({
   cells,
   events,
   anchorMonth,
-  onEventClick,
+  actionDeps,
 }: {
   cells: DayCell[]
   events: CalEvent[]
   anchorMonth: number
-  onEventClick: (e: CalEvent) => void
+  actionDeps: EventActionDeps
 }) {
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
@@ -799,21 +797,26 @@ function MonthGrid({
               <div className="evts">
                 {dayEvents.slice(0, 3).map((evt) => {
                   const tone = toneFor(evt.agent)
+                  const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
                   return (
-                    <button
-                      key={evt.id}
-                      type="button"
-                      className="cc-cal-month-evt"
-                      style={{ borderLeftColor: tone.bg, opacity: past ? 0.5 : 1 }}
-                      onClick={() => onEventClick(evt)}
-                      title={evt.name}
-                    >
-                      <span className="t">
-                        {String(evt.hour).padStart(2, '0')}:
-                        {String(evt.min).padStart(2, '0')}
-                      </span>{' '}
-                      <span className="n2">{evt.name}</span>
-                    </button>
+                    <EventMenu key={evt.id} actions={buildEventActions(evt.item, actionDeps)}>
+                      <button
+                        type="button"
+                        className="cc-cal-month-evt"
+                        style={{
+                          borderLeftColor: overdue ? OVERDUE_TONE : tone.bg,
+                          opacity: past && !evt.due ? 0.5 : 1,
+                        }}
+                        title={evt.name}
+                      >
+                        <span className="t">
+                          {String(evt.hour).padStart(2, '0')}:
+                          {String(evt.min).padStart(2, '0')}
+                        </span>{' '}
+                        {evt.due && <DueTag overdue={overdue} />}{' '}
+                        <span className="n2">{evt.name}</span>
+                      </button>
+                    </EventMenu>
                   )
                 })}
                 {dayEvents.length > 3 && (

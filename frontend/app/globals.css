@@ -2214,7 +2214,9 @@
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 9px; border-radius: 4px;
     background: hsl(var(--secondary));
-    border-left: 2px solid hsl(var(--muted-foreground));
+    /* a <button> now (it opens the routine's action menu): drop the UA border */
+    border: 0; border-left: 2px solid hsl(var(--muted-foreground));
+    cursor: pointer;
     font-family: var(--font-geist-mono, monospace);
     font-size: 10.5px; color: hsl(var(--foreground));
   }
