@@ -28,7 +28,7 @@ from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import HookServer
 from .session import Session, host_capabilities
-from .terminal_server import TerminalServer
+from .terminal_server import MAX_TERMINALS, TerminalServer
 
 log = logging.getLogger("automatos.cli_host")
 
@@ -153,6 +153,7 @@ class Host:
             caps = host_capabilities(self.cfg)
             # PRD-239 S7: where the Canvas terminal listens (loopback only).
             caps["terminal_port"] = self.terminal.port if self.terminal is not None else None
+            caps["max_terminals"] = MAX_TERMINALS if self.terminal is not None else 0
             self._capabilities = caps
         return self._capabilities
 

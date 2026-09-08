@@ -27,6 +27,8 @@ export interface CanvasTerminalProps {
   autoOpen?: boolean
   /** The terminal IS the session: the agent's Claude Code runs in it (no shell prompt first). */
   runtime?: boolean
+  /** A plain shell in the ticket's folder, beside the session (an extra terminal tab). */
+  shell?: boolean
 }
 
 interface TerminalGrant {
@@ -42,7 +44,7 @@ type TerminalStatus = 'idle' | 'opening' | 'connected' | 'closed' | 'error'
 // The host learns the grant on its heartbeat (every 30 s): wait for a full one plus slack.
 const CONNECT_BUDGET_MS = 50_000
 
-export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false }: CanvasTerminalProps) {
+export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false, shell = false }: CanvasTerminalProps) {
   const { data: health } = useCliHostHealth()
   const host = health?.online_hosts?.[0] ?? null
   const [status, setStatus] = useState<TerminalStatus>('idle')
@@ -70,6 +72,7 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false 
         body: JSON.stringify({
           ...(taskId != null && taskId !== '' ? { task_id: Number(taskId) } : {}),
           ...(cwd ? { cwd } : {}),
+          ...(shell ? { shell: true } : {}),
         }),
       })
       let term = termRef.current
@@ -113,7 +116,7 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false 
       setStatus('error')
       setNote(err instanceof Error ? err.message : 'Could not open a terminal')
     }
-  }, [host, taskId, cwd, closeSocket])
+  }, [host, taskId, cwd, shell, closeSocket])
 
   // PRD-239 S7 v2: the Runtime Canvas opens the session itself, once, when a host is online.
   useEffect(() => {
@@ -144,7 +147,7 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false 
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div className="flex min-w-0 items-center gap-2 text-xs">
           <TerminalSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="font-medium">Terminal</span>
+          <span className="font-medium">{shell ? 'Shell' : runtime ? 'Session' : 'Terminal'}</span>
           <span className="truncate text-muted-foreground" data-testid="canvas-terminal-note">
             {status === 'connected' && note ? `on your machine · ${note}` : status === 'opening' && runtime ? 'Starting the session on your machine…' : note}
           </span>

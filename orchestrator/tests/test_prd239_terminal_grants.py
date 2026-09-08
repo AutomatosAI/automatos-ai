@@ -197,3 +197,12 @@ def test_an_interactive_session_ticket_follows_the_host_that_opens_it(monkeypatc
     svc.mint_terminal_grant(_DB(task=task), host, task_id=93)
     assert task.runtime_ref["host_id"] == str(host.id)
     assert task.runtime_ref["mode"] == "terminal"  # rebuilt, nothing else lost
+
+
+def test_a_shell_grant_for_a_cli_ticket_opens_a_plain_shell_in_its_folder(monkeypatch):
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "SOUL")
+    host = _host()
+    out = svc.mint_terminal_grant(_DB(task=_cli_ticket()), host, task_id=93, shell=True)
+    assert out["launch"] is None and out["cwd"] == "/Users/me/Development/repo"
+    delivered = svc.pop_terminal_grants(host.id)[0]
+    assert delivered["launch"] is None and delivered["task_id"] == "93" and delivered["cwd"] == "/Users/me/Development/repo"
