@@ -26,8 +26,14 @@ async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any])
     if not created_by_agent_id:
         return {"success": False, "error": "Could not determine calling agent"}
 
-    # Resolve target agent (default: self)
-    target_agent_id = created_by_agent_id
+    from services.scheduled_task_service import DELIVER_BOARD_TASK, DELIVER_CHAT
+    deliver_as = params.get("deliver_as") or DELIVER_CHAT
+    if deliver_as not in (DELIVER_CHAT, DELIVER_BOARD_TASK):
+        return {"success": False, "error": f"deliver_as must be '{DELIVER_CHAT}' or '{DELIVER_BOARD_TASK}'"}
+
+    # Resolve target agent. Chat delivery defaults to self; a board ticket with
+    # no named agent is filed unassigned (Inbox), never silently self-assigned.
+    target_agent_id = created_by_agent_id if deliver_as == DELIVER_CHAT else None
     target_name = params.get("target_agent_name")
     if target_name:
         from core.models import Agent
@@ -38,6 +44,15 @@ async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any])
         if not target:
             return {"success": False, "error": f"Agent '{target_name}' not found in workspace"}
         target_agent_id = target.id
+
+    payload = None
+    if deliver_as == DELIVER_BOARD_TASK:
+        payload = {
+            "title": (params.get("title") or (str(description).strip().splitlines() or ["Scheduled task"])[0])[:255],
+            "priority": params.get("priority") or "medium",
+            "review_mode": params.get("review_mode") or "auto",
+            "tags": [str(t) for t in (params.get("tags") or []) if t],
+        }
 
     svc = ScheduledTaskService(db, workspace_id)
     return await svc.create_task(
@@ -50,6 +65,12 @@ async def schedule_task(db: Session, workspace_id: UUID, params: Dict[str, Any])
         # PRD-205 S6: server-injected originating conversation (never an
         # LLM-supplied arg) — the delivered output posts back here.
         origin_chat_id=params.get("_origin_chat_id"),
+        deliver_as=deliver_as,
+        payload=payload,
+        # The driving human behind a chat tool call (server-injected, PRD-234):
+        # on the local edition their scheduling IS the consent when the ticket is
+        # filed and assigned at fire time. Autonomous runs thread none.
+        created_by_user_id=params.get("_user_id"),
     )
 
 

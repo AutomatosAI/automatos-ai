@@ -109,6 +109,8 @@ export interface ScheduleItem {
    *  open) without parsing the composite `id`. Each source sets its own. */
   scheduled_task_id?: number
   task_type?: 'one_shot' | 'recurring'
+  /** task only: what firing does — open a chat, or file a board ticket */
+  deliver_as?: 'chat' | 'board_task'
   mission_id?: number
   playbook_id?: number
   board_task_id?: number

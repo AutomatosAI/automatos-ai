@@ -44,7 +44,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # PRD-232 (2026-09-02): the one authorized 232 revision, prd232_cluster_provenance,
 # chains onto prd_workspace_models_backfill and is the new single head.
 # PRD-237 (2026-09-07): prd237_users_chat_sessions chains onto the PRD-234 S1a head.
-EXPECTED_HEAD = "prd237_users_chat_sessions"
+# Calendar (2026-09-08): calendar_scheduled_board_tasks (a scheduled task can file
+# a board ticket when it fires) chains onto the PRD-237 head.
+EXPECTED_HEAD = "calendar_scheduled_board_tasks"
 
 
 def _literal(node: ast.AST):

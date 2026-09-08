@@ -15,12 +15,20 @@ import {
 import { Button } from '@/components/ui/button'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { useCreateTask, usePlanTask, useRefineTask } from '@/hooks/use-board-tasks-api'
+import { useCreateScheduledBoardTask } from '@/hooks/use-scheduled-tasks-api'
 import type { CreateTaskPayload, PlanResponse, RefineResponse } from '@/hooks/use-board-tasks-api'
 import type { TaskPriority, ReviewMode } from '@/types/board'
 import { QuickCreateForm } from './create-task-steps'
 import { PlanningForm } from './create-task-steps'
 import { RefinedPreview } from './create-task-steps'
 import { apiClient } from '@/lib/api-client'
+import {
+  buildSchedulePayload,
+  defaultScheduleAt,
+  describeSchedule,
+  isScheduleInFuture,
+  type ScheduleMode,
+} from './schedule-choice'
 
 // PRD-127: Attachment metadata
 interface AttachmentMeta {
@@ -48,6 +56,10 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
   const [agentId, setAgentId] = useState<string>('none')
   const [tags, setTags] = useState('')
   const [reviewMode, setReviewMode] = useState<ReviewMode>('auto')
+  // When to file it: `now` is the existing create; anything else is a
+  // scheduled task that waits on the calendar (POST /api/v1/scheduled-tasks).
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('now')
+  const [scheduleAt, setScheduleAt] = useState<string>(() => defaultScheduleAt())
 
   // PRD-127: Attachment state
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -61,6 +73,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
 
   const { data: agents = [] } = useAssignableAgents()
   const createTask = useCreateTask()
+  const createScheduledTask = useCreateScheduledBoardTask()
   const planTask = usePlanTask()
   const refineTask = useRefineTask()
 
@@ -111,6 +124,8 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     setAgentId('none')
     setTags('')
     setReviewMode('auto')
+    setScheduleMode('now')
+    setScheduleAt(defaultScheduleAt())
     setPlanData(null)
     setAnswers({})
     setRefinedData(null)
@@ -148,6 +163,49 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
       toast.error('Title is required')
       return
     }
+
+    if (scheduleMode !== 'now') {
+      const scheduled = buildSchedulePayload(scheduleMode, scheduleAt)
+      if (!scheduled) {
+        toast.error('Pick a date and time')
+        return
+      }
+      if (scheduled.task_type === 'one_shot' && !isScheduleInFuture(scheduleAt)) {
+        toast.error('The time must be in the future')
+        return
+      }
+      if (attachments.length > 0) {
+        // PRD-127 attachments are ephemeral; a ticket filed later cannot carry them.
+        toast.error('Attachments can’t be scheduled — create the task now instead')
+        return
+      }
+      try {
+        await createScheduledTask.mutateAsync({
+          title: payload.title,
+          description: payload.description,
+          priority: payload.priority,
+          assigned_agent_id: payload.assigned_agent_id,
+          review_mode: payload.review_mode,
+          tags: payload.tags,
+          ...scheduled,
+        })
+        toast.success(
+          `Scheduled ${describeSchedule(scheduleMode, scheduleAt)}. It’s filed on the board when it fires.`,
+          {
+            duration: 6000,
+            action: {
+              label: 'View calendar',
+              onClick: () => router.push('/command-center?tab=calendar'),
+            },
+          },
+        )
+        handleOpenChange(false)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to schedule the task')
+      }
+      return
+    }
+
     try {
       await createTask.mutateAsync(payload)
 
@@ -170,7 +228,10 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     } catch {
       toast.error('Failed to create task')
     }
-  }, [buildPayload, createTask, handleOpenChange, agentId, agents, router])
+  }, [
+    buildPayload, createTask, createScheduledTask, handleOpenChange, agentId, agents, router,
+    scheduleMode, scheduleAt, attachments,
+  ])
 
   const handlePlan = useCallback(async () => {
     const prompt = description || title
@@ -212,7 +273,7 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
     }
   }, [description, title, answers, refineTask])
 
-  const isSubmitting = createTask.isLoading
+  const isSubmitting = createTask.isLoading || createScheduledTask.isLoading
   const isPlanning = planTask.isLoading
   const isRefining = refineTask.isLoading
 
@@ -303,6 +364,10 @@ export function CreateTaskDialog({ open, onOpenChange }: CreateTaskDialogProps) 
               onAgentIdChange={setAgentId}
               onTagsChange={setTags}
               onReviewModeChange={setReviewMode}
+              scheduleMode={scheduleMode}
+              scheduleAt={scheduleAt}
+              onScheduleModeChange={setScheduleMode}
+              onScheduleAtChange={setScheduleAt}
               onSubmit={handleCreate}
               onPlan={handlePlan}
               isSubmitting={isSubmitting}

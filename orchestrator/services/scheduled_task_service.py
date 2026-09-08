@@ -6,9 +6,14 @@ Agents call platform_schedule_task → this service creates DB records and
 registers jobs with the UnifiedScheduler (APScheduler).
 
 When a job fires it creates a new chat session with the target agent,
-injecting the task description as the opening message.
+injecting the task description as the opening message — or, for a row with
+``deliver_as='board_task'`` (the Command Centre calendar's "schedule a board
+task for later", from the board's Create Task dialog or ``platform_schedule_task``),
+files the ticket the row describes on the board, where the dispatcher runs it
+like any other.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -25,6 +30,14 @@ logger = logging.getLogger(__name__)
 # Limits
 MAX_TASKS_PER_AGENT = 10
 MAX_RECURRING_PER_WORKSPACE = 25
+# Operator-scheduled rows (no creator agent) share one workspace-wide cap.
+MAX_OPERATOR_TASKS_PER_WORKSPACE = 50
+
+# How a fired task is delivered.
+DELIVER_CHAT = "chat"              # PRD-77: open a chat with the target agent
+DELIVER_BOARD_TASK = "board_task"  # file a board ticket (assigned, or Inbox)
+DELIVERY_MODES = (DELIVER_CHAT, DELIVER_BOARD_TASK)
+_REVIEW_MODES = ("auto", "human", "llm")
 
 class ScheduledTaskService:
     """Creates, lists, cancels, and executes agent-scheduled tasks."""
@@ -39,28 +52,49 @@ class ScheduledTaskService:
 
     async def create_task(
         self,
-        created_by_agent_id: int,
-        target_agent_id: int,
+        created_by_agent_id: Optional[int],
+        target_agent_id: Optional[int],
         task_type: str,
         description: str,
         schedule: str,
         max_runs: Optional[int] = None,
         origin_chat_id: Optional[str] = None,
+        *,
+        deliver_as: str = DELIVER_CHAT,
+        payload: Optional[Dict[str, Any]] = None,
+        created_by_user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new scheduled task.
 
         Args:
-            created_by_agent_id: Agent requesting the task.
-            target_agent_id: Agent that will execute it.
+            created_by_agent_id: Agent requesting the task (None when an operator
+                scheduled it — then created_by_user_id is required).
+            target_agent_id: Agent that will execute it. Required for chat
+                delivery; a board ticket with no target is filed into the Inbox.
             task_type: 'one_shot' or 'recurring'.
             description: What the agent should do when the task fires.
             schedule: ISO datetime for one_shot, cron expression for recurring.
             max_runs: Max executions for recurring tasks (None = unlimited).
+            deliver_as: 'chat' opens a chat with the target agent when it fires
+                (PRD-77); 'board_task' files a board ticket instead.
+            payload: board_task only — title (required), priority, review_mode,
+                tags of the ticket to file.
+            created_by_user_id: the operator who scheduled it (the board dialog,
+                or the human driving a chat turn); the consent actor at fire time.
         """
         # Validate task_type
         if task_type not in ("one_shot", "recurring"):
             return {"success": False, "error": "task_type must be 'one_shot' or 'recurring'"}
+        if deliver_as not in DELIVERY_MODES:
+            return {"success": False, "error": f"deliver_as must be one of: {', '.join(DELIVERY_MODES)}"}
+        if created_by_agent_id is None and not created_by_user_id:
+            return {"success": False, "error": "A creator is required (an agent or a user)"}
+        if deliver_as == DELIVER_CHAT and target_agent_id is None:
+            return {"success": False, "error": "Chat delivery needs a target agent"}
+        payload = dict(payload or {})
+        if deliver_as == DELIVER_BOARD_TASK and not str(payload.get("title") or "").strip():
+            return {"success": False, "error": "A board task needs a title"}
 
         # Validate schedule format
         if task_type == "one_shot":
@@ -86,24 +120,39 @@ class ScheduledTaskService:
         ).fetchall()
 
         agent_ids_found = {row.id for row in agent_check}
-        if created_by_agent_id not in agent_ids_found:
+        if created_by_agent_id is not None and created_by_agent_id not in agent_ids_found:
             return {"success": False, "error": f"Creator agent {created_by_agent_id} not found in workspace"}
-        if target_agent_id not in agent_ids_found:
+        if target_agent_id is not None and target_agent_id not in agent_ids_found:
             return {"success": False, "error": f"Target agent {target_agent_id} not found in workspace"}
 
-        # Rate limits
-        active_count = self.db.execute(
-            text("""
-                SELECT COUNT(*) FROM agent_scheduled_tasks
-                WHERE created_by_agent_id = :agent_id
-                  AND workspace_id = :ws_id
-                  AND status = 'active'
-            """),
-            {"agent_id": created_by_agent_id, "ws_id": str(self.workspace_id)},
-        ).scalar() or 0
-
-        if active_count >= MAX_TASKS_PER_AGENT:
-            return {"success": False, "error": f"Agent has reached the limit of {MAX_TASKS_PER_AGENT} active tasks"}
+        # Rate limits: per creator agent, or one workspace-wide cap for operator rows
+        if created_by_agent_id is not None:
+            active_count = self.db.execute(
+                text("""
+                    SELECT COUNT(*) FROM agent_scheduled_tasks
+                    WHERE created_by_agent_id = :agent_id
+                      AND workspace_id = :ws_id
+                      AND status = 'active'
+                """),
+                {"agent_id": created_by_agent_id, "ws_id": str(self.workspace_id)},
+            ).scalar() or 0
+            if active_count >= MAX_TASKS_PER_AGENT:
+                return {"success": False, "error": f"Agent has reached the limit of {MAX_TASKS_PER_AGENT} active tasks"}
+        else:
+            operator_count = self.db.execute(
+                text("""
+                    SELECT COUNT(*) FROM agent_scheduled_tasks
+                    WHERE workspace_id = :ws_id
+                      AND created_by_user_id IS NOT NULL
+                      AND status = 'active'
+                """),
+                {"ws_id": str(self.workspace_id)},
+            ).scalar() or 0
+            if operator_count >= MAX_OPERATOR_TASKS_PER_WORKSPACE:
+                return {
+                    "success": False,
+                    "error": f"Workspace has reached the limit of {MAX_OPERATOR_TASKS_PER_WORKSPACE} active scheduled board tasks",
+                }
 
         if task_type == "recurring":
             recurring_count = self.db.execute(
@@ -131,11 +180,12 @@ class ScheduledTaskService:
                 INSERT INTO agent_scheduled_tasks
                     (workspace_id, created_by_agent_id, target_agent_id,
                      task_type, description, schedule, max_runs, next_run_at,
-                     origin_chat_id)
+                     origin_chat_id, deliver_as, payload, created_by_user_id)
                 VALUES
                     (:ws_id, :created_by, :target,
                      :task_type, :description, :schedule, :max_runs, :next_run_at,
-                     CAST(:origin_chat_id AS uuid))
+                     CAST(:origin_chat_id AS uuid), :deliver_as, CAST(:payload AS jsonb),
+                     :created_by_user_id)
                 RETURNING id, created_at
             """),
             {
@@ -148,6 +198,9 @@ class ScheduledTaskService:
                 "max_runs": max_runs,
                 "next_run_at": next_run_at,
                 "origin_chat_id": str(origin_chat_id) if origin_chat_id else None,
+                "deliver_as": deliver_as,
+                "payload": json.dumps(payload) if payload else None,
+                "created_by_user_id": str(created_by_user_id) if created_by_user_id else None,
             },
         )
         row = result.fetchone()
@@ -158,20 +211,28 @@ class ScheduledTaskService:
         # Register with APScheduler
         self._register_with_scheduler(task_id, task_type, schedule, target_agent_id)
 
-        target_name = next((r.name for r in agent_check if r.id == target_agent_id), "unknown")
+        target_name = next((r.name for r in agent_check if r.id == target_agent_id), None)
         logger.info(
-            "[ScheduledTask] Created task %d: %s → agent '%s' (%s @ %s)",
-            task_id, task_type, target_name, task_type, schedule,
+            "[ScheduledTask] Created task %d: %s → %s '%s' (%s @ %s)",
+            task_id, task_type, deliver_as, target_name or "unassigned", task_type, schedule,
         )
+
+        if deliver_as == DELIVER_BOARD_TASK:
+            where = f"assigned to '{target_name}'" if target_name else "in the Inbox"
+            message = f"Scheduled {task_type} board task #{task_id} '{payload['title']}' — filed {where} when it fires"
+        else:
+            message = f"Scheduled {task_type} task #{task_id} for agent '{target_name or 'unknown'}'"
 
         return {
             "success": True,
             "task_id": task_id,
             "task_type": task_type,
+            "deliver_as": deliver_as,
+            "title": payload.get("title"),
             "target_agent": target_name,
             "schedule": schedule,
             "next_run_at": next_run_at.isoformat() if next_run_at else None,
-            "message": f"Scheduled {task_type} task #{task_id} for agent '{target_name}'",
+            "message": message,
         }
 
     # ------------------------------------------------------------------
@@ -224,6 +285,10 @@ class ScheduledTaskService:
                 {
                     "id": r.id,
                     "task_type": r.task_type,
+                    "deliver_as": getattr(r, "deliver_as", None) or DELIVER_CHAT,
+                    "title": (r.payload or {}).get("title") if isinstance(getattr(r, "payload", None), dict) else None,
+                    "payload": r.payload if isinstance(getattr(r, "payload", None), dict) else None,
+                    "created_by_user_id": getattr(r, "created_by_user_id", None),
                     "description": r.description,
                     "schedule": r.schedule,
                     "status": r.status,
@@ -339,8 +404,9 @@ class ScheduledTaskService:
                 logger.debug("[ScheduledTask] trial-skip check failed for task %d: %s", task_id, _e)
 
             logger.info(
-                "[ScheduledTask] Firing task %d: '%s' → agent %d",
-                task_id, task.description[:80], task.target_agent_id,
+                "[ScheduledTask] Firing task %d: '%s' → %s / agent %s",
+                task_id, task.description[:80], getattr(task, "deliver_as", DELIVER_CHAT),
+                task.target_agent_id,
             )
 
             # Update run tracking
@@ -387,15 +453,19 @@ class ScheduledTaskService:
 
             db.commit()
 
-            # Trigger agent chat via internal API
-            await ScheduledTaskService._trigger_agent_chat(
-                workspace_id=str(task.workspace_id),
-                agent_id=task.target_agent_id,
-                message=f"[Scheduled Task #{task_id}] {task.description}",
-                db=db,
-                origin_chat_id=getattr(task, "origin_chat_id", None),
-                task_id=task_id,
-            )
+            if getattr(task, "deliver_as", DELIVER_CHAT) == DELIVER_BOARD_TASK:
+                # Board delivery: the ticket goes on the board, the dispatcher runs it.
+                ScheduledTaskService._file_board_task(db, task, task_id)
+            else:
+                # Trigger agent chat via internal API
+                await ScheduledTaskService._trigger_agent_chat(
+                    workspace_id=str(task.workspace_id),
+                    agent_id=task.target_agent_id,
+                    message=f"[Scheduled Task #{task_id}] {task.description}",
+                    db=db,
+                    origin_chat_id=getattr(task, "origin_chat_id", None),
+                    task_id=task_id,
+                )
 
         except Exception as e:
             logger.error("[ScheduledTask] Task %d execution failed: %s", task_id, e, exc_info=True)
@@ -410,6 +480,79 @@ class ScheduledTaskService:
             db.commit()
         finally:
             db.close()
+
+    @staticmethod
+    def _file_board_task(db: Session, task: Any, task_id: int) -> None:
+        """Board delivery: file the ticket the row describes.
+
+        The same three steps the HTTP create path takes — insert, PRD-234 D16
+        consent when the operator who scheduled it also assigned it (local
+        edition), then the board SSE push and the dispatcher wake — so the
+        ticket runs exactly like one filed by hand. A recurring row files a fresh
+        ticket per fire (``source_id`` carries the fire time).
+        """
+        from core.models.core import BoardTask
+        from services.board_consent import (
+            WHY_SCHEDULED_AND_ASSIGNED, actor_from_user_id, consent_for_created_ticket,
+        )
+        from services.board_dispatcher import notify_task_available
+        from services.board_events import notify_board_event
+        from services.board_sla import PRIORITY_SLA_HOURS, sla_deadline_for
+        from services.cli_ticket_lane import source_id_for
+
+        payload = task.payload if isinstance(getattr(task, "payload", None), dict) else {}
+        description = str(task.description or "").strip()
+        first_line = description.splitlines()[0] if description else "Scheduled task"
+        title = (str(payload.get("title") or "").strip() or first_line)[:255]
+        priority = payload.get("priority") if payload.get("priority") in PRIORITY_SLA_HOURS else "medium"
+        review_mode = payload.get("review_mode") if payload.get("review_mode") in _REVIEW_MODES else "auto"
+        tags = [str(t) for t in (payload.get("tags") or []) if t]
+        assigned_agent_id = getattr(task, "target_agent_id", None)
+        created_by_user_id = getattr(task, "created_by_user_id", None)
+        now = datetime.now(timezone.utc)
+
+        ticket = BoardTask(
+            workspace_id=task.workspace_id,
+            title=title,
+            description=description or title,
+            priority=priority,
+            review_mode=review_mode,
+            assigned_agent_id=assigned_agent_id,
+            status="assigned" if assigned_agent_id else "inbox",
+            created_by_type="user" if created_by_user_id else "agent",
+            created_by_id=str(created_by_user_id or getattr(task, "created_by_agent_id", None) or ""),
+            source_type="scheduled_task",
+            source_id=source_id_for("task", task_id, now),
+            tags=tags,
+            sla_deadline=sla_deadline_for(priority, now=now),
+        )
+        db.add(ticket)
+        db.commit()
+        db.refresh(ticket)
+
+        if created_by_user_id:
+            consent_for_created_ticket(
+                db, workspace_id=task.workspace_id, task=ticket,
+                actor=actor_from_user_id(created_by_user_id), why=WHY_SCHEDULED_AND_ASSIGNED,
+            )
+        notify_board_event(
+            db, workspace_id=str(task.workspace_id), task_id=ticket.id,
+            status=ticket.status, event="task_created",
+        )
+        if ticket.status == "assigned":
+            notify_task_available(db, workspace_id=str(task.workspace_id), task_id=ticket.id)
+        logger.info("[ScheduledTask] Task %d filed board ticket #%s (%s)", task_id, ticket.id, ticket.status)
+
+        origin_chat_id = getattr(task, "origin_chat_id", None)
+        if origin_chat_id:
+            from services.chat_messenger import deliver_background_message
+
+            deliver_background_message(
+                db, workspace_id=str(task.workspace_id),
+                text=f"Filed board ticket #{ticket.id}: {title}",
+                source={"origin": "scheduled_task"}, chat_id=str(origin_chat_id),
+                link_type="board_task", link_id=str(ticket.id),
+            )
 
     @staticmethod
     async def _trigger_agent_chat(

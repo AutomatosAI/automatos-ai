@@ -3,9 +3,11 @@
  * Command Centre calendar surfaces.
  *
  * PATCH /api/v1/scheduled-tasks/{id}/status pauses, resumes or cancels a task
- * (all three are reversible: a cancelled task can be set active again). The
- * calendar reads these rows through the schedule feed, so a successful change
- * invalidates that feed rather than a scheduled-task list of its own.
+ * (all three are reversible: a cancelled task can be set active again).
+ * POST /api/v1/scheduled-tasks schedules a BOARD ticket for later (the Create
+ * Task dialog's "When"): it waits on the calendar and is filed on the board
+ * when it fires. The calendar reads these rows through the schedule feed, so a
+ * successful change invalidates that feed rather than a list of its own.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -49,6 +51,44 @@ export function useUpdateScheduledTaskStatus() {
     },
     onError: (error) => {
       toast.error(error.message || 'Could not update the scheduled task')
+    },
+  })
+}
+
+export interface CreateScheduledBoardTaskPayload {
+  title: string
+  description?: string
+  /** ISO datetime for one_shot, 5-field cron (UTC) for recurring */
+  schedule: string
+  task_type: 'one_shot' | 'recurring'
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  assigned_agent_id?: number
+  review_mode?: 'auto' | 'human' | 'llm'
+  tags?: string[]
+  max_runs?: number
+}
+
+export interface CreateScheduledTaskResponse {
+  success: boolean
+  task_id: number
+  task_type: 'one_shot' | 'recurring'
+  deliver_as: 'chat' | 'board_task'
+  title?: string | null
+  next_run_at: string | null
+  message?: string
+}
+
+export function useCreateScheduledBoardTask() {
+  const queryClient = useQueryClient()
+
+  return useMutation<CreateScheduledTaskResponse, Error, CreateScheduledBoardTaskPayload>({
+    mutationFn: (payload) =>
+      apiClient.request<CreateScheduledTaskResponse>('/api/v1/scheduled-tasks', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: SCHEDULE_FEED_KEY })
     },
   })
 }

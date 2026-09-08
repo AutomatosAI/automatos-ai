@@ -30,13 +30,8 @@ from core.models.orchestration_enums import (
     TaskState,
 )
 
-# Priority → SLA deadline hours
-_PRIORITY_SLA_HOURS: dict[str, int] = {
-    "urgent": 4,
-    "high": 12,
-    "medium": 24,
-    "low": 72,
-}
+# Priority → SLA deadline hours: the shared table (services.board_sla).
+from services.board_sla import PRIORITY_SLA_HOURS as _PRIORITY_SLA_HOURS  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
