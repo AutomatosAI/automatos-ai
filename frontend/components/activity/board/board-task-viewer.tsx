@@ -66,9 +66,14 @@ function SessionBlock({ task }: { task: BoardTask }) {
   if (!ref || ref.runtime !== 'cli') return null
   const files: string[] = Array.isArray(ref.files_touched) ? ref.files_touched : []
   const usage = ref.usage || {}
-  const takeover = ref.session_id
-    ? `${ref.cwd ? `cd ${ref.cwd} && ` : ''}claude --resume ${ref.session_id}`
+  // Claude Code keeps transcripts per project directory, so `--resume` only
+  // works from the session's own cwd — which the host reports at SessionStart.
+  // Until then there is nothing to resume: say so instead of a command that
+  // answers "No conversation found".
+  const takeover = ref.session_id && ref.cwd
+    ? `cd ${ref.cwd} && claude --resume ${ref.session_id}`
     : null
+  const takeoverPending = Boolean(ref.session_id && !ref.cwd && !ref.exit_reason)
   return (
     <div>
       <SectionLabel icon={<TerminalSquare className="w-3 h-3" />}>Claude Code session</SectionLabel>
@@ -123,9 +128,14 @@ function SessionBlock({ task }: { task: BoardTask }) {
             </ul>
           </div>
         )}
+        {takeoverPending && (
+          <p className="text-xs text-muted-foreground" data-testid="takeover-pending">
+            Take-over becomes available once the session has started (the command needs its working directory).
+          </p>
+        )}
         {takeover && (
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Take over in your terminal</p>
+            <p className="text-xs text-muted-foreground mb-1">Take over in your terminal (run it as one line — the transcript lives in that directory)</p>
             <div className="flex items-center gap-2">
               <code className="block flex-1 rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
               <Button

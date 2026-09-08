@@ -371,6 +371,11 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         cfg = (getattr(agent, "configuration", None) if agent else None) or {}
         prior = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
         resume_session_id = _resume_session_for(prior, host)
+        if resume_session_id is None and task.source_type == CHAT_SOURCE_TYPE:
+            # The previous turn was still running when this message was filed
+            # (the hold above waited for it): resolve the session to continue
+            # NOW that it has ended — again only when this host ran it.
+            resume_session_id = _resume_previous_chat_session(db, task, host)
         session_id = str(uuid4())
         ref = {
             "runtime": RUNTIME_CLI,
@@ -440,6 +445,21 @@ def _resume_session_for(prior: Dict[str, Any], host: CliHost) -> Optional[str]:
     if str(prior.get("resume_host_id") or "") != str(host.id):
         return None
     return str(session_id)
+
+
+def _resume_previous_chat_session(db: Session, task: BoardTask, host: CliHost) -> Optional[str]:
+    """The ended session of this conversation's previous turn, when THIS host ran
+    it — resolved at claim time for a chat ticket filed while that turn was
+    still running (so the filing could not know the session yet)."""
+    from services.cli_ticket_lane import chat_origin_of, previous_session_of
+
+    chat_id = chat_origin_of(task)
+    if not chat_id or not getattr(task, "assigned_agent_id", None):
+        return None
+    previous = previous_session_of(db, task.workspace_id, chat_id, task.assigned_agent_id)
+    if not previous or str(previous[1]) != str(host.id):
+        return None
+    return str(previous[0])
 
 
 def _release_claim(task: BoardTask) -> None:
