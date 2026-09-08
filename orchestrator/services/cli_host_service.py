@@ -282,6 +282,128 @@ def workspace_check(db: Session, workspace_id: Any, path: str) -> Dict[str, Any]
     }
 
 
+# ── PRD-239 S7: terminal grants (the Canvas terminal) ─────────────────────────
+# The operator asks for a terminal; the backend mints a single-use, short-lived
+# grant and hands the browser the host's loopback URL. The host learns the grant
+# on its next heartbeat. Grants live in Redis (shared across workers) with an
+# in-process fallback for a single-worker local stack without Redis.
+
+TERMINAL_GRANT_TTL_SECONDS = 120
+_TERMINAL_GRANTS: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def _terminal_grants_key(host_id: Any) -> str:
+    return f"cli-host:terminal-grants:{host_id}"
+
+
+def _redis():
+    try:
+        from core.redis.client import get_redis_client
+
+        return get_redis_client()
+    except Exception:  # noqa: BLE001 — no Redis is a supported local shape
+        return None
+
+
+def push_terminal_grant(host_id: Any, grant: Dict[str, Any]) -> None:
+    import json as _json
+
+    client = _redis()
+    if client is not None:
+        try:
+            key = _terminal_grants_key(host_id)
+            client.rpush(key, _json.dumps(grant))
+            client.expire(key, TERMINAL_GRANT_TTL_SECONDS)
+            return
+        except Exception:  # noqa: BLE001 — fall back to the process store
+            logger.debug("[cli-host] terminal grant not stored in Redis — using the process store", exc_info=True)
+    _TERMINAL_GRANTS.setdefault(str(host_id), []).append(grant)
+
+
+def pop_terminal_grants(host_id: Any) -> List[Dict[str, Any]]:
+    """Every grant minted for this host since its last heartbeat, unexpired."""
+    import json as _json
+    import time as _time
+
+    grants: List[Dict[str, Any]] = []
+    client = _redis()
+    if client is not None:
+        try:
+            key = _terminal_grants_key(host_id)
+            raw = client.lrange(key, 0, -1)
+            client.delete(key)
+            for item in raw or []:
+                text = item.decode("utf-8") if isinstance(item, (bytes, bytearray)) else str(item)
+                parsed = _json.loads(text)
+                if isinstance(parsed, dict):
+                    grants.append(parsed)
+        except Exception:  # noqa: BLE001
+            logger.debug("[cli-host] terminal grants not read from Redis", exc_info=True)
+    grants += _TERMINAL_GRANTS.pop(str(host_id), [])
+    now = _time.time()
+    fresh = []
+    for grant in grants:
+        try:
+            if float(grant.get("expires_at") or 0) > now:
+                fresh.append(grant)
+        except (TypeError, ValueError):
+            continue
+    return fresh
+
+
+def mint_terminal_grant(
+    db: Session, host: CliHost, *, cwd: Optional[str] = None, task_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """A grant for one terminal on ``host``: in a ticket's real directory
+    (``task_id``), in an agent's working directory (``cwd``, checked against
+    the host's allowed directories), or in the host's default folder."""
+    import time as _time
+
+    from core.cli_runtime import validate_working_directory
+
+    caps = host.capabilities if isinstance(host.capabilities, dict) else {}
+    port = caps.get("terminal_port")
+    if not port:
+        raise LookupError("this host does not serve a terminal — update the host to 0.3.0+ and restart it")
+    resolved_cwd: Optional[str] = None
+    if task_id is not None:
+        task = (
+            db.query(BoardTask)
+            .filter(BoardTask.id == int(task_id), BoardTask.workspace_id == host.workspace_id)
+            .first()
+        )
+        if task is None:
+            raise LookupError(f"task {task_id} not found in this workspace")
+        ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
+        resolved_cwd = str(ref["cwd"]) if ref.get("cwd") else None
+    elif cwd:
+        errors = validate_working_directory(cwd)
+        if errors:
+            raise ValueError(errors[0])
+        clean = cwd.strip()
+        roots = host_allow_dirs(db, host.workspace_id)
+        if roots and not any(_inside(clean, r) for r in roots):
+            raise PermissionError(f"{clean} is outside the directories this host may run in ({', '.join(roots)})")
+        resolved_cwd = clean
+    token = secrets.token_urlsafe(24)
+    expires_at = _time.time() + TERMINAL_GRANT_TTL_SECONDS
+    grant = {
+        "token": token,
+        "cwd": resolved_cwd,
+        "task_id": str(task_id) if task_id is not None else None,
+        "expires_at": expires_at,
+    }
+    push_terminal_grant(host.id, grant)
+    return {
+        "token": token,
+        "port": int(port),
+        "ws_url": f"ws://127.0.0.1:{int(port)}/terminal?token={token}",
+        "cwd": resolved_cwd,
+        "task_id": grant["task_id"],
+        "expires_at": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+    }
+
+
 def list_hosts(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
     rows = (
         db.query(CliHost)
@@ -346,7 +468,13 @@ def record_heartbeat(
             continue
         stale.append(task.id)
     db.commit()
-    return {"reattached": reattached, "stale": stale, "server_time": _iso(_now())}
+    return {
+        "reattached": reattached,
+        "stale": stale,
+        "server_time": _iso(_now()),
+        # PRD-239 S7: the terminal grants the operator asked for since the last beat.
+        "terminal_grants": pop_terminal_grants(host.id),
+    }
 
 
 # ── claim ────────────────────────────────────────────────────────────────────

@@ -15,10 +15,8 @@
  */
 
 import { useState } from 'react'
-import { Loader2, Play, Send, Square, Sparkles } from 'lucide-react'
-import { toast } from 'sonner'
+import { Loader2, Play, Send, Square, Sparkles, TerminalSquare } from 'lucide-react'
 
-import { dispatchCanvasCompose } from '@/lib/chat/canvas-compose'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
@@ -63,34 +61,24 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
     setPrompt('')
   }
 
-  // PRD-239 S7: beside a ticket's Claude Code session the text goes through the
-  // chat lane — the chat page selects the ticket's agent and sends it as a turn,
-  // which files a follow-up ticket that resumes this session.
-  const submitToChat = () => {
-    const text = prompt.trim()
-    if (!text || session.taskId == null) return
-    if (dispatchCanvasCompose(session.taskId, text)) {
-      toast.success('Sent to the chat — the reply lands there')
-      setPrompt('')
-    } else {
-      toast.error('Open this session from the chat page to message the agent')
-    }
-  }
-
   return (
     <div className="flex h-full flex-col border-l border-border bg-background" data-testid="canvas-session-panel">
       {/* Header: status + start/stop */}
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Auto Session</span>
+          {session.external ? (
+            <TerminalSquare className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <Sparkles className="h-4 w-4 text-muted-foreground" />
+          )}
+          <span className="text-sm font-medium">{session.external ? 'Claude Code session' : 'Auto Session'}</span>
           <Badge variant={statusVariant(ui.status)} data-testid="session-status">
             {STATUS_LABEL[ui.status]}
           </Badge>
         </div>
         {session.external ? (
           <span className="text-xs text-muted-foreground" data-testid="session-external-label">
-            Live · Claude Code session for ticket #{String(session.taskId)} — approvals and takeover live on the ticket.
+            Ticket #{String(session.taskId)} on your machine — talk to the agent in the chat; take over from the ticket card.
           </span>
         ) : isLive ? (
           <Button size="sm" variant="outline" onClick={() => void session.stop()} data-testid="session-stop">
@@ -109,20 +97,24 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
         )}
       </div>
 
-      {/* Auto-accept toggle (session-scoped, edits only, visibly indicated) */}
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <div className="flex flex-col">
-          <span className="text-xs font-medium">Auto-accept edits</span>
-          <span className="text-[11px] text-muted-foreground">
-            Applies file edits without a prompt. Never bash.
-          </span>
+      {/* Auto-accept toggle (session-scoped, edits only, visibly indicated) — the
+          worker's SDK session only; a ticket's Claude Code session answers its own
+          permission questions through the cards below (PRD-235 W2 S3). */}
+      {!session.external && (
+        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+          <div className="flex flex-col">
+            <span className="text-xs font-medium">Auto-accept edits</span>
+            <span className="text-[11px] text-muted-foreground">
+              Applies file edits without a prompt. Never bash.
+            </span>
+          </div>
+          <Switch
+            checked={approvals.autoAcceptEdits}
+            onCheckedChange={(v: boolean) => void session.setAutoAccept(v)}
+            data-testid="auto-accept-toggle"
+          />
         </div>
-        <Switch
-          checked={approvals.autoAcceptEdits}
-          onCheckedChange={(v: boolean) => void session.setAutoAccept(v)}
-          data-testid="auto-accept-toggle"
-        />
-      </div>
+      )}
 
       {(startError || ui.error) && (
         <div className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="session-error">
@@ -144,9 +136,11 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
         <div className="space-y-2 p-3" data-testid="session-turns">
           {ui.turns.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              {isLive
-                ? 'Ask Auto to change this workspace — streamed turns and diffs appear here.'
-                : 'Start a session to code with Auto in this workspace.'}
+              {session.external
+                ? 'Nothing streamed for this session yet. Its tool calls, file edits and final text appear here while it runs; the reply lands in the chat.'
+                : isLive
+                  ? 'Ask Auto to change this workspace — streamed turns and diffs appear here.'
+                  : 'Start a session to code with Auto in this workspace.'}
             </p>
           ) : (
             ui.turns.map((turn, i) => <TurnRow key={i} turn={turn} />)
@@ -154,39 +148,9 @@ export function CanvasSessionPanel({ session, workspaceId }: CanvasSessionPanelP
         </div>
       </ScrollArea>
 
-      {/* PRD-239 S7: a ticket's Claude Code session is a read-only mirror here (PRD-234:
-          the host never types into the session). A message typed beside it goes through
-          the chat lane and continues the session as a follow-up ticket. */}
-      {session.external && (
-        <form
-          className="flex items-end gap-2 border-t border-border p-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            submitToChat()
-          }}
-          data-testid="canvas-composer-external"
-        >
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                submitToChat()
-              }
-            }}
-            rows={2}
-            placeholder="Message the agent — continues this session through the chat; the reply lands there"
-            className="flex-1 resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:ring-1 focus:ring-ring"
-            data-testid="canvas-composer-external-input"
-          />
-          <Button type="submit" size="sm" disabled={!prompt.trim()} data-testid="canvas-composer-external-send">
-            <Send className="h-3.5 w-3.5" />
-          </Button>
-        </form>
-      )}
-
-      {/* Prompt composer (PRD-203 C·S7) — the box to instruct Auto. */}
+      {/* Prompt composer (PRD-203 C·S7) — the box to instruct Auto. A ticket's Claude
+          Code session is a read-only mirror here (PRD-234: the host never types into
+          it); the one place to talk to that agent is the chat. */}
       {isLive && !session.external && (
         <form
           className="flex items-end gap-2 border-t border-border p-2"

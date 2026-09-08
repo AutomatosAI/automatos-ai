@@ -36,7 +36,7 @@ export function RootPicker({ workspaceId, value, onChange }: { workspaceId: stri
           )}
         </SelectContent>
       </Select>
-      <span className="text-muted-foreground">Auto works in this folder while Code mode is open.</span>
+      <span className="text-muted-foreground">The chat sees this folder while Code mode is open.</span>
     </div>
   )
 }

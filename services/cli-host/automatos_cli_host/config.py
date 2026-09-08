@@ -53,6 +53,10 @@ class HostConfig:
     claude_binary: Optional[str] = None  # explicit path; default = the user's PATH
     use_worktrees: bool = True
     verbose: bool = False
+    # PRD-239 S7: the Canvas terminal — the operator's own shell served on the
+    # loopback. 0 = an ephemeral port (announced in the host's capabilities).
+    terminal_enabled: bool = True
+    terminal_port: int = 0
 
     # service actions (PRD-235 W3): install | uninstall | status | restart | nudge | None (= run)
     service_action: Optional[str] = None
@@ -111,6 +115,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--no-terminal", action="store_true",
+                   help="do not serve the Canvas terminal (your own shell on 127.0.0.1 for the browser on this machine)")
+    p.add_argument("--terminal-port", type=int, default=0,
+                   help="fixed loopback port for the Canvas terminal (default: an ephemeral port, announced to the backend)")
     svc = p.add_mutually_exclusive_group()
     svc.add_argument("--install", dest="service_action", action="store_const", const="install",
                      help="run this host as a login service (launchd on macOS, systemd --user on Linux) with these arguments")
@@ -142,6 +150,8 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         use_worktrees=not ns.no_worktrees,
         verbose=ns.verbose,
         service_action=ns.service_action,
+        terminal_enabled=not ns.no_terminal,
+        terminal_port=max(0, min(65535, int(ns.terminal_port or 0))),
     )
     if ns.name:
         cfg.name = ns.name

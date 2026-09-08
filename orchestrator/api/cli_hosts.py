@@ -26,7 +26,7 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
-from core.models.cli_hosts import CliHost
+from core.models.cli_hosts import CliHost, CliHostStatus
 from services import cli_host_service as svc
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,13 @@ class EventsRequest(BaseModel):
     events: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class TerminalRequest(BaseModel):
+    """PRD-239 S7: where the Canvas terminal should open — a ticket's real
+    directory, or an agent's working directory; neither = the host's default."""
+    task_id: Optional[int] = None
+    cwd: Optional[str] = Field(None, max_length=1024)
+
+
 class ResultRequest(BaseModel):
     attempt: Optional[int] = None
     status: str = Field("success", pattern="^(success|error|cancelled)$")
@@ -140,6 +147,37 @@ async def workspace_check(
     saved — valid, browsable in the Canvas (as which root), and inside the
     paired host's allowed directories. Read-only; nothing is written."""
     return svc.workspace_check(db, ctx.workspace_id, path)
+
+
+@router.post("/{host_id}/terminal")
+async def open_terminal(
+    host_id: UUID,
+    body: TerminalRequest,
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S7: mint a single-use grant for the operator's own shell on the
+    paired host (served on the host's loopback for the browser on that machine).
+    Nothing runs here; the host opens the shell when the browser connects."""
+    host = (
+        db.query(CliHost)
+        .filter(
+            CliHost.id == host_id,
+            CliHost.workspace_id == ctx.workspace_id,
+            CliHost.status == CliHostStatus.PAIRED.value,
+        )
+        .first()
+    )
+    if host is None:
+        raise HTTPException(status_code=404, detail="no paired CLI host with that id in this workspace")
+    try:
+        return svc.mint_terminal_grant(db, host, cwd=body.cwd, task_id=body.task_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.post("/pairing-codes")
