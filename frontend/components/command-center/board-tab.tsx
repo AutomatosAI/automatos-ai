@@ -19,7 +19,8 @@
  * lives in /chat?mode=plan and routine creation in /agents.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   DragDropContext,
   Droppable,
@@ -35,7 +36,7 @@ import {
   BookMarked,
   CheckSquare,
 } from 'lucide-react'
-import { useBoardTasks, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
+import { useBoardTasks, useBoardTask, useUpdateTaskStatus } from '@/hooks/use-board-tasks'
 import { useAssignableAgents } from '@/hooks/use-agent-api'
 import { BoardTaskViewer } from '@/components/activity/board/board-task-viewer'
 import { HostOfflineBanner } from '@/components/activity/board/host-offline-banner'
@@ -78,6 +79,19 @@ export function BoardTab() {
   const updateStatus = useUpdateTaskStatus()
 
   const allTasks = useMemo(() => columns.flatMap((c) => c.tasks), [columns])
+
+  // Deep link: ?task_id=123 (the calendar's "Open on board", notifications).
+  // Fetched by id so the search/agent/priority filters can't hide the card
+  // from the link. Opens once per id.
+  const deepLinkTaskId = useSearchParams().get('task_id')
+  const { data: deepLinkedTask } = useBoardTask(deepLinkTaskId)
+  const openedDeepLink = useRef<string | null>(null)
+  useEffect(() => {
+    if (!deepLinkTaskId || !deepLinkedTask || openedDeepLink.current === deepLinkTaskId) return
+    openedDeepLink.current = deepLinkTaskId
+    setOpenTask(deepLinkedTask)
+    setViewerOpen(true)
+  }, [deepLinkTaskId, deepLinkedTask])
 
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return

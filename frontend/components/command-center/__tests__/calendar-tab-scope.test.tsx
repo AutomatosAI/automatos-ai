@@ -16,6 +16,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }))
 vi.mock('@/hooks/use-activity-api', () => ({
+  activityQueryKeys: { all: ['activity'] },
   useActivitySchedule: () => ({
     data: { scheduled: [] },
     isLoading: false,
@@ -25,7 +26,10 @@ vi.mock('@/hooks/use-activity-api', () => ({
   useSchedulerHealth: () => ({ data: { healthy: null, last_fired_at: null } }),
 }))
 vi.mock('@/hooks/use-heartbeats-api', () => ({
-  useHeartbeats: () => ({ data: { heartbeats: [] } }),
+  useToggleHeartbeat: () => ({ mutate: vi.fn() }),
+}))
+vi.mock('@/hooks/use-scheduled-tasks-api', () => ({
+  useUpdateScheduledTaskStatus: () => ({ mutate: vi.fn() }),
 }))
 
 import { CalendarTab } from '../calendar-tab'

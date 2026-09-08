@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { DragDropContext, type DropResult } from '@hello-pangea/dnd'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import { BoardTaskViewer } from './board-task-viewer'
 import { CreateTaskDialog } from './create-task-dialog'
 import { HostOfflineBanner } from './host-offline-banner'
 import { useBoardTasks, useUpdateTaskStatus, type BoardFilters } from '@/hooks/use-board-tasks'
+import { useBoardTasks, useBoardTask, useUpdateTaskStatus, type BoardFilters } from '@/hooks/use-board-tasks'
 import { useDeleteTask } from '@/hooks/use-board-tasks-api'
 import type { BoardTask, BoardStatus } from '@/types/board'
 import { cn } from '@/lib/utils'
@@ -60,6 +62,19 @@ export function BoardView({ period, className }: BoardViewProps) {
     setTaskViewerOpen(open)
     if (!open) setOpenTask(null)
   }, [])
+
+  // Deep link: /command-center?tab=board&task_id=123 (the calendar's "Open on
+  // board", notifications). Fetched by id so a period/agent filter that hides
+  // the card from the columns can't hide it from the link. Opens once per id.
+  const deepLinkTaskId = useSearchParams().get('task_id')
+  const { data: deepLinkedTask } = useBoardTask(deepLinkTaskId)
+  const openedDeepLink = useRef<string | null>(null)
+  useEffect(() => {
+    if (!deepLinkTaskId || !deepLinkedTask || openedDeepLink.current === deepLinkTaskId) return
+    openedDeepLink.current = deepLinkTaskId
+    setOpenTask(deepLinkedTask)
+    setTaskViewerOpen(true)
+  }, [deepLinkTaskId, deepLinkedTask])
 
   const handleSelectAgent = useCallback((agentId: number | null) => {
     setSelectedAgentId(agentId)
