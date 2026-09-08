@@ -75,7 +75,9 @@ def save_allowlist(path: Path, dirs: List[str]) -> None:
 # ── process table ────────────────────────────────────────────────────────────
 
 def write_pid(path: Path) -> None:
-    """The running host's pid, for ``--nudge`` (SIGHUP → drain and restart)."""
+    """The running host's pid, for ``--nudge`` (SIGHUP → drain and restart).
+    The state dir may not exist yet on a first run without ``prepare()``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"{os.getpid()}\n")
 
 

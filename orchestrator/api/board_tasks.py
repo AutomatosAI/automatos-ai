@@ -1262,9 +1262,11 @@ def _note_no_host_for_cli(db: Session, task: "BoardTask") -> bool:
     """A ``cli`` agent's ticket waits for the paired host; while none is online
     the ticket says so (the lane's own line), cleared once one is back. Returns
     True when the row changed. No-op for API-runtime agents."""
-    if task is None or not task.assigned_agent_id:
+    # A test double or a partial row may carry no assignee: nothing to note.
+    agent_id = getattr(task, "assigned_agent_id", None) if task is not None else None
+    if not agent_id:
         return False
-    if _agent_runtime_kind(db, task.assigned_agent_id) != RUNTIME_CLI:
+    if _agent_runtime_kind(db, agent_id) != RUNTIME_CLI:
         return False
     from services.cli_ticket_lane import NO_HOST_REASON, host_online
     if not host_online(db, task.workspace_id):

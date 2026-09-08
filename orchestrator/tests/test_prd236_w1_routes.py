@@ -162,8 +162,13 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     assert 'down_revision = "prd234_s1a_cli_hosts_runtime_ref"' in src
     assert "uq_llm_models_provider_model" in src and "serving_provider" in src
     assert "new_column_name=\"sourcing\"" in src  # PRD-223 Q1 executed
+    # 2026-09-08: prd237_users_chat_sessions chained onto the same S1a head, so the
+    # single head is the merge revision that joins the two; the guard follows it.
+    merge = (versions / "prd236w1_prd237_merge.py").read_text()
+    assert 'revision = "prd236w1_prd237_merge"' in merge
+    assert '"prd236_w1_serving_provider"' in merge and '"prd237_users_chat_sessions"' in merge
     guard = (Path(__file__).resolve().parent / "test_prd209_alembic_single_head.py").read_text()
-    assert 'EXPECTED_HEAD = "prd236_w1_serving_provider"' in guard
+    assert 'EXPECTED_HEAD = "prd236w1_prd237_merge"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
