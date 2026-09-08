@@ -16,6 +16,12 @@
  * Prev / Today / Next actually move the visible window. No speculative
  * "Schedule task" / "Filter" / "Export" CTAs — those don't belong on a
  * monitoring surface.
+ *
+ * Mounted by BOTH the studio CommandCenterShell and the classic ActivityPage
+ * (dark / light / matte themes). Every `cc-cal-*` rule in globals.css is
+ * scoped `:is(.studio, .cc-cal-root)`, so the `.cc-cal-root` wrapper below is
+ * what styles the calendar when no `.studio` ancestor exists — drop it and
+ * the classic Command Centre renders the grid as a stack of unstyled divs.
  */
 
 import { useMemo, useState } from 'react'
@@ -456,7 +462,7 @@ export function CalendarTab() {
   })()
 
   return (
-    <>
+    <div className="cc-cal-root">
       <div className="cc-cal-toolbar">
         <div className="cc-seg" role="group" aria-label="Calendar mode">
           <button
@@ -751,7 +757,7 @@ export function CalendarTab() {
           )}
         </div>
       )}
-    </>
+    </div>
   )
 }
 
