@@ -96,7 +96,12 @@ jobs:
       # shared libs the dependency set needs at import time.
       - name: Install system libraries
         run: |
-          sudo apt-get update
+          # The runner image carries third-party apt sources (Google Chrome,
+          # Microsoft); a stale index there ("Hash Sum mismatch", 2026-09-09) makes
+          # apt-get update exit 100 and bash -e kills the step before a single
+          # test runs. The packages below come from Ubuntu's own archive, so a
+          # partial update is fine — install fails loudly if THAT index is stale.
+          sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
             libcairo2 libffi-dev libmagic1 ghostscript
@@ -189,7 +194,12 @@ jobs:
 
       - name: Install system libraries
         run: |
-          sudo apt-get update
+          # The runner image carries third-party apt sources (Google Chrome,
+          # Microsoft); a stale index there ("Hash Sum mismatch", 2026-09-09) makes
+          # apt-get update exit 100 and bash -e kills the step before a single
+          # test runs. The packages below come from Ubuntu's own archive, so a
+          # partial update is fine — install fails loudly if THAT index is stale.
+          sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
             libcairo2 libffi-dev libmagic1 ghostscript
@@ -458,7 +468,12 @@ jobs:
 
       - name: Install system libraries
         run: |
-          sudo apt-get update
+          # The runner image carries third-party apt sources (Google Chrome,
+          # Microsoft); a stale index there ("Hash Sum mismatch", 2026-09-09) makes
+          # apt-get update exit 100 and bash -e kills the step before a single
+          # test runs. The packages below come from Ubuntu's own archive, so a
+          # partial update is fine — install fails loudly if THAT index is stale.
+          sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
             libcairo2 libffi-dev libmagic1 ghostscript
@@ -733,7 +748,12 @@ jobs:
 
       - name: Install system libraries
         run: |
-          sudo apt-get update
+          # The runner image carries third-party apt sources (Google Chrome,
+          # Microsoft); a stale index there ("Hash Sum mismatch", 2026-09-09) makes
+          # apt-get update exit 100 and bash -e kills the step before a single
+          # test runs. The packages below come from Ubuntu's own archive, so a
+          # partial update is fine — install fails loudly if THAT index is stale.
+          sudo apt-get update || echo "::warning::apt-get update reported errors (a third-party index?) — continuing with the indexes that did refresh"
           sudo apt-get install -y --no-install-recommends \
             libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
             libcairo2 libffi-dev libmagic1 ghostscript

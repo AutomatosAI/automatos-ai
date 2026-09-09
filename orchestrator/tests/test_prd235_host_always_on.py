@@ -20,7 +20,7 @@ def test_contract_fields_are_stable_and_versioned():
     assert re.fullmatch(r"[0-9a-f]{16}", f["host_contract"])
     # 0.4.0: PRD-239 S7 v2 — terminal grants carry a launch; TerminalOpened/Closed events.
     # 0.5.0: session results and TerminalClosed carry the turn's token usage (analytics).
-    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.5.0"
+    assert f["expected_host_version"] == svc.EXPECTED_CLI_HOST_VERSION == "0.6.0"
     assert svc.contract_fields() == f
 
 
