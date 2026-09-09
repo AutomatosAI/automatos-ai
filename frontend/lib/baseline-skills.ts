@@ -7,8 +7,12 @@
  * operator can use because the operator is the instance's super admin. The
  * skills repo is the source of truth for the library; re-import to pick up
  * updates.
+ *
+ * The URL is the plain repository page, not the `.git` clone URL: people copy
+ * and paste what they see, and the browser address bar has no `.git`. The
+ * import route appends `.git` itself when it is missing.
  */
-export const BASELINE_SKILLS_REPO_URL = 'https://github.com/AutomatosAI/automatos-skills.git'
+export const BASELINE_SKILLS_REPO_URL = 'https://github.com/AutomatosAI/automatos-skills'
 
 /** The same repo without the `.git` suffix, for display. */
 export const BASELINE_SKILLS_REPO_LABEL = 'github.com/AutomatosAI/automatos-skills'

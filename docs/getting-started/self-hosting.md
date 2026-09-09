@@ -70,7 +70,7 @@ accepted but its processing ends `failed`.
 **Skills.** A fresh install ships with no skills in the marketplace. Start with
 the free baseline library: in **Marketplace → Capabilities** press *Import from
 GitHub* (the local operator is the instance's super admin, so the button is
-there) and import `https://github.com/AutomatosAI/automatos-skills.git` — the
+there) and import `https://github.com/AutomatosAI/automatos-skills` — the
 modal offers it as *Use baseline repo*. Every `SKILL.md` in the repo becomes a
 marketplace skill you can enable per agent; re-import later to pick up updates.
 
