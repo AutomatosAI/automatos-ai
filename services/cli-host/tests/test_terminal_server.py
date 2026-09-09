@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import socket
 import struct
 import time
@@ -129,7 +130,10 @@ def test_a_grant_opens_a_shell_in_the_directory_and_the_output_streams_back(tmp_
         reader = ts.FrameReader()
         seen = b""
         deadline = time.time() + 10
-        while b"AUTOMATOS_OK" not in seen and time.time() < deadline:
+        # The PTY echoes the typed command ("$ pwd; echo AUTOMATOS_OK") before the
+        # shell answers — the marker must be read on its OWN output line, or the
+        # loop stops before `pwd` has printed (flaked in CI and locally, 2026-09-09).
+        while not re.search(rb"(^|\n)AUTOMATOS_OK\r?\n", seen) and time.time() < deadline:
             try:
                 data = s.recv(65536)
             except socket.timeout:
