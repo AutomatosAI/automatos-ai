@@ -302,7 +302,7 @@ export function AnalyticsCosts({ days }: Props) {
         {
           label: 'Total Cost',
           value: formatCost(data?.summary?.totalCost || 0),
-          change: `Last ${days} days · ${data?.byProvider?.length || 0} provider${(data?.byProvider?.length || 0) === 1 ? '' : 's'}`,
+          change: `${data?.byProvider?.length || 0} provider${(data?.byProvider?.length || 0) === 1 ? '' : 's'} · ${days}d`,
           icon: DollarSign,
           iconColor: 'text-[hsl(var(--success))]',
           globalIconKey: 'global_cost',
@@ -311,8 +311,8 @@ export function AnalyticsCosts({ days }: Props) {
           label: 'Total Tokens',
           value: formatNumber(data?.summary?.totalTokens || 0),
           change: (data?.summary?.cacheShare || 0) > 0
-            ? `${((data?.summary?.cacheShare || 0) * 100).toFixed(0)}% of prompts served from cache`
-            : 'Input + Output · API + sessions',
+            ? `${((data?.summary?.cacheShare || 0) * 100).toFixed(0)}% from cache`
+            : 'API + sessions',
           icon: Zap,
           iconColor: 'text-[hsl(var(--info))]',
         },
@@ -322,7 +322,7 @@ export function AnalyticsCosts({ days }: Props) {
           value: (data?.summary?.costPerTask || 0) < 0.01 && (data?.summary?.costPerTask || 0) > 0
             ? `${((data?.summary?.costPerTask || 0) * 100).toFixed(2)}¢`
             : formatCost(data?.summary?.costPerTask || 0),
-          change: `${formatNumber(data?.summary?.totalRequests || 0)} requests · ${((data?.summary?.errorRate || 0) * 100).toFixed(1)}% failed`,
+          change: `${formatNumber(data?.summary?.totalRequests || 0)} requests`,
           icon: Activity,
           iconColor: 'text-[hsl(var(--agent))]',
         },
@@ -340,7 +340,7 @@ export function AnalyticsCosts({ days }: Props) {
             : '—',
           change: data?.summary?.mostExpensiveAgent
             ? (data.summary.mostExpensiveAgent.model && data.summary.mostExpensiveAgent.model !== 'unknown'
-                ? `${data.summary.mostExpensiveAgent.cost > 0 ? 'on' : 'tokens on'} ${data.summary.mostExpensiveAgent.model}`
+                ? shortenModelName(data.summary.mostExpensiveAgent.model.split(' · ')[0])
                 : `${formatNumber(data.summary.mostExpensiveAgent.tokens)} tokens`)
             : 'No data',
           icon: AlertTriangle,
