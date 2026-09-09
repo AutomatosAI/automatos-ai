@@ -445,3 +445,20 @@ def test_terminal_log_keeps_the_newest_bytes_and_a_readable_tail(tmp_path):
     log.close()
     log.write(b"after close")  # ignored, never raises
     assert oct((tmp_path / "s" / "terminal.log").stat().st_mode & 0o777) == "0o600"
+
+
+def test_default_root_flag_is_parsed_and_wins_over_the_allowlist_order(tmp_path):
+    """The Makefile passes AUTOMATOS_WORKSPACE_DIR as --default-root so a ticket with
+    no folder runs there even on a host whose allowlist grew in another order."""
+    from automatos_cli_host.config import parse_args
+    cfg = parse_args(["--allow", str(tmp_path / "Development"), "--default-root", str(tmp_path / "Development" / "deliverables")])
+    assert cfg.default_root == tmp_path / "Development" / "deliverables"
+    saved = [str((tmp_path / "Development").resolve()), str((tmp_path / "old-workspaces").resolve())]
+    roots, default = allowlist.choose_default_root(saved, str(cfg.default_root))
+    assert default == str((tmp_path / "Development" / "deliverables").resolve())
+    assert roots == saved + [default]  # registered too, once
+    assert allowlist.choose_default_root(roots, str(cfg.default_root))[0] == roots
+    # without the flag: the first registered root, and nothing registered is refused
+    assert allowlist.choose_default_root(saved, None) == (saved, saved[0])
+    with pytest.raises(allowlist.NotAllowed):
+        allowlist.choose_default_root([], None)

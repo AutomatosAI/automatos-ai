@@ -42,6 +42,8 @@ def service_argv(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> Li
     argv = [sys.executable, "-m", "automatos_cli_host", "--url", cfg.url, "--dir", str(cfg.state_dir), "--name", cfg.name]
     for d in cfg.allow_dirs:
         argv += ["--allow", str(Path(d).expanduser().resolve())]
+    if cfg.default_root:
+        argv += ["--default-root", str(Path(cfg.default_root).expanduser().resolve())]
     if cfg.max_sessions > 0:
         argv += ["--max-sessions", str(cfg.max_sessions)]
     if cfg.claude_binary:

@@ -39,6 +39,9 @@ class HostConfig:
     url: str = DEFAULT_URL
     state_dir: Path = DEFAULT_STATE_DIR
     allow_dirs: List[Path] = field(default_factory=list)
+    # Where a ticket with no folder runs (<root>/sessions/<ticket>): the deliverables
+    # root compose mounts as the workspace root. None = the first registered root.
+    default_root: Optional[Path] = None
     pair_code: Optional[str] = None
     name: str = field(default_factory=lambda: socket.gethostname() or "cli-host")
     once: bool = False
@@ -97,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="host state directory (token, allowlist, process table)")
     p.add_argument("--allow", action="append", default=[], metavar="DIR",
                    help="a directory sessions may work in (repeatable); registered directories only")
+    p.add_argument("--default-root", default=None, metavar="DIR",
+                   help="where a ticket with no folder runs (<DIR>/sessions/<ticket>); registered too. "
+                        "make cli-host passes the deliverables root. Default: the first registered directory")
     p.add_argument("--pair", default=None, metavar="CODE",
                    help="pair this host with the one-time code from Settings → Session mode")
     p.add_argument("--name", default=None, help="how this host appears in the fleet")
@@ -139,6 +145,7 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         url=ns.url.rstrip("/"),
         state_dir=Path(ns.dir).expanduser(),
         allow_dirs=[Path(d).expanduser() for d in ns.allow],
+        default_root=Path(ns.default_root).expanduser() if ns.default_root else None,
         pair_code=ns.pair,
         once=ns.once,
         max_sessions=max(0, ns.max_sessions),

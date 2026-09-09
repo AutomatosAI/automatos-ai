@@ -105,14 +105,14 @@ status:
 # Python 3.9+; nothing to install. Stop with Ctrl-C.
 cli-host:
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)"
-	@cd services/cli-host && python3 -m automatos_cli_host --allow "$(AUTOMATOS_WORKSPACE_DIR)" $(if $(LOCAL_PROJECTS_DIR),--allow "$(LOCAL_PROJECTS_DIR)",) $(if $(PAIR),--pair $(PAIR),) $(CLI_HOST_ARGS)
+	@cd services/cli-host && python3 -m automatos_cli_host --allow "$(AUTOMATOS_WORKSPACE_DIR)" --default-root "$(AUTOMATOS_WORKSPACE_DIR)" $(if $(LOCAL_PROJECTS_DIR),--allow "$(LOCAL_PROJECTS_DIR)",) $(if $(PAIR),--pair $(PAIR),) $(CLI_HOST_ARGS)
 
 # PRD-235 W3: the host as a login service — starts at login, restarts on exit,
 # restarts itself when its code or the backend's contract changed. Pair once
 # with `make cli-host PAIR=<code>` (Ctrl-C after "paired"), then install.
 cli-host-install:
 	@mkdir -p "$(AUTOMATOS_WORKSPACE_DIR)"
-	@cd services/cli-host && python3 -m automatos_cli_host --install --allow "$(AUTOMATOS_WORKSPACE_DIR)" $(if $(LOCAL_PROJECTS_DIR),--allow "$(LOCAL_PROJECTS_DIR)",) $(CLI_HOST_ARGS)
+	@cd services/cli-host && python3 -m automatos_cli_host --install --allow "$(AUTOMATOS_WORKSPACE_DIR)" --default-root "$(AUTOMATOS_WORKSPACE_DIR)" $(if $(LOCAL_PROJECTS_DIR),--allow "$(LOCAL_PROJECTS_DIR)",) $(CLI_HOST_ARGS)
 
 cli-host-uninstall:
 	@cd services/cli-host && python3 -m automatos_cli_host --uninstall

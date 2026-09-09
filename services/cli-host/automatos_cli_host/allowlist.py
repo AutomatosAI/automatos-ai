@@ -11,7 +11,7 @@ resolved allowed root.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 
 class NotAllowed(PermissionError):
@@ -69,6 +69,25 @@ def resolve_allowed(cwd: Optional[str], roots: Iterable[str], *, default_root: O
         f"{resolved} is outside every registered directory "
         f"({', '.join(str(r) for r in allowed)}); register it with --allow"
     )
+
+
+def choose_default_root(saved: List[str], requested: Optional[str]) -> Tuple[List[str], str]:
+    """The allowed roots and the one a ticket with no folder runs under.
+
+    ``--default-root`` (the Makefile passes AUTOMATOS_WORKSPACE_DIR, the folder
+    compose mounts as the workspace root) wins and is added to the allowed roots
+    when missing; without it the first registered root is the default — which,
+    on a host whose allowlist grew over time, is whatever was registered first.
+    Raises ``NotAllowed`` when nothing is registered at all."""
+    roots = list(saved)
+    if requested:
+        resolved = str(Path(requested).expanduser().resolve())
+        if resolved not in roots:
+            roots.append(resolved)
+        return roots, resolved
+    if not roots:
+        raise NotAllowed("no directories registered — start with `--allow <dir>` (make cli-host registers the deliverables root)")
+    return roots, roots[0]
 
 
 def default_session_cwd(default_root: str, workspace_id: str, task_id: str) -> Path:
