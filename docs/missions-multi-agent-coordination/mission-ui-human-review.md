@@ -5,33 +5,61 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/100-RESEARCH-AUTONOMOUS-OPERATING-LAYER.md](docs/PRDS/100-RESEARCH-AUTONOMOUS-OPERATING-LAYER.md)
-- [docs/PRDS/102-COORDINATOR-ARCHITECTURE.md](docs/PRDS/102-COORDINATOR-ARCHITECTURE.md)
-- [docs/PRDS/103-VERIFICATION-QUALITY.md](docs/PRDS/103-VERIFICATION-QUALITY.md)
-- [docs/PRDS/108-MEMORY-FIELD-PROTOTYPE.md](docs/PRDS/108-MEMORY-FIELD-PROTOTYPE.md)
-- [docs/PRDS/82-RESEARCH-ORCHESTRATION-READINESS.md](docs/PRDS/82-RESEARCH-ORCHESTRATION-READINESS.md)
-- [docs/PRDS/82A-SEQUENTIAL-MISSION-COORDINATOR.md](docs/PRDS/82A-SEQUENTIAL-MISSION-COORDINATOR.md)
-- [frontend/app/missions/[id]/page.tsx](frontend/app/missions/[id]/page.tsx)
+- [frontend/app/assignments/page.tsx](frontend/app/assignments/page.tsx)
+- [frontend/components/assignments/assignments-missions-grid.tsx](frontend/components/assignments/assignments-missions-grid.tsx)
+- [frontend/components/assignments/assignments-page.tsx](frontend/components/assignments/assignments-page.tsx)
+- [frontend/components/assignments/assignments-playbooks-grid.tsx](frontend/components/assignments/assignments-playbooks-grid.tsx)
+- [frontend/components/assignments/mission-card-constellation.tsx](frontend/components/assignments/mission-card-constellation.tsx)
+- [frontend/components/assignments/studio/assignments-hub.tsx](frontend/components/assignments/studio/assignments-hub.tsx)
+- [frontend/components/assignments/studio/entry-grid.tsx](frontend/components/assignments/studio/entry-grid.tsx)
+- [frontend/components/assignments/studio/mission-card.tsx](frontend/components/assignments/studio/mission-card.tsx)
+- [frontend/components/assignments/studio/missions-body.tsx](frontend/components/assignments/studio/missions-body.tsx)
+- [frontend/components/assignments/studio/mkt-card.tsx](frontend/components/assignments/studio/mkt-card.tsx)
+- [frontend/components/assignments/studio/playbook-card.tsx](frontend/components/assignments/studio/playbook-card.tsx)
+- [frontend/components/assignments/studio/playbooks-body.tsx](frontend/components/assignments/studio/playbooks-body.tsx)
+- [frontend/components/assignments/studio/status-head.tsx](frontend/components/assignments/studio/status-head.tsx)
+- [frontend/components/context/pattern-details-modal.tsx](frontend/components/context/pattern-details-modal.tsx)
+- [frontend/components/context/rag-context-builder.tsx](frontend/components/context/rag-context-builder.tsx)
+- [frontend/components/layout/studio-header.tsx](frontend/components/layout/studio-header.tsx)
+- [frontend/components/marketplace/marketplace-playbooks-tab.tsx](frontend/components/marketplace/marketplace-playbooks-tab.tsx)
 - [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
-- [frontend/components/missions/human-review-panel.tsx](frontend/components/missions/human-review-panel.tsx)
 - [frontend/components/missions/index.ts](frontend/components/missions/index.ts)
-- [frontend/components/missions/mission-activity-feed.tsx](frontend/components/missions/mission-activity-feed.tsx)
 - [frontend/components/missions/mission-card.tsx](frontend/components/missions/mission-card.tsx)
-- [frontend/components/missions/mission-dag-canvas.tsx](frontend/components/missions/mission-dag-canvas.tsx)
 - [frontend/components/missions/mission-detail-page.tsx](frontend/components/missions/mission-detail-page.tsx)
+- [frontend/components/missions/mission-field-inspector.tsx](frontend/components/missions/mission-field-inspector.tsx)
+- [frontend/components/missions/mission-field-panel.tsx](frontend/components/missions/mission-field-panel.tsx)
+- [frontend/components/missions/mission-field-viz.tsx](frontend/components/missions/mission-field-viz.tsx)
+- [frontend/components/missions/mission-list.tsx](frontend/components/missions/mission-list.tsx)
 - [frontend/components/missions/mission-results-panel.tsx](frontend/components/missions/mission-results-panel.tsx)
-- [frontend/components/missions/mission-status-badge.tsx](frontend/components/missions/mission-status-badge.tsx)
-- [frontend/components/missions/mission-task-node.tsx](frontend/components/missions/mission-task-node.tsx)
+- [frontend/components/workflows/playbook-execution-config.tsx](frontend/components/workflows/playbook-execution-config.tsx)
+- [frontend/components/workflows/playbook-preview-panel.tsx](frontend/components/workflows/playbook-preview-panel.tsx)
+- [frontend/components/workflows/playbook-schedule-config.tsx](frontend/components/workflows/playbook-schedule-config.tsx)
+- [frontend/components/workflows/playbook-step-builder.tsx](frontend/components/workflows/playbook-step-builder.tsx)
+- [frontend/components/workflows/playbooks-tab.tsx](frontend/components/workflows/playbooks-tab.tsx)
+- [frontend/components/workflows/view-playbook-modal.tsx](frontend/components/workflows/view-playbook-modal.tsx)
+- [frontend/hooks/use-assignments-api.ts](frontend/hooks/use-assignments-api.ts)
 - [frontend/hooks/use-missions-api.ts](frontend/hooks/use-missions-api.ts)
 - [frontend/types/missions.ts](frontend/types/missions.ts)
+- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
+- [orchestrator/api/assignments.py](orchestrator/api/assignments.py)
 - [orchestrator/api/missions.py](orchestrator/api/missions.py)
-- [orchestrator/core/services/mission_memory_service.py](orchestrator/core/services/mission_memory_service.py)
+- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
+- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
+- [orchestrator/modules/context/adapters/vector_field.py](orchestrator/modules/context/adapters/vector_field.py)
+- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
 - [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
+- [orchestrator/modules/coordination/primitive_heartbeat.py](orchestrator/modules/coordination/primitive_heartbeat.py)
 - [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
 - [orchestrator/modules/coordination/verification.py](orchestrator/modules/coordination/verification.py)
+- [orchestrator/modules/memory/durable_store.py](orchestrator/modules/memory/durable_store.py)
 - [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
-- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
-- [orchestrator/tests/test_complexity_detection.py](orchestrator/tests/test_complexity_detection.py)
+- [orchestrator/services/gdpr_service.py](orchestrator/services/gdpr_service.py)
+- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
+- [orchestrator/tests/test_mission_final_output_promotion.py](orchestrator/tests/test_mission_final_output_promotion.py)
+- [orchestrator/tests/test_mission_retry_feeds_critique.py](orchestrator/tests/test_mission_retry_feeds_critique.py)
+- [orchestrator/tests/test_p2w2_gdpr_subject_tags.py](orchestrator/tests/test_p2w2_gdpr_subject_tags.py)
+- [orchestrator/tests/test_prd181_gdpr.py](orchestrator/tests/test_prd181_gdpr.py)
+- [orchestrator/tests/test_w1s1_hotpath_telemetry.py](orchestrator/tests/test_w1s1_hotpath_telemetry.py)
 
 </details>
 
@@ -45,22 +73,23 @@ The frontend architecture for missions is centered around the `MissionDetailPage
 
 ### Component Hierarchy
 *   **MissionList**: Displays a high-level overview of all `OrchestrationRun` entities using `MissionCard` components.
-*   **MissionDetailPage**: The primary view for a specific mission, utilizing a `ResizablePanelGroup` to balance the DAG canvas, task inspector, and activity feed [frontend/components/missions/mission-detail-page.tsx:23-35]().
-*   **MissionDAGCanvas**: A `reactflow`-based visualization of the mission's `TaskResponse` nodes and their dependencies [frontend/components/missions/mission-dag-canvas.tsx:4-13]().
-*   **MissionBudgetBar**: Displays real-time mission metrics including `tokensUsed` and `taskCount` [frontend/components/missions/mission-detail-page.tsx:29]().
-*   **MissionResultsPanel**: A specialized panel for viewing completed task outputs, offering "Combined" markdown views or "Per Task" breakdowns [frontend/components/missions/mission-results-panel.tsx:30-35]().
+*   **MissionDetailPage**: The primary view for a specific mission, utilizing a `ResizablePanelGroup` to balance the DAG canvas, task inspector, activity feed, and deliverables [frontend/components/missions/mission-detail-page.tsx:23-35]().
+*   **MissionDAGCanvas**: A `reactflow`-based visualization of the mission's `TaskResponse` nodes and their dependencies [frontend/components/missions/mission-detail-page.tsx:30]().
+*   **MissionBudgetBar**: Displays real-time mission metrics including `tokens_used` and the `token_budget_estimate` progress [frontend/components/missions/mission-detail-page.tsx:29]().
+*   **MissionResultsPanel**: A specialized panel for viewing completed task outputs, offering "Combined" markdown views or "Per Task" breakdowns [frontend/components/missions/mission-results-panel.tsx:1-10]().
+*   **MissionFieldPanel**: A 3D visualization and list view of the shared semantic field (PRD-108) where agent knowledge resonates and decays [frontend/components/missions/mission-field-panel.tsx:15-115]().
 
 ### Mission Detail Layout
-The `MissionDetailPage` utilizes the `useMission` hook to fetch data and `computeMissionStats` to drive the UI state [frontend/components/missions/mission-detail-page.tsx:58-85](). It provides global controls to `pause`, `resume`, or `cancel` the mission run via mutations [frontend/components/missions/mission-detail-page.tsx:61-69]().
+The `MissionDetailPage` utilizes the `useMission` hook to fetch data and `computeMissionStats` to drive the UI state [frontend/components/missions/mission-detail-page.tsx:70-97](). It provides global controls to `pause`, `resume`, or `cancel` the mission run via mutations [frontend/components/missions/mission-detail-page.tsx:73-81]().
 
 | Feature | Implementation | Source |
 | :--- | :--- | :--- |
 | **State Badges** | `MissionStatusBadge` mapping `RunState` to UI colors | [frontend/types/missions.ts:182-241]() |
-| **Budget Tracking** | `MissionBudgetBar` showing token consumption | [frontend/components/missions/mission-detail-page.tsx:29]() |
-| **Navigation** | `useSearchParams` for tab switching (e.g., `?tab=review`) | [frontend/components/missions/mission-detail-page.tsx:55-56]() |
-| **Layout** | `ResizablePanelGroup` for DAG vs. Activity Feed | [frontend/components/missions/mission-detail-page.tsx:24-26]() |
+| **Budget Tracking** | `MissionBudgetBar` showing token consumption vs estimate | [frontend/components/missions/mission-detail-page.tsx:29]() |
+| **Power Modes** | Selection of `light`, `standard`, or `max` execution caps | [orchestrator/services/coordinator_service.py:91-95]() |
+| **Layout** | `ResizablePanelGroup` for DAG vs. Side Panels | [frontend/components/missions/mission-detail-page.tsx:24-27]() |
 
-**Sources:** [frontend/components/missions/mission-detail-page.tsx:1-150](), [frontend/hooks/use-missions-api.ts:61-69](), [frontend/types/missions.ts:165-178]()
+**Sources:** [frontend/components/missions/mission-detail-page.tsx:1-135](), [frontend/hooks/use-missions-api.ts:1-70](), [frontend/types/missions.ts:1-241](), [orchestrator/services/coordinator_service.py:91-95]()
 
 ---
 
@@ -69,97 +98,95 @@ The `MissionDetailPage` utilizes the `useMission` hook to fetch data and `comput
 The `MissionDAGCanvas` provides a visual representation of the mission plan. It uses `reactflow` to render tasks as nodes and dependencies as edges.
 
 ### Logic & Layout
-1.  **Node Mapping**: Each `TaskResponse` is mapped to a `MissionTaskNode` [frontend/components/missions/mission-dag-canvas.tsx:15-28]().
-2.  **Sequential Layout**: Tasks are sorted and positioned based on their `sequence_number`. Tasks with the same sequence number are laid out side-by-side to represent parallel execution [frontend/components/missions/mission-dag-canvas.tsx:45-55]().
-3.  **Edge Animation**: Edges reflect the flow of data; animated edges indicate active transitions between tasks [frontend/components/missions/mission-dag-canvas.tsx:132-135]().
-4.  **Interaction**: Clicking a node triggers `onTaskSelect`, which updates the `selectedTaskId` in the `useMissionStore` [frontend/components/missions/mission-dag-canvas.tsx:208-214]().
+1.  **Node Mapping**: Each `TaskResponse` is mapped to a `MissionTaskNode`. Nodes visually reflect the `TaskState` (e.g., `RUNNING`, `VERIFIED`, `STALLED`) [orchestrator/core/models/orchestration_enums.py:48-60]().
+2.  **Sequential Layout**: Tasks are sorted and positioned based on their `sequence_number`. Tasks with the same sequence number are laid out side-by-side to represent parallel execution capability [orchestrator/modules/coordination/dispatcher.py:5-18]().
+3.  **Edge Animation**: Edges reflect the flow of data; animated edges indicate active transitions between tasks.
+4.  **Interaction**: Clicking a node triggers `setSelectedTaskId` in the `useMissionStore`, opening the `TaskInspector` [frontend/components/missions/mission-detail-page.tsx:99-112]().
 
-### Task Node States
-Nodes visually reflect the `TaskState` (PENDING, QUEUED, ASSIGNED, RUNNING, COMPLETED, VERIFYING, VERIFIED, FAILED, SKIPPED, STALLED, RETRYING) defined in the orchestration types [frontend/types/missions.ts:22-34]().
-
-**Mission UI Entity Mapping**
+### Mission UI Entity Mapping
 ```mermaid
 graph TD
     subgraph "Natural Language Space"
-        Goal["User Goal (e.g. 'Research AI Act')"]
+        Goal["User Goal (Natural Language)"]
     end
 
     subgraph "Frontend Code Space"
-        MDP["MissionDetailPage [mission-detail-page.tsx]"]
-        MDC["MissionDAGCanvas [mission-dag-canvas.tsx]"]
-        MTN["MissionTaskNode [mission-task-node.tsx]"]
-        MS["useMissionStore [mission-store.ts]"]
+        MDP["MissionDetailPage (mission-detail-page.tsx)"]
+        MDC["MissionDAGCanvas (mission-dag-canvas.tsx)"]
+        MFP["MissionFieldPanel (mission-field-panel.tsx)"]
+        MS["useMissionStore (mission-store.ts)"]
     end
 
     subgraph "Backend Data Space"
-        OR["MissionResponse [types/missions.ts]"]
-        OT["TaskResponse [types/missions.ts]"]
-        API["Mission Control API [use-missions-api.ts]"]
+        OR["OrchestrationRun (core/models/orchestration.py)"]
+        OT["OrchestrationTask (core/models/orchestration.py)"]
+        API["Missions API (api/missions.py)"]
+        VF["VectorField (vector_field.py)"]
     end
 
     Goal --> MDP
     MDP --> MS
     MS --> MDC
-    MDC --> MTN
     MDP -- "fetches via useMission" --> OR
-    MTN -- "represents" --> OT
-    API -- "updates state" --> OR
+    MDC -- "renders tasks" --> OT
+    MFP -- "visualizes" --> VF
+    API -- "CRUD/Lifecycle" --> OR
 ```
-**Sources:** [frontend/components/missions/mission-dag-canvas.tsx:1-120](), [frontend/types/missions.ts:22-34]()
+**Sources:** [frontend/components/missions/mission-detail-page.tsx:1-135](), [orchestrator/core/models/orchestration.py:39-165](), [orchestrator/modules/coordination/dispatcher.py:1-18](), [orchestrator/modules/context/adapters/vector_field.py:1-105]()
 
 ---
 
 ## Human-in-the-Loop (HITL) Review
 
-The platform implements two critical human review gates to ensure safety and quality: **Plan Approval** and **Output Acceptance**.
+The platform implements critical human review gates to ensure safety and quality, specifically for **Plan Approval** and **Task Editing**.
 
 ### 1. Plan Approval Gate
-After the planning phase handled by `MissionPlanner` [orchestrator/modules/coordination/planner.py:5-15](), the mission transitions to `awaiting_approval` [frontend/types/missions.ts:13]().
-*   **UI Trigger**: The `MissionDetailPage` displays an approval interface when the state is `awaiting_approval` [frontend/components/missions/mission-detail-page.tsx:120-121]().
-*   **Actions**: Users can `approveMutation` (starts execution) or `rejectMutation` (requires feedback for replanning) [frontend/components/missions/mission-detail-page.tsx:64-65]().
-*   **Modifications**: Users can modify the plan via `MissionApproveRequest`, including `agent_overrides` and `task_overrides` [orchestrator/api/missions.py:95-105]().
+After the planning phase handled by `MissionPlanner` [orchestrator/modules/coordination/planner.py:5-15](), the mission transitions to `AWAITING_APPROVAL` [orchestrator/core/models/orchestration_enums.py:32]().
+*   **UI Trigger**: The `MissionDetailPage` displays an approval interface when the state is `awaiting_approval`.
+*   **Actions**: Users can call `POST /api/missions/{id}/approve` to start execution [orchestrator/api/missions.py:15]().
+*   **Plan Editing**: PRD-163 S4 allows users to edit `agent_role`, `title`, and `description` of planned tasks before approval [orchestrator/services/coordinator_service.py:98-101](). Edits are submitted via `MissionPlanEditRequest` [orchestrator/api/missions.py:120-125]().
 
 ### 2. Output Verification Gate
-When a task completes, if it requires manual review, the mission enters `awaiting_human` [frontend/types/missions.ts:17]().
-*   **HumanReviewPanel**: Displays the agent's output for a specific task and allows the user to accept or reject the result.
-*   **Decision Matrix**:
-    *   **Accept**: Triggers `useReviewMission` with verdict 'accept', moving the task to `verified` and unlocking downstream dependencies [frontend/hooks/use-missions-api.ts:180-191]().
-    *   **Reject**: Triggers `useReviewMission` with verdict 'reject', which can include `task_feedback` to re-queue specific tasks [orchestrator/api/missions.py:125-135]().
+Verification is primarily advisory (PRD-103), but the system supports human review requests.
+*   **Advisory Review**: `VerificationService` performs deterministic and LLM-as-judge checks, storing feedback in `output_metadata` [orchestrator/modules/coordination/verification.py:5-16]().
+*   **Human Review**: If a task requires manual review, the state moves to `AWAITING_HUMAN` [orchestrator/core/models/orchestration_enums.py:89]().
+*   **Decision**: Users submit a verdict via `POST /api/missions/{id}/review` [orchestrator/api/missions.py:17]().
 
 ### Human Review Data Flow
 ```mermaid
 sequenceDiagram
     participant U as User (Frontend)
-    participant API as Mission API [api/missions.py]
-    participant CS as CoordinatorService [coordinator_service.py]
-    participant RS as MissionReconciler [reconciler.py]
+    participant API as Mission API (api/missions.py)
+    participant CS as CoordinatorService (coordinator_service.py)
+    participant RS as MissionReconciler (reconciler.py)
 
-    CS->>API: Transition Run to 'awaiting_approval'
-    U->>API: POST /api/missions/{id}/approve { modifications }
+    CS->>API: Transition Run to 'AWAITING_APPROVAL'
+    U->>API: POST /api/missions/{id}/approve { overrides }
     Note over API: Mission starts running
-    RS->>RS: Task output ready, state = 'awaiting_human'
+    RS->>RS: Task completed, requires review
+    RS->>API: Transition Run to 'AWAITING_HUMAN'
     U->>API: POST /api/missions/{id}/review { verdict: 'accept' }
-    API->>CS: Trigger tick for next task dispatch
+    API->>CS: Coordinator tick picks up verified task
 ```
-**Sources:** [frontend/components/missions/mission-detail-page.tsx:53-150](), [frontend/hooks/use-missions-api.ts:141-191](), [orchestrator/api/missions.py:95-153]()
+**Sources:** [orchestrator/api/missions.py:1-125](), [orchestrator/services/coordinator_service.py:98-158](), [orchestrator/modules/coordination/verification.py:1-16](), [orchestrator/core/models/orchestration_enums.py:32](), [orchestrator/core/models/orchestration_enums.py:89]()
 
 ---
 
 ## Mission Creation & Context
 
-Missions are initiated via the `CreateMissionModal`, which handles goal definition and attachment resolution.
+Missions are initiated via the `CreateMissionModal`, which handles goal definition, template selection, and attachment resolution.
 
 ### Creation Flow
-*   **Templates**: Users select from predefined `MISSION_TEMPLATES` (e.g., `business_plan`, `research_and_report`) or a custom goal [frontend/components/missions/create-mission-modal.tsx:108-151]().
-*   **Power Modes**: The modal supports selecting `PowerMode` ('light', 'standard', 'max'), which dictates token caps and tool iterations [frontend/components/missions/create-mission-modal.tsx:35-59]().
-*   **Ephemeral Attachments**: PRD-127 implementation allows users to upload files via `apiClient.uploadAttachment` [frontend/components/missions/create-mission-modal.tsx:201-209](). The `MissionPlanner` resolves these `attachment_ids` into text content for the LLM prompt [orchestrator/modules/coordination/planner.py:44-111]().
-*   **Complexity Detection**: The backend automatically scores the goal to determine the `ComplexityTier` (T1-T3) based on word count, deliverables, and domain breadth [orchestrator/modules/coordination/planner.py:184-210]().
+*   **Templates**: Users select from `MISSION_TEMPLATES` (e.g., `business_plan`, `research_and_report`) which provide structure to the goal [frontend/components/missions/create-mission-modal.tsx:108-151]().
+*   **Power Modes**: Users choose execution intensity (`light`, `standard`, `max`), which controls `max_tool_iterations` and `timeout_seconds` [orchestrator/services/coordinator_service.py:91-95]().
+*   **Ephemeral Attachments**: PRD-127 allows uploading files. `MissionPlanner` resolves these `attachment_ids` into text content for the decomposition prompt [orchestrator/modules/coordination/planner.py:46-113]().
 
 ### Mission Field & Context
-Missions utilize a shared context backend (PRD-108) to allow agents within the same mission to share information.
-*   **MissionFieldPanel**: Visualizes the shared vector field, showing `patterns`, `stability`, and `metrics` [frontend/hooks/use-missions-api.ts:104-110]().
-*   **Field Patterns**: Lists specific knowledge items injected into the mission's shared memory by various agents, including `decayed_strength` and `access_count` [frontend/hooks/use-missions-api.ts:73-84]().
+Missions utilize a shared vector field (PRD-108) for inter-agent communication.
+*   **Resonance**: Relevance in the field is determined by `cosine_similarity² × decayed_strength` [orchestrator/modules/context/adapters/vector_field.py:15-16]().
+*   **Visualization**: `MissionFieldPanel` renders these patterns, showing their stability and agent attribution [frontend/components/missions/mission-field-panel.tsx:115-194]().
+*   **Isolation**: Per-mission isolation is enforced via the `field_id` payload filter in Qdrant [orchestrator/modules/context/adapters/vector_field.py:75-78]().
 
-**Sources:** [frontend/components/missions/create-mission-modal.tsx:1-200](), [frontend/hooks/use-missions-api.ts:71-120](), [orchestrator/modules/coordination/planner.py:44-210]()
+**Sources:** [frontend/components/missions/create-mission-modal.tsx:1-200](), [orchestrator/modules/coordination/planner.py:46-175](), [orchestrator/modules/context/adapters/vector_field.py:1-105](), [orchestrator/services/coordinator_service.py:91-95]()
 
 ---

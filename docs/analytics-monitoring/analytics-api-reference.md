@@ -5,185 +5,190 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/52-UNIFIED-ANALYTICS.md](docs/PRDS/52-UNIFIED-ANALYTICS.md)
-- [frontend/app/analytics/page.tsx](frontend/app/analytics/page.tsx)
-- [frontend/components/analytics/analytics-admin.tsx](frontend/components/analytics/analytics-admin.tsx)
-- [frontend/components/analytics/analytics-agents.tsx](frontend/components/analytics/analytics-agents.tsx)
-- [frontend/components/analytics/analytics-costs.tsx](frontend/components/analytics/analytics-costs.tsx)
-- [frontend/components/analytics/analytics-documents.tsx](frontend/components/analytics/analytics-documents.tsx)
-- [frontend/components/analytics/analytics-memory.tsx](frontend/components/analytics/analytics-memory.tsx)
-- [frontend/components/analytics/analytics-openrouter-credits.tsx](frontend/components/analytics/analytics-openrouter-credits.tsx)
-- [frontend/components/analytics/analytics-overview.tsx](frontend/components/analytics/analytics-overview.tsx)
-- [frontend/components/analytics/analytics-page.tsx](frontend/components/analytics/analytics-page.tsx)
-- [frontend/components/analytics/analytics-pandas-chart.tsx](frontend/components/analytics/analytics-pandas-chart.tsx)
-- [frontend/components/analytics/analytics-plan-usage.tsx](frontend/components/analytics/analytics-plan-usage.tsx)
-- [frontend/components/analytics/analytics-recommendations.tsx](frontend/components/analytics/analytics-recommendations.tsx)
-- [frontend/components/analytics/analytics-workflows.tsx](frontend/components/analytics/analytics-workflows.tsx)
-- [frontend/components/dashboard/widgets/system-health-widget.tsx](frontend/components/dashboard/widgets/system-health-widget.tsx)
-- [frontend/components/knowledge/QueryTemplatesGrid.tsx](frontend/components/knowledge/QueryTemplatesGrid.tsx)
-- [frontend/components/system/rag-configuration.tsx](frontend/components/system/rag-configuration.tsx)
-- [frontend/hooks/use-unified-analytics.ts](frontend/hooks/use-unified-analytics.ts)
+- [docs/PRDS/PRD-143-OBS-TIER-MANIFEST.md](docs/PRDS/PRD-143-OBS-TIER-MANIFEST.md)
+- [frontend/components/activity/memory-card.tsx](frontend/components/activity/memory-card.tsx)
+- [frontend/components/activity/memory/health-banner.tsx](frontend/components/activity/memory/health-banner.tsx)
+- [frontend/components/activity/memory/index.ts](frontend/components/activity/memory/index.ts)
+- [frontend/components/activity/memory/memory-sidebar.tsx](frontend/components/activity/memory/memory-sidebar.tsx)
+- [frontend/components/activity/projects/index.ts](frontend/components/activity/projects/index.ts)
+- [frontend/hooks/use-memory-explorer-api.ts](frontend/hooks/use-memory-explorer-api.ts)
+- [orchestrator/api/analytics.py](orchestrator/api/analytics.py)
+- [orchestrator/api/analytics_api.py](orchestrator/api/analytics_api.py)
+- [orchestrator/api/analytics_charts.py](orchestrator/api/analytics_charts.py)
+- [orchestrator/api/analytics_real.py](orchestrator/api/analytics_real.py)
+- [orchestrator/api/composio_analytics.py](orchestrator/api/composio_analytics.py)
+- [orchestrator/api/database_analytics.py](orchestrator/api/database_analytics.py)
+- [orchestrator/api/execution_history.py](orchestrator/api/execution_history.py)
 - [orchestrator/api/llm_analytics.py](orchestrator/api/llm_analytics.py)
+- [orchestrator/api/memory_stats.py](orchestrator/api/memory_stats.py)
+- [orchestrator/api/workflow_history.py](orchestrator/api/workflow_history.py)
+- [orchestrator/core/auth/workspace_admin.py](orchestrator/core/auth/workspace_admin.py)
 - [orchestrator/core/llm/openrouter_analytics.py](orchestrator/core/llm/openrouter_analytics.py)
+- [orchestrator/tests/test_activation_endpoint.py](orchestrator/tests/test_activation_endpoint.py)
+- [orchestrator/tests/test_errors_by_subsystem_endpoint.py](orchestrator/tests/test_errors_by_subsystem_endpoint.py)
+- [orchestrator/tests/test_p2w0_cockpit_reach.py](orchestrator/tests/test_p2w0_cockpit_reach.py)
+- [orchestrator/tests/test_prd143_obs_routers_batch1.py](orchestrator/tests/test_prd143_obs_routers_batch1.py)
+- [orchestrator/tests/test_prd143_obs_routers_batch2.py](orchestrator/tests/test_prd143_obs_routers_batch2.py)
+- [orchestrator/tests/test_primitive_health_endpoint.py](orchestrator/tests/test_primitive_health_endpoint.py)
+- [orchestrator/tests/test_widget_engagement_endpoint.py](orchestrator/tests/test_widget_engagement_endpoint.py)
 
 </details>
 
 
 
-This document provides a technical reference for the analytics infrastructure in Automatos AI. It details the backend API endpoints, frontend React Query hooks, and the data flow between system components for tracking usage, costs, performance, and platform-wide health.
+This document provides a technical reference for the analytics infrastructure in Automatos AI. It details the backend API endpoints, security tiers, and the data flow between system components for tracking usage, costs, performance, and platform-wide health.
 
 ## Backend API Architecture
 
-The analytics system is built on a modular router architecture. It tracks two primary categories of data: **LLM Usage** (tokens, costs, models) and **Operational Performance** (agent success, mission completion, document RAG efficiency).
+The analytics system is built on a modular router architecture with a strict security hierarchy. It tracks two primary categories of data: **LLM Usage** (tokens, costs, models) and **Operational Performance** (agent success, mission completion, substrate health).
 
 ### 1. LLM Analytics API
-The core of the cost tracking system resides in `llm_analytics.py`. It provides endpoints for workspace-level usage summaries and optimization recommendations [orchestrator/api/llm_analytics.py:28-29]().
+The core of the cost tracking system resides in `llm_analytics.py`. It provides endpoints for workspace-level usage summaries and optimization recommendations [orchestrator/api/llm_analytics.py:2-7]().
 
-| Endpoint | Method | Purpose | Data Source |
+| Endpoint | Method | Auth Tier | Purpose |
 |:---|:---:|:---|:---|
-| `/api/analytics/llm/usage` | GET | Token usage grouped by model, provider, or agent [orchestrator/api/llm_analytics.py:87-94]() | `LLMUsage` table |
-| `/api/analytics/llm/costs` | GET | Cost breakdown by dimension (daily, model, etc.) [orchestrator/api/llm_analytics.py:141-148]() | `LLMUsage` table |
-| `/api/analytics/llm/summary` | GET | High-level dashboard summary with cost trends [orchestrator/api/llm_analytics.py:194-200]() | `LLMUsage` table |
-| `/api/analytics/llm/recommendations` | GET | AI-generated cost/performance suggestions [orchestrator/api/llm_analytics.py:265-271]() | Analytics Engine |
+| `/api/analytics/llm/usage` | GET | Workspace Admin | Token usage grouped by model, provider, or agent [orchestrator/api/llm_analytics.py:113-119]() |
+| `/api/analytics/llm/costs` | GET | Workspace Admin | Cost breakdown by dimension (daily, model, etc.) [orchestrator/api/llm_analytics.py:167-173]() |
+| `/api/analytics/llm/summary` | GET | Workspace Admin | High-level dashboard summary with cost trends [orchestrator/api/llm_analytics.py:220-226]() |
+| `/api/analytics/llm/recommendations` | GET | Workspace Admin | AI-generated cost/performance suggestions [orchestrator/api/llm_analytics.py:291-297]() |
+| `/api/analytics/llm/openrouter/sync` | POST | Super Admin | Manual trigger for OpenRouter activity sync [orchestrator/api/llm_analytics.py:348-354]() |
 
-Sources: [orchestrator/api/llm_analytics.py:28-271]()
+Sources: [orchestrator/api/llm_analytics.py:37-55](), [orchestrator/api/llm_analytics.py:113-297]()
 
-### 2. OpenRouter Integration
-For workspaces using OpenRouter, the system synchronizes external usage data into the local `llm_usage` table to provide a single source of truth [orchestrator/core/llm/openrouter_analytics.py:10-11]().
+### 2. Enhanced Performance Analytics
+The `analytics_real.py` module provides high-frequency health metrics and success rates.
 
-*   **Activity Sync**: Fetches daily breakdown from `/api/v1/activity` and upserts into `LLMUsage` [orchestrator/core/llm/openrouter_analytics.py:44-50]().
-*   **Credit Monitoring**: Retrieves account balance via `/api/v1/credits` [orchestrator/core/llm/openrouter_analytics.py:154-159]().
-*   **Key Info**: Tracks rate limits and usage stats per API key [orchestrator/core/llm/openrouter_analytics.py:185-190]().
+*   **Success Rates**: Aggregates legacy `WorkflowExecution` and modern `OrchestrationRun` (Missions) to calculate a unified success percentage [orchestrator/api/analytics_real.py:76-97]().
+*   **Substrate Health**: PRD-197 S4 implementation for monitoring retrieval health (documents, memory, field seams) with latency and error tracking [orchestrator/api/analytics_real.py:160-170]().
+*   **SLO Monitoring**: Workspace-scoped tracking of tool-call success, board-dispatch latency, and event freshness [orchestrator/api/analytics_real.py:135-150]().
 
-Sources: [orchestrator/core/llm/openrouter_analytics.py:1-190]()
+Sources: [orchestrator/api/analytics_real.py:51-55](), [orchestrator/api/analytics_real.py:76-170]()
 
 ---
 
-## Frontend Integration & Data Flow
+## Data Flow & System Integration
 
-The frontend consumes analytics via the `use-unified-analytics` hook library. It implements a workspace-scoping mechanism (`wsScope`) to ensure multi-tenant data isolation and prevent cache bleed when admins switch between workspaces [frontend/hooks/use-unified-analytics.ts:10-14]().
+The analytics system bridges low-level database events and external provider APIs to the user-facing dashboard.
 
 ### Entity Mapping: UI to Code
 
-The following diagram maps user-facing analytics concepts to their underlying code entities and API routes.
+The following diagram maps user-facing analytics concepts to their underlying code entities and backend routers.
 
 **Analytics Entity Mapping**
 ```mermaid
 graph TD
     subgraph "Natural Language Space (UI)"
-        Overview["Dashboard Overview"]
-        AgentPerf["Agent Performance Table"]
-        MissionStats["Mission Success Rate"]
-        CostProj["Cost Projections"]
+        Overview["Command Center Overview"]
+        HealthTile["Primitive Health Tile"]
+        UsageBreakdown["Cost Breakdown"]
+        MemExplorer["Memory Explorer"]
     end
 
-    subgraph "Code Entity Space (Frontend Hooks)"
-        HookOV["useAnalyticsOverview()"]
-        HookAg["useAgentAnalytics()"]
-        HookWf["useWorkflowAnalytics()"]
-        HookProj["useCostProjections()"]
+    subgraph "Code Entity Space (Backend Routers)"
+        LLM_Router["orchestrator/api/llm_analytics.py"]
+        Real_Router["orchestrator/api/analytics_real.py"]
+        Mem_Router["orchestrator/api/memory_stats.py"]
+        OR_Svc["orchestrator/core/llm/openrouter_analytics.py::OpenRouterAnalyticsService"]
     end
 
-    subgraph "Code Entity Space (Backend/DB)"
-        LLM_Router["api/llm_analytics.py"]
-        Agent_Router["api/agents.py"]
-        Mission_Router["api/missions.py"]
-        TableUsage["LLMUsage Table"]
+    subgraph "Code Entity Space (Data Layer)"
+        TableUsage["core/models/core.py::LLMUsage Table"]
+        TableEvent["core/models/error_event.py::ErrorEvent Table"]
+        TableMem["modules/memory/models.py::MemoryShortTerm Table"]
+        Mem0["UnifiedMemoryService Durable Store"]
     end
 
-    Overview --> HookOV
-    AgentPerf --> HookAg
-    MissionStats --> HookWf
-    CostProj --> HookProj
+    Overview --> Real_Router
+    HealthTile --> Real_Router
+    UsageBreakdown --> LLM_Router
+    MemExplorer --> Mem_Router
 
-    HookOV --> LLM_Router
-    HookAg --> Agent_Router
-    HookWf --> Mission_Router
-    HookProj --> LLM_Router
-    
     LLM_Router --> TableUsage
+    LLM_Router --> OR_Svc
+    Real_Router --> TableEvent
+    Mem_Router --> TableMem
+    Mem_Router --> Mem0
 ```
-Sources: [frontend/hooks/use-unified-analytics.ts:46-150](), [orchestrator/api/llm_analytics.py:28-29](), [frontend/components/analytics/analytics-costs.tsx:150-152]()
+Sources: [orchestrator/api/llm_analytics.py:23-25](), [orchestrator/api/analytics_real.py:16-26](), [orchestrator/api/memory_stats.py:18-21](), [orchestrator/core/llm/openrouter_analytics.py:27]()
 
 ---
 
-## Specialized Analytics Modules
+## Memory & Substrate Analytics
 
-### 1. Agent & Memory Utilization
-The `useAgentAnalytics` hook aggregates agent performance with memory depth statistics [frontend/hooks/use-unified-analytics.ts:120-134]().
+### 1. Unified Memory Statistics
+The `memory_stats.py` module implements a "durable-store-first" strategy. It attempts to query the `UnifiedMemoryService` (Mem0) and falls back to the local `MemoryShortTerm` table [orchestrator/api/memory_stats.py:1-6]().
 
-*   **Memory Depth**: Tracks `memory_count` and `avg_importance` per agent [frontend/components/analytics/analytics-agents.tsx:60-72]().
-*   **Access Patterns**: Monitors `total_accesses` to short-term (L1/L2) vs. long-term (L3/L4) memory [frontend/components/analytics/analytics-agents.tsx:127-132]().
+*   **Scope Resolution**: Fetches memories across global, agent, and daily scopes [orchestrator/api/memory_stats.py:85-112]().
+*   **Isolation**: Strictly filters by `ctx.workspace_id` so authenticated members see only their own workspace memory [orchestrator/api/memory_stats.py:26-31]().
 
-### 2. Document & RAG Analytics
-Monitors the effectiveness of the knowledge base retrieval system [frontend/components/analytics/analytics-documents.tsx:36-37]().
+Sources: [orchestrator/api/memory_stats.py:1-6](), [orchestrator/api/memory_stats.py:85-112](), [orchestrator/api/memory_stats.py:26-31]()
 
-*   **Cold Data Detection**: Identifies documents that have "Never Been Accessed" by RAG queries [frontend/components/analytics/analytics-documents.tsx:90-94]().
-*   **RAG Performance**: Tracks `rag_query` and `document_searched` events to calculate retrieval efficiency [frontend/components/analytics/analytics-documents.tsx:114-136]().
+### 2. Primitive Health Monitoring
+The Command Center "is-it-working" strip is backed by a specialized endpoint that tracks 8 core primitives: chat, memory, rag, nl2sql, graph, missions, playbooks, and channels [orchestrator/tests/test_primitive_health_endpoint.py:7-14]().
 
-### 3. Mission & Workflow Analytics
-The system tracks the success and duration of automated missions [frontend/hooks/use-unified-analytics.ts:86-92]().
+**Health State Resolution**
+```mermaid
+graph LR
+    subgraph "Health Sources"
+        Log["core/models/widget_event_log.py::WidgetEventLog"]
+        Err["core/models/error_event.py::ErrorEvent"]
+        Metric["core/models/core.py::SystemMetrics"]
+    end
 
-*   **Success Rates**: Calculates percentages of completed vs failed mission executions [frontend/hooks/use-unified-analytics.ts:89]().
-*   **Token Attribution**: Tracks `avg_tokens_used` per mission to identify high-cost automation patterns [frontend/hooks/use-unified-analytics.ts:91]().
+    subgraph "Processing"
+        Check["services/slo_metrics.py::compute_slos()"]
+        Finding["services/heartbeat_service.py::emit_primitive_finding()"]
+    end
 
-Sources: [frontend/hooks/use-unified-analytics.ts:80-92](), [frontend/components/analytics/analytics-workflows.tsx:145-150]()
+    subgraph "API Output"
+        Health["/api/analytics/primitive-health"]
+        SLO["/api/analytics/slos"]
+    end
 
-### 4. Plan & Quota Tracking
-Tracks workspace consumption against plan limits [frontend/hooks/use-unified-analytics.ts:25]().
-
-*   **Quota Enforcement**: Calculates percentage used for agents, storage, and API calls [frontend/components/analytics/analytics-overview.tsx:127]().
-*   **AI Recommendations**: Surfaces `cost_optimization` or `quota_warning` types to users [orchestrator/api/llm_analytics.py:61-67]().
+    Log --> Check
+    Err --> Finding
+    Metric --> Check
+    Check --> SLO
+    Finding --> Health
+```
+Sources: [orchestrator/api/analytics_real.py:135-154](), [orchestrator/tests/test_primitive_health_endpoint.py:1-14]()
 
 ---
 
 ## Admin Analytics & Platform Health
 
-Super Admins have access to a cross-workspace dashboard for platform-wide monitoring [frontend/components/analytics/analytics-admin.tsx:164]().
+Super Admins have access to the "Observability Tier" for platform-wide monitoring. These routers are locked via `require_super_admin` [orchestrator/api/analytics_real.py:38-45]().
 
-### Admin Data Resolution
-```mermaid
-graph LR
-    subgraph "Admin Interface"
-        Dash["Admin Dashboard Tab"]
-    end
+### Key Admin Modules
+*   **LLM Admin**: Cross-workspace aggregate usage and cost data [orchestrator/api/llm_analytics.py:42-46]().
+*   **Composio Analytics**: Tracks action usage, connection status, and tool execution logs for all integrated apps [orchestrator/api/composio_analytics.py:139-145]().
+*   **System Metrics**: Real-time CPU, memory usage (via `psutil`), and system uptime tracking [orchestrator/api/analytics_real.py:28-29]().
+*   **KPI & Reports**: Specialized routers for cost tracking and performance reporting [orchestrator/tests/test_prd143_obs_routers_batch2.py:68-70]().
 
-    subgraph "Access Control"
-        AdminCheck["_assert_admin()"]
-        WS_Scope["getAdminWorkspaceOverride()"]
-    end
+### Security Boundary Table
+The following table defines which analytics surfaces are accessible to which roles.
 
-    subgraph "Backend Services"
-        DashboardSvc["useAdminDashboard()"]
-        SpenderSvc["Top Spenders Logic"]
-        PlanDist["Plan Distribution Logic"]
-    end
+| Router / Path | Role Required | Enforcement Mechanism |
+|:---|:---|:---|
+| `/api/analytics/llm/usage` | Workspace Admin | `require_workspace_admin` [orchestrator/api/llm_analytics.py:40]() |
+| `/api/admin/analytics/*` | Super Admin | `require_super_admin` [orchestrator/api/llm_analytics.py:45]() |
+| `/api/analytics/composio/*`| Super Admin | `require_super_admin` [orchestrator/api/composio_analytics.py:32]() |
+| `/api/v1/memory/stats/real` | Member | `get_request_context_hybrid` [orchestrator/api/memory_stats.py:141]() |
+| `/api/v1/memory/consolidate`| Super Admin | `require_super_admin` [orchestrator/api/memory_stats.py:43]() |
+| `/api/analytics/errors/by-subsystem` | Workspace Admin | `require_workspace_admin` [orchestrator/api/analytics_real.py:55]() |
+| `/api/analytics/widget-engagement` | Workspace Admin | `require_workspace_admin` [orchestrator/api/analytics_real.py:55]() |
+| `/api/analytics/primitive-health` | Workspace Admin | `require_workspace_admin` [orchestrator/api/analytics_real.py:55]() |
 
-    Dash --> AdminCheck
-    AdminCheck --> WS_Scope
-    WS_Scope --> DashboardSvc
-    DashboardSvc --> SpenderSvc
-    DashboardSvc --> PlanDist
-```
-Sources: [frontend/hooks/use-unified-analytics.ts:12-14](), [frontend/components/analytics/analytics-admin.tsx:168-175](), [orchestrator/api/llm_analytics.py:29]()
+Sources: [orchestrator/api/llm_analytics.py:31-55](), [orchestrator/api/memory_stats.py:26-44](), [orchestrator/tests/test_prd143_obs_routers_batch2.py:8-12](), [orchestrator/api/analytics_real.py:28-29](), [orchestrator/api/composio_analytics.py:139-145](), [orchestrator/api/analytics_real.py:55]()
 
-### Key Admin Metrics
-*   **Top Spenders**: Workspaces sorted by total cost, request count, or agent volume [frontend/components/analytics/analytics-admin.tsx:172-178]().
-*   **Plan Distribution**: Aggregated counts of workspaces across `starter`, `pilot`, `pro`, and `enterprise` tiers [frontend/components/analytics/analytics-admin.tsx:199-205]().
-*   **Platform-Wide Costs**: Total aggregate burn across all models and providers [frontend/components/analytics/analytics-admin.tsx:196]().
+## OpenRouter Sync Implementation
 
-## Caching and Performance
+The system maintains local data consistency with OpenRouter via `OpenRouterAnalyticsService`.
 
-The analytics system uses React Query with specific `staleTime` configurations to balance data freshness with API performance [frontend/hooks/use-unified-analytics.ts:104]().
+1.  **Sync Activity**: Fetches usage from `OPENROUTER_BASE/activity` [orchestrator/core/llm/openrouter_analytics.py:52-58]().
+2.  **Deduplication**: Rows are upserted into `llm_usage` using a unique key derived from `workspace_id + model_id + date` [orchestrator/core/llm/openrouter_analytics.py:97-106]().
+3.  **Credit Tracking**: Monitors remaining credits to prevent agent failure due to exhaustion [orchestrator/core/llm/openrouter_analytics.py:154-167]().
 
-| Data Type | Cache Key | Stale Time | Refresh Trigger |
-|:---|:---|:---|:---|
-| Overview | `unified-analytics/overview` | 60s | Manual / 30d Toggle |
-| Agent Stats | `unified-analytics/agents` | 60s | Tab Switch |
-| LLM Costs | `unified-analytics/costs` | 60s | Period Change |
-| Plan Usage | `unified-analytics/plan-usage` | 300s | Page Load |
-| Admin Dashboard | `unified-analytics/admin/dashboard` | 60s | Admin Tab Load |
-
-Sources: [frontend/hooks/use-unified-analytics.ts:18-43](), [frontend/hooks/use-unified-analytics.ts:104]()
+Sources: [orchestrator/core/llm/openrouter_analytics.py:27-167]()
 
 ---

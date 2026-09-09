@@ -57,16 +57,16 @@ graph TB
     
     subgraph "Orchestrator: FutureAGIService"
         EvalLive["FutureAGIService.eval_live_traffic()<br/>input_text, output_text, context_text"]
-        CheckAvailable["is_available property<br/>check config.AGENT_OPT_WORKER_URL"]
+        CheckAvailable["FutureAGIService.is_available property<br/>check config.AGENT_OPT_WORKER_URL"]
         ExtractText["_extract_text()<br/>parse message parts"]
         QueryPrompts["db.query(SystemPrompt)<br/>.filter(futureagi_eval_enabled==True)"]
         CallWorker["_call_worker('/score', payload)<br/>timeout=120s"]
         CreateRuns["SystemPromptEvalRun<br/>run_type='live', status='completed'"]
     end
     
-    subgraph "Worker Service: main.py"
+    subgraph "Worker Service: agent-opt-worker/main.py"
         ScoreEndpoint["@app.post('/score')<br/>ScoreRequest schema"]
-        BuildInputs["_build_inputs()<br/>per template requirements"]
+        BuildInputs["_build_inputs()<br/>per TEMPLATE_CONFIG"]
         ThreadPool["ThreadPoolExecutor<br/>max_workers=len(metrics)"]
         RunTemplate["_run_single_template()<br/>template, inputs, model"]
         SDKEval["fi.evals.Evaluator<br/>.evaluate()"]
@@ -110,9 +110,9 @@ Live traffic scoring is controlled by the `futureagi_eval_enabled` flag on the `
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `futureagi_eval_enabled` | Boolean | When `true`, every chat interaction scores this prompt [frontend/components/settings/SystemPromptsTab.tsx:53]() |
-| `slug` | String | Unique identifier (e.g., "chatbot-friendly") [frontend/components/settings/SystemPromptsTab.tsx:47]() |
-| `category` | String | Grouping (personality, orchestrator, specialized) [frontend/components/settings/SystemPromptsTab.tsx:49]() |
+| `futureagi_eval_enabled` | Boolean | When `true`, every chat interaction scores this prompt |
+| `slug` | String | Unique identifier (e.g., "chatbot-friendly") |
+| `category` | String | Grouping (personality, orchestrator, specialized) |
 
 ### Frontend Toggle
 
@@ -237,7 +237,7 @@ The worker's `_run_single_template()` function handles multiple output types fro
 
 ### Concurrent Execution
 
-All requested metrics run **concurrently** using Python's `ThreadPoolExecutor` within the worker service to minimize total scoring latency. [services/agent-opt-worker/main.py:313-316]()
+All requested metrics run **concurrently** using Python's `ThreadPoolExecutor` to minimize total scoring latency. [services/agent-opt-worker/main.py:313-316]()
 
 ---
 
@@ -273,7 +273,7 @@ The `_collect_optimization_dataset()` method queries historical chat messages to
 
 ### Fire-and-Forget Pattern
 
-Live scoring is implemented as a fire-and-forget operation to ensure **zero user-facing latency**. The orchestrator dispatches the task asynchronously after the chat stream is finalized. [orchestrator/core/services/futureagi_service.py:234-245]()
+Live scoring is implemented as a fire-and-forget operation to ensure **zero user-facing latency**. The orchestrator dispatches the task asynchronously. [orchestrator/core/services/futureagi_service.py:234-245]()
 
 ### Error Handling
 
@@ -307,14 +307,14 @@ Each metric displays a color indicator, the metric name, score percentage, and a
 
 | Variable | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `AGENT_OPT_WORKER_URL` | Yes | N/A | Worker service base URL [orchestrator/core/services/futureagi_service.py:25]() |
+| `AGENT_OPT_WORKER_URL` | Yes | N/A | Worker service base URL |
 
 **Worker Service** (`services/agent-opt-worker/main.py`):
 
 | Variable | Required | Description |
 | :--- | :--- | :--- |
-| `FUTUREAGI_API_KEY` | Yes | FutureAGI platform API key [services/agent-opt-worker/main.py:47]() |
-| `FUTUREAGI_SECRET_KEY` | Yes | FutureAGI platform secret key [services/agent-opt-worker/main.py:48]() |
+| `FUTUREAGI_API_KEY` | Yes | FutureAGI platform API key |
+| `FUTUREAGI_SECRET_KEY` | Yes | FutureAGI platform secret key |
 
 **Sources**: [orchestrator/core/services/futureagi_service.py:21-26](), [orchestrator/core/services/futureagi_service.py:63-69](), [services/agent-opt-worker/main.py:46-56]()
 
@@ -326,8 +326,8 @@ The `agent-opt-worker` requires the `agent-opt` and `ai-evaluation` packages to 
 
 ### Docker Setup
 
-The worker runs as an isolated service with its own container, exposing port 8080 and using `uvicorn` as the server. [services/agent-opt-worker/Dockerfile:1-16]()
+The worker runs as an isolated service with its own container, exposing port 8080 and using `uvicorn` as the server. [services/agent-opt-worker/Dockerfile:1-15]() It also includes shared logging and metrics utilities. [services/agent-opt-worker/main.py:32-40]()
 
-**Sources**: [services/agent-opt-worker/Dockerfile:1-16](), [services/agent-opt-worker/main.py:32-40]()
+**Sources**: [services/agent-opt-worker/Dockerfile:1-15](), [services/agent-opt-worker/main.py:32-40](), [services/agent-opt-worker/automatos_logging.py:1-191](), [services/agent-opt-worker/automatos_metrics.py:1-187]()
 
 ---

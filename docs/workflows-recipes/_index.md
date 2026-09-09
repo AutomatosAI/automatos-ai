@@ -5,23 +5,25 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/125-WORKFLOW-DECOUPLING-MISSION-MIGRATION.md](docs/PRDS/125-WORKFLOW-DECOUPLING-MISSION-MIGRATION.md)
-- [frontend/components/agents/org-chart-tab.tsx](frontend/components/agents/org-chart-tab.tsx)
-- [frontend/components/dashboard/activity-chart.tsx](frontend/components/dashboard/activity-chart.tsx)
-- [frontend/components/dashboard/dashboard.tsx](frontend/components/dashboard/dashboard.tsx)
-- [frontend/components/dashboard/metric-cards.tsx](frontend/components/dashboard/metric-cards.tsx)
-- [frontend/components/dashboard/widgets/activity-heatmap.tsx](frontend/components/dashboard/widgets/activity-heatmap.tsx)
-- [frontend/components/dashboard/widgets/agent-collaboration-network.tsx](frontend/components/dashboard/widgets/agent-collaboration-network.tsx)
-- [frontend/components/dashboard/widgets/agent-status-grid.tsx](frontend/components/dashboard/widgets/agent-status-grid.tsx)
-- [frontend/components/dashboard/widgets/context-optimization-panel.tsx](frontend/components/dashboard/widgets/context-optimization-panel.tsx)
-- [frontend/components/dashboard/widgets/learning-progress-chart.tsx](frontend/components/dashboard/widgets/learning-progress-chart.tsx)
-- [frontend/components/dashboard/widgets/task-execution-timeline.tsx](frontend/components/dashboard/widgets/task-execution-timeline.tsx)
-- [frontend/components/dashboard/widgets/token-usage-trends.tsx](frontend/components/dashboard/widgets/token-usage-trends.tsx)
-- [frontend/components/workflows/active-workflows-panel.tsx](frontend/components/workflows/active-workflows-panel.tsx)
-- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
+- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
+- [orchestrator/api/composio.py](orchestrator/api/composio.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
+- [orchestrator/api/skills.py](orchestrator/api/skills.py)
+- [orchestrator/api/tools.py](orchestrator/api/tools.py)
+- [orchestrator/api/webhooks.py](orchestrator/api/webhooks.py)
 - [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
-- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
+- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
+- [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
+- [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
+- [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
+- [orchestrator/core/routing/ingestors/webhook.py](orchestrator/core/routing/ingestors/webhook.py)
+- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
+- [orchestrator/services/webhook_dedup.py](orchestrator/services/webhook_dedup.py)
+- [orchestrator/tests/test_p2w0_service_imports_resolve.py](orchestrator/tests/test_p2w0_service_imports_resolve.py)
+- [orchestrator/tests/test_p2w2_webhook_dedup.py](orchestrator/tests/test_p2w2_webhook_dedup.py)
+- [orchestrator/tests/test_p2w2_webhook_signature_reject.py](orchestrator/tests/test_p2w2_webhook_signature_reject.py)
 
 </details>
 
@@ -29,19 +31,17 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document covers the **Workflows & Recipes** system in Automatos AI, which enables multi-agent task orchestration through step-by-step execution pipelines. Recipes are user-defined workflows that chain multiple agents together to accomplish complex tasks, with support for scheduling, triggers, memory integration, and 5-dimensional quality assessment.
-
-Following the system's evolution, complex tasks previously handled by legacy workflows are being migrated to the **Mission** system (PRD-125), which utilizes a topological sort for task dependencies and a coordinator tick loop [docs/PRDS/125-WORKFLOW-DECOUPLING-MISSION-MIGRATION.md:15-18]().
+This document covers the **Workflows & Recipes** system in Automatos AI, which enables multi-agent task orchestration through step-by-step execution pipelines. Recipes are user-defined workflows that chain multiple agents together to accomplish complex tasks, with support for scheduling, triggers, memory integration, and multi-dimensional quality assessment.
 
 For details on the specific sub-systems, see the following child pages:
-- [Creating Recipes](#6.1) — UI step builder and form configuration [frontend/components/workflows/workflow-management.tsx:201-215]().
-- [Recipe Execution Engine](#6.2) — The `execute_recipe_direct` logic and workspace semaphores.
-- [Execution Configuration](#6.3) — Sequential vs parallel modes and timeout management.
-- [Scheduling & Triggers](#6.4) — Manual, cron, and webhook triggers; `RecipeScheduleConfig` [orchestrator/api/workflow_recipes.py:59-65]().
-- [Recipe Memory & Learning](#6.5) — `RecipeLearningService` pattern extraction and `RecipeQualityService` 5D assessment.
-- [Recipe Scratchpad](#6.6) — Inter-step data sharing with structured key-value storage.
-- [Workflow Pipeline Architecture](#6.7) — Comparison between legacy 9-stage and dynamic PRD-59 phases.
-- [Workflow API Reference](#6.8) — Complete endpoint documentation [orchestrator/api/workflow_recipes.py:22-22]().
+- [Creating Recipes](#6.1) — Playbook/recipe creation UI, step builder, preview panel, JSON schema editor.
+- [Recipe Execution Engine](#6.2) — `_execute_step`, workspace semaphores, step loop, agent activation, tool execution, playbook breaker and failure visibility.
+- [Execution Configuration](#6.3) — Sequential vs parallel modes, retries, timeouts, `parallel_limit`, memory_isolation, auto_learning, power modes.
+- [Scheduling & Triggers](#6.4) — Manual, cron, and webhook triggers; `playbook_scheduler`; `scheduled_task_service`; `TriggerSubscription`; webhook dedup and signature verification.
+- [Recipe Memory & Learning](#6.5) — Playbook memory service, pattern extraction, quality assessment, and the learning flywheel.
+- [Recipe Scratchpad](#6.6) — Inter-step data sharing with structured key-value storage, `scratchpad_write`/`read` tools.
+- [Workflow Pipeline Architecture](#6.7) — Legacy 9-stage workflow vs dynamic phases (`PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, `LEARN`), `WorkflowStageTracker`, SSE stage events.
+- [Workflow API Reference](#6.8) — API endpoints for workflow/playbook CRUD, execution, templates, history, active workflows, cleanup.
 
 ---
 
@@ -51,115 +51,113 @@ For details on the specific sub-systems, see the following child pages:
 
 The system supports two distinct execution paradigms:
 
-**Workflows & Missions** (Dynamic Pipeline):
-- Orchestration through dynamic phases: `PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, `LEARN`.
-- **Missions** are the preferred path for organ/organism complexity tasks, utilizing the `coordinator_service.py` 5s tick loop instead of the legacy filesystem-based pipeline [docs/PRDS/125-WORKFLOW-DECOUPLING-MISSION-MIGRATION.md:37-45]().
+- **Workflows (Dynamic Pipeline):** Orchestration through dynamic execution phases (`PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, `LEARN`) [orchestrator/api/workflows.py:63-69](). Used for autonomous, adaptive task execution where progress is tracked via `WorkflowStageTracker`.
+- **Recipes (Direct Step Execution):** Simple step-by-step execution for predictable, repeatable automation [orchestrator/api/recipe_executor.py:5-7](). Bypasses the complex 9-stage pipeline for efficiency and uses the same component path as the chatbot (`ContextService`, `LLMManager`, `ToolRouter`) [orchestrator/api/recipe_executor.py:7-12]().
 
-**Recipes** (Direct Step Execution):
-- Simple step-by-step execution for predictable, repeatable automation.
-- Bypasses complex pipelines for efficiency, often referred to as "Playbooks" in the UI [frontend/components/workflows/workflow-management.tsx:61-62]().
-- Uses the same component path as the chatbot (`ContextService`, `LLMManager`) for alignment.
-
-**Sources:** [docs/PRDS/125-WORKFLOW-DECOUPLING-MISSION-MIGRATION.md:15-45](), [frontend/components/workflows/workflow-management.tsx:57-62]()
-
-### Recipe Architecture
-
-A recipe (represented by the `WorkflowTemplate` model) is a structured template for multi-agent execution [orchestrator/api/workflow_recipes.py:25-25]().
-
-Title: Recipe Data Structure
+Title: Recipe Architecture Mapping
 ```mermaid
 graph TB
-    subgraph "Code Entity Space"
-        Recipe["WorkflowTemplate (Model)"]
-        Steps["steps (JSONB)"]
-        SchedConfig["schedule_config (JSONB)"]
-        ExecRecord["RecipeExecution (Model)"]
+    subgraph "NaturalLanguageSpace"
+        NL_Recipe["Playbook Recipe Definition"]
+        NL_Steps["Step Prompts and Agent Assignments"]
+        NL_Trigger["Cron Schedule or Webhook"]
     end
 
-    subgraph "Natural Language Space"
-        Recipe --- "Automation Definition"
-        Steps --- "Agent Assignments & Prompts"
-        SchedConfig --- "Cron or Trigger Rules"
-        ExecRecord --- "Execution History & Logs"
+    subgraph "CodeEntitySpace"
+        CE_Recipe["WorkflowTemplate"]
+        CE_Steps["steps_jsonb"]
+        CE_Sched["schedule_config_jsonb"]
     end
 
-    Recipe --> Steps
-    Recipe --> SchedConfig
-    ExecRecord --> Recipe
+    NL_Recipe --- CE_Recipe
+    NL_Steps --- CE_Steps
+    NL_Trigger --- CE_Sched
 ```
 
-**Sources:** [orchestrator/api/workflow_recipes.py:25-28](), [orchestrator/api/marketplace.py:25-25]()
+Sources: [orchestrator/api/recipe_executor.py:1-19](), [orchestrator/api/workflow_recipes.py:25-27](), [orchestrator/api/workflows.py:38-70]()
 
 ---
 
 ## Recipe Execution Pipeline
 
-### Execution Flow
+The recipe executor handles the lifecycle of a recipe run. It manages terminal state reporting via `_ingest_playbook_terminal_watch` and supports per-execution step overrides for prompt tweaking [orchestrator/api/recipe_executor.py:89-101](), [orchestrator/api/recipe_executor.py:129-140]().
 
-The system manages the lifecycle of a recipe run through a series of step executions. The UI tracks these through the `ActiveWorkflowsPanel`, which displays `recipe_runs` and `active_workflows` [frontend/components/workflows/active-workflows-panel.tsx:125-132]().
-
-Title: Execution Logic to Code Mapping
+Title: Execution Pipeline Flow
 ```mermaid
 graph TD
-    Trigger["Trigger Event"] --> API["POST /api/workflow-recipes/{id}/execute"]
-    API --> Mutate["executeWorkflowMutation.mutate()"]
-    
-    subgraph "Execution Logic"
-        Mutate --> Factory["AgentFactory.activate_agent()"]
-        Factory --> Context["ContextService(RECIPE).build_context()"]
-        Context --> LLM["LLMManager.generate_response()"]
+    subgraph "NaturalLanguageSpace"
+        NL_Trigger["Trigger Event"]
+        NL_StepExec["Step Execution"]
+        NL_Report["Auto Reporting"]
     end
-    
-    LLM --> UI["ActiveWorkflowsPanel (Live Progress)"]
-    UI --> Completion["NotificationDispatcher.dispatch()"]
+
+    subgraph "CodeEntitySpace"
+        CE_Overrides["_apply_step_overrides"]
+        CE_Loop["Step Loop"]
+        CE_Report["_auto_create_playbook_report"]
+        CE_Watch["_ingest_playbook_terminal_watch"]
+    end
+
+    NL_Trigger --> CE_Overrides
+    CE_Overrides --> CE_Loop
+    CE_Loop --> CE_Report
+    CE_Report --> CE_Watch
 ```
 
-**Sources:** [frontend/components/workflows/active-workflows-panel.tsx:54-58](), [frontend/components/workflows/active-workflows-panel.tsx:192-221](), [orchestrator/api/workflow_recipes.py:22-29]()
+For details on execution internals, see [Recipe Execution Engine](#6.2).
 
-### Recipe Scratchpad & Data Sharing
-Agents in a recipe share data through a structured scratchpad.
-- **Platform Actions:** Agents use `platform_add_playbook_step` or `platform_update_playbook_step` to modify the flow programmatically [orchestrator/core/seeds/platform-management-skill.md:60-63]().
-- **Inter-step Memory:** The `RecipeMemoryService` (Mem0) stores facts that persist across steps [orchestrator/core/seeds/platform-management-skill.md:114-117]().
+Sources: [orchestrator/api/recipe_executor.py:89-158](), [orchestrator/api/recipe_executor.py:163-180]()
 
-**Sources:** [orchestrator/core/seeds/platform-management-skill.md:52-73](), [orchestrator/core/seeds/platform-management-skill.md:114-117]()
+---
+
+## Execution Configuration
+
+Recipes support flexible configuration parameters such as sequential or parallel execution modes, retry policies, timeouts, memory isolation settings, and power modes. 
+
+For complete configuration options, see [Execution Configuration](#6.3).
+
+Sources: [orchestrator/api/recipe_executor.py:14-19]()
 
 ---
 
 ## Scheduling & Triggers
 
-Recipes can be triggered through multiple mechanisms managed via `schedule_config`:
+Playbooks can be invoked via manual UI triggers, scheduled cron expressions using `_sync_cron_schedule`, Composio trigger subscriptions (`_auto_register_trigger`), or external webhooks with cryptographic HMAC signature verification [orchestrator/api/workflow_recipes.py:36-128](), [orchestrator/api/webhooks.py:50-93]().
 
-1.  **Manual:** Triggered via the `ExecutionKitchen` UI or the "Cook" button in the `ActiveWorkflowsPanel` [frontend/components/workflows/active-workflows-panel.tsx:192-193]().
-2.  **Cron:** Scheduled recurring tasks using `cron_expression` managed by `PlaybookSchedulerService` [orchestrator/api/workflow_recipes.py:34-45]().
-3.  **Triggers:** Subscriptions to external events via `TriggerSubscription` using Composio [orchestrator/api/workflow_recipes.py:107-116]().
-4.  **Marketplace:** Recipes can be installed from the Community Marketplace, which clones the template and its agent dependencies to the local workspace [orchestrator/api/marketplace.py:144-150]().
+For implementation details, see [Scheduling & Triggers](#6.4).
 
-**Sources:** [orchestrator/api/workflow_recipes.py:34-45](), [orchestrator/api/workflow_recipes.py:107-116](), [orchestrator/api/marketplace.py:144-150]()
+Sources: [orchestrator/api/workflow_recipes.py:36-128](), [orchestrator/api/webhooks.py:50-93]()
 
 ---
 
-## Monitoring & Analytics
+## Recipe Memory & Learning
 
-Workflow and recipe performance is tracked via the `Analytics` system, providing visibility into costs and success rates.
+Recipes integrate with Mem0 and pattern extraction services to record execution summaries, evaluate quality metrics, and feed the continuous learning loop [orchestrator/api/recipe_executor.py:15-19]().
 
-- **Success Metrics:** `ActiveWorkflow` records track `total_executions`, `success_rate`, and `avg_duration` [frontend/components/workflows/active-workflows-panel.tsx:79-85]().
-- **Live Monitoring:** The `ActivityChart` provides a real-time view of active missions and agent utilization [frontend/components/dashboard/activity-chart.tsx:138-143]().
-- **Optimization:** The `ContextOptimizationPanel` tracks token savings and compression ratios achieved during multi-agent context assembly [frontend/components/dashboard/widgets/context-optimization-panel.tsx:135-149]().
+For more information, see [Recipe Memory & Learning](#6.5).
 
-**Sources:** [frontend/components/workflows/active-workflows-panel.tsx:79-85](), [frontend/components/dashboard/activity-chart.tsx:138-143](), [frontend/components/dashboard/widgets/context-optimization-panel.tsx:135-149]()
+Sources: [orchestrator/api/recipe_executor.py:15-19]()
 
 ---
 
-## UI Components
+## Recipe Scratchpad
 
-| Component | Purpose | File |
-| :--- | :--- | :--- |
-| `ActiveWorkflowsPanel` | Main dashboard for tracking running recipes and historical runs. | [frontend/components/workflows/active-workflows-panel.tsx:139-148]() |
-| `ExecutionKitchen` | Dedicated interface for manual execution and real-time step monitoring. | [frontend/components/workflows/workflow-management.tsx:62-62]() |
-| `PlaybooksTab` | Management interface for browsing and editing recipe templates. | [frontend/components/workflows/workflow-management.tsx:61-61]() |
-| `LiveProgressPanel` | Detailed SSE-driven progress visualization for active recipe steps. | [frontend/components/workflows/active-workflows-panel.tsx:55-55]() |
-| `StatsBar` | High-level summary of completed tasks, agent utilization, and duration. | [frontend/components/workflows/workflow-management.tsx:45-45]() |
+Inter-step data sharing is handled through the `RecipeScratchpad` structured key-value storage, which reduces token usage by 80-90% compared to verbose text dumps [orchestrator/api/recipe_executor.py:15-16](). Agents explicitly export data using the `scratchpad_write` tool [orchestrator/api/recipe_executor.py:16-17]().
 
-**Sources:** [frontend/components/workflows/active-workflows-panel.tsx:139-156](), [frontend/components/workflows/workflow-management.tsx:45-62]()
+For deep dives, see [Recipe Scratchpad](#6.6).
+
+Sources: [orchestrator/api/recipe_executor.py:15-19]()
+
+---
+
+## Workflow Pipeline Architecture & UI
+
+Workflows track progress across legacy stages and dynamic phases (`PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, `LEARN`) via `WorkflowStageTracker` and SSE events [orchestrator/api/workflows.py:38-69](). 
+
+Frontend execution is monitored in real-time through components like `ExecutionKitchen` and `TheaterStageProgress` [frontend/components/workflows/execution-kitchen.tsx:35-54]().
+
+For architectural details, see [Workflow Pipeline Architecture](#6.7) and [Workflow API Reference](#6.8).
+
+Sources: [orchestrator/api/workflows.py:38-69](), [frontend/components/workflows/execution-kitchen.tsx:35-54]()
 
 ---

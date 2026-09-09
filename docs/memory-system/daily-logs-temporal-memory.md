@@ -5,15 +5,36 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/main.py](orchestrator/main.py)
+- [docs/PRDS/PRD-206-MEMORY-CONTINUITY-PERSONAL-CONTEXT.md](docs/PRDS/PRD-206-MEMORY-CONTINUITY-PERSONAL-CONTEXT.md)
+- [docs/runbooks/S10-MEMORY-BASELINE-FREEZE.md](docs/runbooks/S10-MEMORY-BASELINE-FREEZE.md)
+- [frontend/components/__tests__/prd205-auto-speaks.test.ts](frontend/components/__tests__/prd205-auto-speaks.test.ts)
+- [orchestrator/alembic/versions/prd206_chat_summary.py](orchestrator/alembic/versions/prd206_chat_summary.py)
+- [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
+- [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
+- [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
+- [orchestrator/evals/graphiti_vs_baseline.py](orchestrator/evals/graphiti_vs_baseline.py)
+- [orchestrator/modules/context/sections/memory.py](orchestrator/modules/context/sections/memory.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
+- [orchestrator/modules/memory/recall_ranking.py](orchestrator/modules/memory/recall_ranking.py)
+- [orchestrator/modules/memory/thread_checkpoint.py](orchestrator/modules/memory/thread_checkpoint.py)
 - [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/services/memory_archival_job.py](orchestrator/services/memory_archival_job.py)
+- [orchestrator/services/memory_jobs.py](orchestrator/services/memory_jobs.py)
+- [orchestrator/tests/test_l3_distill_input.py](orchestrator/tests/test_l3_distill_input.py)
+- [orchestrator/tests/test_memory_restart_and_isolation.py](orchestrator/tests/test_memory_restart_and_isolation.py)
+- [orchestrator/tests/test_memory_single_write_path.py](orchestrator/tests/test_memory_single_write_path.py)
+- [orchestrator/tests/test_memory_stored_sse.py](orchestrator/tests/test_memory_stored_sse.py)
+- [orchestrator/tests/test_p2w1_semantic_l2_recall.py](orchestrator/tests/test_p2w1_semantic_l2_recall.py)
+- [orchestrator/tests/test_prd197_substrate.py](orchestrator/tests/test_prd197_substrate.py)
+- [orchestrator/tests/test_prd198_graphiti_gate.py](orchestrator/tests/test_prd198_graphiti_gate.py)
+- [orchestrator/tests/test_prd205_auto_speaks.py](orchestrator/tests/test_prd205_auto_speaks.py)
+- [orchestrator/tests/test_prd206_recall_ranking.py](orchestrator/tests/test_prd206_recall_ranking.py)
+- [orchestrator/tests/test_prd206_thread_checkpoint.py](orchestrator/tests/test_prd206_thread_checkpoint.py)
+- [orchestrator/tests/test_recall_relevance_floor.py](orchestrator/tests/test_recall_relevance_floor.py)
+- [orchestrator/tests/test_smart_orchestrator_store_exchange.py](orchestrator/tests/test_smart_orchestrator_store_exchange.py)
 - [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/tests/test_us011_context_budgets.py](orchestrator/tests/test_us011_context_budgets.py)
 
 </details>
 
@@ -21,139 +42,129 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Daily logs provide time-indexed activity tracking for workspaces, enabling agents to answer temporal queries such as "what did we work on earlier today?" or "what happened last week?". This system maintains a structured journal of activities extracted from chat exchanges, heartbeat ticks, and workflow executions. It bridges the gap between raw conversation history and semantic facts by providing a chronological narrative of workspace progress.
+Daily logs provide time-indexed activity tracking for workspaces, enabling agents to answer temporal queries like "what did we work on earlier today?" or "what happened yesterday?". The system maintains a structured journal of activities extracted from chat exchanges and heartbeat executions, stored across the multi-tier memory architecture.
 
-Daily logs are primarily managed by the `UnifiedMemoryService` [orchestrator/modules/memory/unified_memory_service.py:154-161]() and are categorized as part of the L2 (Short-term/Postgres) and L3 (Long-term/Mem0) memory tiers.
+Daily logs primarily occupy **L2 (Short-term/Postgres)** and **L3 (Long-term/Durable)** memory tiers. For the overall memory architecture, see [Memory System](). For the unified service managing these operations, see [UnifiedMemoryService]().
+
+Sources: [orchestrator/modules/memory/unified_memory_service.py:1-21](), [orchestrator/services/memory_jobs.py:1-22]()
 
 ---
 
 ## Architecture Overview
 
-The temporal memory system uses the `ContextRouter` [orchestrator/modules/memory/context_router.py:2-12]() to detect time-based signals in user queries and the `UnifiedMemoryService` to manage the storage and retrieval of these logs across tiered storage.
+The system utilizes a combination of real-time extraction during chat turns and background consolidation jobs to maintain temporal awareness, bridging natural language queries to underlying code execution components.
 
-**Daily Log & Temporal Retrieval Flow**
+**Natural Language to Code Space: Temporal Retrieval Architecture**
 
 ```mermaid
-graph TD
-    subgraph "Query Analysis"
-        UserQuery["User Query"] --> CR["ContextRouter.analyze_query()"]
-        CR --> Signals["ContextSignals<br/>(is_temporal=True)"]
+graph TB
+    subgraph "NaturalLanguageSpace"
+        NL["User Query:<br/>'What did we discuss last week?'"]
     end
     
-    subgraph "Temporal Window Calculation"
-        Signals --> TW["_compute_temporal_window()<br/>Regex-based date parsing"]
-        TW --> Range["(start_date, end_date)"]
+    subgraph "CodeEntitySpace"
+        Router["ContextRouter.analyze_query()<br/>modules/memory/context_router.py"]
+        Ns["MemoryNamespace.daily()<br/>modules/memory/unified_memory_service.py"]
+        Fetch["UnifiedMemoryService.search_long_term()<br/>modules/memory/unified_memory_service.py"]
+        Sec["MemorySection.render()<br/>modules/context/sections/memory.py"]
     end
-    
-    subgraph "Unified Retrieval"
-        Range --> UMS["UnifiedMemoryService.get_daily_logs()"]
-        UMS --> L2["L2 Storage<br/>PostgreSQL memory_items"]
-        UMS --> L3["L3 Storage<br/>Mem0 daily namespace"]
-    end
-    
-    subgraph "Prompt Assembly"
-        L2 --> Bundle["ContextBundle"]
-        L3 --> Bundle
-        Bundle --> Context["ContextService<br/>DatetimeSection + MemorySection"]
-    end
+
+    NL --> Router
+    Router -->|is_temporal=True| Ns
+    Ns --> Fetch
+    Fetch --> Sec
 ```
-Sources: [orchestrator/modules/memory/context_router.py:5-24](), [orchestrator/modules/memory/unified_memory_service.py:38-46]()
+Sources: [orchestrator/modules/memory/context_router.py:1-24](), [orchestrator/modules/memory/unified_memory_service.py:38-79](), [orchestrator/modules/context/sections/memory.py:32-69]()
 
 ---
 
-## Data Model & Namespacing
+## Dual-Tier Storage Strategy
 
-The system enforces strict namespacing to isolate temporal logs from general semantic memories. The `MemoryNamespace` class provides standardized user ID strings for Mem0 and Redis keys to prevent data leakage between workspaces and memory types [orchestrator/modules/memory/unified_memory_service.py:38-48]().
+Daily logs are mirrored across tiers to balance fast temporal lookups with long-term semantic retrieval.
 
-### Temporal Namespaces
-*   **Daily Logs**: `mem:{workspace_id}:daily` [orchestrator/modules/memory/unified_memory_service.py:72-74]()
-*   **Session Cache**: `mem:session:{workspace_id}:{conversation_id}` [orchestrator/modules/memory/unified_memory_service.py:78-80]()
+| Tier | Technology | Purpose | Retention |
+|------|------------|---------|-----------|
+| **L2** | PostgreSQL (`memory_items`) | Verbatim transcripts and episodic logs. | Ebbinghaus decay (default 0.3 threshold) [orchestrator/services/memory_jobs.py:11-13]() |
+| **L3** | Qdrant (Durable Store) | Distilled daily facts and summaries. | Long-term via `MemoryNamespace.daily()` [orchestrator/modules/memory/unified_memory_service.py:72-74]() |
 
-### Storage Tiers
+### Memory Namespacing
+All daily logs are scoped using the `MemoryNamespace` utility to prevent cross-workspace leaks.
+- **Daily Logs (L2):** `mem:{workspace_id}:daily` [orchestrator/modules/memory/unified_memory_service.py:72-74]()
+- **L2 Mirror (L3):** `mem:{workspace_id}:l2` [orchestrator/modules/memory/unified_memory_service.py:76-78]()
 
-| Tier | Logic | Code Entity |
-| :--- | :--- | :--- |
-| **L1 (Working)** | Ephemeral session state (24h TTL) | `SessionMemory` [orchestrator/modules/memory/unified_memory_service.py:123-130]() |
-| **L2 (Short-term)** | Time-decayed logs in Postgres | `UnifiedMemoryService.search_short_term` |
-| **L3 (Long-term)** | Permanent daily summaries in Mem0 | `UnifiedMemoryService.search_long_term` |
-
-Sources: [orchestrator/modules/memory/unified_memory_service.py:8-13](), [orchestrator/modules/memory/unified_memory_service.py:84-87]()
+Sources: [orchestrator/modules/memory/unified_memory_service.py:38-79](), [orchestrator/services/memory_jobs.py:1-22]()
 
 ---
 
-## Signal Detection & Temporal Windows
+## Retrieval & Temporal Awareness
 
-The `ContextRouter` uses a series of compiled regex patterns to identify when a user is asking about past events. 
+The `ContextRouter` is the primary mechanism for detecting when an agent needs temporal information.
 
-### Temporal Patterns
-The system recognizes relative time references like "yesterday", "last week", "a few days ago", and "recently" [orchestrator/modules/memory/context_router.py:85-105]().
+### Signal Detection
+The router uses `_TEMPORAL_PATTERNS` (compiled regex) to detect keywords like "yesterday", "last week", or "recently" [orchestrator/modules/memory/context_router.py:107-126](). If `is_temporal` is flagged, the system prioritizes fetching daily logs and time-indexed memories.
 
-### Window Calculation
-The `_compute_temporal_window` function converts these relative strings into absolute `datetime` ranges [orchestrator/modules/memory/context_router.py:177-186](). For example:
-*   **"yesterday"**: Generates a window from `now - 1 day` at 00:00 to `now` at 00:00 [orchestrator/modules/memory/context_router.py:189-192]().
-*   **"last week"**: Generates a 7-day window ending at the start of the current day [orchestrator/modules/memory/context_router.py:202-205]().
+### Retrieval Flow
+1. **ContextRouter** analyzes the query for temporal signals [orchestrator/modules/memory/context_router.py:1-24]().
+2. **MemorySection** (Priority 6) calls `retrieve_context()` [orchestrator/modules/context/sections/memory.py:120-125]().
+3. The system fetches daily logs, applying a specific budget weight (8% of the usable window) [orchestrator/modules/memory/context_router.py:46-55]().
 
-Sources: [orchestrator/modules/memory/context_router.py:85-105](), [orchestrator/modules/memory/context_router.py:177-205]()
+Sources: [orchestrator/modules/memory/context_router.py:107-175](), [orchestrator/modules/context/sections/memory.py:103-140]()
 
 ---
 
-## Daily Log Consolidation
+## Memory Lifecycle & Cleanup Jobs
 
-Daily logs are not just raw chat logs; they are consolidated summaries. This process is governed by the `UnifiedMemoryService` and scheduled background jobs.
+The `MemoryJobScheduler` manages the aging and promotion of temporal data to ensure the system doesn't become cluttered with irrelevant episodic details.
 
-**Memory Lifecycle: L1 to L2 Consolidation**
+### Background Jobs
+- **Decay Scoring (Hourly):** Applies Ebbinghaus retention scoring to L2 rows. Items falling below the threshold are archived [orchestrator/services/memory_jobs.py:11-13]().
+- **L2→L3 Promotion (Daily):** Promotes important L2 items (transcripts) to L3 durable storage based on an importance policy [orchestrator/services/memory_jobs.py:15-18]().
+- **Thread Checkpoint (Every 15m):** Summarizes recently idle chat threads and moves open loops into L3 [orchestrator/services/memory_jobs.py:160-167]().
+
+**Natural Language to Code Space: Memory Maintenance Execution**
 
 ```mermaid
 sequenceDiagram
-    participant Redis as "L1 (Redis)"
-    participant Job as "Consolidation Job"
-    participant DB as "L2 (Postgres)"
-    participant Mem0 as "L3 (Mem0)"
-
-    Note over Redis: Session ends or TTL expires
-    Job->>Redis: Fetch SessionMemory (summary, decisions)
-    Job->>DB: INSERT INTO memory_items (level=L2)
-    Note over DB: Apply Ebbinghaus Decay
-    DB->>Mem0: Promote if Importance > 0.7
+    participant NL as "User/System Event"
+    participant Sched as "MemoryJobScheduler<br/>services/memory_jobs.py"
+    participant L2 as "L2 Postgres<br/>memory_items table"
+    participant L3 as "L3 Durable Store<br/>DurableMemoryStore"
+    
+    NL->>Sched: "Trigger background sweep"
+    Sched->>L2: "JOB_ID_DECAY (Hourly)"
+    L2-->>L2: "Update decay_score & archive junk"
+    
+    Sched->>L2: "JOB_ID_PROMOTION (Daily)"
+    L2->>L3: "Move high-importance facts to Durable Store"
+    
+    Sched->>L2: "JOB_ID_THREAD_CHECKPOINT (15m)"
+    L2-->>L3: "Summarize idle threads & store open loops"
 ```
-Sources: [orchestrator/modules/memory/unified_memory_service.py:123-137](), [orchestrator/config.py:98-107]()
-
-### Configuration Parameters
-The behavior of temporal memory is tuned via `config.py`:
-*   **`MEMORY_SESSION_TTL_SECONDS`**: 86,400s (24 hours) for active session memory [orchestrator/config.py:85]().
-*   **`MEMORY_DECAY_RATE`**: 0.1 (Ebbinghaus forgetting curve speed) [orchestrator/config.py:99]().
-*   **`CONTEXT_BUDGET_TEMPORAL`**: 600 tokens allocated specifically for temporal results in the context window [orchestrator/config.py:93]().
+Sources: [orchestrator/services/memory_jobs.py:32-173]()
 
 ---
 
-## Implementation Details
+## Distillation vs. Verbatim Storage
 
-### Session Memory Structure
-The `SessionMemory` class tracks the current state of a conversation before it is archived into daily logs [orchestrator/modules/memory/unified_memory_service.py:123-137]().
+When a chat turn occurs, the `SmartMemoryManager` performs a dual-write:
 
-```python
-@dataclass
-class SessionMemory:
-    summary: str = ""
-    decisions: List[str] = field(default_factory=list)
-    action_items: List[str] = field(default_factory=list)
-    exchange_count: int = 0
-    ended: bool = False
-```
-Sources: [orchestrator/modules/memory/unified_memory_service.py:132-137]()
+1.  **Distillation:** The `_distill_durable_facts` method uses a cheap LLM (`MEMORY_DISTILL_MODEL`) to extract typed facts (e.g., `user_fact`, `procedure`) from the exchange. These are stored in **L3** [orchestrator/consumers/chatbot/smart_memory.py:26-36]().
+2.  **Transcript:** The verbatim exchange is stored via `store_transcript` in **L2** for immediate temporal recall [orchestrator/tests/test_l3_distill_input.py:107-109]().
 
-### UnifiedMemoryService Singleton
-The service maintains a shared `Mem0Client` and a Redis client getter to ensure consistent memory access across the application [orchestrator/modules/memory/unified_memory_service.py:154-188](). It provides methods like `store_long_term` and `search_long_term` which automatically handle the namespacing for daily logs [orchestrator/modules/memory/unified_memory_service.py:18-20]().
+Sources: [orchestrator/consumers/chatbot/smart_memory.py:26-137]()
 
 ---
 
-## Maintenance & Cleanup
+## Code Entity Reference
 
-The system includes background jobs for memory health:
-1.  **Decay Job**: Periodically reduces the "importance" score of L2 memories. Items falling below `MEMORY_DECAY_ARCHIVE_THRESHOLD` (default 0.3) are archived [orchestrator/config.py:99-101]().
-2.  **Promotion Job**: Memories with high access counts or importance scores are promoted from L2 to L3 [orchestrator/config.py:104-107]().
-3.  **Archival Job**: A monthly job (PRD-131d) that folds aged L2/L3 memories into the workspace knowledge graph [orchestrator/config.py:116-123]().
+| Entity | Location | Purpose |
+|--------|----------|---------|
+| `MemoryNamespace` | [orchestrator/modules/memory/unified_memory_service.py:39-46]() | Scopes memory keys for workspaces and agents. |
+| `ContextRouter` | [orchestrator/modules/memory/context_router.py:83-101]() | Detects temporal signals in user queries. |
+| `MemoryJobScheduler` | [orchestrator/services/memory_jobs.py:32-43]() | Manages decay, promotion, and consolidation jobs. |
+| `SmartMemoryManager` | [orchestrator/consumers/chatbot/smart_memory.py:63-74]() | Handles the real-time distillation and storage of chat facts. |
+| `MemorySection` | [orchestrator/modules/context/sections/memory.py:32-46]() | System prompt injection wrapper for memories and daily logs. |
 
-Sources: [orchestrator/config.py:98-123](), [orchestrator/modules/memory/unified_memory_service.py:8-13]()
+Sources: [orchestrator/modules/memory/unified_memory_service.py:39-46](), [orchestrator/modules/memory/context_router.py:83-101](), [orchestrator/services/memory_jobs.py:32-43](), [orchestrator/consumers/chatbot/smart_memory.py:63-74](), [orchestrator/modules/context/sections/memory.py:32-46]()
 
 ---

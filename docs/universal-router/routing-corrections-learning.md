@@ -5,39 +5,40 @@
 
 The following files were used as context for generating this wiki page:
 
+- [orchestrator/api/chat.py](orchestrator/api/chat.py)
 - [orchestrator/api/routing.py](orchestrator/api/routing.py)
+- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
+- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
 - [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
-- [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
-- [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
+- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
+- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
+- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
 
 </details>
 
 
 
-This document describes the feedback loop system that enables the `UniversalRouter` to learn from user corrections and improve routing accuracy over time. When the router selects an incorrect agent or workflow, users can submit corrections that feed back into the routing cache and decision history, creating a continuous learning mechanism that eventually updates the Tier 1 cache automatically.
+This page covers the feedback loop system that enables the `UniversalRouter` to learn from user corrections and improve routing accuracy over time [orchestrator/core/routing/engine.py:1-16](). When the router selects an incorrect agent or workflow, users can submit corrections that update the routing cache and decision history, creating a continuous self-healing mechanism [orchestrator/api/routing.py:1-7]().
 
-For information about the core routing engine and tier strategy, see **10.1 Routing Architecture**. For cache lookup implementation details, see **10.3 Tier 1: Cache Lookup**.
-
-Sources: [orchestrator/core/routing/engine.py:1-16]() | [orchestrator/api/routing.py:1-33]()
+Sources: [orchestrator/core/routing/engine.py:1-16]() | [orchestrator/api/routing.py:1-7]()
 
 ---
 
 ## System Overview
 
-The routing corrections system provides three key capabilities:
+The routing corrections system operates across three core architectural pillars:
 
-1.  **Decision Tracking**: Every routing decision is logged to the `routing_decisions` table (represented by the `RoutingDecisionRecord` model) with full context, including request content hash, source, selected agent/workflow, confidence, and reasoning [orchestrator/core/routing/engine.py:857-881]().
-2.  **User Corrections**: Admins can flag incorrect routing decisions and specify the correct `agent_id` via the `POST /api/routing/corrections` endpoint [orchestrator/api/routing.py:291-343]().
-3.  **Cache Learning**: Corrections automatically update the `RoutingCache` after 2+ repeated corrections for the same content pattern, allowing the system to "self-heal" without manual rule intervention [orchestrator/api/routing.py:320-331]().
+1. **Decision Tracking**: Every routing evaluation is persisted via `UniversalRouter._log_decision()` to the `routing_decisions` table using the `RoutingDecisionRecord` model [orchestrator/core/routing/engine.py:85-107]().
+2. **User Corrections**: Administrative interfaces invoke `POST /api/routing/corrections` via the `CorrectionRequest` schema to flag misroutes and provide target identifiers [orchestrator/api/routing.py:82-86]() [orchestrator/api/routing.py:291-343]().
+3. **Cache Auto-Update**: Repeated corrections invoke `RoutingCache.record_correction()` to modify Tier 1 cache entries, allowing the system to bypass expensive downstream classification on identical subsequent inputs [orchestrator/core/routing/cache.py:1-45]() [orchestrator/api/routing.py:320-331]().
 
-This creates a feedback loop where routing accuracy improves dynamically based on real-world usage.
-
-Sources: [orchestrator/api/routing.py:291-343]() | [orchestrator/core/routing/engine.py:58-163]()
+Sources: [orchestrator/core/routing/engine.py:58-107]() | [orchestrator/api/routing.py:82-343]()
 
 ---
 
@@ -45,42 +46,40 @@ Sources: [orchestrator/api/routing.py:291-343]() | [orchestrator/core/routing/en
 
 ### High-Level Flow
 
-The following diagram illustrates the lifecycle of a message from initial routing to user correction and subsequent cache update.
+The following sequence diagram traces an end-to-end request from client invocation through router classification, administrative correction, and cache re-indexing.
 
 **Diagram: Correction Feedback Loop**
 
 ```mermaid
 sequenceDiagram
     participant User as "User"
-    participant Frontend as "Next.js Frontend"
-    participant ChatAPI as "POST /api/chat"
+    participant ChatAPI as "api/chat.py"
     participant Router as "UniversalRouter"
     participant Cache as "RoutingCache"
-    participant DB as "PostgreSQL (RoutingDecisionRecord)"
+    participant DB as "PostgreSQL RoutingDecisionRecord"
     participant AdminUI as "Admin UI"
-    participant CorrectionAPI as "POST /api/routing/corrections"
+    participant CorrectionAPI as "api/routing.py"
 
     User->>ChatAPI: "Send message"
-    ChatAPI->>Router: "route(envelope)" [orchestrator/core/routing/engine.py:79]
-    Router->>Cache: "get(workspace_id, content, source)" [orchestrator/core/routing/engine.py:103]
-    Cache-->>Router: "None (miss)"
-    Router->>Router: "_classify_with_llm()" [orchestrator/core/routing/engine.py:149]
+    ChatAPI->>Router: "route(envelope)"
+    Router->>Cache: "get(workspace_id, content, source)"
+    Cache-->>Router: "None (Cache Miss)"
+    Router->>Router: "_classify_with_llm()"
     Router-->>ChatAPI: "RoutingDecision(agent_id=5, confidence=0.72)"
-    Router->>DB: "_log_decision()" [orchestrator/core/routing/engine.py:157]
+    Router->>DB: "_log_decision()"
     
-    ChatAPI-->>Frontend: "Response + Headers (x-routing-agent-id=5)"
-    Frontend-->>User: "Message from wrong agent"
+    ChatAPI-->>User: "Response from Agent 5 (Incorrect)"
     
     User->>AdminUI: "Flag incorrect routing"
-    AdminUI->>CorrectionAPI: "POST {request_id, correct_agent_id=12}" [orchestrator/api/routing.py:291]
-    CorrectionAPI->>DB: "UPDATE was_corrected=true, corrected_agent_id=12" [orchestrator/api/routing.py:313]
-    CorrectionAPI->>Cache: "record_correction(workspace_id, content, 12)" [orchestrator/api/routing.py:324]
+    AdminUI->>CorrectionAPI: "POST /api/routing/corrections"
+    CorrectionAPI->>DB: "UPDATE was_corrected=true, corrected_agent_id=12"
+    CorrectionAPI->>Cache: "record_correction(workspace_id, content, 12)"
     
     alt "correction_count >= 2"
-        Cache->>Cache: "Auto-update cached decision to agent_id=12"
+        Cache->>Cache: "Auto-update Tier 1 cache to agent_id=12"
     end
     
-    CorrectionAPI-->>AdminUI: "{"status": "corrected"}"
+    CorrectionAPI-->>AdminUI: "{\"status\": \"corrected\"}"
 ```
 
 Sources: [orchestrator/api/routing.py:291-343]() | [orchestrator/core/routing/engine.py:79-163]()
@@ -91,25 +90,23 @@ Sources: [orchestrator/api/routing.py:291-343]() | [orchestrator/core/routing/en
 
 ### RoutingDecisionRecord Schema
 
-Every routing decision is persisted to the database via the `_log_decision` method in `UniversalRouter`. The `RoutingDecisionRecord` model tracks the following key attributes:
+Every decision emitted by `UniversalRouter` is captured in the database via `RoutingDecisionRecord`. The table schema tracks request metadata, routing source, and correction state:
 
 | Column | Type | Purpose |
 | :--- | :--- | :--- |
-| `request_id` | UUID | Unique identifier linking to the `RequestEnvelope` [orchestrator/api/routing.py:65]() |
+| `request_id` | UUID | Unique identifier linking to the `RequestEnvelope` [orchestrator/core/models/routing.py:34-40]() |
 | `envelope_hash` | String | SHA256 hash of normalized content used for cache keys [orchestrator/core/routing/engine.py:52-55]() |
-| `route_type` | String | Type of target: "agent", "workflow", or "orchestrate" [orchestrator/api/routing.py:68]() |
-| `agent_id` | Integer | Selected `Agent.id` (nullable if workflow) [orchestrator/api/routing.py:69]() |
-| `confidence` | Float | Router confidence score (0.0-1.0) [orchestrator/api/routing.py:71]() |
-| `was_corrected` | Boolean | Flag set to True after a user correction [orchestrator/api/routing.py:73]() |
-| `corrected_agent_id` | Integer | The `Agent.id` specified by the user as correct [orchestrator/api/routing.py:74]() |
+| `route_type` | String | Target category: "agent", "workflow", or "orchestrate" [orchestrator/core/routing/engine.py:857-870]() |
+| `agent_id` | Integer | Selected `Agent.id` target (nullable if workflow) [orchestrator/core/routing/engine.py:868]() |
+| `confidence` | Float | Router confidence score (0.0 to 1.0) [orchestrator/core/routing/engine.py:870]() |
+| `was_corrected` | Boolean | Flag set to `True` upon user correction [orchestrator/api/routing.py:313]() |
+| `corrected_agent_id` | Integer | The target `Agent.id` specified by the administrator [orchestrator/api/routing.py:314]() |
 
-Sources: [orchestrator/api/routing.py:63-79]() | [orchestrator/core/routing/engine.py:857-881]()
-
----
+Sources: [orchestrator/core/models/routing.py:34-79]() | [orchestrator/core/routing/engine.py:857-881]()
 
 ### Decision Logging Implementation
 
-The `UniversalRouter` class logs every decision via `_log_decision` [orchestrator/core/routing/engine.py:857](). This function captures the `RequestEnvelope` and the resulting `RoutingDecision` before committing them to the database. This data is primarily used by the `list_decisions` endpoint [orchestrator/api/routing.py:110-156]() to populate the Admin UI for review.
+The `UniversalRouter` class logs routing executions via `_log_decision` [orchestrator/core/routing/engine.py:857](). This helper method commits the decision payload to the database. These records are queried by `list_decisions` in `orchestrator/api/routing.py` to populate administrative views [orchestrator/api/routing.py:110-156]().
 
 Sources: [orchestrator/core/routing/engine.py:857-881]() | [orchestrator/api/routing.py:110-156]()
 
@@ -119,23 +116,23 @@ Sources: [orchestrator/core/routing/engine.py:857-881]() | [orchestrator/api/rou
 
 ### POST /api/routing/corrections
 
-Records a user correction for a specific routing decision. This endpoint is defined in `orchestrator/api/routing.py` and follows this logic:
+Corrections are submitted through `POST /api/routing/corrections`, which executes the following procedural steps:
 
-1.  **Lookup**: It fetches the original decision using the `request_id` provided in the `CorrectionRequest` [orchestrator/api/routing.py:302-306]().
-2.  **Update DB**: It updates the `RoutingDecisionRecord` to reflect the correction, setting `was_corrected=True` and storing the `corrected_agent_id` [orchestrator/api/routing.py:313-315]().
-3.  **Update Cache**: It invokes `RoutingCache.record_correction` to increment the internal correction counter for that specific content hash [orchestrator/api/routing.py:324-329]().
+1. **Lookup**: Retrieves the target `RoutingDecisionRecord` using the `request_id` supplied in the `CorrectionRequest` payload [orchestrator/api/routing.py:302-306]().
+2. **Persistence Update**: Updates the record status, setting `was_corrected=True` and populating `corrected_agent_id` [orchestrator/api/routing.py:313-315]().
+3. **Cache Synchronization**: Invokes `RoutingCache.record_correction()` to track frequency counts for the content hash [orchestrator/api/routing.py:324-329]().
 
-Sources: [orchestrator/api/routing.py:291-343]() | [orchestrator/api/routing.py:81-84]()
+Sources: [orchestrator/api/routing.py:81-86]() | [orchestrator/api/routing.py:291-343]()
 
 ---
 
 ## Cache Learning Mechanism
 
-The `RoutingCache` implements a learning mechanism based on correction frequency:
+The `RoutingCache` layer manages reinforcement learning via threshold-based counter adjustments:
 
-1.  **Content Normalization**: Content is lowercased and whitespace is collapsed via `_normalize_content` to ensure consistent hashing [orchestrator/core/routing/cache.py:43]().
-2.  **Auto-Update Threshold**: When `record_correction` is called, it increments a counter in Redis. If the counter for a specific content/agent pair reaches a threshold (typically 2), the cache entry for that content is updated to the corrected agent [orchestrator/api/routing.py:320-331]().
-3.  **Immediate Effect**: Subsequent requests with the same content hash will hit Tier 1 (Cache) in `UniversalRouter.route` and return the corrected agent immediately, bypassing semantic similarity and LLM classification [orchestrator/core/routing/engine.py:103-107]().
+1. **Normalization**: Content strings are normalized via `_normalize_content()` (stripping punctuation and lowercasing) to ensure stable hashing [orchestrator/core/routing/cache.py:43]().
+2. **Threshold Trigger**: When `record_correction` registers repeated updates for an envelope hash, once the frequency meets the auto-update threshold, the cache overwrites the target mapping [orchestrator/api/routing.py:320-331]().
+3. **Bypass Downstream Tiers**: Subsequent messages yielding the same content hash trigger a Tier 1 cache hit in `UniversalRouter.route()`, instantly returning the corrected agent and bypassing semantic similarity and Tier 3 LLM classification [orchestrator/core/routing/engine.py:102-107]().
 
 Sources: [orchestrator/core/routing/cache.py:43]() | [orchestrator/api/routing.py:320-331]() | [orchestrator/core/routing/engine.py:102-107]()
 
@@ -143,7 +140,7 @@ Sources: [orchestrator/core/routing/cache.py:43]() | [orchestrator/api/routing.p
 
 ## Unrouted Events
 
-When all tiers (Rules, Semantic, and LLM) fail to route a request, the system stores an `UnroutedEvent` [orchestrator/core/routing/engine.py:161-163]().
+When all routing tiers (Rules, Semantic Search, and LLM Fallback) fail to resolve an incoming payload, the router captures an `UnroutedEvent` [orchestrator/core/models/routing.py:81]() [orchestrator/core/routing/engine.py:161-163]().
 
 ```python
 # [orchestrator/core/routing/engine.py:161-163]
@@ -151,27 +148,33 @@ logger.info("[router] No route found for request %s — storing unrouted event",
 self._store_unrouted_event(envelope, reason="All routing tiers exhausted (including LLM)")
 ```
 
-The `_store_unrouted_event` method persists the raw content and metadata to PostgreSQL, allowing administrators to identify gaps in the routing logic or missing agent capabilities [orchestrator/core/routing/engine.py:883-900]().
+Unrouted events are persisted to PostgreSQL to assist platform operators in identifying coverage gaps and missing routing rules or agent capabilities [orchestrator/core/routing/engine.py:883-900]().
 
 Sources: [orchestrator/core/routing/engine.py:161-163]() | [orchestrator/core/routing/engine.py:883-900]()
 
 ---
 
-## Database Schema Relationships
+## Database Schema & Code Architecture
 
-The following diagram bridges the Natural Language concepts to the Code Entity space by associating system names with specific code identifiers used in the routing and learning logic.
+The following entity-relationship diagram maps high-level routing concepts to underlying SQLAlchemy models and repository classes.
 
-**Diagram: Routing & Learning Entities**
+**Diagram: Routing & Learning Code Entities**
 
 ```mermaid
 erDiagram
-    "UniversalRouter (engine.py)" ||--o{ "RoutingDecisionRecord (routing.py)" : "logs_via_log_decision"
-    "RoutingDecisionRecord (routing.py)" }|--|| "Agent (core.py)" : "points_to_target_agent_id"
-    "RoutingDecisionRecord (routing.py)" ||--o{ "RoutingCache (cache.py)" : "triggers_record_correction"
-    "RoutingRule (routing.py)" }|--|| "Agent (core.py)" : "routes_to_target_agent_id"
-    "RequestEnvelope (routing.py)" ||--|| "RoutingDecisionRecord (routing.py)" : "associated_via_request_id"
+    UniversalRouter ||--o{ RoutingDecisionRecord : "logs_via_log_decision"
+    RoutingDecisionRecord }|--|| Agent : "points_to_corrected_agent_id"
+    RoutingDecisionRecord ||--o{ RoutingCache : "triggers_record_correction"
+    RoutingRule }|--|| Agent : "routes_to_target_agent_id"
+    RequestEnvelope ||--|| RoutingDecisionRecord : "associated_via_request_id"
     
-    "RoutingDecisionRecord (routing.py)" {
+    UniversalRouter {
+        string _db
+        string _cache
+        string route
+    }
+
+    RoutingDecisionRecord {
         uuid request_id
         string envelope_hash
         boolean was_corrected
@@ -179,13 +182,13 @@ erDiagram
         float confidence
     }
     
-    "Agent (core.py)" {
+    Agent {
         int id
         string name
         string description
     }
 
-    "RoutingRule (routing.py)" {
+    RoutingRule {
         int id
         string source_pattern
         string[] intent_keywords
@@ -193,6 +196,6 @@ erDiagram
     }
 ```
 
-Sources: [orchestrator/core/routing/engine.py:58]() | [orchestrator/api/routing.py:63-79]() | [orchestrator/core/models/core.py:34-101]() | [orchestrator/api/routing.py:162-185]()
+Sources: [orchestrator/core/routing/engine.py:58-85]() | [orchestrator/core/models/routing.py:34-79]() | [orchestrator/core/models/core.py:27-45]() | [orchestrator/api/routing.py:162-185]()
 
 ---

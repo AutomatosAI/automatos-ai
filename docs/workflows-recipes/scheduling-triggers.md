@@ -5,28 +5,45 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/53-WEBHOOK-TRIGGER-SYSTEM-PRD.md](docs/PRDS/53-WEBHOOK-TRIGGER-SYSTEM-PRD.md)
-- [frontend/app/globals.css](frontend/app/globals.css)
-- [frontend/app/layout.tsx](frontend/app/layout.tsx)
-- [frontend/components/agents/org-chart-tab.tsx](frontend/components/agents/org-chart-tab.tsx)
-- [frontend/components/providers.tsx](frontend/components/providers.tsx)
-- [frontend/components/settings/WebhooksSettingsTab.tsx](frontend/components/settings/WebhooksSettingsTab.tsx)
-- [frontend/components/ui/theme-toggle.tsx](frontend/components/ui/theme-toggle.tsx)
-- [frontend/components/workspace-provider.tsx](frontend/components/workspace-provider.tsx)
-- [orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py](orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
+- [frontend/components/activity/board/__tests__/schedule-choice.test.ts](frontend/components/activity/board/__tests__/schedule-choice.test.ts)
+- [frontend/components/activity/board/create-task-dialog.tsx](frontend/components/activity/board/create-task-dialog.tsx)
+- [frontend/components/activity/board/create-task-steps.tsx](frontend/components/activity/board/create-task-steps.tsx)
+- [frontend/components/activity/board/schedule-choice.ts](frontend/components/activity/board/schedule-choice.ts)
+- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
+- [frontend/hooks/use-board-tasks-api.ts](frontend/hooks/use-board-tasks-api.ts)
+- [orchestrator/alembic/versions/calendar_scheduled_board_tasks.py](orchestrator/alembic/versions/calendar_scheduled_board_tasks.py)
+- [orchestrator/alembic/versions/prd72_board_tasks.py](orchestrator/alembic/versions/prd72_board_tasks.py)
+- [orchestrator/api/composio.py](orchestrator/api/composio.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
+- [orchestrator/api/scheduled_tasks.py](orchestrator/api/scheduled_tasks.py)
+- [orchestrator/api/skills.py](orchestrator/api/skills.py)
+- [orchestrator/api/tools.py](orchestrator/api/tools.py)
 - [orchestrator/api/webhooks.py](orchestrator/api/webhooks.py)
 - [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
-- [orchestrator/core/auth/hybrid.py](orchestrator/core/auth/hybrid.py)
+- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
+- [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
+- [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
+- [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
 - [orchestrator/core/routing/ingestors/webhook.py](orchestrator/core/routing/ingestors/webhook.py)
-- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
-- [orchestrator/tests/test_invitation_routing.py](orchestrator/tests/test_invitation_routing.py)
+- [orchestrator/core/seeds/utterances/scheduling.yaml](orchestrator/core/seeds/utterances/scheduling.yaml)
+- [orchestrator/modules/tools/discovery/handlers_scheduling.py](orchestrator/modules/tools/discovery/handlers_scheduling.py)
+- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
+- [orchestrator/services/playbook_scheduler.py](orchestrator/services/playbook_scheduler.py)
+- [orchestrator/services/scheduled_task_service.py](orchestrator/services/scheduled_task_service.py)
+- [orchestrator/services/webhook_dedup.py](orchestrator/services/webhook_dedup.py)
+- [orchestrator/tests/test_p2w0_service_imports_resolve.py](orchestrator/tests/test_p2w0_service_imports_resolve.py)
+- [orchestrator/tests/test_p2w2_webhook_dedup.py](orchestrator/tests/test_p2w2_webhook_dedup.py)
+- [orchestrator/tests/test_p2w2_webhook_signature_reject.py](orchestrator/tests/test_p2w2_webhook_signature_reject.py)
+- [orchestrator/tests/test_prd209_alembic_single_head.py](orchestrator/tests/test_prd209_alembic_single_head.py)
+- [orchestrator/tests/test_prd232_us007_seed_intent_clusters.py](orchestrator/tests/test_prd232_us007_seed_intent_clusters.py)
 
 </details>
 
 
 
-This page documents the execution trigger mechanisms for workflow recipes and workspace interactions: manual execution, cron-based scheduling, and webhook-based triggers. Each recipe can be configured with a trigger type that determines how it executes, while workspaces provide a global webhook for routed message ingestion.
+This page documents the execution trigger mechanisms for workflow recipes and workspace interactions: manual execution, cron-based scheduling, and webhook-based triggers. Each recipe can be configured with a trigger type that determines how it executes, while workspaces provide global and recipe-specific webhook ingestion channels backed by signature verification and deduplication.
 
 ---
 
@@ -37,8 +54,8 @@ Recipes support three mutually exclusive schedule types defined in the configura
 | Type | Trigger Mechanism | Use Case |
 |------|------------------|----------|
 | `manual` | User-initiated via UI or API | One-off workflows, testing, ad-hoc tasks |
-| `cron` | Time-based with `APScheduler` | Periodic reports, scheduled maintenance, batch jobs |
-| `trigger` | Webhook HTTP POST (Composio or Custom) | External event-driven workflows (Jira, GitHub, Slack, etc.) |
+| `cron` | Time-based with `APScheduler` via `PlaybookSchedulerService` | Periodic reports, scheduled maintenance, batch jobs |
+| `trigger` | Webhook HTTP POST | External event-driven workflows (Jira, GitHub, Slack, etc.) |
 
 **Diagram: Trigger to Code Entity Mapping**
 
@@ -56,7 +73,6 @@ graph TD
         Web["WebhookIngestor"]
         Router["UniversalRouter"]
         Exec["execute_recipe_direct"]
-        Sync["_sync_cron_schedule"]
     end
 
     User -->|"Manual Click"| API
@@ -64,13 +80,12 @@ graph TD
     Ext -->|"POST /api/webhooks/ws/{key}"| Web
     
     API --> Exec
-    Sched -->|"schedule_playbook"| Sync
-    Sync --> Sched
+    Sched -->|"schedule_playbook"| Exec
     Web -->|"ingest()"| Router
     Router -->|"route()"| Exec
 ```
 
-Sources: [orchestrator/api/workflow_recipes.py:34-47](), [orchestrator/api/webhooks.py:6-12](), [orchestrator/core/routing/ingestors/webhook.py:22-30]()
+Sources: [orchestrator/api/webhooks.py:6-12](), [orchestrator/api/workflow_recipes.py:36-50](), [orchestrator/api/recipe_executor.py:5-19]()
 
 ---
 
@@ -79,89 +94,70 @@ Sources: [orchestrator/api/workflow_recipes.py:34-47](), [orchestrator/api/webho
 The system distinguishes between a global workspace-level entry point and specific recipe triggers.
 
 ### 1. Workspace Webhook (Universal Routing)
-Every workspace is assigned a unique `webhook_key` upon creation [orchestrator/alembic/versions/20260213_add_workspace_webhook_key.py:25-35](). Messages sent to this endpoint are processed by the `WebhookIngestor`, which normalizes various payload formats (Telegram, Slack, Twilio, WhatsApp) into a `RequestEnvelope` [orchestrator/api/webhooks.py:91-117]().
+Every workspace is assigned a unique `webhook_key` upon creation. Messages sent to this endpoint are processed by the `WebhookIngestor`, which normalizes various payload formats (Telegram, Slack, Twilio) into a `RequestEnvelope`.
 
 *   **Endpoint**: `POST /api/webhooks/ws/{workspace_key}` [orchestrator/api/webhooks.py:6]()
 *   **Logic**: The `UniversalRouter` analyzes the content to determine if it should trigger an agent or a specific workflow.
-*   **Platform Detection**: The backend automatically detects platforms like Telegram, Slack, and WhatsApp based on payload structure [orchestrator/api/webhooks.py:91-117]().
-*   **Security**: Verification is handled via `_verify_webhook_signature` using HMAC-SHA256 [orchestrator/api/webhooks.py:44-60]().
+*   **Platform Detection**: The system automatically detects the source platform (Slack, Telegram, WhatsApp, Twilio) based on payload structure [orchestrator/api/webhooks.py:159-185]().
+*   **Slack Verification**: Slack requests undergo specific v0 signing scheme verification with timestamp skew protection [orchestrator/api/webhooks.py:127-153]().
 
 ### 2. Recipe-Specific Webhooks
-Recipes configured with the `trigger` type receive a dedicated `webhook_id`. 
-*   **Composio Integration**: If the trigger source is `composio`, the system automatically registers the webhook with Composio via `_auto_register_trigger` [orchestrator/api/workflow_recipes.py:50-69]().
-*   **Subscription Management**: Active triggers are stored in the `TriggerSubscription` table [orchestrator/api/workflow_recipes.py:107-116]().
-*   **UI Reference**: The frontend provides a reference to these in the Webhooks Settings tab [frontend/components/settings/WebhooksSettingsTab.tsx:84-91]().
+Recipes configured with the `trigger` type receive a dedicated webhook mapping. These are task-specific and bypass the universal router to execute the associated recipe directly. 
 
-Sources: [orchestrator/api/workflow_recipes.py:50-126](), [orchestrator/api/webhooks.py:6-12](), [frontend/components/settings/WebhooksSettingsTab.tsx:84-91]()
+*   **Composio Integration**: For triggers sourced from Composio (e.g., GitHub events), the system automatically handles subscription via `_auto_register_trigger` [orchestrator/api/workflow_recipes.py:52-81]().
+*   **Subscription Storage**: Active subscriptions are stored in the `TriggerSubscription` table, linking the `composio_subscription_id` to the `workflow_id` [orchestrator/api/workflow_recipes.py:109-124]().
 
----
-
-## Webhook Ingestion & Routing Logic
-
-The `WebhookIngestor` and `UniversalRouter` work together to transform raw HTTP requests into actionable agent or workflow executions.
-
-### Content Extraction Hierarchy
-The `WebhookIngestor` extracts reply context based on the messaging platform:
-*   **Telegram**: Extracts `chat_id` and `from_user` [orchestrator/api/webhooks.py:124-127]().
-*   **Slack**: Extracts `channel`, `thread_ts`, and `user` [orchestrator/api/webhooks.py:129-133]().
-*   **WhatsApp**: Extracts `from_phone` and `phone_number_id` [orchestrator/api/webhooks.py:135-141]().
-
-### Platform Reply Functions
-The system can send replies back to the originating platform after processing:
-*   **Telegram**: `_send_telegram_reply` truncates text to 4096 characters and uses Markdown [orchestrator/api/webhooks.py:154-171]().
-*   **Slack**: `_send_slack_reply` uses `chat.postMessage` with optional `thread_ts` [orchestrator/api/webhooks.py:184-197]().
-
-**Diagram: Webhook Processing Flow**
-
-```mermaid
-graph TD
-    REQ["Incoming HTTP Request"] --> SIG["_verify_webhook_signature"]
-    SIG --> DET["_detect_platform"]
-    DET --> EXT["_extract_reply_context"]
-    EXT --> ING["WebhookIngestor.ingest"]
-    ING --> ROUTE["UniversalRouter.route"]
-    ROUTE --> EXEC["Agent/Recipe Execution"]
-    EXEC --> REP["_send_platform_reply"]
-```
-
-Sources: [orchestrator/api/webhooks.py:44-208](), [orchestrator/core/routing/ingestors/webhook.py:22-30]()
+Sources: [orchestrator/api/webhooks.py:6-12](), [orchestrator/api/workflow_recipes.py:52-130](), [orchestrator/core/composio/client.py:63-82]()
 
 ---
 
-## Trigger Subscriptions & Automation
+## Agent-Initiated Scheduled Tasks
 
-The `TriggerSubscription` model facilitates long-lived connections between external events and internal workflows.
+Beyond recipe schedules, agents and operators can autonomously schedule tasks using the `ScheduledTaskService`.
 
-### Auto-Registration Flow
-When a recipe is created or updated with a `trigger` configuration:
-1.  `_auto_register_trigger` checks if the source is `composio` [orchestrator/api/workflow_recipes.py:65-69]().
-2.  It retrieves or creates a `ComposioEntity` for the workspace [orchestrator/api/workflow_recipes.py:95-96]().
-3.  It calls `client.subscribe_to_trigger` with a callback URL pointing to `/api/composio/webhook` [orchestrator/api/workflow_recipes.py:101-105]().
-4.  A `TriggerSubscription` record is persisted to track the `composio_subscription_id` [orchestrator/api/workflow_recipes.py:107-116]().
+*   **Task Types**: Supports `one_shot` (ISO datetime) and `recurring` (Cron expression) [orchestrator/services/scheduled_task_service.py:75-78]().
+*   **Rate Limiting**: Limits to 10 active tasks per agent, 25 recurring tasks per workspace, and 50 operator tasks per workspace [orchestrator/services/scheduled_task_service.py:31-34]().
+*   **Delivery Modes**: Supports `chat` (opening a chat session with the target agent) and `board_task` (filing a board ticket into the workspace board) [orchestrator/services/scheduled_task_service.py:37-39]().
+*   **Execution Flow**: When a task fires, it registers with the `UnifiedScheduler` (APScheduler) and executes according to its delivery mode [orchestrator/services/scheduled_task_service.py:4-14]().
 
-### Cleanup
-When recipes are deleted or triggers are disabled, `_cleanup_trigger_subscriptions` deactivates existing subscriptions by setting `is_active = False` [orchestrator/api/workflow_recipes.py:129-137]().
+Sources: [orchestrator/services/scheduled_task_service.py:31-78](), [orchestrator/services/scheduled_task_service.py:89-112]()
 
-Sources: [orchestrator/api/workflow_recipes.py:50-138](), [orchestrator/core/models/composio.py:28]()
+---
+
+## Webhook Security & Verification
+
+The system implements strict verification for incoming webhooks to prevent unauthorized execution and replay attacks.
+
+### Signature Verification
+The `_verify_webhook_signature` function validates HMAC-SHA256 signatures for generic webhooks, GitHub, and Composio [orchestrator/api/webhooks.py:50-76]().
+*   **Headers Checked**: `X-Hub-Signature-256`, `X-Composio-Signature`, `X-Webhook-Signature`.
+*   **Algorithm**: Uses `hmac.compare_digest` to mitigate timing attacks [orchestrator/api/webhooks.py:83-89]().
+
+### Deduplication
+Incoming webhooks are processed through `webhook_dedup` to prevent duplicate execution from retried external requests [orchestrator/api/webhooks.py:35]().
+
+Sources: [orchestrator/api/webhooks.py:35](), [orchestrator/api/webhooks.py:50-91]()
 
 ---
 
 ## Configuration Reference
 
 ### RecipeScheduleConfig Structure
-Stored within the `WorkflowRecipe.schedule_config` JSONB field.
+The configuration determines how the execution engine interacts with the recipe schedule.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | `string` | `manual`, `cron`, or `trigger` [orchestrator/api/workflow_recipes.py:60]() |
-| `cron_expression` | `string` | Standard cron string used by `PlaybookSchedulerService` [orchestrator/api/workflow_recipes.py:42]() |
-| `trigger_config` | `dict` | Contains `source` (e.g., `composio`) and `trigger_name` [orchestrator/api/workflow_recipes.py:63-75]() |
+| `type` | `string` | `manual`, `cron`, or `trigger` [orchestrator/api/workflow_recipes.py:62-63]() |
+| `cron_expression` | `string` | Standard cron string (e.g., `0 9 * * 1`) [orchestrator/api/workflow_recipes.py:44]() |
+| `trigger_config` | `dict` | Contains `source` (e.g., 'composio') and `trigger_name` [orchestrator/api/workflow_recipes.py:65-75]() |
 
-### Workspace Webhook Metadata
-Workspace models include fields for external ingestion:
-*   `webhook_url`: The public endpoint for the workspace [frontend/components/workspace-provider.tsx:27]().
-*   `webhook_key`: The secret key used for URL-based authentication [frontend/components/workspace-provider.tsx:28]().
+### TriggerSubscription Model
+Used for mapping external events to internal logic.
 
-Sources: [orchestrator/api/workflow_recipes.py:41-78](), [frontend/components/workspace-provider.tsx:14-33]()
+*   `composio_subscription_id`: The ID returned by Composio's subscription API [orchestrator/api/workflow_recipes.py:115]().
+*   `is_active`: Boolean flag for enabling/disabling the trigger [orchestrator/api/workflow_recipes.py:117]().
+*   `entity_id`: Links to the `ComposioEntity` associated with the workspace [orchestrator/api/workflow_recipes.py:109]().
+
+Sources: [orchestrator/api/workflow_recipes.py:36-130](), [orchestrator/core/composio/client.py:146-165]()
 
 ---

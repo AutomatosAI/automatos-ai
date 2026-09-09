@@ -6,213 +6,155 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
+- [frontend/components/settings/ChannelsSettingsTab.tsx](frontend/components/settings/ChannelsSettingsTab.tsx)
 - [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
+- [orchestrator/alembic/versions/prd008a4_channel_drivers.py](orchestrator/alembic/versions/prd008a4_channel_drivers.py)
 - [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
+- [orchestrator/channels/drivers/__init__.py](orchestrator/channels/drivers/__init__.py)
+- [orchestrator/channels/drivers/base.py](orchestrator/channels/drivers/base.py)
+- [orchestrator/channels/drivers/discord.py](orchestrator/channels/drivers/discord.py)
+- [orchestrator/channels/drivers/slack.py](orchestrator/channels/drivers/slack.py)
+- [orchestrator/channels/drivers/telegram.py](orchestrator/channels/drivers/telegram.py)
+- [orchestrator/channels/drivers/webhook.py](orchestrator/channels/drivers/webhook.py)
+- [orchestrator/channels/drivers/whatsapp.py](orchestrator/channels/drivers/whatsapp.py)
 - [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
 - [orchestrator/channels/telegram_adapter.py](orchestrator/channels/telegram_adapter.py)
 - [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
+- [orchestrator/tests/test_channel_adapter_contract.py](orchestrator/tests/test_channel_adapter_contract.py)
+- [orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py](orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py)
 
 </details>
 
 
 
-The Channel Architecture defines the base framework for integrating external messaging platforms (Telegram, Slack, Discord, LINE, Google Chat) into the Automatos routing pipeline. This architecture enables the platform to act as an "always-on" autonomous assistant by meeting users on their preferred communication platforms, as defined in PRD-55 [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md:12-22]().
+## Purpose and Scope
+
+The Channel Architecture defines the technical framework for integrating external messaging platforms—specifically Telegram, Slack, Discord, WhatsApp, and generic webhooks—into the Automatos AI routing pipeline [orchestrator/api/channels.py:2-11](), [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md:33-37](). This subsystem enables the platform to operate as an always-on assistant by handling inbound communication, tracking message delivery metrics, enforcing tenant isolation, and managing platform-specific connection lifecycles [orchestrator/channels/manager.py:1-10](), [orchestrator/tests/test_channel_adapter_contract.py:14-48]().
 
 ---
 
-## Core Components
+## 1. Driver-Mediated Contract & Registry (`ChannelDriver` & `BaseChannelAdapter`)
 
-The channel system is built on three foundational components: `BaseChannelAdapter` (abstract interface), `ChannelManager` (lifecycle orchestrator), and `ChannelConnection` (database model).
+The channel integration subsystem separates platform-agnostic management from platform-specific execution using a **Driver-Mediated Registry** [orchestrator/api/channels.py:5-11](). Stateless platform drivers (`ChannelDriver` subclasses) handle credential verification, message transmission, and webhook installation, while stateful adapters (`BaseChannelAdapter` subclasses) manage background polling loops and event ingestion [orchestrator/channels/drivers/base.py:95-181](), [orchestrator/channels/telegram_adapter.py:19-58]().
 
-### BaseChannelAdapter
+### Diagram: Natural Language Space to Code Entity Space (Driver Architecture)
 
-`BaseChannelAdapter` is the abstract base class for all platform adapters. It provides the lifecycle hooks, message handling pipeline, and attachment handling for multimodal support.
-
-**Class Diagram: Adapter Hierarchy**
 ```mermaid
 classDiagram
-    class "BaseChannelAdapter" {
-        +"connection_id: str"
-        +"workspace_id: str"
-        +"config: Dict"
-        +"is_running: bool"
-        +start() async*
-        +stop() async*
-        +send_message(channel_id, text) async*
-        +test_connection() async*
-        +upload_attachment(content, filename) async
-        +handle_message(platform_message) async
-        #_to_envelope(platform_message) RequestEnvelope*
+    direction TB
+    class "Telegram Bot Driver" {
+        +String display_name = "Telegram"
+        +Tuple supported_modes = (WEBHOOK, POLLING)
     }
-    
-    class "TelegramAdapter" {
-        -_app: Application
-        -_task: asyncio.Task
-        +_on_message(update, context) async
-        +_on_command(update, context) async
+    class "TelegramDriver" {
+        +verify(workspace_id, config) VerifyResult
+        +send(workspace_id, config, target, text) SendResult
+        +install_webhook(workspace_id, config, webhook_url) VerifyResult
     }
-    
-    class "SlackAdapter" {
-        -_app: AsyncApp
-        -_handler: AsyncSocketModeHandler
+    class "Slack Bot Driver" {
+        +String display_name = "Slack"
+        +Tuple supported_modes = (WEBHOOK)
     }
-    
-    class "DiscordAdapter" {
-        -_client: discord.Client
-        -_task: asyncio.Task
+    class "SlackDriver" {
+        +verify(workspace_id, config) VerifyResult
+        +send(workspace_id, config, target, text) SendResult
+        +install_webhook(workspace_id, config, webhook_url) VerifyResult
     }
 
-    class "LineAdapter" {
-        -_channel_access_token: str
-        +handle_webhook(body) async
+    "Telegram Bot Driver" --> TelegramDriver : "implemented by orchestrator/channels/drivers/telegram.py"
+    "Slack Bot Driver" --> SlackDriver : "implemented by orchestrator/channels/drivers/slack.py"
+
+    class "ChannelDriver" {
+        <<abstract>>
+        +verify()* VerifyResult
+        +send()* SendResult
+        +install_webhook() VerifyResult
     }
 
-    class "GoogleChatAdapter" {
-        -_service_account_json: str
-        -_credentials: Credentials
-    }
-    
-    "BaseChannelAdapter" <|-- "TelegramAdapter"
-    "BaseChannelAdapter" <|-- "SlackAdapter"
-    "BaseChannelAdapter" <|-- "DiscordAdapter"
-    "BaseChannelAdapter" <|-- "LineAdapter"
-    "BaseChannelAdapter" <|-- "GoogleChatAdapter"
+    ChannelDriver <|-- TelegramDriver : "inherits from"
+    ChannelDriver <|-- SlackDriver : "inherits from"
 ```
 
-**Key Features:**
-- **Lifecycle Management**: Abstract `start` and `stop` methods for managing platform-specific connections. For example, `TelegramAdapter` uses `ApplicationBuilder` and `start_polling()` [orchestrator/channels/telegram_adapter.py:27-51](), while others use socket mode or webhooks [orchestrator/channels/base.py:35-43]().
-- **Attachment Handling**: `upload_attachment` integrates with `get_attachment_store` to persist inbound media (photos, documents) from channels, enabling multimodal agent reasoning via `attachment_ids` [orchestrator/channels/base.py:70-106]().
-- **Ingest Pipeline**: `handle_message` orchestrates the flow from platform event to `UniversalRouter` and `AgentFactory` [orchestrator/channels/base.py:112-192]().
+The driver abstract base class establishes strict typing via `VerifyResult`, `SendResult`, and `ConnectivityMode` (`WEBHOOK` vs `POLLING`) [orchestrator/channels/drivers/base.py:52-90](). Every driver must be stateless and accept the workspace identifier and configuration maps via method parameters rather than database state [orchestrator/channels/drivers/base.py:95-97]().
 
-**Sources:** [orchestrator/channels/base.py:22-192](), [orchestrator/channels/telegram_adapter.py:19-72](), [orchestrator/channels/manager.py:123-135]()
-
-### ChannelConnection Model
-
-The `ChannelConnection` model stores per-workspace channel configurations, including encrypted credentials and default routing targets.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | UUID | Primary key [orchestrator/core/models/channels.py:23]() |
-| `workspace_id` | UUID | Workspace isolation key [orchestrator/core/models/channels.py:24]() |
-| `platform` | String | Identifier (e.g., `telegram`, `slack`, `discord`) [orchestrator/core/models/channels.py:25]() |
-| `config` | JSON | Credentials like `bot_token` [orchestrator/core/models/channels.py:26]() |
-| `status` | String | Connection state: `active`, `inactive`, `error` [orchestrator/core/models/channels.py:27]() |
-| `default_agent_id` | Integer | Target agent for unrouted messages [orchestrator/core/models/channels.py:29]() |
-| `message_count` | Integer | Analytics: Total messages processed [orchestrator/core/models/channels.py:30]() |
-
-**Sources:** [orchestrator/core/models/channels.py:19-40](), [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:43-57]()
-
-### ChannelManager
-
-`ChannelManager` is a singleton service responsible for the global lifecycle of all active adapters. It manages the transition from database records to running process instances.
-
-**Component Interaction: Registry & Lifecycle**
-```mermaid
-graph TB
-    subgraph "ChannelManager_Singleton"
-        Manager["ChannelManager<br/>_adapters: Dict[str, BaseChannelAdapter]"]
-    end
-    
-    subgraph "Postgres_Database"
-        DB[("channel_connections<br/>table")]
-    end
-    
-    subgraph "Platform_Adapters"
-        T["TelegramAdapter"]
-        S["SlackAdapter"]
-        D["DiscordAdapter"]
-        L["LineAdapter"]
-        G["GoogleChatAdapter"]
-    end
-    
-    Manager -->|"start_all()"| DB
-    DB -->|"status='active'"| Manager
-    Manager -->|"_create_adapter()"| T
-    Manager -->|"_create_adapter()"| S
-    Manager -->|"_create_adapter()"| D
-    Manager -->|"_create_adapter()"| L
-    Manager -->|"_create_adapter()"| G
-    Manager -->|"Registry Storage"| Manager
-```
-
-**Key Methods:**
-- `start_all()`: Queries the DB for all `active` connections and initializes their adapters via `start_adapter` [orchestrator/channels/manager.py:32-56]().
-- `stop_all()`: Gracefully shuts down every registered adapter in the `_adapters` dictionary [orchestrator/channels/manager.py:58-66]().
-- `_create_adapter()`: A factory method that uses `importlib.import_module` to load platform-specific modules only when needed [orchestrator/channels/manager.py:110-161]().
-
-**Sources:** [orchestrator/channels/manager.py:22-194]()
+Sources: `orchestrator/channels/drivers/base.py:52-181`, `orchestrator/channels/drivers/telegram.py:53-100`, `orchestrator/channels/drivers/slack.py:36-78`, `orchestrator/tests/test_channel_adapter_contract.py:14-48`
 
 ---
 
-## Message Pipeline
+## 2. ChannelManager Lifecycle Control
 
-The message pipeline bridges the gap between external "Platform Events" and internal "Code Entities" like the `UniversalRouter` and `AgentFactory`.
+The `ChannelManager` class coordinates the runtime lifecycles of active channel connections across the orchestrator [orchestrator/channels/manager.py:22-27](). 
 
-**Sequence Diagram: Natural Language to Code Execution**
+### Startup and Polling Execution
+During system boot, `ChannelManager.start_all()` queries the database for active channel records operating in `polling` mode and spins up their respective adapter loops [orchestrator/channels/manager.py:32-68](). 
+* **Webhook Skip**: Webhook-mode connections are intentionally skipped during `start_all()` because incoming messages post directly to `/api/webhooks/ws/{workspace_key}` without requiring an in-process daemon [orchestrator/channels/manager.py:36-41]().
+* **Lazy Loading**: Platform adapters are imported dynamically via `importlib` within `_create_adapter()` to prevent heavy optional SDK dependencies (such as `python-telegram-bot`) from causing import failures when unused [orchestrator/channels/manager.py:126-170]().
+
+Sources: `orchestrator/channels/manager.py:22-197`
+
+---
+
+## 3. ChannelConnection Model & Persistence
+
+Per-workspace messaging integrations are persisted via the `ChannelConnection` SQLAlchemy model [orchestrator/core/models/channels.py:19-51]().
+
+### Table Schema (`channel_connections`)
+- `id`: `PGUUID` primary key generated via `uuid4()` [orchestrator/core/models/channels.py:23]()
+- `workspace_id`: `PGUUID` foreign key enforcing tenant isolation, indexed for fast lookup [orchestrator/core/models/channels.py:24]()
+- `platform`: String identifier for the messaging provider (e.g., `telegram`, `slack`, `discord`, `whatsapp`) [orchestrator/core/models/channels.py:25]()
+- `config`: JSONB payload storing platform credentials and settings securely [orchestrator/core/models/channels.py:29]()
+- `status`: String state indicator (`active`, `inactive`, or `error`) [orchestrator/core/models/channels.py:30]()
+- `mode`: String connectivity mode (`webhook` or `polling`) [orchestrator/core/models/channels.py:36]()
+- `message_count`: Integer tracking total inbound/outbound throughput [orchestrator/core/models/channels.py:42]()
+- `last_activity_at`: Timestamp recording the most recent message exchange [orchestrator/core/models/channels.py:43]()
+
+Sources: `orchestrator/core/models/channels.py:19-51`, `orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:42-60`
+
+---
+
+## 4. Message Pipeline & Ingress
+
+The message pipeline normalizes inbound platform events into internal `RequestEnvelope` objects and dispatches them to the routing engine [orchestrator/channels/telegram_adapter.py:6-6]().
+
+### Diagram: Natural Language Space to Code Entity Space (Message Pipeline)
+
 ```mermaid
 sequenceDiagram
-    participant P as "Platform (Telegram/Slack)"
-    participant A as "BaseChannelAdapter"
-    participant R as "UniversalRouter"
-    participant F as "AgentFactory"
-    
-    P->>A: Webhook / Polling Event (JSON)
-    A->>A: upload_attachment() (if media)
-    A->>A: _to_envelope() (Normalization)
-    A->>R: route(RequestEnvelope)
-    R-->>A: RoutingDecision(agent_id)
-    
-    alt Agent Found
-        A->>F: execute_with_prompt(agent_id, content)
-        F-->>A: ExecutionResult
-        A->>P: send_message(response_text)
-    else No Route
-        A->>P: send_message("I'm not sure how to handle that.")
-    end
+    participant NL as "External User Message"
+    participant WH as "Webhook Dispatcher (api/webhooks.py)"
+    participant DR as "ChannelDriver (TelegramDriver)"
+    participant AD as "BaseChannelAdapter (_to_envelope)"
+    participant UR as "UniversalRouter (routing.py)"
+
+    NL->>WH: "POST /api/webhooks/ws/{webhook_key}"
+    WH->>DR: "verify and parse payload"
+    DR->>AD: "_to_envelope(payload)"
+    AD-->>WH: "RequestEnvelope object"
+    WH->>UR: "route(RequestEnvelope)"
+    UR-->>WH: "RoutingDecision(agent_id)"
 ```
 
-### Pipeline Stages
+### Pipeline Guarantees
+1. **Contract Uniformity**: Subclasses of `BaseChannelAdapter` implement standardized handlers for normalization and envelope dispatch [orchestrator/tests/test_channel_adapter_contract.py:16-22]().
+2. **Activity Accounting**: `BaseChannelAdapter._update_activity_stats` executes an atomic SQL increment on `message_count` and updates `last_activity_at` restricted strictly to the adapter's connection ID [orchestrator/tests/test_channel_adapter_contract.py:23-27]().
+3. **Tenant Security**: `workspace_id` is bound immutably at adapter instantiation, preventing payload-level spoofing across workspace boundaries [orchestrator/tests/test_channel_adapter_contract.py:28-34]().
 
-1.  **Normalization (`_to_envelope`)**: Adapters translate platform-specific payloads into a standard `RequestEnvelope`. For `TelegramAdapter`, this occurs inside `_on_message` [orchestrator/channels/telegram_adapter.py:148-185]().
-2.  **Routing**: The `UniversalRouter` uses the envelope's content and workspace context to select the best agent [orchestrator/channels/base.py:143-144]().
-3.  **Execution**: `AgentFactory.execute_with_prompt` runs the agent logic, including multi-modal resolution if `attachment_ids` are present [orchestrator/channels/base.py:163-173]().
-4.  **Analytics**: After execution, the adapter calls `_update_activity_stats` to update the `message_count` and `last_activity_at` in the `channel_connections` table [orchestrator/channels/base.py:186-192]().
-
-**Sources:** [orchestrator/channels/base.py:112-192](), [orchestrator/channels/telegram_adapter.py:148-210]()
+Sources: `orchestrator/channels/telegram_adapter.py:1-167`, `orchestrator/tests/test_channel_adapter_contract.py:14-48`
 
 ---
 
-## Adapter Registry & Factory
+## 5. Management API & Frontend UI
 
-The `ChannelManager` maintains an internal `_ADAPTER_MAP` mapping platform identifiers to their respective implementation classes [orchestrator/channels/manager.py:123-135]().
+Platform-agnostic REST endpoints handle configuration CRUD and credential verification under `/api/channels` [orchestrator/api/channels.py:5-46]().
 
-| Platform | Adapter Class | Module Path |
-| :--- | :--- | :--- |
-| `telegram` | `TelegramAdapter` | `.telegram_adapter` |
-| `slack` | `SlackAdapter` | `.slack_adapter` |
-| `discord` | `DiscordAdapter` | `.discord_adapter` |
-| `teams` | `TeamsAdapter` | `.teams_adapter` |
-| `google_chat` | `GoogleChatAdapter` | `.google_chat_adapter` |
-| `line` | `LineAdapter` | `.line_adapter` |
+### Key Endpoints & Helpers
+- `GET /api/channels`: Lists all workspace connections, reconciling DB status flags with runtime checks from `ChannelManager` [orchestrator/api/channels.py:177-188]().
+- `POST /api/channels`: Validates required configuration keys against driver definitions before persistence [orchestrator/api/channels.py:156-168]().
+- `_save_verify_outcome`: Persists verification metrics (`status`, `last_verified`, `last_error`, and merged JSON metadata) safely without raising unhandled exceptions [orchestrator/api/channels.py:95-148]().
 
-**Dynamic Loading Implementation**:
-The factory uses `importlib.import_module` within `_create_adapter` to load the adapter code only when a connection of that type is started. This prevents the entire system from failing if a specific platform's dependencies (e.g., `python-telegram-bot`) are missing [orchestrator/channels/manager.py:143-154]().
+### Frontend Integration
+The frontend settings interface (`ChannelsSettingsTab.tsx`) consumes these APIs to render platform configuration cards, multi-mode selectors (such as webhook versus polling for Telegram), and interactive connection validation triggers [frontend/components/settings/ChannelsSettingsTab.tsx:137-189]().
 
-**Sources:** [orchestrator/channels/manager.py:122-161]()
-
----
-
-## API & Management
-
-Channel connections are managed via the `/api/channels` router [orchestrator/api/channels.py:22]().
-
-- **Listing**: `GET /api/channels` returns all connections for the current workspace, including `status` and `message_count` [orchestrator/api/channels.py:45-73]().
-- **Creation**: `POST /api/channels` validates required configuration fields (e.g., `bot_token` for Telegram) before inserting into the `channel_connections` table [orchestrator/api/channels.py:76-114](). It also attempts to auto-start the adapter using `manager.start_adapter` [orchestrator/api/channels.py:115-130]().
-- **Testing**: `POST /api/channels/{channel_id}/test` performs a live ping to the platform API (e.g., `getMe` for Telegram) to verify credentials [orchestrator/api/channels.py:203-233]().
-- **Lifecycle Control**: Deleting a channel via `DELETE /api/channels/{channel_id}` automatically triggers `manager.stop_adapter(channel_id)` to kill background tasks before removing the database record [orchestrator/api/channels.py:170-201]().
-
-**Sources:** [orchestrator/api/channels.py:22-242](), [orchestrator/channels/telegram_adapter.py:88-99]()
+Sources: `orchestrator/api/channels.py:95-188`, `frontend/components/settings/ChannelsSettingsTab.tsx:137-189`
 
 ---

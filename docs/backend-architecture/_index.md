@@ -5,29 +5,21 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/hooks/use-database-knowledge.ts](frontend/hooks/use-database-knowledge.ts)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/api/admin_prompts.py](orchestrator/api/admin_prompts.py)
-- [orchestrator/api/credentials.py](orchestrator/api/credentials.py)
-- [orchestrator/api/database_knowledge.py](orchestrator/api/database_knowledge.py)
-- [orchestrator/api/document_generation.py](orchestrator/api/document_generation.py)
-- [orchestrator/api/generated_images.py](orchestrator/api/generated_images.py)
-- [orchestrator/api/system_settings.py](orchestrator/api/system_settings.py)
+- [frontend/components/__tests__/prd197-substrate-tile.test.tsx](frontend/components/__tests__/prd197-substrate-tile.test.tsx)
+- [frontend/components/command-center/is-it-working-strip.tsx](frontend/components/command-center/is-it-working-strip.tsx)
+- [frontend/hooks/use-analytics-api.ts](frontend/hooks/use-analytics-api.ts)
+- [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
+- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
 - [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/database/database.py](orchestrator/core/database/database.py)
-- [orchestrator/core/models/system_prompts.py](orchestrator/core/models/system_prompts.py)
-- [orchestrator/core/seeds/seed_system_prompts.py](orchestrator/core/seeds/seed_system_prompts.py)
-- [orchestrator/core/services/audit_service.py](orchestrator/core/services/audit_service.py)
-- [orchestrator/core/services/prompt_registry.py](orchestrator/core/services/prompt_registry.py)
+- [orchestrator/core/models/substrate_metrics.py](orchestrator/core/models/substrate_metrics.py)
+- [orchestrator/core/observability/substrate_metrics.py](orchestrator/core/observability/substrate_metrics.py)
 - [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/documents/generation_service.py](orchestrator/modules/documents/generation_service.py)
-- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/modules/nl2sql/service.py](orchestrator/modules/nl2sql/service.py)
-- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/reports/route-manifest.json](orchestrator/reports/route-manifest.json)
+- [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
+- [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
+- [orchestrator/tests/test_p2w2_authz_boundary_sweep.py](orchestrator/tests/test_p2w2_authz_boundary_sweep.py)
+- [orchestrator/tests/test_prd154_s5_missions.py](orchestrator/tests/test_prd154_s5_missions.py)
+- [orchestrator/tests/test_prd222_w2s1_plan_tiers.py](orchestrator/tests/test_prd222_w2s1_plan_tiers.py)
 
 </details>
 
@@ -36,30 +28,32 @@ The following files were used as context for generating this wiki page:
 This document describes the FastAPI backend architecture of Automatos AI, including application structure, API router organization, execution layer components, database models, and integration patterns. The backend orchestrates multi-agent workflows, manages memory tiers, and provides real-time execution streaming.
 
 For detailed information on specific components, see the following child pages:
-- [FastAPI Application](#18.1) — `main.py`, lifespan manager, and middleware stack (CORS, auth, logging, rate limiting).
-- [API Router Organization](#18.2) — Router modules (agents, workflows, chat, tools, memory, admin, etc.) and route prefixes.
-- [Database Models](#18.3) — SQLAlchemy models, relationships, workspace_id foreign keys, and JSONB fields.
-- [Service Layer Patterns](#18.4) — Singleton services (`get_instance`), dependency injection, and service composition.
-- [Background Services](#18.5) — `UnifiedScheduler` with `fcntl` file lock, APScheduler job store, and background task patterns.
-- [Real-Time Updates](#18.6) — Redis Pub/Sub, SSE streaming, workflow events, and AI SDK Data Stream protocol.
-- [Testing Infrastructure](#18.7) — Nightly test runner (376 tests), health regression suite, contract tests, and regression pins.
+- [FastAPI Application & Boot Sequence](#18.1) — `main.py` two-phase boot, trust gate, lifespan manager, middleware stack (CORS, auth, logging, rate limiting), degraded boot flag
+- [API Router Organization](#18.2) — `router_manifest` RouterSpec registry, route-manifest.json, router modules and prefixes, import-linter contracts
+- [Database Models & Migrations](#18.3) — SQLAlchemy models under core/models, workspace_id foreign keys, JSONB fields, Alembic single-head invariant, schema drift and from-zero checks
+- [Service Layer Patterns](#18.4) — Singleton services, dependency injection, get_db lifecycle, orchestration_state, chat_messenger, service composition across orchestrator/services
+- [Background Services & Schedulers](#18.5) — UnifiedScheduler with file lock, APScheduler job store, playbook/scheduled task schedulers, audit retention, orphan run reaping
+- [Real-Time Updates](#18.6) — Redis Pub/Sub client, Postgres LISTEN/NOTIFY board events, SSE streaming, workflow events, AI SDK Data Stream protocol
+- [Testing Infrastructure](#18.7) — pytest.ini and conftest layout, orchestrator/tests suites, tests/run_nightly.py live-API runner, contract/regression tests, security suites, e2e/playwright, CI test workflow
+- [Evals & Benchmarks](#18.8) — orchestrator/evals (retrieval recall, graphiti vs baseline), nl2sql_eval, tool-routing eval harness, tools/ benchmark scripts and results, CI eval gates
+- [Developer Tooling & Ralph Automation](#18.9) — scripts/ (ci, dr, ralph PRD build/review prompts and acceptance scripts), .claude agents/hooks/skills, Makefile, docs/PRDS workflow, reports/dossiers
 
 ---
 
 ## FastAPI Application
 
-The backend is a FastAPI application that serves as the orchestration layer for the entire platform. The main application is configured in [orchestrator/main.py:1-180](). It utilizes a multi-stage Docker build for development and production.
+The backend is a FastAPI application that serves as the orchestration layer for the entire platform. The main application is configured in [orchestrator/main.py:1-1465](). It utilizes a multi-stage Docker build for development and production.
 
 ### Application Initialization
 
-The application uses an async context manager for startup/shutdown (lifespan) at [orchestrator/main.py:9-462](). Environment variables are loaded at the module level via `load_dotenv()` before any internal imports at [orchestrator/main.py:24-26]().
+The application uses an async context manager for startup/shutdown (lifespan) at [orchestrator/main.py:242-462](). Environment variables are loaded at the module level via `load_dotenv()` before any internal imports at [orchestrator/main.py:24-26](). Centralized configuration management is handled by the `Config` class, which is the single source of truth for `os.getenv()` calls [orchestrator/config.py:30-34]().
 
 **Application Lifecycle (Lifespan Events)**
 
 ```mermaid
 graph TB
-    subgraph "Startup Sequence"
-        Start["lifespan() startup<br/>[main.py:9]"]
+    subgraph "Startup_Sequence"
+        Start["lifespan() startup<br/>[main.py:242]"]
         
         EnsureSysPrompts["PRD-58: Ensure system_prompts tables<br/>[main.py:249-270]"]
         ImportModels["import core.models.system_prompts"]
@@ -128,7 +122,7 @@ graph TB
         StartChannels --> Complete
     end
     
-    subgraph "Shutdown Sequence"
+    subgraph "Shutdown_Sequence"
         Shutdown["lifespan() shutdown<br/>[main.py:440]"]
         
         StopUnified["get_unified_scheduler().stop()<br/>[main.py:444-447]"]
@@ -141,57 +135,60 @@ graph TB
     end
 ```
 
-**Sources:** [orchestrator/main.py:9-462](), [orchestrator/main.py:24-26](), [orchestrator/main.py:362-421]()
+For details, see [FastAPI Application & Boot Sequence](#18.1).
+
+Sources: [orchestrator/main.py:24-26](), [orchestrator/main.py:242-462](), [orchestrator/main.py:362-421](), [orchestrator/config.py:30-34]()
 
 ---
 
 ## API Router Organization
 
-The backend is organized into domain-specific routers registered in [orchestrator/main.py:36-160](). These routers handle core resources, orchestration, and tool integrations.
+The backend is organized into domain-specific routers. Core routers are imported directly in [orchestrator/main.py:36-120](), while conditionally mounted routers are managed by the `router_manifest` system [orchestrator/router_manifest.py:51-91](). This system ensures explicit declaration of optional routers and provides fail-loud behavior for required ones, or a degraded boot if `ALLOW_DEGRADED_BOOT=true` is set [orchestrator/router_manifest.py:100-134](). The `route-manifest.json` file provides a comprehensive list of all registered routes [orchestrator/reports/route-manifest.json:1-3161]().
 
 ### Router Categories
 
-| Category | Router Modules | Prefix |
+| Category | Router Modules (Examples) | Prefix (Examples) |
 | :--- | :--- | :--- |
-| **Core** | `agents`, `workflows`, `workflow_recipes`, `documents` | `/api/agents`, `/api/workflows` |
-| **Knowledge** | `knowledge`, `knowledge_graph`, `codegraph`, `database_knowledge` | `/api/knowledge`, `/api/code-graph` |
-| **Memory** | `memory`, `widget_memory`, `memory_stats` | `/api/memory` |
-| **Tools** | `tools`, `composio`, `cloud_documents` | `/api/tools`, `/api/cloud-documents` |
-| **Admin** | `admin_prompts`, `system_settings`, `credentials` | `/api/admin`, `/api/system-settings` |
+| **Core** | `api.agents`, `api.workflows`, `api.documents` | `/api/agents`, `/api/workflows` |
+| **Orchestration** | `api.missions`, `api.scheduled_tasks` | `/api/missions`, `/api/scheduled-tasks` |
+| **Memory** | `api.widget_memory`, `api.memory_stats` | `/api/widget-memory`, `/api/memory-stats` |
+| **Tools & Integrations** | `api.tools`, `api.composio`, `api.cloud_documents`, `api.shopify` | `/api/tools`, `/api/composio`, `/api/shopify` |
+| **Admin & System** | `api.admin_prompts`, `api.system_settings`, `api.admin_workspaces`, `api.governance` | `/api/admin`, `/api/system-settings` |
+| **Analytics** | `api.analytics`, `api.llm_analytics`, `api.analytics_real` | `/api/analytics`, `/api/llm-analytics` |
+| **Real-Time** | `api.chat`, `api.notifications` | `/api/chat`, `/api/notifications` |
 
 For details on specific route handlers and prefixes, see [API Router Organization](#18.2).
 
-**Sources:** [orchestrator/main.py:36-160](), [orchestrator/api/database_knowledge.py:37](), [orchestrator/api/admin_prompts.py:42]()
+Sources: [orchestrator/main.py:36-120](), [orchestrator/router_manifest.py:51-91](), [orchestrator/router_manifest.py:100-134](), [orchestrator/reports/route-manifest.json:1-3161]()
 
 ---
 
 ## Database Models
 
-The database layer uses SQLAlchemy ORM with PostgreSQL. Models are organized under `core/models/` and utilize a shared `Base` [orchestrator/main.py:32-33]().
+The database layer uses SQLAlchemy ORM with PostgreSQL and `pgvector` for semantic search. Models are organized under `core/models/` and utilize a shared `Base`. Multi-tenancy is enforced through `workspace_id` foreign keys on most models.
 
 ### Core Model Entities
-- **System Prompts**: `SystemPrompt` and `SystemPromptVersion` manage the lifecycle and versioning of platform-wide prompts [orchestrator/api/admin_prompts.py:29-38]().
-- **Database Knowledge**: `DatabaseKnowledgeSource` enables text-to-SQL capabilities via stored schema metadata [orchestrator/api/database_knowledge.py:29-31]().
-- **Generated Documents**: `GeneratedDocument` tracks files created via templates [orchestrator/modules/documents/generation_service.py:34-35]().
+- **Agents & Skills**: `Agent`, `Skill`, and the `agent_skills` association table.
+- **LLM Registry**: `LLMModel` stores metadata, costs, and capabilities.
+- **Workspaces**: `Workspace` manages multi-tenancy, plan limits, and integration settings. Plan tiers are defined in `config.PLAN_TIERS` and can be overridden via environment variables [orchestrator/config.py:199-200](), [orchestrator/tests/test_prd222_w2s1_plan_tiers.py:101-112]().
+- **Analytics**: `LLMUsage` tracks token consumption and costs per request.
 
-For the full schema and relationship documentation, see [Database Models](#18.3).
+For the full schema and relationship documentation, see [Database Models & Migrations](#18.3).
 
-**Sources:** [orchestrator/main.py:32-33](), [orchestrator/api/admin_prompts.py:29-38](), [orchestrator/api/database_knowledge.py:29-31]()
+Sources: [orchestrator/config.py:199-200](), [orchestrator/tests/test_prd222_w2s1_plan_tiers.py:101-112]()
 
 ---
 
 ## Service Layer Patterns
 
-The backend logic is encapsulated in a service layer that follows a singleton pattern, typically accessed via a `get_instance()` method.
+The backend logic is encapsulated in a service layer that follows a singleton pattern, typically accessed via a `get_instance()` method. Dependency injection is used to provide database sessions and other resources to services.
 
 ### Key Service Categories
-- **Unified Memory**: `UnifiedMemoryService` replaces scattered Mem0 instances with a 5-layer stack (L0-L4) [orchestrator/modules/memory/unified_memory_service.py:154-170]().
-- **Document Generation**: `DocumentGenerationService` handles PDF, DOCX, and XLSX creation from templates [orchestrator/modules/documents/generation_service.py:84-90]().
-- **Database Knowledge**: `DatabaseKnowledgeService` manages schema introspection and SQL generation [orchestrator/modules/nl2sql/service.py:75-96]().
+- **Agent Resolver**: `resolve_agent_id` maps public UUIDs or legacy IDs to internal records while validating workspace ownership.
+- **Workspace Provisioning**: The `seed_auto_agent` function ensures every workspace has exactly one "Auto" system agent that acts as the orchestrator LLM config source.
+- **Real-Time Messaging**: `RedisClient` provides Pub/Sub capabilities for workflow execution updates.
 
 For details on dependency injection and service composition, see [Service Layer Patterns](#18.4).
-
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:154-170](), [orchestrator/modules/documents/generation_service.py:84-90](), [orchestrator/modules/nl2sql/service.py:75-96]()
 
 ---
 
@@ -199,33 +196,64 @@ For details on dependency injection and service composition, see [Service Layer 
 
 The backend supports several execution paths ranging from simple chat to complex multi-agent missions.
 
-### 1. Natural Language to SQL
-The `NaturalLanguageToSQLService` (referenced in [orchestrator/api/database_knowledge.py:21]()) translates user queries into validated SQL against connected knowledge sources.
+### 1. Agent Runtime
+The `AgentFactory` handles the activation and execution of agents. The default workspace agent "Auto" is seeded with the `platform-management` skill to allow it to manage workspace resources.
 
-### 2. Memory Retrieval
-The `GraphRouter` service expansions entry nodes through tool routing edges to provide contextually relevant tool hints [scripts/ralph/progress.txt:98-112]().
+### 2. Workspace Execution
+Agent tasks are executed in isolated workspace environments. The frontend interacts with these via the `api/workspace_files` endpoints for file operations [orchestrator/main.py:90-92]() and other workspace-related actions.
 
+### 3. Workflow Execution
+Workflows are managed through the `api/workflows` router [orchestrator/api/workflows.py:35](). The `WorkflowStageTracker` handles dynamic phase and stage tracking for real-time updates, supporting both legacy 9-stage and PRD-59 dynamic phases [orchestrator/api/workflows.py:38-69]().
+
+### 4. Mission Execution
+Missions are orchestrated through the `api/missions` router. The `create_mission` handler ensures that auto-created missions carry recent chat context as `context_messages` for the planner [orchestrator/tests/test_prd154_s5_missions.py:150-163]().
+
+#### Backend Execution Flow
 ```mermaid
-graph LR
-    subgraph "Natural Language Space"
-        Input["User Query<br/>(e.g. 'Generate Q3 report')"]
+graph TD
+    UserRequest["User Request (e.g., Chat, API call)"]
+    FastAPIApp["FastAPI Application<br/>(orchestrator/main.py)"]
+    APIRouter["API Router<br/>(e.g., api/chat.py, api/workflows.py)"]
+    RequestContext["Request Context<br/>(core.auth.hybrid.get_request_context_hybrid)"]
+    ServiceLayer["Service Layer<br/>(e.g., SmartChatOrchestrator, WorkflowService)"]
+    Database["PostgreSQL Database<br/>(core/database/database.py)"]
+    Redis["Redis<br/>(core/redis/client.py)"]
+    AgentRuntime["Agent Runtime<br/>(AgentFactory)"]
+    WorkspaceWorker["Workspace Worker<br/>(Isolated Execution)"]
+    UnifiedScheduler["UnifiedScheduler<br/>(Background Tasks)"]
+    RealTimeUpdates["Real-Time Updates<br/>(SSE, Pub/Sub)"]
+
+    UserRequest --> FastAPIApp
+    FastAPIApp --> APIRouter
+    APIRouter --> RequestContext
+    RequestContext --> ServiceLayer
+    ServiceLayer --> Database
+    ServiceLayer --> Redis
+    ServiceLayer --> AgentRuntime
+    AgentRuntime --> WorkspaceWorker
+    ServiceLayer --> UnifiedScheduler
+    ServiceLayer --> RealTimeUpdates
+    AgentRuntime --> RealTimeUpdates
+    WorkspaceWorker --> RealTimeUpdates
+    UnifiedScheduler --> RealTimeUpdates
+
+    subgraph "Key Code Entities"
+        main_py["orchestrator/main.py"]
+        api_workflows_py["orchestrator/api/workflows.py"]
+        api_chat_py["orchestrator/api/chat.py"]
+        config_py["orchestrator/config.py"]
+        router_manifest_py["orchestrator/router_manifest.py"]
+        test_prd154_s5_missions_py["orchestrator/tests/test_prd154_s5_missions.py"]
     end
 
-    subgraph "Code Entity Space"
-        Router["GraphRouter<br/>[graph_router.py]"]
-        MemService["UnifiedMemoryService<br/>[unified_memory_service.py]"]
-        DocGen["DocumentGenerationService<br/>[generation_service.py]"]
-        DB["DatabaseKnowledgeSource<br/>[database_knowledge.py]"]
-    end
-
-    Input -->|Search| Router
-    Router -->|Fetch Context| MemService
-    MemService -->|Query Data| DB
-    DB -->|Provide Data| DocGen
-    DocGen -->|Return PDF/XLSX| Input
+    FastAPIApp -- "Configures" --> config_py
+    FastAPIApp -- "Mounts Routers" --> router_manifest_py
+    APIRouter -- "Workflow Routes" --> api_workflows_py
+    APIRouter -- "Chat Routes" --> api_chat_py
+    ServiceLayer -- "Mission Context" --> test_prd154_s5_missions_py
 ```
 
-**Sources:** [orchestrator/api/database_knowledge.py:21](), [orchestrator/modules/memory/unified_memory_service.py:154-170](), [orchestrator/modules/documents/generation_service.py:84-90](), [scripts/ralph/progress.txt:98-112]()
+Sources: [orchestrator/main.py:90-92](), [orchestrator/api/workflows.py:35](), [orchestrator/api/workflows.py:38-69](), [orchestrator/tests/test_prd154_s5_missions.py:150-163]()
 
 ---
 
@@ -234,11 +262,12 @@ graph LR
 Automatos AI utilizes Redis and SSE to provide live feedback to the frontend.
 
 ### Update Protocol
-- **Redis Pub/Sub**: The `UnifiedMemoryService` uses a shared Redis client for session caching and Pub/Sub operations [orchestrator/modules/memory/unified_memory_service.py:183-187]().
-- **Standardized Namespacing**: `MemoryNamespace` ensures consistent Redis keys across different memory layers (L1-L3) [orchestrator/modules/memory/unified_memory_service.py:39-117]().
+- **Redis Pub/Sub**: The `RedisClient` manages async pubsub channels for real-time streaming.
+- **Workflow Events**: `publish_workflow_event` broadcasts subtask updates to specific execution channels.
+- **Next.js Integration**: The frontend `apiClient` ([frontend/lib/api-client.ts:1-2430]()) connects to these streams to render live agent logs and progress bars.
 
 For details on the event pipeline and streaming protocols, see [Real-Time Updates](#18.6).
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:39-117](), [orchestrator/modules/memory/unified_memory_service.py:183-187]()
+Sources: [frontend/lib/api-client.ts:1-2430]()
 
 ---

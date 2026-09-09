@@ -5,370 +5,151 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md](docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/alembic/versions/prd206_chat_summary.py](orchestrator/alembic/versions/prd206_chat_summary.py)
 - [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
-- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
 - [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
 - [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
-- [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/agents/queries.py](orchestrator/modules/agents/queries.py)
-- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
-- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
-- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
+- [orchestrator/modules/context/sections/memory.py](orchestrator/modules/context/sections/memory.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
+- [orchestrator/modules/memory/recall_ranking.py](orchestrator/modules/memory/recall_ranking.py)
+- [orchestrator/modules/memory/thread_checkpoint.py](orchestrator/modules/memory/thread_checkpoint.py)
 - [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/services/memory_archival_job.py](orchestrator/services/memory_archival_job.py)
+- [orchestrator/services/memory_jobs.py](orchestrator/services/memory_jobs.py)
+- [orchestrator/tests/test_l3_distill_input.py](orchestrator/tests/test_l3_distill_input.py)
+- [orchestrator/tests/test_memory_restart_and_isolation.py](orchestrator/tests/test_memory_restart_and_isolation.py)
+- [orchestrator/tests/test_memory_single_write_path.py](orchestrator/tests/test_memory_single_write_path.py)
+- [orchestrator/tests/test_memory_stored_sse.py](orchestrator/tests/test_memory_stored_sse.py)
+- [orchestrator/tests/test_p2w1_semantic_l2_recall.py](orchestrator/tests/test_p2w1_semantic_l2_recall.py)
+- [orchestrator/tests/test_prd197_substrate.py](orchestrator/tests/test_prd197_substrate.py)
+- [orchestrator/tests/test_prd206_recall_ranking.py](orchestrator/tests/test_prd206_recall_ranking.py)
+- [orchestrator/tests/test_prd206_thread_checkpoint.py](orchestrator/tests/test_prd206_thread_checkpoint.py)
+- [orchestrator/tests/test_recall_relevance_floor.py](orchestrator/tests/test_recall_relevance_floor.py)
+- [orchestrator/tests/test_smart_orchestrator_store_exchange.py](orchestrator/tests/test_smart_orchestrator_store_exchange.py)
 - [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/tests/test_us011_context_budgets.py](orchestrator/tests/test_us011_context_budgets.py)
 
 </details>
 
 
 
-The Memory System provides a five-layer hierarchical architecture for storing and retrieving conversational context, user facts, temporal data, and organizational knowledge. It replaces fragmented memory implementations with a unified API (`UnifiedMemoryService`) that enforces workspace isolation and automatic memory lifecycle management.
+## Purpose and Scope
 
-For context assembly and prompt injection, see [Context Service](#4). For daily activity summaries, see section 3.5 below. For agent-specific memory integration in missions, see [Missions & Multi-Agent Coordination](#22).
+The Memory System provides a five-layer hierarchical architecture for storing and retrieving conversational context, user facts, temporal data, and organizational knowledge across Automatos AI. It replaces fragmented memory implementations with a centralized service (`UnifiedMemoryService`) that enforces workspace scoping, single write paths, and automated memory lifecycle management. 
+
+For related prompt-building layers, see [Context Service](#4). For cross-agent mission memory, see [Missions & Multi-Agent Coordination](#22).
 
 ---
 
-## Five-Layer Memory Architecture
+## 3.1 Five-Layer Memory Architecture
 
-The system implements a biologically-inspired memory hierarchy with five distinct layers, each optimized for different access patterns and retention policies.
-
-**Layer Overview**
+The system implements a biologically-inspired memory hierarchy spanning five distinct layers, each optimized for specific access patterns, storage backends, and retention policies. For detailed layer specifications, see [Five-Layer Memory Architecture](#3.1).
 
 ```mermaid
 graph TB
-    subgraph ["L0: Focus (Context Window)"]
-        [L0_desc]["Current conversation<br/>No persistence"]
+    subgraph "NaturalLanguageSpace"
+        direction TB
+        NLQuery["User Query / Chat Turn"]
     end
-    
-    subgraph ["L1: Working Memory (Redis)"]
-        [L1_session]["SessionMemory<br/>24hr TTL + 1hr grace<br/>JSON: summary, decisions, action_items"]
+
+    subgraph "CodeEntitySpace"
+        direction TB
+        L0["L0: Focus Window\n(ContextService)"]
+        L1["L1: Working Memory\n(SessionMemory / Redis)"]
+        L2["L2: Short-Term Memory\n(memory_short_term / Postgres)"]
+        L3["L3: Long-Term Memory\n(DurableMemoryStore / Qdrant)"]
+        L4["L4: Organizational Knowledge\n(RAG / NL2SQL Tools)"]
     end
-    
-    subgraph ["L2: Short-Term Memory (PostgreSQL)"]
-        [L2_table]["memory_short_term table<br/>Ebbinghaus decay formula<br/>Promotion to L3 on access_count > 3"]
-    end
-    
-    subgraph ["L3: Long-Term Memory (Mem0)"]
-        [L3_mem0]["Mem0 Service<br/>Fact extraction via LLM<br/>Semantic search with cache"]
-    end
-    
-    subgraph ["L4: Organizational Knowledge"]
-        [L4_tools]["Tool-based access<br/>search_knowledge, query_database<br/>Awareness-only in prompts"]
-    end
-    
-    [L0_desc] -->|"end_session()"| [L1_session]
-    [L1_session] -->|"Consolidate on expiry"| [L2_table]
-    [L2_table] -->|"access_count >= 3"| [L3_mem0]
-    [L3_mem0] -.->|"No promotion"| [L4_tools]
+
+    NLQuery --> L0
+    L0 -->|"store_exchange()"| L1
+    L1 -->|"Consolidation"| L2
+    L2 -->|"Promotion"| L3
+    L3 -.->|"On-demand lookup"| L4
 ```
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:8-13](), [orchestrator/config.py:82-118]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:8-13](), [orchestrator/modules/memory/unified_memory_service.py:127-140]()
 
 ---
 
-### L0: Focus (Context Window)
+## 3.2 UnifiedMemoryService
 
-L0 represents the current conversation context held in the LLM's prompt. No explicit storage is required—the `ContextService` assembles messages from the request and injects them directly into the prompt.
+The `UnifiedMemoryService` acts as the single centralized entry point for all memory operations across system consumers [orchestrator/modules/memory/unified_memory_service.py:1-21](). It manages shared references to the in-process durable store (`DurableMemoryStore`) and the Redis client while maintaining strict tenant isolation via `MemoryNamespace` [orchestrator/modules/memory/unified_memory_service.py:161-191]().
 
-**Key Characteristics:**
-- No persistence layer
-- Managed by `ContextService` message assembly
-- Limited by model context window (typically 8k-128k tokens)
+For implementation details, API methods, and the single write contract, see [UnifiedMemoryService](#3.2).
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:9-9]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:1-21](), [orchestrator/modules/memory/unified_memory_service.py:161-191]()
 
 ---
 
-### L1: Working Memory (Redis Sessions)
+## 3.3 Context Router
 
-L1 stores active session state in Redis with a 24-hour TTL. After `end_session()` is called, the TTL extends to 1 hour to allow consolidation into L2.
+The `ContextRouter` performs fast, regex-based signal detection on user queries (<10 ms, zero I/O) to determine which memory layers to fetch before prompt assembly [orchestrator/modules/memory/context_router.py:1-24](). It recognizes temporal references, personal facts, session continuation cues, and knowledge queries [orchestrator/modules/memory/context_router.py:61-78]().
 
-**Data Model**
+For classification patterns, token budget distribution (`_CONTEXT_BUDGET_WEIGHTS`), and context bundles, see [Context Router](#3.3).
 
 ```mermaid
-classDiagram
-    class SessionMemory {
-        +str summary
-        +List~str~ decisions
-        +List~str~ action_items
-        +int exchange_count
-        +str last_updated
-        +bool ended
-        +to_json() str
-        +from_json(str) SessionMemory
-    }
-```
-
-**Key Operations:**
-
-| Method | Description | TTL Behavior |
-|--------|-------------|--------------|
-| `get_session(workspace_id, conversation_id)` | Retrieve session from Redis | Returns `None` if expired |
-| `update_session(workspace_id, conversation_id, user_msg, assistant_msg)` | Append exchange, increment counter | Resets 24hr TTL |
-| `end_session(workspace_id, conversation_id)` | Mark session as ended | Extends to 1hr grace period |
-
-**Redis Key Pattern:**
-```
-mem:session:{workspace_id}:{conversation_id}
-```
-
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:123-149](), [orchestrator/config.py:84-87]()
-
----
-
-### L2: Short-Term Memory (PostgreSQL)
-
-L2 stores recent exchanges and activity in the `memory_short_term` table with automatic decay and promotion logic.
-
-**Schema**
-
-```mermaid
-erDiagram
-    "memory_short_term" {
-        uuid id PK
-        uuid workspace_id FK
-        int agent_id FK
-        text content
-        string content_type
-        float importance
-        float decay_score
-        int access_count
-        jsonb metadata_
-        timestamp created_at
-        timestamp last_accessed_at
-        timestamp archived_at
-    }
-```
-
-**Content Types:**
-- `exchange` — User-assistant conversation pair
-- `recipe_summary` — Recipe execution summary
-- `heartbeat_log` — Proactive assistant findings
-- `tool_result` — Tool execution results
-- `session_decision` — Key decisions from ended sessions
-
-**Ebbinghaus Decay Formula:**
-
-The decay score is computed hourly via a background job:
-
-```
-decay_score = importance × e^(-decay_rate × hours_since_creation)
-```
-
-Where:
-- `importance` ∈ [0.0, 1.0] — Initial importance score
-- `decay_rate` = 0.1 (configurable via `MEMORY_DECAY_RATE`) [orchestrator/config.py:99-99]()
-- Items with `decay_score < 0.3` are archived [orchestrator/config.py:101-101]()
-
-**Promotion Logic:**
-
-Items are promoted to L3 when:
-- `access_count >= 3` (configurable via `MEMORY_PROMOTION_MIN_ACCESS_COUNT`) [orchestrator/config.py:107-107]()
-- `importance >= 0.7` (configurable via `MEMORY_PROMOTION_MIN_IMPORTANCE`) [orchestrator/config.py:105-105]()
-
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:11-11](), [orchestrator/config.py:98-109]()
-
----
-
-### L3: Long-Term Memory (Mem0)
-
-L3 uses the Mem0 service for semantic fact extraction and retrieval. Mem0 accepts conversational messages, extracts structured facts via an LLM, and stores them in a vector database for semantic search.
-
-**Architecture**
-
-```mermaid
-graph LR
-    subgraph ["UnifiedMemoryService"]
-        [UMS_store]["store_long_term()"]
+graph TB
+    subgraph "CodeEntitySpace"
+        Q["User Query"] --> CR["ContextRouter.analyze_query()"]
+        CR --> CS["ContextSignals"]
+        CS -->|is_temporal| L2["L2 / Temporal Fetch"]
+        CS -->|is_personal_fact| L3["L3 Durable Store"]
+        CS -->|is_session_continuation| L1["L1 Session Summary"]
+        CS -->|is_knowledge_query| L4["L4 Knowledge Awareness"]
+        L1 & L2 & L3 & L4 --> CB["ContextBundle Assembly"]
     end
-    
-    subgraph ["Mem0Client"]
-        [MC_add]["add()"]
-    end
-    
-    subgraph ["Mem0 Service (Railway)"]
-        [Extract]["LLM Fact Extraction"]
-        [Vector]["pgvector / Vector DB"]
-    end
-    
-    subgraph ["Redis Cache"]
-        [CacheLayer]["5-min TTL<br/>mem:cache:{workspace}:{agent}:{query_hash}"]
-    end
-    
-    [UMS_store] --> [MC_add]
-    [MC_add] --> [Extract]
-    [Extract] --> [Vector]
-    
-    [UMS_store] -.->|"Check cache first"| [CacheLayer]
-    [Vector] -.->|"Cache results"| [CacheLayer]
 ```
 
-**Circuit Breaker:**
-
-The `Mem0Client` implements a circuit breaker to prevent cascade failures:
-- Opens after a failure threshold (default 3) [orchestrator/modules/memory/integrations/mem0_client.py:29-34]()
-- Remains open for a cooldown period (default 300s) [orchestrator/modules/memory/integrations/mem0_client.py:34-34]()
-- Allows probe requests after cooldown [orchestrator/modules/memory/integrations/mem0_client.py:51-59]()
-
-**Key Methods:**
-
-| Method | Mem0 Endpoint | Cache Strategy |
-|--------|---------------|----------------|
-| `add(messages, user_id, metadata)` | `POST /memories/` | Sends raw conversation for extraction [orchestrator/modules/memory/integrations/mem0_client.py:176-202]() |
-| `search(query, user_id, limit)` | `POST /memories/search/` | 5-min cache with query hash key [orchestrator/config.py:88-89]() |
-
-**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:25-80](), [orchestrator/modules/memory/unified_memory_service.py:12-12]()
+**Sources:** [orchestrator/modules/memory/context_router.py:1-24](), [orchestrator/modules/memory/context_router.py:61-78]()
 
 ---
 
-### L4: Organizational Knowledge (RAG/NL2SQL)
+## 3.4 Memory Lifecycle & Consolidation
 
-L4 provides awareness of available knowledge sources without pre-fetching content. The `ContextRouter` injects a brief summary of available tools into the system prompt, but actual retrieval happens on-demand via tool calls.
+Memory lifecycle management is governed by background tasks registered on the unified scheduler via `MemoryJobScheduler` [orchestrator/services/memory_jobs.py:1-33](). These tasks handle session consolidation (L1 to L2), contradiction-based invalidation, Ebbinghaus retention decay scoring on L2, daily L2-to-L3 promotion, and GDPR erasure cascades [orchestrator/services/memory_jobs.py:6-18]().
 
-**Key Characteristics:**
-- No pre-fetch—tools are invoked by the agent when needed
-- Awareness text limited by `CONTEXT_BUDGET_AWARENESS` (200 tokens default) [orchestrator/config.py:95-95]()
-- Covered in detail in [Knowledge Base & RAG](#7)
+For background scheduler configurations and retention sweeps, see [Memory Lifecycle & Consolidation](#3.4).
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:13-13](), [orchestrator/config.py:95-95]()
+**Sources:** [orchestrator/services/memory_jobs.py:1-33](), [orchestrator/services/memory_jobs.py:6-18]()
 
 ---
 
-## UnifiedMemoryService API
+## 3.5 Daily Logs & Temporal Memory
 
-The `UnifiedMemoryService` is a singleton that consolidates all memory operations. It replaces scattered `Mem0Client` instances with a single shared service.
+Automatos maintains daily activity logs and temporal retrieval mechanisms to preserve continuity across extended operational windows [orchestrator/modules/memory/unified_memory_service.py:72-74](). Summaries are compiled asynchronously and injected into prompt sections via `MemorySection` [orchestrator/modules/context/sections/memory.py:1-40]().
 
-**Singleton Pattern**
+For daily log aggregation, temporal query windows, and continuity evaluation gates, see [Daily Logs & Temporal Memory](#3.5).
 
-```python
-# [orchestrator/modules/memory/unified_memory_service.py:166-171]
-from modules.memory.unified_memory_service import get_unified_memory_service
-
-service = get_unified_memory_service()
-```
-
-**Core API Methods**
-
-```mermaid
-classDiagram
-    class UnifiedMemoryService {
-        -Mem0Client _mem0
-        -RedisClient _redis_client_getter
-        +get_instance() UnifiedMemoryService
-        +store_long_term(workspace_id, content, agent_id) Dict
-        +search_long_term(workspace_id, query, agent_id) List
-        +get_session(workspace_id, conversation_id) SessionMemory
-        +update_session(workspace_id, conversation_id, user_msg, assistant_msg) bool
-        +end_session(workspace_id, conversation_id) bool
-    }
-    
-    class MemoryNamespace {
-        +workspace_id str
-        +workspace() str
-        +agent(agent_id) str
-        +recipe(recipe_id) str
-        +session(conversation_id) str
-        +cache_key(agent_id, query_hash) str
-        +resolve(agent_id) str
-    }
-    
-    UnifiedMemoryService ..> MemoryNamespace : uses
-```
-
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:38-188]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:72-74](), [orchestrator/modules/context/sections/memory.py:1-40]()
 
 ---
 
-## MemoryNamespace: Workspace Isolation
+## 3.6 SmartMemoryManager
 
-The `MemoryNamespace` class builds standardized `user_id` strings for Mem0 and Redis keys, preventing inconsistencies across the platform.
+`SmartMemoryManager` coordinates agent-specific and workspace-wide memory operations within chat consumers [orchestrator/consumers/chatbot/smart_memory.py:1-73](). It integrates with `SmartChatOrchestrator` to perform two-tier memory retrieval, fact extraction, and background storage without blocking streaming responses [orchestrator/consumers/chatbot/smart_memory.py:63-85](), [orchestrator/consumers/chatbot/smart_orchestrator.py:36-53]().
 
-**Namespace Patterns**
+For widget mode behaviors and assistant memory integration, see [SmartMemoryManager](#3.6).
 
-| Method | Pattern | Usage |
-|--------|---------|-------|
-| `workspace()` | `mem:{workspace_id}` | Global workspace facts [orchestrator/modules/memory/unified_memory_service.py:52-54]() |
-| `agent(agent_id)` | `mem:{workspace_id}:agent:{agent_id}` | Agent-specific memories [orchestrator/modules/memory/unified_memory_service.py:56-58]() |
-| `recipe(recipe_id)` | `mem:{workspace_id}:recipe:{recipe_id}` | Recipe learnings [orchestrator/modules/memory/unified_memory_service.py:60-62]() |
-| `daily()` | `mem:{workspace_id}:daily` | Daily activity logs [orchestrator/modules/memory/unified_memory_service.py:72-74]() |
-| `session(conversation_id)` | `mem:session:{workspace_id}:{conversation_id}` | L1 session cache [orchestrator/modules/memory/unified_memory_service.py:78-80]() |
-
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:38-118]()
+**Sources:** [orchestrator/consumers/chatbot/smart_memory.py:1-73](), [orchestrator/consumers/chatbot/smart_orchestrator.py:36-53]()
 
 ---
 
-## Context Router: Signal-Based Retrieval
+## 3.7 Memory API Reference
 
-The `ContextRouter` analyzes user queries and guided by token budgets, determines which memory layers to fetch.
+Memory retrieval and search functions are exposed to the system and agents through platform actions and internal routers [orchestrator/modules/tools/discovery/handlers_search.py:1-16](). Key handlers include `search_memory` for durable L3 vector search and `search_chat_history` for keyword queries across PostgreSQL message logs [orchestrator/modules/tools/discovery/handlers_search.py:14-16](), [orchestrator/modules/tools/discovery/handlers_search.py:87-90]().
 
-**Budget Allocation:**
+For endpoint specifications, stats routers, and memory explorer hooks, see [Memory API Reference](#3.7).
 
-The system enforces token budgets per source to prevent context overflow:
-
-| Source | Config Constant | Default |
-|--------|----------------|---------|
-| Session summary | `CONTEXT_BUDGET_SESSION` | 500 |
-| Long-term memories | `CONTEXT_BUDGET_LONG_TERM` | 800 |
-| Temporal results | `CONTEXT_BUDGET_TEMPORAL` | 600 |
-| Daily logs | `CONTEXT_BUDGET_DAILY` | 400 |
-| Knowledge awareness | `CONTEXT_BUDGET_AWARENESS` | 200 |
-
-**Sources:** [orchestrator/config.py:91-95]()
+**Sources:** [orchestrator/modules/tools/discovery/handlers_search.py:1-16](), [orchestrator/modules/tools/discovery/handlers_search.py:87-90]()
 
 ---
 
-## Memory Lifecycle & Background Jobs
+## 3.8 Shared Field Memory (Vector Field)
 
-Three background jobs manage memory lifecycle automatically:
+The Vector Field system (`VectorFieldSharedContext`) utilizes a dedicated Qdrant collection (`field_memory`) to manage ambient resonance, Ebbinghaus decay, and attractors across workspace agents. Field sections are dynamically injected into prompts to guide autonomous behavior.
 
-| Job | Interval | Purpose |
-|-----|----------|---------|
-| Consolidation | `MEMORY_CONSOLIDATION_INTERVAL_SECONDS` | Moves ended L1 sessions to L2 [orchestrator/config.py:111-111]() |
-| Decay | `MEMORY_DECAY_INTERVAL_SECONDS` | Updates Ebbinghaus scores in L2 [orchestrator/config.py:112-112]() |
-| Promotion | `MEMORY_PROMOTION_HOUR_UTC` | Promotes high-importance L2 to L3 [orchestrator/config.py:113-113]() |
-
-**Sources:** [orchestrator/config.py:110-115]()
-
----
-
-## Daily Logs & Temporal Memory
-
-Daily logs provide summarized activity for "what happened earlier today" queries. The `UnifiedMemoryService` manages these via the `daily()` namespace.
-
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:72-74]()
-
----
-
-## SmartMemoryManager: Two-Tier Retrieval
-
-The `SmartMemoryManager` provides a chatbot-specific wrapper around `UnifiedMemoryService`, implementing logic to separate personal facts from tool-specific preferences.
-
-**Intent Classification:**
-It uses keywords to determine if a memory is tool-specific (agent tier) or personal (global tier). For example, keywords like "slack" or "github" route to the agent tier, while "my name" or "i work at" route to the global tier [orchestrator/consumers/chatbot/smart_memory.py:92-168]().
-
-**Widget Mode:**
-When `widget_mode=True`, the manager can restrict retrieval to specific scopes, preventing leakage of global workspace context into embedded widgets [orchestrator/consumers/chatbot/smart_orchestrator.py:107-107]().
-
-**Sources:** [orchestrator/consumers/chatbot/smart_memory.py:50-180](), [orchestrator/consumers/chatbot/smart_orchestrator.py:86-124]()
-
----
-
-## Memory API Reference
-
-The memory system is accessible via core platform actions and internal services.
-
-**API Endpoints:**
-- `GET /api/memory` — Memory management router [orchestrator/main.py:50-50]()
-- `GET /api/memory-stats` — Memory usage analytics [orchestrator/main.py:54-54]()
-- `GET /api/widget-memory` — Memory panel for widgets [orchestrator/main.py:51-51]()
-
-**Sources:** [orchestrator/main.py:50-55]()
+For collection parameters, benchmark scripts, and prompt injection structures, see [Shared Field Memory (Vector Field)](#3.8).
 
 ---

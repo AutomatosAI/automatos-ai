@@ -5,15 +5,29 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
+- [.github/workflows/import-linter.yml](.github/workflows/import-linter.yml)
+- [frontend/components/__tests__/prd197-substrate-tile.test.tsx](frontend/components/__tests__/prd197-substrate-tile.test.tsx)
+- [frontend/components/command-center/is-it-working-strip.tsx](frontend/components/command-center/is-it-working-strip.tsx)
+- [frontend/hooks/use-analytics-api.ts](frontend/hooks/use-analytics-api.ts)
+- [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
+- [orchestrator/.importlinter](orchestrator/.importlinter)
+- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
 - [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/core/models/substrate_metrics.py](orchestrator/core/models/substrate_metrics.py)
+- [orchestrator/core/observability/substrate_metrics.py](orchestrator/core/observability/substrate_metrics.py)
 - [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/reports/route-manifest.json](orchestrator/reports/route-manifest.json)
+- [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
+- [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
+- [orchestrator/tests/test_import_contract_present.py](orchestrator/tests/test_import_contract_present.py)
+- [orchestrator/tests/test_no_mem0_residue.py](orchestrator/tests/test_no_mem0_residue.py)
+- [orchestrator/tests/test_p2w2_authz_boundary_sweep.py](orchestrator/tests/test_p2w2_authz_boundary_sweep.py)
+- [orchestrator/tests/test_prd154_s5_missions.py](orchestrator/tests/test_prd154_s5_missions.py)
+- [orchestrator/tests/test_prd222_w2s1_plan_tiers.py](orchestrator/tests/test_prd222_w2s1_plan_tiers.py)
+- [scripts/ralph/PROMPT_build_prd211.md](scripts/ralph/PROMPT_build_prd211.md)
+- [scripts/ralph/PROMPT_review_prd211.md](scripts/ralph/PROMPT_review_prd211.md)
+- [scripts/ralph/acceptance-prd211.sh](scripts/ralph/acceptance-prd211.sh)
+- [scripts/ralph/prd-211.json](scripts/ralph/prd-211.json)
 
 </details>
 
@@ -21,148 +35,190 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the organization and structure of FastAPI routers in the Automatos AI backend orchestrator. It covers router registration, URL prefix patterns, authentication dependencies, and the coordination between the API layer and core service modules such as the Unified Memory System and Universal Router.
+This document describes the organization and structure of FastAPI routers in the backend orchestrator application. It covers router registration, URL prefix patterns, authentication dependencies, endpoint conventions, and the coordination between the API layer and the core service execution paths.
 
-For authentication mechanisms, see [Authentication Flow](17.1). For database models, see [Database Models](18.3). For the main application setup, see [FastAPI Application](18.1).
+For authentication and workspace isolation mechanisms, see [Authentication Flow](17.1). For database models referenced by routers, see [Database Models](18.3). For the main FastAPI application setup, see [FastAPI Application](18.1).
 
 ---
 
 ## Router Organization Overview
 
-The Automatos AI backend organizes API endpoints into **domain-based routers**, modularly defined in the `orchestrator/api/` directory. These routers are mounted to the main application in `main.py` [orchestrator/main.py:35-170]().
+The Automatos AI backend organizes API endpoints into **domain-based routers**, each responsible for a specific feature area. Routers are modular Python files in the `orchestrator/api/` directory that define related endpoints using FastAPI's `APIRouter`. The system serves approximately 789 unique routes [orchestrator/reports/route-manifest.json:2]().
 
-### Router Categories and Prefixes
+### Router Categories
 
-| Category | Key Router Modules | Prefix Example | Purpose |
-|----------|--------------------|----------------|---------|
-| **Agents** | `agents.py`, `personas.py`, `agent_plugins.py` | `/api/agents` | Agent lifecycle, personas, and capability assignment [orchestrator/main.py:36]() |
-| **Workflows** | `workflows.py`, `workflow_recipes.py`, `tasks.py` | `/api/workflows` | Multi-agent orchestration and task queue management [orchestrator/main.py:37-39]() |
-| **Memory** | `memory.py`, `widget_memory.py`, `memory_stats.py` | `/api/memory` | Unified memory access across L1-L4 layers [orchestrator/main.py:50-51]() |
-| **Knowledge** | `knowledge.py`, `knowledge_graph.py`, `codegraph.py` | `/api/knowledge` | RAG, Graphify knowledge graphs, and code indexing [orchestrator/main.py:56,151-153]() |
-| **Tools** | `tools.py`, `composio.py`, `skills.py` | `/api/tools` | Composio integrations and custom skill resolution [orchestrator/main.py:63,68,78]() |
-| **Analytics** | `analytics.py`, `analytics_api.py`, `statistics.py` | `/api/analytics` | LLM usage, cost tracking, and system performance [orchestrator/main.py:52,147,76]() |
-| **System** | `system.py`, `system_settings.py`, `credentials.py` | `/api/system` | Global config, BYOK management, and health checks [orchestrator/main.py:48,61-62]() |
-| **Notifications**| `notifications.py` | `/api/notifications` | Unified dispatching for tasks and missions [orchestrator/main.py:95-98]() |
+| Category | Routers | Primary Purpose |
+|----------|---------|-----------------|
+| **Core Agents** | `agents.py`, `agent_endpoints.py`, `personas.py` | Agent lifecycle, configuration, personalities, and execution [orchestrator/main.py:38,109,76]() |
+| **Workflows & Recipes** | `workflows.py`, `workflow_recipes.py`, `missions.py` | Multi-agent orchestration, sequential missions, and recipe execution [orchestrator/main.py:39-41,73]() |
+| **Tools & Skills** | `tools.py`, `skills.py` | External integrations (Composio), skill sources, and tool discovery [orchestrator/main.py:61,64]() |
+| **Marketplace** | `marketplace.py`, `marketplace_plugins.py` | Plugin discovery, installation, and community items [orchestrator/main.py:43,72]() |
+| **Context & Memory** | `context.py`, `memory_stats.py`, `documents.py` | Context assembly, memory stats, and document management [orchestrator/main.py:58,50,44]() |
+| **Knowledge** | `knowledge.py`, `knowledge_graph.py`, `codegraph.py` | Knowledge base, graph retrieval, and code analysis [orchestrator/main.py:100,102,54]() |
+| **Analytics** | `analytics.py`, `llm_analytics.py`, `statistics.py` | Usage tracking, cost analysis, and system metrics [orchestrator/main.py:49,114,63]() |
+| **System Admin** | `system.py`, `system_settings.py`, `credentials.py` | System configuration, BYOK keys, and global settings [orchestrator/main.py:47,60,59]() |
+| **Workspaces** | `workspaces.py`, `workspace_files.py` | Multi-tenancy, file browser, and workspace context [orchestrator/router_manifest.py:64, orchestrator/main.py:92]() |
+| **Routing & Chat** | `routing.py`, `chat.py` | Universal routing, streaming chat (AI SDK), and LLM classification [orchestrator/main.py:70,107]() |
 
-Sources: [orchestrator/main.py:35-170]()
+Sources: [orchestrator/main.py:38-120](), [orchestrator/reports/route-manifest.json:2](), [orchestrator/router_manifest.py:52-91]()
 
 ---
 
-## Router Architecture & Data Flow
+## Router Architecture
 
-The API layer follows a standardized tiered flow: request reception via FastAPI, context injection for multi-tenancy, and delegation to singleton services.
+The system follows a tiered request flow: the `main.py` entry point mounts routers via `mount_manifest_routers` [orchestrator/main.py:30](), which then use `RequestContext` to enforce workspace isolation before calling specialized services.
 
-### Request Flow to Service Layer
+### API Registration and Request Flow
 "Code Entity Space"
 ```mermaid
-graph TB
-    subgraph "FastAPI Entry (main.py)"
-        App["FastAPI App Instance"]
-        HybridAuth["get_request_context_hybrid()"]
+graph TD
+    subgraph "orchestrator/main.py - FastAPI Application"
+        App["FastAPI Instance"]
+        Lifespan["@asynccontextmanager lifespan"]
+        MountManifest["mount_manifest_routers()"]
+        
+        App --> Lifespan
+        App --> MountManifest
     end
     
-    subgraph "Router Layer (orchestrator/api/)"
-        AgentsRouter["agents.py"]
-        MemoryRouter["memory.py"]
-        ChatRouter["chat.py"]
+    subgraph "Router Registration Examples"
+        MountManifest --> AgentsRouter["api.agents.router<br/>(/api/agents)"]
+        MountManifest --> WorkspacesRouter["api.workspaces.router<br/>(/api/workspaces)"]
+        MountManifest --> ActivityRouter["api.activity.router<br/>(/api/activity)"]
     end
     
-    subgraph "Service Layer (orchestrator/modules/)"
-        UMS["UnifiedMemoryService<br/>(L1-L4 Management)"]
-        CR["ContextRouter<br/>(Signal Analysis)"]
-        AF["AgentFactory<br/>(Execution)"]
-    end
-
-    App --> HybridAuth
-    HybridAuth --> AgentsRouter
-    HybridAuth --> MemoryRouter
-    HybridAuth --> ChatRouter
-    
-    MemoryRouter --> UMS
-    ChatRouter --> CR
-    ChatRouter --> AF
-    
-    subgraph "Data Layer"
-        Redis["Redis (L1/Cache)"]
-        Postgres["PostgreSQL (L2/Core)"]
-        Mem0["Mem0 API (L3)"]
+    subgraph "Implementation Pattern"
+        WorkspacesAPI["orchestrator/api/workspaces.py"]
+        WSDef["router = APIRouter(prefix='/api/workspaces')"]
+        WSHandler["@router.get('/current') get_current_workspace"]
+        
+        WorkspacesAPI --> WSDef
+        WSDef --> WSHandler
     end
     
-    UMS --> Redis
-    UMS --> Postgres
-    UMS --> Mem0
+    WorkspacesRouter -.->|"points to"| WorkspacesAPI
+    
+    subgraph "Execution Layer"
+        Auth["core.auth.hybrid.get_request_context_hybrid"]
+        DB["PostgreSQL<br/>Workspace model"]
+        
+        WSHandler --> Auth
+        WSHandler --> DB
+    end
 ```
-Sources: [orchestrator/main.py:17,35-60](), [orchestrator/modules/memory/unified_memory_service.py:154-188](), [orchestrator/modules/memory/context_router.py:1-24]()
+Sources: [orchestrator/main.py:30-123](), [orchestrator/api/workflows.py:35](), [orchestrator/core/auth/hybrid.py:29]()
 
----
+### Router Manifest and Conditional Mounting
 
-## Memory & Context Routing
+The `router_manifest.py` module defines `RouterSpec` objects that explicitly declare routers to be mounted [orchestrator/router_manifest.py:32-42](). This mechanism replaces the previous `try/except ImportError` pattern in `main.py` that silently dropped routers if their import failed [orchestrator/router_manifest.py:2-5]().
 
-The `memory.py` and `context.py` routers interface with the **Unified Memory Service** to provide a consistent view of agent knowledge.
+The `MANIFEST_ROUTERS` tuple lists all conditionally-mounted routers [orchestrator/router_manifest.py:51-91](). Each `RouterSpec` can be marked as `optional=True` if it's gated on an optional integration (e.g., Composio, S3-Vectors) [orchestrator/router_manifest.py:38,55,56]().
 
-### Memory Tier Resolution
-When a request hits the memory API, it uses the `MemoryNamespace` helper to ensure workspace isolation across different storage backends [orchestrator/modules/memory/unified_memory_service.py:39-48]().
+The `load_routers` function resolves each `RouterSpec` to its router object. If a required router fails to import and `ALLOW_DEGRADED_BOOT` is not set to `true` in `config.py`, a `RouterMountError` is raised [orchestrator/router_manifest.py:100-134](). Otherwise, the failure is logged, and the application can boot in a degraded state [orchestrator/router_manifest.py:125-134]().
 
-| Memory Layer | Backend | Router/Service Logic |
-|--------------|---------|----------------------|
-| **L1 (Working)** | Redis | `MemoryNamespace.session()` key with 24h TTL [orchestrator/modules/memory/unified_memory_service.py:78-80,85]() |
-| **L2 (Short-term)**| Postgres| Time-based Ebbinghaus decay [orchestrator/config.py:98-103]() |
-| **L3 (Long-term)** | Mem0 | `MemoryNamespace.workspace()` fact extraction [orchestrator/modules/memory/unified_memory_service.py:52-54]() |
-| **L4 (Knowledge)** | RAG/Graph | Graphify and CodeGraph retrieval [orchestrator/main.py:56,153]() |
-
-### Context Signal Analysis
-The `ContextRouter` (invoked by chat routers) performs regex-based signal detection to determine which memory layers to fetch before LLM execution [orchestrator/modules/memory/context_router.py:8-12]().
-
-- **Temporal Signals**: Detects "last week", "yesterday" to trigger L2/L3 temporal retrieval [orchestrator/modules/memory/context_router.py:85-105]().
-- **Personal Facts**: Detects "my preference", "I like" to trigger L3 Mem0 fact lookup [orchestrator/modules/memory/context_router.py:108-121]().
-- **Knowledge Queries**: Detects "find the policy", "search docs" to trigger L4 RAG retrieval [orchestrator/modules/memory/context_router.py:140-153]().
-
-Sources: [orchestrator/modules/memory/unified_memory_service.py:39-117](), [orchestrator/modules/memory/context_router.py:82-172](), [orchestrator/config.py:84-115]()
-
----
-
-## Agent and Tool Routing
-
-The `agents.py` router manages the mapping between high-level agent definitions and low-level tool capabilities.
-
-### Agent Lifecycle & Resolution
 "Natural Language Space" to "Code Entity Space"
 ```mermaid
-graph LR
+graph TD
     subgraph "Natural Language Space"
-        User["'Update Auto agent's tools'"]
+        RouterDeclaration["Router Declaration"]
+        ConditionalMounting["Conditional Mounting"]
+        ErrorHandling["Error Handling"]
     end
 
     subgraph "Code Entity Space"
-        Router["api/agents.py<br/>PUT /{id}"]
-        Resolver["core/utils/agent_resolver.py<br/>resolve_agent_id()"]
-        ToolMap["api/agents.py<br/>_resolve_tool_ids_to_app_names()"]
-        DB["PostgreSQL<br/>agents table"]
+        RouterSpecClass["RouterSpec (orchestrator/router_manifest.py)"]
+        ManifestRouters["MANIFEST_ROUTERS (tuple of RouterSpec)"]
+        LoadRoutersFunc["load_routers(specs, allow_degraded)"]
+        MountManifestRoutersFunc["mount_manifest_routers(app, ...)"]
+        RouterMountErrorClass["RouterMountError (exception)"]
+        ConfigAllowDegraded["Config.ALLOW_DEGRADED_BOOT (orchestrator/config.py)"]
     end
 
-    User --> Router
-    Router --> Resolver
-    Router --> ToolMap
-    ToolMap --> DB
+    RouterDeclaration --> RouterSpecClass
+    RouterSpecClass --> ManifestRouters
+    ConditionalMounting --> ManifestRouters
+    ConditionalMounting --> LoadRoutersFunc
+    LoadRoutersFunc --> MountManifestRoutersFunc
+    ErrorHandling --> LoadRoutersFunc
+    LoadRoutersFunc -- "raises if required router fails" --> RouterMountErrorClass
+    LoadRoutersFunc -- "checks" --> ConfigAllowDegraded
+    MountManifestRoutersFunc -- "includes router on app" --> App["FastAPI App"]
 ```
-Sources: [orchestrator/api/agents.py:97-102](), [orchestrator/core/utils/agent_resolver.py:17-49]()
-
-### Tool Hinting and Graph Routing
-Advanced tool routing (PRD-139) is integrated into the context assembly path. The `GraphRouter` ranks tool chains based on execution telemetry [scripts/ralph/progress.txt:92-112]().
-- **Entry Node Selection**: Uses `ActionSemanticIndex` to pick the top 5 relevant tools [scripts/ralph/progress.txt:102]().
-- **Chain Expansion**: Traverses the graph (depth 2) to suggest sequences like `read_file` -> `write_file` [scripts/ralph/progress.txt:103,69-70]().
-- **Telemetry Seeding**: Synthetic telemetry (e.g., from Agents 9001, 9002) is used to bootstrap these routing edges [scripts/ralph/progress.txt:64-67]().
-
-Sources: [scripts/ralph/progress.txt:7-22, 92-112](), [orchestrator/modules/context/sections/platform_actions.py:130-140]()
+Sources: [orchestrator/router_manifest.py:1-149](), [orchestrator/config.py:1992]()
 
 ---
 
-## Response Normalization Patterns
+## Workspace Context Routing
 
-Routers utilize shared utility functions to maintain data integrity:
-- **Tag Normalization**: `_normalize_tags` ensures all agent and workflow tags are lower-cased and deduplicated [orchestrator/api/agents.py:146-171]().
-- **Agent Response Construction**: `_build_agent_response` joins model metadata from `LLMModel` and tool assignments from `AgentAppAssignment` into a unified schema [orchestrator/api/agents.py:174-205]().
+The `workspaces.py` router is critical for the frontend's initialization. It provides the `GET /api/workspaces/current` endpoint which determines the active workspace and its onboarding status [orchestrator/api/workspaces.py:43-56]().
 
-Sources: [orchestrator/api/agents.py:146-205](), [orchestrator/core/models/core.py:43-91]()
+### Workspace Operations
+| Method | Path | Key Logic | Purpose |
+|--------|------|-----------|---------|
+| GET | `/api/workspaces/current` | `public_snapshot(workspace)` | Returns active workspace, role, and onboarding stage [orchestrator/api/workspaces.py:43-118]() |
+| GET | `/api/workspaces/current/integrations` | `_ALLOWED_INTEGRATION_KEYS` | Returns configured integrations (masked tokens) [orchestrator/api/workspaces.py:121-140]() |
+| PUT | `/api/workspaces/current/integrations` | `require_workspace_permission("workspace:manage")` | Updates Telegram/Slack bot tokens [orchestrator/api/workspaces.py:143-181]() |
+| GET | `/api/activity/feed` | `ActivityService.get_feed()` | Merges chats, routines, and recipes for the dashboard [orchestrator/api/activity.py:32-67]() |
+
+### Onboarding and Tours
+The API signals the frontend to trigger tours by checking `agent_count` in the workspace [orchestrator/api/workspaces.py:64-67](). If `is_new_workspace` is true, the frontend `useAutoTour` hook activates Shepherd.js tours [frontend/hooks/use-auto-tour.ts:20-32]().
+
+Sources: [orchestrator/api/workspaces.py:43-181](), [frontend/hooks/use-auto-tour.ts:1-68](), [orchestrator/api/activity.py:32-67]()
+
+---
+
+## Authorization Boundary Sweep
+
+Automatos AI employs a strict **Authorization Boundary Sweep** (PRD-195) to ensure every mutating route is classified into a specific security gate [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:1-13](). This sweep is source-of-truth driven, using `reports/route-manifest.json` as the contract and probing the live application to verify the ground truth [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:4-6]().
+
+### Security Classifications
+```mermaid
+graph LR
+    subgraph "Natural Language Space"
+        UserReq["Mutating Request<br/>(POST/PUT/PATCH/DELETE)"]
+    end
+
+    subgraph "Code Entity Space"
+        HybridGate["core.auth.workspace_permission.require_workspace_permission<br/>(S2 Hybrid Gate)"]
+        AdminGate["core.auth.workspace_admin.require_workspace_admin<br/>(PRD-185 Gate)"]
+        SuperAdmin["core.auth.super_admin.require_super_admin<br/>(PRD-143 Gate)"]
+        Public["PUBLIC_BY_DESIGN<br/>(e.g. /api/team/accept-invitation)"]
+        OwnAuth["OWN_AUTH_ROUTES<br/>(e.g. /api/composio/webhook, /api/widgets/chat)"]
+        AdminInHandler["Admin-gated in handler body<br/>(e.g. assert_admin(ctx))"]
+        OwnGateInHandler["Own explicit in-handler gate<br/>(e.g. credentials /resolve)"]
+    end
+
+    UserReq --> HybridGate
+    UserReq --> AdminGate
+    UserReq --> SuperAdmin
+    UserReq --> Public
+    UserReq --> OwnAuth
+    UserReq --> AdminInHandler
+    UserReq --> OwnGateInHandler
+```
+Sources: [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:7-26](), [orchestrator/tests/authz_sweep_probe.py:45-98]()
+
+### Mutation Gate Validation
+The `authz_sweep_probe.py` tool runs as a subprocess to inspect the FastAPI application's routes and their dependencies [orchestrator/tests/authz_sweep_probe.py:1-6](). It extracts information about whether `get_request_context_hybrid`, `require_super_admin`, `require_workspace_admin`, or `require_workspace_permission` are present in the dependency tree [orchestrator/tests/authz_sweep_probe.py:79-82](). It also uses `inspect.getsource` to verify that mutating endpoints contain required internal assertions like `assert_admin(ctx)` or `_require_admin(ctx)` for admin-gated routes, or specific auth-type gates for `OWN_GATE_IN_HANDLER` routes [orchestrator/tests/authz_sweep_probe.py:68-97]().
+
+The `test_p2w2_authz_boundary_sweep.py` test then uses this probed data to ensure every mutating route is classified exactly once into one of the defined security categories [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:7-26]().
+
+Sources: [orchestrator/tests/test_p2w2_authz_boundary_sweep.py:31-144](), [orchestrator/tests/authz_sweep_probe.py:1-104]()
+
+---
+
+## Activity and Digest Routing
+
+The `activity.py` router provides high-level summaries and feedback loops for Auto's autonomous operations.
+
+### Auto's Read (Workspace Digest)
+- **Endpoint**: `GET /api/activity/digest` [orchestrator/api/activity.py:69-70]().
+- **Logic**: Calls `generate_digest`, which builds a plain-English summary of workspace state, cached by a state hash [orchestrator/api/activity.py:75-82]().
+- **Feedback**: `POST /api/activity/digest/feedback` allows users to rate the quality of the digest, keyed by `state_hash` [orchestrator/api/activity.py:94-119](). This feedback is stored in the `digest_feedback` table [orchestrator/tests/test_prd221_digest_feedback.py:21-34]().
+
+### Scheduler Health
+The Calendar widget uses `GET /api/activity/scheduler-health` to detect if the background `APScheduler` is firing, providing a non-blocking health indicator [orchestrator/api/activity.py:143-158]().
+
+Sources: [orchestrator/api/activity.py:69-158](), [orchestrator/tests/test_prd221_digest_feedback.py:1-84]()
 
 ---

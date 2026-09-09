@@ -5,20 +5,32 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/agents/org-chart-tab.tsx](frontend/components/agents/org-chart-tab.tsx)
-- [frontend/components/knowledge/BusinessGraphPanel.tsx](frontend/components/knowledge/BusinessGraphPanel.tsx)
-- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
+- [frontend/components/__tests__/prd197-substrate-tile.test.tsx](frontend/components/__tests__/prd197-substrate-tile.test.tsx)
+- [frontend/components/command-center/is-it-working-strip.tsx](frontend/components/command-center/is-it-working-strip.tsx)
+- [frontend/hooks/use-analytics-api.ts](frontend/hooks/use-analytics-api.ts)
+- [frontend/hooks/use-marketplace-api.ts](frontend/hooks/use-marketplace-api.ts)
+- [frontend/hooks/use-playbook-api.ts](frontend/hooks/use-playbook-api.ts)
+- [frontend/hooks/use-playbook-form.ts](frontend/hooks/use-playbook-form.ts)
 - [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
-- [orchestrator/api/knowledge_graph.py](orchestrator/api/knowledge_graph.py)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
-- [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
+- [orchestrator/alembic/versions/agents_public_id_default.py](orchestrator/alembic/versions/agents_public_id_default.py)
+- [orchestrator/api/api_playbooks.py](orchestrator/api/api_playbooks.py)
+- [orchestrator/api/workflow_templates.py](orchestrator/api/workflow_templates.py)
 - [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
-- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
-- [orchestrator/modules/context/sections/graph_context.py](orchestrator/modules/context/sections/graph_context.py)
-- [orchestrator/modules/knowledge/graph_extraction.py](orchestrator/modules/knowledge/graph_extraction.py)
-- [orchestrator/modules/knowledge/graph_service.py](orchestrator/modules/knowledge/graph_service.py)
-- [orchestrator/modules/tools/discovery/actions_graph.py](orchestrator/modules/tools/discovery/actions_graph.py)
-- [orchestrator/modules/tools/discovery/handlers_graph.py](orchestrator/modules/tools/discovery/handlers_graph.py)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/core/models/substrate_metrics.py](orchestrator/core/models/substrate_metrics.py)
+- [orchestrator/core/observability/substrate_metrics.py](orchestrator/core/observability/substrate_metrics.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/modules/tools/discovery/cascade_installer.py](orchestrator/modules/tools/discovery/cascade_installer.py)
+- [orchestrator/modules/tools/discovery/handlers_marketplace.py](orchestrator/modules/tools/discovery/handlers_marketplace.py)
+- [orchestrator/modules/tools/discovery/handlers_packages.py](orchestrator/modules/tools/discovery/handlers_packages.py)
+- [orchestrator/modules/tools/discovery/not_found_candidates.py](orchestrator/modules/tools/discovery/not_found_candidates.py)
+- [orchestrator/reports/route-manifest.json](orchestrator/reports/route-manifest.json)
+- [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
+- [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
+- [orchestrator/tests/test_p2w2_authz_boundary_sweep.py](orchestrator/tests/test_p2w2_authz_boundary_sweep.py)
+- [orchestrator/tests/test_prd154_s5_missions.py](orchestrator/tests/test_prd154_s5_missions.py)
+- [orchestrator/tests/test_prd222_not_found_names_candidates.py](orchestrator/tests/test_prd222_not_found_names_candidates.py)
+- [orchestrator/tests/test_prd222_w2s1_plan_tiers.py](orchestrator/tests/test_prd222_w2s1_plan_tiers.py)
 
 </details>
 
@@ -30,7 +42,7 @@ This page documents the REST API endpoints for workflow and recipe management, i
 
 ## API Architecture Overview
 
-The workflow API is organized into modular routers within the FastAPI application. These routers handle distinct responsibilities from template management to real-time execution tracking.
+The workflow API is organized into modular routers within the FastAPI application. These routers handle distinct responsibilities from template management to real-time execution tracking, mounted across `main.py` and managed via explicit router registrations.
 
 **Workflow API Routers Architecture**
 
@@ -82,18 +94,18 @@ graph TB
     Main --> WorkflowRouter
 ```
 
-Sources: [orchestrator/api/workflow_recipes.py:22-31](), [orchestrator/api/workflows.py:34-35]()
+Sources: [orchestrator/api/workflow_recipes.py:22-31](), [orchestrator/api/workflows.py:34-35](), [orchestrator/api/recipe_executor.py:1-19]()
 
 ---
 
 ## Recipe CRUD Endpoints
 
-The recipe management endpoints provide full lifecycle control for workflow recipes, which are stored as `WorkflowTemplate` models in the database.
+The recipe management endpoints provide full lifecycle control for workflow recipes, which are stored as `WorkflowTemplate` models in the database (`core/models/core.py`).
 
 ### List Recipes
 **Endpoint**: `GET /api/workflow-recipes`
 
-Lists all workflow recipes in the current workspace with filtering and sorting.
+Lists all workflow recipes in the current workspace with filtering and sorting parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -121,7 +133,7 @@ Sources: [orchestrator/api/workflow_recipes.py:34-48](), [orchestrator/api/workf
 
 ## Recipe Execution Endpoints
 
-The execution system provides a direct step-by-step path that uses the same components as the chatbot (ContextService, ToolRouter) for consistency.
+The execution system provides a direct step-by-step path that uses the same components as the chatbot (`ContextService`, `ToolRouter`) for consistency.
 
 ### Execute Recipe
 **Endpoint**: `POST /api/workflow-recipes/{recipe_id}/execute`
@@ -135,11 +147,11 @@ Launches a recipe execution as an asynchronous background task.
 4. **Tool Injection**: Injects the `scratchpad_write` and `scratchpad_read` tools into the agent's context for inter-step communication.
 5. **Iteration Limit**: Defaults to 25 LLM tool-call turns per step.
 
-Sources: [orchestrator/api/workflow_recipes.py:155-172](), [orchestrator/api/workflow_recipes.py:50-89]()
+Sources: [orchestrator/api/workflow_recipes.py:1-25](), [orchestrator/api/workflows.py:30-40]()
 
 ---
 
-## Workflow Stage Tracking (SSE)
+## Workflow Stage Tracking (SSE) & Pipeline Architecture
 
 For complex missions and legacy workflows, the `WorkflowStageTracker` provides real-time progress updates via Server-Sent Events (SSE).
 
@@ -157,21 +169,56 @@ The tracker supports both the legacy 9-stage pipeline and the PRD-59 dynamic pha
 **Real-time Event Flow**:
 ```mermaid
 sequenceDiagram
-    participant API as Workflows API [/api/workflows]
-    participant Tracker as WorkflowStageTracker
-    participant Redis as Redis Pub/Sub
-    participant SSE as SSE Stream Manager
+    participant API as "workflows.py [/api/workflows]"
+    participant Tracker as "WorkflowStageTracker"
+    participant Redis as "Redis Pub/Sub"
+    participant SSE as "SSE Stream Manager"
     
-    API->>Tracker: start_phase("PLAN")
-    Tracker->>SSE: broadcast_event("phase_start")
-    Tracker->>Redis: publish_workflow_event()
-    API->>Tracker: start_stage(1)
-    Tracker->>SSE: broadcast_event("stage_start")
-    API->>Tracker: complete_stage(1, result)
-    Tracker->>SSE: broadcast_event("stage_complete")
+    API->>Tracker: "start_phase('PLAN')"
+    Tracker->>SSE: "broadcast_event('phase_start')"
+    Tracker->>Redis: "publish_workflow_event()"
+    API->>Tracker: "start_stage(1)"
+    Tracker->>SSE: "broadcast_event('stage_start')"
+    API->>Tracker: "complete_stage(1, result)"
+    Tracker->>SSE: "broadcast_event('stage_complete')"
 ```
 
 Sources: [orchestrator/api/workflows.py:37-68](), [orchestrator/api/workflows.py:88-106](), [orchestrator/api/workflows.py:126-141]()
+
+---
+
+## Observability & Analytics
+
+Workflow and recipe performance is tracked via specialized telemetry and analytics endpoints.
+
+### Substrate Health Monitoring
+Retrieval health for workflows (documents, memory, field) is tracked via the `SubstrateMetricEvent` model. The `record_substrate_search` function writes search latency and status (hit/empty/error) to the database.
+
+**Substrate Telemetry Flow**
+```mermaid
+graph LR
+    subgraph "Execution Layer"
+        RAG["RAGService"]
+        Mem["UnifiedMemoryService"]
+    end
+    
+    subgraph "Observability [substrate_metrics.py]"
+        Record["record_substrate_search_nowait"]
+    end
+    
+    subgraph "Storage"
+        DB[("SubstrateMetricEvent Table")]
+    end
+    
+    RAG --> Record
+    Mem --> Record
+    Record --> DB
+```
+
+### Analytics Endpoints
+The frontend uses `useAnalyticsSuccessRate` and `useMissionSuccessRate` hooks to query performance data from the backend. These metrics are displayed in the "Is It Working?" strip in the Command Center.
+
+Sources: [frontend/lib/api-client.ts:38-51](), [frontend/hooks/use-analytics-api.ts:33-45]()
 
 ---
 
@@ -182,60 +229,21 @@ Workflows can be published to the community marketplace by setting their `owner_
 **Marketplace API Flow**:
 1. **Listing**: `GET /api/marketplace/items?type=recipe` queries the `WorkflowTemplate` table where `owner_type == 'marketplace'`.
 2. **Installation**: `POST /api/marketplace/install` clones the marketplace item into the user's workspace.
-3. **Platform Actions**: Agents can browse and manage marketplace items using tools like `platform_browse_marketplace_agents` and `platform_install_plugin`.
+3. **Platform Actions**: Agents can browse and manage marketplace items using tools like `browse_marketplace_agents` and plugin installers.
 
-Sources: [orchestrator/api/marketplace.py:152-155](), [orchestrator/api/marketplace.py:89-98](), [orchestrator/core/seeds/platform-management-skill.md:8-15]()
-
----
-
-## Knowledge Graph API
-
-The Workflow system integrates with the Knowledge Graph for advanced entity and relationship management.
-
-**Knowledge API to Code Mapping**
-
-```mermaid
-graph LR
-    subgraph "Frontend [BusinessGraphPanel.tsx]"
-        UI["BusinessGraphPanel"]
-        Viz["BusinessGraphVisualization"]
-    end
-
-    subgraph "API Layer [knowledge_graph.py]"
-        EntitiesAPI["/api/knowledge/entities"]
-        SearchAPI["/api/knowledge/entities/search"]
-    end
-
-    subgraph "Service Layer [graph_service.py]"
-        GS["GraphifyService"]
-        Build["build_graph()"]
-        Load["load_graph()"]
-    end
-
-    subgraph "Extraction [graph_extraction.py]"
-        Extract["_DOCUMENT_EXTRACTION_PROMPT"]
-        Report["_REPORT_EXTRACTION_PROMPT"]
-    end
-
-    UI -- "apiClient.buildBusinessGraph()" --> Build
-    EntitiesAPI -- "DB Query" --> GS
-    Build -- "LLM Extraction" --> Extract
-    Build -- "LLM Extraction" --> Report
-```
-
-Sources: [orchestrator/api/knowledge_graph.py:84-142](), [orchestrator/modules/knowledge/graph_service.py:128-150](), [orchestrator/modules/knowledge/graph_extraction.py:101-187](), [frontend/components/knowledge/BusinessGraphPanel.tsx:174-186]()
+Sources: [orchestrator/modules/tools/discovery/handlers_marketplace.py:82-154](), [orchestrator/modules/tools/discovery/cascade_installer.py:78-128]()
 
 ---
 
 ## Frontend Integration
 
-The frontend interacts with these endpoints via the `apiClient` and specialized React components for monitoring.
+The frontend interacts with these endpoints via the `apiClient` and specialized React components for monitoring execution state.
 
 **Key Components**:
 - **ExecutionKitchen**: A real-time theater for viewing execution logs. It maps incoming SSE events to `STAGE_NAMES` for display and uses `TheaterStageProgress` for visualization.
-- **OrgChartTab**: Visualizes agent relationships and teams within a workspace using `OrgChartCanvas`, allowing users to see the "company structure" created by workflows like Mission Zero.
-- **StreamingLog**: A sub-component within `ExecutionKitchen` that renders `LogEntry` items with icons based on event types like `agent_spawn`, `task_progress`, and `memory_write`.
+- **OrgChartTab**: Visualizes agent relationships and teams within a workspace using `OrgChartCanvas`, allowing users to see the organizational structure created by workflows.
+- **StreamingLog**: A sub-component within `ExecutionKitchen` that renders log entries with status indicators based on event types.
 
-Sources: [frontend/components/workflows/execution-kitchen.tsx:74-84](), [frontend/components/workflows/execution-kitchen.tsx:36-38](), [frontend/components/agents/org-chart-tab.tsx:16-24](), [frontend/components/workflows/execution-kitchen.tsx:119-131]()
+Sources: [frontend/components/command-center/is-it-working-strip.tsx:51-120](), [frontend/hooks/use-analytics-api.ts:1-35]()
 
 ---

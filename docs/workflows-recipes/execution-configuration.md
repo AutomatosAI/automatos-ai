@@ -5,10 +5,38 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/agents/org-chart-tab.tsx](frontend/components/agents/org-chart-tab.tsx)
-- [orchestrator/api/marketplace.py](orchestrator/api/marketplace.py)
+- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
+- [orchestrator/api/composio.py](orchestrator/api/composio.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
+- [orchestrator/api/skills.py](orchestrator/api/skills.py)
+- [orchestrator/api/tools.py](orchestrator/api/tools.py)
+- [orchestrator/api/webhooks.py](orchestrator/api/webhooks.py)
 - [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
-- [orchestrator/core/seeds/platform-management-skill.md](orchestrator/core/seeds/platform-management-skill.md)
+- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
+- [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
+- [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
+- [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
+- [orchestrator/core/routing/ingestors/webhook.py](orchestrator/core/routing/ingestors/webhook.py)
+- [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
+- [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
+- [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
+- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
+- [orchestrator/services/webhook_dedup.py](orchestrator/services/webhook_dedup.py)
+- [orchestrator/tests/test_82c_wiring.py](orchestrator/tests/test_82c_wiring.py)
+- [orchestrator/tests/test_agents_api_plugins.py](orchestrator/tests/test_agents_api_plugins.py)
+- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
+- [orchestrator/tests/test_coordinator_parallel.py](orchestrator/tests/test_coordinator_parallel.py)
+- [orchestrator/tests/test_p2w0_service_imports_resolve.py](orchestrator/tests/test_p2w0_service_imports_resolve.py)
+- [orchestrator/tests/test_p2w2_webhook_dedup.py](orchestrator/tests/test_p2w2_webhook_dedup.py)
+- [orchestrator/tests/test_p2w2_webhook_signature_reject.py](orchestrator/tests/test_p2w2_webhook_signature_reject.py)
+- [orchestrator/tests/test_parallel_decomposition.py](orchestrator/tests/test_parallel_decomposition.py)
+- [orchestrator/tests/test_planner_capability_routing.py](orchestrator/tests/test_planner_capability_routing.py)
+- [orchestrator/tests/test_plugin_assignment_api.py](orchestrator/tests/test_plugin_assignment_api.py)
+- [orchestrator/tests/test_plugin_runtime_integration.py](orchestrator/tests/test_plugin_runtime_integration.py)
+- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
+- [orchestrator/tests/test_synthesis_executor.py](orchestrator/tests/test_synthesis_executor.py)
 
 </details>
 
@@ -22,7 +50,7 @@ For information about creating recipes and defining steps, see [Creating Recipes
 
 ## Configuration Structure
 
-Execution configuration is stored as a JSONB field in the `workflow_templates` table's `execution_config` column [orchestrator/api/marketplace.py:75](). In the codebase, this model is defined as `WorkflowTemplate` (often aliased as `WorkflowRecipe`) [orchestrator/api/workflow_recipes.py:25](). The configuration controls all runtime behavior for recipe execution.
+Execution configuration is stored as a JSONB field in the `workflow_templates` table's `schedule_config` and `execution_metadata` columns, represented in the backend via the `WorkflowRecipe` model alias `WorkflowTemplate` [orchestrator/api/workflow_recipes.py:25-27](). The configuration controls all runtime behavior for recipe execution, including per-execution step overrides introduced under PRD-204 [orchestrator/api/recipe_executor.py:126-127]().
 
 ### Configuration Fields
 
@@ -35,8 +63,9 @@ Execution configuration is stored as a JSONB field in the `workflow_templates` t
 | `auto_learning` | boolean | Enable pattern extraction | `true` | `true`, `false` |
 | `parallel_limit` | integer | Max concurrent steps (parallel mode) | `3` | `1-20` |
 | `memory_isolation` | string | Context sharing strategy | `"shared"` | `"shared"`, `"isolated"` |
+| `step_overrides` | dict | Per-execution prompt tweaks | `None` | `{step_id: {"prompt_template": "..."}}` |
 
-**Sources:** [orchestrator/api/workflow_recipes.py:25-27](), [orchestrator/api/marketplace.py:70-76]()
+Sources: [orchestrator/api/workflow_recipes.py:25-28](), [orchestrator/api/recipe_executor.py:129-141](), [orchestrator/api/recipe_executor.py:163-175]()
 
 ---
 
@@ -44,51 +73,43 @@ Execution configuration is stored as a JSONB field in the `workflow_templates` t
 
 ### Sequential Mode
 
-Steps execute one after another in order. Each step waits for the previous step to complete before starting. Output from step $N$ is passed to step $N+1$ via the `RecipeScratchpad` which provides structured key-value storage for inter-step data sharing.
+Steps execute one after another in order. Each step waits for the previous step to complete before starting. Output from step $N$ is passed to step $N+1$ via the `RecipeScratchpad` which provides a substantial token saving over verbose text dumps [orchestrator/api/recipe_executor.py:14-16]().
 
-**Recipe Execution Data Flow (Sequential)**
+Diagram: Recipe Execution Data Flow (Sequential) mapping natural language orchestration to `_execute_step` and `RecipeScratchpad`.
 ```mermaid
 graph TB
-    Start["Start Execution"] --> Step1["_execute_step (Order 1)<br/>Agent A"]
-    Step1 --> Step2["_execute_step (Order 2)<br/>Agent B"]
-    Step2 --> Step3["_execute_step (Order 3)<br/>Agent C"]
-    Step3 --> End["RecipeExecution Complete"]
+    Start["StartExecution"] --> Step1["_execute_step (Order 1)<br/>AgentA"]
+    Step1 --> Step2["_execute_step (Order 2)<br/>AgentB"]
+    Step2 --> Step3["_execute_step (Order 3)<br/>AgentC"]
+    Step3 --> End["RecipeExecutionComplete"]
     
-    Step1 -.->|"scratchpad_write"| Scratchpad["RecipeScratchpad"]
-    Scratchpad -.->|"scratchpad_read"| Step2
-    Scratchpad -.->|"scratchpad_read"| Step3
+    Step1 -.->|"RecipeScratchpad.format_context_for_step"| Step2
+    Step2 -.->|"RecipeScratchpad.format_context_for_step"| Step3
 ```
+Sources: [orchestrator/api/recipe_executor.py:5-19](), [orchestrator/api/recipe_executor.py:129-141]()
 
 **Characteristics:**
-- **Predictable Order**: Guaranteed execution sequence based on the `steps` array order [orchestrator/api/workflow_recipes.py:140-174]().
-- **Contextual Awareness**: Steps can access `agent` details enriched by the API, including `model`, `provider`, and `tool_count` [orchestrator/api/workflow_recipes.py:162-169]().
-- **Resource Efficiency**: Execution is often managed via workspace-scoped semaphores to bound total concurrent recipes.
-
-**Sources:** [orchestrator/api/workflow_recipes.py:140-174](), [orchestrator/api/workflow_recipes.py:162-169]()
+- **Predictable Order**: Guaranteed execution sequence based on the step configuration array [orchestrator/api/recipe_executor.py:5-7]().
+- **Contextual Awareness**: Steps access scratchpad exports via `ContextService(RECIPE)` [orchestrator/api/recipe_executor.py:9-10]().
+- **Step Overrides**: PRD-204 allows merging `execution_metadata.step_overrides` into the step list for a specific run without mutating the shared template [orchestrator/api/recipe_executor.py:129-141]().
 
 ### Parallel Mode
 
-Steps execute simultaneously up to the `parallel_limit`. The `execution_config` allows specifying this limit to prevent resource exhaustion.
+Steps execute simultaneously up to the `parallel_limit`. While `recipe_executor.py` specializes in sequential execution for starter recipes [orchestrator/api/recipe_executor.py:5-7](), advanced orchestration layers handle parallel execution and concurrency pooling.
 
-**Parallel Execution Logic**
+Diagram: Parallel Execution Logic mapping `parallel_limit` concurrency controls.
 ```mermaid
 graph TB
-    Start["Start Execution"] --> Parallel["Parallel Executor<br/>parallel_limit=3"]
-    Parallel --> Step1["Step 1<br/>Agent A"]
-    Parallel --> Step2["Step 2<br/>Agent B"]
-    Parallel --> Step3["Step 3<br/>Agent C"]
+    Start["StartExecution"] --> Parallel["ParallelExecutor<br/>parallel_limit=3"]
+    Parallel --> Step1["Step1<br/>AgentA"]
+    Parallel --> Step2["Step2<br/>AgentB"]
+    Parallel --> Step3["Step3<br/>AgentC"]
     
-    Step1 --> Sync["Wait for All"]
+    Step1 --> Sync["WaitForAll"]
     Step2 --> Sync
     Sync --> End["Complete"]
 ```
-
-**Characteristics:**
-- **Concurrency Control**: Respects `parallel_limit` defined in `MarketplaceItemOut.execution_config` [orchestrator/api/marketplace.py:75]().
-- **Independence**: Best used when steps do not depend on each other's outputs.
-- **Org Chart Integration**: Agents in parallel workflows can be visualized via the `OrgChartTab` to understand team distribution [frontend/components/agents/org-chart-tab.tsx:16-54]().
-
-**Sources:** [orchestrator/api/marketplace.py:75](), [frontend/components/agents/org-chart-tab.tsx:16-54]()
+Sources: [orchestrator/api/recipe_executor.py:5-7](), [frontend/components/workflows/execution-kitchen.tsx:35-37]()
 
 ---
 
@@ -96,50 +117,43 @@ graph TB
 
 ### Maximum Retries & Iterations
 
-The system distinguishes between **Execution Retries** (re-running a failed step) and **Tool Iterations** (LLM turns within a single step). 
+The system distinguishes between **Execution Retries** (re-running a failed step) and **Tool Iterations** (LLM conversational turns within a single step). 
 
-1.  **Step Iterations**: Managed per-agent or per-step. Higher values allow agents to perform complex work like multi-turn debugging.
-2.  **Retries**: Controls how many times a failed step is retried before the `RecipeExecution` status is set to `failed`.
+1. **Step Iterations**: Managed by the LLM tool loop. Higher values allow agents to perform complex multi-turn work via `tool_router.execute_and_format()` [orchestrator/api/recipe_executor.py:12]().
+2. **Retries**: Controls how many times a failed step is retried before the `RecipeExecution` status transitions to `failed`.
 
-**Retry/Iteration Logic Flow**
+Diagram: Retry and Tool Loop Flow mapping `_execute_step` to tool execution.
 ```mermaid
 graph TB
-    Execute["_execute_step"] --> Loop["LLM Tool Loop"]
+    Execute["_execute_step"] --> Loop["LLMToolLoop"]
     Loop --> IterCheck{Iterations < max_iterations?}
-    IterCheck -->|Yes| Run["LLM Generation"]
-    IterCheck -->|No| FailStep["Step Timeout/Limit"]
+    IterCheck -->|Yes| Run["LLMGeneration"]
+    IterCheck -->|No| FailStep["StepTimeoutOrLimit"]
     
-    Run --> ToolCheck{Tool Call?}
-    ToolCheck -->|Yes| ToolExec["UnifiedToolExecutor"]
+    Run --> ToolCheck{ToolCall?}
+    ToolCheck -->|Yes| ToolExec["tool_router.execute_and_format"]
     ToolExec --> Loop
-    ToolCheck -->|No| Final["Final Response"]
+    ToolCheck -->|No| Final["FinalResponse"]
     
     Final --> SuccessCheck{Success?}
     SuccessCheck -->|No| RetryCheck{Retries < max_retries?}
     RetryCheck -->|Yes| Execute
 ```
-
-**Sources:** [orchestrator/api/marketplace.py:75-76](), [orchestrator/api/workflow_recipes.py:155-172]()
-
-### Timeout Configuration
-
-The system enforces timeouts to prevent runaway resource consumption.
-- **Per-Step Timeout**: Maximum time allowed for a single agent execution (default 120s).
-- **Total Timeout**: Maximum time for the entire workflow sequence (default 600s).
+Sources: [orchestrator/api/recipe_executor.py:5-13](), [orchestrator/api/recipe_executor.py:129-141]()
 
 ---
 
 ## Memory Isolation & Learning
 
 ### Memory Isolation
-Memory isolation controls whether steps share execution context or run independently.
-- **Shared Memory (Default)**: Steps share a common scratchpad. Agents are provided with the `platform_store_memory` and `platform_search_memory` tools to manage workspace long-term memory [orchestrator/core/seeds/platform-management-skill.md:114-117]().
+Memory isolation controls whether steps share execution context or run independently:
+- **Shared Memory (Default)**: Steps share a common `RecipeScratchpad`. Agents are provided with the `scratchpad_write` tool for explicit data exports [orchestrator/api/recipe_executor.py:15-16]().
 - **Isolated Memory**: Each step runs in a clean context with no access to previous step outputs.
 
-### Auto-Learning
-When `auto_learning` is enabled, the system assesses execution quality and extracts patterns for future optimization.
+### Auto-Learning & Reporting
+When `auto_learning` is enabled, the system assesses execution quality and extracts patterns. PRD-128 and PRD-204 added unified notifications and auto-reporting for playbook completions [orchestrator/api/recipe_executor.py:45-55](), [orchestrator/api/recipe_executor.py:163-175]().
 
-**Learning Pipeline**
+Diagram: Learning Pipeline mapping execution output to memory services.
 ```mermaid
 graph LR
     Exec["RecipeExecution"] --> Qual["RecipeQualityService<br/>5D Assessment"]
@@ -148,42 +162,46 @@ graph LR
 ```
 
 The system tracks:
-- **Agent Performance**: `install_count` and `use_count` are tracked to identify high-performing agents and recipes [orchestrator/api/marketplace.py:62](), [orchestrator/api/workflow_recipes.py:185]().
-- **Learning Data**: Captured via platform-management tools like `platform_harness_status` and `platform_harness_trigger` [orchestrator/core/seeds/platform-management-skill.md:118-121]().
+- **Execution Metrics**: `total_duration_ms`, `total_tokens`, and `success` status [orchestrator/api/recipe_executor.py:171-174]().
+- **Auto-Reporting**: Persists an `agent_reports` row summarizing the execution, stored as Markdown in S3 [orchestrator/api/recipe_executor.py:176-185]().
+- **Notifications**: Dispatches `playbook` event types through `NotificationDispatcher` [orchestrator/api/recipe_executor.py:65-75]().
 
-**Sources:** [orchestrator/api/marketplace.py:62](), [orchestrator/api/workflow_recipes.py:185](), [orchestrator/core/seeds/platform-management-skill.md:114-121]()
+Sources: [orchestrator/api/recipe_executor.py:14-19](), [orchestrator/api/recipe_executor.py:45-55](), [orchestrator/api/recipe_executor.py:163-185]()
 
 ---
 
-## Visualizing Execution Structures
+## Frontend Configuration UI
 
-The `OrgChartTab` and `OrgChartCanvas` provide a way to visualize the relationship between agents that may be involved in a complex execution configuration [frontend/components/agents/org-chart-tab.tsx:7-14]().
+### Execution Kitchen
+The `ExecutionKitchen` component provides real-time visualization of configuration parameters, displaying `StreamingLog` and theater panels [frontend/components/workflows/execution-kitchen.tsx:3-54]().
 
-**Code Entity Space to UI Mapping**
+Diagram: UI Entity Association bridging Natural Language Space (`ExecutionKitchen`) to Code Entities (`WorkflowRecipe`, `_execute_step`).
 ```mermaid
 graph TB
-    subgraph "Code Entity Space"
-        API["/api/agents/org-chart"]
-        Model["WorkflowTemplate (Recipe)"]
-        Config["execution_config"]
+    subgraph "frontend/components/workflows/"
+        Kitchen["ExecutionKitchen"]
+        Log["StreamingLog"]
+        Progress["TheaterStageProgress"]
+        Learning["TheaterSelfLearningPanel"]
     end
 
-    subgraph "UI Space"
-        Tab["OrgChartTab"]
-        Canvas["OrgChartCanvas"]
-        TeamFilter["Team Filter Chips"]
+    subgraph "orchestrator/api/"
+        WFR["workflow_recipes.py<br/>WorkflowRecipe"]
+        Executor["recipe_executor.py<br/>_execute_step"]
+        Notify["NotificationDispatcher"]
     end
 
-    API -->|"provides nodes/edges"| Tab
-    Config -->|"defines execution"| Model
-    Tab -->|"renders"| Canvas
-    Tab -->|"filters"| TeamFilter
+    WFR -->|"Config"| Kitchen
+    Kitchen -->|"Render"| Log
+    Executor -->|"Update"| Kitchen
+    Notify -->|"Playbook Event"| Kitchen
 ```
 
 **Key UI Elements:**
-- **Team Filtering**: Allows isolating agents by team to see execution flow within a specific department [frontend/components/agents/org-chart-tab.tsx:73-99]().
-- **Mission Zero**: A special execution mode that designs the AI company structure and populates the org chart data [frontend/components/agents/org-chart-tab.tsx:103-121]().
+- **Execution Log**: Displays events of types `stage_start`, `agent_spawn`, `task_progress`, and `memory_write` [frontend/components/workflows/execution-kitchen.tsx:60-61]().
+- **Theater Components**: `TheaterStepExecution` and `TheaterSelfLearningPanel` provide deep introspection into step-level data and learning outcomes [frontend/components/workflows/execution-kitchen.tsx:35-42]().
+- **Live Watch**: PRD-204 integrates terminal state reporting to the live watch registry [orchestrator/api/recipe_executor.py:89-100]().
 
-**Sources:** [frontend/components/agents/org-chart-tab.tsx:7-14](), [frontend/components/agents/org-chart-tab.tsx:73-121]()
+Sources: [frontend/components/workflows/execution-kitchen.tsx:35-70](), [orchestrator/api/recipe_executor.py:89-100]()
 
 ---

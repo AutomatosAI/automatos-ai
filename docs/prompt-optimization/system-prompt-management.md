@@ -6,7 +6,16 @@
 The following files were used as context for generating this wiki page:
 
 - [frontend/components/settings/SystemPromptsTab.tsx](frontend/components/settings/SystemPromptsTab.tsx)
+- [orchestrator/api/admin_prompts.py](orchestrator/api/admin_prompts.py)
+- [orchestrator/api/generated_images.py](orchestrator/api/generated_images.py)
+- [orchestrator/api/system_settings.py](orchestrator/api/system_settings.py)
+- [orchestrator/core/database/database.py](orchestrator/core/database/database.py)
+- [orchestrator/core/models/system_prompts.py](orchestrator/core/models/system_prompts.py)
+- [orchestrator/core/seeds/seed_system_prompts.py](orchestrator/core/seeds/seed_system_prompts.py)
+- [orchestrator/core/services/audit_service.py](orchestrator/core/services/audit_service.py)
 - [orchestrator/core/services/futureagi_service.py](orchestrator/core/services/futureagi_service.py)
+- [orchestrator/core/services/prompt_registry.py](orchestrator/core/services/prompt_registry.py)
+- [orchestrator/tests/test_w1s8_get_db_lifecycle.py](orchestrator/tests/test_w1s8_get_db_lifecycle.py)
 - [services/agent-opt-worker/Dockerfile](services/agent-opt-worker/Dockerfile)
 - [services/agent-opt-worker/automatos_logging.py](services/agent-opt-worker/automatos_logging.py)
 - [services/agent-opt-worker/automatos_metrics.py](services/agent-opt-worker/automatos_metrics.py)
@@ -68,7 +77,7 @@ erDiagram
     }
 ```
 
-**Sources:** [orchestrator/core/models/system_prompts.py:32-139](), [orchestrator/core/models/__init__.py:21-21]()
+Sources: [orchestrator/core/models/system_prompts.py:32-139]()
 
 ---
 
@@ -80,19 +89,19 @@ The `PromptRegistry` is a singleton service that manages prompt retrieval with a
 
 1.  **Cache**: Checks `self._cache` for a `CachedPrompt`. If not stale (TTL 60s), returns content [orchestrator/core/services/prompt_registry.py:93-98]().
 2.  **Database**: Queries `SystemPrompt` and `SystemPromptVersion` for the `active` status version [orchestrator/core/services/prompt_registry.py:118-140]().
-3.  **Fallback**: If DB is unavailable or empty, uses `_HARDCODED_DEFAULTS` [orchestrator/core/services/prompt_registry.py:149-199]().
+3.  **Fallback**: If DB is unavailable or empty, uses `_HARDCODED_DEFAULTS` [orchestrator/core/services/prompt_registry.py:149-196]().
 
 ### Variable Interpolation
 The registry uses `str.format_map(variables)` to inject runtime data into prompts.
 - **Example**: `prompt_registry.get("chatbot-friendly", agent_name="Atlas")` replaces `{agent_name}` in the template [orchestrator/core/services/prompt_registry.py:59-76]().
 
-**Sources:** [orchestrator/core/services/prompt_registry.py:35-115](), [orchestrator/core/seeds/seed_system_prompts.py:23-163]()
+Sources: [orchestrator/core/services/prompt_registry.py:35-115](), [orchestrator/core/seeds/seed_system_prompts.py:23-157]()
 
 ---
 
 ## Prompt Lifecycle & Versioning
 
-Prompts follow a strict versioning flow managed by `orchestrator/api/admin_prompts.py`. Admin access is strictly enforced via `_assert_admin` [orchestrator/api/admin_prompts.py:49-55]().
+Prompts follow a strict versioning flow managed by `orchestrator/api/admin_prompts.py`. Admin access is strictly enforced via `_assert_admin`, which delegates to `caller_is_admin` for user context or allows `api_key` auth for service-to-service trust [orchestrator/api/admin_prompts.py:49-62]().
 
 ```mermaid
 stateDiagram-v2
@@ -117,17 +126,17 @@ stateDiagram-v2
 
 ### Version Creation Flow
 When `create_version` is called with `activate=true`:
-1.  The system determines the next `version_number` by querying `func.max(SystemPromptVersion.version_number)` [orchestrator/api/admin_prompts.py:187-191]().
-2.  The current `active` version for that `prompt_id` is updated to `status="archived"` [orchestrator/api/admin_prompts.py:196-200]().
-3.  A new `SystemPromptVersion` is inserted with `status="active"` and the new content [orchestrator/api/admin_prompts.py:203-211]().
+1.  The system determines the next `version_number` by querying `func.max(SystemPromptVersion.version_number)` [orchestrator/api/admin_prompts.py:194-198]().
+2.  The current `active` version for that `prompt_id` is updated to `status="archived"` [orchestrator/api/admin_prompts.py:203-207]().
+3.  A new `SystemPromptVersion` is inserted with `status="active"` and the new content [orchestrator/api/admin_prompts.py:212-217]().
 
-**Sources:** [orchestrator/api/admin_prompts.py:171-217](), [orchestrator/api/admin_prompts.py:253-288]()
+Sources: [orchestrator/api/admin_prompts.py:178-217](), [orchestrator/api/admin_prompts.py:253-288]()
 
 ---
 
 ## FutureAGI Integration Architecture
 
-Automatos uses an isolated `agent-opt-worker` service to handle heavy LLM evaluation tasks. The `FutureAGIService` in the orchestrator acts as a thin HTTP client.
+Automatos uses an isolated `agent-opt-worker` service to handle heavy LLM evaluation tasks. The `FutureAGIService` in the orchestrator acts as a thin HTTP client, routing operations like `/assess`, `/safety`, and `/optimize` to the worker [orchestrator/core/services/futureagi_service.py:5-9]().
 
 ### Component Roles
 
@@ -160,7 +169,7 @@ sequenceDiagram
     end
 ```
 
-**Sources:** [orchestrator/core/services/futureagi_service.py:45-112](), [services/agent-opt-worker/main.py:1-40](), [frontend/components/settings/SystemPromptsTab.tsx:100-115](), [orchestrator/api/admin_prompts.py:42-55]()
+Sources: [orchestrator/core/services/futureagi_service.py:45-112](), [services/agent-opt-worker/main.py:1-40](), [frontend/components/settings/SystemPromptsTab.tsx:101-115](), [orchestrator/api/admin_prompts.py:42-62]()
 
 ---
 
@@ -170,10 +179,10 @@ When `futureagi_eval_enabled` is set to `True` on a `SystemPrompt`, the system p
 
 1.  **Trigger**: `FutureAGIService.eval_live_traffic` is called with user input and agent output [orchestrator/core/services/futureagi_service.py:233-240]().
 2.  **Dispatch**: The service identifies all enabled prompts and sends a `/score` request to the worker [orchestrator/core/services/futureagi_service.py:270-280]().
-3.  **Metrics**: The worker evaluates metrics like `completeness`, `is_helpful`, and `is_concise` concurrently using a `ThreadPoolExecutor` [services/agent-opt-worker/main.py:303-331](). It maps these templates to specific models, such as `turing_large` for quality and `protect` for safety [services/agent-opt-worker/main.py:129-141]().
-4.  **Storage**: Results are saved as `SystemPromptEvalRun` with `run_type='live'` [orchestrator/core/services/futureagi_service.py:288-300]().
+3.  **Worker Execution**: The worker evaluates metrics such as `completeness`, `is_helpful`, and `is_concise` concurrently using a `ThreadPoolExecutor` [services/agent-opt-worker/main.py:303-331]().
+4.  **Storage**: Results are saved in the database as `SystemPromptEvalRun` with `run_type='live'` [orchestrator/core/services/futureagi_service.py:288-300]().
 
-**Sources:** [orchestrator/core/services/futureagi_service.py:233-302](), [services/agent-opt-worker/main.py:129-141](), [services/agent-opt-worker/main.py:303-351]()
+Sources: [orchestrator/core/services/futureagi_service.py:233-302](), [services/agent-opt-worker/main.py:303-351]()
 
 ---
 
@@ -183,9 +192,8 @@ Optimization uses multi-round refinement algorithms (e.g., `meta_prompt`, `bayes
 
 -   **Dataset Collection**: The service pulls up to 10 real chat exchanges to ground the optimization [orchestrator/core/services/futureagi_service.py:171-173]().
 -   **Template Escaping**: To prevent the SDK's `.format()` calls from failing on platform variables, the worker uses `_escape_template_vars` to replace `{var}` with `__TMPL_VAR__` during processing [services/agent-opt-worker/main.py:356-377]().
--   **Async Execution**: Optimization is handled as an async job on the worker, returning a `job_id` to the orchestrator [services/agent-opt-worker/main.py:473-485]().
 -   **Polling**: The frontend polls the status of the optimization job every 3 seconds while it is in a `pending` or `running` state [frontend/components/settings/SystemPromptsTab.tsx:166-173]().
 
-**Sources:** [orchestrator/core/services/futureagi_service.py:161-227](), [services/agent-opt-worker/main.py:356-377](), [services/agent-opt-worker/main.py:473-549](), [frontend/components/settings/SystemPromptsTab.tsx:166-173]()
+Sources: [orchestrator/core/services/futureagi_service.py:161-227](), [services/agent-opt-worker/main.py:473-549](), [frontend/components/settings/SystemPromptsTab.tsx:166-173]()
 
 ---

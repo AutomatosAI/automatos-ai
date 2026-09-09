@@ -5,23 +5,30 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/hooks/use-database-knowledge.ts](frontend/hooks/use-database-knowledge.ts)
-- [orchestrator/api/admin_prompts.py](orchestrator/api/admin_prompts.py)
-- [orchestrator/api/credentials.py](orchestrator/api/credentials.py)
-- [orchestrator/api/database_knowledge.py](orchestrator/api/database_knowledge.py)
-- [orchestrator/api/document_generation.py](orchestrator/api/document_generation.py)
-- [orchestrator/api/generated_images.py](orchestrator/api/generated_images.py)
-- [orchestrator/api/system_settings.py](orchestrator/api/system_settings.py)
-- [orchestrator/core/database/database.py](orchestrator/core/database/database.py)
-- [orchestrator/core/database/load_seed_data.py](orchestrator/core/database/load_seed_data.py)
-- [orchestrator/core/models/system_prompts.py](orchestrator/core/models/system_prompts.py)
-- [orchestrator/core/seeds/seed_personas.py](orchestrator/core/seeds/seed_personas.py)
-- [orchestrator/core/seeds/seed_plugin_categories.py](orchestrator/core/seeds/seed_plugin_categories.py)
-- [orchestrator/core/seeds/seed_system_prompts.py](orchestrator/core/seeds/seed_system_prompts.py)
-- [orchestrator/core/services/audit_service.py](orchestrator/core/services/audit_service.py)
-- [orchestrator/core/services/prompt_registry.py](orchestrator/core/services/prompt_registry.py)
-- [orchestrator/modules/documents/generation_service.py](orchestrator/modules/documents/generation_service.py)
-- [orchestrator/modules/nl2sql/service.py](orchestrator/modules/nl2sql/service.py)
+- [.github/workflows/test.yml](.github/workflows/test.yml)
+- [docker-compose.yml](docker-compose.yml)
+- [frontend/.dockerignore](frontend/.dockerignore)
+- [frontend/Dockerfile](frontend/Dockerfile)
+- [infrastructure/.env.example](infrastructure/.env.example)
+- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
+- [orchestrator/Dockerfile](orchestrator/Dockerfile)
+- [orchestrator/conftest.py](orchestrator/conftest.py)
+- [orchestrator/core/database/migrations/044_pinned_documents.sql](orchestrator/core/database/migrations/044_pinned_documents.sql)
+- [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
+- [orchestrator/modules/codegraph/tests/conftest.py](orchestrator/modules/codegraph/tests/conftest.py)
+- [orchestrator/modules/learning/tests/conftest.py](orchestrator/modules/learning/tests/conftest.py)
+- [orchestrator/modules/rag/pinned_context.py](orchestrator/modules/rag/pinned_context.py)
+- [orchestrator/modules/rag/retrieval_filters.py](orchestrator/modules/rag/retrieval_filters.py)
+- [orchestrator/modules/search/tests/conftest.py](orchestrator/modules/search/tests/conftest.py)
+- [orchestrator/modules/search/tests/test_math_foundations.py](orchestrator/modules/search/tests/test_math_foundations.py)
+- [orchestrator/modules/tools/discovery/actions_documents.py](orchestrator/modules/tools/discovery/actions_documents.py)
+- [orchestrator/modules/tools/discovery/handlers_documents.py](orchestrator/modules/tools/discovery/handlers_documents.py)
+- [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/scripts/init_test_db.py](orchestrator/scripts/init_test_db.py)
+- [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
+- [orchestrator/tests/test_document_pinning.py](orchestrator/tests/test_document_pinning.py)
+- [orchestrator/tests/test_read_document_tool.py](orchestrator/tests/test_read_document_tool.py)
+- [orchestrator/tests/test_retrieval_filters.py](orchestrator/tests/test_retrieval_filters.py)
 
 </details>
 
@@ -29,7 +36,7 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document covers the PostgreSQL database configuration, initialization, and management for Automatos AI. It details the connection management using SQLAlchemy, schema initialization via Alembic migrations, and the extensive seeding process for system defaults, credential types, and LLM-facing prompts.
+This document covers the PostgreSQL database configuration, initialization, and management for Automatos AI. It details the connection management via SQLAlchemy, the `pgvector` extension setup, schema initialization, and the versioned system prompt registry.
 
 For application-level data models and ORM patterns, see [Backend Architecture](18.3). For complete environment variable reference, see [Environment Variables](20.3).
 
@@ -37,18 +44,26 @@ For application-level data models and ORM patterns, see [Backend Architecture](1
 
 ## PostgreSQL with pgvector
 
-Automatos AI uses **PostgreSQL** as its primary relational store, augmented with the **pgvector** extension for vector similarity search. The system relies on native vector operations for semantic routing, RAG (Retrieval-Augmented Generation), and memory retrieval.
+Automatos AI uses **PostgreSQL** with the **pgvector extension** for vector similarity search. The system relies on native vector operations for semantic routing and memory retrieval across its 5-layer memory architecture.
 
-### Key Features
+The `pgvector` dependency is specified in `orchestrator/requirements.txt` [orchestrator/requirements.txt:17](). The Docker Compose setup uses the `pgvector/pgvector:pg16` image for the `postgres` service, ensuring the extension is available [docker-compose.yml:31]().
 
-| Feature | Purpose | Implementation |
-|---------|---------|----------------|
-| **pgvector Extension** | Vector embeddings for RAG and Semantic Routing | Enabled via initialization scripts to support `vector` types in models. |
-| **SQLAlchemy ORM** | Python database abstraction | Centralized `SessionLocal` and `get_db` dependency [orchestrator/core/database/database.py:94-111](). |
-| **Connection Pooling** | Performance and resource management | Configured with `pool_size=10` and `max_overflow=20` [orchestrator/core/database/database.py:83-91](). |
-| **Credential-Based URL** | Secure connection resolution | Tries to resolve DB params via the internal `CredentialResolver` before falling back to env vars [orchestrator/core/database/database.py:23-40](). |
+### Connection Management
 
-**Sources:** [orchestrator/core/database/database.py:23-111]()
+The database layer uses SQLAlchemy for connection pooling and session management.
+
+*   **Engine Configuration**: The engine is created with a `pool_size` of 10 and `max_overflow` of 20, recycling connections every hour to ensure stability [orchestrator/core/database/database.py:83-91]().
+*   **SSL Enforcement**: In production environments, the system automatically appends `sslmode=require` to the database URL [orchestrator/core/database/database.py:74-80]().
+*   **Credential Resolution**: The system attempts to fetch connection parameters (host, port, user, password) from a secure `credential_resolver` before falling back to standard environment variables like `DATABASE_URL` [orchestrator/core/database/database.py:23-67]().
+
+### Session Lifecycle and Safety
+
+To prevent "idle in transaction" states that can block DDL and hold row locks during long-lived LLM calls, the system implements strict session handling:
+
+*   **`get_db()`**: A FastAPI dependency that ensures a `rollback()` is performed before `close()` in the `finally` block, ensuring no transaction lingers [orchestrator/core/database/database.py:105-116]().
+*   **`end_open_transaction()`**: A utility to explicitly commit a transaction before an `await` block (e.g., an LLM call), sitting idle instead of idle-in-transaction [orchestrator/core/database/database.py:132-146]().
+
+**Sources:** [orchestrator/core/database/database.py:23-146](), [orchestrator/tests/test_w1s8_get_db_lifecycle.py:1-13](), [orchestrator/requirements.txt:17](), [docker-compose.yml:31]()
 
 ---
 
@@ -56,31 +71,56 @@ Automatos AI uses **PostgreSQL** as its primary relational store, augmented with
 
 ### Database Bootstrapping Flow
 
-The system initializes in three phases: structural creation, version control via Alembic, and comprehensive seeding of platform defaults.
-
-**Fresh databases (compose, CI).** An empty database has no `alembic_version` table, and the migration history cannot replay from empty on its own. The backend entrypoint (`docker-entrypoint.sh`) therefore runs `python -m scripts.init_fresh_db` first: it builds the schema from the SQLAlchemy models plus a tolerant replay of the migration forest and stamps Alembic at heads, after which `alembic upgrade heads` is a no-op. No SQL snapshot is committed — the former `init_complete_schema.sql` is retired. Existing databases (anything with an `alembic_version` row) skip straight to incremental migrations. The `schema-drift` CI lane (`scripts/ci/schema_drift_check.py`) fails when a migration alters a table no writer creates. See [Self-hosting](../getting-started/self-hosting.md#4-first-boot--what-happens-and-how-long-it-takes) for the full boot order.
+The system initializes through a tiered process: structural creation, versioning via Alembic, and prompt seeding.
 
 ```mermaid
 flowchart TD
-    subgraph "Phase 1: Engine & Tables"
-        [get_database_url] --> [create_engine]
-        [create_engine] --> [create_tables]
-        [create_tables] --> [Base.metadata.create_all]
+    subgraph "Phase 1: Structure (SQLAlchemy)"
+        [core.database.database] --> ["create_tables()"]
+        ["create_tables()"] --> ["Base.metadata.create_all()"]
     end
 
-    subgraph "Phase 2: Migrations (Alembic)"
-        [Base.metadata.create_all] --> [Alembic_Upgrade]
-        [Alembic_Upgrade] --> [Schema_Versioning]
+    subgraph "Phase 2: Versioning (Alembic)"
+        ["Base.metadata.create_all()"] --> [Migration_Scripts]
+        [Migration_Scripts] --> [seed_auto_agents_existing_workspaces.py]
     end
 
-    subgraph "Phase 3: Seeding"
-        [Schema_Versioning] --> [load_seed_data.py]
-        [load_seed_data.py] --> [seed_system_settings]
-        [load_seed_data.py] --> [seed_models]
-        [load_seed_data.py] --> [seed_system_prompts]
+    subgraph "Phase 3: Prompt Seeding"
+        [seed_auto_agents_existing_workspaces.py] --> [seed_system_prompts.py]
+        [seed_system_prompts.py] --> ["PROMPT_MANIFEST"]
+        ["PROMPT_MANIFEST"] --> [Database_Ready]
     end
 ```
-**Sources:** [orchestrator/core/database/database.py:69-130](), [orchestrator/core/database/load_seed_data.py:25-54](), [orchestrator/core/database/load_seed_data.py:121-154]()
+**Sources:** [orchestrator/core/database/database.py:96-104](), [orchestrator/core/seeds/seed_system_prompts.py:23-102]()
+
+### Alembic Migrations
+
+Alembic is used for database schema migrations. The `orchestrator` Dockerfile's `development` stage includes a `CMD` that runs `alembic upgrade heads` before starting the Uvicorn server [orchestrator/Dockerfile:124](). This ensures that the database schema is always up-to-date with the application code. The `heads` argument is used to apply all pending migrations, even if there are multiple unmerged branches in the migration history.
+
+### `init_fresh_db` and `init_test_db.py`
+
+For fresh installations or testing environments, the system provides mechanisms to initialize the database without relying on a full migration history.
+
+*   **`init_test_db.py`**: This script is used in the CI environment to create all tables directly from SQLAlchemy models [orchestrator/scripts/init_test_db.py:53](). It also handles the creation of tables that do not have SQLAlchemy models, such as `document_chunks` and `codegraph_projects`, using raw SQL [orchestrator/scripts/init_test_db.py:63-151](). This script checks for `pgvector` availability and conditionally adds the `vector` type to columns [orchestrator/scripts/init_test_db.py:30-45]().
+*   **`init_fresh_db`**: While not explicitly shown in the provided files, this typically refers to a similar process for local development setups, often involving `Base.metadata.create_all()` and seeding.
+
+The `orchestrator-tests` job in `test.yml` explicitly calls `python scripts/init_test_db.py` to prepare the test database [test.yml:109]().
+
+### SQL Migrations Directory
+
+The `orchestrator/core/database/migrations` directory contains SQL migration scripts. For example, `044_pinned_documents.sql` is a raw SQL migration for pinned documents [orchestrator/core/database/migrations/044_pinned_documents.sql](). These are managed by Alembic.
+
+**Sources:** [orchestrator/Dockerfile:124](), [orchestrator/scripts/init_test_db.py:53-151](), [test.yml:109](), [orchestrator/core/database/migrations/044_pinned_documents.sql]()
+
+### System Prompt Management (PRD-58)
+
+Automatos AI features a sophisticated, versioned system prompt registry that allows for A/B testing and evaluation of LLM instructions.
+
+*   **`SystemPrompt`**: The top-level entity identified by a unique `slug` (e.g., `routing-classifier`) used by the code [orchestrator/core/models/system_prompts.py:32-41]().
+*   **`SystemPromptVersion`**: Immutable snapshots of prompt content. Only one version per prompt can be `active` at a time [orchestrator/core/models/system_prompts.py:71-93]().
+*   **`SystemPromptEvalRun`**: Tracks evaluation scores from FutureAGI for specific prompt versions, covering quality, safety, and optimization metrics [orchestrator/core/models/system_prompts.py:108-135]().
+
+**Sources:** [orchestrator/core/models/system_prompts.py:32-135]()
 
 ---
 
@@ -88,83 +128,85 @@ flowchart TD
 
 This section bridges conceptual data requirements with specific code implementations.
 
-### Credential and Database Knowledge Mapping
+### Prompt Retrieval and Interpolation
 
-When a user adds a "Database Source" via natural language, the system maps this to encrypted credentials and introspected schema metadata.
+When the system needs a specific behavior (e.g., "be friendly"), it resolves a slug to a formatted string.
 
 ```mermaid
 graph LR
     subgraph "Natural Language Space"
-        ["'Connect my production Postgres DB'"]
-        ["'What is the schema of our sales table?'"]
+        ["'I need the friendly persona'"]
+        ["'Format with agent name Atlas'"]
     end
 
     subgraph "Code Entity Space"
-        ["DatabaseKnowledgeSource"]
-        ["DatabaseKnowledgeService.add_database_source()"]
-        ["CredentialStore.create_credential()"]
-        ["DatabaseIntrospectionService"]
+        ["PromptRegistry.get(slug)"]
+        ["SystemPrompt.slug = 'chatbot-friendly'"]
+        ["CachedPrompt (TTL 60s)"]
+        ["_HARDCODED_DEFAULTS"]
     end
 
-    ["'Connect my production Postgres DB'"] --> ["DatabaseKnowledgeService.add_database_source()"]
-    ["DatabaseKnowledgeService.add_database_source()"] -.-> ["CredentialStore.create_credential()"]
-    ["'What is the schema of our sales table?'"] --> ["DatabaseIntrospectionService"]
-    ["DatabaseIntrospectionService"] -.-> ["DatabaseKnowledgeSource"]
+    ["'I need the friendly persona'"] --> ["PromptRegistry.get(slug)"]
+    ["PromptRegistry.get(slug)"] -.-> ["SystemPrompt.slug = 'chatbot-friendly'"]
+    ["SystemPrompt.slug = 'chatbot-friendly'"] -.-> ["CachedPrompt (TTL 60s)"]
+    ["CachedPrompt (TTL 60s)"] -- "Fallback" --> ["_HARDCODED_DEFAULTS"]
 ```
-**Sources:** [orchestrator/api/database_knowledge.py:118-141](), [orchestrator/modules/nl2sql/service.py:112-140](), [orchestrator/core/credentials/service.py:130-131]()
+**Sources:** [orchestrator/core/services/prompt_registry.py:35-76, 93-115](), [orchestrator/core/seeds/seed_system_prompts.py:25-43]()
 
-### Prompt Registry Mapping
+### Admin Configuration Mapping
 
-System prompts are resolved from a hierarchy of sources to ensure the platform can bootstrap even without a fully populated database.
+System-wide settings are transitioned from `.env` files to database-backed `SystemSetting` models for real-time updates.
 
 ```mermaid
 graph TD
     subgraph "Natural Language Space"
-        ["'The AI should be technical'"]
-        ["'Use the standard routing logic'"]
+        ["'Update the API rate limit'"]
+        ["'Change system-wide LLM'"]
     end
 
     subgraph "Code Entity Space"
-        ["PromptRegistry.get('chatbot-technical')"]
-        ["SystemPromptVersion (status='active')"]
-        ["_HARDCODED_DEFAULTS"]
-        ["seed_system_prompts.py"]
+        ["SystemSetting (key, value)"]
+        ["SystemSettingUpdate (Pydantic)"]
+        ["update_system_setting()"]
+        ["_require_admin(ctx)"]
     end
 
-    ["'The AI should be technical'"] --> ["PromptRegistry.get('chatbot-technical')"]
-    ["PromptRegistry.get('chatbot-technical')"] -.-> ["SystemPromptVersion (status='active')"]
-    ["SystemPromptVersion (status='active')"] -- "Fallback" --> ["_HARDCODED_DEFAULTS"]
-    ["'Use the standard routing logic'"] --> ["seed_system_prompts.py"]
+    ["'Update the API rate limit'"] --> ["update_system_setting()"]
+    ["'Change system-wide LLM'"] --> ["update_system_setting()"]
+    ["update_system_setting()"] -.-> ["_require_admin(ctx)"]
+    ["_require_admin(ctx)"] --> ["SystemSetting (key, value)"]
 ```
-**Sources:** [orchestrator/core/services/prompt_registry.py:59-76](), [orchestrator/core/services/prompt_registry.py:93-115](), [orchestrator/core/seeds/seed_system_prompts.py:23-43]()
+**Sources:** [orchestrator/api/system_settings.py:41-47, 162-186](), [orchestrator/core/models/system_settings.py:23-27]()
 
 ---
 
-## Seeding and Defaults
+## Seed Data and Defaults
 
-The platform uses an idempotent seeding strategy to ensure essential data is present across all environments.
+The database is populated with essential operational data via seeders:
 
-### 1. System Settings (PRD-25)
-Replaces static `.env` files with database-backed settings. This allows admins to modify platform behavior (e.g., LLM timeouts, feature flags) via the `SystemSettingsAPI` without restarting services [orchestrator/api/system_settings.py:1-18]().
+### System Prompt Manifest
+The `PROMPT_MANIFEST` defines the initial set of instructions for core platform functions:
+*   **`routing-classifier`**: Instructions for the Universal Router to select agents [orchestrator/core/seeds/seed_system_prompts.py:85-102]().
+*   **`chatbot-technical`**: Persona guidelines for developer-focused interactions [orchestrator/core/seeds/seed_system_prompts.py:64-81]().
+*   **`task-decomposer`**: Logic for breaking complex goals into agent sub-tasks [orchestrator/core/seeds/seed_system_prompts.py:104-123]().
 
-### 2. Credential Types
-The `load_seed_data.py` script populates over 400 credential types from `credential_types_seed.json`. This enables dynamic form generation in the UI for connecting external services [orchestrator/core/database/load_seed_data.py:60-108]().
+### Hardcoded Fallbacks
+The `PromptRegistry` maintains a set of `_HARDCODED_DEFAULTS`. These ensure the system remains functional even if the database is temporarily unreachable during the bootstrap phase [orchestrator/core/services/prompt_registry.py:149-199]().
 
-### 3. System Prompts (PRD-58)
-The `seed_system_prompts.py` manifest defines the core "personalities" and "orchestrator" logic. These are stored in `SystemPrompt` and `SystemPromptVersion` tables, allowing for versioning, rollback, and A/B testing via the Admin Prompts API [orchestrator/api/admin_prompts.py:1-12](), [orchestrator/core/seeds/seed_system_prompts.py:23-102]().
+**Sources:** [orchestrator/core/seeds/seed_system_prompts.py:23-123](), [orchestrator/core/services/prompt_registry.py:145-203]()
 
 ---
 
 ## Key Database Functions and Services
 
-| Function / Service | File Path | Purpose |
+| Function / Class | File Path | Purpose |
 |----------|-----------|---------|
-| `get_db` | `core/database/database.py` | FastAPI dependency for yielding database sessions [orchestrator/core/database/database.py:105-111](). |
-| `DatabaseKnowledgeService` | `modules/nl2sql/service.py` | Manages schema introspection and SQL generation for external DB sources [orchestrator/modules/nl2sql/service.py:75-96](). |
-| `CredentialStore` | `core/credentials/service.py` | Handles encrypted storage and retrieval of sensitive keys [orchestrator/api/credentials.py:52-54](). |
-| `PromptRegistry` | `core/services/prompt_registry.py` | Singleton service for resolving system prompts with a 60-second TTL cache [orchestrator/core/services/prompt_registry.py:35-53](). |
-| `DocumentTemplateService` | `modules/documents/template_service.py` | Manages Jinja2 templates for PDF/DOCX generation [orchestrator/api/document_generation.py:83-85](). |
+| `get_db` | `core/database/database.py` | FastAPI dependency for thread-safe session management with automatic rollback [orchestrator/core/database/database.py:105-116](). |
+| `PromptRegistry` | `core/services/prompt_registry.py` | Singleton service managing prompt caching (60s TTL) and DB resolution [orchestrator/core/services/prompt_registry.py:35-53](). |
+| `_assert_admin` | `api/admin_prompts.py` | Security gate ensuring only admin users can modify system-level prompts [orchestrator/api/admin_prompts.py:49-62](). |
+| `AuditService` | `core/services/audit_service.py` | Logs security-relevant database and setting changes to the `audit` logger [orchestrator/core/services/audit_service.py:55-90](). |
+| `list_system_settings` | `api/system_settings.py` | Endpoint for retrieving system-wide configuration with admin-only access [orchestrator/api/system_settings.py:50-67](). |
 
-**Sources:** [orchestrator/core/database/database.py:105-111](), [orchestrator/modules/nl2sql/service.py:75-96](), [orchestrator/core/services/prompt_registry.py:35-53](), [orchestrator/api/document_generation.py:83-85]()
+**Sources:** [orchestrator/core/database/database.py:105-116](), [orchestrator/core/services/prompt_registry.py:35-53](), [orchestrator/api/admin_prompts.py:49-62](), [orchestrator/core/services/audit_service.py:55-122](), [orchestrator/api/system_settings.py:50-67]()
 
 ---

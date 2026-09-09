@@ -5,19 +5,19 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx](frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx)
-- [frontend/components/widgets/TerminalWidget/InteractiveTerminal.tsx](frontend/components/widgets/TerminalWidget/InteractiveTerminal.tsx)
-- [frontend/components/widgets/TerminalWidget/index.tsx](frontend/components/widgets/TerminalWidget/index.tsx)
-- [orchestrator/api/workspace_exec.py](orchestrator/api/workspace_exec.py)
+- [orchestrator/api/context.py](orchestrator/api/context.py)
+- [orchestrator/api/documents.py](orchestrator/api/documents.py)
+- [orchestrator/api/github_webhooks.py](orchestrator/api/github_webhooks.py)
+- [orchestrator/api/system.py](orchestrator/api/system.py)
 - [orchestrator/api/workspace_github.py](orchestrator/api/workspace_github.py)
-- [orchestrator/core/workspace_client.py](orchestrator/core/workspace_client.py)
-- [orchestrator/modules/tools/discovery/workspace_actions.py](orchestrator/modules/tools/discovery/workspace_actions.py)
-- [orchestrator/modules/tools/execution/exec_workspace.py](orchestrator/modules/tools/execution/exec_workspace.py)
-- [services/workspace-worker/Dockerfile](services/workspace-worker/Dockerfile)
-- [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
-- [services/workspace-worker/executor.py](services/workspace-worker/executor.py)
-- [services/workspace-worker/main.py](services/workspace-worker/main.py)
-- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
+- [orchestrator/modules/rag/ingestion/contextual_annotator.py](orchestrator/modules/rag/ingestion/contextual_annotator.py)
+- [orchestrator/modules/rag/ingestion/manager.py](orchestrator/modules/rag/ingestion/manager.py)
+- [orchestrator/modules/rag/service.py](orchestrator/modules/rag/service.py)
+- [orchestrator/modules/search/services/entity_extractor.py](orchestrator/modules/search/services/entity_extractor.py)
+- [orchestrator/tests/security/test_s5_closures.py](orchestrator/tests/security/test_s5_closures.py)
+- [orchestrator/tests/test_entity_extractor_no_vendor_key.py](orchestrator/tests/test_entity_extractor_no_vendor_key.py)
+- [orchestrator/tests/test_p2w1_contextual_annotations.py](orchestrator/tests/test_p2w1_contextual_annotations.py)
+- [orchestrator/tests/test_p2w2_tasks_lane_deleted.py](orchestrator/tests/test_p2w2_tasks_lane_deleted.py)
 
 </details>
 
@@ -30,26 +30,27 @@ The GitHub Integration subsystem enables AI agents and users to interact with re
 GitHub integration is implemented as a bridge between the **Orchestrator API**, the **Workspace Worker**, and external VCS providers. It leverages the `Composio` platform to handle OAuth authentication and entity management, allowing agents to act on behalf of users with fine-grained permissions.
 
 ### Key Components
-*   **`workspace_github.py`**: The primary API router for repository listing and clone task submission [orchestrator/api/workspace_github.py:31-34]().
-*   **`Workspace Worker`**: An ARQ-style consumer that executes the physical `git clone` and file operations on a persistent volume [services/workspace-worker/main.py:59-68]().
-*   **`RepoSelector`**: A frontend component allowing users to browse and select repositories for their workspace [frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx:39-44]().
-*   **`WorkspaceClient`**: An asynchronous proxy used by the Orchestrator to communicate with the worker's HTTP API for file and command operations [orchestrator/core/workspace_client.py:56-61]().
+*   **`workspace_github.py`**: The primary API router for repository listing and clone task submission [orchestrator/api/workspace_github.py:32-35]().
+*   **`Workspace Worker`**: An ARQ-style consumer that executes the physical `git clone` and file operations on a persistent volume [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:77-81]().
+*   **`RepoSelector`**: A frontend component allowing users to browse and select repositories for their workspace.
+*   **`EntityManager`**: A core service that resolves Composio `entity_id` mappings for workspaces to facilitate authenticated GitHub actions [orchestrator/api/workspace_github.py:55-63]().
+
+Sources: [orchestrator/api/workspace_github.py:32-35](), [orchestrator/api/workspace_github.py:55-63](), [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:77-81]()
 
 ## Implementation & Data Flow
 
 The integration follows a decoupled architecture where the API server manages metadata and permissions, while the worker service handles heavy I/O and shell execution.
 
 ### Repository Discovery and Cloning
-When a user or agent requests a repository list, the system uses the `EntityManager` to resolve the workspace's Composio identity [orchestrator/api/workspace_github.py:54-62](). It then fetches repository metadata via the `GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER` action [orchestrator/api/workspace_github.py:133-138]().
+When a user or agent requests a repository list, the system uses the `EntityManager` to resolve the workspace's Composio identity [orchestrator/api/workspace_github.py:59-63](). It then fetches repository metadata via the `GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER` action [orchestrator/api/workspace_github.py:134-139]().
 
 **GitHub Repository Operations Flow**
 
 ```mermaid
 sequenceDiagram
-    participant FE as "Frontend (RepoSelector.tsx)"
+    participant FE as "Frontend (RepoSelector)"
     participant API as "Orchestrator API (workspace_github.py)"
     participant CMP as "Composio SDK / GitHub API"
-    participant DB as "PostgreSQL (Session)"
     participant RED as "Redis (workspace:tasks:normal)"
     participant WRK as "Workspace Worker (main.py)"
 
@@ -65,91 +66,68 @@ sequenceDiagram
 
     WRK->>RED: "RPOP workspace:tasks:normal"
     WRK->>WRK: "git clone --branch {b} {url}"
-    Note over WRK: "Uses workspace_manager.py for path safety"
 ```
-Sources: [orchestrator/api/workspace_github.py:113-179](), [orchestrator/api/workspace_github.py:185-200](), [services/workspace-worker/main.py:180-194](), [services/workspace-worker/executor.py:108-116]()
+Sources: [orchestrator/api/workspace_github.py:114-140](), [orchestrator/api/workspace_github.py:186-210](), [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:73-74]()
 
 ## API Reference: workspace_github.py
 
-The GitHub integration provides two main endpoints scoped by `workspace_id`.
+The GitHub integration provides two main endpoints scoped by `workspace_id`. Access is restricted to users with `workspace:manage` permissions for cloning operations [orchestrator/api/workspace_github.py:186]().
 
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
-| `/api/workspaces/{id}/github/repos` | `GET` | Lists GitHub repositories accessible via the authenticated Composio entity [orchestrator/api/workspace_github.py:113-114](). |
-| `/api/workspaces/{id}/github/clone` | `POST` | Enqueues a background task to clone a repository into the workspace volume [orchestrator/api/workspace_github.py:185-186](). |
+| `/api/workspaces/{id}/github/repos` | `GET` | Lists GitHub repositories accessible via the authenticated Composio entity [orchestrator/api/workspace_github.py:114-115](). |
+| `/api/workspaces/{id}/github/clone` | `POST` | Enqueues a background task to clone a repository into the workspace volume [orchestrator/api/workspace_github.py:186-187](). |
 
-### URL Validation
+### Security Validation
 To prevent SSRF and injection attacks, the `CloneRequest` model enforces strict validation:
-*   **Scheme**: Must be `https` [orchestrator/api/workspace_github.py:89-90]().
-*   **Allowed Hosts**: Limited to `github.com`, `gitlab.com`, and `bitbucket.org` [orchestrator/api/workspace_github.py:37-38](), [orchestrator/api/workspace_github.py:91-92]().
-*   **Credentials**: No embedded usernames or passwords allowed in the URL [orchestrator/api/workspace_github.py:93-94]().
-*   **Branch**: Validated against a safe regex `^[A-Za-z0-9._/\-]+$` [orchestrator/api/workspace_github.py:40-41](), [orchestrator/api/workspace_github.py:105-106]().
+*   **Scheme**: Must be `https` [orchestrator/api/workspace_github.py:90-91]().
+*   **Allowed Hosts**: Limited to `github.com`, `gitlab.com`, and `bitbucket.org` [orchestrator/api/workspace_github.py:38](), [orchestrator/api/workspace_github.py:92-93]().
+*   **Credentials**: No embedded usernames or passwords allowed in the URL [orchestrator/api/workspace_github.py:94-95]().
+*   **Branch**: Validated against a safe regex `^[A-Za-z0-9._/\-]+$` [orchestrator/api/workspace_github.py:41](), [orchestrator/api/workspace_github.py:106-107]().
+
+Sources: [orchestrator/api/workspace_github.py:38](), [orchestrator/api/workspace_github.py:41](), [orchestrator/api/workspace_github.py:90-95](), [orchestrator/api/workspace_github.py:106-107](), [orchestrator/api/workspace_github.py:114-115](), [orchestrator/api/workspace_github.py:186-187]()
 
 ## Agent-Facing Workspace Tools
 
-Agents interact with GitHub repositories using a set of "Platform Actions" defined in the `ActionRegistry`. These actions are proxied to the `Workspace Worker` via the `WorkspaceClient`.
+Agents interact with GitHub repositories using Composio-backed actions. The system ensures that if GitHub is not connected, the agent is informed via a specific error message [orchestrator/api/workspace_github.py:48-52]().
 
 **Code Entity Mapping: Natural Language to Tool Execution**
 
 ```mermaid
 graph TD
     subgraph "Natural Language Space"
-        NL["'Search for the login logic in the repo'"]
+        NL["'Clone the automatos-ai repo into my workspace'"]
     end
 
     subgraph "Code Entity Space (Orchestrator)"
-        AR["ActionRegistry (action_registry.py)"]
-        WA["workspace_grep (workspace_actions.py)"]
-        WC["WorkspaceClient.grep() (workspace_client.py)"]
-        EWA["execute_workspace_action (exec_workspace.py)"]
+        API["workspace_github.py"]
+        CR["CloneRequest (Pydantic Model)"]
+        EM["EntityManager.get_entity_by_workspace"]
     end
 
     subgraph "Execution Space (Worker)"
-        WTE["WorkspaceToolExecutor (executor.py)"]
-        CMD["/usr/bin/rg (ripgrep)"]
+        RED["Redis Queue (workspace:tasks:normal)"]
+        WRK["Workspace Worker"]
     end
 
-    NL -->|Intent Matching| AR
-    AR -->|Resolves| WA
-    WA -->|Calls| EWA
-    EWA -->|Uses| WC
-    WC -->|HTTP GET /files/grep| WTE
-    WTE -->|Executes| CMD
+    NL -->|Intent Matching| API
+    API -->|Validates| CR
+    API -->|Resolves Identity| EM
+    API -->|Enqueues Job| RED
+    RED -->|Consumes| WRK
 ```
-Sources: [orchestrator/modules/tools/discovery/workspace_actions.py:124-161](), [orchestrator/modules/tools/execution/exec_workspace.py:183-192](), [orchestrator/core/workspace_client.py:130-149](), [services/workspace-worker/executor.py:108-116]()
-
-### Key Workspace Actions
-*   **`workspace_read_file`**: Retrieves text content, size, and language of a specific file [orchestrator/modules/tools/discovery/workspace_actions.py:18-51]().
-*   **`workspace_write_file`**: Creates or overwrites files, including automatic parent directory creation [orchestrator/modules/tools/discovery/workspace_actions.py:53-90]().
-*   **`workspace_list_dir`**: Explores project structure [orchestrator/modules/tools/discovery/workspace_actions.py:92-121]().
-*   **`workspace_grep`**: Performs regex searches across the repository [orchestrator/modules/tools/discovery/workspace_actions.py:124-161]().
-*   **`workspace_exec`**: Runs whitelisted commands (e.g., `pytest`, `npm test`) in the repository context [orchestrator/modules/tools/discovery/workspace_actions.py:164-181]().
+Sources: [orchestrator/api/workspace_github.py:48-52](), [orchestrator/api/workspace_github.py:59-63](), [orchestrator/api/workspace_github.py:82-109](), [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:73-74]()
 
 ## Security and Sandboxing
 
-GitHub integration adheres to strict security boundaries to prevent unauthorized access or system compromise during code execution.
+GitHub integration adheres to strict security boundaries. While the direct `/api/tasks` ingress has been removed to prevent ungoverned shell access [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:1-7](), the GitHub clone lane remains a supported, governed background job producer [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:14-15]().
 
-### Command Whitelisting
-The `WorkspaceToolExecutor` maintains an `ALLOWED_COMMANDS` set. Only binaries in this list (e.g., `git`, `python`, `npm`, `ls`) are permitted [services/workspace-worker/executor.py:35-73]().
+### Identity Resolution
+All GitHub operations require a valid Composio connection. The system detects `ConnectedAccountNotFound` errors and provides actionable feedback to the user to connect their account in the "Tools & Accounts" section [orchestrator/api/workspace_github.py:48-52](), [orchestrator/api/workspace_github.py:66-75]().
 
-### Blocked Patterns
-Even if a binary is whitelisted, specific argument patterns are blocked via regex (e.g., `rm -rf /`, `sudo`, `chmod 777`) [services/workspace-worker/executor.py:76-95]().
+### Queue Isolation
+Clone tasks are dispatched to the `workspace:tasks:normal` Redis queue [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:74](). This ensures that long-running I/O operations like cloning large repositories do not block the primary Orchestrator API threads and are handled by the dedicated `workspace-worker` service [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:77-81]().
 
-### Path Containment
-The `WorkspaceManager` ensures all file operations are confined to the `/workspaces/{workspace_id}` directory using `resolve_safe_path`, which prevents directory traversal attacks [services/workspace-worker/executor.py:155-157]().
-
-### Interactive Terminal
-The `InteractiveTerminal` component allows users to execute shell commands directly in the workspace via the `exec_command` API [frontend/components/widgets/TerminalWidget/InteractiveTerminal.tsx:65-88](). It tracks the current working directory (`cwd`) and updates it based on `cd` command outputs returned by the worker [frontend/components/widgets/TerminalWidget/InteractiveTerminal.tsx:110-113]().
-
-## Workspace Filesystem Layout
-
-The `WorkspaceWorker` is configured via environment variables to use a persistent volume [services/workspace-worker/main.py:16-19](). The `entrypoint.sh` script ensures the `worker` user has correct ownership of the volume at runtime [services/workspace-worker/entrypoint.sh:6-9]().
-
-| Path | Purpose | Configuration |
-| :--- | :--- | :--- |
-| `/workspaces` | Base mount point for all workspaces | `WORKSPACE_VOLUME_PATH` [services/workspace-worker/Dockerfile:56]() |
-| `/workspaces/{id}/repos` | Target directory for GitHub clones | Hardcoded in `workspace_actions.py` [orchestrator/modules/tools/discovery/workspace_actions.py:34]() |
-
-Sources: [services/workspace-worker/Dockerfile:56-59](), [services/workspace-worker/main.py:16-20](), [services/workspace-worker/entrypoint.sh:1-13]()
+Sources: [orchestrator/api/workspace_github.py:48-52](), [orchestrator/api/workspace_github.py:66-75](), [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:1-16](), [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:74](), [orchestrator/tests/test_p2w2_tasks_lane_deleted.py:77-81]()
 
 ---

@@ -5,182 +5,183 @@
 
 The following files were used as context for generating this wiki page:
 
+- [.gitleaksignore](.gitleaksignore)
+- [Makefile](Makefile)
+- [docs/PRDS/PRD-234-SESSION-MODE-SUBSCRIPTION-RUNTIME.md](docs/PRDS/PRD-234-SESSION-MODE-SUBSCRIPTION-RUNTIME.md)
+- [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md)
+- [frontend/components/__tests__/prd197-substrate-tile.test.tsx](frontend/components/__tests__/prd197-substrate-tile.test.tsx)
+- [frontend/components/command-center/is-it-working-strip.tsx](frontend/components/command-center/is-it-working-strip.tsx)
 - [frontend/components/settings/GeneralSettingsTab.tsx](frontend/components/settings/GeneralSettingsTab.tsx)
-- [frontend/components/settings/OnboardingAgentsTab.tsx](frontend/components/settings/OnboardingAgentsTab.tsx)
-- [frontend/components/settings/SettingsPanel.tsx](frontend/components/settings/SettingsPanel.tsx)
-- [frontend/components/settings/SystemSettingsTab.tsx](frontend/components/settings/SystemSettingsTab.tsx)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/api/chatbot_llm.py](orchestrator/api/chatbot_llm.py)
-- [orchestrator/api/onboarding_agents.py](orchestrator/api/onboarding_agents.py)
+- [frontend/components/settings/SessionModeTab.tsx](frontend/components/settings/SessionModeTab.tsx)
+- [frontend/hooks/use-analytics-api.ts](frontend/hooks/use-analytics-api.ts)
+- [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
+- [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
 - [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/core/models/substrate_metrics.py](orchestrator/core/models/substrate_metrics.py)
 - [orchestrator/core/models/system_settings.py](orchestrator/core/models/system_settings.py)
+- [orchestrator/core/observability/substrate_metrics.py](orchestrator/core/observability/substrate_metrics.py)
 - [orchestrator/core/seeds/seed_system_settings.py](orchestrator/core/seeds/seed_system_settings.py)
 - [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/scripts/create_test_workspace.py](orchestrator/scripts/create_test_workspace.py)
-- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/modules/memory/write_contract.py](orchestrator/modules/memory/write_contract.py)
+- [orchestrator/reports/route-manifest.json](orchestrator/reports/route-manifest.json)
+- [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
+- [orchestrator/services/cli_host_service.py](orchestrator/services/cli_host_service.py)
+- [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
+- [orchestrator/tests/test_p2w2_authz_boundary_sweep.py](orchestrator/tests/test_p2w2_authz_boundary_sweep.py)
+- [orchestrator/tests/test_prd154_s5_missions.py](orchestrator/tests/test_prd154_s5_missions.py)
+- [orchestrator/tests/test_prd206_write_contract.py](orchestrator/tests/test_prd206_write_contract.py)
+- [orchestrator/tests/test_prd222_w2s1_plan_tiers.py](orchestrator/tests/test_prd222_w2s1_plan_tiers.py)
+- [orchestrator/tests/test_prd234_s1a_cli_hosts_realdb.py](orchestrator/tests/test_prd234_s1a_cli_hosts_realdb.py)
+- [orchestrator/tests/test_system_settings_null_flags.py](orchestrator/tests/test_system_settings_null_flags.py)
+- [services/cli-host/automatos_cli_host/allowlist.py](services/cli-host/automatos_cli_host/allowlist.py)
+- [services/cli-host/automatos_cli_host/hook_server.py](services/cli-host/automatos_cli_host/hook_server.py)
 
 </details>
 
 
 
-This document covers the technical configuration of Automatos AI, including environment variables, service-specific settings (LLM, Redis, Postgres), memory layer parameters, and the database-backed system settings architecture that holds runtime configuration.
+## Purpose & Scope
 
----
-
-## Where configuration lives
-
-For a compose (local-edition) install the layers are, in order of precedence for the backend container:
-
-| Layer | Role |
-|---|---|
-| `docker-compose.yml` `environment:` block | Explicit values and the three required secrets (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`), substituted from `.env`. Wins over the env files. |
-| `envs/api.local` (gitignored, optional) | Personal overrides for **any** backend variable — the deep-override lane. |
-| `envs/api.defaults` (committed) | The local topology: `AUTH_EDITION=local`, `DEFAULT_WORKSPACE_ID`, `LOCAL_OPERATOR_EMAIL`, MinIO wiring (`S3_ENDPOINT_URL`, `S3_PUBLIC_ENDPOINT_URL`), `WORKER_INTERNAL_URL`, observability off. |
-| `orchestrator/config.py` | Code defaults for every remaining dial; the only module that reads the environment. |
-
-`.env` itself only feeds compose substitution — a variable reaches a container only if `docker-compose.yml` references it. The frontend has the same shape with `envs/frontend.defaults` / `envs/frontend.local`. LLM tiers, the Auto/System/Embeddings model choices and feature flags are then edited in the database through the Settings UI, not in files. The hosted deployment sets each service's environment itself and never reads the compose file or `envs/*`.
-
-Full walkthrough: [Self-hosting — the local edition](self-hosting.md). Variable reference: [Environment Variables](../deployment-infrastructure/environment-variables.md).
+This page covers the technical configuration subsystem of Automatos AI. It details how environment variables, database-backed system settings (`SystemSetting`), LLM tiers (`SettingCategory`), core infrastructure services (PostgreSQL, Redis, S3), and service features (such as Auto Live voice and memory lifecycles) are managed via `orchestrator/config.py` and system settings seeds.
 
 ---
 
 ## Configuration Architecture
 
-Automatos AI keeps infrastructure wiring (DB/Redis/storage/edition) in environment variables for bootstrapping, while LLM tiers and feature flags are managed via the `SystemSetting` model.
+Automatos AI employs a hybrid configuration model. While core infrastructure connection parameters (database URLs, Redis hosts) are ingested via environment variables through a centralized `Config` class, application-level parameters—including LLM provider choices, model hyper-parameters, memory thresholds, and feature flags—are stored in the database-backed **System Settings** framework (`orchestrator/core/models/system_settings.py`).
 
 ### Configuration Loading Flow
 
 ```mermaid
 graph TB
-    subgraph "BootstrapSpace"
+    subgraph "InputSources"
         EnvFile[".env File"]
-        ConfigClass["'Config' (config.py)"]
+        ShellVars["Shell Env Vars"]
+        DBCfg["'system_settings' Table"]
     end
 
     subgraph "CodeEntitySpace"
-        AppStartup["FastAPI 'main.py'"]
-        LLMManager["'LLMManager' (manager.py)"]
-        SysSeed["'seed_system_settings' (seed_system_settings.py)"]
-        DB_Settings["'SystemSetting' Table (models/system_settings.py)"]
-    end
-
-    subgraph "FrontendSpace"
-        SettingsUI["'SystemSettingsTab' (SystemSettingsTab.tsx)"]
+        ConfigClass[""Config" (config.py)"]
+        SysSettings[""SystemSetting" (models/system_settings.py)"]
+        LLMManager[""LLMManager""]
+        AutoAgent[""Auto" Agent Row"]
     end
 
     EnvFile --> ConfigClass
-    ConfigClass --> AppStartup
-    AppStartup -->|"Check/Seed"| SysSeed
-    SysSeed --> DB_Settings
+    ShellVars --> ConfigClass
     
-    LLMManager -->|"get_system_setting"| DB_Settings
-    SettingsUI -->|"bulkUpdateSettings"| DB_Settings
+    ConfigClass -->|"Init DB"| SysSettings
+    DBCfg --> SysSettings
+    
+    SysSettings --> LLMManager
+    LLMManager -->|"Runtime Config"| Orchestrator["Orchestrator Logic"]
+    
+    DBCfg -->|"Workspace Overrides"| AutoAgent
+    AutoAgent -->|"Brain Config"| ChatOrchestrator[""SmartChatOrchestrator""]
 ```
 
-**Sources:** [orchestrator/config.py:28-150](), [orchestrator/core/llm/manager.py:56-96](), [orchestrator/core/seeds/seed_system_settings.py:161-180](), [frontend/components/settings/SystemSettingsTab.tsx:72-107]()
+**Sources:** [orchestrator/config.py:28-32](), [orchestrator/core/models/system_settings.py:59-83](), [orchestrator/core/seeds/seed_system_settings.py:161-171]()
 
 ---
 
-## Core Infrastructure
+## Core Infrastructure Services
 
 ### PostgreSQL with pgvector
-The system requires PostgreSQL with the `pgvector` extension. Production environments enforce SSL for non-local hosts via `Config.get_database_url()`.
+The persistence layer requires PostgreSQL with the `pgvector` extension enabled. In non-local deployments, SSL mode (`sslmode=require`) is programmatically enforced in `Config.get_database_url()` [orchestrator/config.py:47-60]().
 
-| Variable | Required | Description |
+| Parameter / Variable | Required | Description |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | **Yes** | Primary connection string. Overrides individual params. [orchestrator/config.py:42]() |
-| `POSTGRES_DB` | **Yes** | Database name. [orchestrator/config.py:37]() |
-| `SQL_DEBUG` | No | Enables SQLAlchemy echo mode. [orchestrator/config.py:43]() |
+| `DATABASE_URL` | **Yes** | Full connection string. When provided, overrides individual host/port parameters [orchestrator/config.py:44]() |
+| `POSTGRES_DB` | **Yes** | Target database name [orchestrator/config.py:39]() |
+| `POSTGRES_USER` | **Yes** | Database username [orchestrator/config.py:40]() |
+| `POSTGRES_PASSWORD` | **Yes** | Database password [orchestrator/config.py:41]() |
+| `POSTGRES_HOST` | **Yes** | Database host address [orchestrator/config.py:42]() |
+| `POSTGRES_PORT` | **Yes** | Database port [orchestrator/config.py:43]() |
+| `SQL_DEBUG` | No | Toggles SQLAlchemy echo logging (`false` by default) [orchestrator/config.py:45]() |
 
 ### Redis Configuration
-Redis is the backbone for L1 memory, task queues, and result caching. The `Config` class constructs the `REDIS_URL` from parts if not explicitly provided.
+Redis functions as the L1 memory cache backbone, asynchronous Pub/Sub broker, and backend job store for `APScheduler` [orchestrator/config.py:65-81]().
 
-| Variable | Required | Description |
+| Parameter / Variable | Required | Description |
 | :--- | :--- | :--- |
-| `REDIS_HOST` | **Yes** | Redis server host. [orchestrator/config.py:63]() |
-| `REDIS_URL` | No | Full connection string (e.g., `redis://user:pass@host:port/0`). [orchestrator/config.py:69-79]() |
+| `REDIS_URL` | No | Explicit URL string. If absent, constructed from `REDIS_HOST` and `REDIS_PORT` [orchestrator/config.py:73-81]() |
+| `REDIS_HOST` | **Yes** | Redis server hostname [orchestrator/config.py:65]() |
+| `REDIS_PORT` | **Yes** | Redis server port [orchestrator/config.py:66]() |
+| `REDIS_PASSWORD` | No | Auth password if cluster authentication is enabled [orchestrator/config.py:67]() |
+| `REDIS_DB` | No | Target database index (defaults to `0`) [orchestrator/config.py:68]() |
 
-**Sources:** [orchestrator/config.py:34-79]()
+**Sources:** [orchestrator/config.py:30-81]()
 
 ---
 
-## LLM Tier Configuration (PRD-136)
+## LLM Tier Management (PRD-136)
 
-The system has collapsed fragmented LLM configurations into three canonical tiers. These are managed via the `SystemSettingsTab` in the UI and stored in the `system_settings` table.
+Per PRD-136, LLM configuration across the platform is collapsed into three clean functional tiers defined in `SettingCategory` (`orchestrator/core/models/system_settings.py`) and populated via `seed_system_settings` (`orchestrator/core/seeds/seed_system_settings.py`):
 
-| Tier | Category | Purpose |
-| :--- | :--- | :--- |
-| **Auto** | `orchestrator_llm` | The "Brain". Premium reasoning, planning, and user chat. [orchestrator/core/llm/manager.py:35-36]() |
-| **System** | `system_llm` | Internal high-volume calls (RAG, summarization, tool routing). [orchestrator/core/llm/manager.py:39-49]() |
-| **Embeddings** | `embeddings` | Vectorization and semantic search. [orchestrator/core/llm/manager.py:52]() |
+1. **Orchestrator LLM (`orchestrator_llm` / Auto)**: The high-reasoning "Brain" model (e.g., GPT-4o, Claude 3.5 Sonnet) used for user-facing chat responses and complex workflow orchestration planning [orchestrator/core/models/system_settings.py:31]().
+2. **System LLM (`system_llm`)**: A fast, economical model (e.g., GPT-4o-mini, Gemini Flash) dedicated to internal background operations: complexity assessment, memory extraction, router classification, and agent deliberation loops [orchestrator/core/models/system_settings.py:32]().
+3. **Embeddings (`embeddings`)**: The designated model configuration for vectorization, knowledge ingestion, and semantic retrieval [orchestrator/core/models/system_settings.py:33]().
 
-### LLM Resolution Logic
-The `LLMManager` resolves configurations using a tiered strategy:
-1. **Tier Settings**: Fetches `provider` and `model` from the category defined in `SERVICE_CATEGORY_MAP`. [orchestrator/core/llm/manager.py:33-53]()
-2. **Credential Resolution**: Maps the provider to a secret in the `CredentialStore` using the pattern `credential_name_{provider}`. [orchestrator/core/llm/manager.py:163-180]()
-3. **Fallback**: Defaults to environment variables (e.g., `OPENAI_API_KEY`) if no database credential is found. [orchestrator/core/llm/manager.py:145-146]()
-
-**Sources:** [orchestrator/core/llm/manager.py:1-185](), [orchestrator/core/seeds/seed_system_settings.py:29-158]()
+**Sources:** [orchestrator/core/models/system_settings.py:19-34](), [orchestrator/core/seeds/seed_system_settings.py:35-158]()
 
 ---
 
-## Memory System Parameters
+## Memory System Configuration
 
-The `UnifiedMemoryService` manages a 5-layer stack. Configuration for these layers is defined in `Config` and can be overridden via system settings.
+The multi-layer memory architecture is governed by configurable parameters in `Config` (`orchestrator/config.py`) that balance retrieval precision against token overhead.
 
-### Memory Layer Configuration (L1-L3)
-| Parameter | Default | Description |
+### Key Memory Lifecycle Constants
+
+| Constant | Default | Description |
 | :--- | :--- | :--- |
-| `MEMORY_SESSION_TTL_SECONDS` | `86400` | L1 Working Memory (Redis) retention (24h). [orchestrator/config.py:85]() |
-| `MEMORY_DECAY_RATE` | `0.1` | Ebbinghaus decay rate for L2 (Short-term). [orchestrator/config.py:99]() |
-| `MEMORY_PROMOTION_MIN_IMPORTANCE` | `0.7` | Threshold for L2 $\rightarrow$ L3 (Long-term) promotion. [orchestrator/config.py:105]() |
-| `MEMORY_CACHE_TTL_SECONDS` | `300` | TTL for Mem0 search result caching in Redis. [orchestrator/config.py:89]() |
+| `MEMORY_SESSION_TTL_SECONDS` | `86400` | L1 active session time-to-live (24 hours) [orchestrator/config.py:87]() |
+| `MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS` | `3600` | Grace window following `end_session()` for final consolidation (1 hour) [orchestrator/config.py:89]() |
+| `MEMORY_CACHE_TTL_SECONDS` | `300` | Redis caching window for durable L3 search results [orchestrator/config.py:91]() |
+| `MEMORY_DECAY_RATE` | `0.004` | Hourly Ebbinghaus decay multiplier for L2 short-term memories [orchestrator/config.py:108]() |
+| `MEMORY_DECAY_ARCHIVE_THRESHOLD` | `0.3` | Score threshold below which decaying items are archived [orchestrator/config.py:110]() |
+| `MEMORY_PROMOTION_MIN_IMPORTANCE` | `0.7` | Importance gate required for automatic promotion from L2 to L3 [orchestrator/config.py:119]() |
 
-### Memory Namespacing
-All memory operations use the `MemoryNamespace` class to ensure consistent key formatting across Redis and Mem0.
+**Sources:** [orchestrator/config.py:84-134]()
 
-```python
-# Standardized namespacing implementation
-namespace = MemoryNamespace(workspace_id="ws_123")
-redis_key = namespace.session("conv_456") # mem:session:ws_123:conv_456
-mem0_user_id = namespace.agent(agent_id=7) # mem:ws_123:agent:7
+---
+
+## Auto Live & Voice Configuration (PRD-207)
+
+Auto Live powers real-time bidirectional voice communication via Retell AI. It is governed by a two-stage authorization mechanism to protect platform resources.
+
+```mermaid
+graph LR
+    subgraph "GlobalSettings"
+        AdminSwitch[""live_enabled" (SystemSetting)"]
+        RetellCreds[""retell_api_key""]
+    end
+
+    subgraph "WorkspaceSettings"
+        WSEnabled[""voice_live.enabled" (JSONB)"]
+        WSCap[""monthly_cap_minutes""]
+    end
+
+    AdminSwitch --> Gate{{"Voice Gate"}}
+    RetellCreds --> Gate
+    WSEnabled --> Gate
+    WSCap --> Gate
+    
+    Gate -->|"Pass"| VoiceCall["Mint Retell Call"]
+    Gate -->|"Fail"| Blocked["Silent/Error"]
 ```
 
-**Sources:** [orchestrator/config.py:82-124](), [orchestrator/modules/memory/unified_memory_service.py:38-117]()
+### Configuration Gates
+- **Platform Arming**: Super-administrators configure global Retell API integration and master enable flags under the `voice` settings category [orchestrator/core/models/system_settings.py:52-53]().
+- **Workspace Cap**: Individual workspaces opt in and configure `monthly_cap_minutes` ceilings to govern operational expenditure.
+
+**Sources:** [orchestrator/core/models/system_settings.py:52-53](), [frontend/components/settings/VoiceProfilesSettingsTab.tsx:146-210]()
 
 ---
 
-## Credential Management System
+## Onboarding & Wizard Configuration
 
-The `CredentialStore` provides secure storage for API keys and sensitive tokens, using the `EncryptionService` for AES-256 encryption.
+New workspaces (`is_new_workspace: true`) trigger the Business Intake Wizard [orchestrator/api/workspaces.py:54-56](). The initialization logic detects whether a workspace has non-system agents and automatically boots the onboarding state machine, setting up Firecrawl scraping and RAG ingestion pipelines to seed the initial knowledge graph and profile.
 
-### Credential Resolution Strategy
-When a service (like the LLM Manager) requests a credential, the `resolver.py` follows this priority:
-1. **Explicit Mapping**: Check `system_settings` for a key like `orchestrator_llm.credential_name_openai`. [orchestrator/core/llm/manager.py:163-170]()
-2. **Standard Pattern**: Search for `{environment}_{provider}_api`. [orchestrator/core/llm/manager.py:141]()
-3. **Environment Fallback**: Last resort check for standard env vars. [orchestrator/core/llm/manager.py:145]()
-
-### Monitoring and Audit
-Every credential access is logged to the `CredentialAuditLog` table, tracking the `workspace_id` and the identity of the requester to ensure multi-tenant isolation.
-
-**Sources:** [orchestrator/core/llm/manager.py:135-185](), [frontend/components/settings/SettingsPanel.tsx:71-74](), [orchestrator/main.py:61]()
-
----
-
-## Onboarding & Coordination Settings
-
-Specialized settings for the **Mission Pipeline** (PRD-130) and **Onboarding Agents** are managed through the `OnboardingAgentsTab`.
-
-- **Planner Configuration**: Controls `planner_max_tokens` and `planner_temperature` for the Mission decomposition stage. [frontend/components/settings/OnboardingAgentsTab.tsx:45]()
-- **Verifier Configuration**: Sets the `verification_pass_threshold` (e.g., 0.8) and `catastrophic_threshold` for the LLM-as-judge pipeline. [frontend/components/settings/OnboardingAgentsTab.tsx:47]()
-- **Agent Personas**: Allows runtime editing of `custom_persona_prompt` for onboarding agents without code changes. [frontend/components/settings/OnboardingAgentsTab.tsx:32]()
-
-**Sources:** [frontend/components/settings/OnboardingAgentsTab.tsx:20-176](), [orchestrator/api/onboarding_agents.py]()
+**Sources:** [orchestrator/api/workspaces.py:43-118](), [frontend/components/onboarding/welcome-modal.tsx:1-185]()
 
 ---

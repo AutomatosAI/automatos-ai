@@ -5,31 +5,34 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
-- [frontend/app/tools/page.tsx](frontend/app/tools/page.tsx)
-- [frontend/components/chatbot/chat-widget.tsx](frontend/components/chatbot/chat-widget.tsx)
-- [frontend/components/layout/header.tsx](frontend/components/layout/header.tsx)
-- [frontend/components/layout/main-layout.tsx](frontend/components/layout/main-layout.tsx)
-- [frontend/components/layout/mobile-sidebar.tsx](frontend/components/layout/mobile-sidebar.tsx)
-- [frontend/components/layout/sidebar.tsx](frontend/components/layout/sidebar.tsx)
-- [frontend/components/tools/my-tools-dashboard.tsx](frontend/components/tools/my-tools-dashboard.tsx)
-- [frontend/components/widgets/CodingCanvasWidget/CodeEditor.tsx](frontend/components/widgets/CodingCanvasWidget/CodeEditor.tsx)
-- [frontend/components/widgets/CodingCanvasWidget/EditorTabs.tsx](frontend/components/widgets/CodingCanvasWidget/EditorTabs.tsx)
-- [frontend/components/widgets/CodingCanvasWidget/FileExplorer.tsx](frontend/components/widgets/CodingCanvasWidget/FileExplorer.tsx)
-- [frontend/components/widgets/CodingCanvasWidget/index.tsx](frontend/components/widgets/CodingCanvasWidget/index.tsx)
-- [frontend/components/widgets/CodingCanvasWidget/useWorkspaceFiles.ts](frontend/components/widgets/CodingCanvasWidget/useWorkspaceFiles.ts)
-- [frontend/components/widgets/FileWidget/FilePreview.tsx](frontend/components/widgets/FileWidget/FilePreview.tsx)
-- [frontend/components/widgets/FileWidget/index.tsx](frontend/components/widgets/FileWidget/index.tsx)
-- [frontend/components/widgets/index.ts](frontend/components/widgets/index.ts)
-- [frontend/components/widgets/router.ts](frontend/components/widgets/router.ts)
-- [frontend/components/widgets/types.ts](frontend/components/widgets/types.ts)
-- [frontend/components/workspace/WorkspaceExplorer.tsx](frontend/components/workspace/WorkspaceExplorer.tsx)
-- [frontend/components/workspace/gallery-view/deliverable-preview.tsx](frontend/components/workspace/gallery-view/deliverable-preview.tsx)
+- [frontend/DESIGN_SYSTEM.md](frontend/DESIGN_SYSTEM.md)
+- [frontend/app/accept-invitation/page.tsx](frontend/app/accept-invitation/page.tsx)
+- [frontend/app/reset-password/page.tsx](frontend/app/reset-password/page.tsx)
+- [frontend/app/sso-callback/page.tsx](frontend/app/sso-callback/page.tsx)
+- [frontend/components/auth/sign-in-form.tsx](frontend/components/auth/sign-in-form.tsx)
+- [frontend/components/providers.tsx](frontend/components/providers.tsx)
+- [frontend/components/shared/empty-state.tsx](frontend/components/shared/empty-state.tsx)
+- [frontend/components/shared/index.ts](frontend/components/shared/index.ts)
+- [frontend/components/shared/page-header.tsx](frontend/components/shared/page-header.tsx)
+- [frontend/components/ui/dialog.tsx](frontend/components/ui/dialog.tsx)
+- [frontend/components/ui/glossary-tooltip.tsx](frontend/components/ui/glossary-tooltip.tsx)
+- [frontend/components/ui/input.tsx](frontend/components/ui/input.tsx)
+- [frontend/components/ui/select.tsx](frontend/components/ui/select.tsx)
+- [frontend/components/ui/tabs.tsx](frontend/components/ui/tabs.tsx)
+- [frontend/components/ui/theme-toggle.tsx](frontend/components/ui/theme-toggle.tsx)
+- [frontend/components/workflows/json-schema-editor.tsx](frontend/components/workflows/json-schema-editor.tsx)
+- [frontend/components/workflows/playbook-step-progress.tsx](frontend/components/workflows/playbook-step-progress.tsx)
+- [frontend/components/workflows/theater/theater-step-execution.tsx](frontend/components/workflows/theater/theater-step-execution.tsx)
+- [frontend/hooks/use-studio-theme.ts](frontend/hooks/use-studio-theme.ts)
+- [frontend/lib/design-utils.ts](frontend/lib/design-utils.ts)
+- [frontend/lib/glossary.ts](frontend/lib/glossary.ts)
+- [frontend/lib/studio-menu.ts](frontend/lib/studio-menu.ts)
+- [frontend/middleware.ts](frontend/middleware.ts)
+- [frontend/next.config.js](frontend/next.config.js)
 - [frontend/package-lock.json](frontend/package-lock.json)
 - [frontend/package.json](frontend/package.json)
-- [frontend/public/brand/jira-logo.svg](frontend/public/brand/jira-logo.svg)
-- [frontend/yarn.lock](frontend/yarn.lock)
-- [orchestrator/api/workspace_files.py](orchestrator/api/workspace_files.py)
+- [frontend/tailwind.config.ts](frontend/tailwind.config.ts)
+- [orchestrator/alembic/versions/add_clerk_invitation_id.py](orchestrator/alembic/versions/add_clerk_invitation_id.py)
 
 </details>
 
@@ -37,125 +40,156 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the technical architecture of the Automatos AI frontend application, including its Next.js structure, state management patterns, component hierarchies, and API integration layer. The frontend serves as the primary interface for managing autonomous agents, complex workflows, and multi-channel integrations.
+This document describes the technical architecture of the Automatos AI frontend application, including its Next.js structure, state management patterns, component hierarchies, and the "Studio" rebrand design system. The frontend serves as the primary interface for managing autonomous agents, complex workflows (Playbooks), and multi-agent coordination (Missions).
 
 ---
 
 ## Next.js Application Structure
 
-The frontend is built with **Next.js** using the App Router pattern. It follows a standard project structure with a clear separation between page routes, reusable components, and global providers.
+The frontend is built with **Next.js** using the App Router. It features a dual-shell architecture that supports both a "Classic" glassmorphic look and a high-editorial "Studio" theme [frontend/components/providers.tsx:93-94](). The `next.config.js` file defines build configurations, security headers, and redirects [frontend/next.config.js:13-122]().
 
 ### Project Layout
 
 ```
 frontend/
 ├── app/                          # Next.js App Router pages
-│   ├── chat/                     # Dedicated chat interface [frontend/app/chat/page.tsx:1-145]()
-│   ├── layout.tsx               # Root layout with providers [frontend/app/layout.tsx:1-29]()
-│   └── (auth)/                  # Auth route group (Clerk integration)
+│   ├── globals.css              # Design system tokens & themes [frontend/app/globals.css:1-236]()
+│   └── assignments/             # Mission & Playbook hub [frontend/app/assignments/page.tsx]()
 ├── components/                   # React components
-│   ├── layout/                  # MainLayout, Sidebar, Header [frontend/components/layout/main-layout.tsx:1-119]()
-│   ├── chatbot/                 # Chat UI and AutoWidget [frontend/components/chatbot/chat-widget.tsx:1-216]()
-│   ├── widgets/                 # Canvas-based widget system [frontend/components/widgets/types.ts:1-179]()
-│   └── ui/                      # Shadcn/ui (Radix) primitives [frontend/package.json:58-84]()
-├── hooks/                       # Custom React hooks (useAutoTour, useChat)
-├── lib/                         # Utilities & Third-party configs
-│   └── chat/                    # Chat hooks and streaming logic [frontend/components/chatbot/chat-widget.tsx:32-32]()
-└── contexts/                    # React Contexts (role-context) [frontend/components/layout/sidebar.tsx:28-28]()
+│   ├── layout/                  # MainLayout, Sidebar, StudioHeader [frontend/components/layout/main-layout.tsx:1-30]()
+│   ├── assignments/             # Studio-specific workforce components [frontend/components/assignments/studio/assignments-hub.tsx:1-41]()
+│   └── ui/                      # Shadcn/ui primitives [frontend/tailwind.config.ts:38-42]()
+├── hooks/                       # Theme detection & API hooks [frontend/hooks/use-studio-theme.ts:1-43]()
+├── lib/                         # Menu definitions & API client [frontend/lib/studio-menu.ts:1-72]()
+└── contexts/                    # RBAC and workspace contexts [frontend/components/providers.tsx:89-100]()
 ```
 
-**Sources:** [frontend/app/chat/page.tsx:1-145](), [frontend/components/layout/main-layout.tsx:1-119](), [frontend/package.json:1-142]()
+**Sources:** [frontend/app/globals.css:1-236](), [frontend/components/layout/main-layout.tsx:1-30](), [frontend/lib/studio-menu.ts:1-72](), [frontend/next.config.js:13-122]()
 
-### Layout Hierarchy
+### Theme & Layout Orchestration
 
-The application uses a nested layout strategy. The `MainLayout` provides the persistent desktop `Sidebar` [frontend/components/layout/sidebar.tsx:127-148](), a `Header` containing the `NotificationBell` [frontend/components/layout/header.tsx:7-93](), and a floating `AutoWidget` assistant [frontend/components/layout/main-layout.tsx:112-116](). For mobile users, it dynamically switches to a `MobileSidebar` within a Radix `Sheet` [frontend/components/layout/main-layout.tsx:80-89]().
+The `Providers` component wraps the entire application, providing context for authentication, theming, and data fetching [frontend/components/providers.tsx:76-114](). It includes a `ThemeProvider` that supports `light`, `dark`, `matte`, and `studio` themes, with the `studio` theme being activated via a URL flag and persisted in local storage [frontend/components/providers.tsx:90-94](), [frontend/hooks/use-studio-theme.ts:16-26]().
 
-**Sources:** [frontend/components/layout/main-layout.tsx:61-119](), [frontend/components/layout/sidebar.tsx:127-176](), [frontend/components/layout/mobile-sidebar.tsx:114-124]()
+**Sources:** [frontend/components/providers.tsx:76-114](), [frontend/hooks/use-studio-theme.ts:16-26]()
 
 ---
 
 ## State Management & Data Fetching
 
-The frontend uses a **hybrid state management approach** combining React Query for server state and React Context for workspace/role scoping.
+The application uses **TanStack React Query** for server state management, configured with a 1-minute default `staleTime` [frontend/components/providers.tsx:78-85](). Client-side state is managed using a combination of React Context and Zustand stores.
 
 ### State Architecture Diagram
 
 ```mermaid
 graph TB
-    subgraph "Server State (@tanstack/react-query)"
-        QueryCache["QueryCache<br/>(staleTime: 1m)"]
-        MutationManager["MutationManager<br/>(invalidateQueries)"]
+    subgraph "Frontend Application"
+        UI["UI Components"]
+        Hooks["React Query Hooks<br/>(e.g., useMissions, usePlaybooks)"]
+        ZustandStores["Zustand Stores<br/>(Client-side state)"]
     end
-    
-    subgraph "Client State"
-        WorkspaceContext["Workspace Scoping<br/>(X-Workspace-ID)"]
-        RoleProvider["RoleProvider<br/>(isAdmin Check)"]
-        MissionStore["Zustand MissionStore<br/>(Plan Mode)"]
+
+    subgraph "Data Flow"
+        UI --> Hooks
+        Hooks --> QueryClient["QueryClient<br/>(staleTime: 1m)"]
+        QueryClient --> APIClient["API Client<br/>(Clerk token, ws header)"]
+        APIClient --> BackendAPI["Backend API<br/>(FastAPI)"]
+        UI --> ZustandStores
     end
-    
-    subgraph "API & Auth"
-        ClerkAuth["Clerk SDK<br/>(JWT Injection)"]
-        APIClient["apiClient.ts<br/>(Backend Proxy)"]
+
+    subgraph "Context Providers"
+        AuthBoundary["AuthBoundary<br/>(ClerkProvider / LocalAuthProvider)"]
+        RoleProvider["RoleProvider<br/>(RBAC context)"]
+        ThemeProvider["ThemeProvider<br/>(Theme context)"]
+        WorkspaceProvider["WorkspaceProvider<br/>(Workspace ID context)"]
     end
-    
-    UI["UI Components"] --> QueryCache
-    UI --> MissionStore
-    UI --> RoleProvider
-    QueryCache --> APIClient
-    APIClient --> ClerkAuth
-    APIClient --> WorkspaceContext
+
+    AuthBoundary --> RoleProvider
+    RoleProvider --> ThemeProvider
+    ThemeProvider --> WorkspaceProvider
+    WorkspaceProvider --> QueryClient
+    WorkspaceProvider --> UI
 ```
 
-**Sources:** [frontend/package.json:88-135](), [frontend/components/layout/sidebar.tsx:130-137](), [frontend/app/chat/page.tsx:14-25]()
+**Sources:** [frontend/components/providers.tsx:78-113](), [frontend/hooks/use-studio-theme.ts:1-43](), [frontend/lib/api-client.ts]()
 
-### Navigation & RBAC
+### Authentication Editions
 
-Navigation items are filtered based on the user's `systemRole`. Admin-only pages like `Workspace Admin` or `Settings` are conditionally rendered using the `isAdmin` flag from `useSystemRole` [frontend/components/layout/sidebar.tsx:134-137]().
+The frontend supports two authentication modes defined in `AuthBoundary` [frontend/components/providers.tsx:29-75]():
+*   **SaaS Edition:** Uses **Clerk** for JWT management and user profiles [frontend/components/providers.tsx:33-74](). The `middleware.ts` file uses `clerkMiddleware` to protect routes [frontend/middleware.ts:20-23]().
+*   **Local Edition:** Uses `LocalAuthProvider`, a no-op token getter for self-hosted environments [frontend/components/providers.tsx:30-32](). In this edition, `middleware.ts` acts as a pass-through, making all routes public [frontend/middleware.ts:27-27]().
 
-**Sources:** [frontend/components/layout/sidebar.tsx:35-125](), [frontend/components/layout/mobile-sidebar.tsx:116-122]()
+**Sources:** [frontend/components/providers.tsx:29-75](), [frontend/middleware.ts:1-33]()
 
 ---
 
 ## UI Component Patterns
 
-Automatos AI utilizes a "Glassmorphism" design system, implemented via Tailwind CSS and Framer Motion for smooth transitions.
+### Studio Design System
 
-### The Widget System (PRD-38.1)
+The "Studio" theme introduces an editorial-first design language characterized by:
+*   **Typography:** Serif headlines (`Tiempos Headline`) paired with Mono detail surfaces (`JetBrains Mono`) [frontend/tailwind.config.ts:17-30]().
+*   **Editorial Headers:** The `PageHeader` component supports an `eyebrow` (mono uppercase) and a `lede` (relaxed paragraph) to establish context [frontend/components/shared/page-header.tsx:38-86]().
+*   **Color Palette:** A "Cream Paper" aesthetic using CSS variables like `--background` and `--primary` (near-black) [frontend/app/globals.css:210-225]().
+*   **Shadcn/ui:** The project leverages Shadcn/ui primitives for consistent and accessible UI components [frontend/package.json:58-83]().
 
-The application features a flexible widget architecture used in the Command Center and Chat Canvas. All widgets implement `WidgetBaseProps` and are registered in a central registry [frontend/components/widgets/types.ts:121-148]().
+**Sources:** [frontend/tailwind.config.ts:17-30](), [frontend/components/shared/page-header.tsx:38-86](), [frontend/app/globals.css:210-225](), [frontend/package.json:58-83]()
 
-*   **CodingCanvasWidget:** A Monaco-based file browser that proxies requests to the workspace worker [frontend/components/widgets/CodingCanvasWidget/index.tsx:29-73]().
-*   **AutoWidget:** A persistent floating assistant that tracks `currentPage` context to provide relevant help [frontend/components/chatbot/chat-widget.tsx:41-62]().
+### Navigation Mapping
 
-### Workspace File Integration
-
-The frontend interacts with sandboxed environments through a proxy API that handles directory listing and file content retrieval [orchestrator/api/workspace_files.py:52-92]().
+The navigation system uses a single source of truth in `STUDIO_MENU_PRIMARY`, grouping routes into `OPERATIONS`, `WORKFORCE`, and `WORKSPACE` [frontend/lib/studio-menu.ts:55-72](). The `resolveActiveMenuId` function maps current pathnames to active menu items [frontend/lib/studio-menu.ts:105-125]().
 
 ```mermaid
 graph LR
-    subgraph "Frontend Space"
-        Explorer["WorkspaceExplorer.tsx"]
-        Hook["useWorkspaceFiles"]
-        Widget["CodingCanvasWidget"]
+    subgraph "Natural Language Concepts"
+        Operations["Daily Operations"]
+        Workforce["Agent & Capability Management"]
+        WorkspaceAdmin["Workspace Administration"]
     end
-    
-    subgraph "API Layer (Orchestrator)"
-        FilesAPI["GET /api/workspaces/:id/files"]
-        ExecAPI["POST /api/workspaces/:id/exec"]
+
+    subgraph "Frontend Code Entities (lib/studio-menu.ts)"
+        Chat["id: 'chat'<br/>href: '/chat'"]
+        CommandCentre["id: 'cmd'<br/>href: '/command-center'"]
+        Assignments["id: 'assign'<br/>href: '/assignments'"]
+        Deliverables["id: 'deliv'<br/>href: '/deliverables'"]
+
+        AgentManagement["id: 'agents'<br/>href: '/agents'"]
+        ToolsIntegrations["id: 'tools'<br/>href: '/tools'"]
+        KnowledgeBase["id: 'kb'<br/>href: '/documents'"]
+        Marketplace["id: 'market'<br/>href: '/marketplace'"]
+
+        TeamManagement["id: 'team'<br/>href: '/team'"]
+        Analytics["id: 'analytics'<br/>href: '/analytics'"]
+        WorkspaceAdminPage["id: 'admin'<br/>href: '/admin/workspaces'"]
     end
-    
-    subgraph "Execution Space"
-        Worker["WorkspaceWorker<br/>(Sandboxed FS)"]
-    end
-    
-    Explorer --> Hook
-    Hook --> FilesAPI
-    Widget --> Explorer
-    FilesAPI --> Worker
-    ExecAPI --> Worker
+
+    Operations --> Chat
+    Operations --> CommandCentre
+    Operations --> Assignments
+    Operations --> Deliverables
+
+    Workforce --> AgentManagement
+    Workforce --> ToolsIntegrations
+    Workforce --> KnowledgeBase
+    Workforce --> Marketplace
+
+    WorkspaceAdmin --> TeamManagement
+    WorkspaceAdmin --> Analytics
+    WorkspaceAdmin --> WorkspaceAdminPage
+
+    style Chat fill:#fff,stroke:#333,stroke-width:2px
+    style CommandCentre fill:#fff,stroke:#333,stroke-width:2px
+    style Assignments fill:#fff,stroke:#333,stroke-width:2px
+    style Deliverables fill:#fff,stroke:#333,stroke-width:2px
+    style AgentManagement fill:#fff,stroke:#333,stroke-width:2px
+    style ToolsIntegrations fill:#fff,stroke:#333,stroke-width:2px
+    style KnowledgeBase fill:#fff,stroke:#333,stroke-width:2px
+    style Marketplace fill:#fff,stroke:#333,stroke-width:2px
+    style TeamManagement fill:#fff,stroke:#333,stroke-width:2px
+    style Analytics fill:#fff,stroke:#333,stroke-width:2px
+    style WorkspaceAdminPage fill:#fff,stroke:#333,stroke-width:2px
 ```
 
-**Sources:** [frontend/components/widgets/CodingCanvasWidget/index.tsx:66-71](), [orchestrator/api/workspace_files.py:9-12](), [frontend/components/widgets/CodingCanvasWidget/useWorkspaceFiles.ts:1-13]()
+**Sources:** [frontend/lib/studio-menu.ts:55-72](), [frontend/lib/studio-menu.ts:105-125]()
 
 ---
 
@@ -163,12 +197,13 @@ graph LR
 
 For deep technical details on specific frontend subsystems, refer to the following child pages:
 
-*   [Application Structure](#19.1) — App router, page components, layout hierarchy, and navigation structure. For details, see [Application Structure](#19.1).
-*   [State Management](#19.2) — React Query hooks, query keys with `wsScope`, cache invalidation, and optimistic updates. For details, see [State Management](#19.2).
-*   [API Client](#19.3) — `apiClient` implementation, authentication injection, and workspace context. For details, see [API Client](#19.3).
-*   [UI Component Patterns](#19.4) — Shared components (StatsBar, modals), Framer Motion animations, and Shadcn/ui integration. For details, see [UI Component Patterns](#19.4).
-*   [Navigation & Layout](#19.5) — Sidebar navigation, role-based filtering, page context tracking, and Shepherd.js tours. For details, see [Navigation & Layout](#19.5).
+*   [Application Structure](#19.1) — Next.js App router, page components, and layout hierarchy.
+*   [State Management](#19.2) — React Query hooks, query keys with `wsScope`, and optimistic updates.
+*   [API Client](#19.3) — `apiClient` implementation, authentication injection, and workspace context.
+*   [UI Component Patterns & Design System](#19.4) — Shared components (StatsBar, page-header, item-card, empty-state), Shadcn/ui primitives, Tailwind theme, premium icons and icon registry, glossary tooltips, DESIGN_SYSTEM.md.
+*   [Navigation & Layout](#19.5) — Sidebar navigation, role-based filtering, and page context tracking.
+*   [Settings UI](#19.6) — SettingsPanel and its tabs: System, LLM models, system LLM, credentials, channels, webhooks, notifications, API keys, session mode, widget SDK, icons.
 
-**Sources:** [frontend/components/layout/main-layout.tsx:1-119](), [frontend/components/widgets/types.ts:1-179](), [frontend/package.json:1-142]()
+**Sources:** [frontend/components/providers.tsx:1-114]()
 
 ---

@@ -5,14 +5,20 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/alembic/versions/wave3_escalation_level.py](orchestrator/alembic/versions/wave3_escalation_level.py)
-- [orchestrator/core/services/escalation.py](orchestrator/core/services/escalation.py)
-- [orchestrator/modules/tools/discovery/actions_reports.py](orchestrator/modules/tools/discovery/actions_reports.py)
-- [orchestrator/modules/tools/discovery/actions_workspace.py](orchestrator/modules/tools/discovery/actions_workspace.py)
-- [orchestrator/modules/tools/discovery/handlers_reports.py](orchestrator/modules/tools/discovery/handlers_reports.py)
-- [orchestrator/modules/tools/discovery/handlers_workspace.py](orchestrator/modules/tools/discovery/handlers_workspace.py)
+- [orchestrator/api/chat.py](orchestrator/api/chat.py)
+- [orchestrator/api/routing.py](orchestrator/api/routing.py)
+- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
+- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
+- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
 - [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
-- [orchestrator/services/report_service.py](orchestrator/services/report_service.py)
+- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
+- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
+- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
 
 </details>
 
@@ -20,259 +26,122 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The Heartbeat & Proactive Assistant system enables scheduled, autonomous checks for both workspace-level orchestrator health and individual agent task completion. This system transforms Automatos from reactive to proactive, allowing agents to monitor assigned work and the orchestrator to perform periodic workspace health assessments and autonomous actions.
+The Heartbeat & Proactive Assistant system enables scheduled, autonomous checks for both workspace-level orchestrator health, individual agent task completion, and active watch monitors [orchestrator/services/heartbeat_service.py:1-10](). This system transforms Automatos from a purely reactive platform into a proactive operating system, allowing agents to execute assigned work, the orchestrator to perform periodic workspace health assessments, and the watch subsystem to trigger autonomous escalations [orchestrator/services/heartbeat_service.py:135-142]().
 
-For multi-channel message handling that enables heartbeat notifications, see [Channel Integrations](#12). For agent execution details, see [Agents](#5). For tool execution used during heartbeat ticks, see [Tools & Integrations](#8). For the unified notification pipeline used to alert users of heartbeat completions, see [Unified Notification System](#24).
+As a PARENT page, this document provides a high-level overview of the heartbeat and proactive subsystems. For deep technical details, implementation specifics, and API parameters, see the child pages:
+- [Heartbeat Architecture](#11.1) — `HeartbeatService`, APScheduler with Redis job store, cron trigger conversion, active hours guard, primitive health probes.
+- [Orchestrator Heartbeat](#11.2) — LLM-powered vs shallow mode, tool loop caps, proactive levels (`silent`, `notify`, `act_notify`, `autonomous`).
+- [Agent Heartbeat](#11.3) — `BoardTask` integration, status transitions, task context injection.
+- [Configuration & Scheduling](#11.4) — Heartbeat config storage, interval/cron setup, timezone handling, `UnifiedScheduler` locking.
+- [Heartbeat API Reference](#11.5) — API endpoints for config, last result, history, run now, orchestrator tick.
+- [Watches & Autonomous Monitoring](#11.6) — PRD-204 watch subsystem: `watch_service` registry, `watch_ticker`, `watch_decider` policy table, watch actions, rerun, `escalation_service`, watch notifications, and the watchlist UI tab.
+- [Auto Reporting & Digests](#11.7) — `auto_reporting` service, auto-cadence, `digest_service` with feedback, `report_service`, and agent reports surfaced in Activity.
 
-**Sources:** [orchestrator/services/heartbeat_service.py:1-10](), [orchestrator/services/heartbeat_service.py:24-31]()
+**Sources:** [orchestrator/services/heartbeat_service.py:1-10](), [orchestrator/services/heartbeat_service.py:135-142]()
 
 ---
 
 ## Architecture Overview
 
-The heartbeat system consists of two primary components: **orchestrator heartbeats** (workspace-level health checks) and **agent heartbeats** (task completion monitors). Both use `APScheduler` with cron triggers for precise scheduling and respect active-hours configurations to prevent off-hours resource consumption.
+The heartbeat and proactive scheduling architecture relies on `APScheduler` managed centrally via `HeartbeatService` [orchestrator/services/heartbeat_service.py:135-147](). It coordinates periodic checks across multiple background channels, ensuring resource governance and multi-tenant isolation.
 
-### System Topology
+### System Topology: Natural Language to Code Entities
 
 ```mermaid
 graph TB
-    subgraph "Scheduling Layer"
-        Scheduler["APScheduler<br/>(AsyncIOScheduler)"]
-        JobStore["Redis JobStore<br/>Persistent Jobs"]
-        Scheduler --> JobStore
+    Scheduler["AsyncIOScheduler"] --> JobStore["RedisJobStore"]
+    Scheduler --> HB["HeartbeatService"]
+    
+    subgraph "Execution Loops"
+        HB --> OrchestratorTick["_orchestrator_tick()"]
+        HB --> AgentTick["_agent_tick()"]
+        HB --> WatchTicker["watch_ticker"]
     end
     
-    subgraph "Heartbeat Service"
-        HB["HeartbeatService"]
-        OrchestratorTick["_orchestrator_tick()"]
-        AgentTick["_agent_tick()"]
-        ActiveHoursGuard["_is_within_active_hours()"]
-        
-        HB --> OrchestratorTick
-        HB --> AgentTick
-        HB --> ActiveHoursGuard
+    subgraph "Core Services"
+        OrchestratorTick --> ContextSvc["ContextService"]
+        OrchestratorTick --> PlatformExec["PlatformActionExecutor"]
+        AgentTick --> AgentFactory["AgentFactory"]
+        WatchTicker --> WatchService["watch_service"]
     end
     
-    subgraph "Orchestrator Tick Pipeline"
-        LLMMode["_orchestrator_tick_llm()"]
-        ShallowMode["_orchestrator_tick_shallow()"]
-        ContextSvc["ContextService<br/>HEARTBEAT mode"]
-        PlatformActions["PlatformActionExecutor<br/>47 platform_* tools"]
-        
-        OrchestratorTick --> LLMMode
-        OrchestratorTick --> ShallowMode
-        LLMMode --> ContextSvc
-        LLMMode --> PlatformActions
+    subgraph "Storage and Telemetry"
+        PlatformExec --> HBResults["heartbeat_results"]
+        AgentFactory --> BoardTasks["BoardTask"]
+        WatchService --> WatchDecider["watch_decider"]
     end
-    
-    subgraph "Agent Tick Pipeline"
-        BoardScan["BoardTask Query<br/>status=assigned"]
-        AgentFactory["AgentFactory.execute_with_prompt()"]
-        StatusUpdate["Update BoardTask<br/>assigned → in_progress → done"]
-        
-        AgentTick --> BoardScan
-        BoardScan --> AgentFactory
-        AgentFactory --> StatusUpdate
-    end
-    
-    subgraph "Storage & Delivery"
-        HeartbeatResults["heartbeat_results table"]
-        NotificationDelivery["_deliver_notification()"]
-        ChannelManager["ChannelManager<br/>Multi-channel delivery"]
-        ReportSvc["ReportService<br/>platform_submit_report"]
-        
-        OrchestratorTick --> HeartbeatResults
-        AgentTick --> HeartbeatResults
-        OrchestratorTick --> NotificationDelivery
-        NotificationDelivery --> ChannelManager
-        AgentTick --> ReportSvc
-    end
-    
-    Scheduler -->|"schedule_orchestrator_heartbeat()"| OrchestratorTick
-    Scheduler -->|"schedule_agent_heartbeat()"| AgentTick
 ```
 
-**Sources:** [orchestrator/services/heartbeat_service.py:24-91](), [orchestrator/services/heartbeat_service.py:173-222](), [orchestrator/services/report_service.py:149-172]()
+**Sources:** [orchestrator/services/heartbeat_service.py:135-184](), [orchestrator/modules/tools/discovery/platform_executor.py:1-10]()
 
 ---
 
-## Heartbeat Service
+## 11.1 Heartbeat Architecture
 
-The `HeartbeatService` class manages all heartbeat scheduling and execution. It initializes with a shared `AsyncIOScheduler` instance and loads active heartbeat configurations from the database on startup. It enforces rate limits, such as a maximum of 5 concurrent heartbeats per workspace.
+The `HeartbeatService` initializes within an asynchronous scheduler lifecycle, using either an in-memory job store or a persistent `RedisJobStore` [orchestrator/services/heartbeat_service.py:164-180](). It includes active hours guards to suppress notifications during off-hours and primitive health probes (`emit_primitive_finding`) that record the real-time operational status (`green`, `degraded`, `down`) of core system components like chat, memory, and RAG into `heartbeat_results` [orchestrator/services/heartbeat_service.py:44-123]().
 
-### Initialization and Lifecycle
+For implementation details, see [Heartbeat Architecture](#11.1).
 
-| Method | Purpose |
-|--------|---------|
-| `start(scheduler)` | Initialize scheduler, load configs, schedule daily summary [orchestrator/services/heartbeat_service.py:43-84]() |
-| `stop()` | Remove heartbeat jobs, shutdown owned scheduler [orchestrator/services/heartbeat_service.py:85-91]() |
-| `_load_heartbeat_configs()` | Query database for active heartbeat settings [orchestrator/services/heartbeat_service.py:96-133]() |
-
-The service supports both standalone mode (creates its own scheduler with `RedisJobStore`) and shared mode where it integrates with a system-wide scheduler.
-
-**Sources:** [orchestrator/services/heartbeat_service.py:24-91]()
-
-### Cron Trigger Conversion
-
-The service converts interval minutes to `CronTrigger` expressions for predictable execution at fixed times (e.g., top of the hour):
-
-```mermaid
-graph LR
-    Input["interval_minutes"]
-    Convert["_interval_to_cron_trigger()"]
-    Output["CronTrigger"]
-    
-    Input -->|"15 min"| Convert
-    Convert -->|"'0,15,30,45 * * * *'"| Output
-    
-    Input -->|"60 min"| Convert
-    Convert -->|"'0 * * * *'"| Output
-    
-    Input -->|"1440 min"| Convert
-    Convert -->|"'0 9 * * *'"| Output
-```
-
-**Sources:** [orchestrator/services/heartbeat_service.py:139-171]()
+**Sources:** [orchestrator/services/heartbeat_service.py:44-123](), [orchestrator/services/heartbeat_service.py:164-180]()
 
 ---
 
-## Orchestrator Heartbeat
+## 11.2 Orchestrator Heartbeat
 
-Orchestrator heartbeats perform workspace-level health checks. They use `ContextService` in `HEARTBEAT` mode to build a system prompt and execute a tool loop (max 5 iterations) to analyze workspace health and perform maintenance tasks.
+Orchestrator heartbeats run workspace-level health evaluations. Depending on configuration, they operate in an LLM-powered mode using `ContextService` (`HEARTBEAT` mode) or a shallow mode [orchestrator/services/heartbeat_service.py:382-546](). They enforce strict tool loop iteration caps and execute actions according to four proactive tiers: `silent`, `notify`, `act_notify`, and `autonomous`.
 
-### LLM-Powered Tick
-
-The orchestrator tick executes via `_orchestrator_tick_llm()`, which handles complex multi-turn interactions and context trimming to avoid token overflow while analyzing workspace state.
-
-```mermaid
-sequenceDiagram
-    participant Scheduler
-    participant HB as HeartbeatService
-    participant CS as ContextService
-    participant LLM as LLMManager
-    participant PE as PlatformActionExecutor
-    participant DB as Database
-    
-    Scheduler->>HB: _orchestrator_tick(workspace_id, config)
-    HB->>HB: _is_within_active_hours()
-    
-    HB->>CS: build_context(mode=HEARTBEAT)
-    CS-->>HB: ContextResult(system_prompt, tools)
-    
-    HB->>LLM: generate_response(messages, tools)
-    
-    loop Tool Loop (max 5 iterations)
-        LLM-->>HB: response with tool_calls
-        HB->>PE: execute(tool_name, params)
-        PE-->>HB: tool_result
-        HB->>LLM: continue with tool results
-    end
-    
-    LLM-->>HB: final response
-    HB->>DB: store_heartbeat_result()
-```
+For details on configuration and execution modes, see [Orchestrator Heartbeat](#11.2).
 
 **Sources:** [orchestrator/services/heartbeat_service.py:382-546]()
 
-### Tool Loop Implementation
+---
 
-The loop in `_orchestrator_tick_llm()` manages message accumulation and exchange boundary detection to keep the context window clean while allowing the orchestrator to call `platform_*` actions to inspect the system.
+## 11.3 Agent Heartbeat
 
-**Sources:** [orchestrator/services/heartbeat_service.py:461-537]()
+Agent heartbeats monitor the `BoardTask` table for items in an `assigned` status [orchestrator/services/heartbeat_service.py:591-735](). Upon pickup, they transition tasks to `in_progress`, inject task context into `AgentFactory.execute_with_prompt()`, and advance the task status to `done` upon completion without requiring interactive user chat sessions.
+
+For execution flows and state transitions, see [Agent Heartbeat](#11.3).
+
+**Sources:** [orchestrator/services/heartbeat_service.py:591-735]()
 
 ---
 
-## Agent Heartbeat
+## 11.4 Configuration & Scheduling
 
-Agent heartbeats monitor the `BoardTask` table for work assigned to specific agents and execute tasks autonomously. This allows agents to work on long-running tasks without direct user interaction in a chat.
+Heartbeat rules, intervals, and cron expressions are stored within database settings (`workspaces.settings` and `agents.configuration`) [orchestrator/services/heartbeat_service.py:235-249](). The scheduling layer converts simple interval minutes into precise `CronTrigger` schedules, with timezone handling managed under the `UnifiedScheduler` locking mechanism.
 
-### Task Execution Flow
+For parameter schemas and setup instructions, see [Configuration & Scheduling](#11.4).
 
-```mermaid
-graph TB
-    Trigger["Agent Heartbeat Trigger"]
-    ActiveHours{"Within Active Hours?"}
-    
-    subgraph "Task Discovery"
-        Query["Query BoardTask<br/>WHERE status='assigned'"]
-        TaskContext["Build task_context"]
-    end
-    
-    subgraph "Agent Execution"
-        StatusInProgress["Update status: 'in_progress'"]
-        ExecutePrompt["AgentFactory.execute_with_prompt()"]
-        StatusDone["Update status: 'done'"]
-    end
-    
-    subgraph "Output Handling"
-        ReportSvc["ReportService.create_report()"]
-        PlatformAction["platform_submit_report"]
-    end
-    
-    Trigger --> ActiveHours
-    ActiveHours -->|Yes| Query
-    Query --> TaskContext
-    TaskContext --> StatusInProgress
-    StatusInProgress --> ExecutePrompt
-    ExecutePrompt --> StatusDone
-    StatusDone --> PlatformAction
-    PlatformAction --> ReportSvc
-```
-
-**Sources:** [orchestrator/services/heartbeat_service.py:591-735](), [orchestrator/modules/tools/discovery/handlers_reports.py:14-92]()
-
-### Escalation and Reporting
-During heartbeat runs, agents use `platform_submit_report` to persist findings. These reports are classified using an `EscalationLevel` (L0-L4) to determine triage priority.
-- **L0 (FYI):** Informational standups.
-- **L2 (APPROVAL):** Recommendations requiring human decision.
-- **L3 (URGENT):** Critical errors or budget exceeded.
-
-**Sources:** [orchestrator/core/services/escalation.py:26-31](), [orchestrator/modules/tools/discovery/actions_reports.py:29-38]()
+**Sources:** [orchestrator/services/heartbeat_service.py:235-249](), [orchestrator/services/heartbeat_service.py:333-366]()
 
 ---
 
-## Configuration & Scheduling
+## 11.5 Heartbeat API Reference
 
-Heartbeat configurations are stored as JSON blobs within the `agents` and `workspaces` tables, allowing per-agent and per-workspace customization of intervals and prompts.
+The backend exposes administrative and monitoring endpoints for managing heartbeat configuration, inspecting last execution results, viewing telemetry history, triggering immediate manual runs, and invoking orchestrator ticks [orchestrator/api/routing.py:1-40]().
 
-| Scope | Storage Location |
-|-------|-----------------|
-| Orchestrator | `workspaces.settings['orchestrator']['heartbeat']` [orchestrator/services/heartbeat_service.py:116-121]() |
-| Agent | `agents.configuration['heartbeat']` [orchestrator/services/heartbeat_service.py:126-131]() |
+For API routes and payload schemas, see [Heartbeat API Reference](#11.5).
 
-### Scheduling API
-
-The `HeartbeatService` provides methods to dynamically schedule or remove jobs when configurations change via the UI:
-- `schedule_orchestrator_heartbeat(workspace_id, hb_config)` [orchestrator/services/heartbeat_service.py:173-199]()
-- `schedule_agent_heartbeat(agent_id, workspace_id, hb_config)` [orchestrator/services/heartbeat_service.py:200-232]()
+**Sources:** [orchestrator/api/routing.py:1-40]()
 
 ---
 
-## Heartbeat API Reference
+## 11.6 Watches & Autonomous Monitoring
 
-The heartbeat API provides endpoints for managing configurations, triggering manual runs, and monitoring execution history.
+Introduced under PRD-204, the watch subsystem provides persistent autonomous monitoring of workspace assets and data conditions [orchestrator/modules/tools/discovery/platform_actions.py:49-50](). It consists of the `watch_service` registry, `watch_ticker`, the `watch_decider` policy table, automated rerun actions, `escalation_service` for alerts, and a dedicated watchlist tab in the user interface [orchestrator/modules/tools/discovery/platform_executor.py:204-209]().
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/agents/{agent_id}/config` | GET/PUT | Manage agent heartbeat settings |
-| `/api/agents/{agent_id}/last` | GET | Get most recent result for an agent |
-| `/api/orchestrator/run` | POST | Trigger immediate orchestrator tick |
-| `/api/orchestrator/history` | GET | List recent orchestrator results |
+For operational semantics and policy configuration, see [Watches & Autonomous Monitoring](#11.6).
+
+**Sources:** [orchestrator/modules/tools/discovery/platform_actions.py:49-50](), [orchestrator/modules/tools/discovery/platform_executor.py:204-209]()
 
 ---
 
-## Results and Notifications
+## 11.7 Auto Reporting & Digests
 
-### Heartbeat Results
+The auto-reporting service (`auto_reporting`) manages periodic summary generation and delivery cadences [orchestrator/modules/tools/discovery/platform_actions.py:39](). Working alongside `digest_service` (incorporating user feedback loops) and `report_service`, it aggregates agent execution reports and surfaces them directly within the Command Centre activity feed and notifications [orchestrator/modules/tools/discovery/platform_executor.py:154-160]().
 
-All executions store detailed telemetry in the `heartbeat_results` table, including `findings` (the LLM's analysis), `actions_taken` (tools called), and financial metrics like `cost` and `tokens_used`.
+For report formatting and cadence settings, see [Auto Reporting & Digests](#11.7).
 
-**Sources:** [orchestrator/services/heartbeat_service.py:346-380]()
-
-### Notification Delivery
-
-The `_deliver_notification()` method routes results to configured destinations. It supports internal orchestrator logging, direct webhooks, or external channels like Slack and Telegram via the `ChannelManager`. It also triggers the `NotificationDispatcher` for in-app alerts.
-
-**Sources:** [orchestrator/services/heartbeat_service.py:737-780]()
+**Sources:** [orchestrator/modules/tools/discovery/platform_actions.py:39](), [orchestrator/modules/tools/discovery/platform_executor.py:154-160]()
 
 ---

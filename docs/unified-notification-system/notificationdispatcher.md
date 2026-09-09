@@ -5,17 +5,25 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/core/security/rate_limiter.py](orchestrator/core/security/rate_limiter.py)
+- [frontend/app/layout.tsx](frontend/app/layout.tsx)
+- [frontend/components/activity/widgets/command-centre-dashboard.tsx](frontend/components/activity/widgets/command-centre-dashboard.tsx)
+- [frontend/components/activity/widgets/decisions-needed-widget.tsx](frontend/components/activity/widgets/decisions-needed-widget.tsx)
+- [frontend/components/activity/widgets/playbook-metrics-widget.tsx](frontend/components/activity/widgets/playbook-metrics-widget.tsx)
+- [frontend/components/activity/widgets/self-learning-health-widget.tsx](frontend/components/activity/widgets/self-learning-health-widget.tsx)
+- [frontend/hooks/use-kpi-api.ts](frontend/hooks/use-kpi-api.ts)
+- [frontend/hooks/use-learning-api.ts](frontend/hooks/use-learning-api.ts)
+- [orchestrator/api/kpi_api.py](orchestrator/api/kpi_api.py)
 - [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
 - [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
+- [orchestrator/modules/memory/tool_outcome_capture.py](orchestrator/modules/memory/tool_outcome_capture.py)
 - [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
 - [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
-- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
-- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
+- [orchestrator/tests/test_p2w2_ask_notification.py](orchestrator/tests/test_p2w2_ask_notification.py)
+- [orchestrator/tests/test_tool_outcome_capture.py](orchestrator/tests/test_tool_outcome_capture.py)
 
 </details>
+
+
 
 
 
@@ -23,13 +31,14 @@ The `NotificationDispatcher` is the central service responsible for the unified 
 
 ## Architecture Overview
 
-The dispatcher follows a "fire-and-forget" non-blocking pattern to ensure that notification delivery never interferes with the primary execution flow of agents or workflows. It is designed to be transaction-aware, where in-app notification records are staged but not committed by the dispatcher itself [orchestrator/core/services/notification_dispatcher.py:9-13]().
+The dispatcher follows a "fire-and-forget" non-blocking pattern to ensure that notification delivery never interferes with the primary execution flow of agents or workflows [orchestrator/core/services/notification_dispatcher.py:9-28]().
 
 ### Dispatch Flow
-1.  **Event Capture**: A service (e.g., `CoordinatorService` or `HeartbeatService`) calls the `dispatch()` method [orchestrator/core/services/notification_dispatcher.py:87-111]().
-2.  **Preference Resolution**: The dispatcher fetches a merged list of preferences via `_get_preferences()`, resolving overrides where user-specific settings take precedence over workspace defaults [orchestrator/core/services/notification_dispatcher.py:125-135]().
-3.  **Fan-out**: The event is fanned out to all enabled destinations: `in_app`, `telegram`, `slack`, or `webhook` [orchestrator/core/services/notification_dispatcher.py:164-210]().
-4.  **Transaction Handling**: For `in_app` notifications, the dispatcher executes a raw SQL insert via `_insert_in_app()` but **does not commit**. The caller owns the transaction, ensuring that if the main work fails, the notification is rolled back [orchestrator/core/services/notification_dispatcher.py:11-13]().
+1.  **Event Capture**: A service calls `dispatch()` with an `event_type` and metadata [orchestrator/core/services/notification_dispatcher.py:108-120]().
+2.  **Auto-Reporting Resolution (Wave 2)**: The dispatcher checks `workspace.settings.auto_reporting` for global overrides, quiet hours, and specific routing rules [orchestrator/core/services/notification_dispatcher.py:137-145](). The `_load_auto_reporting` method is used to retrieve these settings [orchestrator/core/services/notification_dispatcher.py:137]().
+3.  **Preference Resolution**: If no auto-reporting override exists, the dispatcher fetches a merged list of preferences from the `notification_preferences` table, resolving overrides where user-specific settings take precedence over workspace defaults [orchestrator/core/services/notification_dispatcher.py:147-167]().
+4.  **Fan-out**: The event is fanned out to every enabled destination (In-App, Telegram, Slack, Webhook) [orchestrator/core/services/notification_dispatcher.py:183-226]().
+5.  **Transaction Handling**: For `in_app` notifications, the dispatcher inserts rows via `db.execute` but **does not commit**. It relies on the caller's database transaction to ensure atomicity [orchestrator/core/services/notification_dispatcher.py:11-13]().
 
 ### Notification Pipeline Diagram
 This diagram maps the logical flow from event sources to the code entities within the `NotificationDispatcher`.
@@ -40,26 +49,23 @@ graph TD
         A["HeartbeatService"] -- "heartbeat_complete" --> DISP
         B["CoordinatorService"] -- "mission_complete" --> DISP
         C["RecipeExecutor"] -- "playbook_complete" --> DISP
-        D["Platform Action Handler"] -- "platform_send_notification" --> DISP
+        D["AutoReporting Tool (send_notification)"] -- "calls dispatch()" --> DISP
     end
 
     subgraph "orchestrator/core/services/notification_dispatcher.py"
         DISP["NotificationDispatcher.dispatch()"]
-        PREF["_get_preferences()"]
-        FMT["_format_external_message()"]
-        INAPP["_insert_in_app()"]
+        AR_LOAD["_load_auto_reporting()"]
+        GET_PREFS["_get_preferences()"]
+        INSERT_INAPP["_insert_in_app()"]
     end
 
-    subgraph "External Delivery"
-        NS["notification_service.send_workspace_notification()"]
-    end
+    DISP --> AR_LOAD
+    DISP --> GET_PREFS
+    GET_PREFS -->|Resolved Prefs| FAN["Fan-out Loop"]
 
-    DISP --> PREF
-    PREF -->|Resolved Prefs| FAN["Fan-out Logic"]
-
-    FAN -->|in_app| INAPP
-    INAPP --> DB[("PostgreSQL: notifications table")]
-    FAN -->|external| NS
+    FAN -->|in_app| INSERT_INAPP
+    INSERT_INAPP --> DB[("PostgreSQL: notifications table")]
+    FAN -->|external| NS["notification_service.send_workspace_notification()"]
     
     NS --> TG["Telegram"]
     NS --> SL["Slack"]
@@ -67,59 +73,54 @@ graph TD
 
     style DB stroke-dasharray: 5 5
 ```
-Sources: [orchestrator/core/services/notification_dispatcher.py:76-210](), [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-104]()
+Sources: [orchestrator/core/services/notification_dispatcher.py:9-28](), [orchestrator/core/services/notification_dispatcher.py:108-226](), [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-90]()
 
 ## Key Implementation Details
 
 ### Preference Resolution Logic
-The `_get_preferences` method implements a specific override hierarchy [orchestrator/core/services/notification_dispatcher.py:255-275]():
-*   **Workspace Defaults**: Stored with `user_id IS NULL`.
-*   **User Overrides**: If a user-specific row exists for the same destination, it shadows the workspace default [orchestrator/core/services/notification_dispatcher.py:18-21]().
-*   **Multi-Destination**: The preference table allows multiple destinations per event type (e.g., one `in_app` row AND one `telegram` row) [orchestrator/core/services/notification_dispatcher.py:14-17]().
-*   **Default Fallback**: If no preferences are configured, the system defaults to a single `in_app` notification [orchestrator/core/services/notification_dispatcher.py:136-145]().
+The `_get_preferences` method implements a specific override hierarchy [orchestrator/core/services/notification_dispatcher.py:18-24]():
+*   **Workspace Defaults**: Seeded during workspace provisioning with `user_id IS NULL`.
+*   **User Overrides**: If a user has a specific preference for a destination, it shadows the workspace default for that specific destination [orchestrator/core/services/notification_dispatcher.py:18-21]().
+*   **Default Fallback**: If no preferences are configured at all, the system defaults to a single `in_app` notification to prevent silent drops [orchestrator/core/services/notification_dispatcher.py:158-167]().
 
-### Auto-Reporting & Quiet Hours (Wave 2)
-The dispatcher integrates with `AutoReporting` settings stored in `workspace.settings.auto_reporting` [orchestrator/core/services/auto_reporting.py:6-23]():
-*   **Routes Override**: Specific event types can be routed to `primary` or `fallback` channels [orchestrator/core/services/auto_reporting.py:127-154]().
-*   **Quiet Hours**: Non-urgent traffic (anything not `urgent` or `security`) is funneled to `in_app` during the workspace's configured quiet window [orchestrator/core/services/notification_dispatcher.py:147-160]().
+### Auto-Reporting Overrides (Wave 2)
+The `auto_reporting` system (managed in `core.services.auto_reporting`) provides a higher-level configuration layer [orchestrator/core/services/auto_reporting.py:6-27]():
+*   **Quiet Hours**: During configured quiet hours, non-urgent traffic is funneled exclusively to `in_app` [orchestrator/core/services/notification_dispatcher.py:169-182](). The `_is_quiet_hours` method determines if quiet hours are active [orchestrator/core/services/notification_dispatcher.py:173]().
+*   **Specific Routing**: Workspaces can route specific `event_type:severity` combinations to specific channels (e.g., "security" always to Telegram) [orchestrator/core/services/auto_reporting.py:127-154](). The `_auto_reporting_destination` method handles this routing [orchestrator/core/services/notification_dispatcher.py:142]().
 
 ### Supported Event Types
-The system currently recognizes 9 core event types [orchestrator/core/services/notification_dispatcher.py:45-57]():
+The system currently recognizes a broad vocabulary of platform events defined in `VALID_EVENT_TYPES` [orchestrator/core/services/notification_dispatcher.py:45-74]():
 
-| Event Type | Default | Description |
+| Event Type | Category | Description |
 | :--- | :--- | :--- |
-| `heartbeat_complete` | `in_app` | Heartbeat cycle finished |
-| `task_complete` | `in_app` | Board task marked complete |
-| `mission_step_complete`| `silent` | Per-step mission progress |
-| `mission_complete` | `in_app` | Mission terminal state |
-| `playbook_step_complete`| `silent` | Per-step playbook progress |
-| `playbook_complete` | `in_app` | Playbook finished |
-| `trigger_fired` | `in_app` | Composio trigger fired |
-| `report_submitted` | `in_app` | Agent submitted a report |
-| `agent_error` | `in_app` | Agent raised an error |
+| `heartbeat_complete` | Heartbeat | Proactive check cycle finished |
+| `task_complete` | Tasks | Board task marked done |
+| `task_failed` | Tasks | Board task failed |
+| `task_sla_breach` | Tasks | Board task breached SLA |
+| `approval_pending` | Tools | Agent requires human grant to proceed |
+| `question_pending` | Agents | Agent raised a free-text question |
+| `mission_plan_ready` | Missions | Mission plan is ready for review |
+| `mission_step_complete` | Missions | A step in a mission completed |
+| `mission_complete` | Missions | Multi-agent mission finished |
+| `mission_failed` | Missions | Mission failed |
+| `mission_budget_paused`| Missions | Mission stopped due to cost limits |
+| `playbook_step_complete` | Playbooks | A step in a playbook completed |
+| `playbook_complete` | Playbooks | Automated recipe execution finished |
+| `playbook_failed` | Playbooks | Playbook failed |
+| `playbook_benched` | Playbooks | Breaker open, cron fire skipped |
+| `watch_verdict` | Watcher | Watcher-plane S5/S6 events |
+| `watch_action` | Watcher | Watcher-plane S7/S8 corrective actions |
+| `watch_escalation` | Watcher | Watcher-plane escalations |
+| `trigger_fired` | Triggers | A configured trigger fired |
+| `report_submitted` | Reports | A report was submitted |
+| `agent_error` | System | Agent encountered a runtime error |
 
-Sources: [orchestrator/core/services/notification_dispatcher.py:45-57]()
+Sources: [orchestrator/core/services/notification_dispatcher.py:45-74](), [orchestrator/tests/test_p2w2_ask_notification.py:121-127]()
 
-## Platform Action Integration
+## Service Integration
 
-Agents can introspect and trigger notifications using the `platform_send_notification` tool, which routes through the `send_notification` handler [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-64]().
-
-```python
-# orchestrator/modules/tools/discovery/handlers_auto_reporting.py:90-104
-dispatcher = NotificationDispatcher(db, workspace_id)
-result = await dispatcher.dispatch(
-    event_type=event_type,
-    title=title,
-    message=params.get("message"),
-    link_type=params.get("link_type"),
-    link_id=params.get("link_id"),
-    agent_id=params.get("_agent_id"),
-    agent_name=params.get("_agent_name"),
-    status=status,
-    severity=severity,
-)
-db.commit() # Handlers commit explicitly
-```
+### Tool Integration
+Agents can trigger notifications directly via the `send_notification` handler in the auto-reporting module, which wraps the dispatcher [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-108](). This handler validates the `event_type`, `title`, `severity`, and `status` before calling `NotificationDispatcher.dispatch()` [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:66-100]().
 
 ### Entity Mapping Diagram
 This diagram shows how code entities and database structures interact within the dispatcher.
@@ -130,6 +131,9 @@ classDiagram
         +db: Session
         +workspace_id: str
         +dispatch(event_type, title, message, ...)
+        -_load_auto_reporting()
+        -_auto_reporting_destination()
+        -_is_quiet_hours()
         -_get_preferences(event_type, user_id)
         -_insert_in_app(user_id, event_type, title, ...)
     }
@@ -153,27 +157,25 @@ classDiagram
         +link_id: Text
     }
 
-    class AutoReportingSettings {
-        <<JSONB in Workspace.settings>>
-        +enabled: Boolean
-        +primary_channel: String
-        +quiet_hours: Object
-        +routes: Map
+    class Workspace {
+        <<Database Model>>
+        +settings: JSONB
     }
 
-    NotificationDispatcher ..> notification_preferences : Queries
-    NotificationDispatcher ..> notifications : SQL Insert
-    NotificationDispatcher ..> AutoReportingSettings : Loads
+    NotificationDispatcher ..> notification_preferences : Reads
+    NotificationDispatcher ..> notifications : Inserts (In-App)
+    NotificationDispatcher ..> Workspace : Loads auto_reporting settings from .settings
+    AutoReportingSettings --|> Workspace : JSON field
 ```
-Sources: [orchestrator/core/services/notification_dispatcher.py:76-84](), [orchestrator/core/services/auto_reporting.py:42-55](), [orchestrator/core/services/notification_dispatcher.py:255-300]()
+Sources: [orchestrator/core/services/notification_dispatcher.py:93-101](), [orchestrator/core/services/auto_reporting.py:6-27](), [orchestrator/core/services/notification_dispatcher.py:191-205]()
 
 ## Non-Blocking Pattern
-Every fan-out operation in `dispatch()` is wrapped in a `try/except` block. This ensures that failures in external delivery—such as a network timeout to Telegram or a Slack API error—never crash the primary task or roll back the database transaction unless the `in_app` insert itself fails [orchestrator/core/services/notification_dispatcher.py:173-210]().
+Every external delivery is delegated to `send_workspace_notification` and wrapped in `try/except` blocks. Failures in external delivery (e.g., Telegram API timeout) are logged but do not propagate to the caller, ensuring that the primary agent task or mission execution remains uninterrupted [orchestrator/core/services/notification_dispatcher.py:214-226]().
 
 Sources:
-* [orchestrator/core/services/notification_dispatcher.py:1-300]()
-* [orchestrator/core/services/auto_reporting.py:1-156]()
-* [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-109]()
-* [orchestrator/modules/tools/discovery/actions_auto_reporting.py:95-154]()
+* [orchestrator/core/services/notification_dispatcher.py:1-226]()
+* [orchestrator/core/services/auto_reporting.py:1-208]()
+* [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-108]()
+* [orchestrator/tests/test_p2w2_ask_notification.py:121-205]()
 
 ---

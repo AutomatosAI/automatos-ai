@@ -5,23 +5,30 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/api/routing.py](orchestrator/api/routing.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
+- [frontend/components/suggestions/SuggestionChip.tsx](frontend/components/suggestions/SuggestionChip.tsx)
+- [frontend/components/suggestions/ToolSuggestionBar.tsx](frontend/components/suggestions/ToolSuggestionBar.tsx)
+- [orchestrator/alembic/versions/20260129_add_app_suggestions.py](orchestrator/alembic/versions/20260129_add_app_suggestions.py)
+- [orchestrator/alembic/versions/20260129_merge_heads.py](orchestrator/alembic/versions/20260129_merge_heads.py)
+- [orchestrator/alembic/versions/prd123_cost_tracking.py](orchestrator/alembic/versions/prd123_cost_tracking.py)
+- [orchestrator/alembic/versions/prd123_tool_tier.py](orchestrator/alembic/versions/prd123_tool_tier.py)
+- [orchestrator/alembic/versions/prd142_wave5_drop_dead_tables.py](orchestrator/alembic/versions/prd142_wave5_drop_dead_tables.py)
 - [orchestrator/consumers/chatbot/tool_router.py](orchestrator/consumers/chatbot/tool_router.py)
-- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
+- [orchestrator/core/models/composio_cache.py](orchestrator/core/models/composio_cache.py)
+- [orchestrator/core/models/tools.py](orchestrator/core/models/tools.py)
+- [orchestrator/modules/context/sections/platform_actions.py](orchestrator/modules/context/sections/platform_actions.py)
 - [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
 - [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/execution/exec_platform.py](orchestrator/modules/tools/execution/exec_platform.py)
+- [orchestrator/modules/tools/discovery/action_semantic_index.py](orchestrator/modules/tools/discovery/action_semantic_index.py)
 - [orchestrator/modules/tools/execution/unified_executor.py](orchestrator/modules/tools/execution/unified_executor.py)
 - [orchestrator/modules/tools/registry/tool_registry.py](orchestrator/modules/tools/registry/tool_registry.py)
 - [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
 - [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
 - [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
-- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
+- [orchestrator/scripts/prd_parity.py](orchestrator/scripts/prd_parity.py)
+- [orchestrator/services/tool_manifest_service.py](orchestrator/services/tool_manifest_service.py)
 - [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
+- [orchestrator/tests/test_action_semantic_index.py](orchestrator/tests/test_action_semantic_index.py)
+- [orchestrator/tests/test_platform_actions_section.py](orchestrator/tests/test_platform_actions_section.py)
 - [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
 
 </details>
@@ -30,157 +37,160 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This page documents the tool discovery, registration, and resolution systems within Automatos AI. The architecture centers around a centralized `ToolRegistry` and a specialized `ComposioToolService` that implements a multi-tier resolution strategy for discovering actions. These systems bridge the gap between Natural Language (user prompts) and Code Entities (tool schemas and executors).
+This page documents the tool discovery, registration, and resolution systems within Automatos AI. The architecture centers around a centralized `ToolRegistry` [orchestrator/modules/tools/registry/tool_registry.py:158-181](), `ActionRegistry` [orchestrator/modules/tools/discovery/action_registry.py:59-69](), and specialized services like `ComposioToolService` [orchestrator/modules/tools/services/composio_tool_service.py:63-70]() and `ComposioHintService` [orchestrator/modules/tools/services/composio_hint_service.py:89-102]() that implement capability-filtered and token-filtered resolution tiers. These systems bridge the gap between Natural Language inputs and Code Entity Space executions.
 
-Key components include:
-- **ToolRegistry**: The single source of truth for all platform tools [orchestrator/modules/tools/registry/tool_registry.py:157-167]().
-- **ActionRegistry**: Registry for platform-specific management actions (e.g., `platform_list_agents`) [orchestrator/modules/tools/discovery/action_registry.py:55-61]().
-- **ComposioCache**: Database-backed caching for external app metadata and action schemas (`ComposioActionCache`) [orchestrator/modules/tools/services/composio_hint_service.py:33-33]().
-- **3-Tier Resolution**: A cascading strategy (Capability, Token-filtered, Top-N) to find relevant actions within token budgets [orchestrator/modules/tools/services/composio_hint_service.py:12-21]().
+Key components covered:
+- **ToolRegistry & ActionRegistry**: Centralized specification and execution routing for platform and custom tools.
+- **ActionSemanticIndex**: Vector-based semantic similarity ranking for narrowing tool surfaces using embedding managers [orchestrator/modules/tools/discovery/action_semantic_index.py:113-122]().
+- **Multi-Tier Resolution**: Capability-filtered, token-filtered, and top-N resolution tiers [orchestrator/modules/tools/services/composio_hint_service.py:12-21]().
 
 ---
 
 ## Tool Discovery Architecture
 
-The discovery process maps high-level intents to specific executable code entities defined in the `UnifiedToolExecutor` and external Composio actions.
-
-### Natural Language to Code Entity Mapping
+The discovery pipeline maps high-level user intents and system prompts to specific executable code entities defined across `UnifiedToolExecutor` [orchestrator/modules/tools/execution/unified_executor.py:58-64](), `ActionRegistry` [orchestrator/modules/tools/discovery/action_registry.py:59-69](), and external integration suites.
 
 ```mermaid
 graph TD
-    subgraph "Natural Language Space"
-        UserPrompt["User Prompt: 'Search the codebase for the ToolRegistry class'"]
-        Intent["IntentResult (SmartIntentClassifier)"]
-        ToolHints["AutoBrain Tool Hints: ['github', 'search']"]
+    subgraph "Natural_Language_Space"
+        UserPrompt["User Prompt (task_prompt)"]
+        Intent["Intent (via SmartToolRouter)"]
+        ToolHints["AutoBrain Tool Hints (tool_hints)"]
     end
 
-    subgraph "Discovery & Resolution Layer"
-        Registry["ToolRegistry [_register_core_tools]"]
-        ActionReg["ActionRegistry.get_all()"]
+    subgraph "Discovery_and_Resolution_Layer"
+        Registry["ToolRegistry (_register_core_tools)"]
+        SemanticIndex["ActionSemanticIndex.rank_actions"]
         CompService["ComposioToolService.get_tools_for_step"]
         HintService["ComposioHintService.build_hints"]
     end
 
-    subgraph "Code Entity Space (Executors)"
-        PlatformExec["exec_platform.py: execute_platform_tool()"]
-        FileExec["exec_file_ops.py: execute_file_op()"]
-        CompExec["ComposioToolExecutor (exec_composio)"]
+    subgraph "Code_Entity_Space"
+        UnifiedExec["UnifiedToolExecutor (tool_routes)"]
+        PlatformExec["AgentPlatformTools (platform_tools)"]
+        CompExec["ComposioToolExecutor (composio_executor)"]
     end
 
-    UserPrompt --> Intent
-    UserPrompt --> ToolHints
-    Intent --> Registry
-    Intent --> ActionReg
-    ToolHints --> CompService
+    UserPrompt --> SemanticIndex
+    UserPrompt --> CompService
+    ToolHints --> HintService
+    SemanticIndex --> UnifiedExec
     CompService --> CompExec
-    Registry --> PlatformExec
-    Registry --> FileExec
+    HintService --> CompExec
+    UnifiedExec --> PlatformExec
 ```
 
 **Sources:**
-- [orchestrator/modules/tools/registry/tool_registry.py:157-181]()
-- [orchestrator/modules/tools/execution/unified_executor.py:69-168]()
-- [orchestrator/modules/tools/services/composio_tool_service.py:72-113]()
-- [orchestrator/modules/tools/discovery/action_registry.py:55-74]()
-- [orchestrator/consumers/chatbot/intent_classifier.py:37-46]()
+- [orchestrator/modules/tools/registry/tool_registry.py:158-181]()
+- [orchestrator/modules/tools/execution/unified_executor.py:58-146]()
+- [orchestrator/modules/tools/services/composio_tool_service.py:63-113]()
+- [orchestrator/modules/tools/discovery/action_semantic_index.py:113-137]()
 
 ---
 
 ## Core Components
 
-### 1. ToolRegistry
-The `ToolRegistry` [orchestrator/modules/tools/registry/tool_registry.py:157-181]() manages the lifecycle of `ToolSpec` objects. It categorizes tools using the `ToolCategory` enum (RESEARCH, FILE_OPERATIONS, SHELL_COMMANDS, etc.) [orchestrator/modules/tools/registry/tool_registry.py:38-50]() and exports them into OpenAI-compatible function-calling formats via `to_openai_format()` [orchestrator/modules/tools/registry/tool_registry.py:110-128]().
+### 1. ToolRegistry & ActionRegistry
+The `ToolRegistry` [orchestrator/modules/tools/registry/tool_registry.py:158-181]() manages the lifecycle of `ToolSpec` objects. It groups tools using the `ToolCategory` enum (`RESEARCH`, `FILE_OPERATIONS`, `SHELL_COMMANDS`, etc.) [orchestrator/modules/tools/registry/tool_registry.py:38-50]().
 
-### 2. ActionRegistry
-The `ActionRegistry` handles "Platform Actions"—internal operations for managing agents, workflows, and workspace data [orchestrator/modules/tools/discovery/action_registry.py:5-13](). It can export these actions as a single `platform_execute` dispatcher tool [orchestrator/modules/tools/discovery/action_registry.py:136-160]() or as individual "promoted" first-class tools [orchestrator/modules/tools/discovery/action_registry.py:119-134]().
+The `ActionRegistry` [orchestrator/modules/tools/discovery/action_registry.py:59-69]() manages platform-level management actions via `ActionDefinition` [orchestrator/modules/tools/discovery/action_registry.py:27-46](). It provides conversion methods such as `to_openai_tools` [orchestrator/modules/tools/discovery/action_registry.py:111-131]() and `to_first_class_schemas` [orchestrator/modules/tools/discovery/action_registry.py:138-163]().
+
+**Sources:**
+- [orchestrator/modules/tools/registry/tool_registry.py:38-50]()
+- [orchestrator/modules/tools/registry/tool_registry.py:158-181]()
+- [orchestrator/modules/tools/discovery/action_registry.py:27-69]()
+- [orchestrator/modules/tools/discovery/action_registry.py:111-163]()
+
+### 2. ActionSemanticIndex
+The `ActionSemanticIndex` [orchestrator/modules/tools/discovery/action_semantic_index.py:113-122]() embeds platform `ActionDefinition` instances and evaluates cosine similarity against incoming queries using an underlying `EmbeddingManager` and Redis caching layer. It supports request-scoped memoization via `rank_actions_scope()` [orchestrator/modules/tools/discovery/action_semantic_index.py:41-55]() to prevent redundant embedding generation during context assembly turns.
+
+**Sources:**
+- [orchestrator/modules/tools/discovery/action_semantic_index.py:41-55]()
+- [orchestrator/modules/tools/discovery/action_semantic_index.py:113-137]()
 
 ### 3. UnifiedToolExecutor
-The `UnifiedToolExecutor` acts as the routing hub for execution. It maintains a `tool_routes` map that delegates to specific modules like `exec_platform`, `exec_file_ops`, and `exec_composio` [orchestrator/modules/tools/execution/unified_executor.py:105-168](). It supports lazy-loading of executors to minimize startup overhead [orchestrator/modules/tools/execution/unified_executor.py:95-99]().
+`UnifiedToolExecutor` [orchestrator/modules/tools/execution/unified_executor.py:58-64]() acts as the routing nexus for execution requests. Its `tool_routes` map delegates specialized execution tasks to modules such as `exec_platform`, `exec_file_ops`, `exec_shell`, and `exec_composio` [orchestrator/modules/tools/execution/unified_executor.py:28-35](). Heavy dependencies like the Composio executor are lazy-loaded via `_get_composio_executor()` [orchestrator/modules/tools/execution/unified_executor.py:44-53]().
+
+**Sources:**
+- [orchestrator/modules/tools/execution/unified_executor.py:28-64]()
+- [orchestrator/modules/tools/execution/unified_executor.py:96-146]()
 
 ---
 
-## 3-Tier Tool Resolution
+## Multi-Tier Tool Resolution
 
-The `ComposioHintService` and `ComposioToolService` implement a cascading strategy to resolve user prompts into specific tool schemas while respecting token limits [orchestrator/modules/tools/services/composio_hint_service.py:12-21]().
+Tool resolution behavior adapts based on the active context mode (Chatbot, Recipe, or Heartbeat) and filtering strategies managed by `ToolsSection` [orchestrator/modules/context/sections/tools.py:41-51]().
 
-### Tier 1: Capability-Based (Taxonomy Match)
-The system uses `get_capabilities_for_intent` to map user prompts to required capabilities [orchestrator/modules/tools/services/composio_hint_service.py:36-36]().
-- **Logic**: It performs a join between `ComposioActionCache` and `ComposioActionMetadata` to find actions that explicitly provide the required capabilities [orchestrator/modules/tools/services/composio_hint_service.py:12-13]().
+### 1. Semantic Narrowing & Platform Actions
+Platform action surfaces are filtered dynamically by `PlatformActionsSection` [orchestrator/modules/context/sections/platform_actions.py:30-42](). When semantic routing is enabled via configuration flags, `ActionSemanticIndex` ranks actions against runtime queries, reducing catalog token footprints [orchestrator/modules/context/sections/platform_actions.py:72-91]().
 
-### Tier 2: Token-Filtered (Keyword Match)
-If Tier 1 yields insufficient results, the system falls back to token-based filtering.
-- **Mandatory Gate**: Actions MUST match at least one capability term to be included [orchestrator/modules/tools/services/composio_hint_service.py:17-21]().
-- **Scoring**: It uses SQL `ILIKE` on the action name and description against prompt tokens [orchestrator/modules/tools/services/composio_hint_service.py:14-15]().
-
-### Tier 3: Top-N Fallback
-If no specific matches are found, the system provides a "safe" list of actions for the connected apps, prioritizing those frequently used or marked as safe [orchestrator/modules/tools/services/composio_hint_service.py:15-16]().
+### 2. Composio Tool Service Strategy
+`ComposioToolService` resolves external integration actions through a sequential resolution pipeline [orchestrator/modules/tools/services/composio_tool_service.py:97-113]():
+- **Exact Name Lookup**: Extracts action identifiers (e.g., `GITHUB_CREATE_A_REFERENCE`) using regex patterns [orchestrator/modules/tools/services/composio_tool_service.py:75-76]().
+- **Hint-Scoped Search**: Maps AutoBrain `tool_hints` to specific allowed application packages [orchestrator/modules/tools/services/composio_tool_service.py:78-95]().
+- **SDK Semantic Search**: Queries the downstream Composio SDK via semantic parameters [orchestrator/modules/tools/services/composio_tool_service.py:111-111]().
+- **Broadened Fallback**: Falls back to general app-level candidate lists when specific queries yield empty results [orchestrator/modules/tools/services/composio_tool_service.py:112-113]().
 
 ### Resolution Flow Diagram
 
 ```mermaid
 graph TB
-    subgraph "Resolution Pipeline [ComposioHintService.build_hints]"
-        Start([Input: prompt + agent_id])
+    subgraph "Context_Assembly"
+        Start([Input: Mode + Query])
+        Strategy{Strategy}
         
-        Apps["_resolve_allowed_apps"]
-        T1{Tier 1: Capability Match?}
-        T1_Exec[Taxonomy Lookup]
-        
-        T2{Tier 2: Token Filter?}
-        T2_Exec[ILIKE Search + Cap Gate]
-        
-        T3[Tier 3: Fallback Top-N]
-        
-        End([Output: ComposioHintResult])
+        FULL["_load_full: Core + Dispatcher + Composio"]
+        FILTERED["_load_filtered: Intent-based filtering"]
+        DISPATCHER["_load_dispatcher_only: platform_execute only"]
     end
 
-    Start --> Apps
-    Apps --> T1
-    T1 -- "Found" --> T1_Exec
-    T1 -- "None" --> T2
-    T1_Exec --> End
-    
-    T2 -- "Found" --> T2_Exec
-    T2 -- "None" --> T3
-    T2_Exec --> End
-    T3 --> End
+    subgraph "Resolution_Logic"
+        Semantic["ActionSemanticIndex (Narrowing)"]
+        CompRes["ComposioToolService (3-Tier)"]
+    end
+
+    Strategy -- FULL --> FULL
+    Strategy -- FILTERED --> FILTERED
+    Strategy -- DISPATCHER --> DISPATCHER
+
+    FULL --> Semantic
+    FULL --> CompRes
+    DISPATCHER --> Semantic
+    FILTERED --> CompRes
 ```
 
 **Sources:**
-- [orchestrator/modules/tools/services/composio_hint_service.py:103-124]()
-- [orchestrator/modules/tools/services/composio_hint_service.py:162-172]()
-- [orchestrator/modules/tools/services/composio_tool_service.py:108-113]()
+- [orchestrator/modules/context/sections/tools.py:41-113]()
+- [orchestrator/modules/context/sections/platform_actions.py:48-91]()
+- [orchestrator/modules/tools/services/composio_tool_service.py:97-113]()
 
 ---
 
-## Semantic Routing & Intent Classification
+## Tool Hint Service
 
-Automatos uses a `SmartIntentClassifier` to determine if a request even requires tools before attempting discovery [orchestrator/consumers/chatbot/intent_classifier.py:5-12]().
+`ComposioHintService` generates formatted system prompt hints listing candidate actions while constraining context budgets [orchestrator/modules/tools/services/composio_hint_service.py:89-124]().
 
-### Intent Classification
-The classifier categorizes messages into `Intent` types like `DATA_QUERY`, `SEARCH`, or `EXTERNAL_ACTION` [orchestrator/consumers/chatbot/intent_classifier.py:23-34](). This intent then drives the `SmartToolRouter` to select categories of tools to load (e.g., `SEARCH` intent loads the "search" and "web_search" categories) [orchestrator/consumers/chatbot/smart_tool_router.py:115-128]().
-
-### Semantic Narrowing
-For the `platform_execute` tool, the system can narrow the allowed action enum using semantic similarity. The `_rank_actions_for_dispatcher` function uses an `ActionSemanticIndex` to find the top-K platform actions relevant to the user's query [orchestrator/modules/tools/tool_router.py:124-154](). This prevents the LLM from seeing hundreds of irrelevant platform actions in its schema.
+### Resolution Tiers:
+1. **Tier 1 (Capability-based)**: Matches required capabilities against `ComposioActionMetadata` [orchestrator/modules/tools/services/composio_hint_service.py:12-21]().
+2. **Tier 2 (Token-filtered with Capability Gate)**: Enforces capability taxonomy matching as a mandatory gate alongside `ILIKE` token matches [orchestrator/modules/tools/services/composio_hint_service.py:12-21]().
+3. **Tier 3 (Top-N Fallback)**: Retrieves safe baseline actions per connected application when filtered candidates are insufficient [orchestrator/modules/tools/services/composio_hint_service.py:12-21]().
 
 **Sources:**
-- [orchestrator/consumers/chatbot/intent_classifier.py:48-56]()
-- [orchestrator/consumers/chatbot/smart_tool_router.py:79-112]()
-- [orchestrator/modules/tools/tool_router.py:124-154]()
+- [orchestrator/modules/tools/services/composio_hint_service.py:12-21]()
+- [orchestrator/modules/tools/services/composio_hint_service.py:89-124]()
 
 ---
 
-## Execution and Result Formatting
+## Tool Execution Path & Validation
 
-Once a tool is resolved and called by the LLM, the `UnifiedToolExecutor` routes the request [orchestrator/modules/tools/execution/unified_executor.py:69-75]().
-
-1. **Platform Actions**: Routed via `exec_platform.py` [orchestrator/modules/tools/execution/unified_executor.py:28-28]().
-2. **Composio Actions**: Routed to `ComposioToolExecutor` [orchestrator/modules/tools/execution/unified_executor.py:60-61]().
-3. **Formatting**: Results are processed by `ToolResultFormatter` to ensure a consistent structure for the LLM [orchestrator/modules/tools/tool_router.py:31-31](). In chatbot mode, `build_tool_context_message` further enhances this with system-level instructions and document source attribution [orchestrator/consumers/chatbot/tool_router.py:47-58]().
+1. **Invocation**: The LLM executes a tool call via standard function-calling payloads or `platform_execute` [orchestrator/modules/tools/execution/unified_executor.py:58-146]().
+2. **Routing & Dispatch**: `ToolRouter` and `UnifiedToolExecutor` route the request to the corresponding executor module [orchestrator/modules/tools/tool_router.py:54-61]().
+3. **Execution-Time Validation**: Capability filters (`ActionCapabilityFilter`) evaluate request intents against security boundaries at execution time [orchestrator/modules/tools/tool_router.py:37-45]().
+4. **Telemetry & Capture**: Executions fire traces via `fire_tool_trace` [orchestrator/modules/execution/unified_executor.py:38-38]() and record outcomes using `capture_tool_outcome` [orchestrator/modules/memory/tool_outcome_capture.py]() for downstream memory analysis.
+5. **Formatting**: Results are processed by `ToolResultFormatter` before returning structured summaries to the agent run loop [orchestrator/modules/tools/formatting/result_formatter.py]().
 
 **Sources:**
-- [orchestrator/modules/tools/execution/unified_executor.py:105-168]()
-- [orchestrator/consumers/chatbot/tool_router.py:71-110]()
-- [orchestrator/modules/tools/tool_router.py:52-60]()
+- [orchestrator/modules/tools/execution/unified_executor.py:23-39]()
+- [orchestrator/modules/tools/tool_router.py:37-61]()
 
 ---

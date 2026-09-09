@@ -5,15 +5,20 @@
 
 The following files were used as context for generating this wiki page:
 
+- [orchestrator/api/chat.py](orchestrator/api/chat.py)
 - [orchestrator/api/routing.py](orchestrator/api/routing.py)
+- [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
+- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
 - [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
-- [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
-- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
-- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
-- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
+- [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
+- [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
 - [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
-- [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
-- [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
+- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
+- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
+- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
 
 </details>
 
@@ -21,7 +26,7 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-The **Universal Router** is a core orchestration component responsible for resolving a `RequestEnvelope` into a `RoutingDecision`. It implements a 7-tier cascading strategy designed to minimize latency and LLM costs while maximizing routing accuracy. By utilizing aggressive caching, heuristic patterns, and semantic similarity, the system ensures that high-volume requests are routed without requiring an expensive LLM call.
+The **Universal Router** is a core orchestration component responsible for resolving a `RequestEnvelope` into a `RoutingDecision`. It implements a cascading strategy designed to minimize latency and LLM costs while maximizing routing accuracy. By utilizing aggressive caching, heuristic patterns, and semantic similarity, the system ensures that high-volume requests are routed without requiring an expensive LLM call.
 
 This architecture supports multi-tenant isolation through workspace-scoping and provides a continuous learning loop via user corrections and complexity assessment via the **Auto Brain**.
 
@@ -53,40 +58,40 @@ Sources: [orchestrator/core/routing/engine.py:1-16](), [orchestrator/core/routin
 
 The routing system bridges "Natural Language Space" (user messages) to "Code Entity Space" (agents and workflows) using the following structures:
 
-### Routing Data Model
+Routing Data Model
 ```mermaid
 classDiagram
     class RequestEnvelope {
-        +UUID id
-        +UUID workspace_id
-        +str content
-        +ChannelSource source
-        +dict metadata
-        +int override_agent_id
-        +int override_workflow_id
+        "+UUID id"
+        "+UUID workspace_id"
+        "+str content"
+        "+ChannelSource source"
+        "+dict metadata"
+        "+int override_agent_id"
+        "+int override_workflow_id"
     }
     class RoutingDecision {
-        +str route_type
-        +int agent_id
-        +int workflow_id
-        +float confidence
-        +str reasoning
+        "+str route_type"
+        "+int agent_id"
+        "+int workflow_id"
+        "+float confidence"
+        "+str reasoning"
     }
     class RoutingRule {
-        +int id
-        +UUID workspace_id
-        +str source_pattern
-        +list intent_keywords
-        +int target_agent_id
-        +int target_workflow_id
-        +int priority
+        "+int id"
+        "+UUID workspace_id"
+        "+str source_pattern"
+        "+list intent_keywords"
+        "+int target_agent_id"
+        "+int target_workflow_id"
+        "+int priority"
     }
     class RoutingDecisionRecord {
-        +UUID request_id
-        +str envelope_hash
-        +str route_type
-        +bool was_corrected
-        +int corrected_agent_id
+        "+UUID request_id"
+        "+str envelope_hash"
+        "+str route_type"
+        "+bool was_corrected"
+        "+int corrected_agent_id"
     }
 
     RequestEnvelope --> "UniversalRouter" : "input"
@@ -103,7 +108,7 @@ Sources: [orchestrator/core/models/routing.py:1-60](), [orchestrator/core/routin
 
 The following diagram illustrates how a message moves from the API layer through the `UniversalRouter` and `AutoBrain` to reach a specific `Agent` or `Workflow`.
 
-### Message Routing Pipeline
+Message Routing Pipeline
 ```mermaid
 graph TD
     User["User Message"] --> ChatAPI["orchestrator/api/chat.py: POST /api/chat"]
@@ -132,7 +137,7 @@ graph TD
     Execution -.-> Log["DB: routing_decisions table"]
 ```
 
-Sources: [orchestrator/api/chat.py:63-100](), [orchestrator/core/routing/engine.py:79-163](), [orchestrator/core/models/routing.py:65-95]()
+Sources: [orchestrator/api/chat.py:55-72](), [orchestrator/core/routing/engine.py:79-163](), [orchestrator/core/models/routing.py:65-95]()
 
 ---
 
@@ -148,36 +153,10 @@ Sources: [orchestrator/core/routing/engine.py:123-136]()
 
 ### Auto Brain Complexity (PRD-68)
 Before the `UniversalRouter` is invoked, `AutoBrain` assesses the "Complexity Scale" (Atom → Organism).
-- **ATOM**: Simple greetings or identity questions handled via `_ATOM_PATTERNS`.
-- **Platform Keywords**: `AutoBrain` uses `_PLATFORM_KEYWORDS` to detect intents like `platform_list_agents` or `platform_get_llm_usage`. These are then handled by the `ActionRegistry` which defines available platform operations. [orchestrator/modules/tools/discovery/action_registry.py:28-42]()
+- **ATOM**: Simple greetings or identity questions handled via `_ATOM_PATTERNS`. [orchestrator/consumers/chatbot/auto.py:97-119]()
+- **Platform Keywords**: `AutoBrain` uses `_PLATFORM_KEYWORDS` to detect intents like `platform_list_agents` or `platform_get_llm_usage`. [orchestrator/consumers/chatbot/auto.py:121-176]() These are handled by the `PlatformActionExecutor` which defines available platform operations. [orchestrator/modules/tools/discovery/platform_executor.py:5-9]()
 
-Sources: [orchestrator/modules/tools/discovery/action_registry.py:55-61](), [orchestrator/modules/tools/tool_router.py:129-138]()
-
----
-
-## Tool Discovery and Semantic Narrowing
-
-The routing architecture extends beyond message routing into **Tool Routing**. When an agent is selected, the system must decide which tools to provide in the LLM context.
-
-### Semantic Tool Narrowing (PRD-138)
-To avoid overwhelming the LLM with hundreds of platform actions, the `ToolsSection` and `ActionRegistry` implement semantic narrowing.
-
-- **Dispatcher Schema**: The `platform_execute` tool acts as a single entry point for platform actions. [orchestrator/modules/tools/discovery/action_registry.py:136-141]()
-- **Action Enum Trimming**: If `SEMANTIC_TOOL_ROUTING` is enabled, the `ActionSemanticIndex` ranks all platform actions against the user query. [orchestrator/modules/tools/tool_router.py:124-154]()
-- **Context Injection**: The `ToolsSection` calls `_rank_actions_for_dispatcher` to narrow the `action.enum` in the OpenAI function schema to the top-K most relevant actions. [orchestrator/modules/context/sections/tools.py:112-142]()
-
-### Tool Loading Flow
-```mermaid
-graph TD
-    ContextService["ContextService"] --> ToolsSection["modules/context/sections/tools.py: ToolsSection.load_tools()"]
-    ToolsSection --> TR["modules/tools/tool_router.py: get_tools_for_agent()"]
-    TR --> Ranker["modules/tools/tool_router.py: _rank_actions_for_dispatcher()"]
-    Ranker --> SemanticIndex["modules/tools/discovery/action_semantic_index.py: rank_actions()"]
-    Ranker --> Registry["modules/tools/discovery/action_registry.py: to_dispatcher_schema()"]
-    Registry --> ToolSchema["Filtered OpenAI Tool Schema"]
-```
-
-Sources: [orchestrator/modules/context/sections/tools.py:61-99](), [orchestrator/modules/tools/tool_router.py:157-165](), [orchestrator/modules/tools/discovery/action_registry.py:159-180]()
+Sources: [orchestrator/consumers/chatbot/auto.py:47-54](), [orchestrator/modules/tools/discovery/platform_executor.py:19-247]()
 
 ---
 
@@ -197,11 +176,11 @@ Sources: [orchestrator/core/models/routing.py:65-95](), [orchestrator/core/routi
 
 ### The Learning Loop
 When a user corrects a routing decision via the API, the ground truth is stored.
-- **API Correction**: `POST /api/routing/corrections` records the `correct_agent_id`. [orchestrator/api/routing.py:81-84]()
+- **API Correction**: `POST /api/routing/corrections` records the `correct_agent_id`. [orchestrator/api/routing.py:82-85]()
 - **Cache Update**: Future requests with the same `envelope_hash` will prioritize the corrected agent in Tier 1 (Cache Lookup). [orchestrator/core/routing/engine.py:102-108]()
 - **Correction Persistence**: Corrections are tracked to improve the `RoutingCache` effectiveness over time.
 
-Sources: [orchestrator/core/routing/engine.py:161-163](), [orchestrator/api/routing.py:246-270]()
+Sources: [orchestrator/core/routing/engine.py:161-163](), [orchestrator/api/routing.py:111-156]()
 
 ---
 
@@ -209,9 +188,9 @@ Sources: [orchestrator/core/routing/engine.py:161-163](), [orchestrator/api/rout
 
 The routing engine behavior is tuned via global configuration:
 - `ROUTING_LLM_CONFIDENCE_THRESHOLD`: The minimum confidence required for a Tier 3 (LLM) decision to be accepted. [orchestrator/core/routing/engine.py:47]()
-- **Trigger Management**: `TriggerSubscription` allows external events (like webhooks) to be routed based on the event source. [orchestrator/core/models/composio.py:22-25]()
-- **Jira Integration**: Scripts like `setup_jira_trigger.py` register specific triggers (e.g., `JIRA_NEW_ISSUE_TRIGGER`) to be routed to chosen agents or workflows. [orchestrator/scripts/setup_jira_trigger.py:123-136]()
+- **Trigger Management**: `TriggerSubscription` allows external events (like webhooks) to be routed based on the event source. [orchestrator/core/models/composio.py:32]()
+- **Jira Integration**: Scripts register specific triggers (e.g., `JIRA_NEW_ISSUE_TRIGGER`) to be routed to chosen agents or workflows via the `TriggerSetupRequest`. [orchestrator/api/routing.py:87-104]()
 
-Sources: [orchestrator/core/routing/engine.py:47-49](), [orchestrator/scripts/setup_jira_trigger.py:141-152]()
+Sources: [orchestrator/core/routing/engine.py:47-49](), [orchestrator/api/routing.py:163-207]()
 
 ---

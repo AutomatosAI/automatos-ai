@@ -5,154 +5,121 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/api/chat/route.ts](frontend/app/api/chat/route.ts)
 - [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
 - [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
 - [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
+- [frontend/components/agents/agent-performance.tsx](frontend/components/agents/agent-performance.tsx)
 - [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
+- [frontend/components/agents/agent-skills.tsx](frontend/components/agents/agent-skills.tsx)
+- [frontend/components/agents/agent-status-control-modal.tsx](frontend/components/agents/agent-status-control-modal.tsx)
 - [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/chatbot/chat.tsx](frontend/components/chatbot/chat.tsx)
-- [frontend/components/chatbot/mission-suggestion-card.tsx](frontend/components/chatbot/mission-suggestion-card.tsx)
-- [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
-- [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
+- [frontend/components/agents/create-skill-modal.tsx](frontend/components/agents/create-skill-modal.tsx)
+- [frontend/components/agents/model-selector.tsx](frontend/components/agents/model-selector.tsx)
+- [frontend/components/agents/skill-configuration-modal.tsx](frontend/components/agents/skill-configuration-modal.tsx)
+- [frontend/hooks/use-agent-api.ts](frontend/hooks/use-agent-api.ts)
+- [frontend/hooks/use-model-api.ts](frontend/hooks/use-model-api.ts)
 - [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
-- [frontend/lib/chat/hooks.ts](frontend/lib/chat/hooks.ts)
-- [frontend/stores/mission-store.ts](frontend/stores/mission-store.ts)
 - [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
-- [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py](orchestrator/alembic/versions/agent_public_id_and_slug_fix.py)
-- [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py](orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py)
+- [orchestrator/api/agent_endpoints.py](orchestrator/api/agent_endpoints.py)
 - [orchestrator/api/agents.py](orchestrator/api/agents.py)
-- [orchestrator/api/chat.py](orchestrator/api/chat.py)
-- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
-- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [orchestrator/core/models/__init__.py](orchestrator/core/models/__init__.py)
 - [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
-- [orchestrator/core/utils/agent_resolver.py](orchestrator/core/utils/agent_resolver.py)
-- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 
 </details>
 
 
 
-This document provides a hands-on tutorial for getting started with Automatos AI. You will learn how to create an agent, connect tools, run a streaming chat, and execute a Playbook.
-
-**Prerequisites**: This tutorial assumes you have completed the installation described in [Self-hosting — the local edition](self-hosting.md) (or [Installation & Setup](installation-setup.md)), have the application running, and have stored one LLM key (`.env` or Settings → API Keys).
-
-**Shortest path in the local edition**: a fresh instance is already seeded with Auto, a starter roster (Researcher, Writer, Analyst) and one Playbook, *Two-minute brief*. Open **Playbooks**, run it with a topic of your own, and follow the execution log — the Analyst's output is the brief. The welcome Deliverable under **Deliverables → Blogs** repeats these steps. The sections below then show how each piece is built.
+This document provides a technical walkthrough for getting started with Automatos AI. You will learn how to navigate the platform, create your first agent, connect tools, and execute workflows using the core UI components and backend services.
 
 ---
 
-## Step 1: Create Your First Agent
+## 1. Agent Creation & Configuration
 
-Agents are the primary workers in Automatos AI. Creating an agent involves defining its persona, selecting an LLM provider, and assigning capabilities.
+Agents are the primary workers in Automatos AI. They are managed via the agent management components [frontend/components/agents/agent-roster.tsx:187](), which serve as the hub for the agent roster, org charts, and skill configuration.
 
-### Implementation Detail: The Agent Creation Flow
-When you use the `CreateAgentModal`, the frontend collects metadata and sends a POST request to `/api/agents`. The backend uses the `AgentFactory` to initialize the agent's runtime state.
+### Agent Creation Flow
+1.  **Modal Initiation**: The `CreateAgentModal` [frontend/components/agents/create-agent-modal.tsx:67]() is used to define the agent's identity, including name, category, and plugins [frontend/components/agents/create-agent-modal.tsx:69-79]().
+2.  **Category & Persona**: Users select a category (e.g., Development, Analytics) which maps to database agent types and categories [frontend/lib/agent-constants.ts:25-42]().
+3.  **Model Selection**: The `ModelSelector` [frontend/components/agents/model-selector.tsx]() allows assigning a specific LLM (via `useModels` and `useWorkspaceModels`) and configuring runtime parameters [frontend/hooks/use-model-api.ts:73-104]().
+4.  **Backend Persistence**: The frontend calls `POST /api/agents/create-specialized` [orchestrator/api/agent_endpoints.py:41](). The `AgentFactory` [orchestrator/api/agent_endpoints.py:32]() then initializes the agent runtime and triggers a knowledge graph update for the new roster member [orchestrator/api/agent_endpoints.py:93-101]().
 
+### Technical Data Flow: Agent Creation
 ```mermaid
 sequenceDiagram
-    participant UI as CreateAgentModal
-    participant API as agents.py
-    participant DB as SQLAlchemy (Agent)
-    participant SI as SemanticIndexer
+    participant UI as "CreateAgentModal [frontend/components/agents/create-agent-modal.tsx]"
+    participant API as "agent_endpoints.py [orchestrator/api/agent_endpoints.py]"
+    participant Factory as "AgentFactory [modules/agents]"
+    participant DB as "PostgreSQL [orchestrator/core/models/core.py]"
 
-    UI->>API: POST /api/agents (payload)
-    API->>API: _normalize_tags()
-    API->>DB: session.add(Agent)
-    API->>DB: session.commit()
-    API-->>SI: _reindex_agent_embedding() (Async)
-    API->>UI: 201 Created (AgentResponse)
+    UI->>API: POST /api/agents/create-specialized
+    Note right of API: Validates workspace_id & permissions via require_workspace_permission
+    API->>Factory: create_agent(name, agent_type, model_config)
+    Factory->>DB: Insert Agent record & agent_skills
+    Factory->>DB: Schedule incremental graph update
+    API-->>UI: 201 Created (AgentResponse)
 ```
-
-**Key Actions**:
-1.  **Identity**: Provide a `name` and `category` (e.g., "DevOps", "Data Analysis"). The UI maps these categories to internal `agent_type` values via `CATEGORY_TO_DB_MAP` [frontend/components/agents/create-agent-modal.tsx:196]().
-2.  **Persona**: Choose a `PersonaMode`. You can select a predefined persona (e.g., "Code Architect") which injects a specific `system_prompt` [frontend/components/agents/create-agent-modal.tsx:144-152]().
-3.  **Model Config**: Select a provider (OpenAI, Anthropic, etc.) and model. This is stored in the `agent_model_configs` table [orchestrator/core/models/core.py:176-180]().
-
-**Sources**: [frontend/components/agents/create-agent-modal.tsx:176-210](), [orchestrator/api/agents.py:38-66](), [orchestrator/modules/agents/factory/agent_factory.py:105-146]()
+**Sources:** [frontend/components/agents/create-agent-modal.tsx:67-186](), [orchestrator/api/agent_endpoints.py:41-107](), [orchestrator/core/models/core.py:31-41]()
 
 ---
 
-## Step 2: Connect Tools and Skills
+## 2. Connecting Tools & Integrations
 
-Tools allow agents to interact with the outside world (e.g., Slack, GitHub, Jira) via Composio. In the local edition that needs your own `COMPOSIO_API_KEY` in `.env` (then `docker compose up -d backend`; the catalogue syncs itself on that boot). Without one the Tools page says integrations are disabled, Composio tools are not offered to agents, and the native platform tools — the `platform_*` actions Auto uses, documents, Deliverables, Code Canvas — keep working. See [Self-hosting §7](self-hosting.md#7-bring-your-own-composio-key-optional).
+To interact with the outside world, agents use the **Tools** system, which integrates with Composio for third-party app access and workspace assignments.
 
-### Tool Assignment Logic
-Tools are assigned to agents through the `agent_app_assignments` table. When an agent is executed, the `ToolRouter` fetches these assignments to build the available toolset for the LLM.
+### Tool Resolution & Discovery
+When configuring tools for an agent, incoming tool IDs are resolved via `_resolve_tool_ids_to_app_names` [orchestrator/api/agents.py:139](), which checks the `EntityManager` [orchestrator/api/agents.py:149]() for active workspace entity connections and maps them against `ComposioAppCache` [orchestrator/api/agents.py:173]().
 
-| Entity | Role | Code Reference |
+### Tool Connection Process
+1.  **Initiation**: Users interact with tool management interfaces to authenticate or activate integrations.
+2.  **Entity Management**: The backend checks allowed statuses (`active`, `added`, `pending`) for workspace app connections [orchestrator/api/agents.py:154]().
+3.  **Agent Assignment**: Active tools are linked to agents via app assignments (`AgentAppAssignment`) and stored for tool execution context [orchestrator/api/agents.py:14]().
+
+**Sources:** [orchestrator/api/agents.py:139-182](), [orchestrator/core/models/core.py:14-16]()
+
+---
+
+## 3. Knowledge Ingestion (RAG)
+
+Unstructured data and documents are ingested into the platform to build durable context for agents through vector search and knowledge graphs.
+
+### Ingestion Pipeline
+-   **Upload & Parsing**: Documents are uploaded and processed by background workers to extract text and generate semantic embeddings.
+-   **Vector Storage**: Chunks are stored in vector backends (such as pgvector or Qdrant) with strict team and workspace scoping.
+-   **Graph Integration**: Roster updates and document ingestions trigger incremental updates in `get_graph_service()` to keep the knowledge graph synchronized [orchestrator/api/agent_endpoints.py:93-101]().
+
+**Sources:** [orchestrator/api/agent_endpoints.py:93-101](), [orchestrator/core/models/__init__.py:1-31]()
+
+---
+
+## 4. Running a Chat & Workflow
+
+Interaction occurs through the chat interface and agent roster, where agents execute tasks utilizing assigned skills, models, and tools.
+
+### Execution Components
+| Entity | Role | Code Pointer |
 | :--- | :--- | :--- |
-| `AgentAppAssignment` | Links an Agent to a specific Composio App | [orchestrator/core/models/composio_cache.py:13-28]() |
-| `UnifiedToolExecutor` | Routes execution to Composio, Platform, or Workspace tools | [orchestrator/modules/agents/factory/agent_factory.py:42-45]() |
-| `get_tools_for_agent` | Single source of truth for an agent's tool schemas | [orchestrator/modules/agents/factory/agent_factory.py:9-11]() |
+| `AgentRoster` | UI for managing, starting, and inspecting agents | [frontend/components/agents/agent-roster.tsx:200]() |
+| `AgentConfigurationModal` | Modal interface for updating agent settings, plugins, and runtime parameters | [frontend/components/agents/agent-configuration-modal.tsx:98]() |
+| `AgentFactory` | Backend factory initializing specialized agents and LLM bindings | [orchestrator/api/agent_endpoints.py:32]() |
+| `LLMModel` | Core data model tracking provider metadata, context windows, and cost tiers | [orchestrator/core/models/core.py:47]() |
 
-**How to connect**:
-- In the `AgentConfigurationModal`, navigate to the **Tools** tab.
-- Toggle active tools. The frontend calls `_resolve_tool_ids_to_app_names` on the backend to validate that the tools are authenticated for the current workspace [orchestrator/api/agents.py:97-143]().
-
-**Sources**: [orchestrator/api/agents.py:180-200](), [orchestrator/modules/agents/factory/agent_factory.py:171-172]()
-
----
-
-## Step 3: Run a Streaming Chat
-
-The Chat interface uses the `useChat` hook to manage a Server-Sent Events (SSE) stream between the frontend and the `StreamingChatService`.
-
-### Data Flow: Chat Request to LLM Response
-When you send a message, the system performs a complexity assessment (AutoBrain) to determine if it should route to a single agent or trigger a multi-agent workflow.
-
+### Code Entity Space: Agent Execution & Management
 ```mermaid
 graph TD
-    "UI[chat.tsx]" -- "sendMessage()" --> "API[/api/chat]"
-    "API[/api/chat]" -- "Analyze" --> "AB[AutoBrain]"
-    "AB[AutoBrain]" -- "Complexity: ATOM" --> "SCS[StreamingChatService]"
-    "AB[AutoBrain]" -- "Complexity: ORGANISM" --> "WB[WorkflowBridge]"
-    "SCS[StreamingChatService]" -- "Context" --> "CS[ContextService]"
-    "CS[ContextService]" -- "Prompt" --> "LLM[LLMManager]"
-    "LLM[LLMManager]" -- "Stream" --> "UI[chat.tsx]"
+    "AgentRoster[AgentRoster]" --> "ConfigModal[AgentConfigurationModal]"
+    "ConfigModal[AgentConfigurationModal]" --> "AgentAPI[useUpdateAgentConfig]"
+    "AgentAPI[useUpdateAgentConfig]" --> "APIEndpoint[api/agents.py]"
+    "APIEndpoint[api/agents.py]" --> "DB[Agent Model]"
 
     subgraph "Code Entities"
-        "AB[AutoBrain]" --> "orchestrator/consumers/chatbot/auto.py"
-        "SCS[StreamingChatService]" --> "orchestrator/consumers/chatbot/service.py"
-        "WB[WorkflowBridge]" --> "orchestrator/api/chat.py"
+        "AgentRoster[AgentRoster]" --> "frontend/components/agents/agent-roster.tsx:200"
+        "ConfigModal[AgentConfigurationModal]" --> "frontend/components/agents/agent-configuration-modal.tsx:98"
+        "AgentAPI[useUpdateAgentConfig]" --> "frontend/hooks/use-agent-api.ts:45"
+        "APIEndpoint[api/agents.py]" --> "orchestrator/api/agents.py:33"
+        "DB[Agent Model]" --> "orchestrator/core/models/core.py"
     end
 ```
 
-**Key Features**:
-- **Tool Loop Prevention**: The `ToolExecutionTracker` monitors tool calls in a single turn to prevent infinite loops (max 10 iterations) [orchestrator/consumers/chatbot/service.py:83-112]().
-- **Routing Info**: The `UniversalRouter` attaches headers (e.g., `x-routing-agent-id`) to the response so the UI can display which agent is responding [frontend/lib/chat/hooks.ts:142-157]().
-
-**Sources**: [frontend/lib/chat/hooks.ts:55-125](), [orchestrator/api/chat.py:37-100](), [orchestrator/consumers/chatbot/service.py:150-176]()
-
----
-
-## Step 4: Execute a Playbook
-
-Playbooks (`workflow_recipes` in the schema; "recipe" in older code paths) are sequences of steps executed by one or more agents. For simple automation, the system uses the `RecipeDirectExecutor`. The seeded *Two-minute brief* is one: Researcher → Writer → Analyst, three steps, native tools only.
-
-### Playbook Execution Lifecycle
-1.  **Context Assembly**: Uses `ContextService(RECIPE)` to build a system prompt containing the recipe's goal and current step instructions [orchestrator/api/recipe_executor.py:9-12]().
-2.  **Scratchpad**: Agents use a `RecipeScratchpad` to pass data between steps without bloating the context window [orchestrator/api/recipe_executor.py:15-16]().
-3.  **Notifications**: On completion, the `NotificationDispatcher` sends an event (e.g., `playbook_complete`) to the user's notification bell [orchestrator/api/recipe_executor.py:45-61]().
-
-### Automated Reporting
-Upon finishing a recipe, the `ReportService` generates a Markdown summary including:
-- **Metrics**: Total tokens used, cost in USD, and duration [orchestrator/api/recipe_executor.py:113-131]().
-- **Step Breakdown**: Status and output preview for every step [orchestrator/api/recipe_executor.py:159-168]().
-
-**Sources**: [orchestrator/api/recipe_executor.py:1-37](), [orchestrator/api/recipe_executor.py:88-140]()
-
----
-
-## Summary Table: Quick Start Entities
-
-| Task | Key Class/Function | File Path |
-| :--- | :--- | :--- |
-| **Create Agent** | `AgentFactory.create_agent` | [orchestrator/modules/agents/factory/agent_factory.py]() |
-| **Route Chat** | `UniversalRouter.route` | [orchestrator/core/routing/engine.py]() |
-| **Execute Tool** | `UnifiedToolExecutor.execute` | [orchestrator/modules/tools/tool_router.py]() |
-| **Run Playbook** | `execute_recipe_direct` | [orchestrator/api/recipe_executor.py]() |
-| **Stream Response** | `StreamingChatService.stream` | [orchestrator/consumers/chatbot/service.py]() |
-
-**Sources**: [orchestrator/api/agents.py:31](), [orchestrator/api/chat.py:30](), [orchestrator/api/recipe_executor.py:1]()
+**Sources:** [frontend/components/agents/agent-roster.tsx:200-214](), [frontend/components/agents/agent-configuration-modal.tsx:98-116](), [frontend/hooks/use-agent-api.ts:43-46](), [orchestrator/api/agents.py:33-52]()
 
 ---
