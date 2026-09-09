@@ -187,4 +187,5 @@ def test_the_sessions_real_directory_always_wins(monkeypatch):
 
 
 def test_host_contract_version_moved_with_the_claim_shape():
-    assert svc.EXPECTED_CLI_HOST_VERSION == "0.4.0"
+    # 0.5.0 (2026-09-09): results and TerminalClosed carry the turn's token usage
+    assert svc.EXPECTED_CLI_HOST_VERSION == "0.5.0"

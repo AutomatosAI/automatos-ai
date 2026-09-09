@@ -77,7 +77,9 @@ def test_stream_assembler_separates_channels_and_reassembles_tool_calls():
     assert resp.content == "Hello" and resp.reasoning == "think hard"
     assert resp.tool_calls == [{"id": "c1", "type": "function", "function": {"name": "platform_get_agent", "arguments": '{"name":"bob"}'}}]
     assert resp.finish_reason == "tool_calls" and resp.streamed is True
-    assert resp.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    # 2026-09-09 analytics: the usage dict carries the prompt-cache breakdown too
+    assert resp.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+                          "cache_read_tokens": 0, "cache_write_tokens": 0}
 
 
 def test_stream_assembler_lifts_inline_think_tags():
