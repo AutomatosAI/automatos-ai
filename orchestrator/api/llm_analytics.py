@@ -54,6 +54,44 @@ def route_facts(model_id: Optional[str], provider: Optional[str]) -> Dict[str, A
     }
 
 
+def _agent_facts(db: Session, workspace_id, since: datetime, agent_ids: List[Any]) -> Dict[str, Dict[str, Any]]:
+    """Per agent: its NAME (the system agent Auto and a deleted agent are not in
+    the workspace's agent list, and used to render as "Agent #1 · deleted") and
+    the ROUTE it used most in the period — what it actually ran on, not what
+    its configuration says."""
+    if not agent_ids:
+        return {}
+    names = {
+        a.id: a.name
+        for a in db.query(Agent.id, Agent.name).filter(Agent.id.in_(agent_ids)).all()
+    }
+    dominant = (
+        _calls(db, workspace_id, since)
+        .filter(LLMUsage.agent_id.in_(agent_ids))
+        .with_entities(
+            LLMUsage.agent_id,
+            LLMUsage.model_id,
+            LLMUsage.provider,
+            func.count(LLMUsage.id).label("cnt"),
+            func.sum(LLMUsage.total_tokens).label("tokens"),
+        )
+        .group_by(LLMUsage.agent_id, LLMUsage.model_id, LLMUsage.provider)
+        .order_by(LLMUsage.agent_id, desc("cnt"), desc("tokens"))
+        .all()
+    )
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in dominant:
+        key = str(row.agent_id)
+        if key in out:
+            continue
+        facts = route_facts(row.model_id, row.provider)
+        facts["label"] = names.get(row.agent_id) or f"Agent #{row.agent_id}"
+        out[key] = facts
+    for agent_id, name in names.items():
+        out.setdefault(str(agent_id), {"label": name})
+    return out
+
+
 def _calls(db: Session, workspace_id, since: datetime):
     """Every per-call row of the workspace in the period — never the sync copies."""
     return db.query(LLMUsage).filter(
@@ -225,6 +263,10 @@ async def get_usage(
         .all()
     )
 
+    agent_facts: Dict[str, Dict[str, Any]] = {}
+    if group_by == "agent":
+        agent_facts = _agent_facts(db, ctx.workspace_id, since, [r[0] for r in rows if r[0] is not None])
+
     out: List[UsageGroup] = []
     for r in rows:
         values = tuple(r)[: len(group_cols)]
@@ -238,6 +280,9 @@ async def get_usage(
         elif group_by == "model":
             facts = {"model_id": values[0] or "unknown", "label": values[0] or "unknown"}
             key = str(values[0] or "unknown")
+        elif group_by == "agent":
+            key = str(values[0] if values[0] is not None else "unknown")
+            facts = agent_facts.get(key, {})
         else:
             facts = {}
             key = str(values[0] if values[0] is not None else "unknown")

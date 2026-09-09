@@ -74,9 +74,13 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       bgColor: 'from-warning/20 to-warning/5',
     },
     {
+      // Missions AND legacy workflow runs — the card only counted the latter, so a
+      // workspace with missions and no workflows read "0 · 0% success rate"
       label: 'Missions / Runs',
-      value: overview?.workflows.total || 0,
-      sub: `${overview?.workflows.successRate?.toFixed(0) || 0}% success rate`,
+      value: (overview?.workflows.total || 0) + (overview?.missions.total || 0),
+      sub: (overview?.missions.total || 0) > 0 && !(overview?.workflows.total || 0)
+        ? `${(overview?.missions.successRate || 0).toFixed(0)}% success rate`
+        : `${overview?.workflows.successRate?.toFixed(0) || 0}% success rate`,
       icon: GitBranch,
       color: 'text-purple-400',
       bgColor: 'from-purple-500/20 to-purple-500/5',
@@ -95,8 +99,8 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       label: 'LLM Cost',
       value: `$${(overview?.cost.currentPeriod || 0).toFixed(2)}`,
       sub: overview?.cost.changePercent != null
-        ? `${overview.cost.changePercent > 0 ? '+' : ''}${overview.cost.changePercent.toFixed(0)}% vs previous · $${(overview?.cost.projectedMonthly || 0).toFixed(2)}/mo projected`
-        : `Last ${days} days · $${(overview?.cost.projectedMonthly || 0).toFixed(2)}/mo projected`,
+        ? `${overview.cost.changePercent > 0 ? '+' : ''}${overview.cost.changePercent.toFixed(0)}% vs previous`
+        : `$${(overview?.cost.projectedMonthly || 0).toFixed(2)}/mo projected`,
       icon: DollarSign,
       color: 'text-blue-400',
       bgColor: 'from-blue-500/20 to-blue-500/5',

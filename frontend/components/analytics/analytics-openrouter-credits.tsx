@@ -89,7 +89,8 @@ export function AnalyticsOpenRouterCredits() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Credits Balance */}
+        {/* Credits Balance — a key with no prepaid credits reports zeros; then only the usage below is meaningful */}
+        {totalCredits > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
@@ -118,9 +119,12 @@ export function AnalyticsOpenRouterCredits() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Usage Breakdown */}
+        {/* Usage Breakdown — what OpenRouter itself reports for this key */}
         {keyInfo && (
+          <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">OpenRouter reports for this key (its own accounting)</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="p-3 rounded-lg bg-secondary/20">
               <div className="flex items-center gap-2 mb-1">
@@ -143,6 +147,7 @@ export function AnalyticsOpenRouterCredits() {
               </div>
               <p className="text-sm font-medium">{formatCurrency(keyInfo.usage_monthly)}</p>
             </div>
+          </div>
           </div>
         )}
 

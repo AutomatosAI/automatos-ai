@@ -152,14 +152,20 @@ export function mergeAgentUsage(agents: any[], usageByAgent: UsageGroup[]): Agen
     if (group.key === 'unknown' || group.key === 'None') continue
     const agent = byId.get(group.key)
     const facts = agentRuntimeFacts(agent || {})
+    // The route the agent actually used most this period (from llm_usage) beats
+    // its configuration; the backend's label names agents the list does not
+    // carry (the system agent Auto, a deleted agent).
+    const usedRoute = group.model_id && group.provider
+      ? { model: group.model_id, label: `${shortenModelName(group.model_id)} · ${group.provider_label || group.provider}`, billing: (group.billing as Billing) || facts.billing }
+      : null
     rows.push({
       id: Number(group.key),
-      name: agent?.name || `Agent #${group.key}`,
-      status: agent?.status || 'deleted',
+      name: agent?.name || group.label || `Agent #${group.key}`,
+      status: agent?.status || (group.label ? 'system' : 'deleted'),
       runtime: facts.runtime,
-      model: facts.model || 'unknown',
-      modelLabel: facts.label,
-      billing: facts.billing,
+      model: usedRoute?.model || facts.model || 'unknown',
+      modelLabel: usedRoute?.label || facts.label,
+      billing: usedRoute?.billing || facts.billing,
       requests: group.request_count || 0,
       tokens: group.total_tokens || 0,
       inputTokens: group.input_tokens || 0,

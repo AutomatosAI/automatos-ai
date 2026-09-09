@@ -318,7 +318,10 @@ export function AnalyticsCosts({ days }: Props) {
         },
         {
           label: 'Cost per Request',
-          value: formatCost(data?.summary?.costPerTask || 0),
+          // a fraction of a cent reads as cents — "$0.0046" was ellipsised in the tile
+          value: (data?.summary?.costPerTask || 0) < 0.01 && (data?.summary?.costPerTask || 0) > 0
+            ? `${((data?.summary?.costPerTask || 0) * 100).toFixed(2)}¢`
+            : formatCost(data?.summary?.costPerTask || 0),
           change: `${formatNumber(data?.summary?.totalRequests || 0)} requests · ${((data?.summary?.errorRate || 0) * 100).toFixed(1)}% failed`,
           icon: Activity,
           iconColor: 'text-[hsl(var(--agent))]',
@@ -336,7 +339,9 @@ export function AnalyticsCosts({ days }: Props) {
                 : formatNumber(data.summary.mostExpensiveAgent.tokens))
             : '—',
           change: data?.summary?.mostExpensiveAgent
-            ? `${data.summary.mostExpensiveAgent.cost > 0 ? 'on' : 'tokens on'} ${data.summary.mostExpensiveAgent.model}`
+            ? (data.summary.mostExpensiveAgent.model && data.summary.mostExpensiveAgent.model !== 'unknown'
+                ? `${data.summary.mostExpensiveAgent.cost > 0 ? 'on' : 'tokens on'} ${data.summary.mostExpensiveAgent.model}`
+                : `${formatNumber(data.summary.mostExpensiveAgent.tokens)} tokens`)
             : 'No data',
           icon: AlertTriangle,
           iconColor: 'text-primary',

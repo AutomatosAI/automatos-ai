@@ -167,8 +167,14 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     merge = (versions / "prd236w1_prd237_merge.py").read_text()
     assert 'revision = "prd236w1_prd237_merge"' in merge
     assert '"prd236_w1_serving_provider"' in merge and '"prd237_users_chat_sessions"' in merge
+    # 2026-09-09: the analytics cost-tracking revisions chain onto that merge (via
+    # prd240_merge_heads, which also joins the calendar chain); the guard follows.
+    cache = (versions / "prd240_llm_usage_cache_tokens.py").read_text()
+    assert 'down_revision = "prd240_merge_heads"' in cache
+    joins = (versions / "prd240_merge_heads.py").read_text()
+    assert '"prd236w1_prd237_merge"' in joins and '"calendar_scheduled_board_tasks"' in joins
     guard = (Path(__file__).resolve().parent / "test_prd209_alembic_single_head.py").read_text()
-    assert 'EXPECTED_HEAD = "prd236w1_prd237_merge"' in guard
+    assert 'EXPECTED_HEAD = "prd240_llm_usage_cache_tokens"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

@@ -85,11 +85,21 @@ def test_lane_and_execution_ref_follow_the_context(context, lane, ref):
 # ── the tracker ──────────────────────────────────────────────────────────────
 
 class _Query:
-    def __init__(self, rows):
-        self._rows = rows
+    """A query over in-memory rows that honours ``column == value`` clauses —
+    the route lookup (model_id AND serving_provider) must not match any row."""
 
-    def filter(self, *_):
-        return self
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def filter(self, *clauses):
+        rows = self._rows
+        for c in clauses:
+            try:
+                col, val = c.left.name, c.right.value
+                rows = [r for r in rows if getattr(r, col, None) == val]
+            except Exception:  # noqa: BLE001 — a clause the fake cannot read keeps the rows
+                pass
+        return _Query(rows)
 
     def first(self):
         return self._rows[0] if self._rows else None
@@ -143,7 +153,7 @@ def test_a_route_row_prices_the_call_and_names_the_tier(fake_db):
 
 
 def test_a_metered_route_with_no_row_falls_back_to_the_catalogue_then_the_estimate(fake_db):
-    cache = SimpleNamespace(prompt_cost=0.0000003, completion_cost=0.0000025)
+    cache = SimpleNamespace(model_id="google/gemini-2.5-flash", prompt_cost=0.0000003, completion_cost=0.0000025)
     session = fake_db({"OpenRouterModelCache": [cache]})
     ut.UsageTracker.track(workspace_id=WS, model_id="google/gemini-2.5-flash", provider="openrouter",
                           input_tokens=1_000_000, output_tokens=0)
@@ -151,9 +161,13 @@ def test_a_metered_route_with_no_row_falls_back_to_the_catalogue_then_the_estima
     assert row.total_cost == pytest.approx(0.30)            # never $0 for a paid route
     assert row.tier == "aggregator"                          # the registry kind, not the caller's default
     session = fake_db({})
-    ut.UsageTracker.track(workspace_id=WS, model_id="anthropic/claude-opus-4.6", provider="openrouter",
+    ut.UsageTracker.track(workspace_id=WS, model_id="openai/gpt-4o-mini", provider="openrouter",
                           input_tokens=1000, output_tokens=0)
-    assert session.added[0].total_cost > 0                   # the static estimate map matched "claude-opus"
+    assert session.added[0].total_cost > 0                   # the static estimate map matched "gpt-4o"
+    session = fake_db({})
+    ut.UsageTracker.track(workspace_id=WS, model_id="vendor/never-heard-of-it", provider="openrouter",
+                          input_tokens=1000, output_tokens=0)
+    assert session.added[0].total_cost == 0                  # nothing matched: $0, logged — never a made-up rate
 
 
 def test_a_free_route_books_zero_whatever_the_fallback_says(fake_db):

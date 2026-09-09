@@ -128,6 +128,9 @@ def test_usage_by_execution_and_agent_join_back_to_the_spender(seeded, new_sessi
     assert by_exec["mission:m1"].total_cost == pytest.approx(0.02) and by_exec["board_task:97"].total_tokens == 237_400
     assert by_agent["15"].total_cost == 0 and by_agent["15"].total_tokens == 237_400
     assert by_agent["57"].request_count == 2
+    # the route each agent actually used most this period rides on the group
+    assert by_agent["15"].model_id == "claude-fable-5" and by_agent["15"].provider == "claude_code"
+    assert by_agent["15"].billing == "subscription" and by_agent["57"].provider in ("openrouter", "nvidia")
 
 
 def test_daily_series_is_keyed_by_route_with_facts(seeded, new_session):

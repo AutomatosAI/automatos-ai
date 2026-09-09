@@ -105,7 +105,7 @@ export function useAnalyticsOverview(days: number = 30) {
         },
         documents: {
           total: (docStats as any)?.total_documents || 0,
-          storageMb: (docStats as any)?.storage_mb || 0,
+          storageMb: (docStats as any)?.total_storage_mb || 0,
         },
         cost: {
           currentPeriod: totalCost,
@@ -473,18 +473,20 @@ export function usePlanUsage() {
     queryKey: unifiedAnalyticsKeys.planUsage(),
     queryFn: async () => {
       // For now, return placeholder limits (pilot phase — limits TBD)
-      const [agents, missions, documents] = await Promise.all([
+      const [agents, missions, documents, llmSummary] = await Promise.all([
         apiClient.getAgents().catch(() => []),
         apiClient.request<any>('/api/missions?limit=100').catch(() => ({ items: [] })),
         apiClient.getDocuments().catch(() => []),
+        // 30-day LLM calls and tokens from llm_usage — the per-agent blob undercounted both
+        apiClient.request<any>('/api/analytics/llm/summary?period=30d').catch(() => null),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
-      const missionItems = missions?.items || (Array.isArray(missions) ? missions : [])
+      const missionItems = missions?.missions || missions?.items || (Array.isArray(missions) ? missions : [])
       const docList = Array.isArray(documents) ? documents : []
 
-      const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
-      const totalRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
+      const totalTokens = llmSummary?.total_tokens || 0
+      const totalRequests = llmSummary?.total_requests || 0
       const storageMb = docList.reduce((sum: number, d: any) => sum + (d.file_size || d.size || 0), 0) / (1024 * 1024)
 
       return {
@@ -495,8 +497,8 @@ export function usePlanUsage() {
           missions: { used: missionItems.length, limit: null as number | null, label: 'Missions' },
           documents: { used: docList.length, limit: null as number | null, label: 'Documents' },
           storageGb: { used: parseFloat((storageMb / 1024).toFixed(2)), limit: null as number | null, label: 'Storage (GB)' },
-          apiCalls: { used: totalRequests, limit: null as number | null, label: 'API Calls' },
-          tokens: { used: totalTokens, limit: null as number | null, label: 'Tokens' },
+          apiCalls: { used: totalRequests, limit: null as number | null, label: 'LLM Calls (30 days)' },
+          tokens: { used: totalTokens, limit: null as number | null, label: 'Tokens (30 days)' },
         },
       }
     },

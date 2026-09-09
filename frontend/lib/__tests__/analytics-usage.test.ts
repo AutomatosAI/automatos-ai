@@ -61,10 +61,21 @@ describe('agents', () => {
       { key: '57', request_count: 3, input_tokens: 900, output_tokens: 100, total_tokens: 1000, total_cost: 0 },
       { key: '15', request_count: 2, input_tokens: 236000, output_tokens: 700, total_tokens: 236700, total_cost: 0, cache_read_tokens: 117000 },
       { key: '999', request_count: 1, input_tokens: 10, output_tokens: 1, total_tokens: 11, total_cost: 0.5 },
+      { key: '1', request_count: 211, input_tokens: 4, output_tokens: 1, total_tokens: 5, total_cost: 0.4, label: 'Auto', model_id: 'anthropic/claude-opus-4.6', provider: 'openrouter', provider_label: 'OpenRouter', billing: 'metered' },
       { key: 'unknown', request_count: 4, input_tokens: 1, output_tokens: 1, total_tokens: 2, total_cost: 9 },
     ])
-    expect(rows.map((r) => r.name)).toEqual(['Agent #999', 'Bob', 'Researcher'])
-    expect(rows[1]).toMatchObject({ runtime: 'cli', modelLabel: 'Claude Code · fable', cacheReadTokens: 117000, billing: 'subscription' })
+    expect(rows.map((r) => r.name)).toEqual(['Agent #999', 'Auto', 'Bob', 'Researcher'])
+    expect(rows[2]).toMatchObject({ runtime: 'cli', modelLabel: 'Claude Code · fable', cacheReadTokens: 117000, billing: 'subscription' })
     expect(rows[0].status).toBe('deleted')
+    // the system agent is not in the workspace list: the backend's label names it,
+    // and the route it actually used this period is what "runs on" shows
+    expect(rows[1]).toMatchObject({ status: 'system', modelLabel: 'claude-opus-4.6 · OpenRouter', billing: 'metered' })
+  })
+
+  it('prefers the route an agent actually used over its configured model', () => {
+    const rows = mergeAgentUsage([researcher], [
+      { key: '57', request_count: 3, input_tokens: 9, output_tokens: 1, total_tokens: 10, total_cost: 0.01, model_id: 'moonshotai/kimi-k3', provider: 'openrouter', provider_label: 'OpenRouter', billing: 'metered' },
+    ])
+    expect(rows[0]).toMatchObject({ modelLabel: 'kimi-k3 · OpenRouter', billing: 'metered' })
   })
 })
