@@ -42,7 +42,7 @@
     "ts-node": "10.9.1",
     "tsx": "3.12.10",
     "typescript": "5.2.2",
-    "vitest": "^2.1.9"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "@ai-sdk/react": "^2.0.87",
