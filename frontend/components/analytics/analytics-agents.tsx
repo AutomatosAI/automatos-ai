@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
 import { useAgentAnalytics } from '@/hooks/use-unified-analytics'
+import { billingBadge } from '@/lib/analytics-usage'
 
 interface Props {
   days: number
@@ -36,6 +37,14 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toFixed(0)
+}
+
+/** A session agent's calls are on the user's plan: no dollar figure exists to show. */
+function formatAgentCost(agent: { cost: number; tokensUsed: number; billing?: string }): string {
+  if (agent.cost > 0) return `$${agent.cost.toFixed(2)}`
+  if (agent.tokensUsed > 0 && agent.billing === 'subscription') return 'plan'
+  if (agent.tokensUsed > 0 && agent.billing === 'free') return 'free'
+  return '-'
 }
 
 function formatDate(dateStr: string | null): string {
@@ -122,8 +131,20 @@ function AgentExpandedPanel({ agent }: { agent: any }) {
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Total cost</span>
-          <span className="font-medium">{agent.cost > 0 ? `$${agent.cost.toFixed(2)}` : '-'}</span>
+          <span className="font-medium">{formatAgentCost(agent)}</span>
         </div>
+        {agent.cacheReadTokens > 0 && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Served from cache</span>
+            <span className="font-medium">{formatNumber(agent.cacheReadTokens)}</span>
+          </div>
+        )}
+        {agent.errors > 0 && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Failed calls</span>
+            <span className="font-medium text-[hsl(var(--destructive))]">{agent.errors}</span>
+          </div>
+        )}
         {hasMemory && (
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Memory accesses</span>
@@ -151,8 +172,12 @@ function AgentExpandedPanel({ agent }: { agent: any }) {
           <Badge variant="secondary" className="text-xs capitalize">{agent.agentType || 'general'}</Badge>
         </div>
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Model</span>
+          <span className="text-muted-foreground">{agent.runtime === 'cli' ? 'Runtime' : 'Model'}</span>
           <Badge variant="secondary" className="text-xs font-mono">{agent.llmModel}</Badge>
+        </div>
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">Billing</span>
+          <Badge variant="outline" className="text-xs">{billingBadge(agent.billing).label}</Badge>
         </div>
       </div>
     </div>
@@ -225,10 +250,10 @@ export function AnalyticsAgents({ days }: Props) {
   return (
     <div className="space-y-6">
       <StatsBar stats={[
-        { label: 'Total Agents', value: data?.summary?.totalAgents || 0, change: `${data?.summary?.activeAgents || 0} active`, icon: Bot, iconColor: 'text-primary', globalIconKey: 'global_agent' },
+        { label: 'Total Agents', value: data?.summary?.totalAgents || 0, change: `${data?.summary?.activeAgents || 0} active · ${data?.summary?.sessionAgents || 0} on Claude Code`, icon: Bot, iconColor: 'text-primary', globalIconKey: 'global_agent' },
         { label: 'Avg Success Rate', value: `${(data?.summary?.avgSuccessRate || 0).toFixed(0)}%`, change: 'Across all agents', icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]', globalIconKey: 'global_performance' },
-        { label: 'Total Tokens', value: formatNumber(data?.summary?.totalTokens || 0), change: 'This period', icon: Zap, iconColor: 'text-[hsl(var(--info))]' },
-        { label: 'Total Cost', value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`, change: 'This period', icon: DollarSign, iconColor: 'text-[hsl(var(--agent))]', globalIconKey: 'global_cost' },
+        { label: 'Total Tokens', value: formatNumber(data?.summary?.totalTokens || 0), change: `Last ${days} days · API + sessions`, icon: Zap, iconColor: 'text-[hsl(var(--info))]' },
+        { label: 'Total Cost', value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`, change: `Last ${days} days · metered routes`, icon: DollarSign, iconColor: 'text-[hsl(var(--agent))]', globalIconKey: 'global_cost' },
       ]} loading={isLoading} />
 
       {/* Filter */}
@@ -303,9 +328,9 @@ export function AnalyticsAgents({ days }: Props) {
                           {agent.avgRunTime > 0 ? `${agent.avgRunTime.toFixed(1)}s` : '-'}
                         </td>
                         <td className="p-4">{agent.tokensUsed > 0 ? formatNumber(agent.tokensUsed) : '-'}</td>
-                        <td className="p-4">{agent.cost > 0 ? `$${agent.cost.toFixed(2)}` : '-'}</td>
+                        <td className="p-4">{formatAgentCost(agent)}</td>
                         <td className="p-4 hidden lg:table-cell">
-                          <Badge variant="secondary" className="text-xs font-mono">{agent.llmModel}</Badge>
+                          <Badge variant="secondary" className={`text-xs font-mono ${agent.runtime === 'cli' ? 'border-[hsl(var(--agent))]/40 text-[hsl(var(--agent))]' : ''}`}>{agent.llmModel}</Badge>
                         </td>
                         <td className="p-4 hidden xl:table-cell">{getHealthBadge(agent)}</td>
                       </motion.tr>

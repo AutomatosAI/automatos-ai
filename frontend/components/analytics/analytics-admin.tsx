@@ -52,6 +52,8 @@ const PROVIDER_COLORS = [
 ]
 
 const PLAN_COLORS: Record<string, string> = {
+  // PRD-222 W2·S1 renamed the entry tier 'starter' → 'basic'; both still occur in data
+  basic: 'text-muted-foreground border-border/30 bg-secondary/30',
   starter: 'text-muted-foreground border-border/30 bg-secondary/30',
   pilot: 'text-info border-info/30 bg-info/5',
   pro: 'text-agent border-agent/30 bg-agent/5',
@@ -59,6 +61,7 @@ const PLAN_COLORS: Record<string, string> = {
 }
 
 const PLAN_DONUT_COLORS: Record<string, string> = {
+  basic: '#9ca3af',
   starter: '#9ca3af',
   pilot: '#60a5fa',
   pro: '#a78bfa',
@@ -109,7 +112,7 @@ function PeriodToggle({ value, onChange }: { value: string; onChange: (v: string
 
 // ─── Custom Tooltips ──────────────────────────────────────────────────
 
-function ProviderCostTooltip({ active, payload, label }: any) {
+function ProviderCostTooltip({ active, payload, label, labels }: any) {
   if (!active || !payload?.length) return null
   const total = payload.reduce((s: number, p: any) => s + (p.value || 0), 0)
   return (
@@ -120,7 +123,7 @@ function ProviderCostTooltip({ active, payload, label }: any) {
           <div key={p.dataKey} className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full" style={{ background: p.color }} />
-              <span className="text-xs text-foreground capitalize">{p.dataKey}</span>
+              <span className="text-xs text-foreground">{labels?.[p.dataKey] || p.dataKey}</span>
             </div>
             <span className="text-xs font-mono font-medium">{formatCost(p.value)}</span>
           </div>
@@ -351,7 +354,7 @@ export function AnalyticsAdmin({ days }: Props) {
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" strokeOpacity={0.3} vertical={false} />
                         <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v: string) => { const d = new Date(v); return `${d.getMonth() + 1}/${d.getDate()}` }} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v: number) => formatCost(v)} width={60} />
-                        <Tooltip content={<ProviderCostTooltip />} />
+                        <Tooltip content={<ProviderCostTooltip labels={dashboard.daily_by_provider.labels} />} />
                         {dashboard.daily_by_provider.providers.map((prov, idx) => (
                           <Area key={prov} type="monotone" dataKey={prov} stackId="1" stroke={PROVIDER_COLORS[idx % PROVIDER_COLORS.length]} strokeWidth={2} fill={`url(#adm-g-${idx})`} dot={false} activeDot={{ r: 4, strokeWidth: 2, fill: 'hsl(var(--card))' }} />
                         ))}
@@ -362,7 +365,7 @@ export function AnalyticsAdmin({ days }: Props) {
                     {dashboard.daily_by_provider.providers.map((prov, idx) => (
                       <div key={prov} className="flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded-full" style={{ background: PROVIDER_COLORS[idx % PROVIDER_COLORS.length] }} />
-                        <span className="text-xs text-muted-foreground capitalize">{prov}</span>
+                        <span className="text-xs text-muted-foreground">{dashboard.daily_by_provider.labels?.[prov] || prov}</span>
                       </div>
                     ))}
                   </div>

@@ -6,6 +6,27 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient, getAdminWorkspaceOverride } from '@/lib/api-client'
+import {
+  agentRuntimeFacts,
+  cacheShare,
+  mergeAgentUsage,
+  meteredCost,
+  routeLabel,
+  type ProviderUsage,
+  type UsageGroup,
+} from '@/lib/analytics-usage'
+
+/** The backend period for a day count (the page's 7/30/90-day selector). */
+function periodFor(days: number): string {
+  return days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
+}
+
+// Each call wrapped so a synchronous throw never breaks the Promise.all
+const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+  Promise.resolve().then(fn).catch((err) => {
+    console.warn('[Analytics] API call failed:', err?.message || err)
+    return fallback
+  })
 
 // Workspace scope for cache correctness: when admin switches workspace,
 // cached data for workspace A must not bleed into workspace B.
@@ -23,7 +44,6 @@ export const unifiedAnalyticsKeys = {
   costs: (days: number) => ['unified-analytics', wsScope(), 'costs', days] as const,
   recommendations: () => ['unified-analytics', wsScope(), 'recommendations'] as const,
   planUsage: () => ['unified-analytics', wsScope(), 'plan-usage'] as const,
-  memory: () => ['unified-analytics', wsScope(), 'memory'] as const,
   adminWorkspaces: (days: number) => ['unified-analytics', wsScope(), 'admin', 'workspaces', days] as const,
   openrouterCredits: () => ['unified-analytics', wsScope(), 'openrouter', 'credits'] as const,
   openrouterKeyInfo: () => ['unified-analytics', wsScope(), 'openrouter', 'key-info'] as const,
@@ -35,7 +55,6 @@ export const unifiedAnalyticsKeys = {
   composioDailyVolume: (days: number) => ['unified-analytics', wsScope(), 'composio', 'daily-volume', days] as const,
   composioRecentExecs: () => ['unified-analytics', wsScope(), 'composio', 'recent-execs'] as const,
   composioErrors: (days: number) => ['unified-analytics', wsScope(), 'composio', 'errors', days] as const,
-  chartPresets: () => ['unified-analytics', wsScope(), 'charts', 'presets'] as const,
   modelComparison: (modelIds: string[], period: string) => ['unified-analytics', wsScope(), 'llm', 'comparison', modelIds, period] as const,
   costProjections: (period: string) => ['unified-analytics', wsScope(), 'llm', 'projections', period] as const,
   dailyCostByModel: (period: string) => ['unified-analytics', wsScope(), 'llm', 'daily-by-model', period] as const,
@@ -47,18 +66,12 @@ export function useAnalyticsOverview(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.overview(days),
     queryFn: async () => {
-      const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
+      const period = periodFor(days)
 
-      // Each call wrapped in try/catch to prevent synchronous TypeError from breaking Promise.all
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
-
-      const [agents, llmSummary, workflowStats, docStats, missionStats] = await Promise.all([
+      const [agents, llmSummary, projections, workflowStats, docStats, missionStats] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
         safeRequest(() => apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`), null),
+        safeRequest(() => apiClient.request<any>(`/api/analytics/llm/projections?period=${period}`), null),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
         safeRequest(() => apiClient.getAnalyticsOverview(), null),
         // PRD-125 Phase 2: Fetch mission stats alongside workflow stats
@@ -67,10 +80,10 @@ export function useAnalyticsOverview(days: number = 30) {
 
       const agentList = Array.isArray(agents) ? agents : []
 
-      // Cost: prefer llm_usage table, fallback to agent model_usage_stats
-      const llmCost = llmSummary?.total_cost || 0
-      const agentCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
-      const totalCost = llmCost > 0 ? llmCost : agentCost
+      // Cost is what llm_usage booked for the period — never the cumulative
+      // per-agent blob, which ignores the selector and misses sessions.
+      const totalCost = llmSummary?.total_cost || 0
+      const providers: ProviderUsage[] = Array.isArray(llmSummary?.by_provider) ? llmSummary.by_provider : []
 
       return {
         agents: {
@@ -96,7 +109,11 @@ export function useAnalyticsOverview(days: number = 30) {
         },
         cost: {
           currentPeriod: totalCost,
-          previousPeriod: 0,
+          projectedMonthly: projections?.projected_monthly || 0,
+          changePercent: projections?.change_percent ?? null,
+          meteredCost: meteredCost(providers),
+          requests: llmSummary?.total_requests || 0,
+          providers,
         },
         system: {},
       }
@@ -121,28 +138,29 @@ export function useAgentAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.agents(days),
     queryFn: async () => {
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
-
-      const [agents, stats, memoryStats] = await Promise.all([
+      const period = periodFor(days)
+      const [agents, stats, memoryStats, usageByAgent] = await Promise.all([
         safeRequest(() => apiClient.getAgents(), []),
         safeRequest(() => apiClient.getSystemAgentStatistics(), null),
         safeRequest(() => apiClient.request<AgentMemoryStats[]>('/api/v1/memory/stats/agents'), []),
+        // The period's spend per agent from llm_usage — the cumulative
+        // model_usage_stats blob ignored the 7/30/90-day selector entirely.
+        safeRequest(() => apiClient.request<UsageGroup[]>(`/api/analytics/llm/usage?period=${period}&group_by=agent`), []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
       const memoryList = Array.isArray(memoryStats) ? memoryStats : []
+      const usageRows = mergeAgentUsage(agentList, Array.isArray(usageByAgent) ? usageByAgent : [])
+      const usageById = new Map(usageRows.map((row) => [row.id, row]))
 
-      // Build lookup map by agent_id
       const memoryMap = new Map<number, AgentMemoryStats>()
       memoryList.forEach((m) => memoryMap.set(m.agent_id, m))
 
       return {
         agents: agentList.map((agent: any) => {
           const mem = memoryMap.get(agent.id)
+          const usage = usageById.get(agent.id)
+          const facts = agentRuntimeFacts(agent)
           return {
             id: agent.id,
             name: agent.name,
@@ -150,10 +168,14 @@ export function useAgentAnalytics(days: number = 30) {
             agentType: agent.agent_type,
             successRate: (agent.performance_metrics?.success_rate || 0) * 100,
             avgRunTime: agent.performance_metrics?.avg_execution_time || 0,
-            tokensUsed: agent.model_usage_stats?.total_tokens || 0,
-            cost: agent.model_usage_stats?.total_cost || 0,
-            llmModel: agent.agent_model_config?.model_id || 'unknown',
-            totalRequests: agent.model_usage_stats?.total_requests || 0,
+            tokensUsed: usage?.tokens || 0,
+            cost: usage?.cost || 0,
+            cacheReadTokens: usage?.cacheReadTokens || 0,
+            errors: usage?.errors || 0,
+            llmModel: facts.label,
+            runtime: facts.runtime,
+            billing: facts.billing,
+            totalRequests: usage?.requests || 0,
             lastUsed: agent.model_usage_stats?.last_used_at || agent.updated_at,
             // Memory data
             memoryCount: mem?.memory_count || 0,
@@ -175,8 +197,9 @@ export function useAgentAnalytics(days: number = 30) {
             totalAgents: agentList.length,
             activeAgents: agentList.filter((a: any) => a.status === 'active').length,
             avgSuccessRate: avgRate,
-            totalTokens: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0),
-            totalCost: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0),
+            totalTokens: usageRows.reduce((sum, row) => sum + row.tokens, 0),
+            totalCost: usageRows.reduce((sum, row) => sum + row.cost, 0),
+            sessionAgents: agentList.filter((a: any) => agentRuntimeFacts(a).runtime === 'cli').length,
           }
         })(),
         ranking: [],
@@ -191,24 +214,24 @@ export function useWorkflowAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.workflows(days),
     queryFn: async () => {
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
+      const period = periodFor(days)
 
-      const period = days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
-
-      const [workflows, stats, recipesResp, recipeStats, missionsResp, missionStats] = await Promise.all([
+      const [workflows, stats, recipesResp, recipeStats, missionsResp, missionStats, usageByExecution] = await Promise.all([
         safeRequest(() => apiClient.getWorkflows(), []),
         safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
         safeRequest(() => apiClient.listWorkflowRecipes({ limit: 100 }), null),
         safeRequest(() => apiClient.request<any>('/api/workflow-recipes/stats/dashboard'), null),
         safeRequest(() => apiClient.request<any>(`/api/missions?limit=100`), null),
         safeRequest(() => apiClient.request<any>(`/api/missions/stats?period=${period}`), null),
+        // What each mission's tasks actually spent (llm_usage rows tagged mission:<id>)
+        safeRequest(() => apiClient.request<UsageGroup[]>(`/api/analytics/llm/usage?period=${period}&group_by=execution`), []),
       ])
 
       const workflowList = Array.isArray(workflows) ? workflows : []
+      const spendByMission = new Map<string, UsageGroup>()
+      for (const group of Array.isArray(usageByExecution) ? usageByExecution : []) {
+        if (group.key.startsWith('mission:')) spendByMission.set(group.key.slice('mission:'.length), group)
+      }
 
       // Normalize missions into same shape as workflows for the table
       const missionList = (missionsResp?.missions || []).map((m: any) => {
@@ -218,6 +241,7 @@ export function useWorkflowAnalytics(days: number = 30) {
           ? new Date(m.completed_at).getTime() - new Date(m.started_at).getTime()
           : 0
         const durationStr = durationMs > 0 ? `${Math.round(durationMs / 1000)}s` : '0s'
+        const spend = spendByMission.get(String(m.id))
         return {
           id: `mission-${m.id}`,
           name: m.goal || 'Untitled Mission',
@@ -225,8 +249,8 @@ export function useWorkflowAnalytics(days: number = 30) {
           totalRuns: 1,
           successRate: isCompleted ? 100 : isFailed ? 0 : -1,
           avgDuration: durationStr,
-          tokensUsed: m.tokens_used || 0,
-          cost: 0,
+          tokensUsed: spend?.total_tokens || m.tokens_used || 0,
+          cost: spend?.total_cost || 0,
           lastRun: m.completed_at || m.started_at || m.created_at,
           source: 'mission' as const,
         }
@@ -305,13 +329,7 @@ export function useDocumentAnalyticsUnified(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.documents(days),
     queryFn: async () => {
-      const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
-
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
+      const period = periodFor(days)
 
       const [documents, usage] = await Promise.all([
         safeRequest(() => apiClient.getDocuments(), []),
@@ -352,102 +370,93 @@ export function useCostAnalyticsUnified(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.costs(days),
     queryFn: async () => {
-      const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
+      const period = periodFor(days)
 
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
-
-      // Fetch from backend LLM analytics + agent data as fallback
-      const [summary, usageByModel, agents] = await Promise.all([
+      const [summary, usageByRoute, usageByProvider, usageByAgent, usageByLane, agents] = await Promise.all([
         safeRequest(() => apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`), null),
-        safeRequest(() => apiClient.request<any[]>(`/api/analytics/llm/usage?period=${period}&group_by=model`), []),
+        safeRequest(() => apiClient.request<UsageGroup[]>(`/api/analytics/llm/usage?period=${period}&group_by=route`), []),
+        safeRequest(() => apiClient.request<UsageGroup[]>(`/api/analytics/llm/usage?period=${period}&group_by=provider`), []),
+        safeRequest(() => apiClient.request<UsageGroup[]>(`/api/analytics/llm/usage?period=${period}&group_by=agent`), []),
+        safeRequest(() => apiClient.request<UsageGroup[]>(`/api/analytics/llm/usage?period=${period}&group_by=request_type`), []),
         safeRequest(() => apiClient.getAgents(), []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
-      const modelRows = Array.isArray(usageByModel) ? usageByModel : []
+      const routeRows: UsageGroup[] = Array.isArray(usageByRoute) ? usageByRoute : []
+      const providerRows: UsageGroup[] = Array.isArray(usageByProvider) ? usageByProvider : []
+      const laneRows: UsageGroup[] = Array.isArray(usageByLane) ? usageByLane : []
+      const byAgent = mergeAgentUsage(agentList, Array.isArray(usageByAgent) ? usageByAgent : [])
+      const providers: ProviderUsage[] = Array.isArray(summary?.by_provider) ? summary.by_provider : []
 
-      // llm_usage totals
-      const llmTokens = summary?.total_tokens || 0
-      const llmCost = summary?.total_cost || 0
-      const llmRequests = summary?.total_requests || 0
+      const totalTokens = summary?.total_tokens || 0
+      const totalCost = summary?.total_cost || 0
+      const totalRequests = summary?.total_requests || 0
 
-      // agent model_usage_stats totals (fallback)
-      const agentTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
-      const agentCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
-      const agentRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
+      const byModel = routeRows.map((row) => ({
+        key: row.key,
+        model: row.model_id || row.key,
+        label: routeLabel(row),
+        provider: row.provider || 'unknown',
+        providerLabel: row.provider_label || row.provider || 'unknown',
+        billing: row.billing || 'unknown',
+        requests: row.request_count || 0,
+        inputTokens: row.input_tokens || 0,
+        outputTokens: row.output_tokens || 0,
+        cacheReadTokens: row.cache_read_tokens || 0,
+        totalCost: row.total_cost || 0,
+        errors: row.error_count || 0,
+        avgLatencyMs: row.avg_latency_ms ?? null,
+        avgCostPerRequest: row.request_count > 0 ? (row.total_cost || 0) / row.request_count : 0,
+      }))
 
-      // Use llm_usage data when available, fallback to agent stats
-      const hasLlmData = llmTokens > 0 || llmCost > 0
-      const totalTokens = hasLlmData ? llmTokens : agentTokens
-      const totalCost = hasLlmData ? llmCost : agentCost
-      const totalRequests = hasLlmData ? llmRequests : agentRequests
+      const byProvider = providerRows.map((row) => ({
+        provider: row.provider || row.key,
+        label: row.provider_label || row.label || row.key,
+        billing: row.billing || 'unknown',
+        requests: row.request_count || 0,
+        tokens: row.total_tokens || 0,
+        cacheReadTokens: row.cache_read_tokens || 0,
+        cost: row.total_cost || 0,
+        errors: row.error_count || 0,
+        avgLatencyMs: row.avg_latency_ms ?? null,
+        share: totalCost > 0 ? (row.total_cost || 0) / totalCost : 0,
+        routes: byModel.filter((m) => m.provider === (row.provider || row.key)).length,
+      }))
 
-      // Build byModel: prefer backend breakdown, fallback to agent-derived grouping
-      let byModel: any[]
-      if (modelRows.length > 0) {
-        byModel = modelRows.map((row: any) => ({
-          model: row.key || 'unknown',
-          requests: row.request_count || 0,
-          inputTokens: row.input_tokens || 0,
-          outputTokens: row.output_tokens || 0,
-          totalCost: row.total_cost || 0,
-          avgCostPerRequest: row.request_count > 0 ? (row.total_cost || 0) / row.request_count : 0,
-          agentCount: 0,
-        }))
-      } else {
-        // Derive from agent model_usage_stats
-        const modelMap: Record<string, { requests: number; inputTokens: number; outputTokens: number; cost: number; agents: Set<string> }> = {}
-        agentList.forEach((agent: any) => {
-          const model = agent.agent_model_config?.model_id || 'unknown'
-          if (!modelMap[model]) modelMap[model] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, agents: new Set() }
-          modelMap[model].requests += agent.model_usage_stats?.total_requests || 0
-          modelMap[model].inputTokens += agent.model_usage_stats?.input_tokens || 0
-          modelMap[model].outputTokens += agent.model_usage_stats?.output_tokens || 0
-          modelMap[model].cost += agent.model_usage_stats?.total_cost || 0
-          modelMap[model].agents.add(agent.name)
-        })
-        byModel = Object.entries(modelMap).map(([model, data]) => ({
-          model,
-          requests: data.requests,
-          inputTokens: data.inputTokens,
-          outputTokens: data.outputTokens,
-          totalCost: data.cost,
-          avgCostPerRequest: data.requests > 0 ? data.cost / data.requests : 0,
-          agentCount: data.agents.size,
-        })).filter(m => m.requests > 0 || m.totalCost > 0)
-      }
+      const byLane = laneRows.map((row) => ({
+        lane: row.key,
+        requests: row.request_count || 0,
+        tokens: row.total_tokens || 0,
+        cost: row.total_cost || 0,
+        errors: row.error_count || 0,
+        avgLatencyMs: row.avg_latency_ms ?? null,
+      }))
 
-      // Most expensive agent
-      const sortedByCost = [...agentList].sort((a: any, b: any) =>
-        (b.model_usage_stats?.total_cost || 0) - (a.model_usage_stats?.total_cost || 0)
-      )
-      const mostExpensive = sortedByCost[0]
+      const topSpender = byAgent[0]
 
       return {
         summary: {
           totalTokens,
           totalCost,
           totalRequests,
+          meteredCost: meteredCost(providers),
+          cacheReadTokens: summary?.cache_read_tokens || 0,
+          cacheShare: cacheShare(routeRows),
+          errorRate: summary?.error_rate || 0,
+          avgLatencyMs: summary?.avg_latency_ms ?? null,
           costPerTask: totalRequests > 0 ? totalCost / totalRequests : 0,
-          mostExpensiveAgent: mostExpensive?.model_usage_stats?.total_cost > 0 ? {
-            name: mostExpensive.name,
-            cost: mostExpensive.model_usage_stats.total_cost,
-            model: mostExpensive.agent_model_config?.model_id || 'unknown',
+          mostExpensiveAgent: topSpender && (topSpender.cost > 0 || topSpender.tokens > 0) ? {
+            name: topSpender.name,
+            cost: topSpender.cost,
+            tokens: topSpender.tokens,
+            model: topSpender.modelLabel,
+            billing: topSpender.billing,
           } : null,
         },
         byModel,
-        byAgent: agentList.map((agent: any) => ({
-          id: agent.id,
-          name: agent.name,
-          model: agent.agent_model_config?.model_id || 'unknown',
-          tokens: agent.model_usage_stats?.total_tokens || 0,
-          cost: agent.model_usage_stats?.total_cost || 0,
-          requests: agent.model_usage_stats?.total_requests || 0,
-        })).sort((a: any, b: any) => b.cost - a.cost),
+        byProvider,
+        byLane,
+        byAgent,
         costTrend: (summary?.cost_trend || []).map((t: any) => ({
           date: t.date,
           total_cost: t.cost,
@@ -500,12 +509,6 @@ export function useRecommendations() {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.recommendations(),
     queryFn: async () => {
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] Recommendation fetch failed:', err?.message || err)
-          return fallback
-        })
-
       // Fetch real data in parallel: backend LLM recommendations + agent list + LLM summary
       const [backendRecs, agents, llmSummary] = await Promise.all([
         safeRequest(() => apiClient.request<any[]>('/api/analytics/llm/recommendations'), []),
@@ -597,39 +600,6 @@ export function useRecommendations() {
       return recommendations.slice(0, 5)
     },
     staleTime: 5 * 60 * 1000, // 5 min (was 24h — too stale)
-  })
-}
-
-// ============= WORKSPACE MEMORY =============
-export function useWorkspaceMemory() {
-  return useQuery({
-    queryKey: unifiedAnalyticsKeys.memory(),
-    queryFn: async () => {
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
-
-      const [memoryData, recentMemories] = await Promise.all([
-        safeRequest(() => apiClient.request('/api/v1/memory/stats/real'), null),
-        safeRequest(() => apiClient.request<any[]>('/api/v1/memory/stats/recent?limit=8'), []),
-      ])
-
-      const items = Array.isArray(recentMemories) ? recentMemories.map((mem: any) => ({
-        key: mem.memory_type || 'memory',
-        value: mem.content || `${mem.memory_level || 'memory'} (importance: ${mem.importance ?? 'N/A'})`,
-        source: mem.agent_id ? 'learned' : 'system',
-        updated_at: mem.created_at,
-      })) : []
-
-      return {
-        items,
-        totalMemories: (memoryData as any)?.system_stats?.total_memories || 0,
-        hitRate: (memoryData as any)?.access_metrics?.hit_rate || 0,
-      }
-    },
-    staleTime: 60000,
   })
 }
 
@@ -875,57 +845,14 @@ export function useComposioErrors(days: number = 30) {
   })
 }
 
-// ============= PANDASAI CHARTS =============
-
-interface ChartGenerateResponse {
-  summary: string
-  charts: string[]
-  data: Record<string, any>[]
-}
-
-interface ChartPreset {
-  id: string
-  title: string
-  description: string
-  query: string
-  chart_type: string
-}
-
-export function useAnalyticsChart() {
-  return useMutation<ChartGenerateResponse, Error, { query: string; chartType?: string }>({
-    mutationFn: async ({ query, chartType }) => {
-      return apiClient.request<ChartGenerateResponse>(
-        '/api/analytics/charts/generate',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            query,
-            chart_type: chartType || 'auto',
-          }),
-        }
-      )
-    },
-  })
-}
-
-export function useChartPresets() {
-  return useQuery<ChartPreset[]>({
-    queryKey: unifiedAnalyticsKeys.chartPresets(),
-    queryFn: async () => {
-      return apiClient.request<ChartPreset[]>(
-        '/api/analytics/charts/presets'
-      )
-    },
-    staleTime: 300000, // 5 minutes — presets rarely change
-  })
-}
-
 // ============= MODEL COMPARISON =============
 
 interface ModelComparisonItem {
   model_id: string
   display_name: string
   provider: string
+  provider_label?: string | null
+  billing?: string | null
   input_cost_per_1k: number | null
   output_cost_per_1k: number | null
   context_window: number | null
@@ -958,6 +885,12 @@ interface ProjectedItem {
   key: string
   projected_monthly_cost: number
   current_period_cost: number
+  current_period_tokens?: number
+  label?: string | null
+  model_id?: string | null
+  provider?: string | null
+  provider_label?: string | null
+  billing?: string | null
 }
 
 interface CostProjectionData {
@@ -983,8 +916,22 @@ export function useCostProjections(period: string = '30d') {
 
 // ============= DAILY COST BY MODEL (multi-line chart) =============
 
+export interface DailyRouteFacts {
+  key: string
+  model_id: string
+  provider: string
+  provider_label: string
+  billing: string
+  label: string
+  total_cost: number
+  total_tokens: number
+  request_count: number
+}
+
 interface DailyCostByModelData {
+  /** Series keys: ``<model>@<provider>`` — one line per ROUTE */
   models: string[]
+  routes: DailyRouteFacts[]
   series: Record<string, any>[]
 }
 
@@ -1039,12 +986,6 @@ export function useAdminCostAnalytics(period: string = '30d') {
   return useQuery<AdminCostAnalyticsData | null>({
     queryKey: ['unified-analytics', wsScope(), 'admin', 'costs', period],
     queryFn: async () => {
-      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
-        Promise.resolve().then(fn).catch((err) => {
-          console.warn('[Analytics] API call failed:', err?.message || err)
-          return fallback
-        })
-
       // Fetch from backend + agent data as fallback
       const [backendData, agents] = await Promise.all([
         safeRequest(() => apiClient.request<AdminCostAnalyticsData>(
@@ -1125,8 +1066,12 @@ interface AdminDashboardData {
     requests: number
   }>
   models: Array<{
+    key: string
     model_id: string
     provider: string
+    provider_label: string
+    billing: string
+    label: string
     cost: number
     tokens: number
     requests: number
@@ -1134,6 +1079,7 @@ interface AdminDashboardData {
   }>
   daily_by_provider: {
     providers: string[]
+    labels: Record<string, string>
     series: Record<string, any>[]
   }
 }
@@ -1155,7 +1101,7 @@ export function useAdminDashboard(period: string = '30d') {
 
 // ============= ADMIN: CROSS-WORKSPACE =============
 export function useAdminWorkspaceAnalytics(days: number = 30) {
-  const period = days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
+  const period = periodFor(days)
   return useQuery({
     queryKey: unifiedAnalyticsKeys.adminWorkspaces(days),
     queryFn: async () => {

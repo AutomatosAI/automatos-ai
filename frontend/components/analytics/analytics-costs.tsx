@@ -49,6 +49,8 @@ import {
   useDailyCostByModel,
 } from '@/hooks/use-unified-analytics'
 import { useWorkspaceModels } from '@/hooks/use-model-api'
+import { billingBadge, shortenModelName } from '@/lib/analytics-usage'
+import { AnalyticsOpenRouterCredits } from './analytics-openrouter-credits'
 
 interface Props {
   days: number
@@ -83,10 +85,57 @@ function formatCost(n: number): string {
   return `$${n.toFixed(4)}`
 }
 
-function shortenModelName(name: string): string {
-  // Strip provider prefix for legend/tooltip readability
-  const parts = name.split('/')
-  return parts[parts.length - 1]
+const BILLING_TONE: Record<string, string> = {
+  paid: 'border-[hsl(var(--warning))]/40 text-[hsl(var(--warning))]',
+  free: 'border-[hsl(var(--success))]/40 text-[hsl(var(--success))]',
+  subscription: 'border-[hsl(var(--agent))]/40 text-[hsl(var(--agent))]',
+  unknown: 'border-border/40 text-muted-foreground',
+}
+
+function BillingBadge({ billing }: { billing?: string | null }) {
+  const badge = billingBadge(billing)
+  return (
+    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${BILLING_TONE[badge.tone]}`}>
+      {badge.label}
+    </Badge>
+  )
+}
+
+/** Cost cell: dollars when metered, the honest word when the plan or a free tier paid. */
+function costText(cost: number, tokens: number, billing?: string | null): string {
+  if (cost > 0) return formatCost(cost)
+  if (tokens > 0 && billing === 'subscription') return 'plan'
+  if (tokens > 0 && billing === 'free') return 'free'
+  return formatCost(0)
+}
+
+const LANE_LABELS: Record<string, string> = {
+  chat: 'Chat',
+  board_task: 'Board tickets',
+  mission: 'Missions',
+  heartbeat: 'Heartbeats',
+  scheduled_task: 'Scheduled tasks',
+  session: 'Claude Code sessions',
+  embedding: 'Embeddings',
+  rerank: 'Rerank',
+  recipe: 'Playbooks',
+  watch: 'Watches',
+  digest: 'Digests',
+  memory_distill: 'Memory distil',
+  thread_checkpoint: 'Thread checkpoints',
+  complexity_assessor: 'Complexity assessor',
+  graph_extraction: 'Knowledge graph',
+  graph_community_title: 'Graph communities',
+  entity_extraction: 'Entity extraction',
+  planner: 'Mission planner',
+  verifier: 'Mission verifier',
+  planning: 'Board planning',
+  orchestrator: 'Orchestrator (untagged)',
+  manual_run: 'Manual runs',
+}
+
+function laneLabel(lane: string): string {
+  return LANE_LABELS[lane] || lane.replace(/_/g, ' ')
 }
 
 // Period selector component
@@ -117,7 +166,7 @@ function PeriodToggle({ value, onChange }: { value: string; onChange: (v: string
 }
 
 // Custom tooltip for multi-line chart
-function ModelCostTooltip({ active, payload, label }: any) {
+function ModelCostTooltip({ active, payload, label, labels }: any) {
   if (!active || !payload?.length) return null
   return (
     <div className="rounded-xl border border-border/50 bg-card/95 backdrop-blur-lg px-4 py-3 shadow-2xl">
@@ -130,7 +179,7 @@ function ModelCostTooltip({ active, payload, label }: any) {
             <div key={p.dataKey} className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: p.color }} />
-                <span className="text-xs text-foreground">{shortenModelName(p.dataKey)}</span>
+                <span className="text-xs text-foreground">{labels?.[p.dataKey] || shortenModelName(p.dataKey)}</span>
               </div>
               <span className="text-xs font-mono font-medium">{formatCost(p.value)}</span>
             </div>
@@ -159,19 +208,19 @@ export function AnalyticsCosts({ days }: Props) {
     const seen = new Set<string>()
     const result: Array<{ model: string; displayName: string; requests: number; totalCost: number }> = []
 
-    // Usage-based models first (they have stats to show)
+    // Routes with usage first (they have stats to show) — keyed model@provider
     for (const m of data?.byModel || []) {
-      const key = m.model.toLowerCase()
+      const key = m.key.toLowerCase()
       if (!seen.has(key)) {
         seen.add(key)
-        result.push({ model: m.model, displayName: shortenModelName(m.model), requests: m.requests, totalCost: m.totalCost })
+        result.push({ model: m.key, displayName: m.label, requests: m.requests, totalCost: m.totalCost })
       }
     }
 
     // Workspace-installed models that have no usage yet
     for (const wm of workspaceModels) {
       const key = wm.model_id.toLowerCase()
-      if (!seen.has(key)) {
+      if (!seen.has(key) && !result.some((r) => r.model.toLowerCase().startsWith(`${key}@`))) {
         seen.add(key)
         result.push({ model: wm.model_id, displayName: wm.display_name || shortenModelName(wm.model_id), requests: 0, totalCost: 0 })
       }
@@ -179,6 +228,14 @@ export function AnalyticsCosts({ days }: Props) {
 
     return result
   }, [data?.byModel, workspaceModels])
+
+  // Route key → legend label (short model · provider) for the chart
+  const routeLabels = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const r of dailyByModel?.routes || []) out[r.key] = `${shortenModelName(r.model_id)} · ${r.provider_label}`
+    return out
+  }, [dailyByModel])
+  const labelFor = (key: string) => routeLabels[key] || shortenModelName(key)
 
   // Compute max cost share for proportional bars in model table
   const maxModelCost = useMemo(() => {
@@ -245,7 +302,7 @@ export function AnalyticsCosts({ days }: Props) {
         {
           label: 'Total Cost',
           value: formatCost(data?.summary?.totalCost || 0),
-          change: 'This period',
+          change: `Last ${days} days · ${data?.byProvider?.length || 0} provider${(data?.byProvider?.length || 0) === 1 ? '' : 's'}`,
           icon: DollarSign,
           iconColor: 'text-[hsl(var(--success))]',
           globalIconKey: 'global_cost',
@@ -253,34 +310,140 @@ export function AnalyticsCosts({ days }: Props) {
         {
           label: 'Total Tokens',
           value: formatNumber(data?.summary?.totalTokens || 0),
-          change: 'Input + Output',
+          change: (data?.summary?.cacheShare || 0) > 0
+            ? `${((data?.summary?.cacheShare || 0) * 100).toFixed(0)}% of prompts served from cache`
+            : 'Input + Output · API + sessions',
           icon: Zap,
           iconColor: 'text-[hsl(var(--info))]',
         },
         {
           label: 'Cost per Request',
           value: formatCost(data?.summary?.costPerTask || 0),
-          change: `${formatNumber(data?.summary?.totalRequests || 0)} requests`,
+          change: `${formatNumber(data?.summary?.totalRequests || 0)} requests · ${((data?.summary?.errorRate || 0) * 100).toFixed(1)}% failed`,
           icon: Activity,
           iconColor: 'text-[hsl(var(--agent))]',
         },
         {
           // Lead with the dollar amount — agent name as suffix in the
           // label so a long agent name (e.g. "GA ANALYST") never truncates
-          // the headline number.
+          // the headline number. A session agent has tokens but no dollars.
           label: data?.summary?.mostExpensiveAgent
             ? `Top Spender · ${data.summary.mostExpensiveAgent.name}`
             : 'Top Spender',
           value: data?.summary?.mostExpensiveAgent
-            ? formatCost(data.summary.mostExpensiveAgent.cost)
+            ? (data.summary.mostExpensiveAgent.cost > 0
+                ? formatCost(data.summary.mostExpensiveAgent.cost)
+                : formatNumber(data.summary.mostExpensiveAgent.tokens))
             : '—',
           change: data?.summary?.mostExpensiveAgent
-            ? `on ${shortenModelName(data.summary.mostExpensiveAgent.model)}`
+            ? `${data.summary.mostExpensiveAgent.cost > 0 ? 'on' : 'tokens on'} ${data.summary.mostExpensiveAgent.model}`
             : 'No data',
           icon: AlertTriangle,
           iconColor: 'text-primary',
         },
       ] satisfies StatItem[]} />
+
+      {/* ─── Where the spend goes: by provider (who bills) and by lane (what asked) ─── */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
+        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+      >
+        <Card className="glass-card overflow-hidden">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="w-5 h-5 text-[hsl(var(--success))]" />
+              Cost by Provider
+              <span className="text-xs text-muted-foreground font-normal">who bills for the calls</span>
+            </CardTitle>
+          </CardHeader>
+          <div className="overflow-x-auto">
+            {!data?.byProvider?.length ? (
+              <p className="p-8 text-center text-sm text-muted-foreground">No calls recorded in this period</p>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border/50">
+                    <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Provider</th>
+                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Requests</th>
+                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Tokens</th>
+                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cost</th>
+                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell">Latency</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.byProvider.map((prov) => (
+                    <tr key={prov.provider} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{prov.label}</span>
+                          <BillingBadge billing={prov.billing} />
+                          <span className="text-[10px] text-muted-foreground">{prov.routes} route{prov.routes === 1 ? '' : 's'}</span>
+                        </div>
+                      </td>
+                      <td className="p-4 text-sm text-right tabular-nums">
+                        {formatNumber(prov.requests)}
+                        {prov.errors > 0 && <span className="ml-1 text-[10px] text-[hsl(var(--destructive))]">({prov.errors} failed)</span>}
+                      </td>
+                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">
+                        {formatNumber(prov.tokens)}
+                        {prov.cacheReadTokens > 0 && <span className="block text-[10px]">{formatNumber(prov.cacheReadTokens)} cached</span>}
+                      </td>
+                      <td className="p-4 text-sm text-right tabular-nums font-medium">
+                        {costText(prov.cost, prov.tokens, prov.billing)}
+                        {prov.cost > 0 && <span className="block text-[10px] text-muted-foreground">{(prov.share * 100).toFixed(0)}% of spend</span>}
+                      </td>
+                      <td className="p-4 text-sm text-right tabular-nums hidden lg:table-cell text-muted-foreground">
+                        {prov.avgLatencyMs != null ? (prov.avgLatencyMs >= 1000 ? `${(prov.avgLatencyMs / 1000).toFixed(1)}s` : `${Math.round(prov.avgLatencyMs)}ms`) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Card>
+
+        <Card className="glass-card overflow-hidden">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-[hsl(var(--info))]" />
+              Spend by Lane
+              <span className="text-xs text-muted-foreground font-normal">what asked for the calls</span>
+            </CardTitle>
+          </CardHeader>
+          <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+            {!data?.byLane?.length ? (
+              <p className="p-8 text-center text-sm text-muted-foreground">No calls recorded in this period</p>
+            ) : (
+              <table className="w-full">
+                <thead className="sticky top-0 bg-card z-10">
+                  <tr className="border-b border-border/50">
+                    <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Lane</th>
+                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Requests</th>
+                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Tokens</th>
+                    <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...data.byLane].sort((a, b) => (b.cost - a.cost) || (b.tokens - a.tokens)).map((lane) => (
+                    <tr key={lane.lane} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
+                      <td className="p-4 text-sm">
+                        {laneLabel(lane.lane)}
+                        {lane.errors > 0 && <span className="ml-2 text-[10px] text-[hsl(var(--destructive))]">{lane.errors} failed</span>}
+                      </td>
+                      <td className="p-4 text-sm text-right tabular-nums">{formatNumber(lane.requests)}</td>
+                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">{formatNumber(lane.tokens)}</td>
+                      <td className="p-4 text-sm text-right tabular-nums font-medium">{formatCost(lane.cost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Card>
+      </motion.div>
 
       {/* ─── Multi-Line Cost by Model Chart ─── */}
       <motion.div
@@ -339,7 +502,7 @@ export function AnalyticsCosts({ days }: Props) {
                         tickCount={5}
                         width={60}
                       />
-                      <Tooltip content={<ModelCostTooltip />} />
+                      <Tooltip content={<ModelCostTooltip labels={routeLabels} />} />
                       {dailyByModel.models.map((model, idx) => (
                         <Area
                           key={model}
@@ -366,7 +529,7 @@ export function AnalyticsCosts({ days }: Props) {
                           className="w-2.5 h-2.5 rounded-full"
                           style={{ background: MODEL_COLORS[idx % MODEL_COLORS.length] }}
                         />
-                        <span className="text-xs text-muted-foreground">{shortenModelName(model)}</span>
+                        <span className="text-xs text-muted-foreground">{labelFor(model)}</span>
                       </div>
                     )
                   })}
@@ -375,7 +538,7 @@ export function AnalyticsCosts({ days }: Props) {
                       className="text-xs px-2 py-0.5 rounded-full bg-secondary/40 border border-border/50 text-muted-foreground"
                       title={dailyByModel.models
                         .filter((m) => !topModelsForLegend.top.includes(m))
-                        .map(shortenModelName)
+                        .map(labelFor)
                         .join(', ')}
                     >
                       +{topModelsForLegend.rest} more
@@ -385,10 +548,10 @@ export function AnalyticsCosts({ days }: Props) {
               </>
             ) : (
               /* Fallback to aggregate cost trend if no per-model data */
-              data?.costTrend?.length > 0 ? (
+              (data?.costTrend?.length ?? 0) > 0 ? (
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={data.costTrend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                    <AreaChart data={data?.costTrend ?? []} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="costGrad" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#60B5FF" stopOpacity={0.35} />
@@ -528,8 +691,15 @@ export function AnalyticsCosts({ days }: Props) {
                           return (
                             <div key={item.key} className="group">
                               <div className="flex items-center justify-between mb-1">
-                                <span className="text-xs text-foreground">{shortenModelName(item.key)}</span>
-                                <span className="text-xs font-mono font-medium">{formatCost(item.projected_monthly_cost)}/mo</span>
+                                <span className="flex items-center gap-2 text-xs text-foreground">
+                                  {item.label ? `${shortenModelName(item.model_id || item.key)} · ${item.provider_label || item.provider}` : shortenModelName(item.key)}
+                                  <BillingBadge billing={item.billing} />
+                                </span>
+                                <span className="text-xs font-mono font-medium">
+                                  {item.projected_monthly_cost > 0
+                                    ? `${formatCost(item.projected_monthly_cost)}/mo`
+                                    : `${formatNumber(item.current_period_tokens || 0)} tokens · ${billingBadge(item.billing).label.toLowerCase()}`}
+                                </span>
                               </div>
                               <div className="h-2 w-full rounded-full bg-secondary/30 overflow-hidden">
                                 <motion.div
@@ -575,6 +745,7 @@ export function AnalyticsCosts({ days }: Props) {
               <thead className="sticky top-0 bg-card z-10">
                 <tr className="border-b border-border/50">
                   <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Model</th>
+                  <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Provider</th>
                   <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Requests</th>
                   <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Input</th>
                   <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Output</th>
@@ -586,14 +757,14 @@ export function AnalyticsCosts({ days }: Props) {
               <tbody>
                 {(!data?.byModel || data.byModel.length === 0) ? (
                   <tr>
-                    <td colSpan={7} className="p-12 text-center text-muted-foreground">
+                    <td colSpan={8} className="p-12 text-center text-muted-foreground">
                       <Zap className="w-10 h-10 mx-auto mb-3 opacity-30" />
                       <p className="text-sm">No token usage data yet</p>
                     </td>
                   </tr>
                 ) : (
                   data.byModel.map((model, idx) => (
-                    <tr key={model.model} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
+                    <tr key={model.key} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
                       <td className="p-4">
                         <div className="flex items-center gap-2.5">
                           <span
@@ -601,12 +772,26 @@ export function AnalyticsCosts({ days }: Props) {
                             style={{ background: MODEL_COLORS[idx % MODEL_COLORS.length] }}
                           />
                           <Badge variant="secondary" className="font-mono text-xs">{shortenModelName(model.model)}</Badge>
+                          {model.errors > 0 && (
+                            <span className="text-[10px] text-[hsl(var(--destructive))]" title={`${model.errors} failed calls`}>{model.errors} failed</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span>{model.providerLabel}</span>
+                          <BillingBadge billing={model.billing} />
                         </div>
                       </td>
                       <td className="p-4 text-sm text-right tabular-nums">{formatNumber(model.requests)}</td>
-                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">{formatNumber(model.inputTokens)}</td>
+                      <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">
+                        {formatNumber(model.inputTokens)}
+                        {model.cacheReadTokens > 0 && (
+                          <span className="block text-[10px]" title="prompt tokens served from the provider's cache">{formatNumber(model.cacheReadTokens)} cached</span>
+                        )}
+                      </td>
                       <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">{formatNumber(model.outputTokens)}</td>
-                      <td className="p-4 text-sm text-right tabular-nums font-medium">{formatCost(model.totalCost)}</td>
+                      <td className="p-4 text-sm text-right tabular-nums font-medium">{costText(model.totalCost, model.inputTokens + model.outputTokens, model.billing)}</td>
                       <td className="p-4 hidden lg:table-cell">
                         <div className="flex items-center gap-2">
                           <div className="h-1.5 flex-1 rounded-full bg-secondary/30 overflow-hidden">
@@ -635,8 +820,8 @@ export function AnalyticsCosts({ days }: Props) {
         </Card>
       </motion.div>
 
-      {/* ─── Per-Agent Cost Breakdown ─── */}
-      {data?.byAgent && data.byAgent.filter(a => a.cost > 0 || a.tokens > 0).length > 0 && (
+      {/* ─── Per-Agent Cost Breakdown (this period, from llm_usage) ─── */}
+      {data?.byAgent && data.byAgent.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -647,22 +832,17 @@ export function AnalyticsCosts({ days }: Props) {
               <CardTitle className="flex items-center gap-2">
                 <Bot className="w-5 h-5 text-warning" />
                 Cost by Agent
+                <span className="text-xs text-muted-foreground font-normal">last {days} days</span>
               </CardTitle>
             </CardHeader>
             <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
               {(() => {
-                const rows = data.byAgent.filter((a) => a.cost > 0 || a.tokens > 0)
+                const rows = data.byAgent
                 const maxAgentCost = Math.max(...rows.map((r) => r.cost), 0.001)
-                // Map model→colour matching the chart so the magnitude
-                // bar colour ties back to the legend dot above.
-                const chartModels = dailyByModel?.models ?? []
-                const colorFor = (model: string) => {
-                  const idx = chartModels.indexOf(model)
-                  if (idx >= 0) return MODEL_COLORS[idx % MODEL_COLORS.length]
-                  // Fall back to a stable hash of the model name so out-of-chart
-                  // models still get a consistent (if unrelated) colour.
+                const maxAgentTokens = Math.max(...rows.map((r) => r.tokens), 1)
+                const colorFor = (label: string) => {
                   let h = 0
-                  for (let i = 0; i < model.length; i++) h = (h * 31 + model.charCodeAt(i)) | 0
+                  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) | 0
                   return MODEL_COLORS[Math.abs(h) % MODEL_COLORS.length]
                 }
                 return (
@@ -670,7 +850,7 @@ export function AnalyticsCosts({ days }: Props) {
                     <thead className="sticky top-0 bg-card z-10">
                       <tr className="border-b border-border/50">
                         <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Agent</th>
-                        <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Model</th>
+                        <th className="text-left p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Runs on</th>
                         <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Tokens</th>
                         <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Cost</th>
                         <th className="text-right p-4 text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Requests</th>
@@ -678,18 +858,30 @@ export function AnalyticsCosts({ days }: Props) {
                     </thead>
                     <tbody>
                       {rows.map((agent) => {
-                        const sharePct = Math.max(2, Math.round((agent.cost / maxAgentCost) * 100))
-                        const barColor = colorFor(agent.model)
+                        const share = agent.cost > 0 ? agent.cost / maxAgentCost : agent.tokens / maxAgentTokens
+                        const sharePct = Math.max(2, Math.round(share * 100))
+                        const barColor = colorFor(agent.modelLabel)
                         return (
                           <tr key={agent.id} className="border-b border-border/20 hover:bg-secondary/10 transition-colors">
-                            <td className="p-4 font-medium text-sm">{agent.name}</td>
-                            <td className="p-4">
-                              <Badge variant="secondary" className="font-mono text-xs">{shortenModelName(agent.model)}</Badge>
+                            <td className="p-4 font-medium text-sm">
+                              {agent.name}
+                              {agent.status === 'deleted' && <span className="ml-2 text-[10px] text-muted-foreground">deleted</span>}
                             </td>
-                            <td className="p-4 text-sm text-right tabular-nums">{formatNumber(agent.tokens)}</td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary" className="font-mono text-xs">{agent.modelLabel}</Badge>
+                                <BillingBadge billing={agent.billing} />
+                              </div>
+                            </td>
+                            <td className="p-4 text-sm text-right tabular-nums">
+                              {formatNumber(agent.tokens)}
+                              {agent.cacheReadTokens > 0 && (
+                                <span className="block text-[10px] text-muted-foreground">{formatNumber(agent.cacheReadTokens)} cached</span>
+                              )}
+                            </td>
                             <td className="p-4 text-right">
                               <div className="flex flex-col items-end gap-1.5">
-                                <span className="text-sm tabular-nums font-medium">{formatCost(agent.cost)}</span>
+                                <span className="text-sm tabular-nums font-medium">{costText(agent.cost, agent.tokens, agent.billing)}</span>
                                 <div className="w-24 h-1 rounded-full bg-white/[0.04] overflow-hidden">
                                   <div
                                     className="h-full rounded-full"
@@ -698,7 +890,10 @@ export function AnalyticsCosts({ days }: Props) {
                                 </div>
                               </div>
                             </td>
-                            <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">{agent.requests}</td>
+                            <td className="p-4 text-sm text-right tabular-nums hidden md:table-cell text-muted-foreground">
+                              {agent.requests}
+                              {agent.errors > 0 && <span className="ml-1 text-[10px] text-[hsl(var(--destructive))]">({agent.errors} failed)</span>}
+                            </td>
                           </tr>
                         )
                       })}
@@ -816,7 +1011,7 @@ export function AnalyticsCosts({ days }: Props) {
                     </thead>
                     <tbody>
                       {[
-                        { label: 'Provider', render: (m: any) => m.provider || '--' },
+                        { label: 'Provider', render: (m: any) => m.provider_label ? `${m.provider_label} · ${billingBadge(m.billing).label}` : (m.provider || '--') },
                         { label: 'Input Cost/1K', render: (m: any) => m.input_cost_per_1k != null ? `$${m.input_cost_per_1k.toFixed(4)}` : '--' },
                         { label: 'Output Cost/1K', render: (m: any) => m.output_cost_per_1k != null ? `$${m.output_cost_per_1k.toFixed(4)}` : '--' },
                         { label: 'Total Requests', render: (m: any) => formatNumber(m.total_requests) },
@@ -934,6 +1129,9 @@ export function AnalyticsCosts({ days }: Props) {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* ─── OpenRouter account: balance and what OpenRouter itself reports ─── */}
+      <AnalyticsOpenRouterCredits />
     </div>
   )
 }
