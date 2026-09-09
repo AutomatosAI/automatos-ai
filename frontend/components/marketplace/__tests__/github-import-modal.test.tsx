@@ -31,6 +31,6 @@ describe('GitHubImportModal — baseline skills', () => {
   })
 
   it('the baseline URL is the public skills repo', () => {
-    expect(BASELINE_SKILLS_REPO_URL).toBe('https://github.com/AutomatosAI/automatos-skills.git')
+    expect(BASELINE_SKILLS_REPO_URL).toBe('https://github.com/AutomatosAI/automatos-skills')
   })
 })

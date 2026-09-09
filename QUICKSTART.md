@@ -59,7 +59,7 @@ route in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*, mod
 
 **Skills.** A fresh install has none. **Marketplace → Capabilities → Import from
 GitHub**, then *Use baseline repo* to import the free library at
-`https://github.com/AutomatosAI/automatos-skills.git`.
+`https://github.com/AutomatosAI/automatos-skills`.
 
 ## 2. Start the platform
 
