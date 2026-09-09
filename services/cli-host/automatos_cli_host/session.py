@@ -47,7 +47,7 @@ from .config import HostConfig
 from .env import build_session_env, resolve_binary
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
-from .transcript import last_assistant_text, read_usage
+from .transcript import empty_usage, last_assistant_text, read_usage, usage_delta
 
 log = logging.getLogger("automatos.cli_host.session")
 
@@ -230,6 +230,7 @@ class Session:
         self.pgid: Optional[int] = None
         self.effective_cwd: Optional[Path] = None
         self.transcript_path: Optional[str] = None
+        self._usage_before: Optional[Dict[str, Any]] = None
         self.reported_session_id: Optional[str] = None
         self.last_assistant_message: Optional[str] = None
         self.files_touched: List[str] = []
@@ -252,6 +253,12 @@ class Session:
             self.session_started.set()
             self.reported_session_id = payload.get("session_id") or self.reported_session_id
             self.transcript_path = payload.get("transcript_path") or self.transcript_path
+            # A resumed session's transcript already holds earlier turns; snapshot
+            # them now (before this turn's prompt lands) so the result reports
+            # only what THIS run used (2026-09-09 analytics).
+            if self.ticket.get("resume_session_id") and self.transcript_path and self._usage_before is None:
+                path = Path(self.transcript_path)
+                self._usage_before = read_usage(path) if path.exists() else empty_usage()
             cwd = payload.get("cwd")
             if cwd:
                 self.effective_cwd = Path(cwd)
@@ -521,6 +528,8 @@ class Session:
     def _collect(self, exit_reason: str, cwd: Path) -> SessionOutcome:
         transcript = Path(self.transcript_path) if self.transcript_path else None
         usage = read_usage(transcript) if transcript and transcript.exists() else {}
+        if usage and self._usage_before is not None:
+            usage = usage_delta(usage, self._usage_before)
         text = self.last_assistant_message or (last_assistant_text(transcript) if transcript and transcript.exists() else None) or ""
         if exit_reason == "completed":
             status = "success"

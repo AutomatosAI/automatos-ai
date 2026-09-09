@@ -279,6 +279,12 @@ def test_a_launch_grant_runs_the_agents_session_and_reports_open_and_close(tmp_p
     assert names == [("93", "TerminalOpened", False), ("93", "TerminalClosed", False),
                      ("93", "TerminalOpened", True), ("93", "TerminalClosed", True)]
     assert all(p["session_id"] == sid and p["cwd"] == str(root.resolve()) for _, _, p in events)
+    # 2026-09-09: the close carries the TURN's usage (the transcript's growth while
+    # the terminal was open) and never the host-side snapshot
+    closes = [p for _, e, p in events if e == "TerminalClosed"]
+    assert all("usage" in p and "usage_before" not in p for p in closes)
+    assert closes[1]["usage"]["total_tokens"] == 0 and closes[1]["usage"]["per_model"] == {}
+    assert all("usage_before" not in p for _, e, p in events if e == "TerminalOpened")
 
 
 def test_a_launch_the_host_cannot_honour_is_refused_before_any_shell_runs(tmp_path):

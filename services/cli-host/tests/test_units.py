@@ -151,6 +151,25 @@ def test_transcript_usage_and_last_text(tmp_path):
     assert transcript.project_key("/Users/me/MDv0.3.0") == "-Users-me-MDv0-3-0"
 
 
+def test_usage_delta_reports_only_what_this_run_added():
+    before = {"input_tokens": 30, "output_tokens": 12, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0,
+              "assistant_messages": 2, "model": "m1", "per_model": {"m1": {"input_tokens": 30, "output_tokens": 12,
+              "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0}}, "total_tokens": 42}
+    after = {"input_tokens": 36, "output_tokens": 20, "cache_read_input_tokens": 400, "cache_creation_input_tokens": 50,
+             "assistant_messages": 3, "model": "m2", "per_model": {
+                 "m1": {"input_tokens": 30, "output_tokens": 12, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0},
+                 "m2": {"input_tokens": 6, "output_tokens": 8, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 50}},
+             "total_tokens": 56}
+    delta = transcript.usage_delta(after, before)
+    assert delta["input_tokens"] == 6 and delta["output_tokens"] == 8 and delta["cache_read_input_tokens"] == 300
+    assert delta["total_tokens"] == 14 and delta["assistant_messages"] == 1 and delta["model"] == "m2"
+    assert list(delta["per_model"]) == ["m2"]          # m1 did not move → not reported again
+    # a fresh session (no snapshot) is reported whole; a rewritten transcript never goes negative
+    assert transcript.usage_delta(after, None)["total_tokens"] == 56
+    assert transcript.usage_delta(before, after)["input_tokens"] == 0
+    assert transcript.empty_usage()["total_tokens"] == 0
+
+
 # ── argv invariant ───────────────────────────────────────────────────────────
 
 def test_build_args_is_interactive_and_honours_the_terms_invariant(tmp_path):

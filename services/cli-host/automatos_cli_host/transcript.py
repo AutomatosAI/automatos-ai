@@ -104,3 +104,36 @@ def last_assistant_text(path: Path, tail_bytes: int = 512 * 1024) -> Optional[st
                     if text:
                         return text
     return None
+
+
+_USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+
+
+def empty_usage() -> Dict[str, Any]:
+    return {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0, "assistant_messages": 0, "model": None,
+            "per_model": {}, "total_tokens": 0}
+
+
+def usage_delta(after: Dict[str, Any], before: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """What THIS run added to a transcript that may already hold earlier turns.
+
+    ``--resume`` appends to the same ``<session_id>.jsonl``, so a snapshot taken
+    before the launch, subtracted from the totals at the end, is the turn's own
+    usage — the backend books it once, never the whole history again. A model
+    that only appears after the run, or whose counters grew, is kept; nothing
+    goes negative (a rewritten transcript counts as new).
+    """
+    before = before or {}
+    out: Dict[str, Any] = {"model": after.get("model"), "per_model": {}}
+    for key in _USAGE_KEYS:
+        out[key] = max(0, _num(after.get(key)) - _num(before.get(key)))
+    out["assistant_messages"] = max(0, _num(after.get("assistant_messages")) - _num(before.get("assistant_messages")))
+    before_models = before.get("per_model") if isinstance(before.get("per_model"), dict) else {}
+    for model, counts in (after.get("per_model") or {}).items():
+        prior = before_models.get(model) or {}
+        bucket = {key: max(0, _num(counts.get(key)) - _num(prior.get(key))) for key in _USAGE_KEYS}
+        if any(bucket.values()):
+            out["per_model"][model] = bucket
+    out["total_tokens"] = out["input_tokens"] + out["output_tokens"]
+    return out

@@ -48,7 +48,12 @@ from .allowlist import NotAllowed, default_session_cwd, resolve_allowed
 from .claude_settings import record_directory_trust
 from .env import build_session_env, resolve_binary
 from .session import assert_args_honour_invariant
-from .transcript import transcript_path
+from .transcript import empty_usage, read_usage, transcript_path, usage_delta
+
+
+def _public(launched: Dict[str, Any]) -> Dict[str, Any]:
+    """The launch facts an event carries — the usage snapshot stays host-side."""
+    return {k: v for k, v in launched.items() if k != "usage_before"}
 
 log = logging.getLogger("automatos.cli_host.terminal")
 
@@ -483,7 +488,22 @@ class TerminalServer:
             record_directory_trust(cwd, self._claude_home)
         except OSError as exc:
             log.warning("could not record trust for %s: %s", cwd, exc)
-        return args, {"session_id": session_id, "resumed": resumed, "agent_name": launch.get("agent_name")}
+        # The turn's usage is the transcript's growth while the terminal is open:
+        # snapshot the totals a resumed session already carries (2026-09-09).
+        own_transcript = transcript_path(str(cwd), session_id, self._claude_home)
+        usage_before = read_usage(own_transcript) if resumed and own_transcript.exists() else empty_usage()
+        return args, {"session_id": session_id, "resumed": resumed, "agent_name": launch.get("agent_name"),
+                      "usage_before": usage_before}
+
+    def _turn_usage(self, cwd: Path, launched: Dict[str, Any]) -> Dict[str, Any]:
+        """Tokens THIS terminal session added to the transcript (never the history)."""
+        try:
+            own = transcript_path(str(cwd), str(launched.get("session_id") or ""), self._claude_home)
+            after = read_usage(own) if own.exists() else empty_usage()
+            return usage_delta(after, launched.get("usage_before"))
+        except Exception:  # noqa: BLE001 — a receipt never breaks the close
+            log.debug("could not read the session's usage for %s", cwd, exc_info=True)
+            return {}
 
     def _emit(self, grant: Grant, event: str, payload: Dict[str, Any]) -> None:
         if self._on_event is None or not grant.task_id:
@@ -518,7 +538,7 @@ class TerminalServer:
         if launched:
             log.info("terminal: Claude Code session %s %s in %s (pid %s, ticket %s)", launched["session_id"],
                      "resumed" if launched["resumed"] else "started", cwd, proc.pid, grant.task_id)
-            self._emit(grant, "TerminalOpened", {**launched, "cwd": str(cwd), "pid": proc.pid})
+            self._emit(grant, "TerminalOpened", {**_public(launched), "cwd": str(cwd), "pid": proc.pid})
         else:
             log.info("terminal opened in %s (pid %s%s)", cwd, proc.pid, f", ticket {grant.task_id}" if grant.task_id else "")
         closed = threading.Event()
@@ -584,7 +604,10 @@ class TerminalServer:
                 pass
             log.info("terminal in %s closed", cwd)
             if launched:
-                self._emit(grant, "TerminalClosed", {**launched, "cwd": str(cwd), "exit_code": proc.returncode})
+                self._emit(grant, "TerminalClosed", {
+                    **_public(launched), "cwd": str(cwd), "exit_code": proc.returncode,
+                    "usage": self._turn_usage(cwd, launched),
+                })
 
     @staticmethod
     def _control(master: int, payload: bytes) -> None:
