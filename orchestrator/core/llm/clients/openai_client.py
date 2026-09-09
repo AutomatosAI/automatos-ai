@@ -18,6 +18,20 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def usage_from_openai(usage: Any) -> Dict[str, Any]:
+    """OpenAI's accounting: ``prompt_tokens`` already INCLUDES the cached part
+    (``prompt_tokens_details.cached_tokens``); the cache figure rides beside it."""
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = int(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    return {
+        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+        "cache_read_tokens": cached,
+        "cache_write_tokens": 0,
+    }
+
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI GPT provider implementation"""
     
@@ -136,11 +150,7 @@ class OpenAIProvider(BaseLLMProvider):
             
             return LLMResponse(
                 content=content or "",  # May be None if tool_calls present
-                usage={
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
-                },
+                usage=usage_from_openai(response.usage),
                 model=response.model,
                 provider="openai",
                 tool_calls=tool_calls,
@@ -177,11 +187,7 @@ class OpenAIProvider(BaseLLMProvider):
             
             return LLMResponse(
                 content=response.choices[0].message.content,
-                usage={
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
-                },
+                usage=usage_from_openai(response.usage),
                 model=response.model,
                 provider="openai"
             )

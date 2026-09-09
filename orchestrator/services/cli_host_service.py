@@ -34,6 +34,7 @@ from core.cli_runtime import (
     CONFIG_WORKING_DIRECTORY_KEY,
     RUNTIME_CLI,
 )
+from core.llm.usage_context import LANE_BOARD_TASK, LANE_SESSION
 from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
 from services.board_dispatcher import claim_tasks, renew_lease
@@ -167,7 +168,7 @@ def revoke_host(db: Session, host: CliHost) -> None:
 # was built for. A host that sees the fingerprint change drains and exits; its
 # service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
 # whenever the wire contract changes so a stale checkout is told, not surprised.
-EXPECTED_CLI_HOST_VERSION = "0.4.0"  # PRD-239 S7 v2: terminal grants carry a launch; TerminalOpened/Closed events
+EXPECTED_CLI_HOST_VERSION = "0.5.0"  # 2026-09-09: session results and TerminalClosed carry the turn's token usage (analytics)
 
 _CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py")
 
@@ -802,6 +803,13 @@ def _record_terminal_events(db: Session, host: CliHost, task_id: int, events: Li
                 task.lease_until = None
                 task.completed_at = None
         elif name == "TerminalClosed":
+            closed_usage = ev.get("usage")
+            book_session_usage(
+                task, ref, closed_usage if isinstance(closed_usage, dict) else None,
+                status="success" if not ev.get("exit_code") else "error",
+                request_type=LANE_SESSION,
+                execution_id=f"session:{ev.get('session_id') or ref.get('cli_session_id') or task.id}",
+            )
             ref["terminal_closed_at"] = _iso(_now())
             ref.pop("terminal_attached_at", None)
             if interactive:
@@ -877,6 +885,49 @@ def record_events(
         task.runtime_ref = dict(ref)
         db.commit()
     return {"status": task.status, "lease_renewed": bool(renewed), "control": control, "decisions": decisions}
+
+
+def _session_duration_ms(ref: Dict[str, Any]) -> Optional[int]:
+    started = ref.get("claimed_at") or ref.get("terminal_attached_at")
+    if not started:
+        return None
+    try:
+        began = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        return max(0, int((_now() - began).total_seconds() * 1000))
+    except (TypeError, ValueError):
+        return None
+
+
+def book_session_usage(
+    task: BoardTask,
+    ref: Dict[str, Any],
+    usage: Optional[Dict[str, Any]],
+    *,
+    status: str,
+    request_type: str,
+    execution_id: str,
+    error: Optional[str] = None,
+) -> int:
+    """A session's tokens reach ``llm_usage`` like any API call (2026-09-09):
+    provider ``claude_code``, tier ``subscription``, $0 — so the Analytics page
+    shows what the user's own Claude Code plan did beside what the API routes
+    cost. Silent when the host reported no usage at all (no transcript)."""
+    if not isinstance(usage, dict) or not usage:
+        return 0
+    from core.llm.usage_tracker import UsageTracker
+
+    return UsageTracker.track_session(
+        task.workspace_id,
+        cli_provider=str(ref.get("provider") or ""),
+        usage=usage,
+        agent_id=task.assigned_agent_id,
+        execution_id=execution_id,
+        request_type=request_type,
+        status=status,
+        latency_ms=_session_duration_ms(ref),
+        error_message=error,
+        fallback_model=ref.get("model"),
+    )
 
 
 def _tokens_used(usage: Dict[str, Any]) -> int:
@@ -1242,6 +1293,13 @@ async def apply_result(
     }
     task.runtime_ref = ref
     db.commit()
+    book_session_usage(
+        task, ref, usage,
+        status=exec_result["status"],
+        request_type=LANE_BOARD_TASK,
+        execution_id=f"board_task:{task.id}",
+        error=payload.get("error"),
+    )
     # PRD-235 W2 S3: the final message and the end of the turn reach the Canvas too.
     final_text = payload.get("result_text") or payload.get("error") or ""
     base = {"source": "cli", "task_id": task.id, "session_id": ref.get("session_id")}

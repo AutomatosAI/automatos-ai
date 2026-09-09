@@ -31,6 +31,49 @@ except ImportError:  # pragma: no cover — the SDK is a hard dependency in prod
 
 logger = logging.getLogger(__name__)
 
+
+def _extra(obj: Any, key: str) -> Any:
+    """A field the SDK did not type (OpenRouter's ``cost``) — pydantic keeps it
+    in ``model_extra``; a plain namespace keeps it as an attribute."""
+    value = getattr(obj, key, None)
+    if value is None:
+        extra = getattr(obj, "model_extra", None)
+        if isinstance(extra, dict):
+            value = extra.get(key)
+    return value
+
+
+def usage_dict(usage: Any) -> Dict[str, Any]:
+    """The platform's usage dict from an OpenAI-shaped ``usage`` object.
+
+    ``prompt_tokens`` already INCLUDES cached prompt tokens
+    (``prompt_tokens_details.cached_tokens``) — reported beside it. OpenRouter
+    adds ``cost`` (the credits it charged for THIS call, in USD) when the
+    request asked for it (``usage: {include: true}``) — that exact figure beats
+    every price estimate downstream (2026-09-09).
+    """
+    if usage is None:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = int(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    out: Dict[str, Any] = {
+        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+        "cache_read_tokens": cached,
+        "cache_write_tokens": 0,
+    }
+    cost = _extra(usage, "cost")
+    if isinstance(cost, (int, float)):
+        upstream = 0.0
+        cost_details = _extra(usage, "cost_details")
+        if isinstance(cost_details, dict):
+            upstream = float(cost_details.get("upstream_inference_cost") or 0)
+        elif cost_details is not None:
+            upstream = float(_extra(cost_details, "upstream_inference_cost") or 0)
+        out["cost"] = float(cost) + upstream
+    return out
+
 DEFAULT_TIMEOUT_SECONDS = 180.0
 
 
@@ -93,11 +136,7 @@ class _StreamAssembler:
         self.model = getattr(chunk, "model", None) or self.model
         usage = getattr(chunk, "usage", None)
         if usage is not None:
-            self.usage = {
-                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
-                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
-            }
+            self.usage = usage_dict(usage)
         choices = getattr(chunk, "choices", None) or []
         if not choices:
             return out
@@ -255,6 +294,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     for m in (messages or [])
                 )
                 kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
+        if self.spec.reports_cost:
+            body = dict(kwargs.get("extra_body") or {})
+            body["usage"] = {"include": True}
+            kwargs["extra_body"] = body
         return kwargs
 
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
@@ -473,10 +516,5 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             raise
 
     @staticmethod
-    def _usage(response: Any) -> Dict[str, int]:
-        usage = getattr(response, "usage", None)
-        return {
-            "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-            "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
-            "total_tokens": getattr(usage, "total_tokens", 0) or 0,
-        }
+    def _usage(response: Any) -> Dict[str, Any]:
+        return usage_dict(getattr(response, "usage", None))

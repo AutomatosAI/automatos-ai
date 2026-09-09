@@ -38,6 +38,19 @@ PROVIDER_CLAUDE = "claude"
 PROVIDER_CODEX = "codex"
 CLI_PROVIDERS = (PROVIDER_CLAUDE, PROVIDER_CODEX)
 
+# How a session's spend is tagged in ``llm_usage.provider`` — a slug of its own
+# (never a registry API provider: a Claude Code session is the user's plan, not
+# an Anthropic API key) and the human label the analytics page shows.
+USAGE_PROVIDER_SLUGS = {PROVIDER_CLAUDE: "claude_code", PROVIDER_CODEX: "codex"}
+USAGE_PROVIDER_LABELS = {"claude_code": "Claude Code", "codex": "Codex"}
+BILLING_SUBSCRIPTION = "subscription"
+
+
+def usage_provider_slug(cli_provider: Optional[str]) -> str:
+    """``claude`` → ``claude_code``; an unknown CLI keeps its name."""
+    key = str(cli_provider or "").strip().lower()
+    return USAGE_PROVIDER_SLUGS.get(key, key or "unknown")
+
 # What ``claude --model`` accepts: an alias or a full model id. Deliberately
 # narrow — a session agent never carries an OpenRouter id (PRD-223: the model
 # route used to validate nothing).

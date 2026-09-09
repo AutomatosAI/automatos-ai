@@ -676,13 +676,23 @@ class LLMManager:
             raise
 
     def _track_usage(self, response: Any, start: float, status: str = "success") -> None:
-        """Track LLM usage via UsageTracker and cost audit logger."""
+        """Track LLM usage via UsageTracker and cost audit logger.
+
+        Attribution: the task-local ``usage_scope`` (the lane that is spending —
+        chat, board_task, mission, heartbeat… — and its execution id) wins over
+        what this manager was constructed with, because one manager serves every
+        run of an agent. Cache tokens and a provider-reported cost ride the
+        client's ``usage`` dict when the provider gives them.
+        """
         latency_ms = int((time.monotonic() - start) * 1000)
 
         usage = getattr(response, "usage", None) or {}
-        input_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
-        output_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+        input_tokens = int(usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0)
+        output_tokens = int(usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0)
         total_tokens = input_tokens + output_tokens
+        cache_read_tokens = int(usage.get("cache_read_tokens", 0) or 0)
+        cache_write_tokens = int(usage.get("cache_write_tokens", 0) or 0)
+        reported_cost = usage.get("cost")
 
         # ------------------------------------------------------------------
         # Cost audit logging — always log regardless of workspace
@@ -695,26 +705,35 @@ class LLMManager:
         )
 
         # ------------------------------------------------------------------
-        # Workspace-scoped usage tracking
+        # Usage tracking — the scope's lane/execution over the constructor's
         # ------------------------------------------------------------------
-        ws = self._tracking_ctx.get("workspace_id")
-        if not ws:
-            return
         try:
-            from .usage_tracker import UsageTracker
+            from .usage_context import current_usage_scope
+            from .usage_tracker import UsageTracker, resolve_workspace_id
 
+            scope = current_usage_scope()
+            ws = resolve_workspace_id(self._tracking_ctx.get("workspace_id") or scope.get("workspace_id"))
+            if not ws:
+                return
             UsageTracker.track(
                 workspace_id=ws,
                 model_id=self.config.model or "unknown",
                 provider=self.config.provider.value if self.config.provider else "unknown",
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                agent_id=self._tracking_ctx.get("agent_id"),
-                execution_id=self._tracking_ctx.get("execution_id"),
-                request_type=self._tracking_ctx.get("request_type", self.service_name),
+                agent_id=self._tracking_ctx.get("agent_id") or scope.get("agent_id"),
+                execution_id=scope.get("execution_id") or self._tracking_ctx.get("execution_id"),
+                request_type=(
+                    scope.get("request_type")
+                    or self._tracking_ctx.get("request_type")
+                    or self.service_name
+                ),
                 latency_ms=latency_ms,
                 status=status,
                 is_byok=self._tracking_ctx.get("is_byok", False),
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                reported_cost=float(reported_cost) if isinstance(reported_cost, (int, float)) else None,
             )
         except Exception as e:
             logger.debug(f"Usage tracking failed: {e}")
@@ -722,12 +741,12 @@ class LLMManager:
         # PRD-222 US-005: accrue trial spend on the workspace trial + the daily
         # counter — only for platform-trial requests (the flag is False on every
         # BYOK / non-trial / system call, so this is a no-op for them).
-        if self._tracking_ctx.get("trial"):
+        if self._tracking_ctx.get("trial") and self._tracking_ctx.get("workspace_id"):
             try:
                 from services.trial_ledger import record_trial_spend
 
                 record_trial_spend(
-                    ws,
+                    self._tracking_ctx["workspace_id"],
                     model_id=self.config.model or "unknown",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,

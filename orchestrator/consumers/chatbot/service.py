@@ -2259,6 +2259,43 @@ class StreamingChatService:
         page_context: Optional[Dict[str, Any]] = None,
         spoken_mode: bool = False,
     ) -> AsyncGenerator[str, None]:
+        """Stream a chat response produced by the specified agent.
+
+        Every LLM call of the turn — the agent's, the complexity assessor's, a
+        memory distil's — is booked to the ``chat`` lane and to this
+        conversation (``chat:<chat_id>``), task-locally (2026-09-09 analytics).
+        """
+        from core.llm.usage_context import LANE_CHAT, usage_scope
+
+        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id):
+            async for chunk in self._stream_response_with_agent_scoped(
+                chat_id, messages, agent_id, user_id,
+                use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
+                complexity_assessment=complexity_assessment, mission_mode=mission_mode,
+                plan_mode=plan_mode, team=team, suggest_mission=suggest_mission,
+                force_text_only=force_text_only, is_super_admin=is_super_admin,
+                page_context=page_context, spoken_mode=spoken_mode,
+            ):
+                yield chunk
+
+    async def _stream_response_with_agent_scoped(
+        self,
+        chat_id: str,
+        messages: List[Dict[str, Any]],
+        agent_id: int,
+        user_id: int,
+        use_orchestrator_llm: bool = False,
+        skip_composio: bool = False,
+        complexity_assessment: Optional[Any] = None,
+        mission_mode: bool = False,
+        plan_mode: bool = False,
+        team: Optional[str] = None,
+        suggest_mission: bool = False,
+        force_text_only: bool = False,
+        is_super_admin: bool = False,
+        page_context: Optional[Dict[str, Any]] = None,
+        spoken_mode: bool = False,
+    ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
         Yields AISDK-formatted chunks for frontend consumption.

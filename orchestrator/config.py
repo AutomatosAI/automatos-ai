@@ -1424,6 +1424,11 @@ class Config:
         except Exception:
             return os.getenv("RAG_RERANK_MODEL", "rerank-v3.5")
 
+    # Cohere bills reranking per SEARCH UNIT (one query over up to 100 documents),
+    # USD per 1,000 units — the analytics tracker prices each rerank call with it.
+    # Cohere's published list price for rerank-v3.5 (2026): $2.00 / 1k searches.
+    COHERE_RERANK_USD_PER_1K_SEARCHES: float = float(os.getenv("COHERE_RERANK_USD_PER_1K_SEARCHES", "2.0"))
+
     @property
     def RAG_HYBRID_ENABLED(self) -> bool:
         """Real dense+sparse hybrid retrieval (default: ON — PRD-188 S3).

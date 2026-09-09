@@ -546,8 +546,14 @@ class AgentFactory:
             return True
         return False
 
-    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None) -> Tuple[LLMManager, ResolvedKey]:
-        """Create LLM manager with API key resolution (PRD-15, PRD-54)."""
+    async def _create_llm_manager(
+        self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None, agent_id: Optional[int] = None,
+    ) -> Tuple[LLMManager, ResolvedKey]:
+        """Create LLM manager with API key resolution (PRD-15, PRD-54).
+
+        ``agent_id`` rides into usage tracking — without it every call booked
+        through this path had a NULL agent and the agent's counters never moved.
+        """
         from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
 
         from core.llm.providers import enum_for
@@ -618,7 +624,7 @@ class AgentFactory:
         manager = LLMManager(
             config=llm_config,
             workspace_id=workspace_id,
-            agent_id=None,
+            agent_id=agent_id,
             is_byok=resolved.is_byok,
             trial=trial_routed,
         )
@@ -693,7 +699,9 @@ class AgentFactory:
         self.db_session.commit()
 
         try:
-            llm_manager, resolved = await self._create_llm_manager(model_config, db_agent.name, workspace_id=db_agent.workspace_id)
+            llm_manager, resolved = await self._create_llm_manager(
+                model_config, db_agent.name, workspace_id=db_agent.workspace_id, agent_id=db_agent.id,
+            )
 
             if auto_verify:
                 verification_result = await self._verify_llm_connection(llm_manager)
@@ -707,7 +715,9 @@ class AgentFactory:
                         temperature=model_config.temperature,
                         max_tokens=model_config.max_tokens,
                     )
-                    llm_manager, resolved = await self._create_llm_manager(fallback_config, db_agent.name, workspace_id=db_agent.workspace_id)
+                    llm_manager, resolved = await self._create_llm_manager(
+                        fallback_config, db_agent.name, workspace_id=db_agent.workspace_id, agent_id=db_agent.id,
+                    )
                     verification_result = await self._verify_llm_connection(llm_manager)
                     if verification_result["success"]:
                         db_agent.model_config = fallback_config.to_dict()
@@ -1084,6 +1094,40 @@ class AgentFactory:
 
         agent_runtime.lifecycle_state = AgentLifecycle.BUSY
 
+        # Every LLM call of this run — the agent's own manager and any helper —
+        # is booked to the lane that asked (board_task / mission / heartbeat…)
+        # and to the thing it ran for, task-locally (2026-09-09 analytics).
+        from core.llm.usage_context import execution_ref_for_context, lane_for_context, usage_scope
+
+        with usage_scope(
+            request_type=lane_for_context(context),
+            execution_id=execution_ref_for_context(context),
+            agent_id=agent_id,
+            workspace_id=agent_runtime.workspace_id,
+        ):
+            return await self._execute_with_prompt_scoped(
+                agent_runtime, agent_id, agent_name, prompt, system_prompt, context, use_memory,
+                max_retries, max_tool_iterations, composio_action_names, context_mode,
+                attachment_ids, start_time,
+            )
+
+    async def _execute_with_prompt_scoped(
+        self,
+        agent_runtime: AgentRuntime,
+        agent_id: int,
+        agent_name: str,
+        prompt: str,
+        system_prompt: Optional[str],
+        context: Optional[Dict[str, Any]],
+        use_memory: bool,
+        max_retries: int,
+        max_tool_iterations: int,
+        composio_action_names: Optional[set],
+        context_mode: Optional[str],
+        attachment_ids: Optional[List[str]],
+        start_time: float,
+    ) -> Dict[str, Any]:
+        """The body of ``execute_with_prompt`` (unchanged), run inside its usage scope."""
         try:
             # --- Build messages ---
             messages = []

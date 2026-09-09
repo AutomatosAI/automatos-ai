@@ -48,7 +48,10 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-09-08: prd236_w1_serving_provider and prd237_users_chat_sessions both chain
 # onto the S1a head (#700 landed on its stacked base after that base had merged);
 # prd236w1_prd237_merge joins them and is the single head.
-EXPECTED_HEAD = "prd236w1_prd237_merge"
+# 2026-09-09 (analytics cost tracking): prd240_merge_heads joins that merge with the
+# calendar chain (calendar_scheduled_board_tasks); prd240_llm_usage_cache_tokens
+# chains onto it and is the single head.
+EXPECTED_HEAD = "prd240_llm_usage_cache_tokens"
 
 
 def _literal(node: ast.AST):

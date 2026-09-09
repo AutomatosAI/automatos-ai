@@ -176,10 +176,13 @@ class LLMUsage(Base):
     execution_id = Column(String(255))
     request_type = Column(String(50))  # chat, agent, recipe, routing, embedding
 
-    # Token usage
+    # Token usage. ``input_tokens`` is the FULL prompt (fresh + cached + written)
+    # on every provider; the two cache counters are its breakdown (2026-09-09).
     input_tokens = Column(Integer, nullable=False)
     output_tokens = Column(Integer, nullable=False)
     total_tokens = Column(Integer, nullable=False)
+    cache_read_tokens = Column(Integer, nullable=False, default=0, server_default='0')
+    cache_write_tokens = Column(Integer, nullable=False, default=0, server_default='0')
 
     # Cost
     input_cost = Column(Float, nullable=False)
