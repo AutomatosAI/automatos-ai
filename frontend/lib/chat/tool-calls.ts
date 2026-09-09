@@ -5,7 +5,7 @@
  * renders them. Both sides share these rules so a chip can never spin forever:
  * a `finish` frame closes whatever is still running.
  */
-import type { ToolCall } from '@/types'
+import type { TaskCardData, ToolCall } from '@/types'
 
 /** Insert or merge a tool call by id, preserving order. Never mutates. */
 export function upsertToolCall(current: ToolCall[] | undefined, next: ToolCall): ToolCall[] {
@@ -31,4 +31,12 @@ export function formatDuration(ms: number | undefined): string {
   if (seconds < 60) return `${seconds} s`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
+}
+
+/** PRD-238 S6: one card per ticket id, newest data wins, order preserved. Never mutates. */
+export function upsertTaskCard(current: TaskCardData[] | undefined, next: TaskCardData): TaskCardData[] {
+  const list = current ? [...current] : []
+  const index = list.findIndex((c) => c.id === next.id)
+  if (index >= 0) return list.map((c, i) => (i === index ? { ...c, ...next } : c))
+  return [...list, next]
 }

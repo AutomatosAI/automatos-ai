@@ -4,6 +4,7 @@ import { Bot, Clock, CheckCircle2, AlertCircle, RotateCcw, Loader2, FileText, Ex
 import { sessionDenials, denialLine, reviewReason } from './session-denials'
 import { TaskDeliverablesPanel } from './task-deliverables-panel'
 import Link from 'next/link'
+import { sessionCanvasHref } from '@/lib/chat/runtime-canvas'
 import { toast } from 'sonner'
 import { parseBlockedReason } from './blocked-reason'
 import { useGrantApproval } from '@/hooks/use-approval-grants'
@@ -66,9 +67,10 @@ function SessionBlock({ task }: { task: BoardTask }) {
   if (!ref || ref.runtime !== 'cli') return null
   const files: string[] = Array.isArray(ref.files_touched) ? ref.files_touched : []
   const usage = ref.usage || {}
-  const takeover = ref.session_id
-    ? `${ref.cwd ? `cd ${ref.cwd} && ` : ''}claude --resume ${ref.session_id}`
-    : null
+  // PRD-239 S7 v2: the session opens in the Runtime Canvas — the host starts or
+  // resumes it in the ticket's own folder, no command to copy.
+  const sessionId = ref.cli_session_id || ref.session_id
+  const interactive = ref.mode === 'terminal'
   return (
     <div>
       <SectionLabel icon={<TerminalSquare className="w-3 h-3" />}>Claude Code session</SectionLabel>
@@ -123,10 +125,28 @@ function SessionBlock({ task }: { task: BoardTask }) {
             </ul>
           </div>
         )}
-        {takeover && (
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">Take over in your terminal</p>
-            <code className="block rounded bg-muted px-2 py-1.5 font-mono text-xs overflow-x-auto">{takeover}</code>
+        {sessionId && (
+          <div className="flex flex-wrap items-center gap-2" data-testid="session-open">
+            <Link
+              href={sessionCanvasHref(task.id, ref.explorer_root)}
+              className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              <TerminalSquare className="w-3 h-3" /> {interactive && ref.terminal_attached_at ? 'Back to the session' : 'Open the session in the Canvas'}
+            </Link>
+            <span className="text-xs text-muted-foreground">
+              {interactive ? 'An interactive session — you type, on your machine.' : 'Continues this session in a terminal on your machine.'}
+            </span>
+          </div>
+        )}
+        {/* PRD-235 W2: the session's folder in chat (Code mode) and in your own editor */}
+        {ref.cwd && (
+          <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="session-links">
+            {ref.cwd && (
+              <>
+                <a href={`vscode://file${ref.cwd}`} className="rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40">Open in VS Code</a>
+                <a href={`cursor://file${ref.cwd}`} className="rounded-md border border-border/60 px-2 py-1 hover:bg-secondary/40">Open in Cursor</a>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -241,6 +261,18 @@ function BlockedContent({ task, onStatusChange }: { task: BoardTask; onStatusCha
 function AssignedContent({ task }: { task: BoardTask }) {
   return (
     <div className="space-y-6">
+      {/* PRD-234: a Claude Code agent's ticket waits for the paired host; when
+          none is online the backend writes why on the ticket — show it instead
+          of a silent 'assigned'. */}
+      {task.blocked_reason && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/30" data-testid="assigned-waiting-host">
+          <TerminalSquare className="w-4 h-4 mt-0.5 text-[hsl(var(--warning))] shrink-0" />
+          <div className="text-sm">
+            <p className="font-medium text-[hsl(var(--warning))]">Waiting for your Claude Code host</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{task.blocked_reason}</p>
+          </div>
+        </div>
+      )}
       <MetadataGrid task={task} />
 
       {task.description && (

@@ -163,3 +163,12 @@ def test_inject_targets_last_user_message():
     assert len(out[0]["parts"]) == 1
     assert len(out[2]["parts"]) == 2
     assert out[1] is history[1]
+
+
+def test_code_mode_folder_is_rendered_as_a_working_scope():
+    """PRD-235 W2: a 'repo' selection means Code mode is open on that folder."""
+    from services.page_context import render_page_preamble, sanitize_page_context
+    raw = {"page": "chat", "route": "/chat", "selected": {"type": "repo", "id": "projects/my-repo"}}
+    out = render_page_preamble(sanitize_page_context(raw))
+    assert "Code mode is open on the folder `projects/my-repo`" in out
+    assert "workspace_grep" in out and "Selected repo" not in out

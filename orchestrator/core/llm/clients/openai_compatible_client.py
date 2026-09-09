@@ -18,10 +18,11 @@ silent fallbacks (PRD-236 Q2: free must never silently become paid).
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from .base import BaseLLMProvider, LLMConfig, LLMResponse
 from core.llm import providers as registry
+from core.llm.reasoning import coalesce_reasoning, reasoning_from_fields, split_think_tags
 
 try:
     from openai import OpenAI
@@ -29,6 +30,49 @@ except ImportError:  # pragma: no cover — the SDK is a hard dependency in prod
     OpenAI = None
 
 logger = logging.getLogger(__name__)
+
+
+def _extra(obj: Any, key: str) -> Any:
+    """A field the SDK did not type (OpenRouter's ``cost``) — pydantic keeps it
+    in ``model_extra``; a plain namespace keeps it as an attribute."""
+    value = getattr(obj, key, None)
+    if value is None:
+        extra = getattr(obj, "model_extra", None)
+        if isinstance(extra, dict):
+            value = extra.get(key)
+    return value
+
+
+def usage_dict(usage: Any) -> Dict[str, Any]:
+    """The platform's usage dict from an OpenAI-shaped ``usage`` object.
+
+    ``prompt_tokens`` already INCLUDES cached prompt tokens
+    (``prompt_tokens_details.cached_tokens``) — reported beside it. OpenRouter
+    adds ``cost`` (the credits it charged for THIS call, in USD) when the
+    request asked for it (``usage: {include: true}``) — that exact figure beats
+    every price estimate downstream (2026-09-09).
+    """
+    if usage is None:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = int(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    out: Dict[str, Any] = {
+        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+        "cache_read_tokens": cached,
+        "cache_write_tokens": 0,
+    }
+    cost = _extra(usage, "cost")
+    if isinstance(cost, (int, float)):
+        upstream = 0.0
+        cost_details = _extra(usage, "cost_details")
+        if isinstance(cost_details, dict):
+            upstream = float(cost_details.get("upstream_inference_cost") or 0)
+        elif cost_details is not None:
+            upstream = float(_extra(cost_details, "upstream_inference_cost") or 0)
+        out["cost"] = float(cost) + upstream
+    return out
 
 DEFAULT_TIMEOUT_SECONDS = 180.0
 
@@ -42,6 +86,107 @@ def _is_rate_limited(exc: Exception) -> bool:
         return True
     text = str(exc)
     return "429" in text or "rate limit" in text.lower() or "rate_limit" in text.lower()
+
+
+class ProviderModelUnavailableError(ValueError):
+    """The serving provider does not offer the requested model (a 404, or a 400
+    that says the id is not a valid / known model). PRD-239 S4."""
+
+
+_MODEL_UNAVAILABLE_MARKERS = (
+    "not a valid model",
+    "model not found",
+    "no such model",
+    "does not exist",
+    "unknown model",
+    "is not available",
+    "not supported model",
+)
+
+
+def _is_model_unavailable(exc: Exception) -> bool:
+    text = str(exc).lower()
+    if "model" not in text:
+        return False
+    if getattr(exc, "status_code", None) == 404:
+        return True
+    return any(marker in text for marker in _MODEL_UNAVAILABLE_MARKERS)
+
+
+class _StreamAssembler:
+    """Folds chat-completion stream chunks into one ``LLMResponse``.
+
+    Text and reasoning deltas are yielded as they arrive; tool-call argument
+    fragments (keyed by ``index``) are concatenated; the last chunk's usage and
+    finish_reason win. Inline ``<think>`` tags are lifted out of the final text
+    for models that think in-band.
+    """
+
+    def __init__(self) -> None:
+        self.text: List[str] = []
+        self.reasoning: List[str] = []
+        self.tool_calls: Dict[int, Dict[str, Any]] = {}
+        self.finish_reason: Optional[str] = None
+        self.usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.model: Optional[str] = None
+
+    def feed(self, chunk: Any) -> List[Tuple[str, str]]:
+        """Absorb one chunk; return the (kind, text) deltas to deliver live."""
+        out: List[Tuple[str, str]] = []
+        self.model = getattr(chunk, "model", None) or self.model
+        usage = getattr(chunk, "usage", None)
+        if usage is not None:
+            self.usage = usage_dict(usage)
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            return out
+        choice = choices[0]
+        self.finish_reason = getattr(choice, "finish_reason", None) or self.finish_reason
+        delta = getattr(choice, "delta", None)
+        if delta is None:
+            return out
+        try:
+            raw = delta.model_dump()
+        except Exception:
+            raw = {k: getattr(delta, k, None) for k in ("content", "reasoning_content", "reasoning", "tool_calls")}
+        reasoning = reasoning_from_fields(raw)
+        if reasoning:
+            self.reasoning.append(reasoning)
+            out.append(("reasoning", reasoning))
+        content = raw.get("content")
+        if isinstance(content, str) and content:
+            self.text.append(content)
+            out.append(("text", content))
+        for tc in raw.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            index = int(tc.get("index") or 0)
+            slot = self.tool_calls.setdefault(index, {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
+            if tc.get("id"):
+                slot["id"] = tc["id"]
+            if tc.get("type"):
+                slot["type"] = tc["type"]
+            fn = tc.get("function") or {}
+            if fn.get("name"):
+                slot["function"]["name"] += fn["name"]
+            if fn.get("arguments"):
+                slot["function"]["arguments"] += fn["arguments"]
+        return out
+
+    def response(self, provider: str, *, streamed: bool) -> LLMResponse:
+        content, inline_reasoning = split_think_tags("".join(self.text))
+        reasoning = coalesce_reasoning("".join(self.reasoning) or None, inline_reasoning)
+        calls = [self.tool_calls[i] for i in sorted(self.tool_calls)] or None
+        return LLMResponse(
+            content=content,
+            usage=self.usage,
+            model=self.model,
+            provider=provider,
+            tool_calls=calls,
+            finish_reason=self.finish_reason,
+            reasoning=reasoning,
+            streamed=streamed,
+        )
 
 
 class OpenAICompatibleProvider(BaseLLMProvider):
@@ -100,6 +245,20 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             f"{self.spec.label} rate limit reached for model '{self.config.model}'. {note}"
         )
 
+    def _model_unavailable_error(self, exc: Exception) -> ProviderModelUnavailableError:
+        return ProviderModelUnavailableError(
+            f"{self.spec.label} does not offer the model '{self.config.model}' (any more). "
+            "Pick another model in the agent's Model tab."
+        )
+
+    def _classified(self, exc: Exception) -> Optional[ValueError]:
+        """The typed error for a provider refusal we recognise, else None."""
+        if _is_rate_limited(exc):
+            return self._rate_limit_error(exc)
+        if _is_model_unavailable(exc):
+            return self._model_unavailable_error(exc)
+        return None
+
     # ------------------------------------------------------------------ #
     # Requests
     # ------------------------------------------------------------------ #
@@ -121,6 +280,26 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             kwargs["stop"] = self.config.stop
         return kwargs
 
+    def _request_kwargs(self, messages: List[Dict[str, str]], tools: Optional[List[Dict]]) -> Dict[str, Any]:
+        """The chat-completions request for ``messages`` (+ tools and tool_choice)."""
+        kwargs = self._base_kwargs(messages)
+        if tools:
+            kwargs["tools"] = self._sanitize_tools(tools)
+            has_tool_results = any(m.get("role") == "tool" for m in (messages or []))
+            if has_tool_results:
+                kwargs["tool_choice"] = "auto"
+            else:
+                force_tool_choice = any(
+                    (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                    for m in (messages or [])
+                )
+                kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
+        if self.spec.reports_cost:
+            body = dict(kwargs.get("extra_body") or {})
+            body["usage"] = {"include": True}
+            kwargs["extra_body"] = body
+        return kwargs
+
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate a response (OpenAI-compatible chat completions)."""
         self._require_client()
@@ -130,27 +309,14 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
         try:
             def _call():
-                kwargs = self._base_kwargs(messages)
-                if tools:
-                    kwargs["tools"] = self._sanitize_tools(tools)
-
-                    has_tool_results = any(
-                        m.get("role") == "tool" for m in (messages or [])
-                    )
-                    if has_tool_results:
-                        kwargs["tool_choice"] = "auto"
-                    else:
-                        force_tool_choice = any(
-                            (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
-                            for m in (messages or [])
-                        )
-                        kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
+                kwargs = self._request_kwargs(messages, tools)
 
                 try:
                     return self.client.chat.completions.create(**kwargs)
                 except Exception as exc:
-                    if _is_rate_limited(exc):
-                        raise self._rate_limit_error(exc) from exc
+                    typed = self._classified(exc)
+                    if typed is not None:
+                        raise typed from exc
                     err_str = str(exc)
                     if tools and ("not support tool use" in err_str or "No endpoints found that support tool" in err_str):
                         logger.warning(
@@ -201,6 +367,12 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             else:
                 content = msg.content or ""
 
+            # PRD-238 S1: the reasoning channel — a dedicated field on the
+            # message (DeepSeek/Kimi/NVIDIA NIM) or inline <think> tags — is
+            # lifted out so it is never the answer.
+            content, inline_reasoning = split_think_tags(content)
+            reasoning = coalesce_reasoning(reasoning_from_fields(raw_msg), inline_reasoning)
+
             raw_images = raw_msg.get("images") or []
             for img in raw_images:
                 if not isinstance(img, dict):
@@ -245,10 +417,82 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
                 additional_blocks=additional_blocks or None,
+                reasoning=reasoning,
             )
         except Exception as e:
             logger.error("%s API error: %s", self.spec.label, e)
             raise
+
+    # ------------------------------------------------------------------ #
+    # Streaming (PRD-238 S2)
+    # ------------------------------------------------------------------ #
+
+    async def stream_response(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[Dict] = None,
+        on_delta=None,
+    ) -> LLMResponse:
+        """Generate with ``stream=True``, handing every text / reasoning delta to
+        ``on_delta(kind, text)`` (``kind`` is ``"text"`` or ``"reasoning"``) as it
+        arrives, and return the same ``LLMResponse`` the non-streaming path
+        would — tool calls re-assembled from their argument fragments, the
+        reasoning channel separated, ``streamed=True`` when anything was
+        delivered live. The sync SDK iterator runs in a worker thread; deltas
+        cross to the event loop through a queue so nothing blocks it.
+        """
+        self._require_client()
+
+        import asyncio
+        import queue as _queue
+
+        loop = asyncio.get_running_loop()
+        handoff: "asyncio.Queue[Any]" = asyncio.Queue()
+        _END = object()
+
+        def _run_stream():
+            kwargs = self._request_kwargs(messages, tools)
+            kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}
+            try:
+                iterator = self.client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                typed = self._classified(exc)
+                if typed is not None:
+                    raise typed from exc
+                if "stream_options" in str(exc):
+                    kwargs.pop("stream_options", None)
+                    iterator = self.client.chat.completions.create(**kwargs)
+                else:
+                    raise
+            for chunk in iterator:
+                loop.call_soon_threadsafe(handoff.put_nowait, chunk)
+
+        async def _produce():
+            try:
+                await loop.run_in_executor(None, _run_stream)
+            except Exception as exc:  # surfaced to the consumer below
+                loop.call_soon_threadsafe(handoff.put_nowait, exc)
+            finally:
+                loop.call_soon_threadsafe(handoff.put_nowait, _END)
+
+        producer = asyncio.ensure_future(_produce())
+        assembler = _StreamAssembler()
+        streamed = False
+        try:
+            while True:
+                item = await handoff.get()
+                if item is _END:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                for kind, text in assembler.feed(item):
+                    streamed = True
+                    if on_delta is not None:
+                        await on_delta(kind, text)
+        finally:
+            await producer
+        return assembler.response(self.spec.slug, streamed=streamed)
 
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate a response (synchronous)."""
@@ -257,8 +501,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             try:
                 response = self.client.chat.completions.create(**self._base_kwargs(messages))
             except Exception as exc:
-                if _is_rate_limited(exc):
-                    raise self._rate_limit_error(exc) from exc
+                typed = self._classified(exc)
+                if typed is not None:
+                    raise typed from exc
                 raise
             return LLMResponse(
                 content=response.choices[0].message.content,
@@ -271,10 +516,5 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             raise
 
     @staticmethod
-    def _usage(response: Any) -> Dict[str, int]:
-        usage = getattr(response, "usage", None)
-        return {
-            "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-            "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
-            "total_tokens": getattr(usage, "total_tokens", 0) or 0,
-        }
+    def _usage(response: Any) -> Dict[str, Any]:
+        return usage_dict(getattr(response, "usage", None))

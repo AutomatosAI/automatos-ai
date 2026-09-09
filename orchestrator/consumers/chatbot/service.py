@@ -1473,6 +1473,34 @@ class StreamingChatService:
     # (PRD-142 W3-S4 / G6: one tool loop, shared with agent_factory).
     # ─────────────────────────────────────────────────────────────────────
 
+    async def _stream_llm_call(self, llm_manager, messages, tools):
+        """PRD-238 S2: run one LLM call and yield its text/reasoning deltas as
+        stream frames while it runs; the last item is ``{"_response": resp}``.
+        Providers that cannot stream simply yield nothing until the response.
+        """
+        frames: "asyncio.Queue[Any]" = asyncio.Queue()
+        END = object()
+
+        async def _on_delta(kind: str, text: str) -> None:
+            if kind == "reasoning":
+                await frames.put(self.streaming_handler.format_aisdk_reasoning(text))
+            else:
+                await frames.put(self.streaming_handler.format_aisdk_text(text))
+
+        async def _run():
+            try:
+                return await llm_manager.generate_response(messages=messages, tools=tools, on_delta=_on_delta)
+            finally:
+                await frames.put(END)
+
+        task = asyncio.create_task(_run())
+        while True:
+            item = await frames.get()
+            if item is END:
+                break
+            yield item
+        yield {"_response": await task}
+
     async def _stream_tool_loop(
         self,
         response,
@@ -1485,6 +1513,8 @@ class StreamingChatService:
         conversation_id: Optional[str] = None,
         assign_lane: bool = False,
         is_super_admin: bool = False,
+        streamed_text: Optional[List[str]] = None,
+        reasoning_log: Optional[List[str]] = None,
     ) -> AsyncGenerator[Any, None]:
         """Drive :class:`ToolLoopExecutor` from the chat surface.
 
@@ -1520,9 +1550,15 @@ class StreamingChatService:
             _in = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0
             _out = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0
             if _in or _out:
-                from core.llm.manager import estimate_cost_usd
-                _model = getattr(getattr(agent_runtime.llm_manager, "config", None), "model", None)
-                turn_llm_cost_usd += estimate_cost_usd(_model, _in, _out)
+                _mgr = agent_runtime.llm_manager
+                if hasattr(_mgr, "_estimate_cost"):
+                    # PRD-236: per ROUTE — a free provider (NVIDIA trial) adds $0,
+                    # so the governor never forces synthesis over money not spent.
+                    turn_llm_cost_usd += _mgr._estimate_cost(_in, _out)
+                else:
+                    from core.llm.manager import estimate_cost_usd
+                    _model = getattr(getattr(_mgr, "config", None), "model", None)
+                    turn_llm_cost_usd += estimate_cost_usd(_model, _in, _out)
             return resp
 
         # State shared by callbacks within this turn.
@@ -1787,11 +1823,31 @@ class StreamingChatService:
                 return ToolPostResult(force_final=True)
             return None
 
+        # PRD-238 S1/S2: every round's text and reasoning stream live through the
+        # same queue the tool events ride; what was delivered live is recorded so
+        # the caller never emits it twice and the saved message matches the screen.
+        async def _on_delta(kind: str, text: str) -> None:
+            if kind == "reasoning":
+                await sse_queue.put(self.streaming_handler.format_aisdk_reasoning(text))
+            else:
+                await sse_queue.put(self.streaming_handler.format_aisdk_text(text))
+
+        async def _note_round(resp):
+            reasoning = getattr(resp, "reasoning", None)
+            if reasoning:
+                if reasoning_log is not None:
+                    reasoning_log.append(reasoning)
+                if not getattr(resp, "streamed", False):
+                    await sse_queue.put(self.streaming_handler.format_aisdk_reasoning(reasoning))
+            if getattr(resp, "streamed", False) and getattr(resp, "content", None) and streamed_text is not None:
+                streamed_text.append(resp.content)
+            return resp
+
         async def _llm_callback(messages, tools):
             try:
-                return _governor_track(await agent_runtime.llm_manager.generate_response(
-                    messages=messages, tools=tools,
-                ))
+                return await _note_round(_governor_track(await agent_runtime.llm_manager.generate_response(
+                    messages=messages, tools=tools, on_delta=_on_delta,
+                )))
             except Exception as llm_err:
                 logger.warning(
                     f"LLM call failed in tool loop, attempting recovery: {llm_err}"
@@ -1805,9 +1861,9 @@ class StreamingChatService:
                     )
                     if compacted:
                         logger.info("Recovery compaction succeeded, retrying LLM call")
-                        return _governor_track(await agent_runtime.llm_manager.generate_response(
-                            messages=messages_new, tools=tools_new,
-                        ))
+                        return await _note_round(_governor_track(await agent_runtime.llm_manager.generate_response(
+                            messages=messages_new, tools=tools_new, on_delta=_on_delta,
+                        )))
                     raise
                 except Exception:
                     logger.error(
@@ -1836,14 +1892,26 @@ class StreamingChatService:
             finally:
                 await sse_queue.put(DONE)
 
+        # PRD-238 S4: a long-running tool (platform_wait_for_task) narrates
+        # through the turn's progress emitter — registered for exactly the
+        # life of this loop, keyed by the turn id the executor hands handlers.
+        from services import turn_progress as _turn_progress
+
+        async def _emit_progress(text: str) -> None:
+            await sse_queue.put(self.streaming_handler.format_aisdk_progress(text))
+
+        _turn_progress.register(_turn_id, _emit_progress)
         runner_task = asyncio.create_task(_runner())
 
-        while True:
-            item = await sse_queue.get()
-            if item is DONE:
-                break
-            yield item
-            await asyncio.sleep(0)
+        try:
+            while True:
+                item = await sse_queue.get()
+                if item is DONE:
+                    break
+                yield item
+                await asyncio.sleep(0)
+        finally:
+            _turn_progress.unregister(_turn_id)
 
         try:
             result = await runner_task
@@ -2191,6 +2259,43 @@ class StreamingChatService:
         page_context: Optional[Dict[str, Any]] = None,
         spoken_mode: bool = False,
     ) -> AsyncGenerator[str, None]:
+        """Stream a chat response produced by the specified agent.
+
+        Every LLM call of the turn — the agent's, the complexity assessor's, a
+        memory distil's — is booked to the ``chat`` lane and to this
+        conversation (``chat:<chat_id>``), task-locally (2026-09-09 analytics).
+        """
+        from core.llm.usage_context import LANE_CHAT, usage_scope
+
+        with usage_scope(request_type=LANE_CHAT, execution_id=f"chat:{chat_id}", agent_id=agent_id):
+            async for chunk in self._stream_response_with_agent_scoped(
+                chat_id, messages, agent_id, user_id,
+                use_orchestrator_llm=use_orchestrator_llm, skip_composio=skip_composio,
+                complexity_assessment=complexity_assessment, mission_mode=mission_mode,
+                plan_mode=plan_mode, team=team, suggest_mission=suggest_mission,
+                force_text_only=force_text_only, is_super_admin=is_super_admin,
+                page_context=page_context, spoken_mode=spoken_mode,
+            ):
+                yield chunk
+
+    async def _stream_response_with_agent_scoped(
+        self,
+        chat_id: str,
+        messages: List[Dict[str, Any]],
+        agent_id: int,
+        user_id: int,
+        use_orchestrator_llm: bool = False,
+        skip_composio: bool = False,
+        complexity_assessment: Optional[Any] = None,
+        mission_mode: bool = False,
+        plan_mode: bool = False,
+        team: Optional[str] = None,
+        suggest_mission: bool = False,
+        force_text_only: bool = False,
+        is_super_admin: bool = False,
+        page_context: Optional[Dict[str, Any]] = None,
+        spoken_mode: bool = False,
+    ) -> AsyncGenerator[str, None]:
         """
         Stream a chat response produced by the specified agent.
         Yields AISDK-formatted chunks for frontend consumption.
@@ -2473,9 +2578,21 @@ class StreamingChatService:
                 tool_names = [t.get("function", {}).get("name") for t in use_tools if isinstance(t, dict)]
                 logger.info(f"Available tools: {tool_names}")
 
-            response = await agent_runtime.llm_manager.generate_response(
-                messages=llm_messages, tools=use_tools,
-            )
+            # PRD-238 S2: the first call streams its text and reasoning live.
+            streamed_text: List[str] = []
+            reasoning_log: List[str] = []
+            response = None
+            async for item in self._stream_llm_call(agent_runtime.llm_manager, llm_messages, use_tools):
+                if isinstance(item, dict) and "_response" in item:
+                    response = item["_response"]
+                else:
+                    yield item
+            if getattr(response, "reasoning", None):
+                reasoning_log.append(response.reasoning)
+                if not getattr(response, "streamed", False):
+                    yield self.streaming_handler.format_aisdk_reasoning(response.reasoning)
+            if getattr(response, "streamed", False) and response.content:
+                streamed_text.append(response.content)
             if is_empty_completion(response):
                 # Live-test 2026-09-02: zero tokens, finish_reason=stop, streamed as
                 # a successful blank turn mid-onboarding. Retry once, then say so.
@@ -2516,6 +2633,8 @@ class StreamingChatService:
                     conversation_id=chat_id,
                     assign_lane=_assign_lane,
                     is_super_admin=is_super_admin,
+                    streamed_text=streamed_text,
+                    reasoning_log=reasoning_log,
                 ):
                     if isinstance(chunk, dict) and chunk.get('_final_response'):
                         final_response = chunk['_final_response']
@@ -2524,7 +2643,8 @@ class StreamingChatService:
                     await asyncio.sleep(0)
 
                 if final_response and final_response.content:
-                    full_response = final_response.content
+                    final_text = final_response.content
+                    final_streamed = bool(getattr(final_response, "streamed", False))
                 else:
                     logger.warning("Tool loop completed without final response - forcing synthesis")
                     llm_messages.append({
@@ -2532,10 +2652,22 @@ class StreamingChatService:
                         'content': 'Based on the tool results above, provide a comprehensive response to the user.',
                     })
                     forced = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
-                    full_response = forced.content or "I apologize, but I encountered an issue generating a response. Please try again."
+                    final_text = forced.content or "I apologize, but I encountered an issue generating a response. Please try again."
+                    final_streamed = False
             else:
-                if response.content:
-                    full_response = response.content
+                final_text = response.content or ""
+                final_streamed = bool(getattr(response, "streamed", False))
+
+            # PRD-238 S2: the saved message is exactly what the screen showed —
+            # every round's streamed text in order, plus a final answer that the
+            # provider could not stream. Only that unstreamed tail is emitted here.
+            shown_so_far = "\n\n".join(t for t in streamed_text if t)
+            if final_streamed:
+                full_response = shown_so_far
+                unstreamed_tail = ""
+            else:
+                full_response = f"{shown_so_far}\n\n{final_text}".strip() if shown_so_far else final_text
+                unstreamed_tail = final_text
 
             # Upload inline base64 images to S3
             _ws_id_img = getattr(agent_runtime, 'workspace_id', None) or self.workspace_id
@@ -2543,9 +2675,13 @@ class StreamingChatService:
                 full_response, workspace_id=str(_ws_id_img) if _ws_id_img else None,
             )
 
-            # Stream text response
-            async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
-                yield chunk
+            # Stream whatever the screen has not seen yet (nothing, when every round streamed)
+            if unstreamed_tail:
+                tail = await _upload_inline_images(
+                    unstreamed_tail, workspace_id=str(_ws_id_img) if _ws_id_img else None,
+                )
+                async for chunk in self.streaming_handler.stream_text_aisdk(tail):
+                    yield chunk
 
             # Send usage data
             if hasattr(response, 'usage') and response.usage:
@@ -2558,7 +2694,11 @@ class StreamingChatService:
             # Send finish event
             yield self.streaming_handler.format_aisdk_finish()
 
-            # Save assistant message
+            # Save assistant message — PRD-238 S1: the reasoning rides as its
+            # own part (never the answer text, never fed back to the model).
+            joined_reasoning = "\n\n".join(r for r in reasoning_log if r)
+            if joined_reasoning:
+                assistant_parts.append({'type': 'reasoning', 'reasoning': joined_reasoning})
             assistant_parts.append({'type': 'text', 'text': full_response})
             self.chat_service.save_message(
                 chat_id=chat_id, role="assistant",
@@ -2586,12 +2726,43 @@ class StreamingChatService:
             )
 
         except Exception as e:
+            # PRD-239 S4: a failed turn is visible — one plain sentence with a
+            # code on the stream, and a note in the conversation so a reload
+            # (or the detached-turn path) shows it too. The raw text stays here.
+            from consumers.chatbot.turn_errors import describe_turn_error
+
             logger.error(f"Error streaming response with agent: {e}", exc_info=True)
-            yield self.streaming_handler.format_aisdk_error(str(e))
+            err = describe_turn_error(e, agent_name=self._agent_display_name(agent_id))
+            yield self.streaming_handler.format_aisdk_error(err.message, code=err.code)
+            self._persist_turn_error(chat_id, err)
             # PRD-142 W3-S6: chat primitive heartbeat — down on caught error.
             _emit_chat_primitive(
                 self.workspace_id, success=False, detail=str(e),
             )
+
+    def _agent_display_name(self, agent_id: Any) -> Optional[str]:
+        """The agent's name for a user-facing error line; None when unknown."""
+        try:
+            from core.models import Agent as _AgentModel
+
+            row = self.db.query(_AgentModel.name).filter(_AgentModel.id == int(agent_id)).first()
+            return row[0] if row else None
+        except Exception:  # noqa: BLE001 — a name is a courtesy
+            return None
+
+    def _persist_turn_error(self, chat_id: str, err: Any) -> None:
+        """PRD-239 S4: keep the failure in the conversation (an assistant note with
+        provenance) so it survives a reload and the detached-turn path. Fail-soft."""
+        try:
+            self.chat_service.save_message(
+                chat_id=chat_id,
+                role="assistant",
+                parts=[{"type": "text", "text": f"⚠️ {err.message}"}],
+                workspace_id=self.workspace_id,
+                source={"origin": "turn_error", "label": "Error", "code": err.code},
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[Chat] could not persist the turn error note", exc_info=True)
 
     async def stream_response(
         self,

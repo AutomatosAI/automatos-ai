@@ -159,7 +159,7 @@ class ModelRegistry:
         self.logger.info(f"Retrieved {len(result)} models (provider={provider}, status={status})")
         return result
     
-    def get_model(self, model_id: str) -> Optional[ModelInfo]:
+    def get_model(self, model_id: str, provider: Optional[str] = None) -> Optional[ModelInfo]:
         """
         Get specific model by ID.
         
@@ -169,9 +169,17 @@ class ModelRegistry:
         Returns:
             ModelInfo if found, None otherwise
         """
-        model = self.db.query(LLMModel).filter(
-            LLMModel.model_id == model_id
-        ).first()
+        # PRD-236 W1: a vendor id may exist once per serving provider; prefer
+        # the caller's route, then OpenRouter's row, then any row.
+        q = self.db.query(LLMModel).filter(LLMModel.model_id == model_id)
+        model = None
+        if provider:
+            from core.llm.providers import normalize_slug
+            route = normalize_slug(provider)
+            if route:
+                model = q.filter(LLMModel.serving_provider == route).first()
+        if model is None:
+            model = q.filter(LLMModel.serving_provider == "openrouter").first() or q.first()
         
         if model:
             self.logger.debug(f"Found model: {model_id}")

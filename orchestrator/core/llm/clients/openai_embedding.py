@@ -6,9 +6,11 @@ OpenAI embedding models provider (extends OpenAI client).
 """
 
 import logging
+import time
 from typing import List
 
 from config import config
+from .embedding_usage import record_embedding_usage
 from .base import BaseEmbeddingProvider, EmbeddingConfig
 
 try:
@@ -60,11 +62,13 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
                 text = text[:max_length]
                 logger.warning(f"Text truncated to {max_length} characters for embedding")
             
+            started = time.monotonic()
             response = await self.client.embeddings.create(
                 model=self.config.model,
                 input=text
             )
-            
+            record_embedding_usage("openai", self.config.model, response, [text], started)
+
             return response.data[0].embedding
             
         except Exception as e:

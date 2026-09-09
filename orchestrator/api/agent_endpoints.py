@@ -573,15 +573,29 @@ async def update_agent_model_config(
         model_id = model_config.get("model_id")
         if model_id:
             from api.llm_marketplace import _get_or_create_from_cache
-            model = _get_or_create_from_cache(db, model_id)
+            model = _get_or_create_from_cache(db, model_id, model_config.get("provider"))
             if not model:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid model_id: {model_id}"
                 )
-            # PRD-54: Always use the provider from the model registry
-            # The frontend may not know the correct provider for aggregated models
-            model_config["provider"] = model.provider
+            # PRD-239 S5: a route the provider no longer offers is refused with the
+            # reason — saving it would only fail at the first chat turn.
+            if getattr(model, "status", "active") == "deprecated":
+                from core.llm import providers as _registry
+                _spec = _registry.get_spec(model.serving_provider)
+                _route = _spec.label if _spec else (model.serving_provider or "the provider")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"{getattr(model, 'display_name', None) or model_id} is no longer offered by "
+                        f"{_route}. Pick another model."
+                    ),
+                )
+            # PRD-236 W1: the stored provider is the ROUTE that serves the row
+            # (openrouter / nvidia / openai …), never the vendor — the factory
+            # routes to it as tagged.
+            model_config["provider"] = model.serving_provider
 
             # PRD-223 W1: policy gate. The Auto agent row is the orchestrator
             # seat — quarantined/unapproved models are rejected at write time
@@ -593,6 +607,7 @@ async def update_agent_model_config(
             )
             _allowed, _reason = check_model_for_agent(
                 db, ctx.workspace_id, model_id, orchestrator_seat=_is_auto_seat,
+                provider=model.serving_provider,
             )
             if not _allowed:
                 raise HTTPException(

@@ -40,6 +40,13 @@ describe('ActivityTrail', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it('lists progress lines from a long-running tool after the calls', () => {
+    render(<ActivityTrail toolCalls={[]} formatLabel={label} progress={['Bob is working on #92 · 10 s', 'Bob is working on #92 · 20 s · last tool: Bash']} />)
+    const lines = screen.getAllByTestId('progress-line')
+    expect(lines).toHaveLength(2)
+    expect(lines[1]).toHaveTextContent('last tool: Bash')
+  })
+
   it('says when a cap ended the turn', () => {
     render(<LimitReachedNote limit={{ limit: 'max_tool_iterations', value: 10, message: 'I reached the maximum of 10 tool steps.' }} />)
     expect(screen.getByRole('status')).toHaveTextContent('maximum of 10 tool steps')

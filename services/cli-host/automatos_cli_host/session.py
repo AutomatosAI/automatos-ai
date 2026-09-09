@@ -34,6 +34,7 @@ import subprocess
 import termios
 import threading
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,7 +47,7 @@ from .config import HostConfig
 from .env import build_session_env, resolve_binary
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
-from .transcript import last_assistant_text, read_usage
+from .transcript import empty_usage, last_assistant_text, read_usage, usage_delta
 
 log = logging.getLogger("automatos.cli_host.session")
 
@@ -83,6 +84,9 @@ class SessionOutcome:
             "session_id": self.session_id,
             "exit_reason": self.exit_reason,
             "transcript_path": self.transcript_path,
+            # PRD-239: where the session REALLY ran (a --worktree for a git repo) —
+            # the directory `claude --resume` and the editor links must open.
+            "effective_cwd": self.effective_cwd,
         }
 
 
@@ -90,18 +94,31 @@ def _slug(text: str, limit: int = 40) -> str:
     return _SLUG_RE.sub("-", text).strip("-")[:limit] or "ticket"
 
 
+SESSION_RULES = (
+    "The ticket you are working is described in the file named in your first message; "
+    "read it fully before acting.\n"
+    "Rules of the session: work only inside the directory you were started in; "
+    "never push, publish or open pull requests — the manager integrates your work; "
+    "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
+    "reply with a concise summary of what changed, what you verified, and anything left open.\n"
+)
+
+
 def build_system_prompt(ticket: Dict[str, Any]) -> str:
-    """Stable per agent: no ids, no dates, no counters (prompt-cache invariant)."""
+    """Stable per agent: no ids, no dates, no counters (prompt-cache invariant).
+
+    PRD-239 S1: the backend renders the agent's soul — description, persona and
+    skills — as ``system_prompt`` on the ticket (stable per agent); it sits
+    between the introduction and the session rules. Without it the prompt is
+    exactly the name and the rules, as before.
+    """
     name = ticket.get("agent_name") or "an Automatos agent"
-    return (
-        f"You are {name}, working as a supervised Claude Code session managed by Automatos.\n"
-        "The ticket you are working is described in the file named in your first message; "
-        "read it fully before acting.\n"
-        "Rules of the session: work only inside the directory you were started in; "
-        "never push, publish or open pull requests — the manager integrates your work; "
-        "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
-        "reply with a concise summary of what changed, what you verified, and anything left open.\n"
-    )
+    intro = f"You are {name}, working as a supervised Claude Code session managed by Automatos.\n"
+    soul = ticket.get("system_prompt")
+    soul = soul.strip() if isinstance(soul, str) else ""
+    if soul:
+        return intro + "\n" + soul + "\n\n" + SESSION_RULES
+    return intro + SESSION_RULES
 
 
 def build_ticket_file(ticket: Dict[str, Any]) -> str:
@@ -158,6 +175,24 @@ def _is_git_repo(path: Path) -> bool:
     return (path / ".git").exists()
 
 
+def compact_event(event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The event the backend receives: the few facts the board needs, never the
+    whole hook payload. ``cwd`` (PRD-235 W2) is the session's effective working
+    directory — SessionStart carries it — so the ticket can deep-link the editor."""
+    compact = {
+        "event": event,
+        "at": time.time(),
+        "session_id": payload.get("session_id"),
+        "transcript_path": payload.get("transcript_path"),
+        "cwd": payload.get("cwd"),
+        "tool_name": payload.get("tool_name"),
+        "subject": _subject_of(payload),
+        "notification_type": payload.get("notification_type"),
+        "message": (payload.get("message") or "")[:500] or None,
+    }
+    return {k: v for k, v in compact.items() if v is not None}
+
+
 def _subject_of(payload: Dict[str, Any]) -> Optional[str]:
     """The one thing a tool call is about — a command, a path, a pattern — for the
     ticket's live log. Never the whole tool input."""
@@ -195,10 +230,15 @@ class Session:
         self.pgid: Optional[int] = None
         self.effective_cwd: Optional[Path] = None
         self.transcript_path: Optional[str] = None
+        self._usage_before: Optional[Dict[str, Any]] = None
         self.reported_session_id: Optional[str] = None
         self.last_assistant_message: Optional[str] = None
         self.files_touched: List[str] = []
         self.denials: List[Dict[str, Any]] = []
+        # PRD-235 W2 S3: permission questions the operator answers from the Canvas.
+        self._pending_asks: Dict[str, threading.Event] = {}
+        self._ask_answers: Dict[str, bool] = {}
+        self._ask_lock = threading.Lock()
         self.notifications: List[Dict[str, Any]] = []
         self.output_tail: deque = deque(maxlen=_OUTPUT_TAIL_BYTES)
         self.terminal_log: Optional[BoundedLog] = None
@@ -213,6 +253,12 @@ class Session:
             self.session_started.set()
             self.reported_session_id = payload.get("session_id") or self.reported_session_id
             self.transcript_path = payload.get("transcript_path") or self.transcript_path
+            # A resumed session's transcript already holds earlier turns; snapshot
+            # them now (before this turn's prompt lands) so the result reports
+            # only what THIS run used (2026-09-09 analytics).
+            if self.ticket.get("resume_session_id") and self.transcript_path and self._usage_before is None:
+                path = Path(self.transcript_path)
+                self._usage_before = read_usage(path) if path.exists() else empty_usage()
             cwd = payload.get("cwd")
             if cwd:
                 self.effective_cwd = Path(cwd)
@@ -258,9 +304,7 @@ class Session:
         else:
             decision = decide(tool, tool_input, self._policy)
         if decision.behavior == "ask":
-            # Approvals-inbox routing lands with S3; until the backend answers a
-            # hold, an 'ask' is an honest deny the ticket surfaces in review.
-            decision = Decision("deny", decision.reason + " (approval routing not yet available)")
+            decision = self._ask_operator(tool, tool_input, decision.reason)
         if decision.allow:
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
         self.denials.append({"tool": tool, "reason": decision.reason, "stage": "PreToolUse",
@@ -268,6 +312,42 @@ class Session:
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "permissionDecision": "deny",
                                        "permissionDecisionReason": decision.reason}}
+
+    def _ask_operator(self, tool: str, tool_input: Dict[str, Any], reason: str) -> Decision:
+        """PRD-235 W2 S3: hold this tool call while the operator answers a card on the
+        ticket's Canvas. The question travels with the next event flush; the answer
+        comes back on that same channel (``resolve_ask``). No answer within
+        ``ask_timeout`` seconds → deny, honestly worded."""
+        request_id = uuid.uuid4().hex
+        subject = _subject_of({"tool_input": tool_input})
+        done = threading.Event()
+        with self._ask_lock:
+            self._pending_asks[request_id] = done
+        self.events.put({
+            "event": "PermissionRequest", "at": time.time(), "request_id": request_id,
+            "tool_name": tool, "subject": subject, "reason": reason,
+            "session_id": self.reported_session_id or self.session_id,
+        })
+        timeout = float(getattr(self.cfg, "ask_timeout", 120.0) or 120.0)
+        answered = done.wait(timeout)
+        with self._ask_lock:
+            self._pending_asks.pop(request_id, None)
+            approved = self._ask_answers.pop(request_id, None)
+        if answered and approved:
+            return Decision("allow")
+        if answered:
+            return Decision("deny", f"{reason} — denied by the operator")
+        return Decision("deny", f"{reason} — no answer from the operator within {int(timeout)} s")
+
+    def resolve_ask(self, request_id: str, approved: bool) -> bool:
+        """The backend delivered the operator's answer for a pending question."""
+        with self._ask_lock:
+            ev = self._pending_asks.get(str(request_id))
+            if ev is None:
+                return False
+            self._ask_answers[str(request_id)] = bool(approved)
+        ev.set()
+        return True
 
     def _track_file(self, payload: Dict[str, Any]) -> None:
         if payload.get("tool_name") in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
@@ -277,17 +357,7 @@ class Session:
                 self.files_touched.append(str(path))
 
     def _emit(self, event: str, payload: Dict[str, Any]) -> None:
-        compact = {
-            "event": event,
-            "at": time.time(),
-            "session_id": payload.get("session_id"),
-            "transcript_path": payload.get("transcript_path"),
-            "tool_name": payload.get("tool_name"),
-            "subject": _subject_of(payload),
-            "notification_type": payload.get("notification_type"),
-            "message": (payload.get("message") or "")[:500] or None,
-        }
-        self.events.put({k: v for k, v in compact.items() if v is not None})
+        self.events.put(compact_event(event, payload))
 
     # ── the run ─────────────────────────────────────────────────────────────
     def run(self) -> SessionOutcome:
@@ -340,7 +410,11 @@ class Session:
         )
 
         # 4. spawn
-        worktree = f"automatos-{_slug(str(self.task_id))}" if (self.cfg.use_worktrees and _is_git_repo(cwd)) else None
+        # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
+        # (the checkout stays untouched); a workspace of many repos, whose own
+        # git tracks next to nothing, must not (the worktree would be empty).
+        wants_worktree = self.ticket.get("worktree", True) is not False
+        worktree = f"automatos-{_slug(str(self.task_id))}" if (self.cfg.use_worktrees and wants_worktree and _is_git_repo(cwd)) else None
         args = build_args(
             claude,
             session_id=self.session_id,
@@ -454,6 +528,8 @@ class Session:
     def _collect(self, exit_reason: str, cwd: Path) -> SessionOutcome:
         transcript = Path(self.transcript_path) if self.transcript_path else None
         usage = read_usage(transcript) if transcript and transcript.exists() else {}
+        if usage and self._usage_before is not None:
+            usage = usage_delta(usage, self._usage_before)
         text = self.last_assistant_message or (last_assistant_text(transcript) if transcript and transcript.exists() else None) or ""
         if exit_reason == "completed":
             status = "success"
@@ -507,4 +583,7 @@ def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:
         "claude": {"path": claude, "version": version, "onboarded": has_completed_onboarding()} if claude else None,
         "providers": ["claude"] if claude else [],
         "worktrees": cfg.use_worktrees,
+        # PRD-239 S6: the directories this host may run sessions in — the backend
+        # checks an agent's working_directory against them before it is saved.
+        "allow_dirs": [str(p) for p in (cfg.allow_dirs or [])],
     }

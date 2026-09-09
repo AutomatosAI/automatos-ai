@@ -18,7 +18,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,7 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.workspace_admin import require_workspace_admin
 from core.database.database import get_db
-from core.models.cli_hosts import CliHost
+from core.models.cli_hosts import CliHost, CliHostStatus
 from services import cli_host_service as svc
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,28 @@ class EventsRequest(BaseModel):
     events: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class TerminalRequest(BaseModel):
+    """PRD-239 S7: where the Canvas terminal should open — a ticket's real
+    directory, or an agent's working directory; neither = the host's default."""
+    task_id: Optional[int] = None
+    cwd: Optional[str] = Field(None, max_length=1024)
+    # PRD-239: a plain shell in the ticket's folder even when the ticket has a
+    # session to launch — the Runtime Canvas's extra terminal tabs.
+    shell: bool = False
+
+
+class SessionRequest(BaseModel):
+    """PRD-239 S7 v2: open (or resume) the Runtime Canvas session with a session
+    agent in a conversation — one ticket per chat and agent."""
+    agent_id: int
+    chat_id: str = Field(..., min_length=1, max_length=128)
+
+
+class SessionModeSettingsRequest(BaseModel):
+    """PRD-239 S6c: Settings → Session mode — where tickets run when their agent names no folder."""
+    default_folder: str = Field(..., pattern="^(projects|sessions)$")
+
+
 class ResultRequest(BaseModel):
     attempt: Optional[int] = None
     status: str = Field("success", pattern="^(success|error|cancelled)$")
@@ -117,6 +139,126 @@ async def list_cli_hosts(
     db: Session = Depends(get_db),
 ):
     return {"hosts": svc.list_hosts(db, ctx.workspace_id)}
+
+
+@router.get("/health")
+async def cli_host_health(
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-235 W3: is a Claude Code host online for this workspace, since when
+    was one last seen, and how many CLI tickets are waiting. The board banner
+    reads it; the ticket line says the same thing per ticket."""
+    return svc.host_health(db, ctx.workspace_id)
+
+
+@router.get("/workspace-check")
+async def workspace_check(
+    path: str = Query(..., min_length=1, max_length=1024, description="An agent's working_directory as typed"),
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S6: what a cli agent's working directory would mean before it is
+    saved — valid, browsable in the Canvas (as which root), and inside the
+    paired host's allowed directories. Read-only; nothing is written."""
+    return svc.workspace_check(db, ctx.workspace_id, path)
+
+
+@router.post("/{host_id}/terminal")
+async def open_terminal(
+    host_id: UUID,
+    body: TerminalRequest,
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S7: mint a single-use grant for the operator's own shell on the
+    paired host (served on the host's loopback for the browser on that machine).
+    Nothing runs here; the host opens the shell when the browser connects."""
+    host = (
+        db.query(CliHost)
+        .filter(
+            CliHost.id == host_id,
+            CliHost.workspace_id == ctx.workspace_id,
+            CliHost.status == CliHostStatus.PAIRED.value,
+        )
+        .first()
+    )
+    if host is None:
+        raise HTTPException(status_code=404, detail="no paired CLI host with that id in this workspace")
+    try:
+        return svc.mint_terminal_grant(db, host, cwd=body.cwd, task_id=body.task_id, shell=body.shell)
+    except LookupError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.get("/settings")
+async def session_mode_settings(
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S6c: the session-mode settings and the projects-folder state the
+    Settings tab explains (the folder itself is a Docker mount from .env)."""
+    return svc.session_mode_settings(db, ctx.workspace_id)
+
+
+@router.put("/settings")
+async def save_session_mode_settings(
+    body: SessionModeSettingsRequest,
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    try:
+        return svc.save_session_mode_settings(db, ctx.workspace_id, default_folder=body.default_folder)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/sessions")
+async def open_session(
+    body: SessionRequest,
+    ctx: RequestContext = Depends(_require_operator),
+    db: Session = Depends(get_db),
+):
+    """PRD-239 S7 v2: the Runtime Canvas. Picking a session agent in a chat (or
+    reopening it) gets ONE ticket per chat + agent whose Claude Code session the
+    Canvas terminal starts or resumes on the operator's paired host. Nothing is
+    dispatched: the human drives the session."""
+    from core.models.core import Agent
+    from services.board_consent import actor_from_user_id
+    from services.cli_ticket_lane import is_cli_agent, open_session_ticket
+
+    agent = (
+        db.query(Agent)
+        .filter(Agent.id == body.agent_id, Agent.workspace_id == ctx.workspace_id)
+        .first()
+    )
+    if agent is None:
+        raise HTTPException(status_code=404, detail="no agent with that id in this workspace")
+    if not is_cli_agent(db, agent.id):
+        raise HTTPException(status_code=422, detail=f"{agent.name} is not a session agent (runtime: cli)")
+    host = svc.newest_online_host(db, ctx.workspace_id)
+    if host is None:
+        raise HTTPException(status_code=409, detail="no CLI host is online — start it with `make cli-host` and try again")
+    task, created = open_session_ticket(
+        db, workspace_id=ctx.workspace_id, agent=agent, chat_id=body.chat_id, host=host,
+        actor=actor_from_user_id(getattr(ctx.user, "id", None)),
+    )
+    ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
+    return {
+        "task_id": task.id,
+        "host_id": str(host.id),
+        "created": created,
+        "status": task.status,
+        "agent_name": agent.name,
+        "cwd": ref.get("cwd"),
+        "explorer_root": ref.get("explorer_root"),
+    }
 
 
 @router.post("/pairing-codes")
@@ -160,7 +302,9 @@ async def heartbeat(
     db: Session = Depends(get_db),
 ):
     running = [r.model_dump() if hasattr(r, "model_dump") else r.dict() for r in body.running]
-    return svc.record_heartbeat(db, host, body.capabilities, running)
+    out = svc.record_heartbeat(db, host, body.capabilities, running)
+    out.update(svc.contract_fields())  # PRD-235 W3: the host restarts itself when this moves
+    return out
 
 
 @router.post("/{host_id}/claim")

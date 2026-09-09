@@ -11,6 +11,7 @@ Graceful degradation: if no API key configured, returns documents unchanged.
 import asyncio
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -132,6 +133,7 @@ class RerankManager:
         # Truncate docs to Cohere's per-doc limit
         truncated_docs = [doc[:COHERE_DOC_CHAR_LIMIT] for doc in documents]
 
+        started = time.monotonic()
         try:
             client = self._get_client()
             response = await client.post(
@@ -149,6 +151,7 @@ class RerankManager:
             )
             response.raise_for_status()
             data = response.json()
+            self._record_usage(data, len(documents), started)
 
             results = [
                 RerankResult(
@@ -167,6 +170,7 @@ class RerankManager:
 
         except httpx.HTTPStatusError as e:
             logger.warning(f"Cohere rerank API error: {e.response.status_code} {e.response.text[:200]}")
+            self._record_usage(None, len(documents), started, error=f"HTTP {e.response.status_code}")
             return [
                 RerankResult(index=i, relevance_score=0.0)
                 for i in range(min(top_n, len(documents)))
@@ -177,6 +181,30 @@ class RerankManager:
                 RerankResult(index=i, relevance_score=0.0)
                 for i in range(min(top_n, len(documents)))
             ]
+
+    def _record_usage(self, data: Optional[dict], document_count: int, started: float, error: Optional[str] = None) -> None:
+        """Book the call in ``llm_usage`` (2026-09-09 analytics). Cohere reports
+        ``meta.billed_units.search_units``; one query over ≤100 documents is one
+        unit, so a missing meta still books the units the request implies."""
+        try:
+            from core.llm.usage_tracker import STATUS_ERROR, STATUS_SUCCESS, UsageTracker
+
+            units = 0
+            if isinstance(data, dict):
+                units = int(((data.get("meta") or {}).get("billed_units") or {}).get("search_units") or 0)
+            if units <= 0 and error is None:
+                units = max(1, -(-document_count // 100))
+            UsageTracker.track_rerank(
+                provider="cohere",
+                model_id=self._model,
+                search_units=units,
+                usd_per_1k_units=float(config.COHERE_RERANK_USD_PER_1K_SEARCHES),
+                latency_ms=int((time.monotonic() - started) * 1000),
+                status=STATUS_ERROR if error else STATUS_SUCCESS,
+                error_message=error,
+            )
+        except Exception as exc:  # noqa: BLE001 — never fail a rerank over its receipt
+            logger.debug("rerank usage not recorded: %s", exc)
 
     def reload_config(self):
         """Force reload configuration (e.g. after settings change)."""

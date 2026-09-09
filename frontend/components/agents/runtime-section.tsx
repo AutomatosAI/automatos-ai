@@ -13,6 +13,7 @@
  * bad alias is refused at save, not discovered at claim.
  */
 
+import { useEffect, useState } from 'react'
 import { TerminalSquare } from 'lucide-react'
 import { isLocal } from '@/lib/auth-edition'
 import { Input } from '@/components/ui/input'
@@ -26,6 +27,8 @@ export interface RuntimeFields {
   cli_provider: string
   cli_model: string
   cli_working_directory: string
+  /** PRD-239: tickets run in a git worktree of the workspace folder (a single repo), or in the folder itself (a workspace of many repos) */
+  cli_worktree: boolean
 }
 
 const DEFAULT_CLI_PROVIDER = 'claude'
@@ -35,6 +38,7 @@ export const DEFAULT_RUNTIME_FIELDS: RuntimeFields = {
   cli_provider: DEFAULT_CLI_PROVIDER,
   cli_model: '',
   cli_working_directory: '',
+  cli_worktree: true,
 }
 
 /** The aliases Claude Code itself resolves (`claude --model`); a full `claude-…` id also works. */
@@ -52,6 +56,7 @@ export function normalizeRuntimeFields(source: object | null | undefined): Runti
     cli_provider: str(src.cli_provider) || DEFAULT_CLI_PROVIDER,
     cli_model: str(src.cli_model),
     cli_working_directory: str(src.cli_working_directory),
+    cli_worktree: src.cli_worktree !== false,
   }
 }
 
@@ -63,6 +68,7 @@ export function runtimeFieldsFromConfiguration(configuration: object | null | un
     cli_provider: cfg.provider,
     cli_model: cfg.model,
     cli_working_directory: cfg.working_directory,
+    cli_worktree: cfg.worktree_per_ticket,
   })
 }
 
@@ -78,7 +84,99 @@ export function runtimeConfiguration(fields: RuntimeFields): Record<string, unkn
     provider: fields.cli_provider || DEFAULT_CLI_PROVIDER,
     model: fields.cli_model.trim() || null,
     working_directory: fields.cli_working_directory.trim() || null,
+    worktree_per_ticket: fields.cli_worktree,
   }
+}
+
+/** PRD-239 S6: what the backend says a working directory would mean (`GET /api/v1/cli-hosts/workspace-check`). */
+export interface WorkspaceCheck {
+  path: string
+  valid: boolean
+  errors: string[]
+  explorer_root: string | null
+  browsable: boolean
+  /** null = no paired host has announced its allowed directories yet */
+  allowed: boolean | null
+  allowed_roots: string[]
+  projects_dir: string | null
+}
+
+export interface WorkspaceVerdict {
+  tone: 'ok' | 'warn' | 'error'
+  text: string
+  /** The Canvas root to open when the folder is browsable. */
+  canvasRoot: string | null
+}
+
+/** One line the operator can act on, from the check result. Pure. */
+export function describeWorkspaceCheck(check: WorkspaceCheck): WorkspaceVerdict {
+  if (!check.valid) {
+    return { tone: 'error', text: check.errors[0] || 'This path cannot be used.', canvasRoot: null }
+  }
+  if (check.allowed === false) {
+    const roots = check.allowed_roots.join(', ')
+    return {
+      tone: 'error',
+      text: `Your CLI host may only run sessions inside: ${roots}. To allow this folder, set LOCAL_PROJECTS_DIR in the stack's .env to it (or a parent of it) and run \`make cli-host-install\` again; the Canvas explorer then shows it as projects/… too.`,
+      canvasRoot: null,
+    }
+  }
+  if (check.browsable && check.explorer_root) {
+    const where = check.allowed === null ? ' (no host online to confirm it is allowed)' : ''
+    return { tone: 'ok', text: `Browsable in the Canvas as ${check.explorer_root}${where}.`, canvasRoot: check.explorer_root }
+  }
+  const why = check.projects_dir
+    ? `outside LOCAL_PROJECTS_DIR (${check.projects_dir}) and the workspace folder`
+    : 'LOCAL_PROJECTS_DIR is not set on this instance'
+  return {
+    tone: 'warn',
+    text: `Sessions can run here, but the folder is not browsable from the platform: ${why}. Deliverables stay references only.`,
+    canvasRoot: null,
+  }
+}
+
+const CHECK_DEBOUNCE_MS = 400
+
+/** Ask the backend what a typed working directory means; debounced, never throws. */
+function useWorkspaceCheck(path: string, enabled: boolean): { check: WorkspaceCheck | null; loading: boolean } {
+  const [check, setCheck] = useState<WorkspaceCheck | null>(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    const trimmed = path.trim()
+    if (!enabled || !trimmed) {
+      setCheck(null)
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const { apiClient } = await import('@/lib/api-client')
+          const result = await apiClient.request<WorkspaceCheck>(
+            `/api/v1/cli-hosts/workspace-check?path=${encodeURIComponent(trimmed)}`,
+          )
+          if (!cancelled) setCheck(result)
+        } catch {
+          if (!cancelled) setCheck(null)
+        } finally {
+          if (!cancelled) setLoading(false)
+        }
+      })()
+    }, CHECK_DEBOUNCE_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [path, enabled])
+  return { check, loading }
+}
+
+const VERDICT_CLASS: Record<WorkspaceVerdict['tone'], string> = {
+  ok: 'text-[hsl(var(--success))]',
+  warn: 'text-[hsl(var(--warning))]',
+  error: 'text-[hsl(var(--destructive))]',
 }
 
 interface RuntimeSectionProps {
@@ -87,6 +185,9 @@ interface RuntimeSectionProps {
 }
 
 export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
+  // PRD-239 S6: the verdict on the typed working directory, live.
+  const { check, loading } = useWorkspaceCheck(value.cli_working_directory, isLocal && value.runtime === 'cli')
+  const verdict = check ? describeWorkspaceCheck(check) : null
   if (!isLocal) return null
   return (
     <div className="space-y-4 rounded-lg border border-border/40 p-4" data-testid="runtime-section">
@@ -141,16 +242,53 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
             </div>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="cli-working-directory" className="text-xs">Working directory (absolute path, inside a directory the host registered)</Label>
+            <Label htmlFor="cli-working-directory" className="text-xs">Workspace folder (absolute path on your machine, inside a folder your CLI host allows)</Label>
             <Input
               id="cli-working-directory"
-              placeholder="/Users/you/Development/your-repo"
+              placeholder="/Users/you/Development/your-workspace"
               value={value.cli_working_directory}
               onChange={(e) => onChange('cli_working_directory', e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Blank = the host&apos;s default <span className="font-mono">./workspaces</span>. Git repositories get their own worktree per session; sessions never push.
+              Claude Code starts here and loads this folder&apos;s CLAUDE.md files; the Canvas explorer opens here. One repo or a whole workspace of repos — your choice. Blank = the host&apos;s default <span className="font-mono">./workspaces</span>.
             </p>
+            <label className="flex items-start gap-2 text-xs text-muted-foreground" data-testid="cli-worktree">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={value.cli_worktree}
+                onChange={(e) => onChange('cli_worktree', e.target.checked)}
+              />
+              <span>
+                Run each ticket in its own git worktree of this folder (your checkout stays untouched; sessions never push). Turn this off for a workspace of many repos — its own git tracks next to nothing, so a worktree would be empty. Your own sessions from the agent menu always run in the folder itself.
+              </span>
+            </label>
+            {/* PRD-239 S6: what this folder means — valid, allowed by the host, browsable in the Canvas */}
+            {value.cli_working_directory.trim() && (
+              <p className="text-xs" data-testid="workspace-check">
+                {loading && !verdict ? (
+                  <span className="text-muted-foreground">Checking…</span>
+                ) : verdict ? (
+                  <span className={VERDICT_CLASS[verdict.tone]}>
+                    {verdict.text}
+                    {verdict.canvasRoot && (
+                      <>
+                        {' '}
+                        <a
+                          href={`/chat?repo=${encodeURIComponent(verdict.canvasRoot)}`}
+                          className="underline underline-offset-2"
+                          data-testid="workspace-open-canvas"
+                        >
+                          Open in the Canvas
+                        </a>
+                      </>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Could not check this folder right now (is session mode on?).</span>
+                )}
+              </p>
+            )}
           </div>
         </div>
       )}

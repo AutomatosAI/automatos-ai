@@ -1945,8 +1945,10 @@ class ApiClient {
 
   // Analytics methods that return null if not implemented
   async getAnalyticsOverview() {
+    // /api/documents/analytics — total_documents, total_storage_mb, status and
+    // type distributions (the old '/overview' path never existed: 404 on every load)
     try {
-      return await this.request('/api/documents/analytics/overview')
+      return await this.request('/api/documents/analytics')
     } catch {
       return null
     }

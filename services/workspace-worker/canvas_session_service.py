@@ -452,20 +452,20 @@ class CanvasSessionManager:
         }
 
     async def get_status(self, workspace_id: str) -> Dict[str, Any]:
-        """Report the live session, or the persisted volume state if any."""
+        """Report the live session, or the persisted volume state if any, and
+        whether an SDK session could start at all (``sdk_available`` — PRD-239:
+        the Canvas hides the "Auto session" tab when this worker holds no model
+        credential instead of failing on Start). "No session yet" is a normal
+        answer (``session`` null), not an error."""
+        sdk_available = bool(model_auth_env()) or self._factory is not _default_sdk_client_factory
         live = self._live.get(workspace_id)
         if live is not None:
-            return {"success": True, "live": True, "session": live.state.to_dict()}
-
+            return {"success": True, "live": True, "session": live.state.to_dict(), "sdk_available": sdk_available}
         root = (Path(self.volume_path) / workspace_id).resolve()
         state = self._load_state(root)
         if state is None:
-            return {
-                "success": False,
-                "not_found": True,
-                "error": f"No canvas session for workspace {workspace_id}",
-            }
-        return {"success": True, "live": False, "session": state.to_dict()}
+            return {"success": True, "live": False, "session": None, "not_found": True, "sdk_available": sdk_available}
+        return {"success": True, "live": False, "session": state.to_dict(), "sdk_available": sdk_available}
 
     async def stop_session(self, workspace_id: str) -> Dict[str, Any]:
         """Stop the live session; or mark orphaned volume state stopped."""

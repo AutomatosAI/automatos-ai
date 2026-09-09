@@ -50,9 +50,12 @@ internal testing and evaluation, not production, and no personal, financial or
 health data (NVIDIA API Trial Terms §1.2, §1.4, §4.3); the free tier allows about
 40 requests per minute per key. The key is your own agreement with NVIDIA —
 Automatos only routes to it. A model run on NVIDIA is recorded at zero cost and
-is never silently rerouted to a paid provider when the limit is hit. Pick the
-provider in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*,
-model e.g. `moonshotai/kimi-k3`. (PRD-236)
+is never silently rerouted to a paid provider when the limit is hit. In
+**Marketplace → LLMs** open the *NVIDIA* tab, press *Sync NVIDIA* once, and add
+the models you want — "Kimi K3 · NVIDIA" is a different route from
+"Kimi K3 · OpenRouter" and installs with its own (zero) price. Then pick the
+route in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*, model
+*Kimi K3*. (PRD-236)
 
 ## 2. Start the platform
 
@@ -94,22 +97,74 @@ finished and 200 once the instance is usable.
   Postgres (`S3_VECTORS_ENABLED=false`) — no AWS needed.
 - **MinIO object storage.** An S3-compatible store (ports 9000 / 9001) holds
   generated outputs so nothing is lost between runs.
+- **Every provider, one router.** Settings → API Keys lists every registered
+  provider (OpenAI, Anthropic, Google, OpenRouter, NVIDIA, DeepSeek, Azure
+  OpenAI, AWS Bedrock, Grok / xAI, Cohere, HuggingFace) and validates a key on
+  save. Marketplace → LLMs shows one card per *route* — the same model served
+  by NVIDIA (free) and by OpenRouter (paid) is two cards with two prices — and
+  an installed model is bound to the route you picked.
+- **Cost analytics that tag everything.** Analytics → LLM & Costs records every
+  call with the provider that served it and how it bills: paid API, free
+  route, or Claude Code subscription; cost by provider, by lane (chat, board
+  tickets, missions, heartbeats, retrieval), by agent and by route, with
+  cache reads and failed calls.
 - **The core stack:** Postgres (5432), Redis (6379), backend API (8000),
   frontend (3000), MinIO (9000/9001) and the **workspace worker** — the Code
   Canvas runtime that lets agents act on files on *your* machine. It keeps
   those files in `./workspaces` next to `docker-compose.yml`
   (`AUTOMATOS_WORKSPACE_DIR` in `.env` points it elsewhere); every tool call
   is confined to that directory and mutations still need your approval.
-  Canvas sessions need `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in
-  `.env` (the SDK subprocess reads env only, not Settings → API Keys). On a
-  Linux host the files there end up owned by uid 1000, the worker's user.
+  The Canvas's *Auto session* engine (a headless Claude Agent SDK subprocess,
+  billed to an API key) needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
+  in `.env` — it reads env only, not Settings → API Keys. The **Runtime
+  Canvas** for session agents (below) needs no key at all: it is your own
+  Claude Code, launched by the host on your machine. On a Linux host the files
+  under `./workspaces` end up owned by uid 1000, the worker's user.
   `docker compose --profile all up` adds Gotenberg document rendering (3001)
   and Adminer (8080).
 
+## Optional: your own Claude Code as an agent (session mode)
+
+Session mode lets an agent's tickets run as **your own Claude Code sessions on
+your machine**, under your own Claude login — no API key, and inside
+Anthropic's terms (the host runs your unmodified `claude`, never touches a
+token, never uses `-p`). Auto assigns the ticket, the board tracks it, the
+session's files become Deliverables, and you can open any session in the
+Canvas and type alongside it.
+
+1. On this machine, run `claude` once and log in — that login is what every
+   session uses.
+2. In `.env` set `CLI_RUNTIME_ENABLED=true` and
+   `LOCAL_PROJECTS_DIR=/path/to/your/projects` (one parent folder for the
+   repositories your agents may work in; `LOCAL_PROJECTS_MOUNT=rw` lets the
+   Canvas editor save into it), then `make up`.
+3. **Settings → Session mode → Get a pairing code**, then from the repository
+   root run the command it shows:
+
+   ```bash
+   make cli-host PAIR=XXXX-XXXX      # pairs and serves; Ctrl-C after "paired"
+   make cli-host-install             # installs the host as a login service
+   ```
+
+   The host shows as *connected* on that page and restarts itself whenever
+   the backend's contract changes.
+4. Give an agent the runtime **Claude Code session** (Agent → Model →
+   Runtime; pick its workspace folder inside your projects folder) and
+   assign it a ticket — or pick it in the chat to open the Runtime Canvas:
+   the explorer on its folder and a terminal with its Claude Code session
+   already running.
+
+Tokens per session are recorded on the ticket and in Analytics as
+*Claude Code · Subscription* at $0 — your plan pays, there is no dollar
+figure to invent. The full reference is the
+[self-hosting guide](docs/getting-started/self-hosting.md#session-mode--your-own-claude-code-sessions-managed-prd-234).
+
 ## What does *not* work out of the box
 
-- **AI features need an LLM key** (above) — without one, agents and chat have no
-  model to call.
+- **AI features need a model key** (above) — without one, agents and chat have
+  no model to call. A free NVIDIA key covers chat and agents; document search
+  needs an embedding provider too (an OpenAI or OpenRouter key, or the local
+  HuggingFace provider under Settings → System Settings → Embeddings).
 - **Composio-powered integrations** (Gmail, Slack, GitHub, Shopify and the rest
   of the third-party app catalogue) need your own Composio key in `.env`
   (`COMPOSIO_API_KEY=…`, free tier at app.composio.dev; env-only, there is no

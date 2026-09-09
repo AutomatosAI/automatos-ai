@@ -20,6 +20,25 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _usage_dict(usage: Any) -> Dict[str, int]:
+    """Anthropic's accounting: ``input_tokens`` EXCLUDES the cached parts. The
+    platform's ``prompt_tokens`` is the FULL prompt (fresh + cache read + cache
+    write) with the cache parts reported beside it — the tracker re-prices those
+    at the vendor's cache rates (2026-09-09)."""
+    fresh = int(getattr(usage, "input_tokens", 0) or 0)
+    output = int(getattr(usage, "output_tokens", 0) or 0)
+    cache_read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+    cache_write = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+    prompt = fresh + cache_read + cache_write
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": output,
+        "total_tokens": prompt + output,
+        "cache_read_tokens": cache_read,
+        "cache_write_tokens": cache_write,
+    }
+
+
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic Claude provider implementation"""
     
@@ -241,11 +260,7 @@ class AnthropicProvider(BaseLLMProvider):
             
             return LLMResponse(
                 content=content or "",
-                usage={
-                    "prompt_tokens": response.usage.input_tokens,
-                    "completion_tokens": response.usage.output_tokens,
-                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens
-                },
+                usage=_usage_dict(response.usage),
                 model=response.model,
                 provider="anthropic",
                 tool_calls=tool_calls,
@@ -276,11 +291,7 @@ class AnthropicProvider(BaseLLMProvider):
             
             return LLMResponse(
                 content=response.content[0].text,
-                usage={
-                    "prompt_tokens": response.usage.input_tokens,
-                    "completion_tokens": response.usage.output_tokens,
-                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens
-                },
+                usage=_usage_dict(response.usage),
                 model=response.model,
                 provider="anthropic"
             )

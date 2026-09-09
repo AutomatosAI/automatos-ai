@@ -62,6 +62,7 @@ class ProviderSpec:
     price_multiplier: float = 1.0          # W0 interim pricing (W1 prices per catalogue row)
     validation: str = VALIDATION_NONE
     attribution_headers: bool = False      # send HTTP-Referer / X-Title (OpenRouter)
+    reports_cost: bool = False             # returns the credits charged per call in ``usage.cost``
     openrouter_prefix: Optional[str] = None  # vendor → its OpenRouter id prefix
     aliases: Tuple[str, ...] = ()
     embeddings: bool = False
@@ -81,8 +82,10 @@ _NVIDIA_TERMS = (
     "§1.2, §1.4, §4.3). Your key is your own agreement with NVIDIA."
 )
 _NVIDIA_RATE_LIMIT = (
-    "NVIDIA's free tier allows about 40 requests per minute per key. Above that "
-    "the call fails; it is never rerouted to a paid provider."
+    "NVIDIA's free tier allows about 40 requests per minute per key, and a popular "
+    "model can be at capacity (429 within a second even on your first call). The "
+    "call fails; it is never rerouted to a paid provider. Wait a minute or pick "
+    "another NVIDIA route — the smaller Nemotron models usually answer at once."
 )
 
 _SPECS: Tuple[ProviderSpec, ...] = (
@@ -108,7 +111,7 @@ _SPECS: Tuple[ProviderSpec, ...] = (
         slug="openrouter", label="OpenRouter", kind=KIND_AGGREGATOR, adapter=ADAPTER_OPENAI_COMPATIBLE,
         enum_value="openrouter", env_key="OPENROUTER_API_KEY", base_url_key="OPENROUTER_BASE_URL",
         hosts_vendor_models=True, validation=VALIDATION_MODELS_LIST, attribution_headers=True,
-        embeddings=True, key_placeholder="sk-or-…", docs_url="https://openrouter.ai/keys",
+        reports_cost=True, embeddings=True, key_placeholder="sk-or-…", docs_url="https://openrouter.ai/keys",
     ),
     ProviderSpec(
         slug="nvidia", label="NVIDIA", kind=KIND_HOSTED_OPEN, adapter=ADAPTER_OPENAI_COMPATIBLE,
@@ -292,6 +295,36 @@ def to_public_dict(spec: ProviderSpec, edition: Optional[str] = None) -> Dict[st
         "docs_url": spec.docs_url,
         "terms_note": spec.terms_note,
         "rate_limit_note": spec.rate_limit_note,
+    }
+
+
+BILLING_METERED = "metered"          # a paid API route (platform key or BYOK)
+BILLING_FREE = "free"                # the provider does not bill for calls (NVIDIA trial)
+BILLING_SUBSCRIPTION = "subscription"  # the user's own CLI plan (Claude Code, Codex)
+BILLING_UNKNOWN = "unknown"
+
+
+def describe_usage_provider(provider: Optional[str]) -> Dict[str, object]:
+    """How a ``llm_usage.provider`` value reads on the analytics page.
+
+    Covers the registry (API providers) AND the session runtimes
+    (``claude_code`` / ``codex``), which are not API providers and never carry
+    a key. ``billing`` is what the calls cost the operator: metered, free or
+    subscription. Unknown slugs keep their name so an old row is never hidden.
+    """
+    from core.cli_runtime import BILLING_SUBSCRIPTION as _SUB, USAGE_PROVIDER_LABELS
+
+    raw = str(provider or "").strip().lower()
+    if raw in USAGE_PROVIDER_LABELS:
+        return {"slug": raw, "label": USAGE_PROVIDER_LABELS[raw], "kind": "runtime", "billing": _SUB}
+    spec = get_spec(raw)
+    if spec is None:
+        return {"slug": raw or "unknown", "label": raw or "unknown", "kind": "unknown", "billing": BILLING_UNKNOWN}
+    return {
+        "slug": spec.slug,
+        "label": spec.label,
+        "kind": spec.kind,
+        "billing": BILLING_FREE if spec.free else BILLING_METERED,
     }
 
 

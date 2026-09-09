@@ -7,7 +7,6 @@ import {
   Clock,
   CalendarDays,
   Calendar,
-  Settings,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -38,31 +37,8 @@ export function AnalyticsOpenRouterCredits() {
 
   const isLoading = creditsLoading || keyInfoLoading
 
-  // No OpenRouter key configured
-  if (!isLoading && credits === null) {
-    return (
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-[hsl(var(--agent))]" />
-            OpenRouter Credits
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-8">
-            <CreditCard className="w-10 h-10 mx-auto mb-3 opacity-50 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground mb-3">
-              No OpenRouter API key configured
-            </p>
-            <a href="/settings" className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-              <Settings className="w-4 h-4" />
-              Configure in Settings
-            </a>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
+  // No OpenRouter key configured — the card has nothing to say (keys live in Settings)
+  if (!isLoading && credits === null) return null
 
   if (isLoading) {
     return (
@@ -113,7 +89,8 @@ export function AnalyticsOpenRouterCredits() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Credits Balance */}
+        {/* Credits Balance — a key with no prepaid credits reports zeros; then only the usage below is meaningful */}
+        {totalCredits > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
@@ -142,9 +119,12 @@ export function AnalyticsOpenRouterCredits() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Usage Breakdown */}
+        {/* Usage Breakdown — what OpenRouter itself reports for this key */}
         {keyInfo && (
+          <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">OpenRouter reports for this key (its own accounting)</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="p-3 rounded-lg bg-secondary/20">
               <div className="flex items-center gap-2 mb-1">
@@ -167,6 +147,7 @@ export function AnalyticsOpenRouterCredits() {
               </div>
               <p className="text-sm font-medium">{formatCurrency(keyInfo.usage_monthly)}</p>
             </div>
+          </div>
           </div>
         )}
 

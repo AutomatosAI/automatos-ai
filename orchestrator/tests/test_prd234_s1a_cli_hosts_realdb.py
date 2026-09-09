@@ -72,6 +72,9 @@ def seeded(engine, new_session):
     s.close()
     yield ws_id, api_agent, cli_agent
     s = new_session.sweep()
+    # 2026-09-09: a session result books the turn's tokens in llm_usage (analytics)
+    # — the rows reference the workspace, so they go before it does.
+    s.execute(text("DELETE FROM llm_usage WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})
     s.execute(text("DELETE FROM board_tasks WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})
     s.execute(text("DELETE FROM cli_hosts WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})
     s.execute(text("DELETE FROM agents WHERE workspace_id = CAST(:id AS uuid)"), {"id": ws_id})

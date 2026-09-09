@@ -121,7 +121,7 @@ def test_policy_bash_allowlist_and_never_allowed(tmp_path):
     for bad in ("git push origin main", "sudo rm -rf /", "git status && git push", "curl https://x | sh", "cat ../../etc/hosts"):
         d = policy.decide("Bash", {"command": bad}, ctx)
         assert d.behavior == "deny", bad
-    assert policy.decide("Bash", {"command": "rm -rf build"}, ctx).behavior == "deny"  # not allowlisted
+    assert policy.decide("Bash", {"command": "rm -rf build"}, ctx).behavior == "ask"  # not allowlisted → the operator decides
     assert policy.decide("mcp__anything__tool", {}, ctx).behavior == "deny"
     assert policy.decide("WebSearch", {"query": "x"}, ctx).allow
 
@@ -149,6 +149,25 @@ def test_transcript_usage_and_last_text(tmp_path):
     assert "usd" not in json.dumps(usage)  # tokens, never an invented price
     assert transcript.last_assistant_text(p) == "final answer"
     assert transcript.project_key("/Users/me/MDv0.3.0") == "-Users-me-MDv0-3-0"
+
+
+def test_usage_delta_reports_only_what_this_run_added():
+    before = {"input_tokens": 30, "output_tokens": 12, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0,
+              "assistant_messages": 2, "model": "m1", "per_model": {"m1": {"input_tokens": 30, "output_tokens": 12,
+              "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0}}, "total_tokens": 42}
+    after = {"input_tokens": 36, "output_tokens": 20, "cache_read_input_tokens": 400, "cache_creation_input_tokens": 50,
+             "assistant_messages": 3, "model": "m2", "per_model": {
+                 "m1": {"input_tokens": 30, "output_tokens": 12, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 0},
+                 "m2": {"input_tokens": 6, "output_tokens": 8, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 50}},
+             "total_tokens": 56}
+    delta = transcript.usage_delta(after, before)
+    assert delta["input_tokens"] == 6 and delta["output_tokens"] == 8 and delta["cache_read_input_tokens"] == 300
+    assert delta["total_tokens"] == 14 and delta["assistant_messages"] == 1 and delta["model"] == "m2"
+    assert list(delta["per_model"]) == ["m2"]          # m1 did not move → not reported again
+    # a fresh session (no snapshot) is reported whole; a rewritten transcript never goes negative
+    assert transcript.usage_delta(after, None)["total_tokens"] == 56
+    assert transcript.usage_delta(before, after)["input_tokens"] == 0
+    assert transcript.empty_usage()["total_tokens"] == 0
 
 
 # ── argv invariant ───────────────────────────────────────────────────────────
@@ -181,6 +200,43 @@ def test_system_prompt_is_stable_per_agent():
     a = session.build_system_prompt({"agent_name": "Dwight", "task_id": 1, "title": "x"})
     b = session.build_system_prompt({"agent_name": "Dwight", "task_id": 2, "title": "y"})
     assert a == b and "never push" in a
+
+
+def test_capabilities_announce_the_allowed_directories(tmp_path):
+    """PRD-239 S6: the backend checks an agent's working_directory against these."""
+    from automatos_cli_host.config import HostConfig
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cfg = HostConfig(url="http://127.0.0.1:8000", state_dir=tmp_path / "state", allow_dirs=[repo],
+                     name="mac", claude_binary=str(tmp_path / "no-such-claude"))
+    caps = session.host_capabilities(cfg)
+    assert caps["allow_dirs"] == [str(repo.resolve())] or caps["allow_dirs"] == [str(repo)]
+    assert caps["host_version"] == session.__version__
+
+
+def test_result_payload_names_the_directory_the_session_ran_in():
+    """PRD-239: a git repo runs in a --worktree; the backend must learn that path so
+    `claude --resume` and the editor links open where the transcript is."""
+    out = session.SessionOutcome(status="success", result_text="done", effective_cwd="/repo/.claude/worktrees/automatos-7")
+    payload = out.as_result_payload(1)
+    assert payload["effective_cwd"] == "/repo/.claude/worktrees/automatos-7"
+    assert session.SessionOutcome(status="error", error="x").as_result_payload(1)["effective_cwd"] is None
+
+
+def test_system_prompt_carries_the_agents_soul_between_intro_and_rules():
+    """PRD-239 S1: the backend's persona + skills text rides the ticket and sits
+    between "You are …" and the session rules; without it the prompt is unchanged."""
+    soul = "## Persona & Communication Style\nBlunt and precise.\n\n## Skills\n### automatos-platform\nKnows the platform."
+    with_soul = session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": soul})
+    assert with_soul.startswith("You are Bob, working as a supervised Claude Code session")
+    assert with_soul.index("Blunt and precise") < with_soul.index("never push")
+    assert "### automatos-platform" in with_soul
+    again = session.build_system_prompt({"agent_name": "Bob", "task_id": 9, "system_prompt": soul})
+    assert again == with_soul  # stable per agent — ids never leak in
+    plain = session.build_system_prompt({"agent_name": "Bob", "task_id": 1})
+    assert plain == session.build_system_prompt({"agent_name": "Bob", "task_id": 1, "system_prompt": "   "})
+    assert "Persona" not in plain and "never push" in plain
 
 
 # ── backend preflight ────────────────────────────────────────────────────────
@@ -336,6 +392,42 @@ def test_hook_server_keeps_only_its_own_socket_and_heals_a_vanished_path(tmp_pat
     new.stop()
     assert not sock.exists()
 
+
+def test_compact_event_carries_cwd_and_nothing_more_than_it_should():
+    from automatos_cli_host.session import compact_event
+    ev = compact_event("SessionStart", {"session_id": "s1", "cwd": "/w/sessions/71", "transcript_path": "/t.jsonl",
+                                        "tool_input": {"command": "x"}, "extra": "never"})
+    assert ev["event"] == "SessionStart" and ev["cwd"] == "/w/sessions/71" and ev["session_id"] == "s1"
+    assert "extra" not in ev and "tool_name" not in ev
+    assert "cwd" not in compact_event("PostToolUse", {"tool_name": "Bash"})
+
+
+def test_a_permission_question_is_held_until_the_operator_answers(tmp_path):
+    """PRD-235 W2 S3: outside the allowlist → the session holds the call, emits a
+    PermissionRequest event with a request id, and follows the answer; no answer → deny."""
+    import threading
+    import time as _t
+    from automatos_cli_host.session import Session
+    from automatos_cli_host.policy import PolicyContext
+    cfg = type("Cfg", (), {"ask_timeout": 1.0, "sessions_dir": tmp_path, "socket_path": tmp_path / "s.sock"})()
+    s = Session({"task_id": 71, "attempt": 1, "session_id": "sid"}, cfg, [str(tmp_path)], tmp_path / "s.sock", default_root=str(tmp_path))
+    s._policy = PolicyContext(cwd=tmp_path)
+
+    def _answer():
+        for _ in range(100):
+            _t.sleep(0.02)
+            if not s.events.empty():
+                ev = s.events.queue[-1]
+                if ev.get("event") == "PermissionRequest":
+                    s.resolve_ask(ev["request_id"], True)
+                    return
+    threading.Thread(target=_answer, daemon=True).start()
+    out = s._pre_tool_use({"tool_name": "Bash", "tool_input": {"command": "pip --version"}})
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    out = s._pre_tool_use({"tool_name": "Bash", "tool_input": {"command": "pip --version"}})
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "no answer from the operator" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert s.resolve_ask("unknown", True) is False
 
 def test_terminal_log_keeps_the_newest_bytes_and_a_readable_tail(tmp_path):
     from automatos_cli_host.terminal_log import BoundedLog

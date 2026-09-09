@@ -476,6 +476,22 @@ async def get_document_content_by_path(
 
 
 
+# PRD-164: rows the flywheel ingests from agent runs (mission synthesis, reports,
+# heartbeat digests) carry source_type='agent_output'. They live in the Deliverables
+# explorer; the knowledge base the Analytics page reports on is what the user
+# uploaded for RAG — everything else (2026-09-09, owner: "documents in analytics
+# is for RAG documents that user uploaded to help with their business").
+AGENT_OUTPUT_SOURCE_TYPE = "agent_output"
+
+
+def _knowledge_documents(db: Session, workspace_id):
+    """The user's RAG documents: every row of the workspace that is not an agent output."""
+    return db.query(Document).filter(
+        Document.workspace_id == workspace_id,
+        or_(Document.source_type.is_(None), Document.source_type != AGENT_OUTPUT_SOURCE_TYPE),
+    )
+
+
 @router.get("/analytics")
 async def get_document_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -493,45 +509,35 @@ async def get_document_analytics(
     """
     try:
         from sqlalchemy import func
-        
-        # Total documents count
-        total_docs = db.query(func.count(Document.id)).filter(Document.workspace_id == ctx.workspace_id).scalar() or 0
-        
-        # Documents by status
-        status_counts = db.query(
-            Document.status, 
-            func.count(Document.id)
-        ).filter(Document.workspace_id == ctx.workspace_id).group_by(Document.status).all()
-        
+
+        # Every figure below is over the user's KNOWLEDGE documents; agent outputs
+        # are counted once, separately, so the page can say what it left out.
+        knowledge = _knowledge_documents(db, ctx.workspace_id)
+
+        total_docs = knowledge.with_entities(func.count(Document.id)).scalar() or 0
+
+        status_counts = knowledge.with_entities(Document.status, func.count(Document.id)).group_by(Document.status).all()
         status_distribution = {status: count for status, count in status_counts}
-        
-        # Total storage used
-        total_storage = db.query(func.sum(Document.file_size)).filter(Document.workspace_id == ctx.workspace_id).scalar() or 0
-        
-        # File type distribution
-        file_type_counts = db.query(
-            Document.file_type,
-            func.count(Document.id)
-        ).filter(Document.workspace_id == ctx.workspace_id).group_by(Document.file_type).all()
-        
+
+        total_storage = knowledge.with_entities(func.sum(Document.file_size)).scalar() or 0
+
+        file_type_counts = knowledge.with_entities(Document.file_type, func.count(Document.id)).group_by(Document.file_type).all()
         file_types = {file_type: count for file_type, count in file_type_counts}
-        
-        # Total chunks processed
-        total_chunks = db.query(func.sum(Document.chunk_count)).filter(Document.workspace_id == ctx.workspace_id).scalar() or 0
-        
+
+        total_chunks = knowledge.with_entities(func.sum(Document.chunk_count)).scalar() or 0
+
         # Recent uploads (last 24 hours)
         from datetime import datetime, timedelta
         recent_cutoff = datetime.utcnow() - timedelta(days=1)
-        recent_uploads = db.query(func.count(Document.id)).filter(
-            Document.workspace_id == ctx.workspace_id,
-            Document.upload_date >= recent_cutoff
-        ).scalar() or 0
-        
-        # Average chunk count
-        avg_chunks = db.query(func.avg(Document.chunk_count)).filter(
-            Document.workspace_id == ctx.workspace_id,
-            Document.chunk_count > 0
-        ).scalar() or 0
+        recent_uploads = knowledge.filter(Document.upload_date >= recent_cutoff).with_entities(func.count(Document.id)).scalar() or 0
+
+        avg_chunks = knowledge.filter(Document.chunk_count > 0).with_entities(func.avg(Document.chunk_count)).scalar() or 0
+
+        agent_outputs = (
+            db.query(func.count(Document.id))
+            .filter(Document.workspace_id == ctx.workspace_id, Document.source_type == AGENT_OUTPUT_SOURCE_TYPE)
+            .scalar() or 0
+        )
         
         # Processing success rate
         processed_count = status_distribution.get('processed', 0)
@@ -549,6 +555,9 @@ async def get_document_analytics(
             "average_chunks_per_document": round(float(avg_chunks), 2),
             "recent_uploads_24h": recent_uploads,
             "processing_success_rate": round(success_rate, 2),
+            # Agent outputs (reports, digests, mission syntheses) are NOT knowledge
+            # documents — reported here so the split is visible, never summed above.
+            "agent_outputs": int(agent_outputs),
             "last_updated": datetime.utcnow().isoformat()
         }
         
@@ -571,6 +580,9 @@ async def list_documents(
     # callers/tests that omit it get None, not a truthy Query() sentinel that
     # would make `if source_type:` fire and filter on a Query object.
     source_type: Optional[str] = None,
+    # The opposite scope: everything BUT a provenance — the Analytics page lists
+    # the user's RAG documents with exclude_source_type=agent_output (2026-09-09).
+    exclude_source_type: Optional[str] = None,
     # Exact-match lookup by SHA-256 of the file bytes. Lets a caller resolve a
     # document by content (e.g. Academy's --replace) instead of by filename.
     # Plain `= None` (like status/file_type/search) so direct-call callers/tests
@@ -592,6 +604,10 @@ async def list_documents(
         if source_type:
             # PRD-164 S3 (Q58): agent outputs are a filterable team-like scope
             query = query.filter(Document.source_type == source_type)
+        if exclude_source_type:
+            query = query.filter(
+                or_(Document.source_type.is_(None), Document.source_type != exclude_source_type)
+            )
         if search:
             query = query.filter(
                 or_(

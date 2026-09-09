@@ -138,6 +138,7 @@ from modules.tools.discovery.handlers_skill_runtime import (  # PRD-202 S2/S3/S4
     set_skill_script_execution,
 )
 from modules.tools.discovery.handlers_board_tasks import (
+    wait_for_board_task,
     create_board_task,
     list_board_tasks,
     get_board_task,
@@ -558,6 +559,7 @@ class PlatformActionExecutor:
             "platform_list_tasks": list_board_tasks,
             "platform_board_summary": board_summary,
             "platform_get_task": get_board_task,
+            "platform_wait_for_task": wait_for_board_task,  # PRD-238 S4
             "platform_assign_task": assign_board_task,
             "platform_update_task_status": update_board_task_status,
             # PRD-77: Agent Self-Scheduling
@@ -1265,6 +1267,14 @@ class PlatformActionExecutor:
             if _driver:
                 params = {**params, "_user_id": _driver}
 
+        # PRD-238 S4: every handler learns which chat turn (if any) it runs in,
+        # so a long-running action can narrate progress through
+        # services.turn_progress. Strip-then-inject like the keys above — the
+        # turn id is server-side truth from caller_context, never a tool arg.
+        params = {k: v for k, v in params.items() if k != "_turn_id"}
+        _turn = (caller_context or {}).get("turn_id")
+        if _turn:
+            params = {**params, "_turn_id": str(_turn)}
         try:
             result = await handler(self.db, self.workspace_id, params)
             # PRD-143 S8: an invocation that ran only because the full-autonomy

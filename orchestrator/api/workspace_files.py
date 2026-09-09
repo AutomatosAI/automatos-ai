@@ -231,7 +231,9 @@ async def get_canvas_session_status(
     workspace_id: str,
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    """Return the status of the workspace's canvas session."""
+    """Return the status of the workspace's canvas session — ``session`` is null when
+    none exists yet, and ``sdk_available`` says whether the worker could start one
+    (PRD-239: the Canvas hides the SDK tab otherwise)."""
     if str(ctx.workspace_id) != workspace_id:
         raise HTTPException(status_code=403, detail="Workspace access denied")
 

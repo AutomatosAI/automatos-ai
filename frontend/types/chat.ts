@@ -52,11 +52,32 @@ export interface ToolCall {
   skipped?: boolean
 }
 
+/** PRD-238 S6: the compact, live-updatable card for a board ticket in the chat. */
+export interface TaskCardData {
+  id: number
+  title: string
+  status: string
+  assigned_agent: string
+  runtime?: string | null
+  last_tool?: string | null
+  files_touched?: number
+  exit_reason?: string | null
+  denials?: number
+  started_at?: string | null
+  completed_at?: string | null
+}
+
 /** PRD-238 S3: a cap ended the turn; the chat says so instead of going quiet. */
 export interface LimitReached {
   limit: string
   value: number
   message: string
+}
+
+/** PRD-239 S4: a turn that failed — one plain sentence and a stable code. */
+export interface TurnError {
+  message: string
+  code?: string | null
 }
 
 /**
@@ -170,6 +191,14 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   toolCalls?: ToolCall[]
   routingInfo?: RoutingInfo
   limitReached?: LimitReached
+  /** PRD-238 S1: live reasoning text while a reply streams (persisted as a part). */
+  reasoning?: string
+  /** PRD-238 S4: progress lines from a long-running tool call (device-only, not persisted). */
+  progress?: string[]
+  /** PRD-238 S6: tickets this reply filed or checked — rendered as live cards. */
+  taskCards?: TaskCardData[]
+  /** PRD-239 S4: the turn failed; shown in the bubble instead of silence. */
+  error?: TurnError
 }
 
 /**
@@ -177,6 +206,10 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
  */
 export type MessagePart =
   | { type: 'text'; text: string }
+  /** PRD-238 S1: the model's deliberation, stored beside the answer, shown collapsed. */
+  | { type: 'reasoning'; reasoning: string }
+  /** PRD-239 S2: a ticket card persisted with the reply (a session agent's turn). */
+  | { type: 'task_card'; card: TaskCardData }
   | { type: 'file'; filename: string; mediaType: string; url: string }
   | { type: 'tool-result'; toolName: string; result: any }
   | { type: 'artifact'; artifact: Artifact }

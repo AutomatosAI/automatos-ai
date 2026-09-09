@@ -43,10 +43,15 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # deliberate act that must update this pin — that is the point of the guard.
 # PRD-232 (2026-09-02): the one authorized 232 revision, prd232_cluster_provenance,
 # chains onto prd_workspace_models_backfill and is the new single head.
-# PRD-237 (2026-09-07): prd237_users_chat_sessions chains onto the PRD-234 S1a head.
-# Calendar (2026-09-08): calendar_scheduled_board_tasks (a scheduled task can file
-# a board ticket when it fires) chains onto the PRD-237 head.
-EXPECTED_HEAD = "calendar_scheduled_board_tasks"
+# PRD-236 W1 (2026-09-03): prd236_w1_serving_provider chains onto the PRD-234 S1a
+# head — the catalogue keyed by (serving_provider, model_id).
+# 2026-09-08: prd236_w1_serving_provider and prd237_users_chat_sessions both chain
+# onto the S1a head (#700 landed on its stacked base after that base had merged);
+# prd236w1_prd237_merge joins them and is the single head.
+# 2026-09-09 (analytics cost tracking): prd240_merge_heads joins that merge with the
+# calendar chain (calendar_scheduled_board_tasks); prd240_llm_usage_cache_tokens
+# chains onto it and is the single head.
+EXPECTED_HEAD = "prd240_llm_usage_cache_tokens"
 
 
 def _literal(node: ast.AST):

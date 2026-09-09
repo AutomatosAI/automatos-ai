@@ -13,10 +13,12 @@ Features:
 """
 
 import logging
+import time
 import asyncio
 from typing import List, Optional
 
 from config import config
+from .embedding_usage import record_embedding_usage
 from .base import BaseEmbeddingProvider, EmbeddingConfig
 
 try:
@@ -154,12 +156,14 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
             text = text[:max_chars]
             logger.debug(f"Text truncated to ~{model_info[1]} tokens for {self.config.model}")
 
+        started = time.monotonic()
         try:
             response = await client.embeddings.create(
                 model=self.config.model,
                 input=text,
                 extra_body=self._extra_body,
             )
+            record_embedding_usage("openrouter", self.config.model, response, [text], started)
             embedding = response.data[0].embedding
 
             # Truncate to configured dimension if model outputs more
@@ -210,12 +214,14 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
 
         # Try single batch call first (most efficient)
         # OpenRouter supports array input like OpenAI
+        started = time.monotonic()
         try:
             response = await client.embeddings.create(
                 model=self.config.model,
                 input=processed_texts,
                 extra_body=self._extra_body,
             )
+            record_embedding_usage("openrouter", self.config.model, response, processed_texts, started)
 
             embeddings = [None] * len(processed_texts)
             for item in response.data:
@@ -241,12 +247,14 @@ class OpenRouterEmbeddingProvider(BaseEmbeddingProvider):
 
         async def embed_one(idx: int, text: str):
             async with semaphore:
+                t0 = time.monotonic()
                 try:
                     resp = await client.embeddings.create(
                         model=self.config.model,
                         input=text,
                         extra_body=self._extra_body,
                     )
+                    record_embedding_usage("openrouter", self.config.model, resp, [text], t0)
                     emb = resp.data[0].embedding
                     if len(emb) > self.config.dimension:
                         emb = emb[:self.config.dimension]

@@ -42,6 +42,11 @@ def _quiet(monkeypatch, *, existing=None, online=True):
     monkeypatch.setattr(lane, "open_ticket_for_source", lambda db, ws, st, sid: existing)
     monkeypatch.setattr(lane, "host_online", lambda db, ws: online)
     monkeypatch.setattr(lane, "_notify", lambda db, ws, task: None)
+    # The lane also records the operator's standing consent on the local edition
+    # (its own commit; covered by test_prd234_lane_consent.py) — not this shape.
+    import services.board_consent as consent
+
+    monkeypatch.setattr(consent, "consent_for_lane_ticket", lambda db, **kw: "skipped")
 
 
 def test_files_one_assigned_ticket_in_the_lanes_shape(monkeypatch):

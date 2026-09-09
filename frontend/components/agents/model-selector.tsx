@@ -8,7 +8,7 @@
 
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   Brain,
@@ -38,10 +38,18 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useWorkspaceModels, ModelInfo } from '@/hooks/use-model-api'
 
 interface ModelSelectorProps {
-  value: string  // model_id
-  onChange: (modelId: string) => void
+  /** The stored model id. */
+  value: string
+  /**
+   * PRD-239 S5: the pick carries the ROUTE that serves it (openrouter, nvidia,
+   * openai …) — callers store both, so "Kimi K3 via NVIDIA" and "Kimi K3 via
+   * OpenRouter" are two different picks. The backend keeps the route as
+   * `model_config.provider` (PRD-236 W1).
+   */
+  onChange: (modelId: string, servingProvider: string) => void
   agentType?: string
-  provider?: string
+  /** The stored route; disambiguates a model id offered by several routes. */
+  provider?: string | null
   className?: string
 }
 
@@ -52,6 +60,34 @@ const TIER_CONFIG: Record<string, { label: string; icon: typeof Star; order: num
   byok: { label: 'Your Keys (BYOK)', icon: Key, order: 3 },
 }
 
+/** The route a row is served by (older API rows fall back to the vendor). */
+export function servingProviderOf(model: Pick<ModelInfo, 'serving_provider' | 'provider'>): string {
+  return model.serving_provider || model.provider
+}
+
+/** PRD-239 S5: the option key — `route:model_id`, the same shape the backend's installed-ids uses. */
+export function routeKey(servingProvider: string | null | undefined, modelId: string): string {
+  return `${servingProvider || ''}:${modelId}`
+}
+
+/**
+ * The row the stored (provider, model_id) pair means: the exact route when the
+ * list has it, else the first route offering that id (an older config without
+ * a route), else null (the saved model is not installed any more).
+ */
+export function resolveRoute(
+  models: ModelInfo[] | undefined | null,
+  modelId: string | null | undefined,
+  provider?: string | null,
+): ModelInfo | null {
+  if (!models || !modelId) return null
+  if (provider) {
+    const exact = models.find((m) => m.model_id === modelId && servingProviderOf(m) === provider)
+    if (exact) return exact
+  }
+  return models.find((m) => m.model_id === modelId) ?? null
+}
+
 export function ModelSelector({
   value,
   onChange,
@@ -59,20 +95,17 @@ export function ModelSelector({
   provider,
   className = ''
 }: ModelSelectorProps) {
-  const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null)
   const { data: models, isLoading, error } = useWorkspaceModels()
 
-  useEffect(() => {
-    if (value && models && models.length > 0) {
-      const model = models.find(m => m.model_id === value)
-      setSelectedModel(model || null)
-    }
-  }, [value, models])
+  const selectedModel = useMemo(() => resolveRoute(models, value, provider), [models, value, provider])
+  const selectValue = selectedModel ? routeKey(servingProviderOf(selectedModel), selectedModel.model_id) : ''
+  // The saved pick is not among the workspace's installed routes any more
+  // (uninstalled, or deprecated by the catalogue sync): say so, do not pretend.
+  const savedUnavailable = Boolean(value && models && models.length > 0 && !selectedModel)
 
-  const handleChange = (newValue: string) => {
-    onChange(newValue)
-    const model = models?.find(m => m.model_id === newValue)
-    setSelectedModel(model || null)
+  const handleChange = (key: string) => {
+    const model = models?.find((m) => routeKey(servingProviderOf(m), m.model_id) === key)
+    if (model) onChange(model.model_id, servingProviderOf(model))
   }
 
   // Group models by tier, then by provider within each tier
@@ -165,12 +198,16 @@ export function ModelSelector({
 
   const renderModelItem = (model: ModelInfo) => (
     <SelectItem
-      key={model.model_id}
-      value={model.model_id}
+      key={routeKey(servingProviderOf(model), model.model_id)}
+      value={routeKey(servingProviderOf(model), model.model_id)}
       className="text-foreground focus:bg-secondary focus:text-foreground py-2"
     >
       <div className="flex items-center gap-2 w-full">
         <span className="truncate">{model.display_name}</span>
+        {/* PRD-239 S5: the route is part of the pick */}
+        <span className="text-[10px] text-muted-foreground shrink-0">
+          · {model.serving_provider_label || servingProviderOf(model)}
+        </span>
         <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
           {formatNumber(model.context_window)}ctx
         </span>
@@ -206,7 +243,19 @@ export function ModelSelector({
       {/* Model Selector */}
       <div className="space-y-2">
         <label className="text-sm font-medium text-foreground">Model</label>
-        <Select value={value} onValueChange={handleChange} disabled={isLoading}>
+        {savedUnavailable && (
+          <div
+            className="flex items-start gap-2 p-2 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20 text-xs text-[hsl(var(--warning))]"
+            data-testid="model-unavailable"
+          >
+            <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+            <span>
+              The saved model <span className="font-mono">{value}</span>
+              {provider ? ` via ${provider}` : ''} is not among this workspace&apos;s installed models any more. Pick one below.
+            </span>
+          </div>
+        )}
+        <Select value={selectValue} onValueChange={handleChange} disabled={isLoading}>
           <SelectTrigger className="w-full bg-secondary/30 border-border/50">
             <SelectValue placeholder={isLoading ? "Loading models..." : "Select a model..."} />
           </SelectTrigger>
@@ -280,6 +329,7 @@ export function ModelSelector({
                   </h4>
                   <p className="text-sm text-muted-foreground">
                     {selectedModel.model_family} by {selectedModel.provider}
+                    {' · served by '}{selectedModel.serving_provider_label || servingProviderOf(selectedModel)}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5">

@@ -114,6 +114,14 @@ class StreamingHandler:
             payload["data"] = data
         return f'd:{json.dumps(payload)}\n'
 
+    def format_aisdk_progress(self, text: str) -> str:
+        """PRD-238 S4: a progress line from inside a long-running tool call."""
+        return self.format_aisdk_data("progress", {"text": text})
+
+    def format_aisdk_reasoning(self, delta: str) -> str:
+        """PRD-238 S1: a reasoning delta — the thinking channel, never the answer."""
+        return self.format_aisdk_data("reasoning", {"delta": delta})
+
     def format_aisdk_limit_reached(self, limit: str, value: int, message: str) -> str:
         """Format a limit_reached event so the user is told an agent stopped
         because it hit a cap (instead of silently bailing). Carries limit/value
@@ -191,9 +199,13 @@ class StreamingHandler:
         """Format finish event."""
         return f'd:{{"type":"finish","finishReason":"{reason}"}}\n'
 
-    def format_aisdk_error(self, error: str) -> str:
-        """Format error event for AI SDK."""
-        return f'e:{json.dumps({"message": error})}\n'
+    def format_aisdk_error(self, error: str, code: Optional[str] = None) -> str:
+        """Format error event for AI SDK. PRD-239 S4: ``code`` is the stable
+        classification the client can branch on (``turn_errors``)."""
+        payload: Dict[str, Any] = {"message": error}
+        if code:
+            payload["code"] = code
+        return f'e:{json.dumps(payload)}\n'
 
     # ==========================================================================
     # WIDGET SSE EVENTS (US-015)
