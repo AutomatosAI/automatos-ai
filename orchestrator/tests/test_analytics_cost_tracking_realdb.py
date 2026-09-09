@@ -22,6 +22,8 @@ if str(ROOT) not in sys.path:
 from core.database.database import get_database_url  # noqa: E402
 from core.models.core import LLMUsage  # noqa: E402
 from api import llm_analytics as api  # noqa: E402
+from api import documents as docs_api  # noqa: E402
+from core.models.core import Document  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -159,3 +161,56 @@ def test_projections_and_comparison_are_route_aware(seeded, new_session):
     assert {p.provider for p in proj.projected_by_provider} >= {"openrouter", "nvidia", "claude_code"}
     assert cmp_[0].provider == "nvidia" and cmp_[0].billing == "free" and cmp_[0].total_cost == 0
     assert cmp_[1].provider in ("openrouter", "nvidia")
+
+
+# ── Documents: the knowledge base is what the user uploaded, never agent outputs ──
+
+@pytest.fixture
+def seeded_documents(engine, new_session):
+    ws = uuid.uuid4()
+    s = new_session()
+    s.execute(text("INSERT INTO workspaces (id, name) VALUES (CAST(:id AS uuid), :n) ON CONFLICT (id) DO NOTHING"),
+              {"id": str(ws), "n": "analytics-docs-realdb"})
+    s.add_all([
+        Document(filename="Business_Plan.pdf", file_type="pdf", file_size=4000, status="processed",
+                 chunk_count=12, workspace_id=ws, source_type=None, tags=[]),
+        Document(filename="notes.txt", file_type="text", file_size=100, status="processed",
+                 chunk_count=1, workspace_id=ws, source_type="upload", tags=[]),
+        Document(filename="2026-09-09_081500_heartbeat.md", file_type="md", file_size=330, status="processed",
+                 chunk_count=1, workspace_id=ws, source_type="agent_output", tags=["agent_output", "report"]),
+        Document(filename="mission-output.md", file_type="md", file_size=900, status="failed",
+                 chunk_count=0, workspace_id=ws, source_type="agent_output", tags=["agent_output"]),
+    ])
+    s.commit()
+    s.close()
+    yield ws
+    s = new_session.sweep()
+    s.execute(text("DELETE FROM documents WHERE workspace_id = CAST(:id AS uuid)"), {"id": str(ws)})
+    s.execute(text("DELETE FROM workspaces WHERE id = CAST(:id AS uuid)"), {"id": str(ws)})
+    s.commit()
+    s.close()
+
+
+def test_document_analytics_counts_only_the_users_rag_documents(seeded_documents, new_session):
+    db = new_session()
+    try:
+        out = _run(docs_api.get_document_analytics(ctx=_ctx(seeded_documents), db=db))
+    finally:
+        db.close()
+    assert out["total_documents"] == 2 and out["agent_outputs"] == 2
+    assert out["total_storage_bytes"] == 4100 and out["total_chunks"] == 13
+    assert out["status_distribution"] == {"processed": 2}          # the failed agent output is not a failed upload
+    assert set(out["file_type_distribution"]) == {"pdf", "text"}
+
+
+def test_document_list_can_leave_agent_outputs_out(seeded_documents, new_session):
+    db = new_session()
+    try:
+        everything = _run(docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None, db=db))
+        knowledge = _run(docs_api.list_documents(ctx=_ctx(seeded_documents), skip=0, limit=100, team=None,
+                                                 exclude_source_type="agent_output", db=db))
+    finally:
+        db.close()
+    assert len(everything) == 4 and len(knowledge) == 2
+    assert {d.filename for d in knowledge} == {"Business_Plan.pdf", "notes.txt"}
+    assert all(d.source_type != "agent_output" for d in knowledge)

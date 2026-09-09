@@ -16,6 +16,9 @@ import {
   type UsageGroup,
 } from '@/lib/analytics-usage'
 
+/** The user's RAG documents: every workspace document that is not an agent output. */
+const KNOWLEDGE_DOCUMENTS_PATH = '/api/documents/?exclude_source_type=agent_output&limit=1000'
+
 /** The backend period for a day count (the page's 7/30/90-day selector). */
 function periodFor(days: number): string {
   return days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
@@ -332,7 +335,9 @@ export function useDocumentAnalyticsUnified(days: number = 30) {
       const period = periodFor(days)
 
       const [documents, usage] = await Promise.all([
-        safeRequest(() => apiClient.getDocuments(), []),
+        // The user's RAG documents only — agent outputs (reports, digests, mission
+        // syntheses) live in the Deliverables explorer, not in the knowledge base.
+        safeRequest(() => apiClient.request<any[]>(KNOWLEDGE_DOCUMENTS_PATH), []),
         safeRequest(() => apiClient.request<any>(`/api/documents/analytics/usage?period=${period}`), null),
       ])
 
@@ -476,7 +481,7 @@ export function usePlanUsage() {
       const [agents, missions, documents, llmSummary] = await Promise.all([
         apiClient.getAgents().catch(() => []),
         apiClient.request<any>('/api/missions?limit=100').catch(() => ({ items: [] })),
-        apiClient.getDocuments().catch(() => []),
+        apiClient.request<any[]>(KNOWLEDGE_DOCUMENTS_PATH).catch(() => []),
         // 30-day LLM calls and tokens from llm_usage — the per-agent blob undercounted both
         apiClient.request<any>('/api/analytics/llm/summary?period=30d').catch(() => null),
       ])
