@@ -41,7 +41,7 @@ import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { apiClient } from '@/lib/api-client'
-import { useUser } from '@/lib/auth-hooks'
+import { useSystemRole } from '@/contexts/role-context'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
 import { GitHubImportModal } from './github-import-modal'
 
@@ -92,13 +92,14 @@ interface MarketplacePluginsTabProps {
 // ===================================================================
 
 export function MarketplacePluginsTab({ searchQuery, workspaceId }: MarketplacePluginsTabProps) {
-  const { user } = useUser()
   const [viewMode, setViewMode] = useViewMode('mp-plugins')
   const { data: iconMappings = {} } = useSystemIcons()
   const globalPluginIcon = iconMappings['global_plugin'] || null
 
-  // Admin check (same pattern as agents tab)
-  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
+  // Admin controls follow the backend's system_role (super_admin ⊇ admin), the
+  // same gate the admin routes enforce. The local operator is super_admin, so a
+  // fresh local install sees Import from GitHub; a Clerk email domain never did.
+  const { isAdmin } = useSystemRole()
 
   // State
   const [plugins, setPlugins] = useState<PluginSummary[]>([])

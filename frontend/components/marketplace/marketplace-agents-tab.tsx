@@ -22,7 +22,7 @@ import { useMarketplaceItems, useInstallMarketplaceItem } from '@/hooks/use-mark
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { AGENT_CATEGORIES as UNIFIED_CATEGORIES, LEGACY_CATEGORY_MAP } from '@/lib/agent-constants'
 import { MarketplaceItemModal } from './marketplace-item-modal'
-import { useUser } from '@/lib/auth-hooks'
+import { useSystemRole } from '@/contexts/role-context'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 
@@ -69,7 +69,6 @@ interface MarketplaceAgentsTabProps {
 }
 
 export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps) {
-  const { user } = useUser()
   const [viewMode, setViewMode] = useViewMode('mp-agents')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
@@ -78,8 +77,10 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
   const [installingId, setInstallingId] = useState<number | null>(null)
   const [installedIds, setInstalledIds] = useState<Set<number>>(new Set())
 
-  // Check if user is admin (you can adjust this check based on your admin logic)
-  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
+  // Admin controls follow the backend's system_role (super_admin ⊇ admin), the
+  // same gate the admin routes enforce. The local operator is super_admin, so a
+  // fresh local install sees Import from GitHub; a Clerk email domain never did.
+  const { isAdmin } = useSystemRole()
 
   // Fetch all marketplace agents (filter client-side by unified category)
   const { data: rawAgents = [], isLoading, refetch } = useMarketplaceItems({

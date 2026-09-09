@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { BASELINE_SKILLS_REPO_URL } from '@/lib/baseline-skills'
 
 interface ImportResult {
   slug: string
@@ -21,10 +22,12 @@ interface GitHubImportModalProps {
   open: boolean
   onClose: () => void
   onImportComplete: () => void
+  /** Prefill the repository URL (the Skills tab opens the modal on the baseline repo). */
+  initialUrl?: string
 }
 
-export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImportModalProps) {
-  const [url, setUrl] = useState('')
+export function GitHubImportModal({ open, onClose, onImportComplete, initialUrl }: GitHubImportModalProps) {
+  const [url, setUrl] = useState(initialUrl ?? '')
   const [isImporting, setIsImporting] = useState(false)
   const [results, setResults] = useState<ImportResult[] | null>(null)
 
@@ -47,7 +50,7 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
       // Auto-close after 2s on success
       if (successCount > 0) {
         setTimeout(() => {
-          setUrl('')
+          setUrl(initialUrl ?? '')
           setResults(null)
           onClose()
         }, 2000)
@@ -62,7 +65,7 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
   }
 
   const handleClose = () => {
-    setUrl('')
+    setUrl(initialUrl ?? '')
     setResults(null)
     onClose()
   }
@@ -85,6 +88,27 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
 
         {/* Body */}
         <div className="p-4 space-y-4">
+          {/* A fresh install has no skills: point at the free baseline library first. */}
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+            <p className="text-sm">
+              <span className="font-medium">New install?</span> Start with the free baseline skills:
+              the Automatos skills library imports as marketplace skills you can enable per agent.
+            </p>
+            <div className="flex items-center justify-between gap-2">
+              <code className="text-xs text-muted-foreground truncate">{BASELINE_SKILLS_REPO_URL}</code>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="whitespace-nowrap"
+                disabled={isImporting}
+                onClick={() => setUrl(BASELINE_SKILLS_REPO_URL)}
+              >
+                Use baseline repo
+              </Button>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm text-muted-foreground">
               GitHub Repository URL
