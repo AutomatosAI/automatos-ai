@@ -81,12 +81,12 @@ def test_grants_are_single_use_and_expire():
 
 def test_directory_resolution_follows_the_allow_list(tmp_path):
     root = tmp_path / "ws"
-    (root / "wsid" / "sessions").mkdir(parents=True)
+    (root / "sessions").mkdir(parents=True)  # the root IS the workspace root (2026-09-09)
     repo = tmp_path / "repo"
     repo.mkdir()
     server = ts.TerminalServer([str(root), str(repo)], str(root), workspace_id=lambda: "wsid")
     assert server.resolve_directory(ts.Grant("t", str(repo), None, 0)) == repo.resolve()
-    assert server.resolve_directory(ts.Grant("t", None, "95", 0)) == (root / "wsid" / "sessions" / "95").resolve()
+    assert server.resolve_directory(ts.Grant("t", None, "95", 0)) == (root / "sessions" / "95").resolve()
     assert server.resolve_directory(ts.Grant("t", None, None, 0)) == Path(str(root))
     with pytest.raises(ts.NotAllowed):
         server.resolve_directory(ts.Grant("t", str(tmp_path / "elsewhere"), None, 0))
