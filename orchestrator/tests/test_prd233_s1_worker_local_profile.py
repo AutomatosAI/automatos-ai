@@ -2,7 +2,8 @@
 
 The Code Canvas runtime (``services/workspace-worker``) ships to the laptop:
 compose runs it by default against a designated HOST directory
-(``${AUTOMATOS_WORKSPACE_DIR:-./workspaces}`` bind-mounted at ``/workspaces``),
+(``${AUTOMATOS_WORKSPACE_DIR:-./workspaces}`` bind-mounted AS the local workspace's
+root, ``/workspaces/<DEFAULT_WORKSPACE_ID>`` — 2026-09-09: no workspace-id folder on the host),
 and the worker resolves its confinement root through ONE seam,
 ``worker_config.workspace_root()`` — env reads live only in ``worker_config``
 (the worker's mirror of the orchestrator's ``config.py`` discipline).
@@ -58,7 +59,10 @@ finally:
 
 WORKER_SERVICE = "workspace-worker"
 BACKEND_SERVICE = "backend"
-MOUNT_TARGET = "/workspaces"
+# The local workspace's root — the host folder is mounted AS that root (2026-09-09),
+# so on the host there is no workspace-id folder; inside the containers the layout
+# is unchanged (/workspaces/<workspace_id>/…).
+MOUNT_TARGET = "/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
 # The designated host directory — Q1 owner decision: one dial, safe default.
 HOST_DIR_SOURCE = "${AUTOMATOS_WORKSPACE_DIR:-./workspaces}"
 RETIRED_VOLUME = "workspace_data"
@@ -173,9 +177,10 @@ def test_confinement_follows_the_dial_not_a_baked_in_path(monkeypatch, tmp_path)
 # Compose source guard — the local profile carries the worker
 # ---------------------------------------------------------------------------
 
-# Short-syntax volume entry: SOURCE:TARGET[:MODE]. The source may itself hold
-# ':' (``${VAR:-default}``), so the target is anchored on the first ':/'.
-_SHORT_VOLUME_RE = re.compile(r"^(?P<source>.+?):(?P<target>/[^:]*)(?::(?P<mode>[a-zA-Z,]+))?$")
+# Short-syntax volume entry: SOURCE:TARGET[:MODE]. Source AND target may hold
+# ':' inside ``${VAR:-default}``, so the target is anchored on the first ':/' and
+# a ``${…}`` group inside it is consumed atomically.
+_SHORT_VOLUME_RE = re.compile(r"^(?P<source>.+?):(?P<target>/(?:\$\{[^}]*\}|[^:])*)(?::(?P<mode>[a-zA-Z,]+|\$\{[^}]*\}))?$")
 
 
 def _compose() -> dict:
@@ -260,11 +265,22 @@ def test_named_workspace_volume_is_gone():
 
 
 def test_mount_target_matches_worker_config_default():
+    """The host folder is mounted AS the local workspace's root: the compose
+    target is the worker's root (``worker_config.DEFAULT_WORKSPACE_ROOT``,
+    ``/workspaces``) plus the local workspace id — the layout the worker builds
+    (``<root>/<workspace_id>/…``) is unchanged inside the container, and the id
+    expression is the one the entrypoint seeds (``DEFAULT_WORKSPACE_ID``, with
+    the same default)."""
+    root = wc.DEFAULT_WORKSPACE_ROOT
     compose = _compose()
-    worker_env = _env(compose["services"][WORKER_SERVICE])
-    assert worker_env[wc.WORKSPACE_ROOT_ENV] == MOUNT_TARGET == wc.DEFAULT_WORKSPACE_ROOT
-    # The backend's view of the same directory (config.WORKSPACE_VOLUME_PATH).
-    assert _api_defaults()[wc.WORKSPACE_ROOT_ENV] == MOUNT_TARGET
+    # Both containers still address the volume at the worker root…
+    assert _env(compose["services"][WORKER_SERVICE])[wc.WORKSPACE_ROOT_ENV] == root
+    assert _api_defaults()[wc.WORKSPACE_ROOT_ENV] == root
+    # …and the host folder is mounted one level below it, as the local workspace.
+    assert MOUNT_TARGET.startswith(root + "/"), MOUNT_TARGET
+    workspace_segment = MOUNT_TARGET[len(root) + 1:]
+    assert workspace_segment == "${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
+    assert "/" not in workspace_segment  # exactly one level below the worker root
 
 
 def test_worker_keeps_credential_passthrough_and_limits():

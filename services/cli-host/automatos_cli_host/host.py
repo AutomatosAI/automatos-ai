@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from . import state
 from . import __version__
+from .allowlist import NotAllowed, choose_default_root
 from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import HookServer
@@ -87,6 +88,7 @@ class Host:
         self.threads: Dict[str, threading.Thread] = {}
         self.pending_results: Dict[str, Dict[str, Any]] = {}
         self.allow_roots: List[str] = []
+        self.default_root: Optional[str] = None
         self.stop = threading.Event()
         self._last_heartbeat = 0.0
         self._last_flush = 0.0
@@ -113,10 +115,16 @@ class Host:
             resolved = str(Path(d).expanduser().resolve())
             if resolved not in saved:
                 saved.append(resolved)
+        # The default root (--default-root, the deliverables root) is allowed too
+        # and is where a ticket with no folder runs; else the first registered one.
+        try:
+            saved, self.default_root = choose_default_root(
+                saved, str(self.cfg.default_root) if self.cfg.default_root else None,
+            )
+        except NotAllowed as exc:
+            raise HostRefused(str(exc)) from None
         state.save_allowlist(self.cfg.allowlist_path, saved)
         self.allow_roots = saved
-        if not self.allow_roots:
-            raise HostRefused("no directories registered — start with `--allow <dir>` (make cli-host registers ./workspaces)")
 
         # PRD-239 S7: start the terminal before the first capabilities announce so
         # the backend learns the port at pairing / on the first heartbeat.
@@ -284,7 +292,7 @@ class Host:
 
     def _start(self, ticket: Dict[str, Any]) -> None:
         task_id = str(ticket.get("task_id"))
-        session = Session(ticket, self.cfg, self.allow_roots, self.cfg.socket_path, default_root=self.allow_roots[0],
+        session = Session(ticket, self.cfg, self.allow_roots, self.cfg.socket_path, default_root=self.default_root,
                           workspace_id=str((self.identity or {}).get("workspace_id") or ""))
         self.sessions[task_id] = session
         self.hooks.register(task_id, session.handle_hook)

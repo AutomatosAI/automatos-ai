@@ -642,6 +642,11 @@ class Config:
     LOCAL_PROJECTS_DIR: str = os.getenv("LOCAL_PROJECTS_DIR", "").strip()
     # PRD-239: how the projects folder is mounted into the worker (ro|rw) — shown in Settings → Session mode.
     LOCAL_PROJECTS_MOUNT: str = os.getenv("LOCAL_PROJECTS_MOUNT", "").strip().lower()
+    # Local edition: the deliverables root on the HOST — the folder compose mounts as
+    # the local workspace's root (/workspaces/<DEFAULT_WORKSPACE_ID>), so the host's
+    # `<root>/sessions/68/x.py` is the worker's `sessions/68/x.py`. `make up` exports
+    # it absolute; a relative value (plain `docker compose up`) is display-only.
+    AUTOMATOS_WORKSPACE_DIR: str = os.getenv("AUTOMATOS_WORKSPACE_DIR", "").strip()
     # PRD-239 S3b: how long a playbook step waits for a session agent's Claude Code session
     # (a real session runs for minutes; API steps keep the recipe's own step timeout).
     CLI_LANE_STEP_TIMEOUT_SECONDS: int = int(os.getenv("CLI_LANE_STEP_TIMEOUT_SECONDS", "1800"))

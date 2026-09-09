@@ -11,7 +11,7 @@ resolved allowed root.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 
 class NotAllowed(PermissionError):
@@ -71,15 +71,36 @@ def resolve_allowed(cwd: Optional[str], roots: Iterable[str], *, default_root: O
     )
 
 
+def choose_default_root(saved: List[str], requested: Optional[str]) -> Tuple[List[str], str]:
+    """The allowed roots and the one a ticket with no folder runs under.
+
+    ``--default-root`` (the Makefile passes AUTOMATOS_WORKSPACE_DIR, the folder
+    compose mounts as the workspace root) wins and is added to the allowed roots
+    when missing; without it the first registered root is the default — which,
+    on a host whose allowlist grew over time, is whatever was registered first.
+    Raises ``NotAllowed`` when nothing is registered at all."""
+    roots = list(saved)
+    if requested:
+        resolved = str(Path(requested).expanduser().resolve())
+        if resolved not in roots:
+            roots.append(resolved)
+        return roots, resolved
+    if not roots:
+        raise NotAllowed("no directories registered — start with `--allow <dir>` (make cli-host registers the deliverables root)")
+    return roots, roots[0]
+
+
 def default_session_cwd(default_root: str, workspace_id: str, task_id: str) -> Path:
     """Where a ticket with no working directory runs:
-    ``<root>/<workspace_id>/sessions/<task_id>`` — the workspace-worker's layout
-    for this workspace, so Deliverables → Explorer shows the session's files live
-    and the backend can register them as the ticket's deliverables (PRD-234 S2).
-    Created on demand; a hostile id cannot escape the root."""
+    ``<root>/sessions/<task_id>`` — the root is the deliverables folder compose
+    mounts AS the workspace's root (AUTOMATOS_WORKSPACE_DIR, 2026-09-09: no
+    workspace-id folder on the host any more), so Deliverables → Explorer shows
+    the session's files live and the backend can register them as the ticket's
+    deliverables (PRD-234 S2). ``workspace_id`` stays in the signature for the
+    callers; the layout no longer uses it. Created on demand; a hostile id
+    cannot escape the root."""
     root = Path(default_root).expanduser().resolve()
-    ws = (workspace_id or "").strip() or "local"
-    target = (root / ws / "sessions" / str(task_id)).resolve()
+    target = (root / "sessions" / str(task_id)).resolve()
     if not is_inside(target, root):
         raise NotAllowed(f"default session directory escapes the root: {target}")
     target.mkdir(parents=True, exist_ok=True)

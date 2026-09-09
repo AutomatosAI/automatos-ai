@@ -61,6 +61,21 @@ route in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*, mod
 GitHub**, then *Use baseline repo* to import the free library at
 `https://github.com/AutomatosAI/automatos-skills`.
 
+**Your files.** Everything your agents write lives in one folder on your
+machine: `AUTOMATOS_WORKSPACE_DIR` in `.env` (default `./workspaces` next to
+`docker-compose.yml`), mounted as the workspace root — you see `artifacts/`,
+`reports/`, `sessions/`… directly, no workspace-id folder. Put it next to your
+projects folder and the Deliverables Explorer, the chat's Code mode and your
+Claude Code sessions all share the one place:
+
+```
+LOCAL_PROJECTS_DIR=/Users/you/Development
+AUTOMATOS_WORKSPACE_DIR=/Users/you/Development/deliverables
+```
+
+`make up` moves an older `./workspaces/<workspace id>/` layout up one level
+for you, once.
+
 ## 2. Start the platform
 
 ```bash

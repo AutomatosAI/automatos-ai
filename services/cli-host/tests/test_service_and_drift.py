@@ -28,6 +28,9 @@ def test_service_argv_reproduces_the_host_invocation(tmp_path):
     assert argv[1:3] == ["-m", "automatos_cli_host"]
     assert argv[argv.index("--url") + 1] == "http://127.0.0.1:8000"
     assert argv[argv.index("--allow") + 1] == str((tmp_path / "repo").resolve())
+    assert "--default-root" not in argv  # none requested → the host's first root
+    with_root = service.service_argv(_cfg(tmp_path, default_root=tmp_path / "deliverables"))
+    assert with_root[with_root.index("--default-root") + 1] == str((tmp_path / "deliverables").resolve())
     assert "--max-sessions" in argv and argv[argv.index("--max-sessions") + 1] == "2"
     assert "--no-worktrees" in argv and argv[-1] == "--verbose"
     assert "--pair" not in argv and "--install" not in argv  # a service never re-pairs or re-installs

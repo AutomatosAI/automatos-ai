@@ -457,6 +457,9 @@ def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
         "default_folder_explicit": stored.get("default_folder") in DEFAULT_FOLDER_CHOICES,
         "local_projects_dir": projects_dir,
         "projects_mount": (getattr(config, "LOCAL_PROJECTS_MOUNT", "") or None),
+        # The deliverables root on the host (AUTOMATOS_WORKSPACE_DIR as `make up`
+        # exported it) — beside the projects folder in Settings → Session mode.
+        "workspace_dir": configured_workspace_dir(),
         "host_allowed_roots": host_allow_dirs(db, workspace_id),
     }
 
@@ -947,6 +950,19 @@ _DELIVERABLE_TYPE_OVERRIDES = {"report": "document"}
 
 
 PROJECTS_PREFIX = "projects"
+# The explorer root for the deliverables folder itself — the Canvas's own root
+# token (frontend `WORKSPACE_ROOT`), so a session rooted there browses everything.
+WORKSPACE_ROOT_FOLDER = "."
+
+
+def configured_workspace_dir() -> Optional[str]:
+    """The deliverables root on the host, when the stack was started with an
+    ABSOLUTE ``AUTOMATOS_WORKSPACE_DIR`` (what ``make up`` exports). Compose mounts
+    that folder as the local workspace's root, so it is the second anchor for
+    mapping a session's host paths onto the worker's view. A relative value (a
+    plain ``docker compose up`` with the default) means nothing to this process."""
+    raw = (getattr(config, "AUTOMATOS_WORKSPACE_DIR", "") or "").strip().rstrip("/")
+    return raw if raw.startswith("/") else None
 
 
 def _clean_relative(rel: str) -> Optional[str]:
@@ -956,14 +972,27 @@ def _clean_relative(rel: str) -> Optional[str]:
     return rel
 
 
-def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Optional[str] = None) -> Optional[str]:
+def workspace_relative_path(
+    host_path: str,
+    workspace_id: str,
+    projects_dir: Optional[str] = None,
+    workspace_dir: Optional[str] = None,
+) -> Optional[str]:
     """A session's file path on the host → the worker's view of it, or ``None``.
 
-    * ``…/<AUTOMATOS_WORKSPACE_DIR>/<workspace_id>/sessions/68/hello.py`` →
-      ``sessions/68/hello.py`` — the workspace-id segment is the anchor both
-      sides share (the worker's layout is ``<root>/<workspace_id>/<relative>``).
+    * ``…/<workspace_id>/sessions/68/hello.py`` → ``sessions/68/hello.py`` — the
+      workspace-id segment is an anchor both sides share (the nested layout:
+      ``<volume>/<workspace_id>/<relative>``).
+    * ``<AUTOMATOS_WORKSPACE_DIR>/sessions/68/hello.py`` → ``sessions/68/hello.py``
+      — the local edition mounts that folder AS the workspace root (no
+      workspace-id folder on the host), so the folder itself is the anchor.
     * ``<LOCAL_PROJECTS_DIR>/repo/app.py`` → ``projects/repo/app.py`` — the owner's
       projects folder is mounted read-only into the worker under ``projects/``.
+
+    When the deliverables root sits inside the projects folder (or the other way
+    round) the LONGER matching root wins, so ``~/Development/deliverables/reports/x.md``
+    is ``reports/x.md``, not ``projects/deliverables/reports/x.md``. ``workspace_dir``
+    defaults to the configured ``AUTOMATOS_WORKSPACE_DIR`` when absolute.
 
     The host's absolute path means nothing inside this container. ``None`` when
     the file is elsewhere — it then stays a reference in ``runtime_ref.files_touched``.
@@ -973,10 +1002,19 @@ def workspace_relative_path(host_path: str, workspace_id: str, projects_dir: Opt
     idx = path.find(marker)
     if idx >= 0:
         return _clean_relative(path[idx + len(marker):])
-    root = (projects_dir or "").rstrip("/")
-    if root and (path == root or path.startswith(root + "/")):
-        rel = _clean_relative(path[len(root):])
-        return f"{PROJECTS_PREFIX}/{rel}" if rel else None
+    if workspace_dir is None:
+        workspace_dir = configured_workspace_dir()
+    anchors = [
+        (root.rstrip("/"), prefix)
+        for root, prefix in ((workspace_dir, ""), (projects_dir, PROJECTS_PREFIX))
+        if root and root.rstrip("/")
+    ]
+    for root, prefix in sorted(anchors, key=lambda a: len(a[0]), reverse=True):
+        if path == root or path.startswith(root + "/"):
+            rel = _clean_relative(path[len(root):])
+            if not rel:
+                return None
+            return f"{prefix}/{rel}" if prefix else rel
     return None
 
 
@@ -1113,6 +1151,9 @@ def browsable_root(folder: str, workspace_id: str, projects_dir: Optional[str]) 
     root = (projects_dir or "").rstrip("/")
     if root and folder.rstrip("/") == root:
         return PROJECTS_PREFIX
+    workspace_dir = configured_workspace_dir()
+    if workspace_dir and folder.rstrip("/") == workspace_dir:
+        return WORKSPACE_ROOT_FOLDER
     return workspace_relative_path(folder, workspace_id, projects_dir)
 
 

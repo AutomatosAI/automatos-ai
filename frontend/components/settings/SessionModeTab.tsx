@@ -43,10 +43,33 @@ export interface SessionModeSettings {
   default_folder_explicit: boolean
   local_projects_dir: string | null
   projects_mount: string | null
+  /** The deliverables root on the host (AUTOMATOS_WORKSPACE_DIR as `make up` exported it), null when unknown. */
+  workspace_dir: string | null
   host_allowed_roots: string[]
 }
 
-export const PROJECTS_ENV_LINES = (folder: string) => `LOCAL_PROJECTS_DIR=${folder}\nLOCAL_PROJECTS_MOUNT=rw`
+export const PROJECTS_ENV_LINES = (folder: string, deliverables?: string) =>
+  `LOCAL_PROJECTS_DIR=${folder}\nLOCAL_PROJECTS_MOUNT=rw` + (deliverables ? `\nAUTOMATOS_WORKSPACE_DIR=${deliverables}` : '')
+
+/** The deliverables root we suggest for a projects folder: one place, beside the repos. */
+export const suggestedDeliverablesRoot = (projectsFolder: string) => `${projectsFolder.replace(/\/$/, '')}/deliverables`
+
+const inside = (path: string, roots: string[]) => roots.some((r) => path === r || path.startsWith(r.replace(/\/$/, '') + '/'))
+
+/** The one-line state of the deliverables root — what API agents write and where a session with no folder runs. */
+export function describeDeliverablesRoot(s: SessionModeSettings | undefined): { tone: 'ok' | 'warn' | 'muted'; text: string } {
+  if (!s) return { tone: 'muted', text: '…' }
+  if (!s.workspace_dir) {
+    return {
+      tone: 'muted',
+      text: 'The compose default (./workspaces next to docker-compose.yml). Set AUTOMATOS_WORKSPACE_DIR in .env and start with make up to put it beside your projects.',
+    }
+  }
+  if (!inside(s.workspace_dir, s.host_allowed_roots)) {
+    return { tone: 'warn', text: `${s.workspace_dir} — mounted as the workspace root, but your CLI host does not allow it yet: run make cli-host-install again.` }
+  }
+  return { tone: 'ok', text: `${s.workspace_dir} — mounted as the workspace root; sessions without a folder run in sessions/<ticket> inside it.` }
+}
 
 /** The one-line state of the projects folder for the tab. */
 export function describeProjectsFolder(s: SessionModeSettings | undefined): { tone: 'ok' | 'warn' | 'muted'; text: string } {
@@ -117,6 +140,10 @@ export function SessionModeTab() {
   const [hostName, setHostName] = useState('')
   const [saving, setSaving] = useState(false)
   const folderState = describeProjectsFolder(settings.data)
+  const deliverablesState = describeDeliverablesRoot(settings.data)
+  const projectsFolderForEnv = settings.data?.local_projects_dir || '/Users/you/Development'
+  const deliverablesForEnv = settings.data?.workspace_dir || suggestedDeliverablesRoot(projectsFolderForEnv)
+  const envLines = PROJECTS_ENV_LINES(projectsFolderForEnv, deliverablesForEnv)
   const saveDefaultFolder = async (choice: 'projects' | 'sessions') => {
     setSaving(true)
     try {
@@ -244,8 +271,8 @@ export function SessionModeTab() {
                       <CopyButton value={pairing.pair_command} label="Copy the pair command" />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      From the repository root. The host may run sessions in <span className="font-mono">./workspaces</span> and in
-                      your projects folder (below).
+                      From the repository root. The host may run sessions in your deliverables root and in
+                      your projects folder (both below).
                     </p>
                   </div>
                 )}
@@ -266,12 +293,25 @@ export function SessionModeTab() {
                   containers start, so it cannot be changed from a running page. Set it once:
                 </p>
                 <div className="flex items-start gap-2">
-                  <code className="flex-1 whitespace-pre rounded bg-muted px-3 py-2 font-mono text-xs overflow-x-auto">{PROJECTS_ENV_LINES(settings.data?.local_projects_dir || '/Users/you/Development')}</code>
-                  <CopyButton value={PROJECTS_ENV_LINES(settings.data?.local_projects_dir || '/Users/you/Development')} label="Copy the .env lines" />
+                  <code className="flex-1 whitespace-pre rounded bg-muted px-3 py-2 font-mono text-xs overflow-x-auto">{envLines}</code>
+                  <CopyButton value={envLines} label="Copy the .env lines" />
                 </div>
                 <p>
                   then <span className="font-mono">make up</span> (remounts it) and <span className="font-mono">make cli-host-install</span> (lets
                   the host run sessions there). Come back here: the line above turns green.
+                </p>
+              </div>
+              <div className="rounded-lg border border-border/40 p-4 space-y-3 text-xs text-muted-foreground" data-testid="deliverables-root">
+                <p className="text-sm font-medium text-foreground">Your deliverables root</p>
+                <p className={deliverablesState.tone === 'ok' ? 'text-[hsl(var(--success))]' : deliverablesState.tone === 'warn' ? 'text-[hsl(var(--warning))]' : ''} data-testid="deliverables-root-state">
+                  {deliverablesState.text}
+                </p>
+                <p>
+                  Everything your agents write lands here — <span className="font-mono">artifacts/</span>, <span className="font-mono">reports/</span>,
+                  <span className="font-mono">content/</span>, and <span className="font-mono">sessions/&lt;ticket&gt;</span> for a Claude Code session
+                  with no folder of its own. It is mounted as the workspace root, so there is no workspace-id folder on your disk:
+                  Deliverables → Explorer, the chat&apos;s Code mode and your sessions all show this one place. Put it beside your
+                  projects folder (<span className="font-mono">AUTOMATOS_WORKSPACE_DIR</span> in the <span className="font-mono">.env</span> lines above).
                 </p>
               </div>
               <div className="rounded-lg border border-border/40 p-4 space-y-3 text-xs text-muted-foreground" data-testid="default-folder">
@@ -302,7 +342,7 @@ export function SessionModeTab() {
                       onChange={() => saveDefaultFolder('sessions')}
                     />
                     <span>
-                      <span className="text-foreground">A fresh folder per ticket</span> — <span className="font-mono">./workspaces/&lt;workspace&gt;/sessions/&lt;ticket&gt;</span>.
+                      <span className="text-foreground">A fresh folder per ticket</span> — <span className="font-mono">sessions/&lt;ticket&gt;</span> inside your deliverables root.
                       Keeps experiments apart; whatever the session writes there is registered as the ticket&apos;s deliverables.
                     </span>
                   </label>
