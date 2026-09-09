@@ -57,6 +57,10 @@ the models you want — "Kimi K3 · NVIDIA" is a different route from
 route in **Settings → Orchestrator** (or on any agent): provider *NVIDIA*, model
 *Kimi K3*. (PRD-236)
 
+**Skills.** A fresh install has none. **Marketplace → Capabilities → Import from
+GitHub**, then *Use baseline repo* to import the free library at
+`https://github.com/AutomatosAI/automatos-skills.git`.
+
 ## 2. Start the platform
 
 ```bash

@@ -20,6 +20,9 @@ import { useViewMode } from '@/hooks/use-view-mode'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { useSystemRole } from '@/contexts/role-context'
+import { GitHubImportModal } from './github-import-modal'
+import { BASELINE_SKILLS_REPO_LABEL, BASELINE_SKILLS_REPO_URL } from '@/lib/baseline-skills'
 
 // ===================================================================
 // Types
@@ -66,6 +69,10 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
   const [enabling, setEnabling] = useState<number | null>(null)
   const [disabling, setDisabling] = useState<number | null>(null)
   const [localSearch, setLocalSearch] = useState('')
+  // A fresh install has no skills. Admins (the local operator is super_admin)
+  // get a one-click import of the free baseline library from the empty state.
+  const [showImport, setShowImport] = useState(false)
+  const { isAdmin } = useSystemRole()
 
   const { data: iconMappings = {} } = useSystemIcons()
 
@@ -243,8 +250,13 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
           <p className="text-muted-foreground mb-4">
             {(searchQuery || localSearch)
               ? `No skills match "${searchQuery || localSearch}"`
-              : 'No marketplace skills available yet. Import skills via Plugins > Import from GitHub.'}
+              : `No marketplace skills yet. Start with the free baseline skills at ${BASELINE_SKILLS_REPO_LABEL} — Capabilities › Plugins › Import from GitHub.`}
           </p>
+          {isAdmin && !(searchQuery || localSearch) && (
+            <Button size="sm" onClick={() => setShowImport(true)}>
+              Import the baseline skills
+            </Button>
+          )}
         </div>
       ) : viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -320,6 +332,15 @@ export function MarketplaceSkillsTab({ searchQuery, workspaceId }: MarketplaceSk
             </div>
           )}
         </div>
+      )}
+
+      {isAdmin && (
+        <GitHubImportModal
+          open={showImport}
+          onClose={() => setShowImport(false)}
+          onImportComplete={fetchAvailable}
+          initialUrl={BASELINE_SKILLS_REPO_URL}
+        />
       )}
     </div>
   )

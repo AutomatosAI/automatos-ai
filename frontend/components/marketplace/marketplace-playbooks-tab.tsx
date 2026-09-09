@@ -19,7 +19,7 @@ import { Separator } from '@/components/ui/separator'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
-import { useUser } from '@/lib/auth-hooks'
+import { useSystemRole } from '@/contexts/role-context'
 import { useInstallPlaybookFromMarketplace } from '@/hooks/use-playbook-api'
 import { ViewPlaybookModal } from '@/components/workflows/view-playbook-modal'
 
@@ -35,13 +35,15 @@ export function MarketplacePlaybooksTab({ searchQuery }: MarketplacePlaybooksTab
   const [showViewModal, setShowViewModal] = useState(false)
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
-  const { user } = useUser()
   const queryClient = useQueryClient()
   const installMutation = useInstallPlaybookFromMarketplace()
   const { data: iconMappings = {} } = useSystemIcons()
 
   // Admin check (same pattern as agents tab)
-  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
+  // Admin controls follow the backend's system_role (super_admin ⊇ admin), the
+  // same gate the admin routes enforce. The local operator is super_admin, so a
+  // fresh local install sees Import from GitHub; a Clerk email domain never did.
+  const { isAdmin } = useSystemRole()
 
   const handleApprove = async (e: React.MouseEvent, recipeId: number) => {
     e.stopPropagation()
