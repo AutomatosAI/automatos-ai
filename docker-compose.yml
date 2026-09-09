@@ -18,8 +18,14 @@
 # Profiles:
 #   - Default: postgres, redis, minio (+ minio-init), backend, frontend and the
 #     workspace-worker (Code Canvas runtime). The worker's files live in a host
-#     directory bind-mounted at /workspaces — AUTOMATOS_WORKSPACE_DIR in .env,
-#     default ./workspaces next to this file, created on first boot (PRD-233 S1).
+#     directory — AUTOMATOS_WORKSPACE_DIR in .env, default ./workspaces next to
+#     this file, created on first boot (PRD-233 S1). It is mounted as THE local
+#     workspace's root (/workspaces/<DEFAULT_WORKSPACE_ID>), so on your machine
+#     it holds artifacts/, reports/, sessions/… directly — no workspace-id
+#     folder in between. Point it next to your projects folder
+#     (e.g. LOCAL_PROJECTS_DIR=~/Development, AUTOMATOS_WORKSPACE_DIR=~/Development/deliverables)
+#     and Deliverables → Explorer, the chat's Code mode and your Claude Code
+#     sessions all read and write the one place.
 #   - All: Add --profile all (adminer database GUI, gotenberg document conversion)
 # =============================================================================
 
@@ -194,6 +200,11 @@ services:
       # path mapping only — the folder itself is mounted into the workspace-worker).
       LOCAL_PROJECTS_DIR: ${LOCAL_PROJECTS_DIR:-}
       LOCAL_PROJECTS_MOUNT: ${LOCAL_PROJECTS_MOUNT:-ro}
+      # The deliverables root on the HOST (the folder mounted as the local
+      # workspace's root, below) — a string for path mapping and for Settings →
+      # Session mode. `make up` exports it absolute; a relative value (plain
+      # `docker compose up`) is shown but not used for mapping.
+      AUTOMATOS_WORKSPACE_DIR: ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}
 
       # Object storage — local MinIO via the S3 seam (PRD-176 F089).
       # S3_ENDPOINT_URL points boto at MinIO. The store's credentials are mapped
@@ -245,8 +256,9 @@ services:
       # The workspace-worker's host directory, read-only (PRD-233 S1): the
       # backend's WORKSPACE_VOLUME_PATH view of agent deliverables. The file
       # browser and Code Canvas go through the worker's HTTP API instead
-      # (WORKER_INTERNAL_URL in envs/api.defaults).
-      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces:ro
+      # (WORKER_INTERNAL_URL in envs/api.defaults). Mounted as the local
+      # workspace's root (same shape as the worker's mount below).
+      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -306,12 +318,14 @@ services:
   # ===========================================================================
   # Runs in the DEFAULT profile: agents act on files that live on YOUR machine.
   # The host directory ${AUTOMATOS_WORKSPACE_DIR:-./workspaces} is bind-mounted
-  # at /workspaces (created on first boot). Each workspace gets
-  # /workspaces/<workspace_id>/; every Code Canvas tool call is confined to it
-  # (canvas_confinement.py) and mutations still need approval
-  # (canvas_approvals.py) — local is not unguarded. AUTOMATOS_WORKSPACE_DIR in
-  # .env is the ONE dial that widens host access. The backend reaches this
-  # service over the compose network at WORKER_INTERNAL_URL (envs/api.defaults).
+  # as the local workspace's root, /workspaces/<DEFAULT_WORKSPACE_ID> (created
+  # on first boot): the worker still sees /workspaces/<workspace_id>/…, your
+  # machine sees artifacts/, reports/, sessions/… directly. Every Code Canvas
+  # tool call is confined to that root (canvas_confinement.py) and mutations
+  # still need approval (canvas_approvals.py) — local is not unguarded.
+  # AUTOMATOS_WORKSPACE_DIR in .env is the ONE dial that widens host access.
+  # The backend reaches this service over the compose network at
+  # WORKER_INTERNAL_URL (envs/api.defaults).
   # ===========================================================================
   workspace-worker:
     build:
@@ -355,8 +369,10 @@ services:
       LOG_RELAY_ENABLED: "false"
       SERVICE_NAME: workspace-worker
     volumes:
-      # Host directory (bind mount, read-write) — the ONE host-access dial.
-      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces
+      # Host directory (bind mount, read-write) — the ONE host-access dial,
+      # mounted as THE local workspace's root (no <workspace_id> folder on the
+      # host). `make up` migrates an older ./workspaces/<workspace_id>/ layout.
+      - ${AUTOMATOS_WORKSPACE_DIR:-./workspaces}:/workspaces/${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}
       # PRD-234 S2 (local edition): your own projects folder, read-only, shown by
       # Deliverables → Explorer under projects/. Sessions write to it through the
       # CLI host on your machine, never through this container. Nested inside the

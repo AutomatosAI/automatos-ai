@@ -355,12 +355,16 @@ def test_policy_lets_a_session_run_its_own_code(tmp_path):
 
 def test_default_session_cwd_is_the_workspace_sessions_folder(tmp_path):
     """PRD-234 S2: a ticket without a working directory runs where the
-    Deliverables explorer looks — <root>/<workspace id>/sessions/<ticket>."""
+    Deliverables explorer looks — <root>/sessions/<ticket>. The root IS the
+    workspace root since 2026-09-09 (compose mounts AUTOMATOS_WORKSPACE_DIR as
+    /workspaces/<workspace id>), so no workspace-id folder on the host."""
     target = allowlist.default_session_cwd(str(tmp_path), "00000000-0000-0000-0000-0000000000c1", "68")
-    assert target == (tmp_path / "00000000-0000-0000-0000-0000000000c1" / "sessions" / "68").resolve()
+    assert target == (tmp_path / "sessions" / "68").resolve()
     assert target.is_dir()
+    # the workspace id no longer shapes the path — a hostile one cannot escape either
+    assert allowlist.default_session_cwd(str(tmp_path), "../escape", "69") == (tmp_path / "sessions" / "69").resolve()
     with pytest.raises(allowlist.NotAllowed):
-        allowlist.default_session_cwd(str(tmp_path), "../escape", "68")
+        allowlist.default_session_cwd(str(tmp_path), "00000000-0000-0000-0000-0000000000c1", "../../escape")
 
 
 def test_emit_subject_is_the_command_or_path_only():

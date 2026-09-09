@@ -178,7 +178,7 @@ No login. Add one model key and run the seeded *Two-minute brief* Playbook:
 - `NVIDIA_API_KEY` from build.nvidia.com runs the hosted open models for free — in Marketplace → LLMs open the NVIDIA tab, sync once, add a model;
 - keys can also be added later under Settings → API Keys.
 
-To run your own Claude Code as an agent: set `CLI_RUNTIME_ENABLED=true` and `LOCAL_PROJECTS_DIR=/path/to/your/projects` in `.env`, `make up`, then Settings → Session mode → *Get a pairing code* and run the command it shows. [QUICKSTART.md](QUICKSTART.md) is the short walkthrough; [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md) covers every service, dial, session mode in depth, and what the local edition does not include.
+To run your own Claude Code as an agent: set `CLI_RUNTIME_ENABLED=true` and `LOCAL_PROJECTS_DIR=/path/to/your/projects` in `.env`, `make up`, then Settings → Session mode → *Get a pairing code* and run the command it shows. Everything your agents write lands in one folder on your machine — `AUTOMATOS_WORKSPACE_DIR`, e.g. `/path/to/your/projects/deliverables` — which Deliverables → Explorer, the chat's Code mode and your sessions share. [QUICKSTART.md](QUICKSTART.md) is the short walkthrough; [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md) covers every service, dial, session mode in depth, and what the local edition does not include.
 
 ---
 

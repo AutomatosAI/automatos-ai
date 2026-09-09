@@ -21,4 +21,4 @@ Invariants (PRD-234 §Terms — every one has a source guard in the tests):
 Standard library only, Python 3.9+, so ``make cli-host`` needs no virtualenv.
 """
 
-__version__ = "0.5.0"  # 0.5.0: results and TerminalClosed carry the turn's token usage; 0.3.0: persona + skills in the session prompt (PRD-239)
+__version__ = "0.6.0"  # 0.6.0: a ticket with no folder runs in <root>/sessions/<ticket> (the deliverables root IS the workspace root); 0.5.0: results and TerminalClosed carry the turn's token usage; 0.3.0: persona + skills in the session prompt (PRD-239)

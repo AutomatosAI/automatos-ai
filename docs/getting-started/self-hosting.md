@@ -180,11 +180,20 @@ edits files and runs commands. In the local edition it runs in the default
 profile and its files live **on your machine**:
 
 - `AUTOMATOS_WORKSPACE_DIR` in `.env` (default `./workspaces`, next to
-  `docker-compose.yml`, created on first boot, gitignored) is bind-mounted at
-  `/workspaces` — read-write in the worker, read-only in the backend. It is
-  the one dial that decides what the agents can touch: point it at a
-  different folder to hand them that folder.
-- Each workspace gets its own subdirectory, `/workspaces/<workspace_id>/`
+  `docker-compose.yml`, created on first boot, gitignored) is bind-mounted as
+  the local workspace's root, `/workspaces/<workspace_id>/` — read-write in
+  the worker, read-only in the backend. On your machine the folder holds
+  `artifacts/`, `reports/`, `content/`, `sessions/`… directly: there is no
+  workspace-id folder on disk (before 2026-09-09 there was; `make up` moves
+  that layout up one level, once). It is the one dial that decides what the
+  agents can touch: point it at a different folder to hand them that folder.
+  Recommended layout — the deliverables root beside your projects folder, so
+  the Deliverables Explorer, the chat's Code mode and your Claude Code sessions
+  share one place: `LOCAL_PROJECTS_DIR=/Users/you/Development`,
+  `AUTOMATOS_WORKSPACE_DIR=/Users/you/Development/deliverables`. (With the
+  deliverables root inside the projects folder, the Explorer also lists it
+  under `projects/` — the same files twice, harmless.)
+- Inside the containers each workspace is `/workspaces/<workspace_id>/`
   (the local workspace id is the `DEFAULT_WORKSPACE_ID` value in
   `envs/api.defaults`). Every Canvas tool call is re-bound to that root
   before it runs: `..` traversal, symlink escapes, null bytes and shell
@@ -527,7 +536,7 @@ session agent in the workspace.
 
 `make cli-host` registers `./workspaces` (the compose default). A ticket whose
 agent names no working directory runs in
-`./workspaces/<workspace id>/sessions/<ticket>` — the folder **Deliverables →
+`<AUTOMATOS_WORKSPACE_DIR>/sessions/<ticket>` — the folder **Deliverables →
 Explorer** shows live. When the ticket finishes, every file the session wrote
 there is registered as one of the ticket's deliverables (the ticket's
 Deliverables block, the Deliverables gallery) and the task report carries the

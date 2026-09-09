@@ -73,13 +73,15 @@ def resolve_allowed(cwd: Optional[str], roots: Iterable[str], *, default_root: O
 
 def default_session_cwd(default_root: str, workspace_id: str, task_id: str) -> Path:
     """Where a ticket with no working directory runs:
-    ``<root>/<workspace_id>/sessions/<task_id>`` — the workspace-worker's layout
-    for this workspace, so Deliverables → Explorer shows the session's files live
-    and the backend can register them as the ticket's deliverables (PRD-234 S2).
-    Created on demand; a hostile id cannot escape the root."""
+    ``<root>/sessions/<task_id>`` — the root is the deliverables folder compose
+    mounts AS the workspace's root (AUTOMATOS_WORKSPACE_DIR, 2026-09-09: no
+    workspace-id folder on the host any more), so Deliverables → Explorer shows
+    the session's files live and the backend can register them as the ticket's
+    deliverables (PRD-234 S2). ``workspace_id`` stays in the signature for the
+    callers; the layout no longer uses it. Created on demand; a hostile id
+    cannot escape the root."""
     root = Path(default_root).expanduser().resolve()
-    ws = (workspace_id or "").strip() or "local"
-    target = (root / ws / "sessions" / str(task_id)).resolve()
+    target = (root / "sessions" / str(task_id)).resolve()
     if not is_inside(target, root):
         raise NotAllowed(f"default session directory escapes the root: {target}")
     target.mkdir(parents=True, exist_ok=True)

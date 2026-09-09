@@ -90,6 +90,7 @@ def test_the_default_is_the_projects_folder_when_one_is_configured(monkeypatch):
     assert out == {
         "default_folder": "projects", "default_folder_explicit": False,
         "local_projects_dir": "/Users/me/Development", "projects_mount": "rw",
+        "workspace_dir": None,
         "host_allowed_roots": ["/Users/me/Development"],
     }
     assert svc.default_session_folder(_DB(workspace=_ws(None)), WS) == "/Users/me/Development"
@@ -144,3 +145,13 @@ def test_the_settings_routes_are_declared_in_the_mount_manifest():
     manifest = json.loads((_ORCH / "reports" / "route-manifest.json").read_text())
     for method in ("GET", "PUT"):
         assert {"path": "/api/v1/cli-hosts/settings", "method": method} in manifest["routes"]
+
+
+def test_the_settings_carry_the_deliverables_root_only_when_absolute(monkeypatch):
+    monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_DIR", "/Users/me/Development", raising=False)
+    monkeypatch.setattr(svc, "host_allow_dirs", lambda db, ws: [])
+    monkeypatch.setattr(svc.config, "AUTOMATOS_WORKSPACE_DIR", "/Users/me/Development/deliverables/", raising=False)
+    assert svc.session_mode_settings(_DB(workspace=_ws(None)), WS)["workspace_dir"] == "/Users/me/Development/deliverables"
+    # a plain `docker compose up` passes the relative compose default: display-only, never an anchor
+    monkeypatch.setattr(svc.config, "AUTOMATOS_WORKSPACE_DIR", "./workspaces", raising=False)
+    assert svc.session_mode_settings(_DB(workspace=_ws(None)), WS)["workspace_dir"] is None
