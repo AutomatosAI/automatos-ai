@@ -6,28 +6,33 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/67-CTO-AGENT-PLATFORM-BUILDER.md](docs/PRDS/67-CTO-AGENT-PLATFORM-BUILDER.md)
+- [docs/PRDS/PRD-226-AUTO-MANAGER-DOCTRINE.md](docs/PRDS/PRD-226-AUTO-MANAGER-DOCTRINE.md)
 - [docs/auto-cto-custom-soul.txt](docs/auto-cto-custom-soul.txt)
 - [docs/auto-cto-soul.md](docs/auto-cto-soul.md)
-- [frontend/components/agents/agent-configuration-modal.tsx](frontend/components/agents/agent-configuration-modal.tsx)
-- [frontend/components/agents/agent-configuration.tsx](frontend/components/agents/agent-configuration.tsx)
-- [frontend/components/agents/agent-details-modal.tsx](frontend/components/agents/agent-details-modal.tsx)
-- [frontend/components/agents/agent-roster.tsx](frontend/components/agents/agent-roster.tsx)
-- [frontend/components/agents/create-agent-modal.tsx](frontend/components/agents/create-agent-modal.tsx)
-- [frontend/components/chatbot/agent-selector.tsx](frontend/components/chatbot/agent-selector.tsx)
-- [frontend/components/documents/analytics-tab.tsx](frontend/components/documents/analytics-tab.tsx)
-- [frontend/components/documents/processing-tab.tsx](frontend/components/documents/processing-tab.tsx)
-- [frontend/lib/agent-constants.ts](frontend/lib/agent-constants.ts)
 - [orchestrator/alembic/versions/20260226_add_cto_agent_columns.py](orchestrator/alembic/versions/20260226_add_cto_agent_columns.py)
 - [orchestrator/alembic/versions/20260226_merge_heads_for_cto_agent.py](orchestrator/alembic/versions/20260226_merge_heads_for_cto_agent.py)
-- [orchestrator/alembic/versions/add_job_title_to_agents.py](orchestrator/alembic/versions/add_job_title_to_agents.py)
-- [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py](orchestrator/alembic/versions/agent_public_id_and_slug_fix.py)
-- [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py](orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py)
-- [orchestrator/api/agents.py](orchestrator/api/agents.py)
 - [orchestrator/consumers/chatbot/cto_prompt_builder.py](orchestrator/consumers/chatbot/cto_prompt_builder.py)
-- [orchestrator/core/models/core.py](orchestrator/core/models/core.py)
+- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
+- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
+- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
 - [orchestrator/core/seeds/auto-cto-custom-soul.txt](orchestrator/core/seeds/auto-cto-custom-soul.txt)
 - [orchestrator/core/seeds/seed_cto_agent.py](orchestrator/core/seeds/seed_cto_agent.py)
-- [orchestrator/core/utils/agent_resolver.py](orchestrator/core/utils/agent_resolver.py)
+- [orchestrator/core/services/auto_autonomy.py](orchestrator/core/services/auto_autonomy.py)
+- [orchestrator/modules/coordination/dispatch_contract.py](orchestrator/modules/coordination/dispatch_contract.py)
+- [orchestrator/modules/tools/discovery/actions_autonomy.py](orchestrator/modules/tools/discovery/actions_autonomy.py)
+- [orchestrator/modules/tools/discovery/handlers_autonomy.py](orchestrator/modules/tools/discovery/handlers_autonomy.py)
+- [orchestrator/modules/tools/execution/exec_research.py](orchestrator/modules/tools/execution/exec_research.py)
+- [orchestrator/tests/security/test_nl2sql_tenancy.py](orchestrator/tests/security/test_nl2sql_tenancy.py)
+- [orchestrator/tests/security/test_w3_full_autonomy_gate.py](orchestrator/tests/security/test_w3_full_autonomy_gate.py)
+- [orchestrator/tests/test_harness_governance_gate.py](orchestrator/tests/test_harness_governance_gate.py)
+- [orchestrator/tests/test_nl2sql_agent_path.py](orchestrator/tests/test_nl2sql_agent_path.py)
+- [orchestrator/tests/test_nl2sql_semantic_audit_templates.py](orchestrator/tests/test_nl2sql_semantic_audit_templates.py)
+- [orchestrator/tests/test_prd143_manifest_parity.py](orchestrator/tests/test_prd143_manifest_parity.py)
+- [orchestrator/tests/test_prd232_us001_dispatcher_survives_route.py](orchestrator/tests/test_prd232_us001_dispatcher_survives_route.py)
+- [orchestrator/tests/test_prd232_us002_flag_split.py](orchestrator/tests/test_prd232_us002_flag_split.py)
+- [orchestrator/tests/test_us014_graph_router_delegation.py](orchestrator/tests/test_us014_graph_router_delegation.py)
+- [orchestrator/tests/test_us015_registry_intent_filter.py](orchestrator/tests/test_us015_registry_intent_filter.py)
+- [orchestrator/tests/test_w3_auto_autonomy_service.py](orchestrator/tests/test_w3_auto_autonomy_service.py)
 
 </details>
 
@@ -35,132 +40,152 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Agent Personas define the personality, behavior, and voice of AI agents in the Automatos AI platform. A persona consists of a system prompt, voice profile, and behavioral metadata that shapes how an agent communicates and approaches tasks. The system supports a multi-tier approach: predefined global personas, custom workspace-level personas, and specialized **System Agents** (like the Auto CTO) that possess platform-wide awareness and technical depth.
+Agent Personas define the personality, behavior, and voice of AI agents in the Automatos AI platform. A persona consists of a system prompt, voice profile, and behavioral metadata that shapes how an agent communicates and approaches tasks. The system supports a multi-tier approach: predefined global personas, custom workspace-level personas, and specialized **System Agents** (like the Auto CTO) that possess platform-wide awareness and code-level consciousness.
 
 This document covers:
-- The `Agent` and `Persona` data structures.
-- The three-mode persona selection system (None, Predefined, Custom).
-- **System Agents**: Implementation of the "Auto" workspace orchestrator and the CTO persona.
-- **Voice Profiles**: Integration of auditory identities and selection logic.
-- Implementation of persona selection via the `AgentConfigurationModal`.
+- The `Agent` data structure and its role in the persona lifecycle [orchestrator/core/models/core.py:183-261]().
+- The three-mode persona system (None, Predefined, Custom) and the personality module [orchestrator/consumers/chatbot/personality.py:1-124]().
+- **System Agents**: Implementation of the Auto CTO seed agent, role-based persona injection, and custom soul loading [orchestrator/core/seeds/seed_cto_agent.py:1-115]().
+- **Voice Profiles**: Management of audio profiles and integration with agent settings.
+- Implementation of persona selection and category mapping [frontend/lib/agent-constants.ts:25-65]().
 
-**Sources:** [orchestrator/core/models/core.py:228-255](), [frontend/components/agents/agent-configuration-modal.tsx:139-156](), [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py:42-76]()
+**Sources:** [orchestrator/core/models/core.py:183-261](), [orchestrator/consumers/chatbot/personality.py:1-124](), [orchestrator/core/seeds/seed_cto_agent.py:1-115]()
 
 ---
 
 ## Persona System Architecture
 
-The persona system bridges the gap between raw LLM capabilities and specific professional roles. While standard agents are workspace-scoped, System Agents are global entities or platform-seeded defaults with specific `slug` patterns.
+The persona system bridges the gap between raw LLM capabilities and specific professional roles. While standard agents are workspace-scoped, System Agents are global entities with specialized privileges.
 
-### Persona Modes and Agent Types
+### Persona Modes and System Types
 
 | Mode / Type | Backend Logic | Visibility | Use Case |
 | :--- | :--- | :--- | :--- |
-| **None** | Default platform identity. | Workspace | Purely functional utility agents. |
-| **Predefined** | Uses `system_prompt` from `/api/personas`. | Workspace | Standard roles (e.g., "Researcher", "Support"). |
-| **Custom** | Uses unique `custom_persona_prompt`. | Workspace | Highly specialized behaviors. |
-| **System Agent** | `is_system_agent=True` + unique `slug`. | Global/System | Workspace Orchestrator (Auto), CTO, Infrastructure. |
+| **None** | Default platform identity based on `agent_type`. | Workspace | Purely functional utility agents. |
+| **Predefined** | Uses `system_prompt` from a shared persona library (e.g., `chatbot-friendly`, `chatbot-technical`) [orchestrator/consumers/chatbot/personality.py:105-110](). | Workspace | Standard roles (e.g., customer support, data analyst). |
+| **Custom** | Uses a unique `custom_soul` or prompt provided by the user [orchestrator/consumers/chatbot/personality.py:8-10](). | Workspace | Highly specialized behaviors or domain-specific tasks. |
+| **System Agent** | `is_system_agent=True` with specialized `agent_type='system'` [orchestrator/core/seeds/seed_cto_agent.py:78-80](). | Global | Platform CTO, admin tools, infrastructure monitoring. |
 
-**Sources:** [frontend/components/agents/agent-configuration-modal.tsx:140-142](), [orchestrator/core/models/core.py:246-248](), [frontend/lib/agent-constants.ts:48-65]()
+**Sources:** [orchestrator/consumers/chatbot/personality.py:8-110](), [orchestrator/core/models/core.py:202-215](), [orchestrator/core/seeds/seed_cto_agent.py:78-80]()
 
-### Data Flow: Persona Selection & Assignment
+### Data Flow: Persona Initialization and Resolution
 
-When an agent is created or configured, the persona is assigned either by selecting a template from the global persona registry or by providing a custom prompt string.
+When an agent processes a prompt or chat message, the `AutomatosPersonality` module resolves its persona based on workspace orchestrator settings and agent configuration.
 
-**Title: Agent Persona Configuration Flow**
+**Title: Persona Resolution and Injection Flow**
 ```mermaid
 graph TD
-    subgraph "Frontend: AgentConfigurationModal"
-        UI["Persona Tab"] --> MODE{"Persona Mode?"}
-        MODE -- "Predefined" --> PL["Fetch /api/personas"]
-        MODE -- "Custom" --> CP["Textarea: custom_persona_prompt"]
-        PL --> SEL["Select Persona Template"]
+    subgraph "Natural Language Space"
+        Req["User Chat Request"] --> ChatApi["api/chat.py"]
     end
 
-    subgraph "Backend: Agent API"
-        SEL --> API["PUT /api/agents/{id}"]
-        CP --> API
-        API --> DB["Update agents Table"]
+    subgraph "Code Entity Space"
+        ChatApi --> LoadOrch["load_orchestrator_settings(workspace_id)"]
+        LoadOrch --> Cache["_orch_cache TTL Store"]
+        LoadOrch --> DB["Workspace Model Settings JSONB"]
+        
+        LoadOrch --> Pers["AutomatosPersonality.get_base_system_prompt()"]
+        Pers --> ModeEval{"personality_mode"}
+        
+        ModeEval -- "custom" --> Soul["custom_soul prompt"]
+        ModeEval -- "predefined/preset" --> Reg["prompt_registry.get_raw(slug)"]
+        Reg --> Fallback["_PERSONALITY_MAP defaults"]
+        
+        Soul --> PromptAssembly["Assembled System Prompt"]
+        Fallback --> PromptAssembly
     end
 
-    subgraph "Code Entities"
-        DB --> ENTITY["Agent Model"]
-        ENTITY -- "use_custom_persona" --> BOOL["Boolean"]
-        ENTITY -- "custom_persona_prompt" --> TXT["Text"]
-    end
+    ChatApi -.-> LoadOrch
+    PromptAssembly -.-> LLM["LLM Client Execution"]
 ```
-**Sources:** [frontend/components/agents/agent-configuration-modal.tsx:139-156](), [orchestrator/api/agents.py:174-210](), [orchestrator/core/models/core.py:246-247]()
+**Sources:** [orchestrator/consumers/chatbot/personality.py:36-172](), [orchestrator/core/models/workspaces.py:1-50]()
+
+---
+
+## Personality Module & Presets
+
+The `AutomatosPersonality` class manages workspace-level personality configuration and builds base system prompts dynamically [orchestrator/consumers/chatbot/personality.py:119-147]().
+
+### Workspace Settings & Cache
+Workspace orchestrator configurations are loaded with a Time-To-Live (TTL) cache to avoid hitting the database on every message exchange:
+- Defaults include `personality_mode: friendly`, `communication_style: balanced`, `proactive_level: notify`, and `thinking_level: medium` [orchestrator/consumers/chatbot/personality.py:27-33]().
+- `load_orchestrator_settings(workspace_id: str)` checks `_orch_cache` before querying the `Workspace` model's JSONB `settings` field [orchestrator/consumers/chatbot/personality.py:36-68]().
+
+### Personality Presets
+The system defines built-in persona blocks mapping to behavioral archetypes:
+- **Friendly**: Warm, approachable, memory-oriented, action-biased (`_FRIENDLY_PERSONALITY`) [orchestrator/consumers/chatbot/personality.py:75-81]().
+- **Professional**: Polished, enterprise-appropriate, structured, risk-proactive (`_PROFESSIONAL_PERSONALITY`) [orchestrator/consumers/chatbot/personality.py:83-89]().
+- **Technical**: Developer-focused, precise, code-first, step-by-step reasoning (`_TECHNICAL_PERSONALITY`) [orchestrator/consumers/chatbot/personality.py:91-97]().
+- **Communication Suffixes**: Modifies verbosity via `_COMMUNICATION_SUFFIX` for `concise`, `balanced`, or `detailed` styles [orchestrator/consumers/chatbot/personality.py:112-116]().
+
+**Sources:** [orchestrator/consumers/chatbot/personality.py:27-116]()
+
+---
+
+## System Agents: The Auto CTO Seed Agent
+
+System agents represent deeply embedded platform personas. The primary example is the **Auto CTO** (`auto-cto`), seeded into the platform via `seed_cto_agent.py` [orchestrator/core/seeds/seed_cto_agent.py:1-115]().
+
+### Auto CTO Architecture and Persona
+The Auto CTO is initialized as an administrative system agent with direct access to platform architecture knowledge, database schemas, and multi-agent coordination frameworks [orchestrator/core/seeds/seed_cto_agent.py:68-115]().
+- **Soul Document**: Loaded from `auto-cto-custom-soul.txt`, defining its persona as an Irish technical lead made of code, direct dry wit, and strict engineering opinions [orchestrator/core/seeds/seed_cto_agent.py:25-40]().
+- **Configuration**: Stored with `is_system_agent=True`, `required_role='admin'`, and a customized configuration containing architectural living summaries (FastAPI, Redis, PostgreSQL, S3 Vectors, Universal Router) [orchestrator/core/seeds/seed_cto_agent.py:78-90]().
+
+**Title: Auto CTO Seed and Execution Lifecycle**
+```mermaid
+graph TD
+    subgraph "Initialization Space"
+        SeedRunner["python -m core.seeds.seed_cto_agent"] --> LoadSoul["_load_soul_document()"]
+        LoadSoul --> ReadTxt["Read auto-cto-custom-soul.txt"]
+        ReadTxt --> UPSERT["Database Upsert on Agent.slug='auto-cto'"]
+    end
+
+    subgraph "Runtime & Authority Space"
+        UPSERT --> AgentModel["Agent Model (is_system_agent=True)"]
+        AgentModel --> Config["Configuration JSON (extra_context, suggested_model)"]
+        Config --> Execution["Auto CTO Runtime Governor"]
+    end
+
+    ReadTxt -.-> SeedRunner
+    UPSERT -.-> AgentModel
+```
+**Sources:** [orchestrator/core/seeds/seed_cto_agent.py:25-115](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-87]()
+
+**Sources:** [orchestrator/core/seeds/seed_cto_agent.py:1-115](), [orchestrator/core/seeds/auto-cto-custom-soul.txt:1-87]()
 
 ---
 
 ## Implementation Details
 
-### 1. System Agents (Auto & CTO)
-The platform seeds a specialized "Auto" agent for every workspace to act as the primary orchestrator.
-- **The Auto CTO Persona**: Defined by a "Soul Document" that establishes a technical Irish tech-lead personality [docs/auto-cto-custom-soul.txt:1-28]().
-- **Personality Traits**: Sharp, direct, dry wit, and "Dublin tech meetup energy" [orchestrator/core/seeds/auto-cto-custom-soul.txt:21-28]().
-- **Operational Logic**: Separates product intent from platform behavior and observability [docs/auto-cto-custom-soul.txt:29-39]().
-- **Seeding Mechanism**: The `seed_auto_agents_existing_workspaces` migration backfills the Auto agent for all workspaces using a standardized prompt and the `auto-{workspace_id}` slug [orchestrator/alembic/versions/seed_auto_agents_existing_workspaces.py:40-76]().
+### 1. Persona Management in UI
+The `AgentConfigurationModal` and `CreateAgentModal` manage user-facing persona configurations:
+- **Category Mapping**: UI categories map to backend `agent_type` values via `CATEGORY_TO_DB_MAP` [frontend/lib/agent-constants.ts:48-65]().
+- **Persona Library**: Fetches predefined templates providing `system_prompt` and `suggested_temperature` [frontend/components/agents/create-agent-modal.tsx:129-142]().
+- **Custom Prompts**: Allows switching to custom mode, persisting prompts into the agent's database entity [frontend/components/agents/agent-configuration-modal.tsx:142-147]().
 
 ### 2. Voice Profiles
-The voice system allows agents to have distinct auditory identities.
-- **Selection**: Managed within the `AgentConfigurationModal` under the `PersonaMode` logic [frontend/components/agents/agent-configuration-modal.tsx:153-156]().
-- **Data Binding**: The `selectedVoiceProfileId` state is mapped to the agent's configuration during the save operation [frontend/components/agents/agent-configuration-modal.tsx:155]().
+Voice profiles link agents to audio synthesis engines (such as Retell transport integrations):
+- **State Tracking**: `AgentConfigurationModal` manages `selectedVoiceProfileId` and loading states [frontend/components/agents/agent-configuration-modal.tsx:154-157]().
+- **Persistence**: Voice configurations are stored inside the agent's JSONB `configuration` field [orchestrator/core/models/core.py:217-235]().
 
-### 3. Category & Role Mapping
-Personas are categorized to help users find relevant templates.
-- **Category Resolution**: The `getAgentCategoryDisplay` function resolves categories based on `marketplace_category`, `configuration.category`, or the underlying `agent_type` [frontend/lib/agent-constants.ts:118-130]().
-- **Role Lines**: The UI displays a "Role Line" combining the category and a custom `job_title` (e.g., "Research · Senior Market Analyst") [frontend/lib/agent-constants.ts:137-141]().
-
-**Sources:** [frontend/lib/agent-constants.ts:25-42](), [frontend/components/agents/agent-roster.tsx:58-93](), [orchestrator/core/models/core.py:236-237]()
+**Sources:** [frontend/lib/agent-constants.ts:48-65](), [frontend/components/agents/create-agent-modal.tsx:129-142](), [orchestrator/core/models/core.py:217-235]()
 
 ---
 
 ## Technical Data Structures
 
-### Agent Database Model
-The `Agent` class in the core models includes fields specifically for persona management.
+### Agent Model Persona Fields
+The `Agent` SQLAlchemy model defines persona storage and attributes:
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `is_system_agent` | Boolean | Identifies platform-seeded agents like 'Auto'. |
-| `use_custom_persona` | Boolean | Flag to override default behavior with a custom prompt. |
-| `custom_persona_prompt`| Text | The raw system prompt string for custom/system personas. |
-| `job_title` | String | A human-readable title that supplements the agent's name. |
-| `slug` | String | Per-workspace unique identifier (e.g., `auto-123`). |
+| `name` | String | Display name of the agent [orchestrator/core/models/core.py:185](). |
+| `agent_type` | String | Functional role type (e.g., `support`, `data_analyst`, `system`) [orchestrator/core/models/core.py:188](). |
+| `is_system_agent` | Boolean | Identifies global system-seeded agents like Auto CTO [orchestrator/core/models/core.py:195](). |
+| `use_custom_persona` | Boolean | Toggles between predefined presets and custom prompts [orchestrator/core/models/core.py:202](). |
+| `custom_persona_prompt`| Text | Raw custom system prompt text [orchestrator/core/models/core.py:205](). |
+| `configuration` | JSONB | Extended metadata including voice settings, temperature, and extra context [orchestrator/core/models/core.py:217-235](). |
 
-**Sources:** [orchestrator/core/models/core.py:245-248](), [orchestrator/alembic/versions/add_job_title_to_agents.py:15-20](), [orchestrator/alembic/versions/agent_public_id_and_slug_fix.py:59-66]()
-
-### Persona Template Interface
-Templates fetched from the registry follow this structure in the frontend:
-```typescript
-interface PersonaItem {
-  id: string
-  slug: string
-  name: string
-  description?: string
-  system_prompt?: string
-  voice_description?: string
-  category?: string
-  suggested_temperature: number
-}
-```
-**Sources:** [frontend/components/agents/create-agent-modal.tsx:44-54]()
-
----
-
-## UI Components
-
-### Agent Roster & Icons
-The `AgentRoster` component uses a mapping function to assign icons based on the agent's persona category.
-- **Mapping Logic**: Categories like "DevOps" map to the `Terminal` icon, while "Customer Support" maps to `Headphones` [frontend/components/agents/agent-roster.tsx:58-93]().
-- **Visual Feedback**: Icons are colored semantically (e.g., `text-rose-500` for Analytics) to provide immediate context in the agent grid [frontend/lib/agent-constants.ts:25-42]().
-
-### Configuration Tabs
-The `AgentConfigurationModal` organizes persona settings into a dedicated tab where users can toggle between:
-1. **Predefined**: A searchable list of templates [frontend/components/agents/agent-configuration-modal.tsx:142]().
-2. **Custom**: A rich text area for manual prompt engineering [frontend/components/agents/agent-configuration-modal.tsx:144]().
-
-**Sources:** [frontend/components/agents/agent-configuration-modal.tsx:139-156](), [frontend/components/agents/agent-roster.tsx:96-131]()
+**Sources:** [orchestrator/core/models/core.py:183-235]()
 
 ---

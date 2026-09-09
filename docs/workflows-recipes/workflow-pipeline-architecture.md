@@ -5,16 +5,21 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/knowledge/BusinessGraphPanel.tsx](frontend/components/knowledge/BusinessGraphPanel.tsx)
-- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
+- [frontend/components/__tests__/prd197-substrate-tile.test.tsx](frontend/components/__tests__/prd197-substrate-tile.test.tsx)
+- [frontend/components/command-center/is-it-working-strip.tsx](frontend/components/command-center/is-it-working-strip.tsx)
+- [frontend/hooks/use-analytics-api.ts](frontend/hooks/use-analytics-api.ts)
 - [frontend/lib/api-client.ts](frontend/lib/api-client.ts)
-- [orchestrator/api/knowledge_graph.py](orchestrator/api/knowledge_graph.py)
 - [orchestrator/api/workflows.py](orchestrator/api/workflows.py)
-- [orchestrator/modules/context/sections/graph_context.py](orchestrator/modules/context/sections/graph_context.py)
-- [orchestrator/modules/knowledge/graph_extraction.py](orchestrator/modules/knowledge/graph_extraction.py)
-- [orchestrator/modules/knowledge/graph_service.py](orchestrator/modules/knowledge/graph_service.py)
-- [orchestrator/modules/tools/discovery/actions_graph.py](orchestrator/modules/tools/discovery/actions_graph.py)
-- [orchestrator/modules/tools/discovery/handlers_graph.py](orchestrator/modules/tools/discovery/handlers_graph.py)
+- [orchestrator/config.py](orchestrator/config.py)
+- [orchestrator/core/models/substrate_metrics.py](orchestrator/core/models/substrate_metrics.py)
+- [orchestrator/core/observability/substrate_metrics.py](orchestrator/core/observability/substrate_metrics.py)
+- [orchestrator/main.py](orchestrator/main.py)
+- [orchestrator/reports/route-manifest.json](orchestrator/reports/route-manifest.json)
+- [orchestrator/router_manifest.py](orchestrator/router_manifest.py)
+- [orchestrator/tests/authz_sweep_probe.py](orchestrator/tests/authz_sweep_probe.py)
+- [orchestrator/tests/test_p2w2_authz_boundary_sweep.py](orchestrator/tests/test_p2w2_authz_boundary_sweep.py)
+- [orchestrator/tests/test_prd154_s5_missions.py](orchestrator/tests/test_prd154_s5_missions.py)
+- [orchestrator/tests/test_prd222_w2s1_plan_tiers.py](orchestrator/tests/test_prd222_w2s1_plan_tiers.py)
 
 </details>
 
@@ -22,100 +27,86 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the workflow execution pipeline architecture in Automatos AI, covering the **legacy 9-stage workflow orchestration system**, the **PRD-59 dynamic phase model**, and the **WorkflowStageTracker**. It explains how the system bridges these approaches to provide real-time progress tracking via SSE events and Redis Pub/Sub, ensuring visibility into complex multi-agent coordination.
+This document details the workflow execution pipeline architecture in Automatos AI, covering the **legacy 9-stage workflow orchestration system**, the **PRD-59 dynamic phase model** (`PLAN`, `PREPARE`, `EXECUTE`, `EVALUATE`, `LEARN`), and the **`WorkflowStageTracker`** class. It explains how the system manages phase transitions, calculates durations, and emits real-time Server-Sent Events (SSE) and Redis Pub/Sub messages for multi-agent workflows.
+
+Sources: [orchestrator/api/workflows.py:38-80]()
 
 ---
 
 ## Overview: Execution Models
 
-Automatos AI supports two distinct workflow execution architectures, unified by a common tracking layer:
+Automatos AI supports multiple workflow execution paths, all unified under the telemetry and event reporting layer provided by `WorkflowStageTracker`:
 
-| Model | Description | Use Case | Complexity |
-|-------|-------------|----------|------------|
-| **Legacy 9-Stage Pipeline** | Complex orchestration with task decomposition, agent selection, and learning loops. | Advanced multi-agent coordination. | High |
-| **PRD-59 Dynamic Phases** | A modernized grouping of stages into 5 high-level phases (PLAN, PREPARE, EXECUTE, EVALUATE, LEARN). | Standardized autonomous workflows. | Medium |
-| **Recipe Direct Executor** | Sequential execution bypassing the pipeline for simpler "Playbook" tasks. | Starter plan recipes, scheduled cron tasks. | Low |
+| Model | Description | Use Case | Implementation Class / Reference |
+|-------|-------------|----------|----------------------------------|
+| **Legacy 9-Stage Pipeline** | Sequential pipeline covering decomposition, selection, context, execution, and learning. | Advanced multi-agent orchestration tasks. | `WorkflowStageTracker.STAGES` [orchestrator/api/workflows.py:41-52]() |
+| **PRD-59 Dynamic Phases** | Simplified grouping of stages into 5 high-level phases with sub-stages. | Standardized autonomous operations. | `WorkflowStageTracker.PHASES` [orchestrator/api/workflows.py:63-69]() |
+| **Recipe Execution Engine** | Step-by-step runner executing recipes with workspace semaphores and scratchpad storage. | Scheduled cron tasks and playbooks. | `RecipeExecution` [orchestrator/api/workflows.py:27]() |
 
-The `WorkflowStageTracker` class provides a unified progress tracking interface that supports both models, allowing the system to emit consistent events regardless of the underlying execution logic [orchestrator/api/workflows.py:37-41]().
-
-**Sources:** [orchestrator/api/workflows.py:37-41](), [orchestrator/api/workflows.py:62-68]()
+Sources: [orchestrator/api/workflows.py:38-80]()
 
 ---
 
 ## Legacy 9-Stage Pipeline
 
-### Architecture Overview
+### Architecture and Flow
 
-The legacy workflow pipeline decomposes complex tasks into 9 sequential stages. Each stage is responsible for a specific orchestration concern.
+The legacy workflow engine processes tasks through 9 distinct stages, managing the transition from task intake to response delivery.
 
-**Legacy Stage to Code Entity Mapping**
 ```mermaid
 graph TB
-    S1["Stage 1: Task Decomposition<br/>(RealTaskDecomposer)"]
-    S2["Stage 2: Agent Selection<br/>(LLMAgentSelector)"]
-    S3["Stage 3: Context Engineering<br/>(ContextService)"]
-    S4["Stage 4: Agent Execution<br/>(AgentExecutionManager)"]
-    S5["Stage 5: Result Aggregation"]
-    S6["Stage 6: Learning Update"]
-    S7["Stage 7: Quality Assessment"]
-    S8["Stage 8: Memory Storage"]
-    S9["Stage 9: Response Generation"]
-    
-    S1 --> S2
-    S2 --> S3
-    S3 --> S4
-    S4 --> S5
-    S5 --> S6
-    S6 --> S7
-    S7 --> S8
-    S8 --> S9
+    subgraph "Legacy Pipeline Execution"
+        S1[""RealTaskDecomposer<br/>Stage 1: Task Decomposition""] --> S2[""LLMAgentSelector<br/>Stage 2: Agent Selection""]
+        S2 --> S3[""ContextService<br/>Stage 3: Context Engineering""]
+        S3 --> S4[""AgentExecutionManager<br/>Stage 4: Agent Execution""]
+        S4 --> S5[""Stage 5: Result Aggregation""]
+        S5 --> S6[""Stage 6: Learning Update""]
+        S6 --> S7[""Stage 7: Quality Assessment""]
+        S7 --> S8[""DurableMemoryStore<br/>Stage 8: Memory Storage""]
+        S8 --> S9[""Stage 9: Response Generation""]
+    end
 ```
 
-### Stage Implementation Details
+### Stage Breakdown
 
-*   **Stage 1: Task Decomposition**: Handled by `RealTaskDecomposer`, which uses LLMs to break a complex `task_description` into atomic `subtasks`.
-*   **Stage 2: Agent Selection**: Managed by `LLMAgentSelector`, which uses reasoning-based logic to find the best agent match based on skills and proficiency.
-*   **Stage 3: Context Engineering**: Handled by the `ContextService` to assemble the prompt based on priorities and token budgets.
-*   **Stage 4: Agent Execution**: Managed by the execution runtime, handling tool loops and inter-agent communication.
+*   **Stage 1 (Task Decomposition)**: Breaks incoming natural language requests into structured subtasks using decomposition services [orchestrator/api/workflows.py:43]().
+*   **Stage 2 (Agent Selection)**: Selects optimal agents based on capabilities and workspace assignment [orchestrator/api/workflows.py:44]().
+*   **Stage 3 (Context Engineering)**: Assembles prompt sections via `ContextService` [orchestrator/api/workflows.py:45]().
+*   **Stage 4 (Agent Execution)**: Executes tool loops and agent reasoning steps [orchestrator/api/workflows.py:46]().
+*   **Stages 5–9**: Handle aggregation, learning updates, quality assessment, memory persistence, and final response formatting [orchestrator/api/workflows.py:47-52]().
 
-**Sources:** [orchestrator/api/workflows.py:41-51](), [orchestrator/api/workflows.py:74-84]()
+Sources: [orchestrator/api/workflows.py:41-52]()
 
 ---
 
 ## PRD-59 Dynamic Phase Architecture
 
-### Five-Phase Model
+### Five-Phase Grouping Model
 
-PRD-59 introduces a simplified **phase-based execution model** that groups related stages into high-level phases. The `WorkflowStageTracker.PHASES` dictionary maps phases to their constituent stages, including dynamic sub-stages like "2b" (Agent Negotiation) and "4b" (Inter-Agent Coordination) [orchestrator/api/workflows.py:54-68]().
+PRD-59 groups the linear stages into five conceptual phases to improve modularity and provide cleaner status reporting to the frontend UI:
 
-**Phase to Stage Relationship**
 ```mermaid
 graph LR
-    subgraph PLAN["PLAN Phase"]
-        S1["Stage 1: Decomposition"]
-        S2["Stage 2: Selection"]
-        S2b["Stage 2b: Negotiation"]
+    subgraph "PLAN Phase"
+        P1[""Stage 1: Decomposition""] --> P2[""Stage 2: Selection""]
+        P2 --> P2b[""Stage 2b: Agent Negotiation""]
     end
     
-    subgraph PREPARE["PREPARE Phase"]
-        S3["Stage 3: Context"]
-        S3b["Stage 3b: Prompt Opt"]
+    subgraph "PREPARE Phase"
+        P3[""Stage 3: Context Engineering""] --> P3b[""Stage 3b: Prompt Optimization""]
     end
     
-    subgraph EXECUTE["EXECUTE Phase"]
-        S4["Stage 4: Execution"]
-        S4b["Stage 4b: Coordination"]
+    subgraph "EXECUTE Phase"
+        P4[""Stage 4: Agent Execution""] --> P4b[""Stage 4b: Inter-Agent Coordination""]
     end
     
-    subgraph EVALUATE["EVALUATE Phase"]
-        S5["Stage 5: Aggregation"]
-        S6["Stage 6: Learning"]
+    subgraph "EVALUATE Phase"
+        P5[""Stage 5: Aggregation""] --> P6[""Stage 6: Learning Update""]
     end
     
-    subgraph LEARN["LEARN Phase"]
-        S7["Stage 7: Quality"]
-        S8["Stage 8: Memory"]
-        S9["Stage 9: Response"]
+    subgraph "LEARN Phase"
+        P7[""Stage 7: Quality Assessment""] --> P8[""Stage 8: Memory Storage""]
+        P8 --> P9[""Stage 9: Response Generation""]
     end
     
     PLAN --> PREPARE
@@ -124,25 +115,25 @@ graph LR
     EVALUATE --> LEARN
 ```
 
-### Phase Configuration
+### Phase Mapping Table
 
-| Phase | Stages | Label | Purpose |
-|-------|--------|-------|---------|
-| `PLAN` | 1, 2, "2b" | Planning | Task decomposition and agent selection/negotiation [orchestrator/api/workflows.py:63](). |
-| `PREPARE` | 3, "3b" | Preparation | Context assembly and prompt optimization [orchestrator/api/workflows.py:64](). |
-| `EXECUTE` | 4, "4b" | Execution | Agent task execution and inter-agent coordination [orchestrator/api/workflows.py:65](). |
-| `EVALUATE` | 5, 6 | Evaluation | Result aggregation and preliminary learning updates [orchestrator/api/workflows.py:66](). |
-| `LEARN` | 7, 8, 9 | Learning | Quality assessment, memory storage, and final response [orchestrator/api/workflows.py:67](). |
+| Phase Name | Constituent Stages | Label | Description |
+|------------|--------------------|-------|-------------|
+| `PLAN` | `[1, 2, "2b"]` | Planning | Decomposition, agent selection, and negotiation [orchestrator/api/workflows.py:64]() |
+| `PREPARE` | `[3, "3b"]` | Preparation | Context assembly and prompt optimization [orchestrator/api/workflows.py:65]() |
+| `EXECUTE` | `[4, "4b"]` | Execution | Tool execution and inter-agent coordination [orchestrator/api/workflows.py:66]() |
+| `EVALUATE` | `[5, 6]` | Evaluation | Result aggregation and learning feedback [orchestrator/api/workflows.py:67]() |
+| `LEARN` | `[7, 8, 9]` | Learning | Quality checks, memory persistence, and output generation [orchestrator/api/workflows.py:68]() |
 
-**Sources:** [orchestrator/api/workflows.py:54-68]()
+Sources: [orchestrator/api/workflows.py:54-69]()
 
 ---
 
 ## WorkflowStageTracker Implementation
 
-### Class Structure
+### Class Structure and State Management
 
-`WorkflowStageTracker` is the central component for tracking workflow progress. It maintains state for the current phase and stage, calculating durations and broadcasting updates via Redis and SSE [orchestrator/api/workflows.py:70-79]().
+The `WorkflowStageTracker` class tracks workflow state transitions and manages dual-delivery event broadcasting through Redis Pub/Sub and Server-Sent Events (SSE) [orchestrator/api/workflows.py:38-80]().
 
 ```mermaid
 classDiagram
@@ -153,8 +144,8 @@ classDiagram
         +int current_stage
         +str current_phase
         +dict stage_start_times
+        +dict phase_start_times
         +list active_phases
-        
         +set_active_phases(phases)
         +start_phase(phase_name)
         +complete_phase(phase_name, result)
@@ -164,50 +155,45 @@ classDiagram
     }
 ```
 
-### Key Logic
+### Key Execution Methods
 
-1. **Phase Management**: `start_phase` marks the beginning of a high-level phase (e.g., `PLAN`) and calculates the `phase_index` relative to `active_phases` [orchestrator/api/workflows.py:88-106]().
-2. **Stage Management**: `start_stage` and `complete_stage` handle both integer IDs and dynamic strings (e.g., "4b"). They calculate `duration_ms` for performance monitoring [orchestrator/api/workflows.py:126-159]().
-3. **Event Emission**: The `_emit` method ensures dual-delivery:
-   - **SSE**: Real-time updates to the browser via a `stream_manager` [orchestrator/api/workflows.py:163-171]().
-   - **Redis**: Persistence and inter-service coordination via `publish_workflow_event` [orchestrator/api/workflows.py:173-178]().
+1. **`set_active_phases(phases)`**: Configures the active phases selected for a specific execution run [orchestrator/api/workflows.py:81-83]().
+2. **`start_phase(phase_name)` / `complete_phase(...)`**: Records phase timestamps, computes execution duration in milliseconds, and emits `phase_start` / `phase_complete` events [orchestrator/api/workflows.py:89-125]().
+3. **`start_stage(stage_num)` / `complete_stage(...)`**: Supports integer and string stage identifiers (e.g., `"2b"`, `"3b"`), calculates duration, and emits stage events [orchestrator/api/workflows.py:127-161]().
+4. **`_emit(event_type, data)`**: Broadcasts events to active SSE streams and Redis channels [orchestrator/api/workflows.py:162-180]().
 
-**Sources:** [orchestrator/api/workflows.py:70-178]()
+Sources: [orchestrator/api/workflows.py:71-180]()
 
 ---
 
-## Frontend Integration: Execution Kitchen
+## Observability and Retrieval Integration
 
-The frontend consumes pipeline events to provide a "Kitchen" view of the execution. The `ExecutionKitchen` component visualizes logs and progress [frontend/components/workflows/execution-kitchen.tsx:47-55]().
+During execution phases, the workflow pipeline interfaces with storage subsystems and telemetry collectors to record retrieval performance and memory states.
 
-### UI Logs and Progress
+*   **Substrate Metrics**: Tracks latency and status (`hit`, `empty`, `error`) across retrieval seams (`documents`, `memory`, and `field`) [orchestrator/core/models/substrate_metrics.py:22-48]().
+*   **Memory Persistence**: Integrates with `DurableMemoryStore` for long-term storage and retrieval across agent interactions [orchestrator/modules/memory/durable_store.py:76-94]().
 
-*   **Streaming Logs**: The `StreamingLog` component displays events such as `stage_start`, `agent_spawn`, and `task_progress` in real-time [frontend/components/workflows/execution-kitchen.tsx:99-130]().
-*   **Theater Visualization**: High-level progress is visualized through `TheaterStageProgress` and `TheaterStepExecution`, mapping backend stages to UI animations [frontend/components/workflows/execution-kitchen.tsx:36-37]().
-*   **Stage Metadata**: The UI maintains a list of `STAGE_NAMES` and `STAGE_SHORT_NAMES` for the legacy 9-stage display [frontend/components/workflows/execution-kitchen.tsx:74-89]().
-
-**Sources:** [frontend/components/workflows/execution-kitchen.tsx:36-130]()
+Sources: [orchestrator/core/models/substrate_metrics.py:22-48](), [orchestrator/modules/memory/durable_store.py:76-94]()
 
 ---
 
 ## Code Entity Reference
 
-### Core Services
+### Core Classes and Modules
 
-| Entity | File | Role |
-|--------|------|------|
-| `WorkflowStageTracker` | [orchestrator/api/workflows.py:37-41]() | Orchestrates phase/stage transitions and event emission. |
-| `apiClient` | [frontend/lib/api-client.ts:95-101]() | Handles frontend-to-backend communication for workflow status. |
-| `GraphifyService` | [orchestrator/modules/knowledge/graph_service.py:128-135]() | Manages knowledge-graph builds that feed into the Evaluation/Learning phases. |
+| Entity Name | File Path | Role |
+|-------------|-----------|------|
+| `WorkflowStageTracker` | [orchestrator/api/workflows.py:38-179]() | Manages phase/stage state tracking and event emission. |
+| `RecipeExecution` | [orchestrator/core/models/core.py:27]() | Database model for recipe execution tracking. |
+| `SubstrateMetricEvent` | [orchestrator/core/models/substrate_metrics.py:22-48]() | Observability model for search and retrieval telemetry. |
+| `DurableMemoryStore` | [orchestrator/modules/memory/durable_store.py:76-94]() | Qdrant-backed durable memory storage interface. |
 
-### WebSocket & SSE Events
+### SSE Event Signatures
 
-| Event Type | Source | Purpose |
-|------------|--------|---------|
-| `phase_start` | `WorkflowStageTracker.start_phase` | Signals the beginning of a PRD-59 phase [orchestrator/api/workflows.py:106](). |
-| `stage_start` | `WorkflowStageTracker.start_stage` | Signals the beginning of a specific orchestration stage [orchestrator/api/workflows.py:140](). |
-| `stage_complete` | `WorkflowStageTracker.complete_stage` | Emits stage results and duration [orchestrator/api/workflows.py:159](). |
+*   `phase_start`: Emitted via `WorkflowStageTracker.start_phase` with phase metadata and active stage list [orchestrator/api/workflows.py:107]().
+*   `stage_start`: Emitted via `WorkflowStageTracker.start_stage` indicating stage initialization [orchestrator/api/workflows.py:141]().
+*   `stage_complete`: Emitted via `WorkflowStageTracker.complete_stage` providing execution duration and result dictionaries [orchestrator/api/workflows.py:160]().
 
-**Sources:** [orchestrator/api/workflows.py:37-178](), [frontend/lib/api-client.ts:95-156](), [orchestrator/modules/knowledge/graph_service.py:128-150]()
+Sources: [orchestrator/api/workflows.py:38-179](), [orchestrator/core/models/substrate_metrics.py:22-48]()
 
 ---

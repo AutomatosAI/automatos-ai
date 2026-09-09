@@ -6,215 +6,208 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
+- [frontend/components/settings/ChannelsSettingsTab.tsx](frontend/components/settings/ChannelsSettingsTab.tsx)
+- [frontend/components/workflows/execution-kitchen.tsx](frontend/components/workflows/execution-kitchen.tsx)
 - [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
+- [orchestrator/alembic/versions/prd008a4_channel_drivers.py](orchestrator/alembic/versions/prd008a4_channel_drivers.py)
 - [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
+- [orchestrator/api/composio.py](orchestrator/api/composio.py)
+- [orchestrator/api/recipe_executor.py](orchestrator/api/recipe_executor.py)
+- [orchestrator/api/skills.py](orchestrator/api/skills.py)
+- [orchestrator/api/tools.py](orchestrator/api/tools.py)
+- [orchestrator/api/webhooks.py](orchestrator/api/webhooks.py)
+- [orchestrator/api/workflow_recipes.py](orchestrator/api/workflow_recipes.py)
+- [orchestrator/channels/drivers/__init__.py](orchestrator/channels/drivers/__init__.py)
+- [orchestrator/channels/drivers/base.py](orchestrator/channels/drivers/base.py)
+- [orchestrator/channels/drivers/discord.py](orchestrator/channels/drivers/discord.py)
+- [orchestrator/channels/drivers/slack.py](orchestrator/channels/drivers/slack.py)
+- [orchestrator/channels/drivers/telegram.py](orchestrator/channels/drivers/telegram.py)
+- [orchestrator/channels/drivers/webhook.py](orchestrator/channels/drivers/webhook.py)
+- [orchestrator/channels/drivers/whatsapp.py](orchestrator/channels/drivers/whatsapp.py)
 - [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
 - [orchestrator/channels/telegram_adapter.py](orchestrator/channels/telegram_adapter.py)
+- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
+- [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
+- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
+- [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
+- [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
 - [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
+- [orchestrator/core/routing/ingestors/webhook.py](orchestrator/core/routing/ingestors/webhook.py)
+- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
+- [orchestrator/services/webhook_dedup.py](orchestrator/services/webhook_dedup.py)
+- [orchestrator/tests/test_channel_adapter_contract.py](orchestrator/tests/test_channel_adapter_contract.py)
+- [orchestrator/tests/test_p2w0_service_imports_resolve.py](orchestrator/tests/test_p2w0_service_imports_resolve.py)
+- [orchestrator/tests/test_p2w2_webhook_dedup.py](orchestrator/tests/test_p2w2_webhook_dedup.py)
+- [orchestrator/tests/test_p2w2_webhook_signature_reject.py](orchestrator/tests/test_p2w2_webhook_signature_reject.py)
+- [orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py](orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py)
 
 </details>
 
 
 
-This page documents the end-to-end message processing pipeline for channel integrations. It covers the flow from when a user sends a message on a platform (Telegram, Slack, Discord, etc.) through normalization, routing, agent execution, and response delivery.
+This page documents the end-to-end message processing pipeline for channel integrations. It covers the flow from when a user sends a message on an external platform (Telegram, Slack, Discord, WhatsApp, etc.) or webhook endpoint through trust gate evaluation, normalization, universal routing, agent execution, conversation storage, and outbound delivery.
 
 ---
 
 ## Purpose and Scope
 
-The Message Pipeline transforms platform-specific messages into standardized `RequestEnvelope` objects, routes them to appropriate agents via the `UniversalRouter`, executes the selected agent, and delivers responses back through the originating platform. This pipeline enables consistent multi-agent orchestration across all supported channels while preserving platform-specific features like threading and attachments.
+The Message Pipeline ingests raw platform payloads, enforces trust and security policies at the ingress boundary, normalizes messages into standardized `RequestEnvelope` objects, routes them to the appropriate agent via the `UniversalRouter`, executes the agent logic, persists the conversation state, and delivers responses back through the originating platform driver.
 
 **Scope:**
-- Message normalization from platform formats to `RequestEnvelope` via `_to_envelope` [orchestrator/channels/base.py:128]().
-- Routing decisions via `UniversalRouter.route` [orchestrator/channels/base.py:144]().
-- Agent execution via `AgentFactory.execute_with_prompt` [orchestrator/channels/base.py:164-173]().
-- Response delivery via platform-specific `send_message` [orchestrator/channels/base.py:50-52]().
-- Attachment handling and multimodal ingestion (PRD-127) [orchestrator/channels/base.py:70-106]().
-- Activity tracking in the `channel_connections` table [orchestrator/core/models/channels.py:19-33]().
+- **Ingress & Trust Gate:** Verifying signatures and applying channel-level trust gates via `services.ingress_gate` [orchestrator/api/channels.py:37-43]() and `orchestrator/api/webhooks.py:50-93]().
+- **Normalization:** Converting platform-specific payloads into a `RequestEnvelope` via `_to_envelope` normalization functions [orchestrator/tests/test_channel_adapter_contract.py:16-22]().
+- **Routing:** Determining the target agent or workflow using `UniversalRouter.route` [orchestrator/api/webhooks.py:33]().
+- **Agent Execution & Storage:** Invoking agent runtimes, tool loops, and persisting turns in conversation memory stores.
+- **Outbound Delivery:** Sending generated responses back to the user via platform-specific `send` / `send_message` implementations [orchestrator/channels/drivers/base.py:119-130]().
+- **Lifecycle Management:** Starting and stopping polling/webhook adapters via `ChannelManager` [orchestrator/channels/manager.py:88-114]().
 
-Sources: [orchestrator/channels/base.py:1-21](), [orchestrator/channels/base.py:112-188](), [orchestrator/core/models/channels.py:19-33]()
+Sources: [orchestrator/channels/manager.py:1-10](), [orchestrator/channels/drivers/base.py:1-24](), [orchestrator/api/channels.py:37-43](), [orchestrator/api/webhooks.py:50-93]()
 
 ---
 
-## Pipeline Overview
+## Pipeline Architecture & Data Flow
 
-The message pipeline consists of six sequential phases, orchestrated in `BaseChannelAdapter.handle_message()` [orchestrator/channels/base.py:112-188]().
+The pipeline operates across webhook and polling modes, passing data through distinct security, normalization, routing, and execution phases.
 
-Title: Message Pipeline Flow
+### End-to-End Message Pipeline Flow
+Title: "End-to-End Message Pipeline Flow"
 ```mermaid
 graph TB
-    PlatformMsg["Platform Message<br/>(Telegram/Slack/Discord)"]
-    
-    subgraph "Phase 1: Normalization"
-        ToEnvelope["_to_envelope()<br/>Platform-specific logic"]
-        Envelope["RequestEnvelope<br/>source, content, workspace_id"]
-        UploadAtt["upload_attachment()<br/>PRD-127"]
+    subgraph "NaturalLanguageSpace"
+        UserMsg[""User Platform Message"<br/>(Telegram/Slack/Webhook)""]
     end
-    
-    subgraph "Phase 2: Routing"
-        Router["UniversalRouter.route()"]
-        Decision["RoutingDecision<br/>agent_id, confidence,<br/>route_type"]
-    end
-    
-    subgraph "Phase 3: Execution"
-        Factory["AgentFactory.execute_with_prompt()"]
-        ToolLoop["Tool Loop<br/>(UnifiedToolExecutor)"]
-        Response["Response text"]
-    end
-    
-    subgraph "Phase 4: Delivery"
-        SendMsg["send_message()<br/>Platform API call"]
-        PlatformResp["Platform Response"]
-    end
-    
-    subgraph "Phase 5: Storage"
-        StoreConv["store_conversation()<br/>ChatService.save_message"]
-        MemDB[("PostgreSQL<br/>Message Table")]
-    end
-    
-    subgraph "Phase 6: Tracking"
-        UpdateStats["_update_activity_stats()<br/>message_count++"]
-        StatsDB[("PostgreSQL<br/>channel_connections")]
-    end
-    
-    PlatformMsg --> ToEnvelope
-    ToEnvelope --> Envelope
-    Envelope --> Router
-    Router --> Decision
-    Decision --> Factory
-    Factory --> ToolLoop
-    ToolLoop --> Response
-    Response --> SendMsg
-    SendMsg --> PlatformResp
-    Response --> StoreConv
-    StoreConv --> MemDB
-    PlatformResp --> UpdateStats
-    UpdateStats --> StatsDB
-```
 
-Sources: [orchestrator/channels/base.py:112-188](), [orchestrator/channels/base.py:70-106]()
+    subgraph "CodeEntitySpace"
+        Ingress[""WebhookRoute /api/webhooks/ws/{key}<br/>orchestrator/api/webhooks.py""]
+        TrustGate[""Trust Gate & HMAC Verify<br/>services.ingress_gate & _verify_webhook_signature""]
+        Normalize[""Payload Normalization<br/>_to_envelope()""]
+        Router[""UniversalRouter.route()<br/>core/routing/engine.py""]
+        Exec[""Agent Execution & Tool Loop<br/>AgentFactory.execute()""]
+        Store[""Conversation Storage<br/>UnifiedMemoryService""]
+        Send[""Outbound Driver send_message()<br/>orchestrator/channels/drivers/""]
+    end
+
+    UserMsg --> Ingress
+    Ingress --> TrustGate
+    TrustGate --> Normalize
+    Normalize --> Router
+    Router --> Exec
+    Exec --> Store
+    Exec --> Send
+```
+Sources: [orchestrator/api/webhooks.py:6-11](), [orchestrator/api/channels.py:37-43](), [orchestrator/channels/drivers/base.py:119-130]()
 
 ---
 
-## Phase 1: Message Normalization
+## Phase 1: Ingress & Trust Gate
 
-Each platform adapter implements `_to_envelope()` to convert platform-specific message objects into the standardized `RequestEnvelope` format. For example, `TelegramAdapter` processes incoming `Update` objects from `python-telegram-bot` [orchestrator/channels/telegram_adapter.py:148-185]().
+When an incoming webhook request reaches the backend (e.g., `POST /api/webhooks/ws/{workspace_key}` or platform-specific endpoints), it must pass authentication and trust gates before any compute resources are allocated.
 
-### RequestEnvelope Structure
-The `RequestEnvelope` acts as the universal currency for the routing engine.
+### Workspace Key & Signature Verification
+- **URL-as-Secret Floor:** The `workspace_key` embedded in the webhook URL serves as the baseline credential for tenant lookup [orchestrator/api/webhooks.py:6-10]().
+- **HMAC-SHA256 Signature Verification:** When a webhook secret or platform signing secret (e.g., Slack signing secret) is configured, `_verify_webhook_signature` or `_verify_slack_signature` validates headers (`X-Hub-Signature-256`, `X-Composio-Signature`, `X-Slack-Signature`) against the raw request body [orchestrator/api/webhooks.py:50-93](). Mismatches or missing required signatures reject the request with `401 Unauthorized` [orchestrator/api/webhooks.py:60-64]().
 
-Title: RequestEnvelope Entity Association
+### Per-Channel Trust Gate
+The ingress gate subsystem (`services.ingress_gate`) evaluates `trigger_mode_of` and `normalize_trigger_mode` to ensure that inbound messages comply with workspace governance settings, channel policies, and rate limits [orchestrator/api/channels.py:37-43]().
+
+Sources: [orchestrator/api/webhooks.py:50-153](), [orchestrator/api/channels.py:37-43]()
+
+---
+
+## Phase 2: Message Normalization (`_to_envelope`)
+
+Once verified, platform-specific payloads (Telegram updates, Slack events, WhatsApp messages) are converted into a standardized internal structure known as a `RequestEnvelope`.
+
+### Normalization Bridge
+Title: "Normalization Bridge: Platform Payload to RequestEnvelope"
 ```mermaid
 classDiagram
+    class RawPlatformPayload {
+        +dict update_id / event / body
+        +str raw_headers
+    }
+    class ChannelDriver {
+        +verify()
+        +send()
+    }
+    class NormalizationService {
+        +_to_envelope(raw_payload)
+        +extract_inbound_text()
+    }
     class RequestEnvelope {
-        +UUID request_id
-        +ChannelSource source
         +str content
         +UUID workspace_id
-        +Optional[str] user_id
-        +Dict metadata
-        +Optional[int] override_agent_id
-        +Optional[int] override_workflow_id
+        +str platform
+        +str connection_id
+        +dict metadata
     }
-    
-    class ChannelSource {
-        <<enumeration>>
-        CHATBOT
-        TELEGRAM
-        SLACK
-        DISCORD
-        LINE
-        GOOGLE_CHAT
-        WEBHOOK
-    }
-    
-    RequestEnvelope --> ChannelSource
+
+    RawPlatformPayload --> ChannelDriver : "Received by"
+    ChannelDriver --> NormalizationService : "Delegates raw data"
+    NormalizationService --> RequestEnvelope : "Produces standardized"
 ```
 
-Sources: [orchestrator/api/channels.py:24-28](), [orchestrator/channels/telegram_adapter.py:148-185]()
+The normalization helper `_to_envelope` extracts the sender identifier, message body text, attachment references, and thread context into a uniform schema consumed by the routing engine [orchestrator/tests/test_channel_adapter_contract.py:16-22]().
 
-### Attachment Handling (PRD-127)
-Subclasses call `upload_attachment()` when receiving inbound media [orchestrator/channels/base.py:70-106](). In `TelegramAdapter`, this handles photos and documents by downloading them from Telegram servers and storing them in the `AttachmentStore` [orchestrator/channels/telegram_adapter.py:168-180](). The resulting `attachment_ids` are passed to `AgentFactory` for multimodal analysis [orchestrator/channels/base.py:164-173]().
-
----
-
-## Phase 2: Routing
-
-The `UniversalRouter.route()` function processes the envelope through a tiered strategy to resolve a `RoutingDecision`.
-
-1.  **Tier 0 (Override):** Checks for explicit agent or workflow IDs in the envelope.
-2.  **Tier 1 (Cache):** Checks `RoutingCache` for normalized content hashes.
-3.  **Tier 2a (Rules):** Matches `source_pattern` or `source_channel` in the `routing_rules` table [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:39-40]().
-4.  **Tier 2b (Trigger):** Handles `TriggerSubscription` (e.g., Jira events).
-5.  **Tier 2.5 (Semantic):** Performs cosine similarity on agent embeddings.
-6.  **Tier 2c (Intent):** Uses `IntentClassifier` for keyword matching against rules.
-7.  **Tier 3 (LLM):** Fallback to LLM classification for final agent/workflow selection.
-
-Sources: [orchestrator/channels/base.py:143-160](), [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:39-40]()
+Sources: [orchestrator/api/webhooks.py:34](), [orchestrator/tests/test_channel_adapter_contract.py:16-22]()
 
 ---
 
-## Phase 3: Agent Execution
+## Phase 3: Universal Routing (`UniversalRouter.route`)
 
-Execution is handled by `AgentFactory.execute_with_prompt()`, which triggers the agent's lifecycle and tool loop [orchestrator/channels/base.py:163-173]().
+The normalized `RequestEnvelope` is passed to the `UniversalRouter` to determine which agent or workflow should handle the request [orchestrator/api/webhooks.py:33]().
 
-Title: Execution Pipeline to Code Entities
-```mermaid
-sequenceDiagram
-    participant Adapter as BaseChannelAdapter
-    participant Factory as AgentFactory
-    participant LLM as LLMManager
-    participant Router as UnifiedToolExecutor
-    participant Registry as ActionRegistry
-    
-    Adapter->>Factory: execute_with_prompt(agent_id, prompt, attachment_ids)
-    Factory->>Factory: activate_agent(agent_id)
-    
-    loop Tool Loop
-        Factory->>LLM: generate_response(tools)
-        alt Has tool_calls
-            Factory->>Router: execute_tool(tool_name, args)
-            Router->>Registry: get(action_name)
-            Registry-->>Router: ActionDefinition
-            Router-->>Factory: Result
-        else No tool_calls
-            Factory-->>Adapter: Final Response
-        end
-    end
-```
+The routing engine evaluates multiple tiers:
+- **Tier 0:** Explicit user overrides (if an agent ID is specified in the request context).
+- **Tier 1:** Routing cache lookup (`RoutingCache`) for fast workspace-scoped matches.
+- **Tier 2:** Rule-based matching and trigger subscriptions [orchestrator/api/workflow_recipes.py:52-60]().
+- **Tier 2.5:** Semantic similarity via vector embeddings against agent capabilities.
+- **Tier 3:** LLM-based classification when deterministic heuristics do not yield a confident match.
 
-**Context Injection:** The adapter injects `source`, `workspace_id`, and `connection_id` into the execution context to allow agents to be aware of the communication channel [orchestrator/channels/base.py:167-171]().
-
-Sources: [orchestrator/channels/base.py:163-173](), [orchestrator/channels/telegram_adapter.py:164-166]()
+Sources: [orchestrator/api/webhooks.py:32-34](), [orchestrator/core/routing/engine.py]()
 
 ---
 
-## Phase 4: Response Delivery
+## Phase 4: Agent Execution & Conversation Storage
 
-The adapter's `send_message()` method handles platform-specific delivery [orchestrator/channels/base.py:50-52](). `TelegramAdapter` implements auto-chunking for messages exceeding the 4096 character limit [orchestrator/channels/telegram_adapter.py:74-86]().
+Upon receiving a routing decision containing a target `agent_id`, the execution engine instantiates the agent context:
 
-| Platform | Typical Limit | Adapter Implementation |
-|----------|---------------|------------------------|
-| **Slack** | 3000 chars | `SlackAdapter` [orchestrator/channels/manager.py:125]() |
-| **Discord** | 2000 chars | `DiscordAdapter` [orchestrator/channels/manager.py:126]() |
-| **Telegram** | 4096 chars | `TelegramAdapter` [orchestrator/channels/telegram_adapter.py:79-82]() |
-| **Line** | - | `LineAdapter` [orchestrator/channels/manager.py:133]() |
-| **Google Chat**| - | `GoogleChatAdapter` [orchestrator/channels/manager.py:128]() |
+1. **Context Assembly:** `ContextService` builds the system prompt and memory layers (L0 through L4) [orchestrator/api/recipe_executor.py:9-12]().
+2. **LLM Invocation:** The model generates a response, potentially triggering tool loops via `UnifiedToolExecutor` [orchestrator/api/recipe_executor.py:11-12]().
+3. **Conversation Storage:** Exchanges, user prompts, and agent responses are persisted via the `UnifiedMemoryService` to maintain session continuity and update temporal memory logs.
 
-Sources: [orchestrator/channels/base.py:50-52](), [orchestrator/channels/telegram_adapter.py:74-86](), [orchestrator/channels/manager.py:123-135]()
+Sources: [orchestrator/api/recipe_executor.py:5-19]()
 
 ---
 
-## Phase 5 & 6: Storage and Tracking
+## Phase 5: Outbound Delivery (`send_message`) & Tracking
 
-### Activity Tracking
-After successful message delivery, the pipeline calls `_update_activity_stats(db)` [orchestrator/channels/base.py:185-186](). This increments the `message_count` and updates `last_activity_at` in the `channel_connections` table [orchestrator/core/models/channels.py:19-33]().
+After execution, the response is dispatched back to the user via the originating platform driver.
 
-### Heartbeat Proactive Execution
-The `HeartbeatService` can bypass the inbound normalization phase by directly calling `run_orchestrator_heartbeat` or `schedule_agent_heartbeat` [orchestrator/api/heartbeat.py:114-126](), [orchestrator/api/heartbeat.py:165-178](). These proactive ticks use the same `AgentFactory` execution logic but are triggered by `APScheduler` instead of an external message. Results are stored in the `heartbeat_results` table [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:21-34]().
+### Outbound Delivery (`send`)
+Each platform adapter implements an asynchronous `send` or `send_message` method. For instance:
+- **Slack Driver:** Uses `chat.postMessage` [orchestrator/channels/drivers/slack.py:101-106]()
+- **WhatsApp Driver:** Posts via HTTP to the Meta Graph API [orchestrator/channels/drivers/whatsapp.py:101-113]()
 
-Sources: [orchestrator/channels/base.py:185-188](), [orchestrator/core/models/channels.py:19-33](), [orchestrator/api/heartbeat.py:88-126](), [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py:21-34]()
+### Activity Tracking and Connection Reconciliation
+The system records usage statistics via `_update_activity_stats`, which performs a tenant-isolated SQL update:
+- Increments `message_count` by 1.
+- Updates `last_activity_at` to `NOW()`.
+
+Additionally, `GET /api/channels` reconciles database status entries with active polling adapters managed by `ChannelManager` [orchestrator/api/channels.py:171-185]().
+
+Sources: [orchestrator/api/channels.py:89-141](), [orchestrator/channels/manager.py:176-195](), [orchestrator/tests/test_channel_adapter_contract.py:23-34]()
+
+---
+
+## Channel Management UI
+
+Administrators configure and manage channel integrations through the `ChannelsSettingsTab` in the frontend:
+- **Platform Selectors:** Choose integrations (Telegram, Slack, Discord, WhatsApp, etc.) [frontend/components/settings/ChannelsSettingsTab.tsx:26-135]().
+- **Mode Toggles:** Switch between Webhook and Polling modes where supported [frontend/components/settings/ChannelsSettingsTab.tsx:140-153]().
+- **Credential Testing:** Validate connection integrity via backend driver `verify` calls [frontend/components/settings/ChannelsSettingsTab.tsx:181-205]().
+
+Sources: [frontend/components/settings/ChannelsSettingsTab.tsx:13-153]()
 
 ---

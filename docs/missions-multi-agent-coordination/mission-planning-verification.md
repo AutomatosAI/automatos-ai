@@ -6,22 +6,46 @@
 The following files were used as context for generating this wiki page:
 
 - [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
-- [frontend/components/missions/human-review-panel.tsx](frontend/components/missions/human-review-panel.tsx)
-- [frontend/components/missions/mission-budget-bar.tsx](frontend/components/missions/mission-budget-bar.tsx)
-- [frontend/components/missions/mission-results-panel.tsx](frontend/components/missions/mission-results-panel.tsx)
+- [frontend/components/missions/index.ts](frontend/components/missions/index.ts)
+- [frontend/components/missions/mission-card.tsx](frontend/components/missions/mission-card.tsx)
+- [frontend/components/missions/mission-detail-page.tsx](frontend/components/missions/mission-detail-page.tsx)
+- [frontend/components/missions/mission-field-inspector.tsx](frontend/components/missions/mission-field-inspector.tsx)
+- [frontend/components/missions/mission-field-panel.tsx](frontend/components/missions/mission-field-panel.tsx)
+- [frontend/components/missions/mission-field-viz.tsx](frontend/components/missions/mission-field-viz.tsx)
+- [frontend/hooks/use-missions-api.ts](frontend/hooks/use-missions-api.ts)
 - [frontend/types/missions.ts](frontend/types/missions.ts)
+- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
 - [orchestrator/api/missions.py](orchestrator/api/missions.py)
-- [orchestrator/core/services/mission_memory_service.py](orchestrator/core/services/mission_memory_service.py)
+- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
+- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
+- [orchestrator/modules/context/adapters/vector_field.py](orchestrator/modules/context/adapters/vector_field.py)
 - [orchestrator/modules/coordination/__init__.py](orchestrator/modules/coordination/__init__.py)
 - [orchestrator/modules/coordination/agent_matcher.py](orchestrator/modules/coordination/agent_matcher.py)
+- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
 - [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
+- [orchestrator/modules/coordination/primitive_heartbeat.py](orchestrator/modules/coordination/primitive_heartbeat.py)
 - [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
 - [orchestrator/modules/coordination/templates.py](orchestrator/modules/coordination/templates.py)
 - [orchestrator/modules/coordination/verification.py](orchestrator/modules/coordination/verification.py)
+- [orchestrator/modules/memory/durable_store.py](orchestrator/modules/memory/durable_store.py)
 - [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
-- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
+- [orchestrator/services/gdpr_service.py](orchestrator/services/gdpr_service.py)
 - [orchestrator/tests/test_82c_wiring.py](orchestrator/tests/test_82c_wiring.py)
+- [orchestrator/tests/test_agents_api_plugins.py](orchestrator/tests/test_agents_api_plugins.py)
+- [orchestrator/tests/test_budget_gate.py](orchestrator/tests/test_budget_gate.py)
+- [orchestrator/tests/test_coordinator_parallel.py](orchestrator/tests/test_coordinator_parallel.py)
+- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
+- [orchestrator/tests/test_mission_final_output_promotion.py](orchestrator/tests/test_mission_final_output_promotion.py)
+- [orchestrator/tests/test_mission_retry_feeds_critique.py](orchestrator/tests/test_mission_retry_feeds_critique.py)
+- [orchestrator/tests/test_p2w2_gdpr_subject_tags.py](orchestrator/tests/test_p2w2_gdpr_subject_tags.py)
 - [orchestrator/tests/test_parallel_decomposition.py](orchestrator/tests/test_parallel_decomposition.py)
+- [orchestrator/tests/test_planner_capability_routing.py](orchestrator/tests/test_planner_capability_routing.py)
+- [orchestrator/tests/test_plugin_assignment_api.py](orchestrator/tests/test_plugin_assignment_api.py)
+- [orchestrator/tests/test_plugin_runtime_integration.py](orchestrator/tests/test_plugin_runtime_integration.py)
+- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
+- [orchestrator/tests/test_prd181_gdpr.py](orchestrator/tests/test_prd181_gdpr.py)
+- [orchestrator/tests/test_synthesis_executor.py](orchestrator/tests/test_synthesis_executor.py)
+- [orchestrator/tests/test_w1s1_hotpath_telemetry.py](orchestrator/tests/test_w1s1_hotpath_telemetry.py)
 
 </details>
 
@@ -34,35 +58,34 @@ The Mission Planning and Verification layer is responsible for transforming high
 The `MissionPlanner` is the entry point for mission execution. It utilizes a "Template-Hybrid" approach where the system first attempts to match a goal to a pre-defined template before falling back to LLM-based decomposition [orchestrator/modules/coordination/planner.py:7-12]().
 
 ### Decomposition Pipeline
-1.  **Template Matching**: The planner calls `match_template` to check if the goal contains keywords (e.g., "research", "compare", "benchmark") that correspond to a `DecompositionTemplate` [orchestrator/modules/coordination/planner.py:29](), [orchestrator/modules/coordination/templates.py:64-75]().
-2.  **Complexity Detection**: The system scores goal complexity based on word count, deliverable keywords, domain breadth, and attachment count to assign a `ComplexityTier` [orchestrator/modules/coordination/planner.py:184-196]().
-3.  **Context Assembly**: If no template matches, the planner gathers the natural language goal, any attached document contents resolved via `_resolve_attachments_for_planning`, and the available `Agent` roster [orchestrator/modules/coordination/planner.py:44-55](), [orchestrator/modules/coordination/planner.py:67-75]().
-4.  **LLM Generation**: It invokes the LLM with a system prompt that enforces a specific JSON schema, requiring a list of tasks with titles, descriptions, and `agent_role` assignments [orchestrator/modules/coordination/planner.py:118-120]().
-5.  **Plan Validation**: The raw output is parsed and subjected to structural checks by the `PlanValidator` [orchestrator/modules/coordination/planner.py:5-10]().
-6.  **Retry Logic**: If validation fails (e.g., cyclic dependencies or invalid agent roles), the planner retries up to 3 times, feeding the validation errors back into the next prompt [orchestrator/modules/coordination/planner.py:120]().
+1.  **Template Matching**: The planner calls `match_template` to check if the goal contains keywords (e.g., "research", "business plan") that correspond to a `DecompositionTemplate` [orchestrator/modules/coordination/planner.py:8-9](), [orchestrator/modules/coordination/templates.py:1-10]().
+2.  **Complexity Detection**: The system scores goal complexity based on word count, deliverable keywords (e.g., "report", "app"), and domain clusters to assign a `ComplexityTier` [orchestrator/modules/coordination/planner.py:177-190]().
+3.  **Context Assembly**: If no template matches, the planner gathers the natural language goal, any attached document contents resolved via `_resolve_attachments_for_planning` [orchestrator/modules/coordination/planner.py:46-113](), and a planning context pack from `ContextService` [orchestrator/modules/coordination/planner.py:121-153]().
+4.  **LLM Generation**: It invokes the LLM to generate a list of tasks with titles, descriptions, `agent_role` assignments, and `depends_on` relationships to form the DAG [orchestrator/modules/coordination/planner.py:9-10]().
+5.  **Plan Validation**: The raw output is subjected to structural checks by the `PlanValidator` to ensure it is a valid DAG [orchestrator/modules/coordination/planner.py:5-10](), [orchestrator/modules/coordination/planner.py:58]().
+6.  **Retry Logic**: If validation fails (e.g., cyclic dependencies), the planner retries up to 3 times (`MAX_PLAN_RETRIES`) [orchestrator/modules/coordination/planner.py:165]().
 
 ### Plan Validation Logic
 The validation process ensures the mission is viable before any execution begins:
-*   **Acyclicity**: Uses `DependencyResolver` to perform a topological sort and detect cycles in the task graph [orchestrator/modules/coordination/planner.py:30-34]().
-*   **Agent Matching**: Verifies that the `agent_role` requested for each task matches the capabilities in the `Agent` roster [orchestrator/modules/coordination/planner.py:27-29]().
-*   **Task Bounds**: Enforces limits on task counts (minimum 3, maximum 20) to prevent overly complex or trivial plans [orchestrator/modules/coordination/planner.py:118-119]().
-*   **Parallel Safety**: Rejects plans where tasks in the same `parallel_group` have cross-dependencies [orchestrator/tests/test_parallel_decomposition.py:141-173]().
+*   **Acyclicity**: Uses `DependencyResolver` to perform a topological sort and detect cycles in the task graph [orchestrator/modules/coordination/planner.py:32-37]().
+*   **Agent Matching**: Verifies that the `agent_role` requested for each task matches the capabilities in the `Agent` roster via `AgentMatcher` [orchestrator/modules/coordination/planner.py:30](), [orchestrator/modules/coordination/agent_matcher.py:1-10]().
+*   **Task Bounds**: Enforces limits on task counts (minimum 1, maximum 20) to prevent overly complex or trivial plans [orchestrator/modules/coordination/planner.py:163-164]().
 
-**Sources:** [orchestrator/modules/coordination/planner.py:1-216](), [orchestrator/modules/coordination/templates.py:1-181](), [orchestrator/tests/test_parallel_decomposition.py:58-135]()
+**Sources:** [orchestrator/modules/coordination/planner.py:1-210](), [orchestrator/services/coordinator_service.py:55-59](), [orchestrator/modules/coordination/templates.py:1-10](), [orchestrator/modules/coordination/agent_matcher.py:1-10]()
 
 ## 2. Verification Service & Pipeline
 
-Once an agent completes a task, the `VerificationService` assesses the output. Verification is **advisory**; feedback is stored in `task.output_metadata["review_feedback"]` for downstream consumption (e.g., synthesis tasks) [orchestrator/modules/coordination/verification.py:9-12]().
+Once an agent completes a task, the `VerificationService` assesses the output. Verification is **advisory only**; feedback is stored in `task.output_metadata["review_feedback"]` for downstream consumption [orchestrator/modules/coordination/verification.py:9-12]().
 
 ### Verification Stages
 | Stage | Component | Description |
 | :--- | :--- | :--- |
-| **Deterministic** | `DeterministicChecker` | Validates structural quality signals like regex, JSON schema, and length [orchestrator/modules/coordination/verification.py:27](). |
-| **LLM-as-Judge** | `VerificationService` | Uses a cross-model judge (different family than the executor) to score relevance, completeness, accuracy, and format [orchestrator/modules/coordination/verification.py:40-45](). |
-| **Cross-Task Consistency** | `ConsistencyResult` | Checks for contradictions or misalignments between different task outputs within the same mission [orchestrator/modules/coordination/verification.py:72-80](). |
+| **Deterministic** | `DeterministicChecker` | Validates structural quality signals like regex, JSON schema, and length [orchestrator/modules/coordination/verification.py:29](). |
+| **LLM-as-Judge** | `VerificationService` | Uses a cross-model judge to score `relevance`, `completeness`, `accuracy`, and `format_compliance` [orchestrator/modules/coordination/verification.py:40-41](). |
+| **Cross-Task Consistency** | `ConsistencyResult` | Checks for contradictions or misalignments between different task outputs [orchestrator/modules/coordination/verification.py:73-80](). |
 
 ### Cross-Model Selection Logic
-To ensure objective review, the `VerificationService` selects a verifier model from a different family than the one used to execute the task [orchestrator/modules/coordination/verification.py:101-110](). For example, if a task was executed by an OpenAI model, the verifier will be chosen from Anthropic, Google, or Meta families based on the `COORDINATOR_VERIFIER_MODEL_MAPPING` [orchestrator/modules/coordination/verification.py:116-131]().
+To ensure objective review, the `VerificationService` selects a verifier model from a different family than the one used to execute the task [orchestrator/modules/coordination/verification.py:102-107](). For example, if a task was executed by a `gpt-4o` (OpenAI), the verifier will be chosen from Anthropic or Google families based on the `COORDINATOR_VERIFIER_MODEL_MAPPING` [orchestrator/modules/coordination/verification.py:117-132]().
 
 Title: Task Verification Pipeline
 ```mermaid
@@ -88,7 +111,7 @@ graph TD
     E --> F["TaskState.VERIFIED"]
     F --> G["Store Feedback in output_metadata"]
 ```
-**Sources:** [orchestrator/modules/coordination/reconciler.py:116-119](), [orchestrator/modules/coordination/verification.py:1-140](), [orchestrator/core/models/orchestration_enums.py:48-60]()
+**Sources:** [orchestrator/modules/coordination/verification.py:1-161](), [orchestrator/modules/coordination/reconciler.py:151-153](), [orchestrator/core/models/orchestration_enums.py:99-102]()
 
 ## 3. Feedback Loop & Retries
 
@@ -96,18 +119,18 @@ The mission lifecycle is managed by the `CoordinatorService` tick loop, which re
 
 ### Reconciliation Flow
 The `MissionReconciler` transitions tasks through their lifecycle:
-1.  **COMPLETED → VERIFYING**: Triggered when an agent submits output [orchestrator/modules/coordination/reconciler.py:149-152]().
-2.  **VERIFYING → VERIFIED**: Output evaluated; feedback is attached for downstream synthesis tasks [orchestrator/modules/coordination/reconciler.py:104]().
-3.  **Stall Detection**: The reconciler identifies `ASSIGNED` tasks older than 60s or `RUNNING` tasks older than 300s and marks them as `STALLED` [orchestrator/modules/coordination/reconciler.py:155-158]().
-4.  **Fatal Failure**: If a task fails and retries are exhausted, the entire `OrchestrationRun` transitions to `FAILED` [orchestrator/modules/coordination/reconciler.py:200-202]().
+1.  **COMPLETED → VERIFYING**: Triggered when an agent submits output [orchestrator/modules/coordination/reconciler.py:151]().
+2.  **VERIFYING → VERIFIED**: Output evaluated; feedback is attached for downstream synthesis tasks [orchestrator/modules/coordination/reconciler.py:152]().
+3.  **Stall Detection**: The reconciler identifies `ASSIGNED` tasks older than 60s or `RUNNING` tasks older than 300s and marks them as `STALLED` [orchestrator/modules/coordination/reconciler.py:7-8]().
+4.  **Fatal Failure**: If a task fails and retries are exhausted, the entire `OrchestrationRun` transitions to `FAILED` [orchestrator/modules/coordination/reconciler.py:10]().
 
-### Human-in-the-Loop (HITL) Review
-Users can review verified tasks in the UI. The `HumanReviewPanel` allows for:
-*   **Accept**: Moves the mission forward [orchestrator/api/missions.py:126]().
-*   **Reject Flagged**: Rejects specific tasks with feedback, triggering a `RETRYING` state for those specific IDs [orchestrator/api/missions.py:127-130]().
-*   **Replan**: Allows for replanning a failed mission [orchestrator/api/missions.py:18]().
+### Human-in-the-Loop (HITL) & Approval
+Users interact with the mission lifecycle via the `MissionDetailPage` [frontend/components/missions/mission-detail-page.tsx:68]().
+*   **Plan Approval**: Missions created with `plan_only=True` await approval via `POST /api/missions/{id}/approve` [orchestrator/api/missions.py:91-94](), [orchestrator/api/missions.py:15]().
+*   **Plan Editing**: Before approval, users can PATCH task fields like `agent_role`, `title`, and `description` [orchestrator/services/coordinator_service.py:98-101](), [orchestrator/api/missions.py:109-117]().
+*   **Replanning**: Failed missions can be replanned with user feedback using `useReplanMission` [frontend/components/missions/mission-detail-page.tsx:80](), [orchestrator/api/missions.py:18]().
 
-**Sources:** [orchestrator/modules/coordination/reconciler.py:116-202](), [orchestrator/api/missions.py:125-152](), [orchestrator/services/orchestration_state.py:84-185]()
+**Sources:** [orchestrator/modules/coordination/reconciler.py:1-110](), [orchestrator/api/missions.py:1-28](), [frontend/components/missions/mission-detail-page.tsx:160-200]()
 
 ## 4. System Interaction Diagrams
 
@@ -128,37 +151,59 @@ sequenceDiagram
     alt Template Match
         T-->>CP: "DecompositionResult"
     else No Match
-        CP->>LLM: "decompose_goal_to_tasks()"
-        LLM-->>CP: "PlannedTask List"
+        CP->>LLM: "LLM decomposition prompt"
+        LLM-->>CP: "PlannedTask JSON"
     end
     Note over CP: "PlanValidator.check_acyclic()"
     CP->>DB: "Insert OrchestrationRun (RunState.PENDING)"
     CP->>DB: "Insert OrchestrationTask (sequence_number)"
-    DB-->>U: "Mission Created"
+    DB-->>U: "Mission Created (missionId)"
 ```
-**Sources:** [orchestrator/modules/coordination/planner.py:102-216](), [orchestrator/api/missions.py:82-90](), [frontend/components/missions/create-mission-modal.tsx:211-230]()
+**Sources:** [orchestrator/modules/coordination/planner.py:7-12](), [orchestrator/api/missions.py:83-95](), [frontend/components/missions/create-mission-modal.tsx:222-230]()
+
+### Mission Field Memory Integration
+The `VectorFieldSharedContext` [orchestrator/modules/context/adapters/vector_field.py:68-78]() provides a shared semantic space for agents within a mission. This "field memory" allows agents to resonate with and reinforce patterns, enabling a more cohesive multi-agent collaboration.
+
+Title: Mission Field Memory Data Flow
+```mermaid
+graph TD
+    A[Agent Output] --> B{VectorFieldSharedContext.inject()};
+    B --> C[Qdrant Collection: "field_memory"];
+    C -- "Payload: field_id, workspace_id, agent_id, content_hash" --> D[FieldPattern];
+    D -- "Embedding" --> C;
+    E[Agent Input] --> F{VectorFieldSharedContext.query()};
+    F --> C;
+    C -- "Resonance (cosine_similarity² × decayed_strength)" --> G[Relevant Field Patterns];
+    G --> E;
+    H[MissionFieldPanel (frontend)] --> I{useMissionField()};
+    I --> J[GET /api/missions/{id}/field];
+    J --> K[VectorFieldSharedContext.get_all_patterns()];
+    K --> H;
+```
+**Sources:** [orchestrator/modules/context/adapters/vector_field.py:1-100](), [frontend/components/missions/mission-field-panel.tsx:116-128](), [frontend/hooks/use-missions-api.ts:1-10](), [orchestrator/modules/context/adapters/vector_field.py:50-51]()
 
 ### Budget Governance & Telemetry
 Missions track token usage and complexity to prevent budget overruns.
 
 | Feature | Entity | Purpose |
 | :--- | :--- | :--- |
-| **Token Estimate** | `token_budget_estimate` | Sum of token budgets based on task complexity tiers [orchestrator/modules/coordination/planner.py:124-130](). |
-| **Complexity Tier** | `ComplexityTier` | Scored based on deliverables, domains, and word count [orchestrator/modules/coordination/planner.py:184-196](). |
-| **Usage Tracking** | `tokens_used` | Accumulated tokens across all tasks in the run [orchestrator/api/missions.py:204](), [frontend/types/missions.ts:49](). |
+| **Token Estimate** | `token_budget_estimate` | Sum of token budgets based on task complexity tiers [orchestrator/modules/coordination/planner.py:169-174](). |
+| **Complexity Tier** | `ComplexityTier` | Categorizes tasks as `SIMPLE`, `MODERATE`, or `COMPLEX` [orchestrator/core/models/orchestration_enums.py:175-179](). |
+| **Usage Tracking** | `tokens_used` | Accumulated tokens across all tasks in the run [orchestrator/core/models/orchestration.py:98](). |
+| **Budget Config** | `budget_config` | Stored JSON for `max_cost` and `max_tokens` limits [orchestrator/core/models/orchestration.py:112](). |
 
-**Sources:** [orchestrator/modules/coordination/planner.py:124-196](), [orchestrator/api/missions.py:195-210](), [frontend/types/missions.ts:39-60]()
+**Sources:** [orchestrator/core/models/orchestration.py:95-113](), [orchestrator/modules/coordination/planner.py:169-174](), [orchestrator/core/models/orchestration_enums.py:175-179]()
 
 ## 5. Mission State Reference
 
 | State | Type | Description |
 | :--- | :--- | :--- |
-| `PLANNING` | `RunState` | `MissionPlanner` is decomposing the goal into a DAG [frontend/types/missions.ts:12](). |
-| `AWAITING_APPROVAL` | `RunState` | Plan is generated; waiting for user to click 'Approve' in UI [frontend/types/missions.ts:13](). |
-| `VERIFYING` | `TaskState` | `VerificationService` is currently running judge/deterministic checks [frontend/types/missions.ts:28](). |
-| `STALLED` | `TaskState` | Task has timed out and is waiting for the reconciler to recover it [frontend/types/missions.ts:32](). |
-| `RETRYING` | `TaskState` | Task failed or was rejected and is being re-attempted [frontend/types/missions.ts:33](). |
+| `PLANNING` | `RunState` | `MissionPlanner` is decomposing the goal into a DAG [orchestrator/core/models/orchestration_enums.py:31](). |
+| `AWAITING_APPROVAL` | `RunState` | Plan is generated; waiting for user approval [orchestrator/core/models/orchestration_enums.py:32](). |
+| `VERIFYING` | `TaskState` | `VerificationService` is currently running judge/deterministic checks [orchestrator/core/models/orchestration_enums.py:54](). |
+| `STALLED` | `TaskState` | Task has timed out and is waiting for recovery [orchestrator/core/models/orchestration_enums.py:58](). |
+| `RETRYING` | `TaskState` | Task is being re-attempted after failure or rejection [orchestrator/core/models/orchestration_enums.py:59](). |
 
-**Sources:** [frontend/types/missions.ts:10-34](), [orchestrator/modules/coordination/reconciler.py:31-39]()
+**Sources:** [orchestrator/core/models/orchestration_enums.py:29-60](), [orchestrator/modules/coordination/reconciler.py:5-10]()
 
 ---

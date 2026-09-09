@@ -5,260 +5,223 @@
 
 The following files were used as context for generating this wiki page:
 
+- [frontend/components/activity/activity-page.tsx](frontend/components/activity/activity-page.tsx)
 - [frontend/components/agents/agent-management.tsx](frontend/components/agents/agent-management.tsx)
-- [frontend/components/agents/skills/skill-editor-modal.tsx](frontend/components/agents/skills/skill-editor-modal.tsx)
-- [frontend/components/agents/skills/workspace-skills-tab.tsx](frontend/components/agents/skills/workspace-skills-tab.tsx)
 - [frontend/components/documents/document-management.tsx](frontend/components/documents/document-management.tsx)
-- [frontend/components/documents/local-storage-browser.tsx](frontend/components/documents/local-storage-browser.tsx)
-- [frontend/components/knowledge/memory-tab.tsx](frontend/components/knowledge/memory-tab.tsx)
+- [frontend/components/marketplace/marketplace-homepage.tsx](frontend/components/marketplace/marketplace-homepage.tsx)
 - [frontend/components/tools/tools-dashboard.tsx](frontend/components/tools/tools-dashboard.tsx)
-- [frontend/hooks/use-skills-api.ts](frontend/hooks/use-skills-api.ts)
-- [orchestrator/api/documents.py](orchestrator/api/documents.py)
-- [orchestrator/api/knowledge_multimodal.py](orchestrator/api/knowledge_multimodal.py)
-- [orchestrator/api/workspace_skills.py](orchestrator/api/workspace_skills.py)
-- [orchestrator/modules/agents/services/agent_platform_tools.py](orchestrator/modules/agents/services/agent_platform_tools.py)
-- [orchestrator/modules/rag/chunking/semantic_chunker.py](orchestrator/modules/rag/chunking/semantic_chunker.py)
-- [orchestrator/modules/rag/ingestion/manager.py](orchestrator/modules/rag/ingestion/manager.py)
-- [orchestrator/modules/rag/service.py](orchestrator/modules/rag/service.py)
-- [orchestrator/modules/rag/services/cloud_file_downloader.py](orchestrator/modules/rag/services/cloud_file_downloader.py)
-- [orchestrator/modules/rag/services/cloud_sync_service.py](orchestrator/modules/rag/services/cloud_sync_service.py)
-- [orchestrator/modules/search/services/entity_extractor.py](orchestrator/modules/search/services/entity_extractor.py)
-- [orchestrator/modules/tools/formatting/result_formatter.py](orchestrator/modules/tools/formatting/result_formatter.py)
+- [frontend/components/workflows/active-workflows-panel.tsx](frontend/components/workflows/active-workflows-panel.tsx)
+- [frontend/components/workflows/workflow-management.tsx](frontend/components/workflows/workflow-management.tsx)
+- [orchestrator/conftest.py](orchestrator/conftest.py)
+- [orchestrator/core/database/migrations/044_pinned_documents.sql](orchestrator/core/database/migrations/044_pinned_documents.sql)
+- [orchestrator/modules/codegraph/tests/conftest.py](orchestrator/modules/codegraph/tests/conftest.py)
+- [orchestrator/modules/learning/tests/conftest.py](orchestrator/modules/learning/tests/conftest.py)
+- [orchestrator/modules/rag/pinned_context.py](orchestrator/modules/rag/pinned_context.py)
+- [orchestrator/modules/rag/retrieval_filters.py](orchestrator/modules/rag/retrieval_filters.py)
+- [orchestrator/modules/search/tests/conftest.py](orchestrator/modules/search/tests/conftest.py)
+- [orchestrator/modules/search/tests/test_math_foundations.py](orchestrator/modules/search/tests/test_math_foundations.py)
+- [orchestrator/modules/tools/discovery/actions_documents.py](orchestrator/modules/tools/discovery/actions_documents.py)
+- [orchestrator/modules/tools/discovery/handlers_documents.py](orchestrator/modules/tools/discovery/handlers_documents.py)
+- [orchestrator/scripts/init_test_db.py](orchestrator/scripts/init_test_db.py)
+- [orchestrator/tests/test_document_pinning.py](orchestrator/tests/test_document_pinning.py)
+- [orchestrator/tests/test_read_document_tool.py](orchestrator/tests/test_read_document_tool.py)
+- [orchestrator/tests/test_retrieval_filters.py](orchestrator/tests/test_retrieval_filters.py)
 
 </details>
 
 
 
-Document Management provides the interface for uploading, processing, and managing documents that feed into the RAG system. It handles file uploads via REST API, validates content types, stores documents in S3, and tracks metadata in PostgreSQL. Documents can be uploaded directly or synced automatically from cloud storage providers.
+Document Management provides the interface for uploading, processing, and managing documents that feed into the RAG system, team-scoped knowledge bases, and agent tools. It coordinates file uploads via REST API, validates MIME types and content hashes, stores raw files in object storage, tracks chunk metadata in PostgreSQL, and handles advanced features like team access scoping and document pinning.
 
-**Scope**: This page covers document upload, storage, metadata management, and cloud sync orchestration. For details on how documents are processed and chunked, see [Document Ingestion Pipeline (7.2)](). For using documents in retrieval, see [RAG Retrieval System (7.4)]().
-
----
-
-## Document Lifecycle
-
-Documents move through a defined lifecycle from upload to completion. The `DocumentManager` and API endpoints coordinate state transitions.
-
-### Document States
-
-```mermaid
-stateDiagram-v2
-    [*] --> uploaded: "POST /api/documents/upload"
-    uploaded --> processing: "DocumentManager.process_document()"
-    processing --> completed: "Success"
-    processing --> failed: "Error"
-    completed --> processing: "POST /reprocess"
-    failed --> processing: "POST /reprocess"
-    completed --> [*]: "DELETE /:id"
-    failed --> [*]: "DELETE /:id"
-```
-
-**Sources**: [orchestrator/api/documents.py:106-115](), [orchestrator/modules/rag/ingestion/manager.py:56-60]()
-
-| State | Description | Database Field |
-|-------|-------------|----------------|
-| `uploaded` | File received, awaiting processing | `status='uploaded'` |
-| `processing` | Extraction and chunking in progress | `status='processing'` |
-| `completed` | Successfully processed and indexed | `status='completed'` |
-| `failed` | Processing encountered an error | `status='failed'` |
-| `duplicate` | Identical content hash already exists | `status='duplicate'` |
-
-The `Document` model in PostgreSQL tracks this lifecycle with fields: `id`, `filename`, `file_type`, `file_size`, `upload_date`, `processed_date`, `status`, `chunk_count`, `content_hash`, and `workspace_id`.
-
-**Sources**: [orchestrator/api/documents.py:154-164](), [frontend/components/documents/document-management.tsx:71-82](), [orchestrator/modules/rag/ingestion/manager.py:72-83]()
+**Scope**: This page covers the `DocumentManagement` React component, upload workflows, provider cards, document details modal, team scoping constraints, and pinned documents infrastructure. For text extraction and embedding generation, see [Document Ingestion Pipeline (7.2)](). For semantic chunking strategies, see [Semantic Chunking Strategies (7.3)]().
 
 ---
 
-## Frontend Components
+## Document Management Frontend Component & Layout
 
-The document management interface is primarily handled by the `DocumentManagement` component, which utilizes a tabbed interface to separate local storage, cloud providers, and semantic search.
-
-### Document Management UI Structure
+The user interface for managing documents is anchored by the `DocumentManagement` component located in `frontend/components/documents/document-management.tsx`. It orchestrates multiple tabs and dialogs for local storage browsing, cloud provider synchronization, schema exploration, and semantic search.
 
 ```mermaid
 graph TD
-    subgraph "Frontend Component Space"
-        DM["DocumentManagement<br/>(document-management.tsx)"]
-        PH["PageHeader<br/>(page-header.tsx)"]
-        SB["StatsBar<br/>(stats-bar.tsx)"]
-        PC["ProviderCards<br/>(provider-cards.tsx)"]
-        LSB["LocalStorageBrowser<br/>(local-storage-browser.tsx)"]
-        DDM["DocumentDetailsModal<br/>(document-details-modal.tsx)"]
-        SS["SemanticSearch<br/>(semantic-search.tsx)"]
-        DP["DocumentProcessing<br/>(document-processing.tsx)"]
+    subgraph "Natural Language Space"
+        UI_USER["User Managing Knowledge"]
+        UI_SEARCH["Semantic Search Query"]
+        UI_VIEW["View Document Details"]
     end
 
-    subgraph "API Hook Space"
-        UD["useDocuments"]
-        USD["useUploadDocument"]
-        UST["useDocumentStats"]
-        UCC["useCloudConnections"]
+    subgraph "Code Entity Space"
+        DM["DocumentManagement<br/>(frontend/components/documents/document-management.tsx:4-72)"]
+        LSB["LocalStorageBrowser<br/>(frontend/components/documents/document-management.tsx:65)"]
+        PC["ProviderCards<br/>(frontend/components/documents/document-management.tsx:63)"]
+        DDM["DocumentDetailsModal<br/>(frontend/components/documents/document-management.tsx:54)"]
+        SS["SemanticSearch<br/>(frontend/components/documents/document-management.tsx:57)"]
+        API_HOOKS["useDocuments / useUploadDocument<br/>(frontend/components/documents/document-management.tsx:67)"]
     end
-    
-    DM --> PH
-    DM --> SB
-    DM --> PC
+
+    UI_USER --> DM
+    UI_SEARCH --> SS
+    UI_VIEW --> DDM
     DM --> LSB
+    DM --> PC
     DM --> DDM
     DM --> SS
-    DM --> DP
-    
-    DM -.-> UD
-    DM -.-> USD
-    DM -.-> UST
-    DM -.-> UCC
+    DM -.-> API_HOOKS
 ```
 
-**Sources**: [frontend/components/documents/document-management.tsx:4-69]()
+**Sources**: [frontend/components/documents/document-management.tsx:4-72](), [frontend/components/documents/document-management.tsx:54-67]()
 
-- **`DocumentManagement`**: The main container managing tabs for Local Storage, Cloud Storage, and Knowledge Graphs (Code/Business) [frontend/components/documents/document-management.tsx:4-69]().
-- **`LocalStorageBrowser`**: Handles the list and grid views for documents stored directly in the Automatos filesystem, including status badges and action menus [frontend/components/documents/document-management.tsx:63]().
-- **`ProviderCards`**: Displays connected cloud providers (Google Drive, Dropbox, etc.) and their sync status [frontend/components/documents/document-management.tsx:61]().
-- **`DocumentDetailsModal`**: Shows metadata, processing status, and chunk information for a specific document [frontend/components/documents/document-management.tsx:52]().
-- **`SchemaBrowser`**: An inline component within the document view that allows exploring database table metadata and column types for connected data sources [frontend/components/documents/document-management.tsx:105-188]().
-- **`DocumentProcessing`**: Visualizes the ingestion pipeline progress, including text extraction and vector indexing status [frontend/components/documents/document-management.tsx:58]().
+- **`DocumentManagement`**: The parent component managing local storage, cloud providers, and analytics tabs [frontend/components/documents/document-management.tsx:4-72]().
+- **`LocalStorageBrowser`**: Renders list and grid views for workspace files stored in Automatos [frontend/components/documents/document-management.tsx:65]().
+- **`ProviderCards`**: Displays integrated cloud storage providers (e.g., Google Drive, Dropbox) and connection health [frontend/components/documents/document-management.tsx:63]().
+- **`DocumentDetailsModal`**: Displays document metadata, processing status, chunk counts, and team access permissions [frontend/components/documents/document-management.tsx:54]().
+- **`SchemaBrowser`**: An inline tool for exploring database table metadata and column structures for connected data sources [frontend/components/documents/document-management.tsx:109-188]().
+
+**Sources**: [frontend/components/documents/document-management.tsx:54-188]()
 
 ---
 
-## Upload Methods
+## Upload Flow & Validation Pipeline
 
-### Direct Upload via API
-
-The primary upload endpoint accepts multipart form data with file validation.
+Documents enter the system via multipart form requests processed by backend endpoints and managed on the frontend by `useUploadDocument`.
 
 ```mermaid
 sequenceDiagram
     participant Client as "Frontend (useUploadDocument)"
     participant API as "POST /api/documents/upload"
     participant Magic as "python-magic"
-    participant DB as "PostgreSQL (Document)"
-    participant S3 as "S3 Storage"
+    participant DB as "PostgreSQL (documents table)"
+    participant S3 as "S3 Object Storage"
     
-    Client->>API: multipart/form-data (file + tags)
+    Client->>API: multipart/form-data (file + team_access)
     API->>Magic: Detect MIME type from buffer
-    Magic-->>API: "application/pdf"
+    Magic-->>API: MIME string (e.g. application/pdf)
     API->>API: Validate against ALLOWED_MIME_TYPES
-    API->>DB: Check content_hash (SHA-256)
-    DB-->>API: No existing hash
-    API->>API: Save to /tmp/automatos_uploads
-    API->>DB: INSERT Document (status='uploaded')
-    API->>S3: Upload to workspaces/{ws_id}/documents/
-    API-->>Client: DocumentUploadResponse (ID + status)
+    API->>DB: Check content_hash (SHA-256 uniqueness)
+    DB-->>API: No collision found
+    API->>DB: INSERT INTO documents (status='uploaded')
+    API->>S3: Upload raw payload to workspaces/{ws_id}/documents/
+    API-->>Client: Document upload success response
 ```
 
-**Sources**: [orchestrator/api/documents.py:106-154](), [orchestrator/api/documents.py:166-175]()
+**Sources**: [frontend/components/documents/document-management.tsx:67](), [orchestrator/scripts/init_test_db.py:63-72]()
 
-**Key Validations**:
-- **File Size**: Maximum 50MB enforced at [orchestrator/api/documents.py:126-127]().
-- **MIME Type Detection**: Uses `python-magic` for content-based detection at [orchestrator/api/documents.py:131-131]().
-- **Deduplication**: SHA-256 hash prevents duplicate uploads within a workspace at [orchestrator/api/documents.py:155-158]().
+### Validation and Deduplication Rules
+- **File Size Caps**: Enforced at the FastAPI ingestion boundary to reject oversized payloads.
+- **MIME Verification**: Content-based detection prevents extension spoofing.
+- **SHA-256 Deduplication**: Computes a cryptographic hash of the raw stream to prevent duplicate ingestion within a workspace [orchestrator/scripts/init_test_db.py:120-125]().
 
-**Supported File Types**:
-The system maps MIME types to allowed extensions to prevent extension spoofing.
-
-```python
-ALLOWED_MIME_TYPES = {
-    "application/pdf": [".pdf"],
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-    "text/plain": [".txt", ".md", ".csv"],
-    "text/markdown": [".md"],
-    "text/html": [".md", ".html"],
-    "text/csv": [".csv"],
-    "application/json": [".json"],
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-}
-```
-
-**Sources**: [orchestrator/api/documents.py:89-104]()
+**Sources**: [orchestrator/scripts/init_test_db.py:63-125]()
 
 ---
 
-## Cloud Storage Integration (PRD-42)
+## Team Scoping & Access Control
 
-The system integrates with major cloud providers via Composio to ingest external data.
+Documents can be restricted to specific teams within a workspace via the `team_access` field in the database. Agent tools such as `read_document` and `grep_documents` enforce fail-closed team scoping to prevent unauthorized access.
 
-### Cloud File Downloader
-The `CloudFileDownloader` service implements a multi-layered strategy for retrieving files:
-1.  **Layer 1 (REST API)**: Primary attempt using Composio v3 REST API [orchestrator/modules/rag/services/cloud_file_downloader.py:94-97]().
-2.  **Layer 2 (SDK Fallback)**: Specifically for Google Drive, which often truncates REST responses. The SDK is used to pull the full binary to the container disk [orchestrator/modules/rag/services/cloud_file_downloader.py:101-111]().
+```mermaid
+graph TD
+    subgraph "Natural Language Space"
+        REQ["Agent Tool Execution<br/>(read_document / grep_documents)"]
+        DECISION["Access Evaluation"]
+    end
 
-### Supported Providers
-- **Google Drive**: `GOOGLEDRIVE_DOWNLOAD_FILE` [orchestrator/modules/rag/services/cloud_file_downloader.py:30]().
-- **Dropbox**: `DROPBOX_READ_FILE` [orchestrator/modules/rag/services/cloud_file_downloader.py:31]().
-- **OneDrive**: `ONEDRIVE_DOWNLOAD_FILE` [orchestrator/modules/rag/services/cloud_file_downloader.py:32]().
-- **Box**: `BOX_DOWNLOAD_FILE` [orchestrator/modules/rag/services/cloud_file_downloader.py:33]().
+    subgraph "Code Entity Space"
+        HD["handlers_documents.py<br/>(read_document / grep_documents)"]
+        RAT["_resolve_agent_team(db, agent_id)<br/>(handlers_documents.py)"]
+        DB_DOC["documents.team_access<br/>(PostgreSQL Table)"]
+        RF["allowed_document_ids()<br/>(retrieval_filters.py)"]
+    end
 
-**Sources**: [orchestrator/modules/rag/services/cloud_file_downloader.py:28-34](), [orchestrator/modules/rag/services/cloud_file_downloader.py:59-65]()
+    REQ --> HD
+    HD --> RAT
+    RAT --> DB_DOC
+    HD --> RF
+    DB_DOC -- "Match Team" --> DECISION
+```
+
+**Sources**: [orchestrator/tests/test_read_document_tool.py:127-143](), [orchestrator/modules/rag/retrieval_filters.py]()
+
+### Implementation Details
+- **`team_access` Array**: PostgreSQL column storing team identifiers (e.g. `'{sales}'`) permitted to read the document [orchestrator/tests/test_read_document_tool.py:79-103]().
+- **Agent Team Resolution**: `_resolve_agent_team` maps the executing `agent_id` to its assigned organizational team [orchestrator/tests/test_read_document_tool.py:134]().
+- **Fail-Closed Filtering**: If an agent belongs to a non-matching team (e.g. `support` attempting to read a `sales`-restricted document), execution returns a failure result [orchestrator/tests/test_read_document_tool.py:135-136]().
+
+**Sources**: [orchestrator/tests/test_read_document_tool.py:79-143]()
 
 ---
 
-## Storage & Retrieval Architecture
+## Pinned Documents & Context Injection
 
-Documents use a dual-storage model: metadata and chunks in PostgreSQL, and original files in S3.
+During chat sessions, users can pin specific documents to guarantee their inclusion in the agent's prompt context across conversation turns.
 
-### Storage Components
+```mermaid
+sequenceDiagram
+    participant User as "Frontend Chat UI"
+    participant API as "pinned_context.py"
+    participant DB as "PostgreSQL (document_pins table)"
+    participant Context as "Context Builder"
+    
+    User->>API: pin_document(chat_id, document_id)
+    API->>DB: INSERT INTO document_pins
+    DB-->>API: Pin recorded
+    Note over User,Context: Subsequent Chat Turn
+    Context->>API: build_pinned_system_message(chat_id)
+    API->>DB: SELECT chunks FROM document_chunks WHERE pinned
+    DB-->>API: Chunk content ("PINNED-MARKER")
+    API-->>Context: Injected system prompt message
+```
+
+**Sources**: [orchestrator/tests/test_document_pinning.py:112-158]()
+
+### Key Functions
+- **`pin_document` / `unpin_document`**: Manages association between chat sessions and document IDs [orchestrator/tests/test_document_pinning.py:114-117]()
+- **`build_pinned_system_message`**: Assembles pinned document chunks into a formatted system prompt injection [orchestrator/tests/test_document_pinning.py:118]()
+- **`_filter_frontend_docs_by_scope`**: Validates frontend document widget links against workspace and team scopes, dropping out-of-scope references [orchestrator/tests/test_document_pinning.py:30-43]()
+
+**Sources**: [orchestrator/tests/test_document_pinning.py:30-158]()
+
+---
+
+## Cloud Storage Integration & Provider Cards
+
+Cloud storage synchronization allows Automatos to ingest documents automatically from external providers like Google Drive and Dropbox (PRD-42).
 
 ```mermaid
 graph LR
-    subgraph "PostgreSQL (Metadata & Search)"
-        DOC["Document Table<br/>(id, filename, status, content_hash)"]
-        CHUNKS["DocumentChunks Table<br/>(document_id, content, embedding)"]
+    subgraph "Frontend UI"
+        PC["ProviderCards<br/>(provider-cards.tsx)"]
+        PB["ProviderBrowser<br/>(provider-browser.tsx)"]
     end
-    
-    subgraph "S3 (Object Storage)"
-        S3DOCS["S3 Documents Bucket<br/>workspaces/{ws_id}/documents/"]
-        S3VECTORS["S3 Vectors Bucket<br/>(Optional Vector Storage)"]
+
+    subgraph "Backend Services"
+        CCS["CloudSyncService<br/>(cloud_sync.py)"]
+        DB_CS["CloudSyncConfig / CloudDocument<br/>(cloud_sync.py models)"]
+        S3["S3 Vectors / Storage Backend"]
     end
-    
-    DOC --> S3DOCS
-    CHUNKS --> S3VECTORS
+
+    PC --> CCS
+    PB --> CCS
+    CCS --> DB_CS
+    DB_CS --> S3
 ```
 
-**Sources**: [orchestrator/api/documents.py:77-86](), [orchestrator/modules/rag/ingestion/manager.py:94-111]()
+**Sources**: [frontend/components/documents/document-management.tsx:63-64](), [orchestrator/scripts/init_test_db.py:15]()
 
-### Document Processor
-The `DocumentProcessor` handles extraction logic for various formats:
-- **PDF**: Uses `pdfplumber` with a `PyPDF2` fallback for robust extraction [orchestrator/modules/rag/ingestion/manager.py:157-194]().
-- **DOCX**: Uses `python-docx` [orchestrator/modules/rag/ingestion/manager.py:196-203]().
-- **Markdown/Code**: Uses specialized LangChain splitters (`MarkdownTextSplitter`, `PythonCodeTextSplitter`) [orchestrator/modules/rag/ingestion/manager.py:116-130]().
+- **`ProviderCards`**: Component rendering connection status, sync frequency, and trigger actions for external storage integrations [frontend/components/documents/document-management.tsx:63]()
+- **`CloudSyncConfig`**: Database model tracking authentication tokens, root folders, and sync intervals [orchestrator/scripts/init_test_db.py:15]()
+- **`CloudDocument`**: Model mapping external file IDs to internal document ingestion records [orchestrator/scripts/init_test_db.py:15]()
 
----
-
-## Unified Result Formatting
-
-To ensure consistent document presentation across the platform, the `ToolResultFormatter` provides static methods for cleaning filenames and extracting useful excerpts.
-
-### Formatting Logic
-- **Filename Cleaning**: Removes 32-64 character hexadecimal hash prefixes from stored filenames [orchestrator/modules/tools/formatting/result_formatter.py:25-42]().
-- **Content Extraction**: Smartly truncates document chunks at sentence or paragraph boundaries, defaulting to an 800-character limit [orchestrator/modules/tools/formatting/result_formatter.py:45-67]().
-- **Database Fallback**: If the original file is missing from S3, the formatter reassembles the document from `document_chunks` ordered by `chunk_index` [orchestrator/modules/tools/formatting/result_formatter.py:152-168]().
-
-**Sources**: [orchestrator/modules/tools/formatting/result_formatter.py:18-171]()
+**Sources**: [frontend/components/documents/document-management.tsx:63](), [orchestrator/scripts/init_test_db.py:15]()
 
 ---
 
-## Document API Endpoints
+## Document API Reference
 
-### Document Management
-- **POST `/api/documents/upload`**: Upload and process a document [orchestrator/api/documents.py:106]().
-- **GET `/api/documents/`**: List workspace documents [orchestrator/api/documents.py:29]().
-- **DELETE `/api/documents/{document_id}`**: Delete a document and its associated vector chunks [frontend/components/documents/document-management.tsx:65]().
+- **`POST /api/documents/upload`**: Ingests multipart form files, validates MIME types, checks SHA-256 deduplication hashes, and triggers background processing.
+- **`GET /api/documents/`**: Lists workspace documents with pagination, status filters, and search queries.
+- **`DELETE /api/documents/{id}`**: Deletes a document and cascades removal to associated chunks and vector indices.
+- **`POST /api/rag/pin`**: Pins a document to a specific chat session for persistent prompt context inclusion.
 
-### Platform Integration
-- **search_knowledge**: Agent-facing tool to search the internal knowledge base [orchestrator/modules/agents/services/agent_platform_tools.py:59-77]().
-- **semantic_search**: Agent-facing tool to find similar content across platform documents [orchestrator/modules/agents/services/agent_platform_tools.py:78-96]().
-
----
-
-## Configuration
-
-| Variable | Purpose |
-|----------|---------|
-| `S3_DOCUMENTS_BUCKET` | S3 bucket for original document storage [orchestrator/api/documents.py:80](). |
-| `S3_VECTORS_ENABLED` | Toggle for using S3 as the vector backend [orchestrator/api/documents.py:79](). |
-| `DATABASE_URL` | Primary PostgreSQL connection string [orchestrator/api/documents.py:50](). |
-| `COMPOSIO_API_KEY` | Required for cloud storage downloads [orchestrator/modules/rag/services/cloud_file_downloader.py:151-154](). |
-
-**Sources**: [orchestrator/api/documents.py:50-86](), [orchestrator/modules/rag/services/cloud_file_downloader.py:151-154]()
+**Sources**: [orchestrator/tests/test_read_document_tool.py:79-103](), [orchestrator/tests/test_document_pinning.py:112-158]()
 
 ---

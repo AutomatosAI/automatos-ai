@@ -5,15 +5,30 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/app/chat/page.tsx](frontend/app/chat/page.tsx)
-- [frontend/app/tools/page.tsx](frontend/app/tools/page.tsx)
-- [frontend/components/chatbot/chat-widget.tsx](frontend/components/chatbot/chat-widget.tsx)
-- [frontend/components/layout/header.tsx](frontend/components/layout/header.tsx)
-- [frontend/components/layout/main-layout.tsx](frontend/components/layout/main-layout.tsx)
-- [frontend/components/layout/mobile-sidebar.tsx](frontend/components/layout/mobile-sidebar.tsx)
-- [frontend/components/layout/sidebar.tsx](frontend/components/layout/sidebar.tsx)
-- [frontend/components/tools/my-tools-dashboard.tsx](frontend/components/tools/my-tools-dashboard.tsx)
-- [frontend/public/brand/jira-logo.svg](frontend/public/brand/jira-logo.svg)
+- [SPRINT0_OVERNIGHT_REPORT.md](SPRINT0_OVERNIGHT_REPORT.md)
+- [frontend/app/accept-invitation/page.tsx](frontend/app/accept-invitation/page.tsx)
+- [frontend/app/deliverables/explorer/page.tsx](frontend/app/deliverables/explorer/page.tsx)
+- [frontend/app/deliverables/page.tsx](frontend/app/deliverables/page.tsx)
+- [frontend/app/marketplace/developer/page.tsx](frontend/app/marketplace/developer/page.tsx)
+- [frontend/app/marketplace/publish/page.tsx](frontend/app/marketplace/publish/page.tsx)
+- [frontend/app/reset-password/page.tsx](frontend/app/reset-password/page.tsx)
+- [frontend/app/settings/notifications/page.tsx](frontend/app/settings/notifications/page.tsx)
+- [frontend/app/settings/profile/page.tsx](frontend/app/settings/profile/page.tsx)
+- [frontend/app/sso-callback/page.tsx](frontend/app/sso-callback/page.tsx)
+- [frontend/components/auth/require-role.tsx](frontend/components/auth/require-role.tsx)
+- [frontend/components/auth/sign-in-form.tsx](frontend/components/auth/sign-in-form.tsx)
+- [frontend/components/settings/ApiKeyManager.tsx](frontend/components/settings/ApiKeyManager.tsx)
+- [frontend/components/settings/NotificationsSettingsTab.tsx](frontend/components/settings/NotificationsSettingsTab.tsx)
+- [frontend/components/workflows/json-schema-editor.tsx](frontend/components/workflows/json-schema-editor.tsx)
+- [frontend/components/workflows/playbook-step-progress.tsx](frontend/components/workflows/playbook-step-progress.tsx)
+- [frontend/components/workflows/theater/theater-step-execution.tsx](frontend/components/workflows/theater/theater-step-execution.tsx)
+- [frontend/middleware.ts](frontend/middleware.ts)
+- [frontend/next.config.js](frontend/next.config.js)
+- [frontend/package-lock.json](frontend/package-lock.json)
+- [frontend/package.json](frontend/package.json)
+- [frontend/stores/index.ts](frontend/stores/index.ts)
+- [orchestrator/alembic/versions/add_clerk_invitation_id.py](orchestrator/alembic/versions/add_clerk_invitation_id.py)
+- [orchestrator/alembic/versions/prd195_drop_authz_fossil_tables.py](orchestrator/alembic/versions/prd195_drop_authz_fossil_tables.py)
 
 </details>
 
@@ -45,9 +60,13 @@ const nextConfig = {
 ```
 
 **Key Configuration Decisions**:
-- **Standalone Output**: The `output: 'standalone'` setting creates a minimal build folder containing only the necessary files for production.
-- **Security Headers**: The configuration injects strict security headers, including a robust `Content-Security-Policy` (CSP) to prevent XSS.
-- **API Strategy**: The application uses absolute URLs via `NEXT_PUBLIC_API_URL` for backend communication.
+- **Standalone Output**: The `output: 'standalone'` setting [frontend/next.config.js:14-14]() creates a minimal build folder containing only the necessary files for production.
+- **Security Headers**: The configuration injects strict security headers, including a robust `Content-Security-Policy` (CSP) [frontend/next.config.js:99-117]() to prevent XSS.
+- **API Strategy**: The application uses absolute URLs via `NEXT_PUBLIC_API_URL` [frontend/next.config.js:6-6]() for backend communication.
+- **Redirects**: Permanent redirects are configured for old routes to new information architecture paths, such as `/workspace` to `/deliverables` [frontend/next.config.js:48-56]().
+- **TypeScript and ESLint**: Build errors for TypeScript and ESLint are ignored during the build process [frontend/next.config.js:28-36](), with checks performed in CI to prevent regressions [frontend/next.config.js:20-27](), [frontend/next.config.js:30-36]().
+
+**Sources**: [frontend/next.config.js:1-125]()
 
 ---
 
@@ -59,22 +78,30 @@ The `RootLayout` serves as the entry point, wrapping the application in a `Provi
 
 | Provider | Responsibility |
 | :--- | :--- |
-| `ClerkProvider` | Authentication and user session management |
-| `QueryClientProvider` | Server state management via React Query |
+| `ClerkProvider` | Authentication and user session management [frontend/package.json:50-50]() |
+| `QueryClientProvider` | Server state management via React Query [frontend/package.json:84-84]() |
 | `WorkspaceProvider` | Multi-tenancy context and workspace switching |
-| `ThemeProvider` | Dark/Light/Matte mode management |
+| `ThemeProvider` | Dark/Light/Matte/Studio mode management |
 | `RoleProvider` | RBAC (Role-Based Access Control) state |
+
+**Sources**: [frontend/package.json:50-50](), [frontend/package.json:84-84]()
 
 ### Main Layout & Navigation
 
-The `MainLayout` [frontend/components/layout/main-layout.tsx:19-119]() component establishes the structural shell for the internal application pages. It manages:
+The `MainLayout` component establishes the structural shell. It supports two primary visual paradigms: **Classic** and **Studio**.
 
-- **Sidebar Navigation**: Desktop sidebar with collapse state [frontend/components/layout/main-layout.tsx:64-77]() and a mobile-specific `Sheet` navigation [frontend/components/layout/main-layout.tsx:80-89]().
-- **Page Header**: Contains the menu toggle, branding, and user profile [frontend/components/layout/main-layout.tsx:97-97]().
-- **Floating Assistant**: The `AutoWidget` [frontend/components/layout/main-layout.tsx:112-116]() is injected globally except on the dedicated `/chat` route.
-- **Onboarding**: Automatically starts page tours via `useAutoTour()` [frontend/components/layout/main-layout.tsx:26-26]().
+#### Studio Shell (Desktop)
+When `isStudio` is active, the layout renders the "CD round-4 chrome":
+- **StudioSidebar**: A labelled rail (232px) supporting icon-rail collapse (56px).
+- **StudioHeader**: A minimal editorial bar containing search (⌘K), notifications, and profile.
+- **StudioPageTabs**: Generic sub-nav tabs (e.g., Roster, Skills, Lineage) mapped to the current route.
 
-**Sources**: [frontend/components/layout/main-layout.tsx:1-120]()
+#### Classic Shell
+The fallback layout used for non-studio users or mobile views:
+- **Sidebar**: Standard desktop sidebar with collapse state.
+- **Mobile Navigation**: Uses a Shadcn `Sheet` to wrap the `MobileSidebar`.
+
+**Sources**: [frontend/package.json:52-52]()
 
 ---
 
@@ -86,84 +113,116 @@ The following diagram bridges the "Natural Language Space" of "Page-Aware Assist
 
 ```mermaid
 graph TD
-    Path["usePathname()"] --> Layout["MainLayout (main-layout.tsx)"]
+    Path["usePathname()"] --> Layout["MainLayout.tsx"]
     Layout --> ContextFn["getCurrentPage()"]
     
     ContextFn -- "/agents/*" --> AgentCtx["'agents'"]
     ContextFn -- "/documents/*" --> DocCtx["'documents'"]
     ContextFn -- "/tools/*" --> ToolCtx["'tools'"]
+    ContextFn -- "/assignments/*" --> AssignCtx["'assignments'"]
     
     AgentCtx --> Widget["AutoWidget (chat-widget.tsx)"]
     DocCtx --> Widget
     ToolCtx --> Widget
+    AssignCtx --> Widget
     
     Widget --> ChatHook["useChat(id: 'auto-widget')"]
     ChatHook --> Hint["[Context: User is on the ... page]"]
 ```
-**Sources**: [frontend/components/layout/main-layout.tsx:29-51](), [frontend/components/chatbot/chat-widget.tsx:107-112]()
+**Sources**: No direct code citations for `MainLayout.tsx` or `chat-widget.tsx` were provided in the given file contents.
 
-### Chat Routing & Handoff
+### Assignment Hub Navigation
 
-This diagram illustrates the data flow when a user transitions from the floating widget to the full-screen chat interface.
+This diagram illustrates how the `StudioAssignmentsHub` coordinates between Missions and Playbooks using URL state.
 
 ```mermaid
-sequenceDiagram
-    participant W as "AutoWidget (chat-widget.tsx)"
-    participant S as "sessionStorage"
-    participant R as "Next.js Router"
-    participant P as "ChatPage (app/chat/page.tsx)"
-    participant C as "Chat Component"
-
-    W->>W: handleOpenFullChat()
-    W->>S: setItem('auto-widget-handoff', messages)
-    W->>R: push('/chat')
-    R->>P: Render
-    P->>S: getItem('auto-widget-handoff')
-    S-->>P: handoffMessages
-    P->>C: mount with initialMessages={handoffMessages}
+graph TD
+    Hub["StudioAssignmentsHub (assignments-hub.tsx)"] --> SearchParams["useSearchParams('tab')"]
+    SearchParams -- "playbooks" --> PBBody["PlaybooksBody.tsx"]
+    SearchParams -- "missions" --> MBody["MissionsBody.tsx"]
+    
+    Hub --> EntryGrid["EntryGrid.tsx"]
+    EntryGrid -- "Pick Mission" --> MissionModal["CreateMissionModal"]
+    EntryGrid -- "Pick Playbook" --> PlaybookModal["CreatePlaybookModal"]
+    
+    PBBody --> Execute["useExecutePlaybook()"]
+    Execute --> Router["router.push('/activity/execution')"]
 ```
-**Sources**: [frontend/components/chatbot/chat-widget.tsx:84-93](), [frontend/app/chat/page.tsx:63-75]()
+**Sources**: No direct code citations for `assignments-hub.tsx`, `PlaybooksBody.tsx`, or `MissionsBody.tsx` were provided in the given file contents.
 
 ---
 
 ## Navigation & UI Structure
 
-### Sidebar & Role Access
-The `Sidebar` [frontend/components/layout/sidebar.tsx:127-215]() and `MobileSidebar` [frontend/components/layout/mobile-sidebar.tsx:114-187]() manage application-wide navigation.
-- **RBAC Filtering**: Navigation items are filtered based on the user's `systemRole` and `isAdmin` status [frontend/components/layout/sidebar.tsx:134-137]().
-- **Admin Section**: Routes like `/admin/workspaces` are restricted to users with the `admin` role [frontend/components/layout/sidebar.tsx:117-124]().
-- **Premium Icons**: Navigation supports dynamic icon mapping via `useSystemIcons()` [frontend/components/layout/sidebar.tsx:131-131]().
+### Studio Menu Registry
+The `STUDIO_MENU_PRIMARY` registry is the single source of truth for the sidebar, organized into three groups:
+1.  **OPERATIONS**: Daily surfaces like Chat, Command Centre, Assignments, and Deliverables.
+2.  **WORKFORCE**: Management of Agents, Tools, Knowledge Base, and Marketplace.
+3.  **WORKSPACE**: Admin functions including Team, Analytics, and Workspace Admin.
 
-### Chat Interface
-The dedicated `/chat` page [frontend/app/chat/page.tsx:20-145]() features unique layout behaviors:
-- **Viewport Management**: Uses `dvh` (Dynamic Viewport Height) for mobile to account for browser toolbars [frontend/app/chat/page.tsx:87-87]().
-- **History Panel**: Integrates a dedicated `AppSidebar` for chat history [frontend/app/chat/page.tsx:106-106]().
-- **Deep Linking**: Supports specific modes like `?mode=plan` which activates the mission planning interface via `useMissionStore` [frontend/app/chat/page.tsx:32-36]().
-- **History Toggle**: Responds to the `automatos:chat-history-toggle` custom event dispatched from the main sidebar [frontend/app/chat/page.tsx:78-82]().
+### Assignments Hub
+The `/assignments` route dynamically switches between the classic `AssignmentsPage` and the `StudioAssignmentsHub` based on theme and device.
+- **MissionsBody**: Manages the mission queue with Grouped, Cards, and Table views.
+- **PlaybooksBody**: Manages the playbook library with scope filtering (All, Mine, Workspace, Imported).
 
-### Tools Dashboard
-The `/tools` page [frontend/app/tools/page.tsx:7-15]() hosts the `ToolsDashboard` and `MyToolsDashboard` [frontend/components/tools/my-tools-dashboard.tsx:13-113]().
-- **Connectivity Status**: Displays real-time status (Active, Error, Disconnected) for third-party integrations via `useConnectedApps()` [frontend/hooks/use-composio-api:10-10]().
-- **Marketplace Link**: Provides direct access to the marketplace for discovering new tools [frontend/components/tools/my-tools-dashboard.tsx:66-72]().
+**Sources**: No direct code citations for `STUDIO_MENU_PRIMARY`, `AssignmentsPage`, `StudioAssignmentsHub`, `MissionsBody`, or `PlaybooksBody` were provided in the given file contents.
 
-**Sources**: [frontend/components/layout/sidebar.tsx:35-125](), [frontend/app/chat/page.tsx:1-145](), [frontend/components/tools/my-tools-dashboard.tsx:1-188]()
+### App Router Pages
+
+The Next.js App Router organizes pages based on the file system. Key pages and their functionalities include:
+
+-   `/`: The main application entry point, typically redirecting to a dashboard or chat interface.
+-   `/sign-in`, `/sign-up`: Authentication pages handled by Clerk [frontend/components/auth/sign-in-form.tsx:18-27]().
+-   `/reset-password`: Password reset flow, also managed by Clerk [frontend/app/reset-password/page.tsx:22-27]().
+-   `/sso-callback`: Handles Single Sign-On (SSO) redirects from Clerk [frontend/app/sso-callback/page.tsx:13-17]().
+-   `/accept-invitation`: Page for accepting workspace invitations, which involves fetching invitation info and then accepting it via an API call [frontend/app/accept-invitation/page.tsx:45-91]().
+-   `/deliverables`: Displays all agent outputs, with tabs for `outputs`, `blogs`, `templates`, and `explorer` [frontend/app/deliverables/page.tsx:39-46]().
+    -   `/deliverables/explorer`: A full-page workspace file browser, rendering the `WorkspaceExplorer` component [frontend/app/deliverables/explorer/page.tsx:23-29]().
+-   `/settings/profile`: User profile management. This page is conditional, rendering `LocalProfileForm` for the `local` edition and `ClerkProfilePage` for the `saas` edition [frontend/app/settings/profile/page.tsx:25-26]().
+
+**Sources**:
+[frontend/components/auth/sign-in-form.tsx:18-27]()
+[frontend/app/reset-password/page.tsx:22-27]()
+[frontend/app/sso-callback/page.tsx:13-17]()
+[frontend/app/accept-invitation/page.tsx:45-91]()
+[frontend/app/deliverables/page.tsx:39-46]()
+[frontend/app/deliverables/explorer/page.tsx:23-29]()
+[frontend/app/settings/profile/page.tsx:25-26]()
+
+### Middleware
+
+The `middleware.ts` file [frontend/middleware.ts:1-33]() handles authentication and routing logic before a request is completed.
+-   It uses `clerkMiddleware` for SaaS deployments to protect non-public routes [frontend/middleware.ts:20-24]().
+-   For local deployments, it acts as a pass-through, making all routes public as there is no authentication [frontend/middleware.ts:27-27]().
+-   Public routes are defined using `createRouteMatcher` [frontend/middleware.ts:11-18]().
+
+**Sources**: [frontend/middleware.ts:1-33]()
+
+### Stores
+
+The frontend uses Zustand for state management. The `frontend/stores/index.ts` file [frontend/stores/index.ts:1-21]() serves as the entry point, exporting various stores:
+-   `useWorkspaceStore`: Manages workspace-related state, including widgets, layout mode, chat panel width, and widget tray status [frontend/stores/index.ts:8-19]().
+-   `useChatSessionStore`: Manages chat session-specific state [frontend/stores/index.ts:21-21]().
+
+**Sources**: [frontend/stores/index.ts:1-21]()
 
 ---
 
 ## Styling & Theme System
 
-The application uses **Tailwind CSS** with a custom theme engine supporting three primary modes:
+The application uses **Tailwind CSS** with a custom theme engine supporting four primary modes:
 
 | Theme | Description | CSS Trigger |
 | :--- | :--- | :--- |
 | **Light** | High-contrast, crisp borders, standard surfaces | `:root` |
 | **Dark** | Neon accents, glassmorphism, glowing shadows | `.dark` |
 | **Matte** | Cool-grey palette, flat surfaces, no glow | `.matte` |
+| **Studio** | Cream paper, serif headlines, mono detail, olive/navy accents | `.studio` |
 
 **Key Styling Entities**:
-- **Glassmorphism**: Layout components use `glass-card` and `backdrop-blur` for a layered UI feel [frontend/components/layout/main-layout.tsx:84-84]().
-- **Branding**: The brand mark (`automatos-mark-hi.png`) is consistently used across the header [frontend/components/layout/header.tsx:37-42]() and mobile sidebar [frontend/components/layout/mobile-sidebar.tsx:128-133]().
+- **Glassmorphism**: Alphas like `--glass-card-alpha` control the intensity of the "glass" effect per theme.
+- **Fabricated Stats Removal**: Per PRD-180 S2, the `StudioSidebar` no longer renders hardcoded telemetry literals to maintain data integrity.
 
-**Sources**: [frontend/components/layout/header.tsx:1-102](), [frontend/components/layout/main-layout.tsx:62-62]()
+**Sources**: No direct code citations for styling entities were provided in the given file contents.
 
 ---

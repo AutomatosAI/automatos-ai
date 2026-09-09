@@ -5,15 +5,20 @@
 
 The following files were used as context for generating this wiki page:
 
+- [orchestrator/api/chat.py](orchestrator/api/chat.py)
+- [orchestrator/api/routing.py](orchestrator/api/routing.py)
 - [orchestrator/consumers/chatbot/auto.py](orchestrator/consumers/chatbot/auto.py)
-- [orchestrator/core/security/rate_limiter.py](orchestrator/core/security/rate_limiter.py)
-- [orchestrator/core/services/auto_reporting.py](orchestrator/core/services/auto_reporting.py)
-- [orchestrator/core/services/notification_dispatcher.py](orchestrator/core/services/notification_dispatcher.py)
-- [orchestrator/modules/tools/discovery/actions_auto_reporting.py](orchestrator/modules/tools/discovery/actions_auto_reporting.py)
-- [orchestrator/modules/tools/discovery/handlers_auto_reporting.py](orchestrator/modules/tools/discovery/handlers_auto_reporting.py)
+- [orchestrator/consumers/chatbot/service.py](orchestrator/consumers/chatbot/service.py)
+- [orchestrator/core/llm/manager.py](orchestrator/core/llm/manager.py)
+- [orchestrator/core/routing/engine.py](orchestrator/core/routing/engine.py)
+- [orchestrator/modules/agents/factory/agent_factory.py](orchestrator/modules/agents/factory/agent_factory.py)
 - [orchestrator/modules/tools/discovery/platform_actions.py](orchestrator/modules/tools/discovery/platform_actions.py)
 - [orchestrator/modules/tools/discovery/platform_executor.py](orchestrator/modules/tools/discovery/platform_executor.py)
-- [orchestrator/tests/test_prd128_notification_dispatcher.py](orchestrator/tests/test_prd128_notification_dispatcher.py)
+- [orchestrator/scripts/setup_jira_trigger.py](orchestrator/scripts/setup_jira_trigger.py)
+- [orchestrator/services/heartbeat_service.py](orchestrator/services/heartbeat_service.py)
+- [orchestrator/services/page_context.py](orchestrator/services/page_context.py)
+- [orchestrator/tests/test_prd221_page_context.py](orchestrator/tests/test_prd221_page_context.py)
+- [orchestrator/tests/test_prd221_page_prior_tools.py](orchestrator/tests/test_prd221_page_prior_tools.py)
 
 </details>
 
@@ -21,90 +26,79 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose & Scope
 
-AutoBrain is the progressive complexity assessor that receives **every** incoming chat message and determines the computational depth required to respond. It implements PRD-68's Progressive Complexity Routing, classifying requests on a five-level scale from simple greetings (`ATOM`) to enterprise-scale multi-agent pipelines (`ORGANISM`). [orchestrator/consumers/chatbot/auto.py:1-22]()
+AutoBrain is the progressive complexity assessor that receives **every** incoming chat message and determines the computational depth required to respond [orchestrator/consumers/chatbot/auto.py:1-22](). It implements PRD-68's Progressive Complexity Model, classifying requests on a five-level scale from simple greetings (`ATOM`) to enterprise-scale multi-agent coordination (`ORGANISM`) [orchestrator/consumers/chatbot/auto.py:47-58]().
 
-The assessor's output determines three critical downstream behaviors:
-1. **Routing decision** — whether to respond directly, delegate to a specialized agent, or trigger a workflow/mission. [orchestrator/consumers/chatbot/auto.py:51-57]()
-2. **Tool availability** — which tools to load (if any) to avoid overwhelming the LLM via `tool_hints`. [orchestrator/consumers/chatbot/auto.py:69-71]()
-3. **Memory retrieval** — whether to fetch conversation context from the memory system via `needs_memory`. [orchestrator/consumers/chatbot/auto.py:70-70]()
+The assessor's output dictates three critical downstream behaviors:
+1. **Routing decision** — whether to respond directly, delegate to a specialized agent, execute a mission, or assign a board ticket [orchestrator/consumers/chatbot/auto.py:60-68]().
+2. **Tool availability** — which tools to load (`tool_hints` / `ASSIGN_TOOL_HINTS`) to prevent context window bloat [orchestrator/consumers/chatbot/auto.py:69-75]().
+3. **Memory retrieval** — whether to fetch conversation context from the unified memory system via `needs_memory` [orchestrator/consumers/chatbot/auto.py:65-78]().
 
-The `ComplexityAssessment` result flows through the system wiring, where `needs_memory` and `tool_hints` drive downstream behavior in the `SmartChatOrchestrator`. [orchestrator/consumers/chatbot/auto.py:19-22]()
-
-**Sources**: [orchestrator/consumers/chatbot/auto.py:1-85]()
+Sources: [orchestrator/consumers/chatbot/auto.py:1-78](), [orchestrator/api/chat.py:1-25](), [orchestrator/consumers/chatbot/service.py:1-13]()
 
 ---
 
 ## Complexity Levels
 
-AutoBrain classifies requests into five discrete complexity levels on the Atom → Organism scale defined in the `Complexity` Enum: [orchestrator/consumers/chatbot/auto.py:42-49]()
+AutoBrain evaluates incoming prompts against five discrete complexity tiers defined in the `Complexity` Enum [orchestrator/consumers/chatbot/auto.py:51-58]():
 
-| Level | Name | Description | Token Budget | Example |
-|-------|------|-------------|--------------|---------|
-| **ATOM** | Simple | Greetings, factual, chitchat | <200 tokens | "hi", "thanks", "what can you do" |
-| **MOLECULE** | Single Tool | Needs a tool or specific agent skill | ~1K tokens | "send email", "check Jira", "search docs" |
-| **CELL** | Memory + Tools | Needs memory + tool + reasoning | ~3K tokens | "reply to that email we discussed" |
-| **ORGAN** | Multi-Agent | Multi-agent coordination | ~6K tokens | "research bug, plan fix, open PR" |
-| **ORGANISM** | Enterprise Pipeline | Full PRD-59 Neural Swarm pipelines | ~12K tokens | "refactor auth across all services" |
+| Level | Enum Value | Description | Token Budget | Example Query |
+|-------|------------|-------------|--------------|---------------|
+| **ATOM** | `atom` | Greetings, factual, chitchat | <200 tokens | "hi", "thanks", "what can you do" |
+| **MOLECULE** | `molecule` | Single tool call or specific skill | ~1K tokens | "send email", "check Jira docs" |
+| **CELL** | `cell` | Needs memory + tool + reasoning | ~3K tokens | "reply to that email we discussed" |
+| **ORGAN** | `organ` | Multi-agent coordination | ~6K tokens | "research bug, plan fix, open PR" |
+| **ORGANISM** | `organism` | Enterprise pipeline, learning + feedback | ~12K tokens | "refactor auth across all services" |
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:42-49]()
+Sources: [orchestrator/consumers/chatbot/auto.py:47-58]()
+
+---
+
+## Action Types & Decision Paths
+
+The `Action` Enum maps classified requests to specific execution handlers in the chat and task dispatch pipelines [orchestrator/consumers/chatbot/auto.py:60-68]():
+
+*   `RESPOND`: Auto answers directly in-thread without tools or delegation (typically `ATOM`) [orchestrator/consumers/chatbot/auto.py:62]().
+*   `DELEGATE`: Route the query to a specialized single sub-agent to answer during the current turn (`MOLECULE` or `CELL`) [orchestrator/consumers/chatbot/auto.py:63]().
+*   `MISSION`: Complex multi-step target requiring conversational mission planning or DAG generation (PRD-125) [orchestrator/consumers/chatbot/auto.py:65]().
+*   `ASSIGN`: File an off-thread board ticket for a named single agent using `ASSIGN_TOOL_HINTS` (`platform_create_task`, `platform_assign_task`, `platform_update_task_status`) (PRD-224) [orchestrator/consumers/chatbot/auto.py:66-74]().
+*   `WORKFLOW`: Deprecated action type maintained for backward compatibility [orchestrator/consumers/chatbot/auto.py:64]().
+
+Sources: [orchestrator/consumers/chatbot/auto.py:60-74]()
 
 ---
 
 ## Three-Tier Assessment Strategy
 
-AutoBrain uses a three-tier cascade with strict latency and cost targets to minimize overhead for simple queries: [orchestrator/consumers/chatbot/auto.py:14-17]()
+To maintain sub-100ms latency on simple interactions, AutoBrain processes incoming prompts via a three-tier cascade: [orchestrator/consumers/chatbot/auto.py:14-18]()
+
+```mermaid
+graph TD
+    IncomingMsg["Incoming User Message"] --> Tier1["Tier 1: Redis Cache Lookup"]
+    Tier1 -- "Hit (<5ms)" --> ReturnCache["Return Cached Assessment"]
+    Tier1 -- "Miss" --> Tier2["Tier 2: Regex Fast Paths"]
+    Tier2 -- "Match (<5ms)" --> ReturnRegex["Return Heuristic Assessment"]
+    Tier2 -- "Miss" --> Tier3["Tier 3: LLM Classification (~200ms)"]
+    Tier3 --> ReturnLLM["Return LLM Assessment"]
+```
+*Diagram: Three-tier assessment flow for incoming chat prompts.*
+Sources: [orchestrator/consumers/chatbot/auto.py:14-18]()
 
 ### Tier 1: Redis Cache Lookup
-The first tier performs a **cache lookup** using the SHA-256 hash of the normalized message text. This provides instant (<5ms) responses for repeated queries at zero LLM cost. [orchestrator/consumers/chatbot/auto.py:15-15](), [orchestrator/consumers/chatbot/auto.py:27-28]()
+Queries are hashed via SHA-256 and checked against the Redis routing cache. A cache hit bypasses all subsequent computation, returning an instantaneous assessment (<5ms) at zero cost [orchestrator/consumers/chatbot/auto.py:15]().
 
 ### Tier 2: Regex Fast Paths
-When cache misses, Tier 2 applies **hand-coded regex patterns** for common message types. These patterns are deliberately strict — they must match the **entire message** (with optional punctuation) to prevent false positives. [orchestrator/consumers/chatbot/auto.py:87-91]()
-
-#### ATOM Pattern Matching
-The `_ATOM_PATTERNS` list contains regex for pure chitchat, greetings, and identity questions: [orchestrator/consumers/chatbot/auto.py:92-114]()
-
-```python
-_ATOM_PATTERNS = [
-    r"^(hi|hello|hey|howdy|yo|sup)(\s+\w+)?[\s!?.,:]*$",
-    r"^(thanks|thank you|thx|ty|cheers)(\s+\w+)?[\s!?.,:]*$",
-    r"^(bye|goodbye|see ya|later|cya|see you)(\s+\w+)?[\s!?.,:]*$",
-    r"^(what|who)\s+(are|is)\s+(you|automatos|auto)[\s!?.]*$",
-]
-```
-
-#### Platform Query Detection
-Platform self-awareness queries (PRD-64) are detected via keyword matching in `_PLATFORM_KEYWORDS`. If a match is found, AutoBrain injects specific `tool_hints` to enable the agent to call platform tools. [orchestrator/consumers/chatbot/auto.py:116-181]()
-
-| Matched Tool Hint | Example Keyword Patterns |
-|-----------|--------------------------|
-| `platform_list_agents` | "list my agents", "show my agents" |
-| `platform_get_llm_usage` | "token usage", "llm usage", "my api cost" |
-| `platform_list_documents` | "list my documents", "show my uploaded files" |
-| `platform_query_data` | "query the database", "ask the database" |
-| `platform_workspace_stats` | "workspace stats", "usage stats" |
+When cache misses occur, strict regular expression patterns evaluate the message for known chitchat structures, greetings, and platform self-awareness queries [orchestrator/consumers/chatbot/auto.py:16](). Platform keywords dynamically populate `tool_hints` such as `platform_list_agents`, `platform_get_llm_usage`, and `platform_query_data` without hitting an LLM [orchestrator/modules/tools/discovery/platform_executor.py:19-158]().
 
 ### Tier 3: LLM Classification
-When both cache and regex patterns fail, AutoBrain invokes an **LLM classifier** (~200ms) to assess complexity. This tier populates the `ComplexityAssessment` dataclass with reasoning and confidence scores. [orchestrator/consumers/chatbot/auto.py:59-73]()
+If heuristics fail, AutoBrain invokes the `system_llm` model provider tier to categorize the prompt, extract intent, and populate the `ComplexityAssessment` dataclass fields (`confidence`, `needs_memory`, `tool_hints`) [orchestrator/consumers/chatbot/auto.py:17](), [orchestrator/core/llm/manager.py:39-50]().
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:14-181]()
-
----
-
-## Action Types
-
-AutoBrain maps complexity levels to four **action types** that control downstream execution: [orchestrator/consumers/chatbot/auto.py:51-57]()
-
-*   **RESPOND**: Auto responds directly (no delegation). Typically used for `ATOM` complexity. [orchestrator/consumers/chatbot/auto.py:53-53]()
-*   **DELEGATE**: Route to a single sub-agent. Used for `MOLECULE` and `CELL` complexity. [orchestrator/consumers/chatbot/auto.py:54-54]()
-*   **MISSION**: Suggests a complex multi-step mission to the user (PRD-125). [orchestrator/consumers/chatbot/auto.py:56-56]()
-*   **WORKFLOW**: (Deprecated) Kept for backward compatibility with PRD-59 pipelines. [orchestrator/consumers/chatbot/auto.py:55-55]()
+Sources: [orchestrator/consumers/chatbot/auto.py:14-18](), [orchestrator/core/llm/manager.py:39-50](), [orchestrator/modules/tools/discovery/platform_executor.py:19-158]()
 
 ---
 
 ## Data Flow & Implementation
 
-### ComplexityAssessment Data Structure
-The assessment result is encapsulated in a dataclass consumed by the orchestrator: [orchestrator/consumers/chatbot/auto.py:59-73]()
+The assessment structure is instantiated in `auto.py` and threaded through the chat pipeline to configure execution context [orchestrator/consumers/chatbot/auto.py:65-78]().
 
 ```python
 @dataclass
@@ -121,67 +115,72 @@ class ComplexityAssessment:
     needs_multi_agent: bool = False
 ```
 
-### Platform Action Integration
-AutoBrain detects platform-specific keywords and injects them into `tool_hints`. These hints are resolved by the `PlatformActionExecutor` which routes to domain-specific handlers. [orchestrator/modules/tools/discovery/platform_executor.py:5-177]()
-
 ```mermaid
 graph TD
     subgraph "Natural Language Space"
-        UserMsg["User Message: 'show my token usage'"]
+        UserMessage["User message: 'list my agents and token usage'"]
     end
 
     subgraph "AutoBrain Assessment"
-        Regex["Tier 2: _PLATFORM_KEYWORDS (auto.py)"]
-        Hints["tool_hints: ['platform_get_llm_usage']"]
+        AutoBrainModule["AutoBrain.assess() (auto.py)"]
+        AssessmentObj["ComplexityAssessment object with tool_hints"]
     end
 
     subgraph "Code Entity Space"
-        Executor["PlatformActionExecutor (platform_executor.py)"]
-        Handler["get_llm_usage (handlers_analytics.py)"]
-        Registry["ActionRegistry (action_registry.py)"]
+        ChatApi["api/chat.py"]
+        PlatformExec["PlatformActionExecutor (platform_executor.py)"]
+        HandlersAgents["handlers_agents.py:list_agents"]
+        HandlersAnalytics["handlers_analytics.py:get_llm_usage"]
     end
 
-    UserMsg --> Regex
-    Regex --> Hints
-    Hints --> Executor
-    Executor --> Handler
-    Executor --> Registry
+    UserMessage --> AutoBrainModule
+    AutoBrainModule --> AssessmentObj
+    AssessmentObj --> ChatApi
+    ChatApi --> PlatformExec
+    PlatformExec --> HandlersAgents
+    PlatformExec --> HandlersAnalytics
 ```
-**Diagram: Mapping Natural Language Platform Queries to Code Handlers**
-
-### Hierarchy Permissions & Security
-Mutating platform actions (e.g., `platform_update_agent`) undergo a hierarchy check before execution. The `_HIERARCHY_TARGETS` map in the executor ensures that actors have sufficient permissions to modify target entities. [orchestrator/modules/tools/discovery/platform_executor.py:182-226]()
-
-Additionally, platform actions are subject to rate limiting. `platform_write` operations are capped at 60 per minute per agent to prevent resource exhaustion. [orchestrator/core/security/rate_limiter.py:52-57]()
+*Diagram: Bridging natural language assessment requests to execution code entities.*
+Sources: [orchestrator/consumers/chatbot/auto.py:65-78](), [orchestrator/api/chat.py:1-25](), [orchestrator/modules/tools/discovery/platform_executor.py:19-158]()
 
 ```mermaid
 graph TD
-    subgraph "Execution Pipeline"
-        Exec["PlatformActionExecutor.execute"]
-        Check["can_actor_modify (hierarchy_permissions.py)"]
-        RateLimit["check_rate_limit (rate_limiter.py)"]
-        Dispatch["Handler Dispatch"]
+    subgraph "Chat Interface"
+        APIEndpoint["POST /api/chat (api/chat.py)"]
     end
 
-    Exec --> Check
-    Check --> RateLimit
-    RateLimit --> Dispatch
-```
-**Diagram: Platform Action Security Middleware**
+    subgraph "Assessment & Orchestration"
+        AutoBrainEval["AutoBrain.assess() (auto.py)"]
+        StreamingSvc["StreamingChatService (service.py)"]
+    end
 
-**Sources**: [orchestrator/consumers/chatbot/auto.py:59-83](), [orchestrator/modules/tools/discovery/platform_executor.py:5-226](), [orchestrator/core/security/rate_limiter.py:45-57]()
+    subgraph "Execution & Routing"
+        UnivRouter["UniversalRouter (engine.py)"]
+        AgentRuntime["AgentFactory.execute_with_prompt() (agent_factory.py)"]
+    end
+
+    APIEndpoint --> AutoBrainEval
+    AutoBrainEval -- "ComplexityAssessment" --> StreamingSvc
+    StreamingSvc --> UnivRouter
+    UnivRouter --> AgentRuntime
+```
+*Diagram: High-level request lifecycle integration with AutoBrain.*
+Sources: [orchestrator/api/chat.py:1-25](), [orchestrator/consumers/chatbot/auto.py:1-22](), [orchestrator/consumers/chatbot/service.py:10-13](), [orchestrator/core/routing/engine.py:58-85]()
+
+Sources: [orchestrator/consumers/chatbot/auto.py:65-78](), [orchestrator/api/chat.py:1-25](), [orchestrator/consumers/chatbot/service.py:1-13](), [orchestrator/core/routing/engine.py:58-85](), [orchestrator/modules/tools/discovery/platform_executor.py:19-158]()
 
 ---
 
-## Unified Notification Integration
-AutoBrain and other platform agents can emit notifications via the `platform_send_notification` tool. [orchestrator/modules/tools/discovery/actions_auto_reporting.py:96-103]() This tool invokes the `NotificationDispatcher`, which handles multi-destination fan-out (Telegram, Slack, In-App) based on workspace `auto_reporting` settings. [orchestrator/core/services/notification_dispatcher.py:76-111]()
+## Tool Loop Prevention & Deduplication
 
-| Action | Function | Purpose |
-|--------|----------|---------|
-| `platform_get_auto_reporting_prefs` | `get_auto_reporting_prefs` | Read workspace notification channels/rules [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:14-16]() |
-| `platform_update_auto_reporting_prefs` | `update_auto_reporting_prefs` | Update quiet hours or routing [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:28-30]() |
-| `platform_send_notification` | `send_notification` | Trigger a manual platform event [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:57-59]() |
+AutoBrain's routing behavior is paired with runtime checks in `StreamingChatService` to prevent recursive tool loops and runaway token expenditure [orchestrator/consumers/chatbot/service.py:76-104]().
 
-**Sources**: [orchestrator/core/services/notification_dispatcher.py:1-111](), [orchestrator/modules/tools/discovery/handlers_auto_reporting.py:1-109](), [orchestrator/modules/tools/discovery/actions_auto_reporting.py:11-154]()
+| Loop Prevention Mechanism | Implementation Function / Attribute | Objective |
+|---------------------------|-------------------------------------|-----------|
+| **Exact Deduplication** | `_normalize_query` / exact match set | Rejects identical tool invocations with duplicate parameters within a turn [orchestrator/consumers/chatbot/service.py:76-82]() |
+| **Semantic Deduplication**| `_queries_are_similar` (threshold=0.75) | Blocks redundant searches sharing high string similarity ratio [orchestrator/consumers/chatbot/service.py:85-95]() |
+| **Argument Extraction** | `_extract_query_from_args` | Inspects payloads for query keys (`query`, `search_query`, `q`, `text`) [orchestrator/consumers/chatbot/service.py:97-104]() |
+
+Sources: [orchestrator/consumers/chatbot/service.py:76-104]()
 
 ---

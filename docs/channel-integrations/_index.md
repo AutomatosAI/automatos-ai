@@ -6,13 +6,22 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
+- [frontend/components/settings/ChannelsSettingsTab.tsx](frontend/components/settings/ChannelsSettingsTab.tsx)
 - [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
+- [orchestrator/alembic/versions/prd008a4_channel_drivers.py](orchestrator/alembic/versions/prd008a4_channel_drivers.py)
 - [orchestrator/api/channels.py](orchestrator/api/channels.py)
-- [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
+- [orchestrator/channels/drivers/__init__.py](orchestrator/channels/drivers/__init__.py)
+- [orchestrator/channels/drivers/base.py](orchestrator/channels/drivers/base.py)
+- [orchestrator/channels/drivers/discord.py](orchestrator/channels/drivers/discord.py)
+- [orchestrator/channels/drivers/slack.py](orchestrator/channels/drivers/slack.py)
+- [orchestrator/channels/drivers/telegram.py](orchestrator/channels/drivers/telegram.py)
+- [orchestrator/channels/drivers/webhook.py](orchestrator/channels/drivers/webhook.py)
+- [orchestrator/channels/drivers/whatsapp.py](orchestrator/channels/drivers/whatsapp.py)
 - [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
 - [orchestrator/channels/telegram_adapter.py](orchestrator/channels/telegram_adapter.py)
 - [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
+- [orchestrator/tests/test_channel_adapter_contract.py](orchestrator/tests/test_channel_adapter_contract.py)
+- [orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py](orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py)
 
 </details>
 
@@ -20,9 +29,9 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-Channel Integrations enable Automatos AI to receive and respond to messages from external communication platforms (Telegram, Slack, Discord, LINE, Google Chat). This system converts platform-specific message formats into `RequestEnvelope` objects that flow through the Universal Router for intelligent agent selection and execution [orchestrator/channels/base.py:1-10]().
+Channel Integrations enable Automatos AI to receive and respond to messages from external communication platforms (Telegram, Slack, Discord, WhatsApp, and Webhooks). This system converts platform-specific message formats into normalized envelopes that flow through the Universal Router for intelligent agent selection and execution [orchestrator/channels/base.py:1-10]().
 
-This architecture transforms Automatos into an **always-on autonomous assistant** that meets users where they are, moving beyond a reactive web-only interface [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md:12-20](). It allows a "team of specialists with heartbeats" to proactively interact across multiple messaging channels [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md:14-15]().
+The architecture has evolved from a legacy adapter-only model to a dual-layer system: **Drivers** handle stateless platform logic (verification, sending, webhook installation) [orchestrator/channels/drivers/base.py:1-24](), while **Adapters** manage stateful lifecycle operations like long-polling for platforms that require it [orchestrator/channels/manager.py:1-10]().
 
 For details on the underlying architecture, see [Channel Architecture](#12.1).
 For details on the data flow, see [Message Pipeline](#12.2).
@@ -33,50 +42,54 @@ For details on management endpoints, see [Channel API Reference](#12.4).
 
 ## Channel Architecture
 
-The channel integration system is built on a modular adapter pattern that decouples platform-specific SDKs from the core routing logic.
+The system uses a driver-mediated architecture to decouple platform-specific SDKs from core business logic.
 
-1.  **BaseChannelAdapter**: Abstract base class defining the lifecycle (`start`, `stop`), messaging contract (`send_message`), and health checks (`test_connection`) [orchestrator/channels/base.py:22-64]().
-2.  **ChannelManager**: Singleton service that manages the lifecycle of all adapters. It handles `start_all()` on system boot by loading active connections from the database and provides a factory `_create_adapter()` to instantiate platform-specific classes [orchestrator/channels/manager.py:22-115]().
-3.  **ChannelConnection**: SQLAlchemy model storing workspace-scoped credentials (`config`), platform type, status, and activity metrics like `message_count` and `last_activity_at` [orchestrator/core/models/channels.py:19-33]().
+1.  **ChannelDriver**: A stateless abstraction for platform capabilities. It defines how to `verify` credentials, `send` messages, and `install_webhook` [orchestrator/channels/drivers/base.py:90-150]().
+2.  **ChannelManager**: A singleton service that manages the lifecycle of stateful polling adapters. It starts polling loops for active connections on boot [orchestrator/channels/manager.py:22-68]().
+3.  **ChannelConnection**: The database entity storing credentials, `mode` (webhook vs polling), `status`, and metrics like `message_count` [orchestrator/core/models/channels.py:19-46]().
+4.  **Connectivity Modes**: Platforms connect via `WEBHOOK` (platform POSTs to us) or `POLLING` (we long-poll the platform) [orchestrator/channels/drivers/base.py:52-55]().
 
 ### Channel System Entity Mapping
 
-This diagram maps the high-level channel concepts to the specific code entities that implement them.
+This diagram maps the high-level channel concepts to the specific code entities and driver registry.
 
 ```mermaid
 graph TB
     subgraph "Code Entity Space (orchestrator/)"
-        BaseAdapter["BaseChannelAdapter<br/>channels/base.py"]
+        DriverBase["ChannelDriver<br/>channels/drivers/base.py"]
         Manager["ChannelManager<br/>channels/manager.py"]
-        ConnModel["ChannelConnection<br/>core/models/channels.py"]
+        API["Channel API<br/>api/channels.py"]
         
-        subgraph "Implementations"
-            TG["TelegramAdapter<br/>channels/telegram_adapter.py"]
-            SL["SlackAdapter<br/>channels/slack_adapter.py"]
-            DC["DiscordAdapter<br/>channels/discord_adapter.py"]
-            LN["LineAdapter<br/>channels/line_adapter.py"]
-            GC["GoogleChatAdapter<br/>channels/google_chat_adapter.py"]
+        subgraph "Driver Registry"
+            TGD["TelegramDriver"]
+            SLD["SlackDriver"]
+            WAD["WhatsAppDriver"]
+            WHD["WebhookDriver"]
+        end
+
+        subgraph "Polling Adapters"
+            TGA["TelegramAdapter"]
+            SLA["SlackAdapter"]
         end
     end
     
     subgraph "Natural Language Space"
-        Concept1["'The Adapter Registry'"]
-        Concept2["'Connection Credentials'"]
-        Concept3["'Platform Lifecycle'"]
+        Concept1[""Stateless Platform Logic""]
+        Concept2[""Lifecycle Management""]
+        Concept3[""Connection UI""]
     end
     
-    Manager -- "manages registry of" --> BaseAdapter
-    ConnModel -- "stores" --> Concept2
-    BaseAdapter -- "defines" --> Concept3
-    Concept1 -- "implemented by" --> Manager
-    TG -- "inherits" --> BaseAdapter
-    SL -- "inherits" --> BaseAdapter
-    DC -- "inherits" --> BaseAdapter
-    LN -- "inherits" --> BaseAdapter
-    GC -- "inherits" --> BaseAdapter
+    DriverBase -- "defines" --> Concept1
+    Manager -- "handles" --> Concept2
+    API -- "powers" --> Concept3
+    
+    TGD -- "implements" --> DriverBase
+    SLD -- "implements" --> DriverBase
+    TGA -- "managed by" --> Manager
+    API -- "calls" --> TGD
 ```
 
-**Sources:** [orchestrator/channels/base.py:22-29](), [orchestrator/channels/manager.py:22-26](), [orchestrator/core/models/channels.py:19-33](), [orchestrator/channels/manager.py:123-135]()
+**Sources:** [orchestrator/channels/drivers/base.py:90-107](), [orchestrator/channels/manager.py:22-41](), [orchestrator/api/channels.py:29-36]()
 
 For details, see [Channel Architecture](#12.1).
 
@@ -84,36 +97,41 @@ For details, see [Channel Architecture](#12.1).
 
 ## Message Pipeline
 
-The message pipeline normalizes incoming events into a standard format before routing them to the AI agents.
+The pipeline normalizes incoming events from disparate platforms into a unified execution flow.
 
 ### Pipeline Execution Flow
 
-The `BaseChannelAdapter.handle_message()` method orchestrates the full ingestion-to-response loop [orchestrator/channels/base.py:112-187]().
+1.  **Ingestion**: Messages arrive via a webhook endpoint `/api/webhooks/ws/{key}` [orchestrator/api/channels.py:72]() or a polling loop in `ChannelManager` [orchestrator/channels/manager.py:32-41]().
+2.  **Normalization**: Adapters convert platform payloads into a standard `RequestEnvelope` [orchestrator/tests/test_channel_adapter_contract.py:16-22]().
+3.  **Routing**: The `UniversalRouter` determines which agent or workflow should handle the message.
+4.  **Execution**: `AgentFactory` runs the agent, potentially involving tool use or memory retrieval.
+5.  **Dispatch**: The `ChannelDriver.send()` method delivers the response back to the platform [orchestrator/channels/drivers/base.py:118-130]().
+6.  **Telemetry**: Every interaction increments `message_count` and updates `last_activity_at` via `_update_activity_stats` [orchestrator/tests/test_channel_adapter_contract.py:23-27]().
 
-1.  **Normalization**: Platform-specific data is converted to a `RequestEnvelope` via `_to_envelope()` [orchestrator/channels/base.py:128-129]().
-2.  **Routing**: The `UniversalRouter` selects an `agent_id` based on the envelope content [orchestrator/channels/base.py:143-144]().
-3.  **Multimodal Handling**: Attachments (images/files) are downloaded by adapters, uploaded to the `AttachmentStore` via `upload_attachment()`, and linked to the execution [orchestrator/channels/base.py:70-106](), [orchestrator/channels/base.py:121-134]().
-4.  **Execution**: `AgentFactory.execute_with_prompt()` runs the agent logic with the normalized prompt and context [orchestrator/channels/base.py:163-173]().
-5.  **Response**: The result is sent back to the source platform via `send_message()` [orchestrator/channels/base.py:178-183]().
-6.  **Stats**: Activity stats are updated on the `ChannelConnection` record [orchestrator/channels/base.py:186]().
+### Data Normalization to Code Entities
 
 ```mermaid
-sequenceDiagram
-    participant P as External Platform
-    participant A as Adapter (handle_message)
-    participant R as UniversalRouter
-    participant F as AgentFactory
-    
-    P->>A: Webhook/Polling Event
-    A->>A: _to_envelope()
-    A->>R: route(envelope)
-    R-->>A: RoutingDecision (agent_id)
-    A->>F: execute_with_prompt()
-    F-->>A: AgentResult
-    A->>P: send_message(text)
+graph LR
+    subgraph "Natural Language Space"
+        Msg[""Incoming Chat Message""]
+        Resp[""Agent Response""]
+    end
+
+    subgraph "Code Entity Space"
+        Env["RequestEnvelope"]
+        Router["UniversalRouter"]
+        Exec["AgentFactory.execute"]
+        Driver["ChannelDriver.send"]
+    end
+
+    Msg --> Env
+    Env --> Router
+    Router --> Exec
+    Exec --> Driver
+    Driver --> Resp
 ```
 
-**Sources:** [orchestrator/channels/base.py:112-187](), [orchestrator/channels/base.py:70-106]()
+**Sources:** [orchestrator/channels/drivers/base.py:118-130](), [orchestrator/tests/test_channel_adapter_contract.py:23-34]()
 
 For details, see [Message Pipeline](#12.2).
 
@@ -121,15 +139,17 @@ For details, see [Message Pipeline](#12.2).
 
 ## Platform Adapters
 
-Each adapter encapsulates the specific library and authentication requirements for its platform.
+The system supports several major platforms, each with specific driver logic:
 
-*   **Telegram**: Uses `python-telegram-bot` with background polling. It handles `/start` and `/help` commands and persists `telegram_default_chat_id` to workspace settings [orchestrator/channels/telegram_adapter.py:27-50](), [orchestrator/channels/telegram_adapter.py:118-147]().
-*   **Slack**: Uses `slack-bolt` with support for Socket Mode or Events API.
-*   **Discord**: Uses `discord.py` and handles message chunking for the 4000-character Telegram limit (and similar platform constraints) [orchestrator/channels/telegram_adapter.py:79-82]().
-*   **LINE**: Uses the Messaging API via `LineAdapter`.
-*   **Google Chat**: Uses service account authentication via `GoogleChatAdapter`.
+*   **Telegram**: Supports both `WEBHOOK` and `POLLING`. Uses `setWebhook` for registration [orchestrator/channels/drivers/telegram.py:55-166]().
+*   **Slack**: Webhook-only (Events API). Requires `bot_token` and `signing_secret` [orchestrator/channels/drivers/slack.py:38-42]().
+*   **WhatsApp**: Meta Cloud API integration. Requires `phone_number_id` and `access_token` [frontend/components/settings/ChannelsSettingsTab.tsx:28-37]().
+*   **Discord**: Currently supports outbound `send` via REST API [orchestrator/channels/drivers/base.py:95-131]().
+*   **Generic Webhook**: Outbound-only driver for delivering JSON payloads to external URLs [orchestrator/channels/drivers/base.py:95-131]().
 
-**Sources:** [orchestrator/channels/telegram_adapter.py:19-147](), [orchestrator/channels/manager.py:123-135]()
+**Note:** Legacy driverless adapters were removed in favor of the unified driver registry [orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py:37-46]().
+
+**Sources:** [orchestrator/channels/drivers/telegram.py:53-58](), [orchestrator/channels/drivers/slack.py:36-45](), [frontend/components/settings/ChannelsSettingsTab.tsx:28-37]()
 
 For details, see [Platform Adapters](#12.3).
 
@@ -137,17 +157,16 @@ For details, see [Platform Adapters](#12.3).
 
 ## Channel API Reference
 
-The `channels` API router provides management endpoints for CRUD operations and connectivity testing. It enforces platform-specific configuration requirements, such as `bot_token` for Telegram or `service_account_key` for Google Chat [orchestrator/api/channels.py:30-42]().
+The `channels` API manages the persistence and verification of these connections [orchestrator/api/channels.py:1-12]().
 
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
-| `/api/channels` | `GET` | List all channel connections for the workspace [orchestrator/api/channels.py:45-73]() |
-| `/api/channels` | `POST` | Create a new connection and auto-start the adapter [orchestrator/api/channels.py:76-130]() |
-| `/api/channels/{id}` | `PUT` | Update configuration or `default_agent_id` [orchestrator/api/channels.py:133-168]() |
-| `/api/channels/{id}` | `DELETE` | Stop the adapter and delete the connection record [orchestrator/api/channels.py:170-200]() |
-| `/api/channels/{id}/test` | `POST` | Ping the platform API to verify credentials [orchestrator/api/channels.py:203-209]() |
+| `/api/channels` | `GET` | Lists all connections, reconciling DB status with `ChannelManager` [orchestrator/api/channels.py:171-185]() |
+| `/api/channels/platforms` | `GET` | Returns available platforms from the driver registry [orchestrator/api/channels.py:29-36]() |
+| `/api/channels/{id}/test` | `POST` | Triggers `driver.verify()` to check credentials [orchestrator/api/channels.py:81-93]() |
+| `/api/channels/{id}/start` | `POST` | Explicitly starts a polling adapter [orchestrator/channels/manager.py:88-114]() |
 
-**Sources:** [orchestrator/api/channels.py:22-209]()
+**Sources:** [orchestrator/api/channels.py:171-185](), [orchestrator/channels/manager.py:88-114](), [frontend/components/settings/ChannelsSettingsTab.tsx:168-179]()
 
 For details, see [Channel API Reference](#12.4).
 

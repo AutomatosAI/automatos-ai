@@ -6,45 +6,54 @@
 The following files were used as context for generating this wiki page:
 
 - [.gitignore](.gitignore)
+- [.gitleaksignore](.gitleaksignore)
+- [Makefile](Makefile)
 - [docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md](docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md)
+- [docs/PRDS/PRD-234-SESSION-MODE-SUBSCRIPTION-RUNTIME.md](docs/PRDS/PRD-234-SESSION-MODE-SUBSCRIPTION-RUNTIME.md)
+- [docs/getting-started/self-hosting.md](docs/getting-started/self-hosting.md)
+- [frontend/components/settings/GeneralSettingsTab.tsx](frontend/components/settings/GeneralSettingsTab.tsx)
+- [frontend/components/settings/SessionModeTab.tsx](frontend/components/settings/SessionModeTab.tsx)
 - [graphify-out/snapshots/bucket-1-pre-drop.sql](graphify-out/snapshots/bucket-1-pre-drop.sql)
 - [orchestrator/.env.example](orchestrator/.env.example)
 - [orchestrator/alembic/versions/prd135_drop_bucket_1.py](orchestrator/alembic/versions/prd135_drop_bucket_1.py)
-- [orchestrator/core/credentials/service.py](orchestrator/core/credentials/service.py)
-- [orchestrator/core/models/credentials.py](orchestrator/core/models/credentials.py)
+- [orchestrator/core/models/system_settings.py](orchestrator/core/models/system_settings.py)
+- [orchestrator/core/seeds/seed_system_settings.py](orchestrator/core/seeds/seed_system_settings.py)
 - [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
+- [orchestrator/modules/memory/write_contract.py](orchestrator/modules/memory/write_contract.py)
+- [orchestrator/services/cli_host_service.py](orchestrator/services/cli_host_service.py)
+- [orchestrator/tests/test_prd206_write_contract.py](orchestrator/tests/test_prd206_write_contract.py)
+- [orchestrator/tests/test_prd234_s1a_cli_hosts_realdb.py](orchestrator/tests/test_prd234_s1a_cli_hosts_realdb.py)
+- [orchestrator/tests/test_system_settings_null_flags.py](orchestrator/tests/test_system_settings_null_flags.py)
+- [services/cli-host/automatos_cli_host/allowlist.py](services/cli-host/automatos_cli_host/allowlist.py)
+- [services/cli-host/automatos_cli_host/hook_server.py](services/cli-host/automatos_cli_host/hook_server.py)
 
 </details>
 
 
 
-This document describes the environment variable configuration system used across all Automatos AI services. Environment variables control database connections, external service credentials, feature flags, and service-specific settings in both editions.
+This document describes the environment variable configuration system used across all Automatos AI services. Environment variables control database connections, external service credentials, feature flags, and service-specific settings across the 19-service production topology.
 
-For the compose stack end to end, see [Self-hosting — the local edition](../getting-started/self-hosting.md). For deployment infrastructure, see [Production Deployment](production-deployment.md). For credential management in the UI, see [Credentials Management](../authentication-multi-tenancy/credentials-management.md).
+For deployment infrastructure, see [Production Deployment](20.6). For credential management in the UI, see [Credentials Management](17.5).
 
 ---
 
 ## Overview
 
-Automatos AI uses environment variables for all external configuration to support multiple deployment targets (Docker Compose locally, Railway for the hosted edition) without code changes. `orchestrator/config.py` is the only module that reads the environment; everything else reads `config`.
+Automatos AI uses environment variables for all external configuration to support multiple deployment targets (Docker Compose, Railway, Kubernetes) without code changes. Variables are loaded from `.env` files in local development and from platform-provided environment in production.
 
-In the compose stack the layers are:
+The system follows a three-tier loading strategy:
 
-| Layer | What it holds | Precedence (backend container) |
-| :--- | :--- | :--- |
-| `.env` (from the root `.env.example`) | Secrets and the few values only you choose. **Read by compose for substitution only** — a variable reaches a container only if `docker-compose.yml` references it. | — |
-| `docker-compose.yml` `environment:` block | The substituted secrets and explicit wiring (`DATABASE_URL`, `S3_ENDPOINT_URL`, the `S3_*` → `AWS_*` mapping, Composio and LLM keys). | Highest |
-| `envs/api.local` (gitignored, optional) | Personal overrides for any backend variable — the deep-override lane. | Middle |
-| `envs/api.defaults` (committed) | The local topology: `AUTH_EDITION=local`, `DEFAULT_WORKSPACE_ID`, `LOCAL_OPERATOR_EMAIL`, `PLATFORM_KEY_WORKSPACE_ID`, `WORKER_INTERNAL_URL`, `S3_PUBLIC_ENDPOINT_URL`, `S3_VECTORS_ENABLED=false`, observability off. No secrets. | Lowest env file |
-| `orchestrator/config.py` | Code defaults for every remaining dial. | Fallback |
+1.  **Environment variables** (highest priority) — set by hosting platform or shell.
+2.  **`.env` file** — loaded via `python-dotenv` in the backend application lifecycle [orchestrator/main.py:24-26]().
+3.  **Hardcoded defaults** — fallback values in centralized config [orchestrator/config.py:28-132]().
 
-The frontend has the same shape (`envs/frontend.defaults`, `envs/frontend.local`). The hosted deployment sets each service's environment itself and never reads the compose file or `envs/*`. `orchestrator/.env.example` is a template for running the backend process outside compose; it is not the supported local path and its values (for example `REQUIRE_AUTH`) predate the edition flag.
+The codebase includes an `.env.example` in the root for the full platform stack and a service-specific `orchestrator/.env.example` for the core API.
 
-**Sources:** [docker-compose.yml](), [envs/api.defaults](), [envs/frontend.defaults](), [orchestrator/config.py](), [.gitignore]()
+**Sources:** [orchestrator/config.py:24-27](), [orchestrator/main.py:24-26](), [orchestrator/.env.example:1-64](), [.gitignore:109-116]()
 
 ---
 
-## Environment Variable Loading Flow
+## Configuration Injection Pipeline
 
 The following diagram illustrates how configuration flows from environment sources into the core system entities.
 
@@ -55,188 +64,229 @@ graph TB
         EnvFile[".env file"]
         ComposeEnv["docker-compose.yml<br/>environment section"]
         PlatformEnv["Platform Environment<br/>(Railway/Cloud)"]
+        SystemSettingsDB["SystemSetting<br/>(Database)"]
     end
     
     subgraph "Code_Entity_Config_Manager"
-        ConfigModule["config.py<br/>(Centralized Config)"]
+        ConfigModule["Config<br/>(orchestrator/config.py)"]
     end
     
     EnvFile --> ConfigModule
     ComposeEnv --> ConfigModule
     PlatformEnv --> ConfigModule
+    SystemSettingsDB --> ConfigModule
     
     subgraph "System_Consumers"
-        DB["Database Services<br/>SQLAlchemy / pgvector"]
-        RedisSvc["RedisClient<br/>(core/redis/client.py)"]
+        DB["init_database<br/>(core/database/database.py)"]
+        RedisSvc["REDIS_URL<br/>(orchestrator/config.py)"]
         LLM["LLMManager<br/>(API Providers)"]
-        Auth["Auth Service<br/>(Clerk JWT)"]
-        PluginSvc["PluginContentCache<br/>(core/services/plugin_cache.py)"]
-        WorkspaceWorker["WorkspaceWorker<br/>(services/workspace-worker)"]
+        Auth["get_request_context_hybrid<br/>(core/auth/hybrid.py)"]
+        MemoryJobs["Memory_Jobs<br/>(orchestrator/config.py)"]
+        CliHostService["CliHostService<br/>(services/cli_host_service.py)"]
     end
     
     ConfigModule --> DB
     ConfigModule --> RedisSvc
     ConfigModule --> LLM
     ConfigModule --> Auth
-    ConfigModule --> PluginSvc
-    ConfigModule --> WorkspaceWorker
+    ConfigModule --> MemoryJobs
+    ConfigModule --> CliHostService
 ```
 
-**Sources:** [orchestrator/core/services/plugin_cache.py:42-47](), [orchestrator/.env.example:1-65]()
+**Sources:** [orchestrator/config.py:28-132](), [orchestrator/main.py:24-29](), [orchestrator/.env.example:1-64](), [orchestrator/core/models/system_settings.py:59-73](), [orchestrator/services/cli_host_service.py:28]()
 
 ---
 
 ## Required Environment Variables
 
-These are the only variables the compose stack **refuses to start without** — declared as `${VAR:?message}` in `docker-compose.yml`, so an unset or empty value stops `docker compose up` with the message shown.
+These variables **must** be set for the system to function. Missing required variables will cause startup failures in production.
 
 ### Core Infrastructure
 
-| Variable | Purpose | Error when missing | Used By |
+| Variable | Purpose | Example | Used By |
 | :--- | :--- | :--- | :--- |
-| `POSTGRES_PASSWORD` | PostgreSQL password (applied when the data volume is first initialised) | `POSTGRES_PASSWORD is required - set in .env file` | `postgres`, `backend`, `workspace-worker` |
-| `REDIS_PASSWORD` | Redis authentication | `REDIS_PASSWORD is required - set in .env file` | `redis`, `backend`, `workspace-worker` |
-| `API_KEY` | The backend's own API-key principal | `API_KEY is required - set in .env file` | `backend` |
+| `POSTGRES_PASSWORD` | PostgreSQL admin password | `secure_db_pass_123` | `postgres`, `backend`, `workspace-worker` |
+| `REDIS_PASSWORD` | Redis authentication | `secure_redis_pass` | `redis`, `backend`, `workspace-worker` |
+| `API_KEY` | Internal API authentication | `automatos_api_key_xyz` | `backend` auth middleware |
+| `DATABASE_URL` | Full connection string | `postgresql://user:pass@host:port/db` | `Config.get_database_url()` |
 
-In the hosted edition (`AUTH_EDITION=saas`) the boot guard additionally requires `CLERK_JWKS_URL` and `CLERK_SECRET_KEY` and fails fast without them (`config.validate_auth_edition`); in the local edition it requires `DEFAULT_WORKSPACE_ID`, which `envs/api.defaults` provides.
+These variables are declared as `${VAR:?message}` in `docker-compose.yml` to ensure they are set before `docker compose up` can proceed [docs/getting-started/self-hosting.md:29-38]().
 
-**Sources:** [docker-compose.yml](), [orchestrator/config.py]()
-
----
-
-## Edition and Local-Edition Variables
-
-| Variable | Default (compose) | Purpose |
-| :--- | :--- | :--- |
-| `AUTH_EDITION` | `local` (`envs/api.defaults`; code default `saas`) | The one edition flag. `local` forces `REQUIRE_AUTH=false` (no login, one operator); `saas` requires Clerk. |
-| `NEXT_PUBLIC_AUTH_EDITION` | `local` (`envs/frontend.defaults`) | Frontend mirror, read by `frontend/lib/auth-edition.ts`; hides the hosted-only surfaces locally. |
-| `DEFAULT_WORKSPACE_ID` | `00000000-0000-0000-0000-0000000000c1` | The single local workspace every anonymous request resolves to. |
-| `LOCAL_OPERATOR_EMAIL` | `local@automatos.local` | The operator's `users` row (the session's lookup key; name editable under Settings → Profile). |
-| `PLATFORM_KEY_WORKSPACE_ID` | the local workspace id | Whose stored API key acts as the platform key for embeddings and system LLM calls. |
-| `AUTOMATOS_WORKSPACE_DIR` | `./workspaces` | Host directory bind-mounted at `/workspaces` — the workspace-worker's host-access dial. |
-| `WORKER_INTERNAL_URL` / `WORKER_INTERNAL_TOKEN` | `http://workspace-worker:8081` / empty | Where the backend reaches the worker; optional shared secret. |
-| `COMPOSIO_API_KEY` | unset | Bring-your-own Composio key (env-only). Absent ⇒ Composio tools are not offered and the Tools page says integrations are disabled; native tools keep working. |
-| `S3_ENDPOINT_URL` | `http://minio:9000` | Points the single S3 client factory at MinIO. |
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` | MinIO root credentials / `us-east-1` | The object store's credentials as the backend sees them (compose maps them onto the backend's `AWS_*`); your own `AWS_*` variables are deliberately not read by the local store. |
-| `S3_PUBLIC_ENDPOINT_URL` | `http://localhost:9000` | Host the browser can reach for presigned links; change with `MINIO_PORT`. |
-| `S3_VECTORS_ENABLED` | `false` | Local RAG runs on pgvector; S3 Vectors is hosted-only. |
-| `CREDENTIAL_KEY_FILE` | `/app/data/.credential_key` | Where the auto-generated credential-encryption key persists (the `backend_data` volume). |
-
-**Sources:** [docker-compose.yml](), [envs/api.defaults](), [envs/frontend.defaults](), [orchestrator/config.py]()
+**Sources:** [orchestrator/config.py:37-42](), [orchestrator/config.py:63-65](), [orchestrator/.env.example:1-16](), [docs/getting-started/self-hosting.md:29-38]()
 
 ---
 
 ## Database and Cache Configuration
 
 ### PostgreSQL with pgvector
-The system uses `pgvector` for semantic search and `orchestrator_db` for relational data.
+The system uses `pgvector` for semantic search. The `Config` class enforces SSL for production hosts [orchestrator/config.py:47-58]().
 
-| Variable | Default (compose) | Purpose |
+| Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `POSTGRES_HOST` | `postgres` | PostgreSQL server hostname (the compose service) |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL server hostname |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
 | `POSTGRES_DB` | `orchestrator_db` | Database name |
-| `POSTGRES_USER` | `postgres` | Database user |
-| `DATABASE_URL` | assembled by compose | The SQLAlchemy connection string |
+| `SQL_DEBUG` | `false` | Toggles SQLAlchemy echo [orchestrator/config.py:43]() |
 
-**Sources:** [docker-compose.yml](), [envs/api.defaults]()
+**Sources:** [orchestrator/config.py:37-58](), [orchestrator/.env.example:1-6]()
 
 ### Redis Configuration
-Redis serves as the L1 memory tier, Pub/Sub broker, and task queue.
+Redis serves as the L1 memory tier, Pub/Sub broker, and task queue. The `REDIS_URL` property dynamically constructs the connection string if only individual parts are provided [orchestrator/config.py:68-79]().
 
-| Variable | Default (compose) | Purpose |
+| Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `REDIS_HOST` | `redis` | Redis server hostname (the compose service) |
+| `REDIS_HOST` | `localhost` | Redis server hostname |
 | `REDIS_PORT` | `6379` | Redis port |
+| `REDIS_DB` | `0` | Redis database index |
 
-**Sources:** [docker-compose.yml](), [envs/api.defaults]()
+**Sources:** [orchestrator/config.py:63-79](), [orchestrator/.env.example:8-11]()
 
 ---
 
 ## LLM Provider Configuration
 
-Automatos AI supports a multi-provider strategy. While variables can be set in the environment, the system also supports a dynamic **Credential Store** for per-workspace keys managed by `CredentialStore`.
+Automatos AI supports a multi-provider strategy. While variables can be set in the environment, the system also supports a dynamic **Credential Store** for per-workspace keys.
 
-**Diagram: LLM API Key Resolution**
+**Diagram: LLM Configuration Resolution**
 ```mermaid
 graph TD
-    subgraph "Request_Context"
-        Req["Agent Execution Request"]
+    subgraph "Request_Flow"
+        Req["Agent Execution"]
     end
 
-    subgraph "Resolution_Logic_CredentialStore"
-        Store["CredentialStore.get_credential()<br/>(core/credentials/service.py)"]
-        Env["os.getenv('OPENAI_API_KEY', ...)"]
+    subgraph "Resolution_Hierarchy"
+        WS_Config["workspace.settings.byok_preferences<br/>(SystemSetting.category='orchestrator_llm')"]
+        Env_Keys["os.getenv('OPENAI_API_KEY')"]
+        Auto_Agent["Auto Agent model_config"]
     end
 
-    Req --> Store
-    Store -- "Not Found" --> Env
-    Env -- "Found" --> Provider["LLM Provider Client<br/>(OpenAI/Anthropic/Gemini)"]
-    Store -- "Found (Encrypted)" --> Decrypt["EncryptionService.decrypt_dict()<br/>(core/credentials/encryption.py)"]
-    Decrypt --> Provider
+    Req --> WS_Config
+    WS_Config -- "Missing or not configured" --> Env_Keys
+    Env_Keys -- "Missing" --> Auto_Agent
 ```
+
+The `SystemSetting` model and `seed_system_settings` function manage LLM configurations in the database, categorizing them into `orchestrator_llm` (Auto - premium, user-facing), `system_llm` (System - cheap-fast internal), and `embeddings` (vectorization) [orchestrator/core/models/system_settings.py:31-33](), [orchestrator/core/seeds/seed_system_settings.py:166-170](). These settings include `provider`, `model`, `temperature`, `max_tokens`, `top_p`, `frequency_penalty`, `presence_penalty`, `timeout_seconds`, and `max_retries` [orchestrator/core/seeds/seed_system_settings.py:41-157]().
 
 | Variable | Purpose |
 | :--- | :--- |
-| `OPENAI_API_KEY` | Key for OpenAI models (passed through by compose) |
-| `ANTHROPIC_API_KEY` | Key for Anthropic models — also the credential the workspace-worker's Canvas sessions read |
-| `OPENROUTER_API_KEY` | Key for OpenRouter (many providers behind one key) |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Alternative Canvas-session credential (Claude subscription token), worker only |
+| `OPENAI_API_KEY` | Key for OpenAI models |
+| `ANTHROPIC_API_KEY` | Key for Anthropic models |
+| `LLM_PROVIDER` | Default provider (e.g., `openai`) |
+| `LLM_MODEL` | Default model (e.g., `gpt-4`) |
 
-Any one of the first three is enough for chat, agents and embeddings; keys can also be added in the UI under Settings → API Keys, where they are stored encrypted.
-
-**Encryption:** Credentials stored in the database are encrypted using `encryption_service.encrypt_dict()` before being persisted in the `credentials` table [orchestrator/core/credentials/service.py:146-150](). The `Credential` model stores this as `encrypted_data` [orchestrator/core/models/credentials.py:74](). The encryption key is generated on first boot and persisted at `CREDENTIAL_KEY_FILE` (the `backend_data` volume) unless `CREDENTIAL_ENCRYPTION_KEY` is set — note that compose does not pass `CREDENTIAL_ENCRYPTION_KEY` from `.env`; set it in `envs/api.local` if you want to pin it.
-
-**Sources:** [docker-compose.yml](), [envs/api.defaults](), [orchestrator/core/credentials/service.py:146-150](), [orchestrator/core/models/credentials.py:60-75]()
+**Sources:** [orchestrator/config.py:119-125](), [orchestrator/.env.example:18-26](), [orchestrator/core/seeds/seed_auto_agent.py:68-78](), [orchestrator/core/models/system_settings.py:31-33](), [orchestrator/core/seeds/seed_system_settings.py:41-157](), [orchestrator/core/seeds/seed_system_settings.py:166-170]()
 
 ---
 
-## Service-Specific Configuration
+## Memory Tier Configuration (PRD-79)
 
-### Plugin and Marketplace
-Controls the marketplace caching and storage.
+The Unified Memory Service uses several environment variables to control retention, decay, and promotion across the 5-layer architecture.
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `MEMORY_DECAY_RATE` | `0.004` | Ebbinghaus decay rate per hour [orchestrator/config.py:106]() |
+| `MEMORY_PROMOTION_MIN_IMPORTANCE` | `0.7` | Threshold for L2→L3 promotion [orchestrator/config.py:117]() |
+| `MEMORY_SESSION_TTL_SECONDS` | `86400` | TTL for active L1 sessions [orchestrator/config.py:85]() |
+| `MEMORY_JOBS_ENABLED` | `true` | Toggles background consolidation jobs [orchestrator/config.py:131]() |
+
+**Sources:** [orchestrator/config.py:82-132]()
+
+---
+
+## Universal Router and Tools
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
-| `PLUGIN_CACHE_TTL_SECONDS` | TTL for Redis plugin cache | `3600` |
-| `MARKETPLACE_S3_BUCKET` | S3 bucket for plugin storage | `automatos-marketplace` |
-| `PLUGIN_MAX_UPLOAD_SIZE_MB` | Max size for plugin uploads | `10` |
-| `PLUGIN_LLM_SCAN_MODEL` | Model used for security scanning | `claude-haiku-4-20250414` |
-
-**Sources:** [orchestrator/core/services/plugin_cache.py:43-47](), [orchestrator/.env.example:48-54]()
-
-### Universal Router and Webhooks
-| Variable | Purpose | Default |
-| :--- | :--- | :--- |
-| `COMPOSIO_WEBHOOK_SECRET` | Secret to validate incoming tool webhooks | (none) |
+| `COMPOSIO_WEBHOOK_SECRET` | Secret to validate tool webhooks | (none) |
 | `ROUTING_CACHE_TTL_HOURS` | TTL for routing decisions in Redis | `24` |
 | `ROUTING_LLM_CONFIDENCE_THRESHOLD` | Threshold for Tier 3 routing | `0.5` |
 
-**Sources:** [orchestrator/.env.example:38-40]()
-
-### Object storage (S3 API) — hosted edition
-Every S3 client in the backend is built by one factory (`orchestrator/core/storage/s3.py`). With `S3_ENDPOINT_URL` unset it targets AWS S3 with the credentials below; with it set (the compose default, `http://minio:9000`) it targets MinIO with path-style addressing. The hosted deployment sets these itself.
-
-| Variable | Purpose |
-| :--- | :--- |
-| `AWS_ACCESS_KEY_ID` | AWS authentication ID (locally set by compose from `S3_ACCESS_KEY_ID`) |
-| `AWS_SECRET_ACCESS_KEY` | AWS authentication secret (locally from `S3_SECRET_ACCESS_KEY`) |
-| `AWS_REGION` | Target AWS region (locally from `S3_REGION`) |
-| `S3_DOCUMENTS_BUCKET`, `MARKETPLACE_S3_BUCKET`, `RECIPE_LOG_S3_BUCKET` | Bucket names; against MinIO they self-create on first use, on AWS they must exist |
-| `S3_VECTORS_ENABLED` | S3 Vectors for RAG — hosted only; never enable against MinIO |
-
-**Sources:** [orchestrator/config.py](), [orchestrator/core/storage/s3.py](), [docker-compose.yml]()
+**Sources:** [orchestrator/.env.example:37-41]()
 
 ---
 
 ## System and Logging
-| Variable | Purpose | Default (compose) |
-| :--- | :--- | :--- |
-| `ENVIRONMENT` | Deployment stage (`development`, `production`) | `development` |
-| `LOG_LEVEL` | Verbosity of backend logs (`DEBUG`, `INFO`, `ERROR`) | `INFO` |
-| `LOG_RELAY_ENABLED`, `LOG_RELAY_URL`, `LOKI_URL`, `PROMETHEUS_URL`, `AGENT_OPT_WORKER_URL` | Hosted telemetry and the prompt-optimisation worker; an empty URL disables the feature with a log line | `false` / empty |
-| `REQUIRE_AUTH` | Authentication enforcement — **derived**: forced `false` when `AUTH_EDITION=local`, read from the environment (default `true`) in `saas` | derived |
 
-**Sources:** [envs/api.defaults](), [orchestrator/config.py]()
+| Variable | Purpose | Default |
+| :--- | :--- | :--- |
+| `ENVIRONMENT` | Deployment stage (`development`, `production`) | `production` |
+| `LOG_LEVEL` | Verbosity of backend logs | `INFO` |
+| `DEBUG` | Toggle for FastAPI debug mode | `false` |
+| `REQUIRE_AUTH` | Toggle for Clerk JWT enforcement | `false` (local) |
+
+The `GeneralSettingsTab` in the frontend allows users to configure `environment` and `log_level` via the UI, which are then stored as `SystemSetting` entries [frontend/components/settings/GeneralSettingsTab.tsx:83-119]().
+
+**Sources:** [orchestrator/.env.example:28-34,56-58](), [frontend/components/settings/GeneralSettingsTab.tsx:83-119]()
+
+---
+
+## Gitleaks Ignore
+
+The `.gitleaksignore` file specifies patterns and specific commit hashes to ignore during Gitleaks scans. This is crucial for preventing false positives, especially for test fixtures that intentionally contain secret-like strings to validate exclusion mechanisms. For example, a test for the memory exclusion validator includes a fake "api_key = ..." string that is meant to be refused by the write path [orchestrator/tests/test_prd206_write_contract.py:7-8](). Another entry addresses a system setting name that matched a generic API key pattern due to entropy [orchestrator/tests/test_system_settings_null_flags.py:1-3]().
+
+**Sources:** [.gitleaksignore:1-20](), [orchestrator/tests/test_prd206_write_contract.py:7-8](), [orchestrator/tests/test_system_settings_null_flags.py:1-3]()
+
+---
+
+## Service Configuration
+
+### CLI Host Service (Session Mode)
+
+The `cli_host_service` manages local CLI sessions for agents, particularly for "Session Mode" (PRD-234). This service uses environment variables for configuration, though many settings are managed through the `CliHost` database model and its associated pairing and token mechanisms [orchestrator/services/cli_host_service.py:10-15]().
+
+**Diagram: CLI Host Service Configuration**
+```mermaid
+graph TD
+    subgraph "CLI_Host_Configuration"
+        CliHostModel["CliHost Model<br/>(core/models/cli_hosts.py)"]
+        CliHostService["cli_host_service<br/>(orchestrator/services/cli_host_service.py)"]
+        ConfigModule["Config<br/>(orchestrator/config.py)"]
+    end
+
+    subgraph "CLI_Host_Runtime"
+        CliHostApp["automatos_cli_host<br/>(services/cli-host)"]
+    end
+
+    ConfigModule --> CliHostService
+    CliHostModel --> CliHostService
+    CliHostService -- "Provides runtime config" --> CliHostApp
+
+    CliHostApp -- "Reports capabilities" --> CliHostModel
+    CliHostApp -- "Claims tasks" --> CliHostService
+```
+
+The `CliHost` model stores `capabilities` (e.g., available CLIs, models) and `status` (PENDING, PAIRED, REVOKED) [orchestrator/services/cli_host_service.py:80-85](), [orchestrator/services/cli_host_service.py:126-127](). The `automatos_cli_host` application, which runs on the user's machine, uses an `allowlist.py` to define which commands are permitted [services/cli-host/automatos_cli_host/allowlist.py]().
+
+**Sources:** [orchestrator/services/cli_host_service.py:10-15](), [orchestrator/services/cli_host_service.py:80-85](), [orchestrator/services/cli_host_service.py:126-127](), [services/cli-host/automatos_cli_host/allowlist.py]()
+
+### Plugin Marketplace / S3
+
+| Variable | Purpose | Default |
+| :--- | :--- | :--- |
+| `MARKETPLACE_S3_BUCKET` | S3 bucket for marketplace assets | `automatos-marketplace` |
+| `AWS_ACCESS_KEY_ID` | AWS Access Key ID | (none) |
+| `AWS_SECRET_ACCESS_KEY` | AWS Secret Access Key | (none) |
+| `AWS_REGION` | AWS region for S3 | `us-east-1` |
+| `PLUGIN_MAX_UPLOAD_SIZE_MB` | Max size for plugin uploads | `10` |
+| `PLUGIN_LLM_SCAN_MODEL` | LLM used for scanning plugins | `claude-haiku-4-20250414` |
+| `PLUGIN_CACHE_TTL_SECONDS` | TTL for plugin metadata cache | `3600` |
+
+**Sources:** [orchestrator/.env.example:48-55]()
+
+---
+
+## Gitignore and Sensitive Files
+
+The `.gitignore` file is configured to exclude various sensitive or generated files from version control. This includes:
+
+*   `.mcp.json`: MCP config, potentially containing API keys.
+*   `envs/*.local`: Personal local environment overrides that may hold secrets.
+*   `.env`, `.env.local`, `.env.*.local`: Environment files containing secrets.
+*   `.credential_key`: Auto-generated credential encryption keys.
+*   `tests/e2e/.auth/`: E2E dev-browser auth fixtures, containing live Clerk session material.
+*   `orchestrator/scripts/eval/**/live/`: Real-tenant evaluation gold sets, containing sensitive client corpus data.
+*   `/workspaces/`: The workspace-worker host directory, where agent deliverables are stored locally.
+
+**Sources:** [.gitignore:1-150]()
 
 ---

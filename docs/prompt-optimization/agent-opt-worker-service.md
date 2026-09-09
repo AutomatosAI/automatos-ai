@@ -79,7 +79,7 @@ graph TB
     FutureAGIService --> DB
 ```
 
-Sources: [orchestrator/core/services/futureagi_service.py:1-10](), [services/agent-opt-worker/main.py:1-16]()
+Sources: [orchestrator/core/services/futureagi_service.py:5-10](), [services/agent-opt-worker/main.py:1-16]()
 
 ---
 
@@ -211,13 +211,13 @@ Sources: [services/agent-opt-worker/main.py:32-40](), [services/agent-opt-worker
 
 ### Deployment
 
-The service is containerized using a slim Python 3.11 base image: [services/agent-opt-worker/Dockerfile:1-16]().
+The service is containerized using a slim Python 3.11 base image: [services/agent-opt-worker/Dockerfile:1-15]().
 
 **Key Characteristics**:
 *   **Non-root User**: Created at build time for security: [services/agent-opt-worker/Dockerfile:10-11]().
-*   **Dependencies**: Includes `agent-opt`, `ai-evaluation`, and `litellm`: [services/agent-opt-worker/requirements.txt:1-8]().
+*   **Dependencies**: Includes `agent-opt`, `ai-evaluation`, and `litellm`: [services/agent-opt-worker/requirements.txt:1-7]().
 *   **Runtime**: Executed via `uvicorn` on port 8080: [services/agent-opt-worker/Dockerfile:15]().
 
-Sources: [services/agent-opt-worker/Dockerfile:1-16](), [services/agent-opt-worker/requirements.txt:1-8]()
+Sources: [services/agent-opt-worker/Dockerfile:1-15](), [services/agent-opt-worker/requirements.txt:1-7]()
 
 ---

@@ -5,184 +5,270 @@
 
 The following files were used as context for generating this wiki page:
 
+- [.env.example](.env.example)
+- [.github/workflows/test.yml](.github/workflows/test.yml)
 - [docker-compose.yml](docker-compose.yml)
+- [docker-entrypoint.sh](docker-entrypoint.sh)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
+- [frontend/components/activity/board/__tests__/blocked-reason.test.ts](frontend/components/activity/board/__tests__/blocked-reason.test.ts)
+- [frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx](frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx)
+- [frontend/components/activity/board/blocked-reason.ts](frontend/components/activity/board/blocked-reason.ts)
+- [frontend/components/activity/board/task-deliverables-panel.tsx](frontend/components/activity/board/task-deliverables-panel.tsx)
+- [infrastructure/.env.example](infrastructure/.env.example)
+- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
+- [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py](orchestrator/alembic/versions/prd222_veteran_skip_backfill.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
+- [orchestrator/core/seeds/seed_local_first_run.py](orchestrator/core/seeds/seed_local_first_run.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
+- [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
+- [orchestrator/tests/test_prd222_onboarding_reset.py](orchestrator/tests/test_prd222_onboarding_reset.py)
+- [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
 
 </details>
 
 
 
-This page documents the Docker Compose orchestration for Automatos AI — the stack that **is** the local edition and the development environment: service definitions, dependencies, health checks, volumes, networks and the one optional profile. The hosted (Railway) topology is separate and described in [Production Deployment](production-deployment.md); Railway never reads this file.
-
-> The operator-facing walkthrough — secrets, first boot, the worker's host directory, object storage, Composio, updating, resetting, troubleshooting — is [Self-hosting — the local edition](../getting-started/self-hosting.md). This page describes the compose file itself.
+This page documents the Docker Compose orchestration for Automatos AI, covering service definitions, dependencies, health checks, volumes, networks, and deployment profiles. The setup mirrors a 19-service production topology used in Railway deployments, organized into modular functional groups.
 
 ## Purpose and Scope
 
 The Docker Compose configuration orchestrates all services required to run Automatos AI in a containerized environment. It defines:
 
-- **Data services**: PostgreSQL with `pgvector`, Redis, MinIO (S3-compatible object storage) with a one-shot bucket initialiser [docker-compose.yml]().
-- **Application services**: the FastAPI backend and the Next.js frontend, built from source with their `development` targets [docker-compose.yml]().
-- **The workspace-worker**: the Code Canvas runtime, in the default profile, acting on a host directory [docker-compose.yml]().
-- **`--profile all`**: Adminer (database GUI) and Gotenberg (DOCX/XLSX → PDF, PRD-63) [docker-compose.yml]().
+- **Core Services**: PostgreSQL, Redis, MinIO (S3), FastAPI backend, Next.js frontend [docker-compose.yml:135-217]().
+- **Data Infrastructure**: Dedicated pgvector, Redis, and Qdrant vector database [docker-compose.yml:30-133]().
+- **Memory Subsystem**: Mem0 OpenMemory server with isolated storage (not directly in `docker-compose.yml`, but part of the broader infrastructure as seen in `infrastructure/railway-manifest.json`) [infrastructure/railway-manifest.json:31-38]().
+- **Voice Services**: TTS (Chatterbox), STT (Whisper), and WebSocket orchestration (not directly in `docker-compose.yml`, but part of the broader infrastructure as seen in `infrastructure/railway-manifest.json`) [infrastructure/railway-manifest.json:24-30]().
+- **Monitoring Stack**: Prometheus, Grafana, Loki, and exporters (not directly in `docker-compose.yml`, but part of the broader infrastructure as seen in `infrastructure/railway-manifest.json`) [infrastructure/railway-manifest.json:39-50]().
+- **Worker Services**: Workspace worker for isolated task execution and agent-opt-worker for prompt optimization [docker-compose.yml:218-270]().
 
-The `agent-opt-worker` (prompt optimisation), mem0, Qdrant and the observability stack are not part of the compose file; they belong to the hosted deployment.
+Sources: [docker-compose.yml:1-270](), [infrastructure/railway-manifest.json:1-66]()
 
-Sources: [docker-compose.yml](), [orchestrator/Dockerfile:1-141](), [frontend/Dockerfile:1-115]()
+## Modular Architecture (Production Mirror)
 
----
+The system is split into specialized compose files to allow granular scaling and deployment of specific subsystems. This mirrors the Railway production topology.
 
-## Services
+### Service Grouping
 
-| Service | Container | Image / build | Host port (variable) | Role |
-|---|---|---|---|---|
-| `postgres` | `automatos_postgres` | `pgvector/pgvector:pg16` | 5432 (`POSTGRES_PORT`) | Relational data and the pgvector chunk store (local RAG) [docker-compose.yml]() |
-| `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues; `FLUSHDB`/`FLUSHALL`/`DEBUG` disabled, 256 MB `allkeys-lru` [docker-compose.yml]() |
-| `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store; the backend reaches it via `S3_ENDPOINT_URL=http://minio:9000` [docker-compose.yml]() |
-| `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates `S3_DOCUMENTS_BUCKET` (default `automatos-ai`), then exits [docker-compose.yml]() |
-| `backend` | `automatos_backend` | `./orchestrator`, target `development` | 8000 (`API_PORT`) | FastAPI API; `uvicorn --reload` over the bind-mounted source; entrypoint `docker-entrypoint.sh` [docker-compose.yml]() |
-| `frontend` | `automatos_frontend` | `./frontend`, target `development` | 3000 (`FRONTEND_PORT`) | Next.js UI (`npm run dev`); starts after the backend is healthy [docker-compose.yml]() |
-| `workspace-worker` | `automatos_workspace_worker` | `./services/workspace-worker` | none (8081 internal only) | Code Canvas runtime; 2 CPU / 2 GB limits; `WORKER_CONCURRENCY` default 3 [docker-compose.yml]() |
-| `adminer` (`--profile all`) | `automatos_adminer` | `adminer` | 8080 (`ADMINER_PORT`) | Database GUI pre-pointed at `postgres` [docker-compose.yml]() |
-| `gotenberg` (`--profile all`) | `automatos_gotenberg` | `gotenberg/gotenberg:8` | 3001 (`GOTENBERG_PORT`) | Document conversion at `http://gotenberg:3000` for the backend [docker-compose.yml]() |
+| Group | Compose File | Primary Services |
+|-------|--------------|------------------|
+| **Core** | `docker-compose.yml` | `backend`, `frontend`, `workspace-worker`, `minio` |
+| **Data** | `docker-compose.yml` | `postgres`, `redis`, `qdrant` |
+| **Memory** | `infrastructure/railway-manifest.json` | `mem0-server`, `mem0-pgvector` |
+| **Voice** | `infrastructure/railway-manifest.json` | `voice-service`, `voice-pipeline` |
+| **Monitoring** | `infrastructure/railway-manifest.json` | `prometheus`, `grafana`, `loki`, `log-relay` |
+| **Landing** | `infrastructure/railway-manifest.json` | `automatos-ai-landing` |
 
-**System Data Flow & Networking**
+**Cross-Service Communication Map**
 
 ```mermaid
 graph TB
     subgraph "Public Entrypoints"
-        LB_API["localhost:8000"]
-        LB_UI["localhost:3000"]
-        LB_MINIO["localhost:9000 / 9001"]
+        LB_API["api.automatos.app"]
+        LB_UI["ui.automatos.app"]
+        LB_LAND["automatos.app"]
     end
 
-    subgraph "Application"
+    subgraph "Core Group (docker-compose.yml)"
         API["automatos_backend<br/>(FastAPI)"]
         UI["automatos_frontend<br/>(Next.js)"]
-        WS_WORKER["automatos_workspace_worker<br/>(Code Canvas runtime, default profile)"]
+        WORKER["workspace_worker<br/>(Isolated Exec)"]
+        MINIO["minio<br/>(S3 Storage)"]
     end
 
-    subgraph "Data"
-        PG["postgres<br/>(pgvector)"]
-        RD["redis<br/>(Cache/PubSub)"]
-        MN["minio<br/>(S3 API)"]
+    subgraph "Data Group (docker-compose.yml)"
+        PG["postgres<br/>(Main DB)"]
+        RD["redis<br/>(Cache/Queue)"]
+        QD["qdrant<br/>(Vectors)"]
+    end
+
+    subgraph "Memory Group (Railway Manifest)"
+        M0["mem0_server<br/>(L3 Memory)"]
+        M0PG["mem0_pgvector<br/>(Isolated Storage)"]
     end
 
     LB_API --> API
     LB_UI --> UI
-    LB_MINIO --> MN
+    LB_LAND --> LAND["landing_page"]
     
     API --> PG
     API --> RD
-    API --> MN
-    API -- "WORKER_INTERNAL_URL" --> WS_WORKER
-    WS_WORKER --> RD
-    WS_WORKER --> PG
+    API --> QD
+    API --> M0
+    API --> MINIO
+    M0 --> M0PG
+    WORKER --> RD
+    WORKER --> PG
 ```
 
-All services share the `automatos` bridge network (`automatos_network`) [docker-compose.yml]().
-
-Sources: [docker-compose.yml](), [envs/api.defaults](), [orchestrator/core/redis/client.py:141-197]()
+Sources: [docker-compose.yml:26-270](), [infrastructure/railway-manifest.json:1-66]()
 
 ---
 
-## Core Infrastructure Implementation
+## Core Infrastructure
 
-### Backend (FastAPI)
-The backend service is built using a multi-stage `Dockerfile` targeting `python:3.11-slim` [orchestrator/Dockerfile:13](). It includes system dependencies for OCR (`tesseract-ocr`), document processing (`ghostscript`), and PDF generation (`libpango`) [orchestrator/Dockerfile:18-32]().
+### PostgreSQL (pgvector)
 
-- **Entrypoint**: `docker-entrypoint.sh` (bind-mounted from the repo root) waits for Postgres, builds the schema on an empty database (`python -m scripts.init_fresh_db`), runs `alembic upgrade heads` (fail-closed), loads the idempotent seeds, ensures the local workspace and operator exist, then starts `uvicorn` [docker-entrypoint.sh]().
-- **Configuration**: `env_file: envs/api.defaults` (committed local topology, `AUTH_EDITION=local`) then the optional gitignored `envs/api.local`; the `environment:` block carries the secrets substituted from `.env` and wins over both [docker-compose.yml]().
-- **Hot Reload**: In development mode, the `./orchestrator` directory is mounted to `/app` and `uvicorn` runs with `--reload` [docker-compose.yml](), [orchestrator/Dockerfile:93]().
-- **Object storage**: `S3_ENDPOINT_URL=http://minio:9000`; the backend's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` are set from `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` (defaulting to the MinIO root credentials), so a developer's `AWS_*` variables never reach the local store [docker-compose.yml]().
+The database uses `pgvector/pgvector:pg16` for production-grade vector storage, supporting the `pgvector` extension required for L2 memory and RAG operations [docker-compose.yml:31]().
 
-### Workspace worker
-Built from `services/workspace-worker`. The host directory `${AUTOMATOS_WORKSPACE_DIR:-./workspaces}` is bind-mounted at `/workspaces` (read-write here, read-only in the backend); each workspace gets `/workspaces/<workspace_id>/`, every Code Canvas tool call is confined to it and mutations need approval. The process runs as uid 1000 (`worker`) and its entrypoint takes ownership of the mounted directory. Canvas sessions need `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `.env`. The backend reaches the worker at `WORKER_INTERNAL_URL=http://workspace-worker:8081` (`envs/api.defaults`); the port is not published on the host [docker-compose.yml](), [services/workspace-worker/entrypoint.sh](), [services/workspace-worker/worker_config.py]().
+**Health Check & Initialization**
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+```
+The `docker-entrypoint.sh` script ensures PostgreSQL is ready and runs Alembic migrations before the backend starts [docker-entrypoint.sh:22-60]().
 
-### Frontend (Next.js)
-The frontend uses a multi-stage build that outputs a standalone Node.js server for production efficiency [frontend/Dockerfile:83-114]().
+Sources: [docker-compose.yml:30-51](), [docker-entrypoint.sh:22-60]()
 
-- **Environment Injection**: `NEXT_PUBLIC_API_URL` and Clerk keys are baked into the client bundle during the build stage [frontend/Dockerfile:58-71]().
-- **Security**: Runs as a non-root `nextjs` user [frontend/Dockerfile:93-101]().
+### Redis Security Hardening
 
-### Redis Pub/Sub & Task Queue
-Redis is the central nervous system for real-time updates. The `RedisClient` class manages connection pools and async pub/sub for WebSocket streaming [orchestrator/core/redis/client.py:14-64]().
+Redis serves as the session store, pub/sub hub for real-time updates via `RedisClient` [orchestrator/core/redis/client.py:14-31](), and task queue for `WorkspaceWorker`. It is hardened by renaming dangerous commands [docker-compose.yml:59-68]().
 
-- **Workflow Events**: The `publish_workflow_event` method routes execution updates to channels like `workflow:{id}:execution:{id}` [orchestrator/core/redis/client.py:110-119]().
-- **Security**: The `redis` service renames dangerous commands like `FLUSHALL` and `FLUSHDB` to prevent accidental data loss [docker-compose.yml:59-61]().
+| Command | Action | Reason |
+|---------|--------|--------|
+| `FLUSHDB` | Disabled | Prevent accidental data wipe [docker-compose.yml:66]() |
+| `FLUSHALL` | Disabled | Prevent global data wipe [docker-compose.yml:67]() |
+| `DEBUG` | Disabled | Prevent info disclosure [docker-compose.yml:68]() |
 
-Sources: [orchestrator/Dockerfile:1-141](), [frontend/Dockerfile:1-115](), [orchestrator/core/redis/client.py:1-197](), [docker-compose.yml:48-73]()
+Sources: [docker-compose.yml:55-80](), [orchestrator/core/redis/client.py:1-31]()
+
+### MinIO (Local S3)
+
+MinIO provides a durable local object store for the "knowledge flywheel," ensuring generated outputs persist instead of using ephemeral container disk [docker-compose.yml:83-88](). The backend talks to it through the existing S3 seam via `S3_ENDPOINT_URL` [docker-compose.yml:87](). The `minio-init` service is no longer used as the storage factory calls `ensure_bucket()` on first use [docker-compose.yml:112-114]().
+
+Sources: [docker-compose.yml:83-114]()
+
+### Qdrant (Vector Store)
+
+Qdrant is an optional, opt-in service for durable (L3) and field memory [docker-compose.yml:116-117](). It is enabled via the `memory` profile: `docker compose --profile memory up -d` [docker-compose.yml:118]().
+
+Sources: [docker-compose.yml:116-133]()
 
 ---
 
-## Code Entity to Service Mapping
+## Specialized Subsystems (Railway Manifest)
 
-This diagram maps specific Python modules and frontend components to their containerized environments.
+The following subsystems are defined in the `infrastructure/railway-manifest.json` for production deployments and are not directly part of the default `docker-compose.yml`.
+
+### Memory Services (L3 Storage)
+
+The memory subsystem isolates Mem0 workloads into a dedicated container and database instance to prevent RAG/embedding tasks from impacting main API performance [infrastructure/railway-manifest.json:31-38]().
+
+- **mem0-server**: Provides the OpenMemory API for long-term fact storage [infrastructure/railway-manifest.json:35]().
+- **mem0-pgvector**: Dedicated PostgreSQL instance to isolate memory vector workloads [infrastructure/railway-manifest.json:36]().
+
+### Voice Pipeline
+
+Enables real-time TTS and STT capabilities for agents.
+- **voice-service**: Runs Chatterbox (TTS) and Whisper (STT) engines [infrastructure/railway-manifest.json:28]().
+- **voice-pipeline**: WebSocket orchestration layer connecting the `backend` to `voice-service` [infrastructure/railway-manifest.json:29]().
+
+### Monitoring & Observability
+
+A complete Prometheus/Grafana stack is included for system health tracking.
+- **log-relay**: Receives Railway log drains and pushes to **Loki** [infrastructure/railway-manifest.json:46]().
+- **exporters**: `postgres-exporter` and `redis-exporter` provide service-specific metrics to Prometheus [infrastructure/railway-manifest.json:49-50]().
+
+Sources: [infrastructure/railway-manifest.json:1-66]()
+
+---
+
+## Code to Container Mapping
+
+This diagram maps specific backend modules and service directories to their containerized service counterparts.
 
 ```mermaid
 graph LR
-    subgraph "Codebase Modules"
+    subgraph "Backend Codebase"
         main["orchestrator/main.py"]
-        redis_client["core/redis/client.py"]
-        cloud_api["api/cloud_documents.py"]
-        fe_app["frontend/app/"]
+        ws_worker_dir["services/workspace-worker/"]
+        opt_worker_dir["services/agent-opt-worker/"]
+        fe_src["frontend/"]
     end
 
-    subgraph "Docker Containers"
+    subgraph "Docker Services"
         svc_api["[backend]<br/>automatos_backend"]
-        svc_redis["[redis]<br/>automatos_redis"]
-        svc_ui["[frontend]<br/>automatos_frontend"]
+        svc_ws["[workspace-worker]<br/>automatos_workspace_worker"]
+        svc_opt["[agent-opt-worker]<br/>automatos_agent_opt_worker"]
+        svc_fe["[frontend]<br/>automatos_frontend"]
     end
 
-    main -.->|"FastAPI App"| svc_api
-    redis_client -.->|"Pub/Sub"| svc_redis
-    cloud_api -.->|"Boto3/S3"| svc_api
-    fe_app -.->|"Next.js"| svc_ui
+    main -.->|"Uvicorn Entry"| svc_api
+    ws_worker_dir -.->|"ARQ Worker"| svc_ws
+    opt_worker_dir -.->|"Optimization API"| svc_opt
+    fe_src -.->|"Next.js Standalone"| svc_fe
 ```
 
-Sources: [orchestrator/main.py:1-50](), [orchestrator/core/redis/client.py:14-31](), [orchestrator/api/cloud_documents.py:25](), [frontend/Dockerfile:114]()
+Sources: [orchestrator/Dockerfile:131](), [frontend/Dockerfile:129](), [docker-compose.yml:135-270]()
 
 ---
 
-## Data Persistence & Volumes
+## Dockerfile Specifications
 
-The setup uses named volumes to ensure state is preserved across container lifecycles, plus one host bind mount.
+### Backend (Orchestrator)
+The backend uses a multi-stage Dockerfile [orchestrator/Dockerfile:1-8]().
+- **`pybuild` stage**: Installs build-time dependencies like `gcc`, `g++`, `libffi-dev` and Python packages from `requirements.txt` [orchestrator/Dockerfile:19-59](). It conditionally installs `graphifyy[leiden]` based on `INSTALL_GRAPH_EXTRAS` build argument [orchestrator/Dockerfile:38-58]().
+- **`base` stage**: Installs runtime-only system dependencies such as `git`, `postgresql-client`, `libmagic1`, `tesseract-ocr`, `ghostscript`, `libpango-1.0-0`, `libcairo2`, `libgdk-pixbuf-2.0-0` [orchestrator/Dockerfile:70-81]().
+- **`development` stage**: Includes hot-reload capabilities and debugging tools. The entrypoint `docker-entrypoint.sh` is mounted from the host, and the default command runs `alembic upgrade heads` before starting `uvicorn` with `--reload` [orchestrator/Dockerfile:91-131]().
+- **`production` stage**: Optimized and minimal, copying only necessary application code and running `uvicorn` with multiple workers [orchestrator/Dockerfile:136-184]().
 
-| Volume / mount | Service | Mount Path | Purpose |
-|-------------|---------|------------|---------|
-| `postgres_data` (`automatos_postgres_data`) | `postgres` | `/var/lib/postgresql/data` | Persistent SQL & vector data. Keeps the password it was initialised with — changing `POSTGRES_PASSWORD` later needs a reset or `ALTER USER` [docker-compose.yml]() |
-| `redis_data` (`automatos_redis_data`) | `redis` | `/data` | Cache and session persistence [docker-compose.yml]() |
-| `minio_data` (`automatos_minio_data`) | `minio` | `/data` | Object storage (documents, generated outputs, plugin packages, images) [docker-compose.yml]() |
-| `backend_data` | `backend` | `/app/data` | The auto-generated credential-encryption key (`CREDENTIAL_KEY_FILE`); losing it makes stored API keys undecryptable [docker-compose.yml](), [envs/api.defaults]() |
-| `backend_logs` (`automatos_backend_logs`) | `backend` | `/app/logs` | Application logs [docker-compose.yml]() |
-| **bind mount** `${AUTOMATOS_WORKSPACE_DIR:-./workspaces}` | `workspace-worker` (rw), `backend` (ro) | `/workspaces` | The agents' files, on the host. Not a named volume: `docker compose down -v` leaves it in place [docker-compose.yml]() |
+Sources: [orchestrator/Dockerfile:1-184](), [orchestrator/requirements.txt:1-142]()
 
-Sources: [docker-compose.yml](), [envs/api.defaults]()
+### Frontend
+The frontend uses a multi-stage Dockerfile for a Next.js standalone build [frontend/Dockerfile:1-9]().
+- **`base` stage**: Installs Node.js and common build tools [frontend/Dockerfile:14-26]().
+- **`development` stage**: Installs all dependencies and runs the Next.js development server with hot-reload [frontend/Dockerfile:30-48]().
+- **`builder` stage**: Accepts `NEXT_PUBLIC_*` build arguments which are embedded into the client bundle. It performs the `npm run build` step [frontend/Dockerfile:53-98]().
+- **`production` stage**: Copies only the `.next/standalone`, `.next/static`, and `public` folders for a minimal image. It runs the `node server.js` command [frontend/Dockerfile:103-132]().
+
+Sources: [frontend/Dockerfile:1-132]()
 
 ---
 
-## Environment Configuration
+## Volumes and Data Persistence
 
-A `.env` file is mandatory for initialization. Compose reads it for variable substitution only; the committed topology lives in `envs/api.defaults` and `envs/frontend.defaults`, with `envs/api.local` / `envs/frontend.local` as gitignored overrides.
+The setup uses named volumes to ensure data persistence across container restarts.
 
-- **Required** (`${VAR:?…}` — compose refuses to start without them): `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY` [docker-compose.yml]().
-- **LLM keys**: optional at startup (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`); can also be stored under Settings → API Keys [docker-compose.yml]().
-- **Integrations**: `COMPOSIO_API_KEY` — bring your own; without it integrations are disabled and native tools keep working [docker-compose.yml]().
-- **Worker**: `AUTOMATOS_WORKSPACE_DIR`, `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`, `WORKER_CONCURRENCY`, `WORKSPACE_DEFAULT_QUOTA_GB`, `WORKER_INTERNAL_TOKEN` [docker-compose.yml]().
-- **Auth**: Clerk variables are hosted-edition only and use `:-` defaults, so their absence never blocks a local boot; `AUTH_EDITION=local` comes from `envs/api.defaults` [docker-compose.yml](), [envs/api.defaults]().
+| Volume Name | Usage | Target Path |
+|-------------|-------|-------------|
+| `postgres_data` | Main DB storage | `/var/lib/postgresql/data` [docker-compose.yml:42]() |
+| `redis_data` | Cache/Queue state | `/data` [docker-compose.yml:72]() |
+| `minio_data` | S3 Object storage | `/data` [docker-compose.yml:102]() |
+| `qdrant_data` | Qdrant vector storage | `/qdrant/storage` [docker-compose.yml:131]() |
+| `automatos_backend_data` | Backend persistent data (e.g., credential encryption keys) | `/app/data` [orchestrator/Dockerfile:108]() |
+| `automatos_workspace_dir` | Workspace worker filesystems | `/workspaces` [docker-compose.yml:249]() |
 
-### Launching the Stack
+Sources: [docker-compose.yml:42,72,102,131,249](), [orchestrator/Dockerfile:108]()
 
-- **Default**: `docker compose up` (add `--build` after dependency or Dockerfile changes) [docker-compose.yml]().
-- **With admin tools**: `docker compose --profile all up` — Adminer and Gotenberg [docker-compose.yml]().
-- **Updating**: `git pull && docker compose up -d --build`; migrations run on every backend boot.
-- **Reset**: `docker compose down -v` removes the named volumes; delete `AUTOMATOS_WORKSPACE_DIR` by hand.
-- **Production Mode**: the `production` targets in the Dockerfiles exclude dev dependencies like `pytest`, `black`, and `isort` and are what the hosted deployment builds; the compose file uses the `development` targets [orchestrator/Dockerfile:98-146](), [frontend/Dockerfile:92-121]().
+---
 
-Sources: [docker-compose.yml](), [orchestrator/Dockerfile](), [frontend/Dockerfile]()
+## Deployment and Setup
+
+### Prerequisites
+1. Copy `.env.example` to `.env` and set required values (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `API_KEY`) [docker-compose.yml:14-15]().
+2. Ensure Docker and Docker Compose are installed.
+
+### Launch Commands
+
+- **Standard (Core Only)**: `docker compose up --build` [docker-compose.yml:9]().
+- **With Qdrant (Memory Profile)**: `docker compose --profile memory up -d` [docker-compose.yml:118]().
+- **Development Mode**: Uses the `development` target in the Dockerfile for hot-reloading [orchestrator/Dockerfile:91-131]().
+
+### `docker-entrypoint.sh`
+
+The `docker-entrypoint.sh` script orchestrates the backend startup sequence [docker-entrypoint.sh:1-11]():
+1. **Wait for PostgreSQL**: Ensures the database is ready before proceeding [docker-entrypoint.sh:22-39]().
+2. **Run Database Migrations**: Executes `alembic upgrade heads` to apply all pending migrations. This is a fail-closed step; if migrations fail, the container exits [docker-entrypoint.sh:41-61]().
+3. **Load Seed Data**: Runs `python -m core.database.load_seed_data` to populate initial data. This process is idempotent [docker-entrypoint.sh:63-93]().
+4. **Ensure Local Workspace**: For the `local` authentication edition, it ensures the `DEFAULT_WORKSPACE_ID` exists and seeds a `Local Operator` user. This is crucial for fresh installs to start onboarding correctly [docker-entrypoint.sh:96-127](). The workspace is inserted with an explicit `not_started` onboarding stage to prevent it from being marked `skipped` by the `prd222_veteran_skip_backfill` migration [docker-entrypoint.sh:110-113](), [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:44](), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:44-48]().
+5. **Check Database Connection**: Verifies the database connection after migrations and seeding [docker-entrypoint.sh:130-143]().
+6. **Start Backend Application**: Finally, it executes the `uvicorn` command to start the FastAPI application [docker-entrypoint.sh:199]().
+
+Sources: [docker-compose.yml:1-16](), [docker-entrypoint.sh:1-204](), [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-65](), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-57]()
 
 ---

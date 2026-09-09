@@ -5,23 +5,22 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx](frontend/components/widgets/CodingCanvasWidget/RepoSelector.tsx)
-- [frontend/components/widgets/TerminalWidget/InteractiveTerminal.tsx](frontend/components/widgets/TerminalWidget/InteractiveTerminal.tsx)
-- [frontend/components/widgets/TerminalWidget/index.tsx](frontend/components/widgets/TerminalWidget/index.tsx)
-- [orchestrator/api/tasks.py](orchestrator/api/tasks.py)
+- [docs/workspace-execution/security-sandboxing.md](docs/workspace-execution/security-sandboxing.md)
+- [orchestrator/alembic/versions/prd140_permission_bypass_log.py](orchestrator/alembic/versions/prd140_permission_bypass_log.py)
+- [orchestrator/alembic/versions/prd140_team_lead_enabled.py](orchestrator/alembic/versions/prd140_team_lead_enabled.py)
 - [orchestrator/api/widgets/cors.py](orchestrator/api/widgets/cors.py)
-- [orchestrator/api/widgets/rate_limit.py](orchestrator/api/widgets/rate_limit.py)
-- [orchestrator/api/workspace_exec.py](orchestrator/api/workspace_exec.py)
-- [orchestrator/api/workspace_github.py](orchestrator/api/workspace_github.py)
-- [orchestrator/core/workspace_client.py](orchestrator/core/workspace_client.py)
-- [orchestrator/modules/tools/discovery/workspace_actions.py](orchestrator/modules/tools/discovery/workspace_actions.py)
-- [orchestrator/modules/tools/execution/exec_workspace.py](orchestrator/modules/tools/execution/exec_workspace.py)
-- [services/workspace-worker/Dockerfile](services/workspace-worker/Dockerfile)
-- [services/workspace-worker/entrypoint.sh](services/workspace-worker/entrypoint.sh)
-- [services/workspace-worker/executor.py](services/workspace-worker/executor.py)
-- [services/workspace-worker/main.py](services/workspace-worker/main.py)
-- [services/workspace-worker/requirements.txt](services/workspace-worker/requirements.txt)
-- [services/workspace-worker/workspace_manager.py](services/workspace-worker/workspace_manager.py)
+- [orchestrator/core/security/__init__.py](orchestrator/core/security/__init__.py)
+- [orchestrator/core/security/bypass_audit.py](orchestrator/core/security/bypass_audit.py)
+- [orchestrator/core/security/hierarchy_permissions.py](orchestrator/core/security/hierarchy_permissions.py)
+- [orchestrator/core/security/url_validator.py](orchestrator/core/security/url_validator.py)
+- [orchestrator/core/services/auto_cadence.py](orchestrator/core/services/auto_cadence.py)
+- [orchestrator/modules/tools/execution/exec_platform.py](orchestrator/modules/tools/execution/exec_platform.py)
+- [orchestrator/scripts/check_hierarchy_gate.py](orchestrator/scripts/check_hierarchy_gate.py)
+- [orchestrator/tests/security/test_hierarchy_permissions.py](orchestrator/tests/security/test_hierarchy_permissions.py)
+- [orchestrator/tests/security/test_prd172_tenant_isolation.py](orchestrator/tests/security/test_prd172_tenant_isolation.py)
+- [orchestrator/tests/test_p2w2_cors_boot_guard.py](orchestrator/tests/test_p2w2_cors_boot_guard.py)
+- [orchestrator/tests/test_prd008a_cors_coverage.py](orchestrator/tests/test_prd008a_cors_coverage.py)
+- [orchestrator/tests/test_prd186_s3_hardening.py](orchestrator/tests/test_prd186_s3_hardening.py)
 
 </details>
 
@@ -83,51 +82,104 @@ To prevent resource exhaustion, the `WorkspaceWorker` enforces limits on storage
 
 Sources: [services/workspace-worker/main.py:17-18](), [services/workspace-worker/executor.py:101-105](), [orchestrator/core/workspace_client.py:162]()
 
-## Widget Security & Rate Limiting
+## Tenant Isolation & S3 Hardening
+
+The system enforces strict tenant isolation across all data domains. Workspace A cannot read, write, or delete any data belonging to Workspace B [orchestrator/tests/security/test_prd172_tenant_isolation.py:3-6]().
+
+### S3 Vector Isolation
+For vector storage in shared S3 buckets, isolation is ensured by mandatory workspace labeling:
+*   **Stamping:** Every document chunk added to the vector store is stamped with the `workspace_id` in its metadata [orchestrator/tests/test_prd186_s3_hardening.py:108-116]().
+*   **Filtering:** Search operations automatically drop any hits that are unlabeled or belong to a different workspace [orchestrator/tests/test_prd186_s3_hardening.py:83-93]().
+*   **Scoped Deletion:** Disconnect-time deletion is strictly file-scoped rather than index-wide to prevent accidental clearing of other tenants' vectors [orchestrator/tests/test_prd186_s3_hardening.py:119-132]().
+
+Sources: [orchestrator/tests/security/test_prd172_tenant_isolation.py:3-6](), [orchestrator/tests/test_prd186_s3_hardening.py:83-132]()
+
+## Widget Security & CORS Policy
 
 The widget system allows embedding Automatos capabilities into external sites. This requires specialized security measures to prevent abuse and ensure cross-origin safety.
 
-### Rate Limiting via `WidgetRateLimitMiddleware`
+### Widget CORS Policy
+Widget endpoints (`/api/widgets/*`) and Sites endpoints (`/api/sites/*`) use a dedicated `WidgetCORSMiddleware`. This middleware is ASGI-native to avoid buffering `StreamingResponse` (SSE) data, ensuring real-time performance for chat streams [orchestrator/api/widgets/cors.py:5-8]().
+
+*   **Dynamic Domain Validation:** For `/api/widgets`, the middleware checks if the `Origin` header matches any domain explicitly named on an active public `SdkApiKey`. This lookup is cached with a TTL of 60 seconds to maintain performance [orchestrator/api/widgets/cors.py:86-119]().
+*   **Platform Fast-Path:** First-party origins (e.g., the Automatos dashboard) are pre-validated against `PLATFORM_ORIGINS` and bypass the database lookup [orchestrator/api/widgets/cors.py:112-113]().
+*   **Fail-Closed Logic:** If a database lookup for an origin fails, the middleware fails closed (denies access) to prevent security regressions during outages [orchestrator/api/widgets/cors.py:122-127]().
+
+### Widget Rate Limiting
 The widget subsystem includes rate limiting using a thread-safe in-memory sliding-window counter [orchestrator/api/widgets/rate_limit.py:46-51]().
 *   **Public Keys:** Default 30 requests per minute [orchestrator/api/widgets/rate_limit.py:37]().
 *   **Server Keys:** Default 1000 requests per minute for keys starting with `ak_srv_` [orchestrator/api/widgets/rate_limit.py:38](), [orchestrator/api/widgets/rate_limit.py:127]().
-*   **Headers:** The system injects standard headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`) into every widget response [orchestrator/api/widgets/rate_limit.py:152-156]().
-*   **Exceeding Limits:** If the limit is exceeded, it returns a `429 Too Many Requests` status with a `Retry-After` header [orchestrator/api/widgets/rate_limit.py:136-149]().
 
-### CORS Policy
-Widget endpoints (`/api/widgets/*`) use a dedicated `WidgetCORSMiddleware`. This middleware is ASGI-native to avoid buffering `StreamingResponse` (SSE) data, ensuring real-time performance for chat streams [orchestrator/api/widgets/cors.py:5-8]().
-*   **Origin Allowlist:** There is no global widget origin env var. A merchant storefront is authorised from the per-key `SdkApiKey.allowed_domains` the merchant maintains — the same list `widget_auth` enforces on the real request. Preflights carry no `Authorization` header, so the middleware asks whether the origin is named on *any* active public key [orchestrator/api/widgets/cors.py]().
-*   **First-party Origins:** Our own dashboard and marketing site come from `config.CORS_ALLOW_ORIGINS`, the same list the app-wide `CORSMiddleware` uses. `/api/sites/*` (dashboard Sites CRUD, JWT-cookie auth) resolves from this list only and never consults merchant keys — otherwise any merchant could open CORS on the admin surface by naming that origin on their own key.
-*   **Preflight Handling:** The middleware handles `OPTIONS` requests by validating the `Origin` and returning appropriate `Access-Control-Allow-*` headers [orchestrator/api/widgets/cors.py:57-77]().
-*   **Credentials:** If the origin is allowed, `access-control-allow-credentials: true` is set to support authenticated widget interactions [orchestrator/api/widgets/cors.py:88]().
+### CORS Boot Guard
+A critical security boot guard ensures that the `WidgetCORSMiddleware` is correctly configured. This guard runs during the application's `lifespan` event, ensuring that any misconfiguration (e.g., an empty `WIDGET_ORIGIN_ALLOWLIST` which is now deprecated) would abort the boot process rather than allowing the application to start in a vulnerable state [orchestrator/tests/test_p2w2_cors_boot_guard.py:74-75](). This prevents a scenario where a misconfigured CORS policy could inadvertently widen access.
 
-**Figure 2: Widget Authentication and Rate Limiting Architecture**
+### Code Canvas Confinement
+The Code Canvas feature (PRD-170) manages headless Claude Agent SDK sessions within the workspace worker [services/workspace-worker/canvas_session_service.py:4-5]().
+*   **Hard Confinement:** Every tool call requested by the SDK is routed through `evaluate_tool_confinement`. Any path outside the workspace mount is denied immediately without human intervention [services/workspace-worker/canvas_session_service.py:171-189]().
+*   **Human-in-the-Loop:** Mutating tools (like file writes or shell commands) require explicit approval via a `permission.request` event sent to the UI [services/workspace-worker/canvas_session_service.py:173-177]().
+
+**Figure 2: Widget Authentication and CORS Architecture**
 ```mermaid
 graph LR
     subgraph "External Webpage"
         "JS_SDK"["JS Widget SDK"]
     end
 
-    subgraph "Automatos Backend [orchestrator/api/widgets/]"
+    subgraph "Automatos Backend [api/widgets/]"
         "CORS_MW"["cors.py:WidgetCORSMiddleware"]
-        "RL_MW"["rate_limit.py:WidgetRateLimitMiddleware"]
-        "RL_Store"["rate_limit.py:RateLimitStore"]
+        "KeyService"["core.services.api_key_service:ApiKeyService"]
+        "WidgetChat"["chat.py:widget_chat"]
     end
 
-    "JS_SDK" -- "POST /api/widgets/chat" --> "CORS_MW"
-    "CORS_MW" -- "Next" --> "RL_MW"
-    "RL_MW" -- "check(key_id)" --> "RL_Store"
-    "RL_MW" -- "Inject Headers" --> "Response"["HTTP Response"]
+    "JS_SDK" -- "OPTIONS Preflight" --> "CORS_MW"
+    "CORS_MW" -- "Origin Lookup" --> "KeyService"
+    "KeyService" -- "allowed_domains Check" --> "CORS_MW"
+    "CORS_MW" -- "Allow-Origin Header" --> "JS_SDK"
+    "JS_SDK" -- "POST /api/widgets/chat" --> "WidgetChat"
 ```
-Sources: [orchestrator/api/widgets/cors.py:36-42](), [orchestrator/api/widgets/rate_limit.py:85-103](), [orchestrator/api/widgets/rate_limit.py:134-156]()
+Sources: [orchestrator/api/widgets/cors.py:104-131](), [orchestrator/api/widgets/cors.py:158-168](), [services/workspace-worker/canvas_session_service.py:165-189]()
 
-## GitHub Integration Security
+## URL Validation
 
-The GitHub integration allows agents to clone repositories into their workspace using Composio actions. To prevent exploitation via malicious URLs:
-*   **Host Validation:** Only `github.com`, `gitlab.com`, and `bitbucket.org` are permitted hosts for HTTPS clone URLs [orchestrator/api/workspace_github.py:37](), [orchestrator/api/workspace_github.py:91-92]().
-*   **Credential Scrubbing:** Clone URLs must not contain embedded credentials (username or password) [orchestrator/api/workspace_github.py:93-94]().
-*   **Branch Sanitization:** Branch names are validated against a strict regex (`_BRANCH_RE`) to prevent shell injection or directory traversal within the `.git` directory [orchestrator/api/workspace_github.py:40](), [orchestrator/api/workspace_github.py:105-106]().
+The system employs robust URL validation to prevent various security vulnerabilities, particularly Server-Side Request Forgery (SSRF) and open redirects. The `validate_webhook_url` function [core/security/url_validator.py:21]() is a key component, ensuring that URLs used for webhooks or other external requests adhere to strict safety criteria.
 
-Sources: [orchestrator/api/workspace_github.py:37-40](), [orchestrator/api/workspace_github.py:81-95]()
+**Figure 3: URL Validation Flow**
+```mermaid
+graph TD
+    A[Input URL] --> B{Is URL valid?}
+    B -- No --> C[Reject Request: Invalid URL]
+    B -- Yes --> D{Is URL scheme HTTP/HTTPS?}
+    D -- No --> C
+    D -- Yes --> E{Is URL a private IP or reserved range?}
+    E -- Yes --> C
+    E -- No --> F{Is URL a local hostname?}
+    F -- Yes --> C
+    F -- No --> G[Allow Request: Valid and Safe URL]
+```
+Sources: [orchestrator/core/security/url_validator.py:21]()
+
+## Hierarchy Permissions & Bypass Audit
+
+The platform implements a granular hierarchy permission system, primarily managed by the `can_actor_modify` function [core/security/hierarchy_permissions:111](). This system ensures that agents and users can only perform actions on targets (agents, tasks, playbooks, skills) within their authorized scope.
+
+### Actor Gate
+The `can_actor_modify` function includes a strict "actor gate" that fails closed on suspicious activity:
+*   **Anonymous Actors:** Requests without an `actor_agent_id` are denied without escalation [core/security/hierarchy_permissions:131-134]().
+*   **Unknown Actors:** If the `actor_agent_id` does not correspond to an existing agent, the request is denied [core/security/hierarchy_permissions:136-139]().
+*   **Cross-Workspace Actors:** An actor attempting to modify a target in a different workspace is denied outright [core/security/hierarchy_permissions:141-145]().
+*   **Inactive Actors:** Agents with an inactive status are prevented from performing actions [core/security/hierarchy_permissions:147-150]().
+
+These security failures are refused directly and do not trigger an escalation to Auto, as they represent fundamental breaches of trust [core/security/hierarchy_permissions:92-94]().
+
+### Narrowed System Bypass
+Certain system agents (e.g., "Auto", "Auto CTO", "HARNESS", "platform-admin", "platform-system") are allowed to bypass the hierarchy for critical operations. However, this bypass is strictly narrowed: an agent must have `is_system_agent=True` AND its `name` must be present in the `SYSTEM_BYPASS_ALLOWLIST` [core/security/hierarchy_permissions:152-157](), [core/security/hierarchy_permissions:68-74](). This prevents a stray `is_system_agent` flag from granting unintended privileges [orchestrator/tests/security/test_hierarchy_permissions.py:142-151]().
+
+### Permission Bypass Log
+All instances where a system agent or platform admin bypasses the standard hierarchy permissions are recorded in the `permission_bypass_log` table [alembic/versions/prd140_permission_bypass_log.py:23-36](). This provides a queryable audit trail for governance and compliance, allowing workspace owners to review bypass events [core/security/bypass_audit.py:33-66](). The logging mechanism is fail-soft; if the audit insert fails, the operation still proceeds, but a warning is logged to indicate degraded audit coverage [core/security/bypass_audit.py:67-78]().
+
+### Agent Impersonation Prevention
+When executing platform actions, the system explicitly strips any `_agent_id` or `_agent_name` parameters that an LLM or tool call might try to smuggle in. The true `agent_id` is server-minted from the trusted runtime context. This prevents an agent from impersonating a system agent and bypassing hierarchy permission checks [modules/tools/execution/exec_platform.py:58-65]().
+
+Sources: [core/security/hierarchy_permissions.py:111](), [core/security/hierarchy_permissions.py:131-150](), [core/security/hierarchy_permissions.py:152-157](), [core/security/hierarchy_permissions.py:68-74](), [orchestrator/tests/security/test_hierarchy_permissions.py:142-151](), [alembic/versions/prd140_permission_bypass_log.py:23-36](), [core/security/bypass_audit.py:33-66](), [core/security/bypass_audit.py:67-78](), [modules/tools/execution/exec_platform.py:58-65]()
 
 ---

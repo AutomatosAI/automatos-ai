@@ -5,23 +5,24 @@
 
 The following files were used as context for generating this wiki page:
 
-- [.gitignore](.gitignore)
-- [docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md](docs/PRDS/126-BUSINESS-KNOWLEDGE-GRAPH.md)
-- [graphify-out/snapshots/bucket-1-pre-drop.sql](graphify-out/snapshots/bucket-1-pre-drop.sql)
-- [orchestrator/.env.example](orchestrator/.env.example)
-- [orchestrator/alembic/versions/prd135_drop_bucket_1.py](orchestrator/alembic/versions/prd135_drop_bucket_1.py)
-- [orchestrator/api/composio.py](orchestrator/api/composio.py)
-- [orchestrator/api/tools.py](orchestrator/api/tools.py)
-- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
-- [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
-- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
+- [frontend/components/settings/DynamicCredentialForm.tsx](frontend/components/settings/DynamicCredentialForm.tsx)
+- [frontend/lib/api/credentials.ts](frontend/lib/api/credentials.ts)
+- [orchestrator/api/api_keys.py](orchestrator/api/api_keys.py)
+- [orchestrator/api/credentials.py](orchestrator/api/credentials.py)
+- [orchestrator/api/widgets/auth.py](orchestrator/api/widgets/auth.py)
+- [orchestrator/api/widgets/config.py](orchestrator/api/widgets/config.py)
+- [orchestrator/api/widgets/session.py](orchestrator/api/widgets/session.py)
+- [orchestrator/core/credentials/integration_bridges/__init__.py](orchestrator/core/credentials/integration_bridges/__init__.py)
+- [orchestrator/core/credentials/integration_bridges/base.py](orchestrator/core/credentials/integration_bridges/base.py)
+- [orchestrator/core/credentials/integration_bridges/shopify.py](orchestrator/core/credentials/integration_bridges/shopify.py)
 - [orchestrator/core/credentials/service.py](orchestrator/core/credentials/service.py)
-- [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
-- [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
-- [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
+- [orchestrator/core/database/migrations/043_team_based_document_scoping.sql](orchestrator/core/database/migrations/043_team_based_document_scoping.sql)
 - [orchestrator/core/models/credentials.py](orchestrator/core/models/credentials.py)
-- [orchestrator/core/services/plugin_cache.py](orchestrator/core/services/plugin_cache.py)
-- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
+- [orchestrator/core/models/sdk_api_keys.py](orchestrator/core/models/sdk_api_keys.py)
+- [orchestrator/core/services/api_key_service.py](orchestrator/core/services/api_key_service.py)
+- [orchestrator/tests/test_p2w2_credentials_null_workspace.py](orchestrator/tests/test_p2w2_credentials_null_workspace.py)
+- [orchestrator/tests/test_p2w2_widget_fail_closed.py](orchestrator/tests/test_p2w2_widget_fail_closed.py)
+- [orchestrator/tests/test_prd008a_widget_config_resolver.py](orchestrator/tests/test_prd008a_widget_config_resolver.py)
 
 </details>
 
@@ -29,204 +30,134 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the credential management system in Automatos AI, which provides secure storage, retrieval, and lifecycle management for sensitive credentials (LLM API keys, database passwords, OAuth tokens, etc.). The system is inspired by n8n's credential architecture and provides encryption, testing, audit logging, and multi-tenant isolation via workspace scoping. It enables both system-wide keys and "Bring Your Own Key" (BYOK) overrides for specific users or agents.
+The Credentials Management system provides a secure, multi-tenant framework for handling sensitive secrets such as API keys, database credentials, and OAuth tokens. Inspired by n8n's architecture, it facilitates encrypted storage, lifecycle management, and "Bring Your Own Key" (BYOK) overrides. This system is critical for agent execution, tool integrations (via Composio), and secure SDK access.
 
-**Sources:** [orchestrator/core/credentials/service.py:1-15](), [orchestrator/core/models/credentials.py:1-20]()
+**Sources:** [orchestrator/core/credentials/service.py:1-7](), [orchestrator/core/models/credentials.py:1-7]()
 
 ---
 
 ## System Architecture
 
-The credentials management system consists of four primary components that bridge the gap between user-provided secrets and secure agent execution.
+The system is partitioned into two primary domains: **Platform Credentials** (managed via the `CredentialStore`) for external integrations like Shopify or OpenAI, and **SDK API Keys** (managed via `ApiKeyService`) for authenticating external requests to the Automatos platform.
 
 ### Credential Entity Relationship Diagram
 
 ```mermaid
-graph TB
+graph TD
     subgraph "API & Service Layer"
         Store["CredentialStore<br/>(service.py)"]
-        Tester["CredentialTester<br/>(tester.py)"]
+        Bridge["IntegrationBridge<br/>(integration_bridges/__init__.py)"]
         Encryption["EncryptionService<br/>(encryption.py)"]
+        KeyService["ApiKeyService<br/>(api_key_service.py)"]
     end
     
     subgraph "Code Entity Space (SQLAlchemy Models)"
         TypeModel["CredentialType<br/>(models/credentials.py)"]
         CredModel["Credential<br/>(models/credentials.py)"]
-        AuditModel["CredentialAuditLog<br/>(models/credentials.py)"]
+        SDKModel["SdkApiKey<br/>(models/sdk_api_keys.py)"]
+        AuditLogModel["CredentialAuditLog<br/>(models/credentials.py)"]
     end
     
-    subgraph "Storage & External"
-        DB[("PostgreSQL<br/>'credentials' table")]
-        Targets["External APIs<br/>(OpenAI, Anthropic, DBs)"]
+    subgraph "External Integrations"
+        Composio["Composio Entity/Connection"]
+        ExternalAPI["External Provider APIs"]
     end
     
     Store --> TypeModel
     Store --> CredModel
     Store --> Encryption
-    Store --> AuditModel
-    
-    Tester --> Targets
-    Store --> Tester
-    CredModel --> DB
+    Store --> Bridge
+    Store --> AuditLogModel
+    Bridge --> Composio
+    KeyService --> SDKModel
     
     style Store stroke-width:2px
-    style CredModel stroke-width:2px
+    style KeyService stroke-width:2px
+    style Bridge stroke-width:2px
 ```
 
-**Component Responsibilities:**
-
-| Component | Purpose | Key Classes |
-|-----------|---------|-------------|
-| **CredentialStore** | CRUD operations, lifecycle management, and workspace isolation. | [orchestrator/core/credentials/service.py:42-105]() |
-| **CredentialType** | Schema definitions for credential categories (AI, DB, etc.). | [orchestrator/core/models/credentials.py:25-58]() |
-| **Credential** | Encrypted credential storage with workspace mapping. | [orchestrator/core/models/credentials.py:60-103]() |
-| **EncryptionService** | AES-256 encryption via Fernet. | [orchestrator/core/credentials/encryption.py:1-26]() |
-| **CredentialTester** | Async validation via actual provider test calls. | [orchestrator/core/credentials/tester.py:55-126]() |
-| **CredentialAuditLog** | Security audit trail for all access and modifications. | [orchestrator/core/models/credentials.py:105-131]() |
-
-**Sources:** [orchestrator/core/credentials/service.py:42-56](), [orchestrator/core/models/credentials.py:25-131]()
+**Sources:** [orchestrator/core/credentials/service.py:42-85](), [orchestrator/core/credentials/integration_bridges/shopify.py:70-109](), [orchestrator/core/services/api_key_service.py:42-45](), [orchestrator/core/models/credentials.py:105-131]()
 
 ---
 
-## Credential Types
+## SDK API Keys & Widget Auth
 
-Credential types define schemas for different categories of credentials. Each type specifies required fields, UI presentation (icons/logos), and test logic. The system supports a wide range of types via a seeding mechanism.
+Automatos provides a specialized API key system for SDKs and web widgets. These keys are distinct from external service credentials and are used to authorize browser-based chat widgets.
 
-### Type Schema Structure
+### Key Types and Security
+1.  **Public Keys (`ak_pub_`)**: Intended for browser use. These are strictly origin-locked via `allowed_domains` [orchestrator/core/models/sdk_api_keys.py:61]().
+2.  **Server Keys (`ak_srv_`)**: Used for backend-to-backend communication. These can be exchanged for short-lived JWT session tokens [orchestrator/api/widgets/session.py:99-104]().
 
-The system seeds several system-defined types including `openai_api`, `anthropic_api`, and `postgres_credentials`.
+### Token Exchange Flow
+For enhanced security, server-side applications exchange a long-lived API key for a short-lived (default 1 hour) JWT using the `exchange_session_token` endpoint [orchestrator/api/widgets/session.py:78-82](). This JWT is then passed to the frontend widget, preventing the exposure of the raw API key in the browser.
 
-**Credential Type Attributes:**
+| Feature | Implementation | Source |
+| :--- | :--- | :--- |
+| **Hashing** | Keys stored as SHA-256 digests; plaintext shown only once. | [orchestrator/core/services/api_key_service.py:23-25]() |
+| **Origin Check** | Public keys fail closed if the request origin is missing. | [orchestrator/api/widgets/auth.py:182-187]() |
+| **Team Scoping** | Keys can be locked to specific teams for document access. | [orchestrator/core/models/sdk_api_keys.py:57-58]() |
+| **Agent Lock** | `default_agent_id` forces the widget to use a specific agent. | [orchestrator/core/models/sdk_api_keys.py:54-55]()
 
-| Attribute | Description | Code Reference |
-|-----------|-------------|----------------|
-| `name` | Unique string ID (e.g., `openai_api`) | [orchestrator/core/models/credentials.py:34-34]() |
-| `schema_definition` | JSON array of field definitions | [orchestrator/core/models/credentials.py:43-43]() |
-| `test_endpoint` | Configuration for connection testing | [orchestrator/core/models/credentials.py:47-47]() |
-| `category` | Classification (ai, database, infrastructure) | [orchestrator/core/models/credentials.py:36-36]() |
-
-**Sources:** [orchestrator/core/models/credentials.py:25-58](), [orchestrator/core/database/credential_types_seed.json:1-131]()
+**Sources:** [orchestrator/core/services/api_key_service.py:48-105](), [orchestrator/api/widgets/auth.py:100-166](), [orchestrator/api/widgets/session.py:127-150]()
 
 ---
 
-## Credential Storage & Multi-Tenancy
+## Integration Bridges
 
-Credentials are workspace-scoped. Every `Credential` record must have a `workspace_id` to ensure data isolation and protection against Broken Object Level Authorization (BOLA).
+The `IntegrationBridge` system acts as glue between Automatos credentials and execution platforms like Composio. When a user saves a credential, the system dispatches it to a bridge that translates the data into a functional connection.
 
-### Credential Data Flow
+### Shopify Bridge Case Study
+The Shopify bridge ([orchestrator/core/credentials/integration_bridges/shopify.py]()) handles three credential paths:
+*   **Custom App (shpat_*)**: Direct Admin API token mapping to Composio `API_KEY` auth [orchestrator/core/credentials/integration_bridges/shopify.py:160-165]().
+*   **Partner App**: Uses Client ID and Secret to initiate an OAuth2 "install bounce" [orchestrator/core/credentials/integration_bridges/shopify.py:124-129]().
+*   **Legacy Private App**: Deprecated/Unsupported [orchestrator/core/credentials/integration_bridges/shopify.py:11-12]().
+
+**Sources:** [orchestrator/core/credentials/service.py:61-85](), [orchestrator/core/credentials/integration_bridges/__init__.py:41-74]()
+
+---
+
+## Credential Storage & Encryption
+
+All platform credentials (non-SDK keys) are encrypted using the `EncryptionService` before being persisted to the `credentials` table.
+
+### Data Flow for Credential Creation
 
 ```mermaid
-graph LR
-    subgraph "Natural Language Space"
-        User["User adds OpenAI Key"]
-        Workspace["Workspace: Marketing-Prod"]
-    end
+sequenceDiagram
+    participant U as User/UI
+    participant API as Credential API
+    participant Store as CredentialStore
+    participant Enc as EncryptionService
+    participant Bridge as IntegrationBridge
+    participant DB as PostgreSQL
 
-    subgraph "Code Entity Space"
-        Input["CredentialCreate Object<br/>(models/credentials.py)"]
-        Logic["CredentialStore.create_credential()<br/>(service.py)"]
-        Model["Credential Model Instance<br/>(models/credentials.py)"]
-        Enc["EncryptionService.encrypt_dict()<br/>(encryption.py)"]
-    end
-
-    User --> Input
-    Workspace --> Input
-    Input --> Logic
-    Logic --> Enc
-    Enc --> Model
-    Model --> DB[("DB: credentials table")]
-
-    style Logic stroke-width:2px
-    style Model stroke-width:2px
+    U->>API: POST /api/credentials/ (Plaintext Data)
+    API->>Store: create_credential()
+    Store->>Enc: encrypt_dict(data)
+    Enc-->>Store: Ciphertext
+    Store->>DB: Insert Credential (Encrypted)
+    Store->>Bridge: dispatch_integration_bridge()
+    Bridge->>DB: add_connection (Composio Metadata)
+    Store-->>API: CredentialResponse (Masked)
+    API-->>U: Success
 ```
 
-**Database Schema Constraints:**
-- **Workspace Isolation:** `workspace_id` is a required UUID foreign key to the `workspaces` table [orchestrator/core/models/credentials.py:69-69]().
-- **Encryption:** Values are stored in the `encrypted_data` text column after encryption [orchestrator/core/models/credentials.py:74-74]().
-- **Environment:** Supports `production`, `staging`, or `dev` tags for environment-specific keys [orchestrator/core/models/credentials.py:76-76]().
+**Key Security Controls:**
+*   **BOLA Protection**: The `_check_credential_workspace` helper ensures that users can only access credentials belonging to their active `workspace_id` [orchestrator/api/credentials.py:66-84]().
+*   **Encryption**: Uses AES-256 via the `cryptography` library. Decryption only occurs in memory during execution or bridge dispatch [orchestrator/core/credentials/service.py:175-179]().
+*   **Audit Logging**: Every create, update, or access event is logged in `credential_audit_logs` [orchestrator/core/models/credentials.py:105-131]().
 
-**Sources:** [orchestrator/core/models/credentials.py:60-103](), [orchestrator/core/credentials/service.py:101-185]()
-
----
-
-## Encryption System
-
-The system uses the `cryptography` library's Fernet implementation for AES-256-CBC encryption to protect sensitive data at rest.
-
-### Key Management
-The encryption key is typically loaded from environment variables or a local `.credential_key` file. The system ignores these keys in version control to prevent leaks.
-
-**Encryption Implementation:**
-- `encrypt_dict`: Serializes a dictionary to JSON and then encrypts the string using the `encryption_service` [orchestrator/core/credentials/service.py:147-147]().
-- `decrypt_dict`: Decrypts the ciphertext and deserializes the JSON back into a Python dictionary [orchestrator/core/credentials/service.py:433-433]().
-
-**Sources:** [orchestrator/core/credentials/encryption.py:1-26](), [orchestrator/core/credentials/service.py:145-150](), [.gitignore:110-114]()
+**Sources:** [orchestrator/core/credentials/service.py:128-196](), [orchestrator/api/credentials.py:179-192](), [orchestrator/core/models/credentials.py:60-103]()
 
 ---
 
-## Credential Resolution (BYOK Overrides)
+## Frontend Integration
 
-The system determines which credentials to use for a given operation through a prioritized resolution logic. This is critical for services like `LLMManager` and platform integrations.
+The `DynamicCredentialForm` component ([frontend/components/settings/DynamicCredentialForm.tsx]()) dynamically renders input fields based on the `schema_definition` of a `CredentialType`.
 
-### Resolution Priority
-1. **Agent/Workspace Override:** Specific credentials assigned to an agent or workspace in the database.
-2. **Credential Store:** Resolving by `credential_id` stored in service configurations.
-3. **Environment Variables:** System-level fallbacks defined in `.env`.
+### Field Overrides
+To improve UX, the frontend applies overrides to technical schema names (e.g., changing "accessToken" to "Partner App Client ID") for specific integrations like Shopify [frontend/components/settings/DynamicCredentialForm.tsx:47-66]().
 
-**Special Handling: LinkedIn Image Workaround**
-Due to limitations in the Composio SDK for LinkedIn image uploads, the platform uses a direct bypass that resolves credentials from the `CredentialStore`. It specifically looks for a credential of type `linkedInCommunityManagementOAuth2Api` [orchestrator/core/composio/linkedin_image_workaround.py:61-110]().
-
-**Sources:** [orchestrator/core/composio/linkedin_image_workaround.py:43-110](), [orchestrator/core/credentials/service.py:191-205]()
-
----
-
-## Credential Testing
-
-The `CredentialTester` class allows users to verify their configurations (e.g., database connections) before saving.
-
-### Supported Providers & Methods
-The `test_credential` method routes requests based on the `credential_type` to specific test methods [orchestrator/core/credentials/tester.py:69-126]().
-
-| Type | Test Logic |
-|------|------------|
-| `openai_api` | Calls OpenAI `/models` endpoint to verify key validity [orchestrator/core/credentials/tester.py:129-161](). |
-| `anthropic_api` | Calls Anthropic `/v1/messages` endpoint [orchestrator/core/credentials/tester.py:163-173](). |
-| `postgres` | Attempts an `asyncpg` connection [orchestrator/core/credentials/tester.py:75-77](). |
-| `linkedin` | Tests LinkedIn Community Management API [orchestrator/core/credentials/tester.py:109-109](). |
-
-### Security: SSRF Protection
-The tester includes validation to prevent Server-Side Request Forgery (SSRF) by blocking access to private/reserved IP ranges during connection tests [orchestrator/core/credentials/tester.py:27-53]().
-
-**Sources:** [orchestrator/core/credentials/tester.py:27-173]()
-
----
-
-## Audit Logging
-
-Every lifecycle event (creation, update, deletion, access, and testing) generates a `CredentialAuditLog` entry.
-
-**Audit Data Points:**
-- **Action:** Tracks operation type: `created`, `updated`, `deleted`, `accessed`, `tested` [orchestrator/core/models/credentials.py:115-115]().
-- **Actor:** Records the `user_id` and `ip_address` [orchestrator/core/models/credentials.py:116-117]().
-- **Context:** Stores metadata about the operation (success/failure) [orchestrator/core/models/credentials.py:121-121]().
-
-**Sources:** [orchestrator/core/models/credentials.py:105-131](), [orchestrator/core/credentials/service.py:172-179]()
-
----
-
-## Configuration Reference
-
-### Environment Variables
-Credential management relies on the following variables in the `.env` file for default settings:
-
-| Variable | Purpose |
-|----------|---------|
-| `OPENAI_API_KEY` | Default system-wide OpenAI key [orchestrator/.env.example:19-19](). |
-| `ANTHROPIC_API_KEY` | Default system-wide Anthropic key [orchestrator/.env.example:20-20](). |
-| `POSTGRES_PASSWORD` | Default DB password if not using credential store [orchestrator/.env.example:6-6](). |
-| `REDIS_PASSWORD` | Default Redis password [orchestrator/.env.example:11-11](). |
-| `API_KEY` | System-level API authentication [orchestrator/.env.example:16-16](). |
-
-**Sources:** [orchestrator/.env.example:1-21]()
+**Sources:** [frontend/components/settings/DynamicCredentialForm.tsx:102-158](), [orchestrator/core/models/credentials.py:147-168]()
 
 ---

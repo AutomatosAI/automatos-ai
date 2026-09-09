@@ -5,24 +5,20 @@
 
 The following files were used as context for generating this wiki page:
 
-- [orchestrator/api/composio.py](orchestrator/api/composio.py)
-- [orchestrator/api/tools.py](orchestrator/api/tools.py)
-- [orchestrator/consumers/chatbot/intent_classifier.py](orchestrator/consumers/chatbot/intent_classifier.py)
-- [orchestrator/consumers/chatbot/personality.py](orchestrator/consumers/chatbot/personality.py)
-- [orchestrator/consumers/chatbot/smart_tool_router.py](orchestrator/consumers/chatbot/smart_tool_router.py)
 - [orchestrator/consumers/chatbot/tool_router.py](orchestrator/consumers/chatbot/tool_router.py)
-- [orchestrator/core/composio/client.py](orchestrator/core/composio/client.py)
-- [orchestrator/core/composio/linkedin_image_workaround.py](orchestrator/core/composio/linkedin_image_workaround.py)
-- [orchestrator/core/composio/tool_executor.py](orchestrator/core/composio/tool_executor.py)
-- [orchestrator/core/credentials/tester.py](orchestrator/core/credentials/tester.py)
-- [orchestrator/core/credentials/types.py](orchestrator/core/credentials/types.py)
-- [orchestrator/core/database/credential_types_seed.json](orchestrator/core/database/credential_types_seed.json)
-- [orchestrator/modules/tools/execution/exec_platform.py](orchestrator/modules/tools/execution/exec_platform.py)
+- [orchestrator/modules/context/sections/platform_actions.py](orchestrator/modules/context/sections/platform_actions.py)
+- [orchestrator/modules/context/sections/tools.py](orchestrator/modules/context/sections/tools.py)
+- [orchestrator/modules/tools/discovery/action_registry.py](orchestrator/modules/tools/discovery/action_registry.py)
+- [orchestrator/modules/tools/discovery/action_semantic_index.py](orchestrator/modules/tools/discovery/action_semantic_index.py)
 - [orchestrator/modules/tools/execution/unified_executor.py](orchestrator/modules/tools/execution/unified_executor.py)
 - [orchestrator/modules/tools/registry/tool_registry.py](orchestrator/modules/tools/registry/tool_registry.py)
 - [orchestrator/modules/tools/services/composio_hint_service.py](orchestrator/modules/tools/services/composio_hint_service.py)
 - [orchestrator/modules/tools/services/composio_tool_service.py](orchestrator/modules/tools/services/composio_tool_service.py)
-- [orchestrator/services/metadata_sync_service.py](orchestrator/services/metadata_sync_service.py)
+- [orchestrator/modules/tools/tool_router.py](orchestrator/modules/tools/tool_router.py)
+- [orchestrator/tests/test_action_registry_filtered.py](orchestrator/tests/test_action_registry_filtered.py)
+- [orchestrator/tests/test_action_semantic_index.py](orchestrator/tests/test_action_semantic_index.py)
+- [orchestrator/tests/test_platform_actions_section.py](orchestrator/tests/test_platform_actions_section.py)
+- [orchestrator/tests/test_tool_router_semantic.py](orchestrator/tests/test_tool_router_semantic.py)
 
 </details>
 
@@ -30,217 +26,135 @@ The following files were used as context for generating this wiki page:
 
 ## Purpose and Scope
 
-This document describes the tools and integrations system in Automatos AI, which enables agents to interact with external services via the Composio platform and internal platform capabilities. The system provides access to 880+ applications with 12,000+ actions through a unified interface, including OAuth management, metadata caching, action discovery, and execution.
+This document describes the tools and integrations system in Automatos AI, which enables agents to interact with external services via the Composio platform and internal platform capabilities. The system provides access to 880+ applications and 12,000+ actions through a unified execution and routing architecture, including OAuth management, metadata caching, semantic discovery, and permission validation.
 
-For information about how agents use tools during chat conversations, see [Chat Interface](#9). For workspace-specific tools like file operations and shell commands, see [Workspace Execution](#21). For knowledge retrieval tools, see [Knowledge Base & RAG](#7).
+For details on how tools integrate with agent runtimes, see [Agents](#5). For chat interaction streaming and tool loops, see [Chat Interface](#9). For workspace sandboxed operations, see [Workspace Execution](#21).
 
 ---
 
 ## System Architecture
 
-The tools system consists of five main layers: (1) **Tool Registry** for centralized tool catalogs, (2) **Tool Discovery** for resolving available actions, (3) **Metadata Sync** for caching Composio apps/actions locally, (4) **Connection Management** for OAuth flows, and (5) **Tool Execution** for routing and validation.
+The tools system consists of five main layers: (1) **Tool Registry** for centralized catalogs [orchestrator/modules/tools/registry/tool_registry.py:158-181](), (2) **Tool Discovery & Resolution** for semantic ranking and capability filtering [orchestrator/modules/tools/discovery/action_semantic_index.py:113-124](), (3) **Metadata Sync** for caching remote schemas locally [orchestrator/modules/tools/services/composio_tool_service.py:63-70](), (4) **Permission & Validation System** for safety guards [orchestrator/modules/tools/tool_router.py:36-46](), and (5) **Tool Execution** via `UnifiedToolExecutor` [orchestrator/modules/tools/execution/unified_executor.py:58-64]().
 
 Title: Tool System Architecture (Natural Language to Code Entity Space)
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        UI["Tools Marketplace UI<br/>(Frontend)"]
-        ChatUI["Chat Interface<br/>(Next.js)"]
+    subgraph "Natural Language Space"
+        UserQuery["User Natural Language Query<br/>'Send a slack message to team'"]
+        Intent["Intent Classification<br/>AutoBrain / UniversalRouter"]
     end
-    
-    subgraph "API Layer"
-        ToolsAPI["/api/tools/*<br/>orchestrator/api/tools.py"]
-        ComposioAPI_Route["/api/composio/*<br/>orchestrator/api/composio.py"]
+
+    subgraph "Code Entity Space"
+        ToolsSec["ToolsSection<br/>modules/context/sections/tools.py"]
+        HintServ["ComposioHintService<br/>modules/tools/services/composio_hint_service.py"]
+        Registry["ToolRegistry<br/>modules/tools/registry/tool_registry.py"]
+        Router["ToolRouter<br/>modules/tools/tool_router.py"]
+        Executor["UnifiedToolExecutor<br/>modules/tools/execution/unified_executor.py"]
+        ComposioExec["ComposioToolExecutor<br/>core/composio/tool_executor.py"]
     end
-    
-    subgraph "Registry Layer"
-        ToolRegistry["ToolRegistry<br/>modules/tools/registry/tool_registry.py"]
-    end
-    
-    subgraph "Discovery & Routing"
-        SmartToolRouter["SmartToolRouter<br/>consumers/chatbot/smart_tool_router.py"]
-        ComposioHintService["ComposioHintService<br/>modules/tools/services/composio_hint_service.py"]
-        ComposioToolService["ComposioToolService<br/>modules/tools/services/composio_tool_service.py"]
-    end
-    
-    subgraph "Execution Layer"
-        UnifiedExecutor["UnifiedToolExecutor<br/>modules/tools/execution/unified_executor.py"]
-        ComposioToolExecutor["ComposioToolExecutor<br/>core/composio/tool_executor.py"]
-        ActionExecutor["ActionExecutor<br/>modules/agents/services/agent_action_executor.py"]
-    end
-    
-    subgraph "Integration Layer"
-        ComposioClient["ComposioClient<br/>core/composio/client.py"]
-        LinkedInWorkaround["LinkedInWorkaround<br/>core/composio/linkedin_image_workaround.py"]
-    end
-    
-    subgraph "Storage Layer"
-        MetadataSync["MetadataSyncService<br/>services/metadata_sync_service.py"]
-        ComposioAppCache[("ComposioAppCache<br/>(SQLAlchemy Model)")]
-        ComposioActionCache[("ComposioActionCache<br/>(SQLAlchemy Model)")]
-        AgentAppAssignment[("AgentAppAssignment<br/>(SQLAlchemy Model)")]
-    end
-    
-    UI --> ToolsAPI
-    ChatUI --> SmartToolRouter
-    
-    ToolsAPI --> MetadataSync
-    ToolsAPI --> ComposioClient
-    
-    SmartToolRouter --> UnifiedExecutor
-    UnifiedExecutor --> ToolRegistry
-    
-    UnifiedExecutor --> ComposioToolExecutor
-    UnifiedExecutor --> ActionExecutor
-    
-    ComposioToolExecutor --> ComposioClient
-    ComposioToolExecutor --> LinkedInWorkaround
-    MetadataSync --> ComposioClient
-    MetadataSync --> ComposioAppCache
-    MetadataSync --> ComposioActionCache
+
+    UserQuery --> Intent
+    Intent --> ToolsSec
+    ToolsSec --> HintServ
+    ToolsSec --> Registry
+    Registry --> Router
+    Router --> Executor
+    Executor --> ComposioExec
 ```
 
-**Key Components**:
-
-| Component | Purpose | Location |
-|-----------|---------|----------|
-| `ToolRegistry` | Centralized catalog of platform tools | [orchestrator/modules/tools/registry/tool_registry.py:157-181]() |
-| `UnifiedToolExecutor` | Single entry point for tool execution routing | [orchestrator/modules/tools/execution/unified_executor.py:69-171]() |
-| `ComposioClient` | Wrapper around Composio SDK for entity/auth management | [orchestrator/core/composio/client.py:54-126]() |
-| `MetadataSyncService` | Bulk syncs Composio metadata to local cache tables | [orchestrator/services/metadata_sync_service.py:37-54]() |
-| `ComposioToolService` | Resolves Composio actions into OpenAI function schemas | [orchestrator/modules/tools/services/composio_tool_service.py:63-73]() |
-| `ComposioHintService` | Generates system message hints for LLM action discovery | [orchestrator/modules/tools/services/composio_hint_service.py:89-109]() |
-| `SmartToolRouter` | Intent-based filtering of available tools for LLM context | [orchestrator/consumers/chatbot/smart_tool_router.py:39-56]() |
-
-**Sources**: [orchestrator/modules/tools/execution/unified_executor.py:1-44](), [orchestrator/core/composio/client.py:1-51](), [orchestrator/modules/tools/registry/tool_registry.py:1-35](), [orchestrator/modules/tools/services/composio_tool_service.py:1-22](), [orchestrator/modules/tools/services/composio_hint_service.py:1-21]()
+Sources: [orchestrator/modules/tools/registry/tool_registry.py:158-181](), [orchestrator/modules/tools/tool_router.py:29-46](), [orchestrator/modules/tools/execution/unified_executor.py:58-64](), [orchestrator/modules/context/sections/tools.py:41-55]()
 
 ---
 
-## Tool Registry & Models
+## 8.1 Composio Integration
 
-The `ToolRegistry` provides a unified query interface for all platform tools. Tools are defined as `ToolSpec` objects which can be exported to OpenAI function-calling formats.
+The Composio integration wraps the external SDK, managing entity mappings (`workspace_id` to entity IDs), OAuth flows, and metadata synchronization. It populates local tables like `ComposioAppCache` and `ComposioActionCache` to ensure fast lookups and handles special environment workarounds, such as LinkedIn media image uploads.
 
-Title: Tool Specification Entities
-```mermaid
-classDiagram
-    class ToolSpec {
-        +string name
-        +ToolCategory category
-        +string description
-        +string executor_class
-        +string executor_method
-        +List~ToolParameter~ parameters
-        +SecurityLevel security_level
-        +to_openai_format() Dict
-    }
-    
-    class ToolParameter {
-        +string name
-        +string type
-        +string description
-        +bool required
-        +to_openai_format() Dict
-    }
-    
-    class ToolCategory {
-        <<enumeration>>
-        RESEARCH
-        FILE_OPERATIONS
-        SHELL_COMMANDS
-        DATABASE_TOOLS
-        COMMUNICATION
-    }
-    
-    ToolSpec --> ToolParameter
-    ToolSpec --> ToolCategory
-    ToolRegistry ..> ToolSpec : manages
-```
+For deep technical details, see [Composio Integration](#8.1).
 
-**Tool Categories** (defined in `ToolCategory` enum):
-- **RESEARCH**: RAG, semantic search, CodeGraph [orchestrator/modules/tools/registry/tool_registry.py:40-40]().
-- **FILE_OPERATIONS**: Read, write, delete files [orchestrator/modules/tools/registry/tool_registry.py:41-41]().
-- **SHELL_COMMANDS**: Execute shell commands [orchestrator/modules/tools/registry/tool_registry.py:42-42]().
-- **COMMUNICATION**: Slack, Email, etc. [orchestrator/modules/tools/registry/tool_registry.py:47-47]().
-
-**Sources**: [orchestrator/modules/tools/registry/tool_registry.py:38-154](), [orchestrator/modules/tools/registry/tool_registry.py:157-181]()
+Sources: [orchestrator/modules/tools/services/composio_tool_service.py:63-70]()
 
 ---
 
-## Composio Integration
+## 8.2 Tool Discovery & Resolution
 
-Composio provides OAuth management and tool execution for 880+ external applications. The `ComposioClient` manages entities (mapped to `workspace_id`) and handles the "Hosted Auth" flow.
+Tool discovery uses `ToolRegistry`, `ComposioCache`, `AgentAppAssignment`, and `SkillLoader` to resolve tools through tiered filters: capability-based matching, token-filtered scoring, and top-N fallbacks.
 
-### Metadata Sync & Cache
-To avoid excessive API calls to Composio, the `MetadataSyncService` populates local cache tables:
-- `ComposioAppCache`: Stores app metadata (Slack, GitHub, etc.) [orchestrator/api/tools.py:139-142]()
-- `ComposioActionCache`: Stores individual action schemas [orchestrator/api/tools.py:26-26]()
-- `ComposioStatsCache`: Global counts for marketplace display [orchestrator/api/tools.py:133-135]()
+For deep technical details, see [Tool Discovery & Resolution](#8.2).
 
-### Connection Management
-The `EntityManager` (via `ComposioClient`) maps internal `workspace_id` to Composio entities [orchestrator/core/composio/client.py:137-156](). Connections are initiated via `initiate_connection` which returns a hosted OAuth URL [orchestrator/core/composio/client.py:69-79]().
-
-### LinkedIn Workaround
-Due to known issues with Composio's LinkedIn image upload (May 2026), a direct implementation using LinkedIn's Community Management API is used for media posts [orchestrator/core/composio/linkedin_image_workaround.py:4-13]().
-
-**Sources**: [orchestrator/core/composio/client.py:54-126](), [orchestrator/services/metadata_sync_service.py:37-150](), [orchestrator/api/tools.py:94-104](), [orchestrator/core/composio/linkedin_image_workaround.py:1-24]()
+Sources: [orchestrator/modules/tools/registry/tool_registry.py:158-181](), [orchestrator/modules/tools/discovery/action_semantic_index.py:113-124]()
 
 ---
 
-## Tool Discovery & Hinting
+## 8.3 Tool Router & Execution
 
-Automatos uses a 3-tier strategy to resolve tools for an agent's current task, primarily managed by `ComposioHintService` and `ComposioToolService`.
+`UnifiedToolExecutor` provides the single execution entry point, routing requests across specialized executor modules (`exec_platform`, `exec_research`, `exec_workspace`, `exec_composio`, `exec_multimodal`, and `exec_shell`), capturing outcomes, and formatting results.
 
-1. **Capability-based (Tier 1)**: Matches intents against `ComposioActionMetadata` and taxonomy [orchestrator/modules/tools/services/composio_hint_service.py:13-13]().
-2. **Token-filtered (Tier 2)**: Uses `ILIKE` matching on action names and descriptions with a mandatory capability gate [orchestrator/modules/tools/services/composio_hint_service.py:14-14]().
-3. **Top-N Fallback (Tier 3)**: Provides safe, high-utility actions for connected apps when no specific match is found [orchestrator/modules/tools/services/composio_hint_service.py:15-15]().
+For deep technical details, see [Tool Router & Execution](#8.3).
 
-The `SmartToolRouter` also performs semantic ranking (PRD-64) using embeddings to match tools to user intent [orchestrator/consumers/chatbot/smart_tool_router.py:49-51]().
-
-**Sources**: [orchestrator/modules/tools/services/composio_hint_service.py:12-21](), [orchestrator/modules/tools/services/composio_tool_service.py:108-113](), [orchestrator/consumers/chatbot/smart_tool_router.py:39-112]()
+Sources: [orchestrator/modules/tools/execution/unified_executor.py:58-146]()
 
 ---
 
-## Tool Execution & Routing
+## 8.4 Connecting Apps
 
-The `UnifiedToolExecutor` serves as the central dispatcher for all tool calls.
+The `ToolsDashboard` and `my-tools` workspace views manage third-party integrations, initiating OAuth popup flows or instant NO_AUTH activation depending on the application requirements.
 
-### Execution Routing Logic
-The executor maps tool names to specific implementation modules:
-- **Research Tools**: Routed to `_execute_platform_tool` (e.g., `search_knowledge`) [orchestrator/modules/tools/execution/unified_executor.py:109-113]().
-- **File Ops**: Routed to `_execute_file_op` (e.g., `read_file`, `write_file`) [orchestrator/modules/tools/execution/unified_executor.py:126-130]().
-- **Shell Commands**: Routed to `_execute_shell` [orchestrator/modules/tools/execution/unified_executor.py:133-133]().
-- **Composio Actions**: Routed to `ComposioToolExecutor` via `composio_execute` or dynamic prefix routing [orchestrator/modules/tools/execution/unified_executor.py:142-142]().
+For deep technical details, see [Connecting Apps](#8.4).
 
-### File Upload Handling
-The `resolve_file_uploads` function handles converting workspace file paths or URLs into Composio `FileUploadable` objects for actions that require media (e.g., Twitter/LinkedIn posts) [orchestrator/core/composio/tool_executor.py:123-132]().
-
-**Sources**: [orchestrator/modules/tools/execution/unified_executor.py:105-168](), [orchestrator/core/composio/tool_executor.py:123-132]()
+Sources: [orchestrator/modules/tools/registry/tool_registry.py:1-35]()
 
 ---
 
-## Tools API Reference
+## 8.5 Permission & Validation System
 
-The `/api/tools` router serves the marketplace and connection status.
+`ActionCapabilityFilter` performs intent validation, capability taxonomy checks, hierarchy permission verification, and maintains audit trails for privileged or destructive actions.
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/tools/marketplace` | GET | Returns cached apps and actions for the UI [orchestrator/api/tools.py:105-113]() |
-| `/api/tools/stats` | GET | Summary of connected vs available tools [orchestrator/api/tools.py:92-98]() |
-| `/api/tools/sync` | POST | Triggers manual metadata synchronization [orchestrator/api/tools.py:27-27]() |
+For deep technical details, see [Permission & Validation System](#8.5).
 
-**Sources**: [orchestrator/api/tools.py:32-207]()
+Sources: [orchestrator/modules/tools/tool_router.py:36-46]()
+
+---
+
+## 8.6 Tool Hint Service
+
+`ComposioHintService` implements a three-tier hint strategy combining capability-based hints, token filtering, and top-N fallbacks backed by an action semantic index to inject relevant hints into prompt contexts.
+
+For deep technical details, see [Tool Hint Service](#8.6).
+
+Sources: [orchestrator/modules/tools/services/composio_hint_service.py:89-98]()
+
+---
+
+## 8.7 Tools API Reference
+
+Exposes endpoints under `/api/tools/*` and `/api/composio/*` for marketplace stats, connected apps listing, credential testing, skill management, and workspace association.
+
+For deep technical details, see [Tools API Reference](#8.7).
+
+Sources: [orchestrator/modules/tools/registry/tool_registry.py:1-35]()
+
+---
+
+## 8.8 Tool Routing Graph & Telemetry
+
+PRD-139/232 intent graph infrastructure (`graph_router`, `edge_builder`, intent clustering, and signal recorders) tracks routing telemetry and powers evaluation harnesses under `scripts/eval`.
+
+For deep technical details, see [Tool Routing Graph & Telemetry](#8.8).
+
+Sources: [orchestrator/modules/context/sections/platform_actions.py:143-166]()
 
 ---
 
 ## Child Pages
 
-For deep dives into specific subsystems, see:
-- [Composio Integration](#8.1) — SDK wrapper, entity management, and OAuth flow.
-- [Tool Discovery & Resolution](#8.2) — ToolRegistry, ComposioCache, and 3-tier resolution logic.
-- [Tool Router & Execution](#8.3) — UnifiedToolExecutor routing logic and Platform/Action executors.
-- [Connecting Apps](#8.4) — ToolsDashboard and connection initiation flow.
-- [Permission & Validation System](#8.5) — ActionCapabilityFilter and intent validation.
-- [Tool Hint Service](#8.6) — ComposioHintService strategies and token filtering.
-- [Tools API Reference](#8.7) — Detailed API documentation for tools marketplace and stats.
+- [Composio Integration](#8.1) — Composio SDK wrapper, metadata sync, app/action caching, OAuth flow, entity management, LinkedIn image workaround
+- [Tool Discovery & Resolution](#8.2) — ToolRegistry, ComposioCache, AgentAppAssignment, SkillLoader; capability/token-filtered/top-N resolution tiers
+- [Tool Router & Execution](#8.3) — UnifiedToolExecutor routing logic, exec_* executors (platform, research, workspace, composio, multimodal), result formatting
+- [Connecting Apps](#8.4) — ToolsDashboard, my-tools dashboard, initiate connection flow, OAuth popup, NO_AUTH instant activation
+- [Permission & Validation System](#8.5) — ActionCapabilityFilter, intent validation, capability taxonomy, hierarchy permissions, bypass audit
+- [Tool Hint Service](#8.6) — ComposioHintService 3-tier strategy, capability-based hints, token filtering, top-N fallback, action semantic index
+- [Tools API Reference](#8.7) — API endpoints for tools marketplace, stats, connected apps, skills, credentials testing, add/remove from workspace
+- [Tool Routing Graph & Telemetry](#8.8) — PRD-139/232 intent graph: graph_router, edge_builder, intent clustering, signal recorder, tool routing telemetry tables, seed utterances, and the tool-routing eval harness under scripts/eval
 
 ---

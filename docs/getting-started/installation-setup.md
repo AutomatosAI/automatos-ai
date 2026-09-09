@@ -5,229 +5,229 @@
 
 The following files were used as context for generating this wiki page:
 
+- [.env.example](.env.example)
+- [.github/workflows/test.yml](.github/workflows/test.yml)
 - [docker-compose.yml](docker-compose.yml)
+- [docker-entrypoint.sh](docker-entrypoint.sh)
 - [frontend/.dockerignore](frontend/.dockerignore)
 - [frontend/Dockerfile](frontend/Dockerfile)
+- [frontend/components/activity/board/__tests__/blocked-reason.test.ts](frontend/components/activity/board/__tests__/blocked-reason.test.ts)
+- [frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx](frontend/components/activity/board/__tests__/task-deliverables-panel.test.tsx)
+- [frontend/components/activity/board/blocked-reason.ts](frontend/components/activity/board/blocked-reason.ts)
+- [frontend/components/activity/board/task-deliverables-panel.tsx](frontend/components/activity/board/task-deliverables-panel.tsx)
+- [infrastructure/.env.example](infrastructure/.env.example)
+- [infrastructure/railway-manifest.json](infrastructure/railway-manifest.json)
 - [orchestrator/Dockerfile](orchestrator/Dockerfile)
-- [orchestrator/api/cloud_documents.py](orchestrator/api/cloud_documents.py)
-- [orchestrator/core/database/boot_lock.py](orchestrator/core/database/boot_lock.py)
+- [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py](orchestrator/alembic/versions/prd222_veteran_skip_backfill.py)
 - [orchestrator/core/redis/client.py](orchestrator/core/redis/client.py)
+- [orchestrator/core/seeds/seed_local_first_run.py](orchestrator/core/seeds/seed_local_first_run.py)
 - [orchestrator/requirements.txt](orchestrator/requirements.txt)
-- [railway.json](railway.json)
+- [orchestrator/tests/test_dockerfile_prod_parity.py](orchestrator/tests/test_dockerfile_prod_parity.py)
+- [orchestrator/tests/test_prd222_onboarding_reset.py](orchestrator/tests/test_prd222_onboarding_reset.py)
+- [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py](orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py)
 
 </details>
 
 
 
-This page guides you through installing and running Automatos AI using Docker Compose. It covers cloning the repository, configuring environment variables, starting services, and verifying the installation.
-
-> **[Self-hosting — the local edition](self-hosting.md) is the full reference** (every service and port, the worker's host directory, object storage, the optional Composio key, updating, resetting, troubleshooting). This page keeps to the install steps and the build details.
+## Purpose & Scope
+This page guides developers and operators through the installation, configuration, and execution of Automatos AI using Docker Compose. It details the multi-service architecture, environment variables, database initialization via Alembic migrations, container dependency installations across multi-stage Dockerfiles, and runtime startup sequences.
 
 ---
 
 ## Prerequisites
 
-Before installing Automatos AI, ensure your system has:
-
-- **Docker** with the **Compose v2** plugin (`docker compose`)
+Before installing Automatos AI, ensure your host environment satisfies the following requirements:
+- **Docker Engine** (20.10+) and **Docker Compose** (2.0+)
 - **Git** for repository cloning
-- **~10 GB disk space** for Docker images and persistent volumes
-- **Port availability**: 3000 (frontend), 8000 (backend), 5432 (PostgreSQL), 6379 (Redis), 9000/9001 (MinIO API/console) — all overridable through `*_PORT` variables in `.env`
+- **Minimum 8GB RAM** (16GB recommended for running local workers, MinIO, and Qdrant)
+- **10GB free disk space** for persistent volumes and container images
+- **Port Availability**: `3000` (frontend), `8000` (backend), `5432` (PostgreSQL), `6379` (Redis), `9000`/`9001` (MinIO)
+
+Sources: [docker-compose.yml:1-24](), [orchestrator/Dockerfile:1-8](), [frontend/Dockerfile:1-9]()
 
 ---
 
 ## Quick Start
 
 ### 1. Clone Repository
-
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 ```
 
 ### 2. Configure Environment Variables
-
-A `.env` file is required for the stack to boot correctly [docker-compose.yml](). Copy the example file:
-
+Copy the template environment file to the project root:
 ```bash
-cp .env.example .env
+cp orchestrator/.env.example .env
 ```
+Ensure required variables are populated in `.env`:
+- `POSTGRES_PASSWORD`: PostgreSQL root password [docker-compose.yml:37]()
+- `REDIS_PASSWORD`: Redis authentication token [docker-compose.yml:63]()
+- `API_KEY`: Backend API access token [orchestrator/.env.example:28]()
 
-Edit `.env` and set the following **required** variables — compose declares them as `${VAR:?…}` and refuses to start while any is unset or empty:
-
-| Variable | Description | Source |
-|----------|-------------|--------|
-| `POSTGRES_PASSWORD` | PostgreSQL password (applied when the data volume is first initialised) | [docker-compose.yml]() |
-| `REDIS_PASSWORD` | Redis authentication password | [docker-compose.yml]() |
-| `API_KEY` | Backend API authentication key | [docker-compose.yml]() |
-
-Optional but recommended: one LLM key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`), or add one later under Settings → API Keys. `.env` is read by compose for substitution only; the committed local topology lives in `envs/api.defaults` and `envs/frontend.defaults` (`AUTH_EDITION=local`, MinIO wiring, worker URL), with `envs/api.local` as the gitignored override lane.
-
-**Sources:** [docker-compose.yml](), [envs/api.defaults](), [envs/frontend.defaults]()
+Sources: [docker-compose.yml:4-16](), [.env.example:1-30]()
 
 ### 3. Start Services
-
+Launch the core stack using Docker Compose:
 ```bash
-# Default profile: postgres, redis, minio (+ minio-init), backend, frontend, workspace-worker
-docker compose up
-
-# Add Adminer (database GUI) and Gotenberg (DOCX/XLSX → PDF)
-docker compose --profile all up
+docker compose up --build -d
 ```
+Access the web frontend at `http://localhost:3000`.
 
-The workspace-worker runs in the default profile; the former `workers` profile no longer exists. Its files live in the host directory `AUTOMATOS_WORKSPACE_DIR` (default `./workspaces`, created on first boot).
-
-**Sources:** [docker-compose.yml]()
+Sources: [docker-compose.yml:1-24]()
 
 ---
 
 ## System Architecture & Component Map
 
-The installation deploys a multi-tier architecture. The diagram below maps the service names to their specific code entities (Docker images, containers, and modules).
+The installation deploys a multi-container network. The diagram below bridges natural language subsystem descriptions to their concrete code entities (Docker images, container names, and build paths).
 
 ### Infrastructure Entity Map
 
 ```mermaid
 graph TB
-    subgraph "Data_Layer"
-        pg["postgres<br/>(pgvector/pgvector:pg16)"]
-        rd["redis<br/>(redis:7-alpine)"]
-        mn["minio<br/>(minio/minio, S3 API :9000, console :9001)"]
+    subgraph "Data Persistence"
+        pg["postgres<br/>(\"pgvector/pgvector:pg16\")"]
+        rd["redis<br/>(\"redis:7-alpine\")"]
+        mi["minio<br/>(\"minio/minio\")"]
     end
     
-    subgraph "Core_Application"
-        be["backend<br/>(automatos_backend)<br/>FastAPI"]
-        fe["frontend<br/>(automatos_frontend)<br/>Next.js"]
-    end
-    
-    subgraph "Execution_Workers"
-        ww["workspace-worker<br/>(automatos_workspace_worker)<br/>host dir AUTOMATOS_WORKSPACE_DIR → /workspaces"]
+    subgraph "Application Services"
+        be["backend<br/>(\"orchestrator/Dockerfile\")"]
+        fe["frontend<br/>(\"frontend/Dockerfile\")"]
+        wk["workspace-worker<br/>(\"services/workspace-worker/Dockerfile\")"]
     end
 
-    fe -- "NEXT_PUBLIC_API_URL" --> be
-    be -- "DATABASE_URL" --> pg
-    be -- "REDIS_HOST" --> rd
-    be -- "S3_ENDPOINT_URL" --> mn
-    be -- "WORKER_INTERNAL_URL" --> ww
-    ww -- "Redis queue" --> rd
+    fe -->|HTTP/WS| be
+    be -->|SQL/pgvector| pg
+    be -->|Cache/PubSub| rd
+    be -->|S3 API| mi
+    wk -->|Queue/IPC| rd
+    wk -->|Workspace IO| be
     
     classDef default stroke:#333,stroke-width:2px;
 ```
 
-**Sources:** [docker-compose.yml](), [envs/api.defaults](), [frontend/Dockerfile:111-115]()
+Sources: [docker-compose.yml:26-159](), [infrastructure/railway-manifest.json:12-67]()
 
 ---
 
-## Service Initialization Sequence
+## Service Initialization Sequence & Entrypoint Lifecycle
 
-The following diagram details the internal function calls and health checks that occur during the `docker compose up` lifecycle, including database migration handling.
+When the backend container boots, it executes `docker-entrypoint.sh`, handling database connectivity checks, schema migrations, seed data installation, and local workspace provisioning.
 
-### Startup & Code Logic Flow
+### Startup & Lifecycle Code Flow
 
 ```mermaid
 sequenceDiagram
     participant DC as "Docker Compose"
-    participant PG as "Postgres (pg16)"
-    participant RD as "Redis (7-alpine)"
-    participant BE as "Backend (FastAPI)"
-    
-    DC->>PG: "Start Container"
-    PG-->>DC: "Health: pg_isready"
-    
-    DC->>RD: "Start Container"
-    Note over RD: "Security: --rename-command FLUSHALL ''"
-    RD-->>DC: "Health: redis-cli ping"
-    
-    DC->>BE: "Start Container (depends_on postgres, redis, minio healthy)"
+    participant BE as "backend (docker-entrypoint.sh)"
+    participant PG as "postgres (automatos_postgres)"
+    participant AL as "Alembic (upgrade heads)"
+    participant SD as "Seed Loader (core.database.load_seed_data)"
+
+    DC->>BE: "Start Container"
     activate BE
-    BE->>BE: "docker-entrypoint.sh"
-    BE->>PG: "empty database? python -m scripts.init_fresh_db"
-    BE->>PG: "alembic upgrade heads (fail-closed)"
-    BE->>PG: "python -m core.database.load_seed_data (idempotent seeds)"
-    BE->>PG: "ensure local workspace + operator user"
-    BE->>BE: "init_redis_client() [client.py]"
-    BE->>BE: "uvicorn main:app"
-    BE-->>DC: "Health: GET /health (then /health/ready after full boot)"
+    BE->>PG: "wait_for_postgres() (pg_isready)"
+    PG-->>BE: "PostgreSQL Ready"
+    
+    BE->>AL: "run_migrations() (alembic upgrade heads)"
+    AL-->>BE: "Schema at Head"
+    
+    BE->>SD: "load_seed_data() (python -m core.database.load_seed_data)"
+    SD-->>BE: "Seed Upserts Complete"
+    
+    BE->>BE: "ensure_local_workspace() (Local Edition Workspace Provisioning)"
+    Note over BE: "Inserts default workspace with 'not_started' onboarding stage (PRD-233)"
+
+    BE->>BE: "Exec Uvicorn (main:app)"
+    BE-->>DC: "Health Check (GET /health)"
     deactivate BE
 ```
 
-**Key Initialization Logic:**
-1. **Fresh database**: With no `alembic_version` table present, the entrypoint runs `python -m scripts.init_fresh_db` — the SQLAlchemy models plus a tolerant replay of the migration history, stamped at heads. No SQL snapshot is committed; the generator is the fresh path [docker-entrypoint.sh](), [orchestrator/scripts/init_fresh_db.py]().
-2. **Migrations**: `alembic upgrade heads` runs on every boot and fails closed — a failing migration stops the backend rather than serving a half-built schema [docker-entrypoint.sh]().
-3. **Seeds**: `core.database.load_seed_data` is idempotent (credential types, models, skills, personas, plugin categories, marketplace catalogue, and in the local edition the first-run content: Auto, the Researcher/Writer/Analyst roster, the *Two-minute brief* Playbook and a welcome Deliverable) [orchestrator/core/database/load_seed_data.py](), [orchestrator/core/seeds/seed_local_first_run.py]().
-4. **Boot Locking**: On multi-worker startups, `boot_leader_lock` uses PostgreSQL advisory locks to ensure only one worker runs seed operations [orchestrator/core/database/boot_lock.py:25-40]().
-5. **Redis Security**: Dangerous commands like `FLUSHDB` and `FLUSHALL` are disabled at the command line [docker-compose.yml]().
-6. **Redis Client**: Initialized via `init_redis_client`, supporting both `REDIS_URL` and discrete host/port variables [orchestrator/core/redis/client.py:141-161]().
+**Key Initialization Steps:**
+1. **Postgres Readiness**: `wait_for_postgres()` polls `pg_isready` up to 30 attempts [docker-entrypoint.sh:22-39]().
+2. **Database Migrations**: `run_migrations()` executes `alembic upgrade heads` to bring the database schema to the latest revision, failing closed if any migration fails [docker-entrypoint.sh:51-61]().
+3. **Seed Data Loader**: Invokes `python -m core.database.load_seed_data` as a module to upsert core catalogs, agent personas, credential types, and marketplace items [docker-entrypoint.sh:66-93]().
+4. **Local Workspace Provisioning**: `ensure_local_workspace()` initializes `DEFAULT_WORKSPACE_ID` with an explicit `not_started` onboarding JSON document if running in `local` edition mode [docker-entrypoint.sh:102-127]().
 
-**Sources:** [docker-entrypoint.sh](), [orchestrator/scripts/init_fresh_db.py](), [orchestrator/core/database/boot_lock.py:1-21](), [orchestrator/core/redis/client.py:141-161]()
+Sources: [docker-entrypoint.sh:1-127](), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-57]()
 
 ---
 
 ## Environment Variables Reference
 
-The full list, with what each dial does, is in [Self-hosting](self-hosting.md) and [Environment Variables](../deployment-infrastructure/environment-variables.md). The ones an installer meets first:
+Configuration values are injected via `.env` and `envs/api.defaults`.
 
-### Core Service Variables
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `DATABASE_URL` | `postgresql://...` | Primary SQLAlchemy connection string, assembled by compose [docker-compose.yml](). |
-| `REDIS_HOST` | `redis` | Hostname for Redis connection [docker-compose.yml](). |
-| `API_KEY` | **Required** | The backend's own API-key principal [docker-compose.yml](). |
-| `AUTH_EDITION` | `local` (from `envs/api.defaults`) | The edition flag — `local` (no login) or `saas` (Clerk required) [orchestrator/config.py](). |
-| `S3_ENDPOINT_URL` | `http://minio:9000` | Points the S3 client at MinIO; the store's credentials are mapped from `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` (default: the MinIO root credentials) [docker-compose.yml](). |
-| `AUTOMATOS_WORKSPACE_DIR` | `./workspaces` | Host directory the workspace-worker acts in [docker-compose.yml](). |
-| `COMPOSIO_API_KEY` | unset | Bring-your-own Composio key; without it integrations are disabled and native tools keep working [docker-compose.yml](). |
-| `GOTENBERG_URL` | `http://gotenberg:3000` | PDF generation service for PRD-63 (`--profile all`) [docker-compose.yml](). |
+| Variable Name | Default Value | Description | Code Reference |
+|---------------|---------------|-------------|----------------|
+| `POSTGRES_DB` | `orchestrator_db` | PostgreSQL database name | [docker-compose.yml:35]() |
+| `POSTGRES_USER` | `postgres` | PostgreSQL connection user | [docker-compose.yml:36]() |
+| `POSTGRES_PASSWORD` | *Required* | PostgreSQL password secret | [docker-compose.yml:37]() |
+| `REDIS_PASSWORD` | *Required* | Redis auth password secret | [docker-compose.yml:63]() |
+| `API_KEY` | *Required* | Backend authentication key | [.env.example:28]() |
+| `S3_ENDPOINT_URL` | `http://minio:9000` | Local MinIO object store endpoint | [.env.example:81]() |
+| `AUTH_EDITION` | `saas` (`local` in compose) | Edition mode gating authentication | [.github/workflows/test.yml:70]() |
+| `DEFAULT_WORKSPACE_ID` | Workspace UUID | Default tenant ID for local sessions | [.github/workflows/test.yml:76]() |
 
-### Frontend Variables
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend API endpoint for the browser [envs/frontend.defaults](). |
-| `NEXT_PUBLIC_AUTH_EDITION` | `local` | Frontend mirror of `AUTH_EDITION` [envs/frontend.defaults](). |
-| `NODE_ENV` | `development` | Sets Next.js optimization level [frontend/Dockerfile:111](). |
-
-**Sources:** [docker-compose.yml](), [envs/api.defaults](), [envs/frontend.defaults](), [frontend/Dockerfile:53-71]()
+Sources: [docker-compose.yml:30-103](), [.env.example:1-112](), [.github/workflows/test.yml:56-76]()
 
 ---
 
-## Dependency Installation
+## Dependency Installation & Container Build Architecture
 
-The backend environment is built using a multi-stage Dockerfile to optimize image size and security.
+Automatos AI uses multi-stage Docker builds to decouple build-time compilers and heavy development tools from lightweight production runtimes.
 
-### Backend Requirements
-The `orchestrator/requirements.txt` file defines the core stack:
-- **Web Framework**: `fastapi`, `uvicorn`, `websockets` [orchestrator/requirements.txt:2-4]().
-- **Database**: `sqlalchemy`, `alembic`, `pgvector` [orchestrator/requirements.txt:7-11]().
-- **AI/LLM**: `openai`, `anthropic`, `google-generativeai`, `tiktoken` [orchestrator/requirements.txt:72-75]().
-- **Integrations**: `composio` (PRD-36), `boto3` (PRD-42), `graphifyy` (PRD-126) [orchestrator/requirements.txt:105-119]().
+### Backend Multi-Stage Pipeline (`orchestrator/Dockerfile`)
+1. **`pybuild` Stage**: Uses `python:3.11-slim` with `gcc`, `g++`, and `libffi-dev` installed to build Python wheels from `requirements.txt` into `/install`. Handles conditional graph extra compilation (`INSTALL_GRAPH_EXTRAS` build arg) [orchestrator/Dockerfile:19-58]().
+2. **`base` Stage**: Slim runtime image containing system packages for document parsing and OCR (`tesseract-ocr`, `ghostscript`, `libmagic1`, `libpango-1.0-0`, `libcairo2`) [orchestrator/Dockerfile:63-83]().
+3. **`development` & `production` Stages**: Installs application code, creates non-user `automatos`, and exposes port `8000` running `uvicorn` or gunicorn workers [orchestrator/Dockerfile:91-150]().
 
-### Specialized Build Steps
-The `orchestrator/Dockerfile` performs specific initialization:
-1. **System Dependencies**: Installs `tesseract-ocr`, `libmagic1`, and `libpango` for document processing [orchestrator/Dockerfile:18-32]().
-2. **FutureAGI**: Installed with `--no-deps` to avoid version conflicts with the core stack [orchestrator/Dockerfile:43]().
-3. **NLTK Data**: Pre-downloads `punkt` and `stopwords` for memory tokenization [orchestrator/Dockerfile:49-50]().
+### Frontend Container (`frontend/Dockerfile`)
+- Uses `node:20-alpine` as base, supporting Next.js standalone output mode by copying traced dependencies into `/app` to minimize final image size [frontend/Dockerfile:14-132]().
 
-**Sources:** [orchestrator/requirements.txt:1-120](), [orchestrator/Dockerfile:13-53]()
+Sources: [orchestrator/Dockerfile:1-150](), [frontend/Dockerfile:1-132]()
+
+---
+
+## Database Setup, Migrations & Veteran Backfill
+
+Database schemas are managed exclusively through Alembic revision scripts.
+
+### Migration Invariants & Veteran Backfill
+- **Alembic Heads**: Because the migration tree contains multiple unmerged paths, migrations run with `alembic upgrade heads` (plural) [docker-entrypoint.sh:55]().
+- **Veteran Backfilling**: `prd222_veteran_skip_backfill.py` marks pre-existing workspaces without onboarding stages as `skipped` while preserving new signups [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-50]().
+- **Fresh Install Boot**: Brand new local installations seed workspaces with `stage: not_started` so that the Auto-led onboarding chat triggers correctly [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-40]().
+
+Sources: [orchestrator/alembic/versions/prd222_veteran_skip_backfill.py:1-65](), [orchestrator/tests/test_prd233_fresh_install_starts_onboarding.py:1-57]()
 
 ---
 
 ## Verification & Troubleshooting
 
-After deployment, verify the stack is operational:
+After starting containers, verify operational status:
 
-1. **Service Health**:
+1. **Check Container Health**:
    ```bash
    docker compose ps
    ```
-2. **Redis Connectivity**:
-   The backend logs will show `✅ Redis connection test successful` upon initialization via `test_connection()` [orchestrator/core/redis/client.py:121-145]().
-3. **API Connectivity**:
-   Navigate to `http://localhost:8000/health`. The container `HEALTHCHECK` uses this endpoint to verify availability [orchestrator/Dockerfile:78-79](). `http://localhost:8000/health/ready` returns 200 only once the full boot has finished.
-4. **Integrations**:
-   `GET /api/tools/integrations/status` reports whether Composio integrations are available and why not when they are not (no `COMPOSIO_API_KEY` is the expected local answer) [orchestrator/api/tools.py](). Cloud-document connectors (`GET /api/cloud-documents/connections`) also run through Composio [orchestrator/api/cloud_documents.py:185-203]().
+2. **Inspect Migration Logs**:
+   Confirm that Alembic successfully applied revisions up to head:
+   ```bash
+   docker compose logs backend | grep "alembic upgrade heads"
+   ```
+3. **Test Redis Connectivity**:
+   Execute a ping against the Redis client container:
+   ```bash
+   docker compose exec redis redis-cli -a "$REDIS_PASSWORD" ping
+   ```
+4. **Run Test Suites**:
+   The test suite runs against an ephemeral PostgreSQL service configured in GitHub Actions [ [.github/workflows/test.yml:35-77]() ]:
+   ```bash
+   pytest tests --timeout=60 -v
+   ```
 
-For "password authentication failed" after changing `POSTGRES_PASSWORD`, the required-variable errors, and the other common faults, see the [troubleshooting section of the self-hosting guide](self-hosting.md#12-troubleshooting).
-
-**Sources:** [orchestrator/core/redis/client.py:121-145](), [orchestrator/Dockerfile:78-79](), [orchestrator/api/tools.py](), [orchestrator/api/cloud_documents.py:185-203]()
+Sources: [docker-compose.yml:43-109](), [.github/workflows/test.yml:35-134]()
 
 ---

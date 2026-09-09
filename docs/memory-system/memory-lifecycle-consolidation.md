@@ -5,146 +5,210 @@
 
 The following files were used as context for generating this wiki page:
 
-- [docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md](docs/PRDS/137-AUTO-CHATBOT-RECOVERY.md)
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/config.py](orchestrator/config.py)
+- [frontend/components/missions/create-mission-modal.tsx](frontend/components/missions/create-mission-modal.tsx)
+- [frontend/components/missions/index.ts](frontend/components/missions/index.ts)
+- [frontend/components/missions/mission-card.tsx](frontend/components/missions/mission-card.tsx)
+- [frontend/components/missions/mission-detail-page.tsx](frontend/components/missions/mission-detail-page.tsx)
+- [frontend/components/missions/mission-field-inspector.tsx](frontend/components/missions/mission-field-inspector.tsx)
+- [frontend/components/missions/mission-field-panel.tsx](frontend/components/missions/mission-field-panel.tsx)
+- [frontend/components/missions/mission-field-viz.tsx](frontend/components/missions/mission-field-viz.tsx)
+- [frontend/hooks/use-missions-api.ts](frontend/hooks/use-missions-api.ts)
+- [frontend/types/missions.ts](frontend/types/missions.ts)
+- [orchestrator/alembic/versions/prd123_checkpoint_count.py](orchestrator/alembic/versions/prd123_checkpoint_count.py)
+- [orchestrator/alembic/versions/prd206_chat_summary.py](orchestrator/alembic/versions/prd206_chat_summary.py)
+- [orchestrator/api/missions.py](orchestrator/api/missions.py)
 - [orchestrator/consumers/chatbot/integration.py](orchestrator/consumers/chatbot/integration.py)
-- [orchestrator/consumers/chatbot/prompt_analyzer.py](orchestrator/consumers/chatbot/prompt_analyzer.py)
 - [orchestrator/consumers/chatbot/smart_memory.py](orchestrator/consumers/chatbot/smart_memory.py)
 - [orchestrator/consumers/chatbot/smart_orchestrator.py](orchestrator/consumers/chatbot/smart_orchestrator.py)
-- [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/agents/queries.py](orchestrator/modules/agents/queries.py)
-- [orchestrator/modules/context/sections/identity.py](orchestrator/modules/context/sections/identity.py)
-- [orchestrator/modules/context/sections/skills.py](orchestrator/modules/context/sections/skills.py)
-- [orchestrator/modules/context/sections/task_context.py](orchestrator/modules/context/sections/task_context.py)
+- [orchestrator/core/models/orchestration.py](orchestrator/core/models/orchestration.py)
+- [orchestrator/core/models/orchestration_enums.py](orchestrator/core/models/orchestration_enums.py)
+- [orchestrator/modules/context/adapters/vector_field.py](orchestrator/modules/context/adapters/vector_field.py)
+- [orchestrator/modules/context/sections/memory.py](orchestrator/modules/context/sections/memory.py)
+- [orchestrator/modules/coordination/dispatcher.py](orchestrator/modules/coordination/dispatcher.py)
+- [orchestrator/modules/coordination/planner.py](orchestrator/modules/coordination/planner.py)
+- [orchestrator/modules/coordination/primitive_heartbeat.py](orchestrator/modules/coordination/primitive_heartbeat.py)
+- [orchestrator/modules/coordination/reconciler.py](orchestrator/modules/coordination/reconciler.py)
+- [orchestrator/modules/coordination/verification.py](orchestrator/modules/coordination/verification.py)
 - [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/integrations/mem0_client.py](orchestrator/modules/memory/integrations/mem0_client.py)
+- [orchestrator/modules/memory/durable_store.py](orchestrator/modules/memory/durable_store.py)
+- [orchestrator/modules/memory/recall_ranking.py](orchestrator/modules/memory/recall_ranking.py)
+- [orchestrator/modules/memory/thread_checkpoint.py](orchestrator/modules/memory/thread_checkpoint.py)
 - [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
+- [orchestrator/modules/tools/discovery/handlers_search.py](orchestrator/modules/tools/discovery/handlers_search.py)
+- [orchestrator/services/coordinator_service.py](orchestrator/services/coordinator_service.py)
+- [orchestrator/services/gdpr_service.py](orchestrator/services/gdpr_service.py)
+- [orchestrator/services/memory_archival_job.py](orchestrator/services/memory_archival_job.py)
+- [orchestrator/services/memory_jobs.py](orchestrator/services/memory_jobs.py)
+- [orchestrator/tests/test_dispatcher_parallel.py](orchestrator/tests/test_dispatcher_parallel.py)
+- [orchestrator/tests/test_l3_distill_input.py](orchestrator/tests/test_l3_distill_input.py)
+- [orchestrator/tests/test_memory_restart_and_isolation.py](orchestrator/tests/test_memory_restart_and_isolation.py)
+- [orchestrator/tests/test_memory_single_write_path.py](orchestrator/tests/test_memory_single_write_path.py)
+- [orchestrator/tests/test_memory_stored_sse.py](orchestrator/tests/test_memory_stored_sse.py)
+- [orchestrator/tests/test_mission_final_output_promotion.py](orchestrator/tests/test_mission_final_output_promotion.py)
+- [orchestrator/tests/test_mission_retry_feeds_critique.py](orchestrator/tests/test_mission_retry_feeds_critique.py)
+- [orchestrator/tests/test_p2w1_semantic_l2_recall.py](orchestrator/tests/test_p2w1_semantic_l2_recall.py)
+- [orchestrator/tests/test_p2w2_gdpr_subject_tags.py](orchestrator/tests/test_p2w2_gdpr_subject_tags.py)
+- [orchestrator/tests/test_prd181_gdpr.py](orchestrator/tests/test_prd181_gdpr.py)
+- [orchestrator/tests/test_prd197_substrate.py](orchestrator/tests/test_prd197_substrate.py)
+- [orchestrator/tests/test_prd206_recall_ranking.py](orchestrator/tests/test_prd206_recall_ranking.py)
+- [orchestrator/tests/test_prd206_thread_checkpoint.py](orchestrator/tests/test_prd206_thread_checkpoint.py)
+- [orchestrator/tests/test_recall_relevance_floor.py](orchestrator/tests/test_recall_relevance_floor.py)
+- [orchestrator/tests/test_smart_orchestrator_store_exchange.py](orchestrator/tests/test_smart_orchestrator_store_exchange.py)
 - [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [orchestrator/tests/test_us011_context_budgets.py](orchestrator/tests/test_us011_context_budgets.py)
+- [orchestrator/tests/test_w1s1_hotpath_telemetry.py](orchestrator/tests/test_w1s1_hotpath_telemetry.py)
 
 </details>
 
 
 
-This page describes how memories flow through the 5-layer memory stack, from ephemeral session state to long-term facts. Specifically, it covers **session consolidation** (L1→L2), **Ebbinghaus decay** (L2 time-based archiving), and **promotion** (L2→L3 based on importance and access patterns).
+This wiki page details the mechanics of session consolidation (L1→L2), Ebbinghaus decay scoring, promotion (L2→L3), background tasks managed by `MemoryJobScheduler`, and GDPR-compliant memory erasure cascades across memory tiers.
 
 ---
 
-## Overview
+## 1. Overview & Architecture
 
-The memory lifecycle in Automatos AI is governed by the `UnifiedMemoryService` [orchestrator/modules/memory/unified_memory_service.py:154](), which acts as the central coordinator for the 5-layer stack. Memories move between layers based on temporal relevance, frequency of access, and importance scores.
+Memories in Automatos AI transition through a structured hierarchy managed by `UnifiedMemoryService` [orchestrator/modules/memory/unified_memory_service.py:161-170]() and background workers coordinated by `MemoryJobScheduler` [orchestrator/services/memory_jobs.py:32-44](). The system maintains strict tenant separation via workspace scoping and handles automated decay, promotion, and purging.
 
-1.  **L1 (Working/Session)**: Active conversation state stored in Redis [orchestrator/modules/memory/unified_memory_service.py:120-148]().
-2.  **L2 (Short-term)**: Summarized session results and experiences stored in Postgres, subject to **Ebbinghaus decay** [orchestrator/config.py:98-103]().
-3.  **L3 (Long-term)**: Extracted facts and persistent knowledge stored via Mem0 [orchestrator/modules/memory/integrations/mem0_client.py:77-105]().
-4.  **L4 (Knowledge Graph)**: Deep organizational context; long-term memories are eventually folded into the graph via monthly archival jobs [orchestrator/config.py:116-123]().
-
-### Memory Transition Architecture
-Title: "Memory Transition Diagram (Code Entity Space)"
+### Memory Transition & Background Jobs
+Title: "Memory Transition and Background Jobs Architecture"
 ```mermaid
 graph TB
-    subgraph "L1: Working Memory (Redis)"
-        Session["SessionMemory Class<br/>Key: mem:session:ws:conv<br/>TTL: 24h / 1h"]
+    subgraph "L1WorkingMemory"
+        L1["SessionMemory<br/>mem:session:ws_id:conv_id<br/>TTL: 86400s"]
     end
     
-    subgraph "L2: Short-term (Postgres)"
-        DailyLog["Daily Activity Logs<br/>Decay Rate: 0.1<br/>Archive Threshold: 0.3"]
+    subgraph "L2ShortTermMemory"
+        L2["DailyActivityLogs<br/>Transcripts<br/>decay_score: [0, 1]"]
     end
     
-    subgraph "L3: Long-term (Mem0)"
-        Mem0["Mem0Client.add()<br/>Namespace: mem:ws:agent<br/>Circuit Breaker Protected"]
+    subgraph "L3LongTermMemory"
+        L3["DurableMemoryStore<br/>Typed Facts<br/>Importance Weighting"]
     end
 
-    Chat["StreamingChatService"] -->|store_exchange| Session
-    Session -->|end_session()| Consolidation["Consolidation Job"]
-    Consolidation -->|L1 to L2| DailyLog
+    L1 -->|"Consolidation Job"| L2
+    L2 -->|"Promotion Job"| L3
     
-    DailyLog -->|Promotion Logic| Promotion["Promotion Job"]
-    Promotion -->|Importance > 0.7| Mem0
+    subgraph "MemoryJobScheduler"
+        J1["_run_consolidation<br/>(Contradiction Invalidation)"]
+        J2["_run_decay<br/>(Ebbinghaus Scoring)"]
+        J3["_run_promotion<br/>(L2 -> L3 Transfer)"]
+    end
     
-    DailyLog -->|Decay Logic| Decay["Decay Job"]
-    Decay -->|Score < 0.3| Archival["Graphify Archival (L4)"]
+    J1 -.-> L1
+    J2 -.-> L2
+    J3 -.-> L3
 ```
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:38-118](), [orchestrator/modules/memory/unified_memory_service.py:123-148](), [orchestrator/config.py:84-123](), [orchestrator/consumers/chatbot/smart_orchestrator.py:117-120]()
+
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:8-13](), [orchestrator/modules/memory/unified_memory_service.py:82-85](), [orchestrator/services/memory_jobs.py:4-19]()
 
 ---
 
-## L1 Session Consolidation
+## 2. L1 Working Memory & Session Consolidation (L1 → L2)
 
-### Working Memory Lifecycle
-Active conversations are managed as `SessionMemory` objects in Redis [orchestrator/modules/memory/unified_memory_service.py:123](). This layer tracks:
-*   **Summary**: A running recap of the current conversation [orchestrator/modules/memory/unified_memory_service.py:132]().
-*   **Decisions & Action Items**: Structured outputs extracted from the exchange [orchestrator/modules/memory/unified_memory_service.py:133-134]().
-*   **Exchange Count**: Used to trigger periodic summarization [orchestrator/modules/memory/unified_memory_service.py:135]().
+### Session State (`SessionMemory`)
+`SessionMemory` tracks the conversation `summary`, `exchange_count`, and `ended` boolean flag in Redis [orchestrator/modules/memory/unified_memory_service.py:128-140](). Keys are generated using `MemoryNamespace.session(conversation_id)` [orchestrator/modules/memory/unified_memory_service.py:82-85](). This layer ensures low-latency context retrieval across immediate browser interactions within a 24-hour window.
 
-### The Consolidation Trigger
-When a session is explicitly ended or the `MEMORY_SESSION_CONSOLIDATION_TTL_SECONDS` (default 3600s) expires [orchestrator/config.py:86-87](), the `UnifiedMemoryService` triggers consolidation. This process takes the L1 `SessionMemory` and flattens it into an L2 record (Daily Log) for the workspace [orchestrator/modules/memory/unified_memory_service.py:72-74]().
+### Consolidation Mechanics
+The background job `JOB_ID_CONSOLIDATION` [orchestrator/services/memory_jobs.py:35]() processes active session closures:
+* Summarizes raw transcript exchanges into structured text blocks.
+* Identifies contradictions against existing L3 facts and invalidates superseded entries [orchestrator/services/memory_jobs.py:7-9]().
+* Flushes consolidated session records into L2 short-term tables via `UnifiedMemoryService` [orchestrator/modules/memory/unified_memory_service.py:161-190]().
 
-**Sources:** [orchestrator/modules/memory/unified_memory_service.py:123-148](), [orchestrator/config.py:84-87]()
-
----
-
-## L2 Decay & Ebbinghaus Forgetting
-
-### Decay Mechanism
-Short-term memories (L2) are not permanent. They are subject to a decay algorithm based on the Ebbinghaus Forgetting Curve.
-*   **Decay Rate**: Configured via `MEMORY_DECAY_RATE` (default 0.1) [orchestrator/config.py:98-99]().
-*   **Archival Threshold**: When a memory's importance falls below `MEMORY_DECAY_ARCHIVE_THRESHOLD` (default 0.3), it is moved to inactive storage or folded into L4 [orchestrator/config.py:100-101]().
-
-### Background Decay Jobs
-The `MEMORY_DECAY_INTERVAL_SECONDS` (default 3600s) governs how often the background worker scans L2 memories to apply decay [orchestrator/config.py:112](). This ensures the context window isn't cluttered with stale, low-importance information.
-
-**Sources:** [orchestrator/config.py:98-114]()
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:82-85](), [orchestrator/modules/memory/unified_memory_service.py:128-140](), [orchestrator/services/memory_jobs.py:32-35]()
 
 ---
 
-## L2 → L3 Promotion
+## 3. L2 Short-term Memory & Ebbinghaus Decay
 
-### Promotion Criteria
-Not all short-term memories are discarded. High-value memories are promoted to L3 (Mem0) based on two primary signals:
-1.  **Importance Score**: Must meet `MEMORY_PROMOTION_MIN_IMPORTANCE` (default 0.7) [orchestrator/config.py:104-105]().
-2.  **Access Frequency**: Frequently retrieved items (`MEMORY_PROMOTION_MIN_ACCESS_COUNT` >= 3) are deemed "facts" and promoted [orchestrator/config.py:106-107]().
+### Ebbinghaus Decay Scoring
+Short-term records in L2 are governed by an hourly decay sweep (`JOB_ID_DECAY`) [orchestrator/services/memory_jobs.py:36]() which evaluates the `decay_score` of each row:
+* **Decay Curve**: Scores decrease over time following an Ebbinghaus retention curve parameterized by `MEMORY_DECAY_RATE` (default `0.004`) [orchestrator/tests/test_unified_memory.py:47-48]().
+* **Archival Threshold**: Items dropping below `MEMORY_DECAY_ARCHIVE_THRESHOLD` (default `0.3`) are pruned from hot L2 query sets and moved to archival storage [orchestrator/services/memory_jobs.py:12-13]().
 
-### Fact Extraction (Mem0)
-Promotion involves sending the memory content to `Mem0Client.add()` [orchestrator/modules/memory/integrations/mem0_client.py:176](). The `SmartMemoryManager` classifies whether these facts are `global`, `agent-specific`, or `both` [orchestrator/consumers/chatbot/smart_memory.py:92-168]().
+### Daily Temporal Logs
+Daily activity is aggregated under namespaces created by `MemoryNamespace.daily()` [orchestrator/modules/memory/unified_memory_service.py:72-74](). These summaries provide chronological context injected via `MemorySection` during prompt assembly [orchestrator/modules/context/sections/memory.py:33-37]().
 
-Title: "Memory Promotion & Tier Classification"
+**Sources:** [orchestrator/modules/memory/unified_memory_service.py:72-74](), [orchestrator/services/memory_jobs.py:11-13](), [orchestrator/services/memory_jobs.py:36](), [orchestrator/tests/test_unified_memory.py:47-48]()
+
+---
+
+## 4. Promotion to L3 Long-term Memory (L2 → L3)
+
+### Promotion Logic (`JOB_ID_PROMOTION`)
+The promotion background job runs daily at 03:00 UTC to evaluate L2 records for promotion to the durable Qdrant backend (`DurableMemoryStore`) [orchestrator/services/memory_jobs.py:37, 89-96]().
+* **Importance Policy**: Verifies that extracted facts meet type-specific importance floors (`0.5` for high-signal types like `user_fact` or `preference`, `0.7` for general facts) [orchestrator/tests/test_unified_memory.py:50-52]().
+* **Deduplication**: Computes content hashes to prevent duplicate entries from being written into Qdrant collections [orchestrator/services/memory_jobs.py:18]().
+
+### Fact Distillation Pipeline
+During chat turns, `SmartMemoryManager._distill_durable_facts` invokes a lightweight LLM (`MEMORY_DISTILL_MODEL`) to parse raw text into a structured taxonomy (`tool_outcome`, `task_learning`, `playbook_pattern`, `user_fact`, `business_fact`, `preference`, `procedure`) [orchestrator/consumers/chatbot/smart_memory.py:109-137](), [orchestrator/tests/test_l3_distill_input.py:7-10]().
+
+### Fact Distillation & Storage Flow
+Title: "Memory Distillation and Storage Data Flow"
 ```mermaid
 sequenceDiagram
+    participant User as "User Message"
     participant SMM as "SmartMemoryManager"
-    participant Classifier as "_classify_memory_tier()"
-    participant Mem0 as "Mem0Client"
+    participant Distill as "_distill_durable_facts()"
+    participant UMS as "UnifiedMemoryService"
+    participant L3 as "DurableMemoryStore (Qdrant)"
 
-    SMM->>Classifier: "User: 'My name is Gerard and I use Slack'"
-    Note over Classifier: "Keywords: 'my name' (Global), 'slack' (Agent)"
-    Classifier-->>SMM: "Tier: 'both'"
-    SMM->>Mem0: "add(messages, user_id='mem:ws:agent')"
-    SMM->>Mem0: "add(messages, user_id='mem:ws')"
+    User->>SMM: "I prefer dark mode"
+    SMM->>Distill: "Extract Facts (Cheap LLM)"
+    Note over Distill: Taxonomy: preference<br/>Importance: 0.9
+    Distill-->>SMM: "[{'fact': '...', 'type': 'preference'}]"
+    SMM->>UMS: "store_two_tier(workspace_id, facts)"
+    UMS->>L3: "add(user_id, content, metadata)"
 ```
 
-**Sources:** [orchestrator/config.py:104-109](), [orchestrator/consumers/chatbot/smart_memory.py:92-168](), [orchestrator/modules/memory/integrations/mem0_client.py:176-200]()
+**Sources:** [orchestrator/consumers/chatbot/smart_memory.py:109-137](), [orchestrator/services/memory_jobs.py:37](), [orchestrator/services/memory_jobs.py:89-96](), [orchestrator/tests/test_l3_distill_input.py:7-16]()
 
 ---
 
-## Reliability & Background Jobs
+## 5. Background Maintenance Jobs (`memory_jobs.py`)
 
-### Circuit Breaker
-Since L3 promotion and retrieval rely on the external Mem0 API, the system implements a `_CircuitBreaker` [orchestrator/modules/memory/integrations/mem0_client.py:25-60]().
-*   **Threshold**: Opens after 3 consecutive failures [orchestrator/modules/memory/integrations/mem0_client.py:29]().
-*   **Cooldown**: Remains open for 300 seconds to prevent cascading failures in the chat loop [orchestrator/modules/memory/integrations/mem0_client.py:29]().
+The `MemoryJobScheduler` orchestrates the complete lifecycle of memory maintenance across the system:
 
-### Monthly Archival (L4)
-Monthly archival jobs (`MEMORY_ARCHIVAL_CRON_DAY=1`) fold aged L2 and L3 memories into the workspace Business Knowledge Graph [orchestrator/config.py:116-123](). This represents the final stage of the memory lifecycle, where discrete facts become part of the organizational "God Node" graph.
-
-| Parameter | Default Value | Purpose |
+| Job ID | Frequency | Target / Purpose |
 | :--- | :--- | :--- |
-| `MEMORY_JOBS_ENABLED` | `true` | Master toggle for background consolidation/decay [orchestrator/config.py:114](). |
-| `MEMORY_PROMOTION_HOUR_UTC` | `3` | Hour when the daily promotion job runs [orchestrator/config.py:113](). |
-| `MEMORY_ARCHIVAL_L3_RETENTION_DAYS` | `180` | Days before L3 facts are folded into L4 graph [orchestrator/config.py:122](). |
+| `JOB_ID_CONSOLIDATION` | Hourly | Resolves contradictions and merges duplicate L3 memories [orchestrator/services/memory_jobs.py:35](). |
+| `JOB_ID_DECAY` | Hourly | Applies Ebbinghaus decay formulas to L2 items [orchestrator/services/memory_jobs.py:36](). |
+| `JOB_ID_PROMOTION` | Daily (03:00) | Promotes qualified L2 short-term records to L3 Qdrant store [orchestrator/services/memory_jobs.py:37, 89-96](). |
+| `JOB_ID_ARCHIVAL` | Monthly | Offloads stale memory tiers into workspace knowledge graphs [orchestrator/services/memory_jobs.py:38, 98](). |
+| `JOB_ID_AUDIT_RETENTION` | Daily | Cleans up expired audit trails and execution ledgers [orchestrator/services/memory_jobs.py:39, 114-118](). |
+| `JOB_ID_SNAPSHOT` | Daily | Backs up vector memory planes to S3 object storage [orchestrator/services/memory_jobs.py:40, 129-132](). |
+| `JOB_ID_THREAD_CHECKPOINT` | 15 Minutes | Checkpoints idle chat threads and extracts new decisions [orchestrator/services/memory_jobs.py:42, 160-163](). |
 
-**Sources:** [orchestrator/modules/memory/integrations/mem0_client.py:25-60](), [orchestrator/config.py:111-124]()
+**Sources:** [orchestrator/services/memory_jobs.py:32-44](), [orchestrator/services/memory_jobs.py:98-176]()
+
+---
+
+## 6. GDPR Erasure of Memory
+
+### Erasure Architecture
+To comply with GDPR data subject access rights, `GdprService` executes complete memory erasure cascades across all persistent tiers. Because memories span relational tables (Postgres L2) and vector collections (Qdrant L3 / `VectorFieldSharedContext`), erasure requires coordinated multi-store deletions.
+
+### Subject-Tag Filtering & Deletion
+Every durable vector point created within shared vector spaces maintains a keyword-indexed `subject_id` payload field [orchestrator/modules/context/adapters/vector_field.py:144-147](). When an erasure request is received:
+1. `GdprService` targets the given `workspace_id` and `subject_id`.
+2. Issues filtered delete queries across Postgres L2 activity tables and daily log stores.
+3. Executes a Qdrant payload-filter delete against the `field_memory` collection matching `workspace_id` and `subject_id`.
+
+### GDPR Memory Erasure Data Flow
+Title: "GDPR Memory Erasure Data Flow"
+```mermaid
+sequenceDiagram
+    participant API as "GdprService"
+    participant PG as "PostgreSQL (L2/Audit)"
+    participant Qdrant as "VectorFieldSharedContext (L3)"
+
+    API->>PG: "DELETE FROM memory_rows WHERE workspace_id = ws AND subject_id = sub"
+    PG-->>API: "Rows deleted"
+    API->>Qdrant: "client.delete(collection='field_memory', filter=workspace_id AND subject_id)"
+    Qdrant-->>API: "Points purged"
+    Note over API: Erasure cascade completed
+```
+
+**Sources:** [orchestrator/services/gdpr_service.py](), [orchestrator/modules/context/adapters/vector_field.py:144-147](), [orchestrator/tests/test_prd181_gdpr.py](), [orchestrator/tests/test_p2w2_gdpr_subject_tags.py]()
 
 ---

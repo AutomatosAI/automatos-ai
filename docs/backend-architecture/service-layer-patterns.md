@@ -5,21 +5,34 @@
 
 The following files were used as context for generating this wiki page:
 
-- [frontend/tsconfig.tsbuildinfo](frontend/tsconfig.tsbuildinfo)
-- [orchestrator/config.py](orchestrator/config.py)
-- [orchestrator/main.py](orchestrator/main.py)
-- [orchestrator/modules/memory/context_router.py](orchestrator/modules/memory/context_router.py)
-- [orchestrator/modules/memory/unified_memory_service.py](orchestrator/modules/memory/unified_memory_service.py)
-- [orchestrator/tests/test_unified_memory.py](orchestrator/tests/test_unified_memory.py)
-- [scripts/ralph/IMPLEMENTATION_PLAN.md](scripts/ralph/IMPLEMENTATION_PLAN.md)
-- [scripts/ralph/prd.json](scripts/ralph/prd.json)
-- [scripts/ralph/progress.txt](scripts/ralph/progress.txt)
+- [docs/PRDS/PRD-227-BOARD-LIGHT-UP.md](docs/PRDS/PRD-227-BOARD-LIGHT-UP.md)
+- [docs/PRDS/PRD-WAVE-AUTO-MANAGER.md](docs/PRDS/PRD-WAVE-AUTO-MANAGER.md)
+- [orchestrator/alembic/versions/prd201_s1_message_context_trace.py](orchestrator/alembic/versions/prd201_s1_message_context_trace.py)
+- [orchestrator/core/context_guard.py](orchestrator/core/context_guard.py)
+- [orchestrator/core/llm/prompt_cache.py](orchestrator/core/llm/prompt_cache.py)
+- [orchestrator/core/llm/request_scope.py](orchestrator/core/llm/request_scope.py)
+- [orchestrator/core/observability/tracer.py](orchestrator/core/observability/tracer.py)
+- [orchestrator/modules/context/result.py](orchestrator/modules/context/result.py)
+- [orchestrator/modules/context/sections/base.py](orchestrator/modules/context/sections/base.py)
+- [orchestrator/services/audit_retention.py](orchestrator/services/audit_retention.py)
+- [orchestrator/services/board_events.py](orchestrator/services/board_events.py)
+- [orchestrator/services/chat_messenger.py](orchestrator/services/chat_messenger.py)
+- [orchestrator/services/orchestration_state.py](orchestrator/services/orchestration_state.py)
+- [orchestrator/tests/conftest.py](orchestrator/tests/conftest.py)
+- [orchestrator/tests/test_board_dispatch.py](orchestrator/tests/test_board_dispatch.py)
+- [orchestrator/tests/test_board_sse_listen_notify.py](orchestrator/tests/test_board_sse_listen_notify.py)
+- [orchestrator/tests/test_context_guard.py](orchestrator/tests/test_context_guard.py)
+- [orchestrator/tests/test_p2w2_audit_retention.py](orchestrator/tests/test_p2w2_audit_retention.py)
+- [orchestrator/tests/test_p2w2_governance_audit.py](orchestrator/tests/test_p2w2_governance_audit.py)
+- [orchestrator/tests/test_p2w2_governance_policy_budget.py](orchestrator/tests/test_p2w2_governance_policy_budget.py)
+- [orchestrator/tests/test_prd164_flywheel.py](orchestrator/tests/test_prd164_flywheel.py)
+- [orchestrator/tests/test_prd204_run_verdict.py](orchestrator/tests/test_prd204_run_verdict.py)
 
 </details>
 
 
 
-This document describes the architectural patterns used in the service layer of Automatos AI. The service layer provides business logic, orchestration, and resource management, sitting between API routers and the data persistence layer. It emphasizes the use of singleton services, dependency injection, and complex service composition.
+This document describes the architectural patterns used in the service layer of Automatos AI. The service layer provides business logic, orchestration, and resource management, sitting between API routers and the data persistence layer.
 
 ---
 
@@ -29,122 +42,88 @@ The service layer implements the business logic tier in a three-layer architectu
 
 ### Core Service Interaction
 
-The following diagram maps high-level system components to their corresponding code entities and shows the flow of data through the service layer, bridging Natural Language Space to Code Entity Space.
+The following diagram maps high-level system components to their corresponding code entities and shows the flow of data through the service layer.
 
 ```mermaid
 graph TB
     subgraph "API Layer (Code Entity Space)"
         ChatRoute["orchestrator/api/chat.py"]
-        MemoryRoute["orchestrator/api/memory.py"]
+        WorkspacesRoute["orchestrator/api/workspaces.py"]
         SystemRoute["orchestrator/api/system.py"]
     end
     
     subgraph "Service Layer (Logic Space)"
-        UnifiedMemory["UnifiedMemoryService"]
-        ContextRouter["ContextRouter"]
+        SmartOrchestrator["SmartChatOrchestrator"]
         AgentFactory["AgentFactory"]
         LLMManager["LLMManager"]
-        GraphRouter["GraphRouter"]
+        UnifiedExecutor["UnifiedToolExecutor"]
+        SmartMemory["SmartMemoryManager"]
     end
     
     subgraph "Data Layer (Entity Space)"
-        Redis["Redis (L1/Cache)"]
-        Postgres["PostgreSQL (L2/ORM)"]
-        Mem0["Mem0Client (L3)"]
+        AgentModel["Agent (ORM)"]
+        WorkspaceModel["Workspace (ORM)"]
+        Mem0Client["Mem0Client (External/L3)"]
+        Redis["Redis (Pub/Sub)"]
         SysSetting["SystemSetting (ORM)"]
     end
     
-    ChatRoute --> AgentFactory
-    MemoryRoute --> UnifiedMemory
+    ChatRoute --> SmartOrchestrator
+    WorkspacesRoute --> WorkspaceModel
     SystemRoute --> SysSetting
     
-    AgentFactory --> ContextRouter
-    ContextRouter --> UnifiedMemory
-    UnifiedMemory --> Redis
-    UnifiedMemory --> Postgres
-    UnifiedMemory --> Mem0
-    
+    SmartOrchestrator --> AgentFactory
+    SmartOrchestrator --> SmartMemory
     AgentFactory --> LLMManager
-    AgentFactory --> GraphRouter
+    AgentFactory --> UnifiedExecutor
+    
+    AgentFactory --> AgentModel
+    SmartMemory --> Mem0Client
+    AgentFactory --> Redis
 ```
 
-**Sources**: [orchestrator/main.py:36-113](), [orchestrator/modules/memory/unified_memory_service.py:154-188](), [orchestrator/modules/memory/context_router.py:5-24](), [orchestrator/modules/agents/factory/agent_factory.py:158-175]()
+**Sources**: [orchestrator/api/chat.py:107-107](), [orchestrator/api/workspaces.py:43-58](), [orchestrator/main.py:37-81]()
 
 ---
 
 ## Singleton and Instance Patterns
 
-Automatos AI utilizes the Singleton pattern via `get_instance()` methods and centralized factory functions to ensure consistent state and efficient resource usage across the application.
+Automatos AI utilizes the Singleton pattern and centralized factory functions for core registry and stateful services to ensure consistent state and efficient resource usage across the application.
 
 ### Singleton Implementation (`get_instance`)
 
-Core services use class-level `_instance` variables to manage shared state across the lifecycle of the FastAPI application.
+Services often use factory functions that act as singletons or manage shared state across the lifecycle of the FastAPI application.
 
-- **Unified Memory Service**: `UnifiedMemoryService.get_instance()` ensures that only one shared `Mem0Client` and one Redis client connection pool are active at any time [orchestrator/modules/memory/unified_memory_service.py:163-170]().
-- **Graph Router**: Implements a `get_graph_router()` factory to provide a singleton instance for tool routing logic [scripts/ralph/progress.txt:110-110]().
-- **Agent Runtime Management**: `AgentFactory` maintains an internal `_agents` dictionary to cache `AgentRuntime` objects, preventing redundant LLM manager initializations [orchestrator/modules/agents/factory/agent_factory.py:215-225]().
+- **Centralized Config**: The `Config` class in `orchestrator/config.py` acts as the single source of truth for all environment variables, ensuring `os.getenv()` is only called in one place [orchestrator/config.py:28-32]().
+- **Agent Runtime Management**: `AgentFactory` maintains an internal `_agents` dictionary to cache `AgentRuntime` objects, preventing redundant LLM manager initializations.
+- **Monitoring**: `get_monitoring_service()` provides a platform-level monitoring instance used across agent executions.
+- **Tool Execution**: `get_unified_tool_executor()` lazily initializes the routing and execution logic for tools.
 
-### Instance Management Functions
-
-| Function | Service Provided | Implementation Detail |
-| :--- | :--- | :--- |
-| `get_unified_memory_service()` | `UnifiedMemoryService` | Wraps `get_instance()` for memory operations [orchestrator/modules/memory/unified_memory_service.py:16-18]() |
-| `get_monitoring_service()` | Monitoring Logic | Platform-level monitoring instance [orchestrator/modules/agents/factory/agent_factory.py:37-40]() |
-| `get_redis_client()` | Redis Connection | Shared client for L1 session and L3 caching [orchestrator/modules/memory/unified_memory_service.py:184-186]() |
-
-**Sources**: [orchestrator/modules/memory/unified_memory_service.py:154-188](), [orchestrator/modules/agents/factory/agent_factory.py:37-44](), [scripts/ralph/progress.txt:102-113]()
+**Sources**: [orchestrator/config.py:1-7](), [orchestrator/config.py:28-32](), [orchestrator/main.py:28-30]()
 
 ---
 
 ## Dependency Injection & Service Composition
 
-Automatos AI uses composition to bridge different domains. Services are frequently composed to create complex pipelines, such as the `ContextRouter` which integrates with the `UnifiedMemoryService`.
+Automatos AI uses composition to bridge different domains. Services are frequently composed to create complex pipelines, such as the `AgentFactory` which ties together LLM configuration, tool execution, and metadata management.
 
-### Memory Service Composition (PRD-79)
+### Composition in Agent Execution
 
-The `UnifiedMemoryService` encapsulates the 5-layer memory stack, composing multiple data backends into a single interface:
+The `AgentFactory` composes several specialized entities to facilitate an agent's lifecycle:
 
-| Component | Responsibility | Code Reference |
+| Component | Role | Code Reference |
 | :--- | :--- | :--- |
-| `MemoryNamespace` | Standardizes scoped IDs for Mem0 and Redis | [orchestrator/modules/memory/unified_memory_service.py:39-118]() |
-| `SessionMemory` | Manages L1 working memory (Redis) | [orchestrator/modules/memory/unified_memory_service.py:124-149]() |
-| `Mem0Client` | Interfaces with L3 long-term memory | [orchestrator/modules/memory/unified_memory_service.py:178-181]() |
+| `AgentMetadata` | Encapsulates user-defined configuration and skills | [orchestrator/core/models/core.py:24-24]() |
+| `ModelConfiguration` | Standardizes LLM parameters (temp, tokens, provider) | [orchestrator/core/llm/defaults.py:25-26]() |
+| `UnifiedToolExecutor` | Routes and executes tool calls during agent loops | [orchestrator/main.py:60-60]() |
 
-### Context Assembly Pipeline
+### System Settings Composition
 
-The `ContextRouter` demonstrates service composition by analyzing queries and orchestrating retrieval across memory layers:
-1. **Signal Detection**: Uses regex patterns to detect `is_temporal`, `is_personal_fact`, etc. [orchestrator/modules/memory/context_router.py:40-56]().
-2. **Context Retrieval**: Calls `UnifiedMemoryService` to fetch L1/L2/L3 data based on detected signals [orchestrator/modules/memory/context_router.py:10-12]().
-3. **Budget Management**: Assembles a `ContextBundle` constrained by token budgets defined in `Config` [orchestrator/modules/memory/context_router.py:62-79](), [orchestrator/config.py:90-95]().
+The system settings architecture demonstrates a compositional approach to platform configuration, organizing settings into logical categories that services consume at runtime:
+- **Orchestrator Settings**: Managed via `SystemLLMSettingsTab`, combining LLM configuration, personality (Soul), and Heartbeat autonomous settings [frontend/components/settings/SystemLLMSettingsTab.tsx:5-11]().
+- **Workspace Context**: The `RequestContext` injected via `get_request_context_hybrid` provides a unified way for services to access `workspace_id` and user roles [orchestrator/api/workspaces.py:44-46]().
 
-**Sources**: [orchestrator/modules/memory/unified_memory_service.py:1-32](), [orchestrator/modules/memory/context_router.py:1-33](), [orchestrator/config.py:82-124]()
-
----
-
-## Service Layer Data Flow
-
-The flow of data through services is often governed by "Signals" and "Bundles". The following diagram illustrates the lifecycle of a memory retrieval request.
-
-```mermaid
-graph LR
-    subgraph "Natural Language Space"
-        UserQuery["'What did we discuss yesterday?'"]
-    end
-
-    subgraph "Code Entity Space"
-        Router["ContextRouter.analyze_query()"]
-        Signals["ContextSignals (is_temporal=True)"]
-        UMS["UnifiedMemoryService.search_long_term()"]
-        Bundle["ContextBundle"]
-    end
-
-    UserQuery --> Router
-    Router --> Signals
-    Signals --> UMS
-    UMS --> Bundle
-```
-
-**Sources**: [orchestrator/modules/memory/context_router.py:14-24](), [orchestrator/modules/memory/unified_memory_service.py:18-21]()
+**Sources**: [frontend/components/settings/SystemLLMSettingsTab.tsx:5-11](), [orchestrator/api/workspaces.py:43-58](), [orchestrator/core/llm/defaults.py:25-26]()
 
 ---
 
@@ -154,27 +133,144 @@ Expensive resources or environment-dependent configurations are resolved lazily 
 
 ### API Key Resolution Strategy
 
-The `AgentFactory` implements a 3-tier lazy resolution pattern for LLM API keys:
-1. **BYOK (Bring Your Own Key)**: Checked first from the `Agent` model's own credentials [orchestrator/modules/agents/factory/agent_factory.py:281-285]().
-2. **Platform Credentials**: Checked second from the `CredentialStore` [orchestrator/modules/agents/factory/agent_factory.py:287-291]().
-3. **Environment Variables**: Final fallback to system-level `.env` values [orchestrator/modules/agents/factory/agent_factory.py:293-295]().
+The platform implements a multi-tier resolution pattern for LLM API keys:
+1. **BYOK (Bring Your Own Key)**: Checked first from workspace-specific settings [orchestrator/api/workspaces.py:186-200]().
+2. **Platform Credentials**: Managed via `api/credentials.py` [orchestrator/main.py:58-58]().
+3. **Environment Variables**: Final fallback to system-level `.env` values defined in `Config` [orchestrator/config.py:37-42]().
 
-### Graph-Based Tool Routing
+### Database Connection Resolution
 
-The `GraphRouter` service lazily expansions entry nodes through `tool_routing_edges` to build execution chains [scripts/ralph/progress.txt:102-104](). It utilizes a fallback pattern: if the graph is empty or a database error occurs, it returns single-action chains based on embedding scores [scripts/ralph/progress.txt:108-109]().
+The `Config.get_database_url()` method lazily computes the connection string, enforcing `sslmode=require` only for non-local hosts to ensure security in production while maintaining ease of use in local development [orchestrator/config.py:48-58]().
 
-**Sources**: [orchestrator/modules/agents/factory/agent_factory.py:270-300](), [scripts/ralph/progress.txt:92-113]()
+**Sources**: [orchestrator/config.py:48-58](), [orchestrator/api/workspaces.py:186-200](), [orchestrator/config.py:37-42]()
 
 ---
 
-## Service Initialization & Background Jobs
+## Service State Management
 
-The platform uses a robust seeding pattern and background job scheduling to maintain service health.
+Services manage both ephemeral runtime state and persistent database state, often bridging the two during high-frequency operations like agent execution.
 
-- **Background Memory Jobs**: The `UnifiedMemoryService` relies on background intervals for session consolidation (L1→L2), Ebbinghaus decay, and L2→L3 promotion [orchestrator/config.py:110-115]().
-- **System Settings Seeding**: The `seed_system_settings` script ensures that categories like `GENERAL` and `ORCHESTRATOR_LLM` have valid defaults [orchestrator/core/seeds/seed_system_settings.py:8-11]().
-- **Graphify Archival**: A monthly job (PRD-131d) folds aged L2+L3 memories into the workspace knowledge graph [orchestrator/config.py:116-123]().
+### Workspace Context Persistence
 
-**Sources**: [orchestrator/config.py:82-124](), [orchestrator/core/seeds/seed_system_settings.py:8-20]()
+The `api/workspaces.py` router demonstrates how service-level logic manages workspace state, such as auto-generating `webhook_key` for legacy workspaces [orchestrator/api/workspaces.py:69-72]() and masking sensitive integration tokens before returning them to the frontend [orchestrator/api/workspaces.py:78-87]().
+
+```mermaid
+graph TD
+    subgraph "Workspace Service Logic (orchestrator/api/workspaces.py)"
+        GetWS["get_current_workspace"]
+        Masking["Mask sensitive tokens (L78-87)"]
+        WebhookGen["Generate Webhook Key (L69-72)"]
+        RoleResolve["resolve_workspace_role (L99-101)"]
+    end
+    
+    subgraph "Persistence (orchestrator/core/models/workspaces.py)"
+        DB_WS["Workspace Table"]
+        DB_Agent["Agent Table (Count check)"]
+    end
+    
+    GetWS --> DB_WS
+    GetWS --> DB_Agent
+    GetWS --> WebhookGen
+    WebhookGen --> DB_WS
+    GetWS --> Masking
+    GetWS --> RoleResolve
+```
+
+**Sources**: [orchestrator/api/workspaces.py:43-118](), [orchestrator/api/workspaces.py:69-87]()
+
+### Orchestration State Transitions
+
+The `orchestration_state.py` service manages state transitions for `OrchestrationRun` and `OrchestrationTask` entities. It enforces valid transitions, updates timestamps, and records `OrchestrationEvent`s in the same transaction. This "dual-write" pattern ensures data consistency and provides an immutable audit trail of state changes. Optimistic locking is used to detect concurrent modifications, raising a `ConflictError` if a stale data error occurs.
+
+```mermaid
+graph TD
+    A[Caller (e.g., CoordinatorService)] --> B{transition_task / transition_run};
+    B --> C{Validate Transition};
+    C -- Invalid --> D[InvalidTransitionError];
+    C -- Valid --> E[Update Task/Run State & Timestamps];
+    E --> F[Create OrchestrationEvent];
+    F --> G{db.flush()};
+    G -- StaleDataError --> H[ConflictError];
+    G -- Success --> I[Return TaskTransition/RunTransition];
+```
+**Title**: Orchestration State Transition Flow
+**Sources**: [orchestrator/services/orchestration_state.py:1-15](), [orchestrator/services/orchestration_state.py:84-185](), [orchestrator/services/orchestration_state.py:193-211]()
+
+### Chat Messenger for Background Messages
+
+The `chat_messenger.py` service provides a robust mechanism for background processes (e.g., watchers, scheduled tasks) to post messages into user conversations. It handles the resolution of target chats, ensuring messages are delivered to the correct workspace and user, falling back to a dedicated "Auto" chat thread if the specified chat is invalid or inaccessible. It also includes safeguards to prevent cross-user message leakage.
+
+```mermaid
+graph TD
+    A[Background Producer] --> B[deliver_background_message];
+    B --> C{post_background_message};
+    C --> D{_resolve_user_int_id};
+    D -- No User ID --> E[Log Warning];
+    D -- User ID --> F{Resolve Target Chat};
+    F -- Valid Chat ID & Owner Match --> G[Use Provided Chat];
+    F -- Invalid Chat ID / Owner Mismatch --> H{find_or_create_auto_chat};
+    H --> I[Create/Retrieve Auto Chat];
+    G --> J[ChatService.add_message];
+    I --> J;
+    J --> K[db.commit()];
+    K --> L[notify_chat_event];
+    L --> M[Postgres LISTEN/NOTIFY];
+    M --> N[SSE Stream to Frontend];
+    C -- Failure --> O[Log Error (fail-soft)];
+```
+**Title**: Background Chat Message Delivery Flow
+**Sources**: [orchestrator/services/chat_messenger.py:1-24](), [orchestrator/services/chat_messenger.py:41-48](), [orchestrator/services/chat_messenger.py:51-98](), [orchestrator/services/chat_messenger.py:121-131](), [orchestrator/services/chat_messenger.py:133-172]()
+
+### Context Guard for LLM Calls
+
+The `ContextGuard` in `core/context_guard.py` is a critical service for managing token usage before LLM calls. It prevents `context_length_exceeded` errors by dynamically compacting conversations when they approach the model's context limit. This involves counting tokens, resolving model-aware compaction thresholds, summarizing older turns, and flushing key facts to durable memory before discarding messages.
+
+```mermaid
+graph TD
+    A[LLM Call Request] --> B{ContextGuard.check_and_compact};
+    B --> C[Count Tokens in Messages];
+    C --> D{Get Model Context Window};
+    D --> E{Resolve Compaction Threshold};
+    E -- Below Threshold --> F[Pass Messages Unchanged];
+    E -- Above Threshold --> G[Compact Messages];
+    G --> H[Summarize Older Turns];
+    G --> I[Keep Recent Context];
+    G --> J[Flush Key Facts to Durable Memory];
+    J --> F;
+    F --> K[Return (messages, was_compacted)];
+```
+**Title**: Context Guard Token Management Flow
+**Sources**: [orchestrator/core/context_guard.py:1-28](), [orchestrator/core/context_guard.py:49-51](), [orchestrator/core/context_guard.py:87-109](), [orchestrator/core/context_guard.py:158-163]()
+
+### Real-time Board Events
+
+The `board_events.py` service enables real-time updates for the Command Center UI using PostgreSQL's `LISTEN/NOTIFY` mechanism. When a board task changes status, `notify_board_event` fires a `pg_notify` on the `board_events` channel. An `_SSEListener` thread, running a raw `psycopg2` connection, listens for these notifications and pushes them onto an `asyncio.Queue`. The `board_event_stream` then drains this queue and forwards the events as Server-Sent Events (SSE) to subscribed clients, ensuring sub-second UI updates. A similar mechanism exists for `notify_chat_event` to update chat interfaces.
+
+```mermaid
+graph TD
+    A[Board Task Status Change] --> B{notify_board_event};
+    B --> C[PostgreSQL: pg_notify("board_events", payload)];
+    C --> D[_SSEListener Thread];
+    D --> E[Raw psycopg2 LISTEN Connection];
+    E -- Notification Received --> F[asyncio.Queue.put_nowait(payload)];
+    F --> G[board_event_stream (AsyncIterator)];
+    G --> H[SSE Client (Frontend Command Center)];
+    I[Chat Message Landing] --> J{notify_chat_event};
+    J --> C;
+```
+**Title**: Real-time Board and Chat Event Flow
+**Sources**: [orchestrator/services/board_events.py:1-16](), [orchestrator/services/board_events.py:38-69](), [orchestrator/services/board_events.py:71-101](), [orchestrator/services/board_events.py:104-165]()
+
+---
+
+## Service Initialization & Seeding
+
+The platform uses a robust seeding pattern to ensure that every workspace is initialized with a consistent set of core services and agents.
+
+- **Auto Agent Seeding**: Every workspace receives exactly one "Auto" agent (slug `auto-{workspace_id}`) which serves as the default orchestrator and single source of truth for the workspace's LLM config and persona [orchestrator/core/seeds/seed_auto_agent.py:5-10]().
+- **Skill Assignment**: Core skills like `platform-management` are idempotently assigned to system agents. The seeding process uses `pg_advisory_xact_lock` to prevent race conditions during concurrent workspace provisioning [orchestrator/core/seeds/seed_auto_agent.py:97-102]().
+- **Onboarding Guard**: The `FirstLoginGuard` and `useAutoTour` hooks coordinate to ensure the "Welcome Modal" and Shepherd tours only fire for brand-new workspaces (where `is_new_workspace` is true) [frontend/components/onboarding/first-login-guard.tsx:20-24](), [frontend/hooks/use-auto-tour.ts:30-32]().
+
+**Sources**: [orchestrator/core/seeds/seed_auto_agent.py:5-16](), [orchestrator/core/seeds/seed_auto_agent.py:97-102](), [frontend/components/onboarding/first-login-guard.tsx:20-28](), [frontend/hooks/use-auto-tour.ts:30-32]()
 
 ---

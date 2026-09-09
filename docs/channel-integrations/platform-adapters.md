@@ -6,253 +6,147 @@
 The following files were used as context for generating this wiki page:
 
 - [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md](docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md)
+- [frontend/app/sign-in/[[...rest]]/page.tsx](frontend/app/sign-in/[[...rest]]/page.tsx)
+- [frontend/app/sign-up/[[...rest]]/page.tsx](frontend/app/sign-up/[[...rest]]/page.tsx)
+- [frontend/app/tools/callback/page.tsx](frontend/app/tools/callback/page.tsx)
+- [frontend/components/__tests__/prd175-auth-edition.test.tsx](frontend/components/__tests__/prd175-auth-edition.test.tsx)
+- [frontend/components/auth/sign-up-form.tsx](frontend/components/auth/sign-up-form.tsx)
+- [frontend/components/local-auth-provider.tsx](frontend/components/local-auth-provider.tsx)
+- [frontend/components/settings/ChannelsSettingsTab.tsx](frontend/components/settings/ChannelsSettingsTab.tsx)
+- [frontend/lib/auth-edition.ts](frontend/lib/auth-edition.ts)
 - [orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py](orchestrator/alembic/versions/20260215_add_heartbeat_and_channels.py)
+- [orchestrator/alembic/versions/prd008a4_channel_drivers.py](orchestrator/alembic/versions/prd008a4_channel_drivers.py)
 - [orchestrator/api/channels.py](orchestrator/api/channels.py)
 - [orchestrator/api/heartbeat.py](orchestrator/api/heartbeat.py)
-- [orchestrator/channels/base.py](orchestrator/channels/base.py)
+- [orchestrator/channels/discord_adapter.py](orchestrator/channels/discord_adapter.py)
+- [orchestrator/channels/drivers/__init__.py](orchestrator/channels/drivers/__init__.py)
+- [orchestrator/channels/drivers/base.py](orchestrator/channels/drivers/base.py)
+- [orchestrator/channels/drivers/discord.py](orchestrator/channels/drivers/discord.py)
+- [orchestrator/channels/drivers/slack.py](orchestrator/channels/drivers/slack.py)
+- [orchestrator/channels/drivers/telegram.py](orchestrator/channels/drivers/telegram.py)
+- [orchestrator/channels/drivers/webhook.py](orchestrator/channels/drivers/webhook.py)
+- [orchestrator/channels/drivers/whatsapp.py](orchestrator/channels/drivers/whatsapp.py)
 - [orchestrator/channels/manager.py](orchestrator/channels/manager.py)
+- [orchestrator/channels/slack_adapter.py](orchestrator/channels/slack_adapter.py)
 - [orchestrator/channels/telegram_adapter.py](orchestrator/channels/telegram_adapter.py)
+- [orchestrator/core/composio/entity_manager.py](orchestrator/core/composio/entity_manager.py)
 - [orchestrator/core/models/channels.py](orchestrator/core/models/channels.py)
+- [orchestrator/tests/test_channel_adapter_contract.py](orchestrator/tests/test_channel_adapter_contract.py)
+- [orchestrator/tests/test_prd175_auth_edition.py](orchestrator/tests/test_prd175_auth_edition.py)
+- [orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py](orchestrator/tests/test_prd184_us005_legacy_channel_adapters_deleted.py)
 
 </details>
 
 
 
-This page documents the individual platform adapter implementations for Telegram, Slack, Discord, LINE, and Google Chat. Each adapter translates platform-specific message formats into the universal `RequestEnvelope` format and routes responses back through platform APIs.
+This page documents the individual platform adapter implementations for Telegram, Slack, Discord, and WhatsApp. Each adapter translates platform-specific message formats into the universal `RequestEnvelope` format and routes responses back through platform APIs.
 
 For the architecture and lifecycle management of all adapters, see [12.1 Channel Architecture](). For the message processing pipeline that all adapters share, see [12.2 Message Pipeline](). For API endpoints to manage channel connections, see [12.4 Channel API Reference]().
 
 ---
 
-## Adapter Overview
+## Adapter Overview & Shipped Drivers
 
-Automatos supports five messaging platforms through dedicated adapter implementations. Each adapter extends `BaseChannelAdapter` [orchestrator/channels/base.py:22-23]() and implements platform-specific authentication, message handling, and API communication patterns.
+Automatos supports messaging platforms through dedicated adapter implementations. The system utilizes a driver-mediated architecture where `ChannelDriver` defines the interface for platform interactions, while `BaseChannelAdapter` [orchestrator/channels/base.py:22]() (and its subclasses) handles the runtime lifecycle within the orchestrator [orchestrator/api/channels.py:5-11]().
 
 **Adapter Implementations**
 
-| Platform | Class | Library | Mode | Max Message Length |
-|----------|-------|---------|------|-------------------|
-| Telegram | `TelegramAdapter` | `python-telegram-bot` v22+ | Polling | 4,096 chars |
-| Slack | `SlackAdapter` | `slack-bolt` | Socket Mode / Events API | No hard limit |
-| Discord | `DiscordAdapter` | `discord.py` v2.0+ | Event Listener | 2,000 chars |
-| LINE | `LineAdapter` | `httpx` (HTTP API) | Webhook | 5,000 chars |
-| Google Chat | `GoogleChatAdapter` | `httpx` + `google-auth` | Webhook + Service Account | 4,096 chars |
+| Platform | Driver Class | Supported Modes | Required Config |
+|----------|--------------|-----------------|-----------------|
+| Telegram | `TelegramDriver` | Webhook, Polling | `bot_token` |
+| Slack | `SlackDriver` | Webhook, Socket | `bot_token`, `signing_secret` |
+| Discord | `DiscordDriver` | Webhook, Events | `bot_token` |
+| WhatsApp | `WhatsAppDriver` | Webhook | `phone_number_id`, `access_token` |
+| Webhook | `WebhookDriver` | Webhook (Outbound POST) | `webhook_url` |
 
-Sources: [orchestrator/channels/manager.py:122-134](), [orchestrator/api/channels.py:24-42](), [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md:33-42]()
+Sources: [orchestrator/api/channels.py:5-60](), [orchestrator/core/models/channels.py:19-46]()
 
 ---
 
 ## Adapter Factory and Registry
 
-The `ChannelManager` dynamically instantiates platform adapters using lazy imports to avoid requiring all optional dependencies at startup [orchestrator/channels/manager.py:116-121]().
+The `ChannelManager` dynamically instantiates platform adapters using lazy imports inside `_create_adapter()` [orchestrator/channels/manager.py:126-170](). It reconciles database connection status with the actual running state of polling adapters at read time via `is_running()` [orchestrator/channels/manager.py:176-187]().
 
-**Adapter Resolution Diagram**
+**Diagram: Natural Language Space to Code Entity Space — Adapter Resolution**
 ```mermaid
 graph TD
-    Manager["ChannelManager<br/>_adapters: Dict[str, BaseChannelAdapter]"]
-    Factory["_create_adapter()"]
-    
-    Manager -->|"start_adapter()"| Factory
-    
-    Factory -->|"platform='telegram'"| TelegramMod["importlib.import_module<br/>'.telegram_adapter'"]
-    Factory -->|"platform='slack'"| SlackMod["importlib.import_module<br/>'.slack_adapter'"]
-    Factory -->|"platform='discord'"| DiscordMod["importlib.import_module<br/>'.discord_adapter'"]
-    Factory -->|"platform='line'"| LineMod["importlib.import_module<br/>'.line_adapter'"]
-    Factory -->|"platform='google_chat'"| GChatMod["importlib.import_module<br/>'.google_chat_adapter'"]
-    
-    TelegramMod --> TelegramCls["TelegramAdapter(connection_id, workspace_id, config)"]
-    SlackMod --> SlackCls["SlackAdapter(connection_id, workspace_id, config)"]
-    DiscordMod --> DiscordCls["DiscordAdapter(connection_id, workspace_id, config)"]
-    LineMod --> LineCls["LineAdapter(connection_id, workspace_id, config)"]
-    GChatMod --> GChatCls["GoogleChatAdapter(connection_id, workspace_id, config)"]
-    
-    TelegramCls & SlackCls & DiscordCls & LineCls & GChatCls --> Manager
+    subgraph "NaturalLanguageSpace"
+        UserAction["StartActivePollingChannels"] --> ManagerStart["ChannelManager.start_all()"]
+    end
+    subgraph "CodeEntitySpace"
+        ManagerStart --> QueryDB["ChannelConnection db.query()"]
+        QueryDB --> StartAdapter["ChannelManager.start_adapter()"]
+        StartAdapter --> CreateAdapter["ChannelManager._create_adapter()<br/>orchestrator/channels/manager.py:126"]
+        CreateAdapter --> TelegramMod["importlib.import_module<br/>orchestrator/channels/manager.py:153"]
+        TelegramMod --> TelegramCls["TelegramAdapter<br/>orchestrator/channels/telegram_adapter.py:19"]
+    end
 ```
-
-**Adapter Map**
-
-The factory uses a static map `_ADAPTER_MAP` in `orchestrator/channels/manager.py` to resolve platform names to module paths [orchestrator/channels/manager.py:122-134](). Missing dependencies (e.g., `python-telegram-bot` not installed) result in an `ImportError`, which is caught and logged as a warning [orchestrator/channels/manager.py:147-153]().
-
-Sources: [orchestrator/channels/manager.py:109-161]()
+Sources: [orchestrator/channels/manager.py:32-170](), [orchestrator/tests/test_channel_adapter_contract.py:80-90]()
 
 ---
 
 ## Telegram Adapter
 
 **Implementation Details**
+The `TelegramAdapter` manages async Telegram bot interactions using `python-telegram-bot` [orchestrator/channels/telegram_adapter.py:19-21]().
 
-The `TelegramAdapter` uses `python-telegram-bot` v22+ for asynchronous bot integration [orchestrator/channels/telegram_adapter.py:5-6]().
+- **Polling Mode**: Spawns an async task running `_app.updater.start_polling()` [orchestrator/channels/telegram_adapter.py:48]().
+- **Webhook Mode**: Delegates inbound parsing to the webhook endpoint handler.
+- **Set-Once Default Chat ID**: Captures inbound chat IDs via `/start` or regular messages to anchor `telegram_default_chat_id` in workspace settings without allowing arbitrary inbound updates to hijack target routing [orchestrator/channels/telegram_adapter.py:118-126]().
 
-**Connection Mode**
-It operates in **Long Polling** mode by initializing the `ApplicationBuilder` and starting the updater via `self._app.updater.start_polling()` [orchestrator/channels/telegram_adapter.py:36-48]().
-
-**Multimodal Support (PRD-127)**
-The adapter handles text, photos, and documents [orchestrator/channels/telegram_adapter.py:156-158]().
-- **Photos**: Downloads the highest resolution version via `context.bot.get_file(photo.file_id)` and uploads it to the `AttachmentStore` using `self.upload_attachment()` [orchestrator/channels/telegram_adapter.py:171-178]().
-- **Documents**: Downloads files and preserves the original filename and mime type.
-
-**Persistence**
-The adapter captures the `chat_id` from incoming `/start` or `/help` commands and persists it to `workspace.settings.integrations.telegram_default_chat_id` to enable proactive notifications [orchestrator/channels/telegram_adapter.py:101-142]().
-
-**Message Chunking**
-Telegram enforces a 4,096 character limit. The `send_message` implementation automatically chunks outbound text to comply [orchestrator/channels/telegram_adapter.py:79-82]().
-
-Sources: [orchestrator/channels/telegram_adapter.py:19-178](), [orchestrator/api/channels.py:31](), [docs/PRDS/55-AUTONOMOUS-ASSISTANT-PLATFORM.md:20]()
+Sources: [orchestrator/channels/telegram_adapter.py:1-167](), [orchestrator/channels/drivers/telegram.py:53-58]()
 
 ---
 
-## Slack Adapter
+## Slack Adapter & Code Entity Space Mapping
 
-**Code Entity Space Mapping**
+**Diagram: Natural Language Space to Code Entity Space — Slack Integration**
 ```mermaid
 graph TB
-    subgraph "CodeEntities"
-        SA["SlackAdapter (orchestrator/channels/slack_adapter.py)"]
-        AA["AsyncApp (slack_bolt.async_app)"]
-        SMH["AsyncSocketModeHandler (slack_bolt.adapter.socket_mode.async_handler)"]
+    subgraph "NaturalLanguageSpace"
+        IncomingEvent["ProcessInboundSlackEvent"] --> SlackRoute["SlackDriver.verify()"]
     end
-
-    subgraph "PlatformEvents"
-        EV["Slack message event"]
+    subgraph "CodeEntitySpace"
+        SlackRoute --> SlackDriverCls["SlackDriver<br/>orchestrator/channels/drivers/slack.py"]
+        SlackDriverCls --> AuthTest["test_connection()<br/>Slack auth.test API"]
+        SlackDriverCls --> PostMsg["send_message()<br/>Slack chat.postMessage API"]
+        SlackDriverCls --> ConnModel["ChannelConnection<br/>orchestrator/core/models/channels.py:19"]
     end
-
-    SA -->|"start()"| AA
-    AA -->|"@app.message('')"| MH["_on_message()"]
-    EV --> MH
-    MH -->|"handle_message()"| Base["BaseChannelAdapter.handle_message()"]
-    Base -->|"_to_envelope()"| Env["RequestEnvelope"]
 ```
+Sources: [orchestrator/core/models/channels.py:19-51](), [orchestrator/channels/drivers/slack.py:36-106]()
 
 **Implementation Details**
+The `SlackDriver` requires a `bot_token` (typically prefixed with `xoxb-`) and a `signing_secret` [orchestrator/channels/drivers/slack.py:40-41](). Verification performs an `auth.test` call against the Slack Web API, and outgoing messages dispatch via `chat.postMessage` [orchestrator/channels/drivers/slack.py:54-106]().
 
-The `SlackAdapter` uses the `slack-bolt` async SDK. It supports two connection modes:
-
-1. **Socket Mode**: WebSocket connection via `AsyncSocketModeHandler`. Requires `app_token` (starts with `xapp-`).
-2. **Events API Mode**: HTTP webhooks. Used when `app_token` is not provided.
-
-**Multimodal Support (PRD-127)**
-It downloads files from Slack using the `bot_token` for authorization and uploads them to the platform's `AttachmentStore` using the inherited `upload_attachment` method [orchestrator/channels/base.py:70-106]().
-
-**Thread Support**
-Responses preserve thread context by passing `thread_ts` from the original message metadata to `chat_postMessage`.
-
-Sources: [orchestrator/channels/manager.py:125](), [orchestrator/api/channels.py:32](), [orchestrator/channels/base.py:112-186]()
+Sources: [orchestrator/channels/drivers/slack.py:36-146](), [frontend/components/settings/ChannelsSettingsTab.tsx:47-54]()
 
 ---
 
-## Discord Adapter
+## Discord and WhatsApp Adapters
 
-**Implementation Details**
+**Discord Implementation**
+The `DiscordDriver` handles outbound and event-driven communications using bot tokens. It verifies tokens against the `users/@me` endpoint and sends messages via `channels/{target}/messages` [orchestrator/channels/drivers/discord.py:39-132]().
 
-The `DiscordAdapter` uses `discord.py` v2.0+ with event-driven message handling.
+**WhatsApp Implementation**
+The `WhatsAppDriver` integrates with the Meta Cloud API. It requires a `phone_number_id` and an `access_token`, verifying metadata against the Graph API and posting outbound messages to the Meta messaging endpoint [orchestrator/channels/drivers/whatsapp.py:38-148]().
 
-**Intents Configuration**
-Discord requires explicit intent declarations for accessing message content, specifically `intents.message_content = True`.
-
-**Multimodal Support (PRD-127)**
-Iterates through `message.attachments`, downloads bytes via `attachment.read()`, and populates `attachment_ids` before calling the core `handle_message()` logic [orchestrator/channels/base.py:112-133]().
-
-**Message Chunking**
-Discord enforces a 2,000 character limit. Outbound messages are split into chunks in `send_message`.
-
-Sources: [orchestrator/channels/manager.py:126](), [orchestrator/api/channels.py:33](), [orchestrator/channels/base.py:112-186]()
+Sources: [orchestrator/channels/drivers/discord.py:39-132](), [orchestrator/channels/drivers/whatsapp.py:38-148]()
 
 ---
 
-## Line Adapter
+## Configuration, Schema, and Contract Testing
 
-**Implementation Details**
+All channel configurations are stored persistently in the database via the `ChannelConnection` model [orchestrator/core/models/channels.py:19-46]().
 
-The `LineAdapter` implements the LINE Messaging API using `httpx` for asynchronous communication.
+**ChannelConnection Schema Properties**
+- `platform`: String identifier (`telegram`, `slack`, `discord`, `whatsapp`) [orchestrator/core/models/channels.py:25]()
+- `mode`: Connectivity mode (`webhook` or `polling`) [orchestrator/core/models/channels.py:36]()
+- `config`: Encrypted JSON object holding platform tokens and secrets [orchestrator/core/models/channels.py:29]()
+- `status`: Lifecycle state (`active`, `inactive`, `error`) [orchestrator/core/models/channels.py:30]()
 
-**Messaging Strategy**
-- **Reply Token**: Prefers using `replyToken` for responding to incoming webhooks, as this is typically free under LINE's pricing model.
-- **Push API**: Uses `send_message()` to push messages to users when a reply token is unavailable or expired.
+**Adapter Contract Verification**
+The adapter suite is verified via parameterized contract tests [orchestrator/tests/test_channel_adapter_contract.py:1-49]() ensuring every `BaseChannelAdapter` subclass strictly exposes the mandatory 5-method surface: `start`, `stop`, `send_message`, `test_connection`, and `_to_envelope` [orchestrator/tests/test_channel_adapter_contract.py:16-22]().
 
-**Signature Verification**
-Verifies webhook authenticity using HMAC-SHA256 with the `channel_secret`.
-
-Sources: [orchestrator/channels/manager.py:133](), [orchestrator/api/channels.py:40]()
-
----
-
-## Google Chat Adapter
-
-**Code Entity Space Mapping**
-```mermaid
-graph TB
-    subgraph "GoogleCloud"
-        SA_JSON["service_account_json"]
-        G_API["chat.googleapis.com"]
-    end
-
-    subgraph "AdapterLogic"
-        GCA["GoogleChatAdapter (orchestrator/channels/google_chat_adapter.py)"]
-        AUTH["_authenticate()"]
-        SEND["send_message()"]
-        WH["handle_webhook()"]
-    end
-
-    SA_JSON --> AUTH
-    AUTH -->|"scopes=['chat.bot']"| GCA
-    WH -->|"MESSAGE event"| GCA
-    GCA --> SEND
-    SEND -->|"httpx.post"| G_API
-```
-
-**Implementation Details**
-
-The `GoogleChatAdapter` operates in **webhook mode** and uses **service account authentication** for outbound API calls.
-
-**Authentication Lifecycle**
-- Loads credentials from `service_account_key` provided in the connection config [orchestrator/api/channels.py:35]().
-- Performs async credential refresh using `google-auth`.
-- Automatically refreshes tokens on `401 Unauthorized` responses during `send_message`.
-
-Sources: [orchestrator/channels/manager.py:128](), [orchestrator/api/channels.py:35]()
-
----
-
-## Configuration Storage
-
-All adapter configurations are stored in the `channel_connections` table with workspace-scoped isolation [orchestrator/core/models/channels.py:24]().
-
-**ChannelConnection Model**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `platform` | String | telegram, slack, discord, line, google_chat [orchestrator/core/models/channels.py:25]() |
-| `config` | JSON | Stores credentials (e.g. `bot_token`) [orchestrator/core/models/channels.py:26]() |
-| `status` | String | active, inactive, error [orchestrator/core/models/channels.py:27]() |
-| `default_agent_id` | Integer | Optional default routing target [orchestrator/core/models/channels.py:29]() |
-
-**Required Configuration by Platform**
-
-| Platform | Required Fields |
-|----------|----------------|
-| Telegram | `bot_token` [orchestrator/api/channels.py:31]() |
-| Slack | `bot_token`, `signing_secret` [orchestrator/api/channels.py:32]() |
-| Discord | `bot_token` [orchestrator/api/channels.py:33]() |
-| LINE | `channel_access_token`, `channel_secret` [orchestrator/api/channels.py:40]() |
-| Google Chat | `service_account_key` [orchestrator/api/channels.py:35]() |
-
-Sources: [orchestrator/core/models/channels.py:19-33](), [orchestrator/api/channels.py:30-42]()
-
----
-
-## Adapter Lifecycle
-
-All adapters share a common lifecycle managed by the `ChannelManager` singleton [orchestrator/channels/manager.py:187-192]().
-
-**Startup Sequence**
-1. `ChannelManager.start_all()` queries all connections with `status == "active"` [orchestrator/channels/manager.py:32-44]().
-2. `start_adapter()` stops any existing instance for that connection ID [orchestrator/channels/manager.py:81-82]().
-3. `_create_adapter()` uses `importlib` to perform a lazy import of the platform module [orchestrator/channels/manager.py:143-145]().
-4. `adapter.start()` is called to initialize platform listeners [orchestrator/channels/manager.py:89]().
-
-**Shutdown Sequence**
-`ChannelManager.stop_adapter()` removes the adapter from the internal registry and calls its `stop()` method to close network connections and cancel background tasks [orchestrator/channels/manager.py:99-103]().
-
-Sources: [orchestrator/channels/manager.py:22-178]()
+Sources: [orchestrator/core/models/channels.py:1-51](), [orchestrator/tests/test_channel_adapter_contract.py:1-93]()
 
 ---
