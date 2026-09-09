@@ -46,12 +46,21 @@ cp .env.example .env      # fill in section 1 (the three secrets)
 docker compose up
 ```
 
-**One LLM key** makes the agents think. The platform boots and serves without
-one, but chat, agents and embeddings have no model to call until you set
-exactly one of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`
-in `.env` — or add a key later in the UI under **Settings → API Keys**
-(providers: OpenAI, Anthropic, OpenRouter, Azure OpenAI; stored encrypted in
-your local database). While no key is stored the chat page shows a banner,
+**One model key** makes the agents think. The platform boots and serves without
+one, but chat, agents and embeddings have no model to call until you set one of
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`
+or `DEEPSEEK_API_KEY` in `.env` — or add a key later in the UI under
+**Settings → API Keys**, which lists every provider in the registry (OpenAI,
+Anthropic, Google, OpenRouter, NVIDIA, DeepSeek, Azure OpenAI, AWS Bedrock,
+Grok / xAI, Cohere, HuggingFace), validates a key live on save, and stores it
+encrypted in your local database. Models are installed *per route* in
+**Marketplace → LLMs** (one tab per provider): the same model served by NVIDIA
+and by OpenRouter is two cards with two prices, and an installed model is bound
+to the route you chose — the runtime never reroutes a free route to a paid one.
+NVIDIA's hosted endpoint (build.nvidia.com) serves its open models at no charge
+under NVIDIA's own trial terms and a rate limit of about 40 requests a minute;
+the key is your agreement with NVIDIA, and Automatos only routes to it
+(details in [QUICKSTART.md](../../QUICKSTART.md)). While no key is stored the chat page shows a banner,
 *"Add an LLM key to bring Auto to life"*, linking to that tab. The key stored
 there is also what embeddings use (`PLATFORM_KEY_WORKSPACE_ID` in
 `envs/api.defaults` points the platform key slot at the local workspace), so
@@ -178,11 +187,14 @@ profile and its files live **on your machine**:
   shows a permission request (a diff for edits), and the tool runs only after
   you approve (`canvas_approvals.py`). Read-only navigation is not gated.
   Local is not unguarded.
-- **Model credential.** Canvas sessions run a headless Claude Agent SDK
-  subprocess inside the worker. It reads only `ANTHROPIC_API_KEY` or
-  `CLAUDE_CODE_OAUTH_TOKEN` (a Claude subscription token) from `.env` — keys
-  stored through the UI, and OpenAI/OpenRouter keys, do not reach it. With
-  neither set, starting a session fails immediately instead of idling.
+- **Model credential.** The Canvas's *Auto session* engine runs a headless
+  Claude Agent SDK subprocess inside the worker, billed to an API key. It
+  reads only `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` from `.env` —
+  keys stored through the UI, and OpenAI/OpenRouter keys, do not reach it;
+  with neither set the tab says so instead of idling. The **Runtime Canvas**
+  for session agents (see *Session mode* below) is a different thing: it needs
+  no key, because the terminal it shows is your own Claude Code, launched by
+  the host on your machine.
 - **Linux ownership note.** The worker process runs as uid 1000 (`worker`).
   Its entrypoint `chown -R`s the mounted directory to that uid whenever it is
   owned by anyone else, so on a Linux host the files under
@@ -278,6 +290,18 @@ something you edited, and does not resurrect something you deleted (the
 workspace keeps a ledger of what was seeded). The marketplace catalogue
 (agents, packages, personas, plugin categories) is seeded the same way and is
 fully usable offline.
+
+### What the books record
+
+Every model call the platform makes is written to `llm_usage` with the provider
+that served it (`openrouter`, `nvidia`, `anthropic`, `claude_code`, …), the lane
+that asked (chat, board ticket, mission, heartbeat, embedding, rerank, …), the
+agent, the execution it ran for, the tokens including prompt-cache reads and
+writes, and the cost priced from that provider's route — $0 for a free NVIDIA
+route or a subscription session, the provider's own reported figure when it
+gives one (OpenRouter does). Analytics → LLM & Costs reads exactly that. The
+vocabulary and the rules are in
+[docs/ANALYTICS-COST-TRACKING.md](../ANALYTICS-COST-TRACKING.md).
 
 ## 9. What is not in the local edition
 
@@ -477,8 +501,20 @@ make cli-host PAIR=XXXX-XXXX
 ```
 
 The host exchanges the code for a token it keeps in `~/.automatos/cli-host/`
-(owner-only files) and starts serving. Afterwards it is just `make cli-host`;
-stop it with Ctrl-C. The fleet shows the host as connected while it runs.
+(owner-only files) and starts serving. Then make it a login service:
+
+```bash
+make cli-host-install      # launchd LaunchAgent on macOS, a systemd --user unit on Linux
+make cli-host-status       # is it running, which version, which directories
+make cli-host-restart      # after you change LOCAL_PROJECTS_DIR
+```
+
+The service starts at login and restarts itself when its own source or the
+backend's host contract changes (a "restart requested" line in
+`~/.automatos/cli-host/host.log`). `make cli-host` in a terminal still works
+for a one-off session, Ctrl-C to stop. Settings → Session mode and the fleet
+show the host as connected while it runs; one host per machine serves every
+session agent in the workspace.
 
 ### Where sessions work
 
@@ -492,11 +528,19 @@ session log: model, tokens, files, refused tool calls, the last tool calls and
 the `claude --resume` command.
 
 Your own repositories: set `LOCAL_PROJECTS_DIR=/path/to/your/projects` in
-`.env` and run `make up`. The explorer shows that folder read-only under
-`projects/`, the host registers it, and an agent's working directory can point
-at any repository inside it. The folder is mounted read-only into the
-platform by default; sessions write to it through the host on your machine.
-`LOCAL_PROJECTS_MOUNT=rw` lets the Code Canvas editor save into it directly.
+`.env` — one parent folder for everything an agent may open: single
+repositories, a workspace of many repositories — then `make up` and
+`make cli-host-install`. The explorer shows that folder under `projects/`, the
+host registers it, and each agent gets its own **workspace folder** inside it
+(Agent → Model → Workspace folder; the form checks the path against the host's
+registered directories and offers *Open in the Canvas*). The explorer and the
+agent's Claude Code session both open there. The folder is mounted read-only
+into the platform by default; sessions write to it through the host on your
+machine. `LOCAL_PROJECTS_MOUNT=rw` lets the Code Canvas editor save into it
+directly. Settings → Session mode chooses the default folder for agents that
+name none (`projects` or the per-ticket `sessions/<ticket>` folder). A single
+repository gets a git worktree per ticket; a workspace of many repositories
+does not (`worktree_per_ticket` on the agent).
 
 Approvals: on this edition a ticket you create and assign — on the board, or by
 asking Auto in chat — runs without a separate approval; the workspace policy
@@ -511,19 +555,44 @@ workspace folder are listed on the ticket as references (path only).
 ### Using it
 
 Give an agent the runtime **Claude Code session** (`runtime: cli`, provider
-`claude`, an optional model alias) and assign it a ticket. The ticket stays
-*Assigned* until the host claims it, then *In Progress* while the session runs,
-then *Done* — or *Review* when the session hit a policy denial ("could not run
-the tests" must never read as finished). Cancel from the board; the session is
-stopped on its next event. Take over any session in your own terminal from its
-directory: `claude --resume <session id>` (shown on the ticket).
+`claude`, an optional model alias such as `sonnet` or `opus`) and assign it a
+ticket. The ticket stays *Assigned* until the host claims it, then *In
+Progress* while the session runs, then *Done* — or *Review* when the session
+hit a policy denial ("could not run the tests" must never read as finished).
+Cancel from the board; the session is stopped on its next event.
+
+What the session is told is what you configured: the agent's persona and the
+full text of its skills are rendered into the session's system prompt (up to
+`CLI_SESSION_SKILLS_MAX_CHARS`), together with the ticket contract. Every lane
+that runs agents reaches a session agent through the same ticket — a chat
+message, a playbook step, a mission task, a heartbeat, a schedule, a channel —
+and the lane waits for the ticket inside its own timeout. A permission
+question the session asks (a command outside its allowlist) shows up as an
+approval card in the Canvas and on the ticket; unanswered, it is denied after
+the host's ask timeout and the ticket goes to *Review* with the reason.
+
+**The Runtime Canvas.** Pick a session agent in the chat's agent menu (or
+*Open the session in the Canvas* on its ticket) and the Canvas opens
+full-screen: the explorer on the agent's workspace folder on the left, and on
+the right a terminal in which the host has already launched that agent's own
+Claude Code session — resumed when its transcript exists on this machine,
+started fresh otherwise, with the agent's persona appended. You type alongside
+it; more terminal tabs (plain shells in the same folder) up to the host's
+`max_terminals`. The terminal runs on `127.0.0.1` behind single-use grants the
+backend hands to the page; nothing in it passes through the platform's API
+keys. A session's id is on its ticket, so `claude --resume <id>` from the
+session's directory also works from any terminal of your own.
 
 ### What you will and will not see
 
-Token usage per session, from Claude Code's own transcript. No dollar figures:
-on a subscription there is nothing to invent. Limits are Claude Code's own — when
-a session reports one, the ticket blocks with the reset time. Overage is
-controlled in your Anthropic account, not here.
+Token usage per session, from Claude Code's own transcript — on the ticket and
+in **Analytics → LLM & Costs**, where it is booked as *Claude Code ·
+Subscription* at $0 beside the paid and free API routes (input, output and
+cache-read tokens, per model). A resumed session reports only what the new
+turn added, never its history. No dollar figures: on a subscription there is
+nothing to invent. Limits are Claude Code's own — when a session reports one,
+the ticket blocks with the reset time. Overage is controlled in your Anthropic
+account, not here.
 
 ### The terms this design stays inside
 
