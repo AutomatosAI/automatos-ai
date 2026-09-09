@@ -265,11 +265,22 @@ def test_named_workspace_volume_is_gone():
 
 
 def test_mount_target_matches_worker_config_default():
+    """The host folder is mounted AS the local workspace's root: the compose
+    target is the worker's root (``worker_config.DEFAULT_WORKSPACE_ROOT``,
+    ``/workspaces``) plus the local workspace id — the layout the worker builds
+    (``<root>/<workspace_id>/…``) is unchanged inside the container, and the id
+    expression is the one the entrypoint seeds (``DEFAULT_WORKSPACE_ID``, with
+    the same default)."""
+    root = wc.DEFAULT_WORKSPACE_ROOT
     compose = _compose()
-    worker_env = _env(compose["services"][WORKER_SERVICE])
-    assert worker_env[wc.WORKSPACE_ROOT_ENV] == MOUNT_TARGET == wc.DEFAULT_WORKSPACE_ROOT
-    # The backend's view of the same directory (config.WORKSPACE_VOLUME_PATH).
-    assert _api_defaults()[wc.WORKSPACE_ROOT_ENV] == MOUNT_TARGET
+    # Both containers still address the volume at the worker root…
+    assert _env(compose["services"][WORKER_SERVICE])[wc.WORKSPACE_ROOT_ENV] == root
+    assert _api_defaults()[wc.WORKSPACE_ROOT_ENV] == root
+    # …and the host folder is mounted one level below it, as the local workspace.
+    assert MOUNT_TARGET.startswith(root + "/"), MOUNT_TARGET
+    workspace_segment = MOUNT_TARGET[len(root) + 1:]
+    assert workspace_segment == "${DEFAULT_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
+    assert "/" not in workspace_segment  # exactly one level below the worker root
 
 
 def test_worker_keeps_credential_passthrough_and_limits():
