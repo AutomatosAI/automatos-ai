@@ -62,6 +62,10 @@ Session mode turns your Claude Code subscription into an agent runtime — witho
 - **Your folders, your rules.** The host only runs sessions inside directories you registered; a git repository gets a worktree per ticket; sessions never push. The Claude Code binary is never modified, no token is ever touched or stored, and `-p` and `--bare` are never used.
 
 <p align="center">
+  <img src="docs/assets/09-Runtime-Canvas.png" alt="Runtime Canvas — the agent's own Claude Code session beside its files" width="800">
+</p>
+
+<p align="center">
   <img src="docs/assets/08-Session-Mode.png" alt="Session mode — pair a Claude Code host" width="800">
 </p>
 
