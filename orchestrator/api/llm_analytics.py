@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, and_
+from sqlalchemy import func, desc, and_, case
 
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
@@ -24,9 +24,50 @@ from core.models.core import LLMUsage, LLMModel, UserApiKey, Agent, RecipeExecut
 from core.models import WorkflowTemplate as WorkflowRecipe
 from core.models.workspaces import Workspace
 from core.credentials.encryption import get_encryption_service
+from core.llm.providers import describe_usage_provider
 from config import config
 
 logger = logging.getLogger(__name__)
+
+# Rows the OpenRouter activity sync copies from OpenRouter's own daily report.
+# They are a RECONCILIATION source (what OpenRouter says it charged), not
+# calls — summing them with the per-call rows counted every dollar twice.
+ACTIVITY_SYNC_REQUEST_TYPE = "activity_sync"
+ROUTE_KEY_SEPARATOR = "@"
+
+
+def route_key(model_id: Optional[str], provider: Optional[str]) -> str:
+    """One key per ROUTE — the same vendor model served by two providers (Kimi
+    K3 on NVIDIA for free, on OpenRouter for $3/M) is two lines, never one."""
+    return f"{model_id or 'unknown'}{ROUTE_KEY_SEPARATOR}{provider or 'unknown'}"
+
+
+def route_facts(model_id: Optional[str], provider: Optional[str]) -> Dict[str, Any]:
+    facts = describe_usage_provider(provider)
+    return {
+        "key": route_key(model_id, provider),
+        "model_id": model_id or "unknown",
+        "provider": facts["slug"],
+        "provider_label": facts["label"],
+        "billing": facts["billing"],
+        "label": f"{model_id or 'unknown'} · {facts['label']}",
+    }
+
+
+def _calls(db: Session, workspace_id, since: datetime):
+    """Every per-call row of the workspace in the period — never the sync copies."""
+    return db.query(LLMUsage).filter(
+        LLMUsage.workspace_id == workspace_id,
+        LLMUsage.created_at >= since,
+        LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE,
+    )
+
+
+def _platform_calls(db: Session, since: datetime):
+    return db.query(LLMUsage).filter(
+        LLMUsage.created_at >= since,
+        LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE,
+    )
 
 # PRD-143 S7 locked BOTH routers to super-admin; 2026-07-30 (Gerard) relaxes
 # the workspace-scoped router to workspace owners/admins: every endpoint here
@@ -64,6 +105,16 @@ class UsageGroup(BaseModel):
     output_tokens: int
     total_tokens: int
     total_cost: float
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    error_count: int = 0
+    avg_latency_ms: Optional[float] = None
+    # Route facts (group_by=route / model / provider): who served it, what it costs
+    model_id: Optional[str] = None
+    provider: Optional[str] = None
+    provider_label: Optional[str] = None
+    billing: Optional[str] = None
+    label: Optional[str] = None
 
 
 class CostBreakdown(BaseModel):
@@ -74,6 +125,17 @@ class CostBreakdown(BaseModel):
     request_count: int
 
 
+class ProviderUsage(BaseModel):
+    provider: str
+    label: str
+    billing: str
+    kind: str
+    request_count: int
+    total_tokens: int
+    total_cost: float
+    error_count: int = 0
+
+
 class UsageSummary(BaseModel):
     total_requests: int
     total_tokens: int
@@ -82,6 +144,9 @@ class UsageSummary(BaseModel):
     error_rate: float
     top_models: List[Dict[str, Any]]
     cost_trend: List[Dict[str, Any]]
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    by_provider: List[ProviderUsage] = Field(default_factory=list)
 
 
 class Recommendation(BaseModel):
@@ -112,56 +177,88 @@ def _period_start(period: str) -> datetime:
 
 @router.get("/usage", response_model=List[UsageGroup])
 async def get_usage(
-    period: str = Query("7d", description="1h|24h|7d|30d"),
-    group_by: str = Query("model", description="model|provider|agent|tier"),
+    period: str = Query("7d", description="1h|24h|7d|30d|90d"),
+    group_by: str = Query("model", description="model|route|provider|agent|tier|is_byok|request_type|execution"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Token usage grouped by dimension."""
+    """Token usage grouped by dimension.
+
+    ``route`` (model × serving provider) is the honest unit of cost: a free
+    NVIDIA route and a paid OpenRouter route for the same vendor model are two
+    rows. ``execution`` groups by the thing that spent (``mission:<id>``,
+    ``board_task:<id>``, ``chat:<id>``) so a mission's cost can be joined back.
+    """
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
     since = _period_start(period)
 
     group_col_map = {
-        "model": LLMUsage.model_id,
-        "provider": LLMUsage.provider,
-        "agent": LLMUsage.agent_id,
-        "tier": LLMUsage.tier,
-        "is_byok": LLMUsage.is_byok,
-        "request_type": LLMUsage.request_type,
+        "model": (LLMUsage.model_id,),
+        "route": (LLMUsage.model_id, LLMUsage.provider),
+        "provider": (LLMUsage.provider,),
+        "agent": (LLMUsage.agent_id,),
+        "tier": (LLMUsage.tier,),
+        "is_byok": (LLMUsage.is_byok,),
+        "request_type": (LLMUsage.request_type,),
+        "execution": (LLMUsage.execution_id,),
     }
-    group_col = group_col_map.get(group_by, LLMUsage.model_id)
+    group_cols = group_col_map.get(group_by, (LLMUsage.model_id,))
 
     rows = (
-        db.query(
-            group_col.label("key"),
+        _calls(db, ctx.workspace_id, since)
+        .with_entities(
+            *group_cols,
             func.count(LLMUsage.id).label("request_count"),
             func.sum(LLMUsage.input_tokens).label("input_tokens"),
             func.sum(LLMUsage.output_tokens).label("output_tokens"),
             func.sum(LLMUsage.total_tokens).label("total_tokens"),
             func.sum(LLMUsage.total_cost).label("total_cost"),
+            func.sum(LLMUsage.cache_read_tokens).label("cache_read_tokens"),
+            func.sum(LLMUsage.cache_write_tokens).label("cache_write_tokens"),
+            func.sum(case((LLMUsage.status == "error", 1), else_=0)).label("error_count"),
+            func.avg(LLMUsage.latency_ms).label("avg_latency_ms"),
         )
-        .filter(
-            LLMUsage.workspace_id == ctx.workspace_id,
-            LLMUsage.created_at >= since,
-        )
-        .group_by(group_col)
-        .order_by(desc("total_cost"))
+        .group_by(*group_cols)
+        .order_by(desc("total_cost"), desc("total_tokens"))
         .all()
     )
 
-    return [
-        UsageGroup(
-            key=str(r.key or "unknown"),
+    out: List[UsageGroup] = []
+    for r in rows:
+        values = tuple(r)[: len(group_cols)]
+        if group_by == "route":
+            facts = route_facts(values[0], values[1])
+            key = facts["key"]
+        elif group_by == "provider":
+            facts = route_facts(None, values[0])
+            facts["label"] = facts["provider_label"]
+            key = facts["provider"]
+        elif group_by == "model":
+            facts = {"model_id": values[0] or "unknown", "label": values[0] or "unknown"}
+            key = str(values[0] or "unknown")
+        else:
+            facts = {}
+            key = str(values[0] if values[0] is not None else "unknown")
+        out.append(UsageGroup(
+            key=key,
             request_count=r.request_count,
             input_tokens=int(r.input_tokens or 0),
             output_tokens=int(r.output_tokens or 0),
             total_tokens=int(r.total_tokens or 0),
             total_cost=float(r.total_cost or 0),
-        )
-        for r in rows
-    ]
+            cache_read_tokens=int(r.cache_read_tokens or 0),
+            cache_write_tokens=int(r.cache_write_tokens or 0),
+            error_count=int(r.error_count or 0),
+            avg_latency_ms=float(r.avg_latency_ms) if r.avg_latency_ms is not None else None,
+            model_id=facts.get("model_id"),
+            provider=facts.get("provider"),
+            provider_label=facts.get("provider_label"),
+            billing=facts.get("billing"),
+            label=facts.get("label"),
+        ))
+    return out
 
 
 @router.get("/costs", response_model=List[CostBreakdown])
@@ -189,16 +286,13 @@ async def get_costs(
         group_col = col_map.get(breakdown, LLMUsage.model_id)
 
     rows = (
-        db.query(
+        _calls(db, ctx.workspace_id, since)
+        .with_entities(
             group_col.label("key"),
             func.sum(LLMUsage.input_cost).label("input_cost"),
             func.sum(LLMUsage.output_cost).label("output_cost"),
             func.sum(LLMUsage.total_cost).label("total_cost"),
             func.count(LLMUsage.id).label("request_count"),
-        )
-        .filter(
-            LLMUsage.workspace_id == ctx.workspace_id,
-            LLMUsage.created_at >= since,
         )
         .group_by(group_col)
         .order_by(desc("total_cost"))
@@ -223,42 +317,64 @@ async def get_summary(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Dashboard summary: totals, top models, cost trend."""
+    """Dashboard summary: totals, cache share, top routes, per-provider split, cost trend."""
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
     since = _period_start(period)
-    base = db.query(LLMUsage).filter(
-        LLMUsage.workspace_id == ctx.workspace_id,
-        LLMUsage.created_at >= since,
-    )
+    base = _calls(db, ctx.workspace_id, since)
 
-    # Aggregates
     agg = base.with_entities(
         func.count(LLMUsage.id).label("cnt"),
         func.sum(LLMUsage.total_tokens).label("tokens"),
         func.sum(LLMUsage.total_cost).label("cost"),
         func.avg(LLMUsage.latency_ms).label("latency"),
+        func.sum(LLMUsage.cache_read_tokens).label("cache_read"),
+        func.sum(LLMUsage.cache_write_tokens).label("cache_write"),
+        func.sum(case((LLMUsage.status == "error", 1), else_=0)).label("errors"),
     ).first()
 
     total_requests = agg.cnt or 0
-    error_count = base.filter(LLMUsage.status == "error").count()
+    error_count = int(agg.errors or 0)
     error_rate = error_count / total_requests if total_requests > 0 else 0.0
 
-    # Top models
+    # Top ROUTES by cost, then by tokens (a free route that carried the work
+    # still shows up — cost alone would hide every NVIDIA and subscription call)
     top = (
         base.with_entities(
             LLMUsage.model_id,
+            LLMUsage.provider,
             func.sum(LLMUsage.total_cost).label("cost"),
+            func.sum(LLMUsage.total_tokens).label("tokens"),
             func.count(LLMUsage.id).label("cnt"),
         )
-        .group_by(LLMUsage.model_id)
-        .order_by(desc("cost"))
+        .group_by(LLMUsage.model_id, LLMUsage.provider)
+        .order_by(desc("cost"), desc("tokens"))
         .limit(5)
         .all()
     )
 
-    # Daily cost trend
+    provider_rows = (
+        base.with_entities(
+            LLMUsage.provider,
+            func.count(LLMUsage.id).label("cnt"),
+            func.sum(LLMUsage.total_tokens).label("tokens"),
+            func.sum(LLMUsage.total_cost).label("cost"),
+            func.sum(case((LLMUsage.status == "error", 1), else_=0)).label("errors"),
+        )
+        .group_by(LLMUsage.provider)
+        .order_by(desc("cost"), desc("tokens"))
+        .all()
+    )
+    by_provider = []
+    for r in provider_rows:
+        facts = describe_usage_provider(r.provider)
+        by_provider.append(ProviderUsage(
+            provider=facts["slug"], label=facts["label"], billing=facts["billing"], kind=facts["kind"],
+            request_count=r.cnt or 0, total_tokens=int(r.tokens or 0), total_cost=float(r.cost or 0),
+            error_count=int(r.errors or 0),
+        ))
+
     trend = (
         base.with_entities(
             func.date(LLMUsage.created_at).label("day"),
@@ -275,8 +391,16 @@ async def get_summary(
         total_cost=float(agg.cost or 0),
         avg_latency_ms=float(agg.latency) if agg.latency else None,
         error_rate=round(error_rate, 4),
+        cache_read_tokens=int(agg.cache_read or 0),
+        cache_write_tokens=int(agg.cache_write or 0),
+        by_provider=by_provider,
         top_models=[
-            {"model_id": m.model_id, "total_cost": float(m.cost or 0), "request_count": m.cnt}
+            {
+                **route_facts(m.model_id, m.provider),
+                "total_cost": float(m.cost or 0),
+                "total_tokens": int(m.tokens or 0),
+                "request_count": m.cnt,
+            }
             for m in top
         ],
         cost_trend=[
@@ -310,6 +434,7 @@ async def get_recommendations(
         .filter(
             LLMUsage.workspace_id == ctx.workspace_id,
             LLMUsage.created_at >= since,
+            LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE,
             LLMUsage.agent_id.isnot(None),
         )
         .group_by(LLMUsage.agent_id, LLMUsage.model_id)
@@ -355,49 +480,57 @@ async def get_daily_costs_by_model(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Daily cost breakdown per model for multi-line time-series chart."""
+    """Daily cost per ROUTE (model × serving provider) for the multi-line chart.
+
+    ``models`` holds the series keys (``<model>@<provider>``), ``routes`` the
+    facts behind each key (label, provider, billing) — a free route and a paid
+    route for the same vendor model are two lines.
+    """
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
     since = _period_start(period)
 
     rows = (
-        db.query(
+        _calls(db, ctx.workspace_id, since)
+        .with_entities(
             func.date(LLMUsage.created_at).label("day"),
             LLMUsage.model_id,
+            LLMUsage.provider,
             func.sum(LLMUsage.total_cost).label("cost"),
+            func.sum(LLMUsage.total_tokens).label("tokens"),
             func.count(LLMUsage.id).label("requests"),
         )
-        .filter(
-            LLMUsage.workspace_id == ctx.workspace_id,
-            LLMUsage.created_at >= since,
-        )
-        .group_by(func.date(LLMUsage.created_at), LLMUsage.model_id)
+        .group_by(func.date(LLMUsage.created_at), LLMUsage.model_id, LLMUsage.provider)
         .order_by("day")
         .all()
     )
 
-    # Pivot: {date -> {model -> cost}}
     date_map: Dict[str, Dict[str, float]] = {}
-    models_set: set = set()
+    routes: Dict[str, Dict[str, Any]] = {}
     for r in rows:
-        day_str = str(r.day)
-        model = r.model_id or "unknown"
-        models_set.add(model)
-        if day_str not in date_map:
-            date_map[day_str] = {}
-        date_map[day_str][model] = round(float(r.cost or 0), 6)
+        facts = route_facts(r.model_id, r.provider)
+        key = facts["key"]
+        routes.setdefault(key, {**facts, "total_cost": 0.0, "total_tokens": 0, "request_count": 0})
+        routes[key]["total_cost"] += float(r.cost or 0)
+        routes[key]["total_tokens"] += int(r.tokens or 0)
+        routes[key]["request_count"] += int(r.requests or 0)
+        date_map.setdefault(str(r.day), {})[key] = round(float(r.cost or 0), 6)
 
-    # Build chart-ready array
-    models = sorted(models_set)
+    ordered = sorted(routes.values(), key=lambda f: (-f["total_cost"], -f["total_tokens"], f["key"]))
+    keys = [f["key"] for f in ordered]
     series = []
     for day_str in sorted(date_map.keys()):
         entry: Dict[str, Any] = {"date": day_str}
-        for m in models:
-            entry[m] = date_map[day_str].get(m, 0)
+        for k in keys:
+            entry[k] = date_map[day_str].get(k, 0)
         series.append(entry)
 
-    return {"models": models, "series": series}
+    return {
+        "models": keys,
+        "routes": [{**f, "total_cost": round(f["total_cost"], 6)} for f in ordered],
+        "series": series,
+    }
 
 
 # ── Model Comparison ─────────────────────────────────────────────────
@@ -407,6 +540,8 @@ class ModelComparisonItem(BaseModel):
     model_id: str
     display_name: str
     provider: str
+    provider_label: Optional[str] = None
+    billing: Optional[str] = None
     input_cost_per_1k: Optional[float] = None
     output_cost_per_1k: Optional[float] = None
     context_window: Optional[int] = None
@@ -439,49 +574,54 @@ async def get_model_comparison(
     since = _period_start(period)
     results: List[ModelComparisonItem] = []
 
-    for mid in ids:
-        # Get registry data (fallback info if no usage exists)
-        registry = db.query(LLMModel).filter(LLMModel.model_id == mid).first()
-
-        # Get usage stats scoped to workspace + period
-        usage = (
-            db.query(
-                func.count(LLMUsage.id).label("total_requests"),
-                func.sum(LLMUsage.total_tokens).label("total_tokens"),
-                func.sum(LLMUsage.total_cost).label("total_cost"),
-                func.avg(LLMUsage.latency_ms).label("avg_latency_ms"),
-            )
-            .filter(
-                LLMUsage.workspace_id == ctx.workspace_id,
-                LLMUsage.model_id == mid,
-                LLMUsage.created_at >= since,
-            )
+    for raw in ids:
+        # A route key (``model@provider``) pins the serving provider; a bare
+        # model id compares the route that served most of its usage.
+        mid, _, wanted_provider = raw.partition(ROUTE_KEY_SEPARATOR)
+        served = (
+            _calls(db, ctx.workspace_id, since)
+            .filter(LLMUsage.model_id == mid)
+            .with_entities(LLMUsage.provider, func.count(LLMUsage.id).label("cnt"))
+            .group_by(LLMUsage.provider)
+            .order_by(desc("cnt"))
             .first()
         )
+        provider_slug = wanted_provider or (served.provider if served else None)
+
+        registry = None
+        if provider_slug:
+            registry = (
+                db.query(LLMModel)
+                .filter(LLMModel.model_id == mid, LLMModel.serving_provider == provider_slug)
+                .first()
+            )
+        if registry is None:
+            registry = db.query(LLMModel).filter(LLMModel.model_id == mid).first()
+        provider_slug = provider_slug or (registry.serving_provider if registry else None)
+        facts = describe_usage_provider(provider_slug)
+
+        usage_q = _calls(db, ctx.workspace_id, since).filter(LLMUsage.model_id == mid)
+        if provider_slug:
+            usage_q = usage_q.filter(LLMUsage.provider == provider_slug)
+        usage = usage_q.with_entities(
+            func.count(LLMUsage.id).label("total_requests"),
+            func.sum(LLMUsage.total_tokens).label("total_tokens"),
+            func.sum(LLMUsage.total_cost).label("total_cost"),
+            func.avg(LLMUsage.latency_ms).label("avg_latency_ms"),
+            func.sum(case((LLMUsage.status == "error", 1), else_=0)).label("errors"),
+        ).first()
 
         total_requests = usage.total_requests or 0 if usage else 0
-
-        # Error rate
-        error_count = 0
-        if total_requests > 0:
-            error_count = (
-                db.query(func.count(LLMUsage.id))
-                .filter(
-                    LLMUsage.workspace_id == ctx.workspace_id,
-                    LLMUsage.model_id == mid,
-                    LLMUsage.created_at >= since,
-                    LLMUsage.status == "error",
-                )
-                .scalar() or 0
-            )
-
+        error_count = int(usage.errors or 0) if usage else 0
         error_rate = error_count / total_requests if total_requests > 0 else 0.0
         success_rate = 1.0 - error_rate
 
         results.append(ModelComparisonItem(
             model_id=mid,
             display_name=registry.display_name if registry else mid,
-            provider=registry.provider if registry else (usage and getattr(usage, "provider", None)) or "unknown",
+            provider=facts["slug"],
+            provider_label=facts["label"],
+            billing=facts["billing"],
             input_cost_per_1k=registry.input_cost_per_1k_tokens if registry else None,
             output_cost_per_1k=registry.output_cost_per_1k_tokens if registry else None,
             context_window=registry.context_window if registry else None,
@@ -504,6 +644,12 @@ class ProjectedItem(BaseModel):
     key: str
     projected_monthly_cost: float
     current_period_cost: float
+    label: Optional[str] = None
+    model_id: Optional[str] = None
+    provider: Optional[str] = None
+    provider_label: Optional[str] = None
+    billing: Optional[str] = None
+    current_period_tokens: int = 0
 
 
 class CostProjectionResponse(BaseModel):
@@ -528,84 +674,70 @@ async def get_cost_projections(
     delta = PERIOD_MAP.get(period, timedelta(days=30))
     since = datetime.utcnow() - delta
 
-    # Current period total cost
-    current_cost = (
-        db.query(func.sum(LLMUsage.total_cost))
-        .filter(
-            LLMUsage.workspace_id == ctx.workspace_id,
-            LLMUsage.created_at >= since,
-        )
-        .scalar() or 0.0
-    )
-    current_cost = float(current_cost)
+    base = _calls(db, ctx.workspace_id, since)
+    current_cost = float(base.with_entities(func.sum(LLMUsage.total_cost)).scalar() or 0.0)
 
-    # Count distinct days with data for accurate daily average
+    # Distinct days with data — the honest daily average for sparse usage
     days_with_data = (
-        db.query(func.count(func.distinct(func.date(LLMUsage.created_at))))
-        .filter(
-            LLMUsage.workspace_id == ctx.workspace_id,
-            LLMUsage.created_at >= since,
-        )
-        .scalar() or 0
+        base.with_entities(func.count(func.distinct(func.date(LLMUsage.created_at)))).scalar() or 0
     )
 
     daily_avg = current_cost / days_with_data if days_with_data > 0 else 0.0
     projected_monthly = daily_avg * 30
 
-    # Previous period for comparison
     prev_start = since - delta
-    prev_cost = (
+    prev_cost = float(
         db.query(func.sum(LLMUsage.total_cost))
         .filter(
             LLMUsage.workspace_id == ctx.workspace_id,
             LLMUsage.created_at >= prev_start,
             LLMUsage.created_at < since,
+            LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE,
         )
         .scalar() or 0.0
     )
-    prev_cost = float(prev_cost)
 
     change_percent = None
     if prev_cost > 0:
         change_percent = round(((current_cost - prev_cost) / prev_cost) * 100, 2)
 
-    # Projected by model
-    by_model_rows = (
-        db.query(
-            LLMUsage.model_id.label("key"),
+    by_route_rows = (
+        base.with_entities(
+            LLMUsage.model_id,
+            LLMUsage.provider,
             func.sum(LLMUsage.total_cost).label("cost"),
+            func.sum(LLMUsage.total_tokens).label("tokens"),
         )
-        .filter(
-            LLMUsage.workspace_id == ctx.workspace_id,
-            LLMUsage.created_at >= since,
-        )
-        .group_by(LLMUsage.model_id)
-        .order_by(desc("cost"))
+        .group_by(LLMUsage.model_id, LLMUsage.provider)
+        .order_by(desc("cost"), desc("tokens"))
         .all()
     )
 
     projected_by_model = []
-    for r in by_model_rows:
-        model_cost = float(r.cost or 0)
-        model_daily = model_cost / days_with_data if days_with_data > 0 else 0.0
+    for r in by_route_rows:
+        route_cost = float(r.cost or 0)
+        route_daily = route_cost / days_with_data if days_with_data > 0 else 0.0
+        facts = route_facts(r.model_id, r.provider)
         projected_by_model.append(ProjectedItem(
-            key=str(r.key or "unknown"),
-            projected_monthly_cost=round(model_daily * 30, 6),
-            current_period_cost=round(model_cost, 6),
+            key=facts["key"],
+            projected_monthly_cost=round(route_daily * 30, 6),
+            current_period_cost=round(route_cost, 6),
+            current_period_tokens=int(r.tokens or 0),
+            label=facts["label"],
+            model_id=facts["model_id"],
+            provider=facts["provider"],
+            provider_label=facts["provider_label"],
+            billing=facts["billing"],
         ))
 
-    # Projected by provider
     by_provider_rows = (
-        db.query(
+        base.with_entities(
             LLMUsage.provider.label("key"),
             func.sum(LLMUsage.total_cost).label("cost"),
-        )
-        .filter(
-            LLMUsage.workspace_id == ctx.workspace_id,
-            LLMUsage.created_at >= since,
+            func.sum(LLMUsage.total_tokens).label("tokens"),
         )
         .group_by(LLMUsage.provider)
-        .order_by(desc("cost"))
+        .order_by(desc("cost"), desc("tokens"))
         .all()
     )
 
@@ -613,10 +745,16 @@ async def get_cost_projections(
     for r in by_provider_rows:
         prov_cost = float(r.cost or 0)
         prov_daily = prov_cost / days_with_data if days_with_data > 0 else 0.0
+        facts = describe_usage_provider(r.key)
         projected_by_provider.append(ProjectedItem(
-            key=str(r.key or "unknown"),
+            key=facts["slug"],
             projected_monthly_cost=round(prov_daily * 30, 6),
             current_period_cost=round(prov_cost, 6),
+            current_period_tokens=int(r.tokens or 0),
+            label=facts["label"],
+            provider=facts["slug"],
+            provider_label=facts["label"],
+            billing=facts["billing"],
         ))
 
     return CostProjectionResponse(
@@ -814,7 +952,7 @@ async def get_admin_cost_analytics(
             func.sum(LLMUsage.total_tokens).label("total_tokens"),
             func.count(LLMUsage.id).label("total_requests"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .first()
     )
 
@@ -830,7 +968,7 @@ async def get_admin_cost_analytics(
             func.sum(LLMUsage.total_tokens).label("total_tokens"),
             func.count(LLMUsage.id).label("total_requests"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(LLMUsage.workspace_id)
         .order_by(desc("total_cost"))
         .all()
@@ -858,6 +996,7 @@ async def get_admin_cost_analytics(
             .filter(
                 LLMUsage.workspace_id == r.workspace_id,
                 LLMUsage.created_at >= since,
+                LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE,
             )
             .group_by(LLMUsage.model_id)
             .order_by(desc("cost"))
@@ -883,7 +1022,7 @@ async def get_admin_cost_analytics(
             func.sum(LLMUsage.total_cost).label("total_cost"),
             func.count(LLMUsage.id).label("request_count"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(LLMUsage.provider)
         .order_by(desc("total_cost"))
         .all()
@@ -891,7 +1030,7 @@ async def get_admin_cost_analytics(
 
     cost_by_provider = [
         CostBreakdown(
-            key=str(r.key or "unknown"),
+            key=describe_usage_provider(r.key)["slug"],
             input_cost=float(r.input_cost or 0),
             output_cost=float(r.output_cost or 0),
             total_cost=float(r.total_cost or 0),
@@ -907,7 +1046,7 @@ async def get_admin_cost_analytics(
             func.sum(LLMUsage.total_cost).label("cost"),
             func.count(LLMUsage.id).label("requests"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(func.date(LLMUsage.created_at))
         .order_by("day")
         .all()
@@ -929,7 +1068,7 @@ async def get_admin_cost_analytics(
             func.sum(LLMUsage.total_cost).label("total_cost"),
             func.count(LLMUsage.id).label("request_count"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(LLMUsage.is_byok)
         .all()
     )
@@ -978,7 +1117,7 @@ async def get_admin_dashboard(
             func.sum(LLMUsage.total_tokens).label("total_tokens"),
             func.count(LLMUsage.id).label("total_requests"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .first()
     )
     total_cost = float(agg.total_cost or 0) if agg else 0.0
@@ -1016,7 +1155,7 @@ async def get_admin_dashboard(
             func.sum(LLMUsage.total_tokens).label("tokens"),
             func.count(LLMUsage.id).label("requests"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(LLMUsage.workspace_id)
         .all()
     )
@@ -1053,7 +1192,7 @@ async def get_admin_dashboard(
             func.count(LLMUsage.id).label("requests"),
             func.count(func.distinct(LLMUsage.workspace_id)).label("workspace_count"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(LLMUsage.model_id, LLMUsage.provider)
         .order_by(desc("cost"))
         .limit(15)
@@ -1062,8 +1201,7 @@ async def get_admin_dashboard(
 
     models = [
         {
-            "model_id": r.model_id or "unknown",
-            "provider": r.provider or "unknown",
+            **route_facts(r.model_id, r.provider),
             "cost": round(float(r.cost or 0), 6),
             "tokens": int(r.tokens or 0),
             "requests": r.requests or 0,
@@ -1079,7 +1217,7 @@ async def get_admin_dashboard(
             LLMUsage.provider,
             func.sum(LLMUsage.total_cost).label("cost"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(func.date(LLMUsage.created_at), LLMUsage.provider)
         .order_by("day")
         .all()
@@ -1097,6 +1235,7 @@ async def get_admin_dashboard(
         day_map[d][p] = round(float(r.cost or 0), 6)
 
     providers = sorted(providers_set)
+    provider_labels = {p: describe_usage_provider(p)["label"] for p in providers}
     daily_by_provider = []
     for d in sorted(day_map.keys()):
         entry: Dict[str, Any] = {"date": d}
@@ -1111,7 +1250,7 @@ async def get_admin_dashboard(
             func.sum(LLMUsage.total_cost).label("cost"),
             func.count(LLMUsage.id).label("requests"),
         )
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .group_by(LLMUsage.is_byok)
         .all()
     )
@@ -1123,7 +1262,7 @@ async def get_admin_dashboard(
     # Compute daily average and projected monthly (for billing planning)
     days_with_data = (
         db.query(func.count(func.distinct(func.date(LLMUsage.created_at))))
-        .filter(LLMUsage.created_at >= since)
+        .filter(LLMUsage.created_at >= since, LLMUsage.request_type != ACTIVITY_SYNC_REQUEST_TYPE)
         .scalar() or 0
     )
     daily_avg = total_cost / days_with_data if days_with_data > 0 else 0.0
@@ -1147,6 +1286,7 @@ async def get_admin_dashboard(
         "models": models,
         "daily_by_provider": {
             "providers": providers,
+            "labels": provider_labels,
             "series": daily_by_provider,
         },
     }
