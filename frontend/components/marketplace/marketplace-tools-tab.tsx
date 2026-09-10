@@ -41,7 +41,8 @@ import {
 import { MarketplaceAppDetailsModal } from './marketplace-app-details-modal'
 import { apiClient } from '@/lib/api-client'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSyncToolsCache } from '@/hooks/use-tools-api'
+import { useSyncToolsCache, useIntegrationsStatus } from '@/hooks/use-tools-api'
+import { IntegrationsDisabledCard } from '@/components/tools/integrations-disabled-card'
 import { useSystemRole } from '@/contexts/role-context'
 import { EnhancedPagination } from '@/components/ui/pagination'
 
@@ -65,6 +66,10 @@ interface MarketplaceToolsTabProps {
 
 export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
     const { isAdmin } = useSystemRole()
+    // The Tools page has always explained the no-key case; the marketplace grid
+    // rendered empty with no reason, which is what read as "the marketplace is
+    // broken" rather than "no Composio key yet — add one and press Sync".
+    const { data: integrationsStatus } = useIntegrationsStatus()
     const syncCacheMutation = useSyncToolsCache()
     const [viewMode, setViewMode] = useViewMode('mp-tools')
     const [selectedCategory, setSelectedCategory] = useState('all')
@@ -352,6 +357,8 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
 
     return (
         <div className="space-y-6">
+            <IntegrationsDisabledCard status={integrationsStatus} />
+
             {/* Header Stats */}
             <div className="flex items-center justify-between">
                 <div>

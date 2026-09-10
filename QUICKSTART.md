@@ -36,14 +36,14 @@ want AI features:
 
 ```bash
 OPENAI_API_KEY=sk-...          # or
-ANTHROPIC_API_KEY=sk-ant-...   # or
-OPENROUTER_API_KEY=sk-or-...   # one key, 400+ models (paid per call)
-NVIDIA_API_KEY=nvapi-...       # build.nvidia.com — open models (Kimi, DeepSeek, Nemotron…) at no charge
-DEEPSEEK_API_KEY=sk-...        # DeepSeek's own API
+ANTHROPIC_API_KEY=sk-ant-...   # or any provider below, via the UI
 ```
 
-You can also add keys later through **Settings → API Keys** in the UI (until
-you do, the chat page shows *"Add an LLM key to bring Auto to life"*).
+**Every provider is added in the app** — **Settings → API Keys** lists OpenAI,
+Anthropic, OpenRouter, NVIDIA, DeepSeek, Google, Grok / xAI, Cohere, Azure
+OpenAI, AWS Bedrock and HuggingFace, and validates the key on save. Nothing but
+the two lines above ever needs to go in `.env`. (Until a key is stored the chat
+page shows *"Add an LLM key to bring Auto to life"*.)
 
 **About the NVIDIA key.** NVIDIA's hosted endpoint is a trial: its terms allow
 internal testing and evaluation, not production, and no personal, financial or
@@ -185,11 +185,13 @@ figure to invent. The full reference is the
   needs an embedding provider too (an OpenAI or OpenRouter key, or the local
   HuggingFace provider under Settings → System Settings → Embeddings).
 - **Composio-powered integrations** (Gmail, Slack, GitHub, Shopify and the rest
-  of the third-party app catalogue) need your own Composio key in `.env`
-  (`COMPOSIO_API_KEY=…`, free tier at app.composio.dev; env-only, there is no
-  UI field), then `docker compose up -d backend` to apply it. On that boot the
-  backend syncs the catalogue itself and re-binds the seeded agents to their
-  apps. Without a key the Tools page says *"Integrations are disabled — no
+  of the third-party app catalogue) need your own Composio key. Put
+  `COMPOSIO_KEY=…` in `.env` (free tier at app.composio.dev; env-only, there is
+  no UI field for it — the line is in `.env.example`), then
+  `docker compose up -d backend` to apply it. On that boot the backend syncs
+  the catalogue itself; you can also pull it on demand from **Marketplace →
+  Tools → Sync**, which fetches every toolkit and its actions. Without a key
+  the Tools page and Marketplace → Tools say *"Integrations are disabled — no
   Composio API key is configured."*, Composio tools are not offered to agents,
   and the native platform tools keep working (PRD-233 S2).
 - **Durable memory (mem0) and field memory (Qdrant)** are not in the default

@@ -260,20 +260,27 @@ Third-party app integrations (Gmail, Slack, GitHub, Shopify and the rest of
 the Composio catalogue) run through Composio. In the local edition that is a
 **bring-your-own key, env-only** setting:
 
-1. Put `COMPOSIO_API_KEY=…` in `.env` (free tier at app.composio.dev).
+1. Put `COMPOSIO_KEY=…` in `.env` (free tier at app.composio.dev). That is the
+   canonical name — it matches the Railway variable; `COMPOSIO_API_KEY` is
+   accepted as an alias. `docker-compose.yml` forwards both.
 2. Apply it: `docker compose up -d backend` (the container must be recreated;
-   the key is read from the environment, not from the UI).
+   the key is read from the environment at process start, not from the UI).
 3. On that boot, if the local catalogue (`composio_apps_cache`) is empty, the
    backend syncs the full Composio catalogue in a background thread and then
    re-binds the seeded marketplace agents to the apps they were designed for.
    A later boot with a populated catalogue only re-binds anything still
    unbound. The Tools page shows *"Integration catalogue is syncing"* while
    this runs.
+4. To pull the catalogue on demand instead of waiting for a boot, press
+   **Sync** on **Marketplace → Tools** (or `POST /api/tools/sync?sync_type=full`).
+   It fetches every toolkit and its actions into the cache; a full catalogue is
+   several hundred apps, so it takes a few minutes. Without a valid key the
+   request returns 400 with the reason rather than reporting a sync of 0 apps.
 
 Without a key the platform is honest rather than empty:
 
-- the Tools page shows *"Integrations are disabled — no Composio API key is
-  configured."* with the fix;
+- the Tools page **and Marketplace → Tools** show *"Integrations are disabled —
+  no Composio API key is configured."* with the fix;
 - Composio tools are not offered to agents at all (excluded from discovery),
   and a direct call returns an explicit `integrations_unavailable` error —
   never a silent success;
@@ -404,8 +411,10 @@ purpose).
 **Chat answers nothing; banner "Add an LLM key to bring Auto to life".** No
 model key is stored. Settings → API Keys, or one of the keys in §2.
 
-**Tools page: "Integrations are disabled".** No `COMPOSIO_API_KEY` (§7). Native
-tools keep working.
+**Tools page: "Integrations are disabled".** No `COMPOSIO_KEY` (§7) — check the
+variable actually reached the container (`docker compose exec backend env | grep
+COMPOSIO`); it is read at process start, so a `.env` edit needs
+`docker compose up -d backend`. Native tools keep working.
 
 **Code Canvas session fails as soon as it starts.** The worker has no model
 credential: set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in `.env`

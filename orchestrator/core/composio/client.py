@@ -1436,7 +1436,7 @@ def get_composio_client() -> ComposioClient:
 # is env-only and the SDK install is static) — ``reset_composio_availability``
 # exists for tests that flip the config.
 
-COMPOSIO_UNAVAILABLE_NO_KEY = "COMPOSIO_API_KEY is not configured"
+COMPOSIO_UNAVAILABLE_NO_KEY = "COMPOSIO_KEY is not configured"
 # NOTE: keep "composio-openai" out of this string — tool_router's
 # _is_fatal_dependency_error() keys on it and would replace the honest
 # message with a generic "restart the backend" line.
