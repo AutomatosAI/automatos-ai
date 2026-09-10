@@ -419,6 +419,41 @@ async def test_status_endpoint_reports_available_state(composio_on):
 
 
 # ---------------------------------------------------------------------------
+# 4c. POST /api/tools/sync — the Marketplace -> Tools "Sync" button
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_refuses_without_a_key_instead_of_reporting_zero_apps(composio_off):
+    """Keyless, the SDK wrapper returns an empty app list, so the sync used to
+    finish "successfully" having synced 0 apps — the button looked like it had
+    worked and the catalogue stayed empty."""
+    from fastapi import HTTPException
+
+    from api.tools import sync
+
+    with patch("api.tools.MetadataSyncService") as service:
+        with pytest.raises(HTTPException) as excinfo:
+            await sync(sync_type="full", ctx=MagicMock(), db=MagicMock())
+
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail == cc.COMPOSIO_UNAVAILABLE_NO_KEY
+    service.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_runs_the_full_catalogue_sync_when_a_key_is_configured(composio_on):
+    from api.tools import sync
+
+    with patch("api.tools.MetadataSyncService") as service:
+        service.return_value.run_full_sync.return_value = {"apps_synced": 880}
+        out = await sync(sync_type="full", ctx=MagicMock(), db=MagicMock())
+
+    assert out == {"apps_synced": 880}
+    service.return_value.run_full_sync.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
 # 5. Boot bootstrap (pure — session + service mocked)
 # ---------------------------------------------------------------------------
 

@@ -25,6 +25,7 @@ _COMPOSE = _REPO_ROOT / "docker-compose.yml"
 _QUICKSTART = _REPO_ROOT / "QUICKSTART.md"
 _README = _REPO_ROOT / "README.md"
 _SELF_HOSTING = _REPO_ROOT / "docs" / "getting-started" / "self-hosting.md"
+_ENV_EXAMPLE = _REPO_ROOT / ".env.example"
 
 # ${VAR:?message} — a variable compose treats as REQUIRED (errors if unset/empty).
 _REQUIRED_VAR = re.compile(r"\$\{([A-Z_][A-Z0-9_]*):\?")
@@ -131,3 +132,41 @@ def test_readme_quickstart_references_required_secrets_or_quickstart():
     assert ("POSTGRES_PASSWORD" in text) or ("QUICKSTART.md" in text), (
         "README quickstart must name the required secrets or link QUICKSTART.md"
     )
+
+
+# ---------------------------------------------------------------------------
+# The env var has to actually reach the container (2026-09-10)
+# ---------------------------------------------------------------------------
+
+
+def test_env_example_names_the_composio_key():
+    """`cp .env.example .env` must produce a file with a line for the key.
+
+    QUICKSTART told readers to put the Composio key in `.env` while
+    `.env.example` had no such line, so a fresh install had nowhere to put it.
+    """
+    assert re.search(r"^COMPOSIO_KEY=", _ENV_EXAMPLE.read_text(encoding="utf-8"), re.MULTILINE), (
+        "COMPOSIO_KEY is named in the install docs but has no line in .env.example"
+    )
+
+
+def test_env_example_documents_every_compose_required_secret():
+    text = _ENV_EXAMPLE.read_text(encoding="utf-8")
+    missing = sorted(v for v in _required_secrets() if v not in text)
+    assert not missing, f".env.example omits compose-required secrets: {missing}"
+
+
+def test_compose_forwards_both_composio_key_names():
+    """The bug this guards.
+
+    `config.py` reads ``COMPOSIO_API_KEY or COMPOSIO_KEY``, and COMPOSIO_KEY is
+    the canonical name (it matches the Railway variable). But docker-compose.yml
+    forwarded ONLY COMPOSIO_API_KEY, so a `.env` carrying COMPOSIO_KEY never
+    reached the process: the fallback could not fire, integrations stayed off,
+    and the Tools marketplace looked broken rather than unconfigured.
+    """
+    compose = _COMPOSE.read_text(encoding="utf-8")
+    for var in ("COMPOSIO_KEY", "COMPOSIO_API_KEY"):
+        assert re.search(rf"^\s*{var}:\s*\$\{{{var}", compose, re.MULTILINE), (
+            f"docker-compose.yml does not forward {var} — a .env line for it would be inert"
+        )

@@ -19,7 +19,7 @@ afterEach(() => cleanup())
 
 const noKey: IntegrationsStatus = {
   available: false,
-  reason: 'COMPOSIO_API_KEY is not configured',
+  reason: 'COMPOSIO_KEY is not configured',
   key_configured: false,
   apps_cached: 0,
   last_sync: null,
@@ -35,10 +35,10 @@ describe('PRD-233 S2 — IntegrationsDisabledCard', () => {
     expect(card).toHaveAttribute('role', 'alert')
     expect(screen.getByText(INTEGRATIONS_DISABLED_NO_KEY_TITLE)).toBeInTheDocument()
     const text = card.textContent || ''
-    expect(text).toContain(
-      'Add COMPOSIO_API_KEY to .env, then docker compose up -d backend; the catalogue syncs automatically on boot.',
-    )
-    expect(text).toContain('Reason: COMPOSIO_API_KEY is not configured')
+    expect(text).toContain('Add COMPOSIO_KEY to .env, then docker compose up -d backend')
+    // The user's route back: the Sync button on the marketplace tab.
+    expect(text).toContain('press Sync on Marketplace → Tools')
+    expect(text).toContain('Reason: COMPOSIO_KEY is not configured')
     expect(text).toContain('Native platform tools keep working')
   })
 

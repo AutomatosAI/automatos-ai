@@ -39,8 +39,9 @@ export function IntegrationsDisabledCard({ status }: IntegrationsDisabledCardPro
         <AlertTitle>{title}</AlertTitle>
         <AlertDescription className="space-y-1">
           <p>
-            Add <code>COMPOSIO_API_KEY</code> to <code>.env</code>, then{' '}
-            <code>docker compose up -d backend</code>; the catalogue syncs automatically on boot.
+            Add <code>COMPOSIO_KEY</code> to <code>.env</code>, then{' '}
+            <code>docker compose up -d backend</code>; the catalogue syncs automatically on boot,
+            or press <strong>Sync</strong> on Marketplace &rarr; Tools.
           </p>
           {status.reason ? <p className="text-muted-foreground">Reason: {status.reason}</p> : null}
           <p className="text-muted-foreground">
@@ -61,7 +62,7 @@ export function IntegrationsDisabledCard({ status }: IntegrationsDisabledCardPro
       <AlertDescription>
         {failed ? (
           <p>
-            The last catalogue sync did not complete — check that <code>COMPOSIO_API_KEY</code> is valid
+            The last catalogue sync did not complete — check that <code>COMPOSIO_KEY</code> is valid
             (backend logs carry the error), then run Sync or restart the backend.
           </p>
         ) : (

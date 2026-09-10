@@ -777,6 +777,11 @@ async def sync(
     db: Session = Depends(get_db),
 ):
     logger.info(f"Sync requested: type={sync_type}, workspace_id={ctx.workspace_id}")
+    # Without a key the SDK wrapper returns an empty app list, so the sync used
+    # to report success with 0 apps synced — the Sync button looked like it had
+    # worked and the catalogue stayed empty. Say what is actually wrong instead.
+    if not composio_available():
+        raise HTTPException(status_code=400, detail=composio_unavailable_reason())
     service = MetadataSyncService(db)
     if sync_type == "incremental":
         result = service.run_incremental_sync()
