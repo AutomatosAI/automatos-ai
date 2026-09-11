@@ -29,6 +29,8 @@ try:
 except ImportError:  # pragma: no cover — the SDK is a hard dependency in production
     OpenAI = None
 
+from core.llm.web_citations import citations_from_annotations, sources_markdown  # PRD-240
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,6 +131,9 @@ class _StreamAssembler:
         self.finish_reason: Optional[str] = None
         self.usage: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         self.model: Optional[str] = None
+        # PRD-240: url_citation annotations ride the delta that closes a
+        # provider-side web search; collected here, rendered once at the end.
+        self.annotations: List[Any] = []
 
     def feed(self, chunk: Any) -> List[Tuple[str, str]]:
         """Absorb one chunk; return the (kind, text) deltas to deliver live."""
@@ -157,6 +162,8 @@ class _StreamAssembler:
         if isinstance(content, str) and content:
             self.text.append(content)
             out.append(("text", content))
+        for ann in raw.get("annotations") or []:
+            self.annotations.append(ann)
         for tc in raw.get("tool_calls") or []:
             if not isinstance(tc, dict):
                 continue
@@ -173,10 +180,17 @@ class _StreamAssembler:
                 slot["function"]["arguments"] += fn["arguments"]
         return out
 
+    def sources(self) -> str:
+        """The Sources footer for the citations seen so far ("" when none)."""
+        return sources_markdown(citations_from_annotations(self.annotations))
+
     def response(self, provider: str, *, streamed: bool) -> LLMResponse:
         content, inline_reasoning = split_think_tags("".join(self.text))
         reasoning = coalesce_reasoning("".join(self.reasoning) or None, inline_reasoning)
         calls = [self.tool_calls[i] for i in sorted(self.tool_calls)] or None
+        citations = citations_from_annotations(self.annotations) or None
+        if citations:
+            content += sources_markdown(citations)
         return LLMResponse(
             content=content,
             usage=self.usage,
@@ -186,6 +200,7 @@ class _StreamAssembler:
             finish_reason=self.finish_reason,
             reasoning=reasoning,
             streamed=streamed,
+            citations=citations,
         )
 
 
@@ -298,7 +313,38 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             body = dict(kwargs.get("extra_body") or {})
             body["usage"] = {"include": True}
             kwargs["extra_body"] = body
+        server_tool = self._web_search_server_tool(kwargs.get("tools"))
+        if server_tool is not None:
+            kwargs["tools"] = [*(kwargs.get("tools") or []), server_tool]
         return kwargs
+
+    def _web_search_server_tool(self, tools: Optional[List[Dict]]) -> Optional[Dict[str, Any]]:
+        """PRD-240 S4: the route's provider-executed web search, when allowed.
+
+        Attached only when ``WEB_ACCESS`` is on and this provider offers one
+        (``ProviderSpec.web_search_tool``); never twice — a caller that already
+        put one on the request (the web_search action) keeps its own settings.
+        The model decides when to search; the provider bills each search on
+        the user's account; the operator's denylist rides as excluded domains.
+        """
+        from config import config
+        from core.security.web_access import denied_hosts, web_access_enabled
+
+        tool_type = getattr(self.spec, "web_search_tool", None)
+        if not tool_type or not web_access_enabled():
+            return None
+        for t in tools or []:
+            if isinstance(t, dict) and str(t.get("type", "")).startswith("openrouter:"):
+                return None
+        tool: Dict[str, Any] = {
+            "type": tool_type,
+            "max_uses": int(config.WEB_SEARCH_MAX_USES_PER_TURN),
+            "max_results": int(config.WEB_SEARCH_MAX_RESULTS),
+        }
+        deny = list(denied_hosts())
+        if deny:
+            tool["excluded_domains"] = deny
+        return tool
 
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate a response (OpenAI-compatible chat completions)."""
@@ -409,6 +455,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                         }
                     })
 
+            citations = citations_from_annotations(raw_msg.get("annotations")) or None
+            if citations:
+                content = (content or "") + sources_markdown(citations)
+
             return LLMResponse(
                 content=content or "",
                 usage=self._usage(response),
@@ -418,6 +468,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 finish_reason=finish_reason,
                 additional_blocks=additional_blocks or None,
                 reasoning=reasoning,
+                citations=citations,
             )
         except Exception as e:
             logger.error("%s API error: %s", self.spec.label, e)
@@ -490,6 +541,11 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     streamed = True
                     if on_delta is not None:
                         await on_delta(kind, text)
+            # PRD-240: the citations arrive with the closing chunk — the live
+            # reader gets the same Sources footer the persisted text carries.
+            sources = assembler.sources()
+            if sources and streamed and on_delta is not None:
+                await on_delta("text", sources)
         finally:
             await producer
         return assembler.response(self.spec.slug, streamed=streamed)

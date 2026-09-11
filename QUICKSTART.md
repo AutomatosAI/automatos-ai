@@ -31,19 +31,27 @@ ports) already has a working default in the compose file and `envs/*.defaults`.
 ### Optional: one LLM key for AI features (bring your own key)
 
 The platform boots and serves without any LLM key, but agents, chat, and
-embeddings need one to actually think. Add **one** of these to `.env` when you
-want AI features:
+embeddings need one to actually think.
 
-```bash
-OPENAI_API_KEY=sk-...          # or
-ANTHROPIC_API_KEY=sk-ant-...   # or any provider below, via the UI
-```
+**Recommended: OpenRouter.** One key, 400+ models, and — since PRD-240 — web
+search for every model your agents run on. It is already the default route
+(Auto starts on `google/gemini-2.5-flash` via OpenRouter). Get a key at
+openrouter.ai/keys and add it under **Settings → API Keys**. Add **NVIDIA**
+beside it for free open models (Kimi, DeepSeek, Nemotron — see below).
 
 **Every provider is added in the app** — **Settings → API Keys** lists OpenAI,
 Anthropic, OpenRouter, NVIDIA, DeepSeek, Google, Grok / xAI, Cohere, Azure
-OpenAI, AWS Bedrock and HuggingFace, and validates the key on save. Nothing but
-the two lines above ever needs to go in `.env`. (Until a key is stored the chat
-page shows *"Add an LLM key to bring Auto to life"*.)
+OpenAI, AWS Bedrock and HuggingFace, and validates the key on save. Only two
+keys ever need to be in `.env`, and only for the Code Canvas worker, which
+reads the environment rather than Settings:
+
+```bash
+OPENAI_API_KEY=sk-...          # optional
+ANTHROPIC_API_KEY=sk-ant-...   # optional — the Canvas's Auto session engine
+```
+
+(Until a key is stored the chat page shows *"Add an LLM key to bring Auto to
+life"*.)
 
 **About the NVIDIA key.** NVIDIA's hosted endpoint is a trial: its terms allow
 internal testing and evaluation, not production, and no personal, financial or
@@ -112,6 +120,26 @@ finished and 200 once the instance is usable.
   starter roster (Researcher, Writer, Analyst), one Playbook — *Two-minute
   brief* — and a welcome Deliverable under **Deliverables → Blogs**. Run the
   Playbook from the Playbooks page with a topic of your own.
+- **Web access for your agents (PRD-240).** Reading a page works out of the
+  box — every agent has `web_fetch`, no key, no app to connect, nothing to
+  assign. Private and internal addresses are always refused. Searching the
+  web (`web_search`) uses the first engine you have, in this order:
+  1. **Your OpenRouter key** — search on any model, including free NVIDIA
+     ones; the model on an OpenRouter route also searches inside its own
+     turn and cites its sources. Billed per search on your OpenRouter account
+     (about a cent).
+  2. **Composio** — if `COMPOSIO_KEY` is set for integrations, Composio Search
+     is used automatically. Free tier, no extra setup.
+  3. **SearXNG** — a self-hosted search container, no key at all:
+     `docker compose --profile search up -d`, then
+     `SEARXNG_URL=http://searxng:8080` in `.env`.
+
+  Switch it off with `WEB_ACCESS=off`; block hosts with
+  `WEB_ACCESS_DENY=example.com,corp.internal`; pin an engine with
+  `WEB_SEARCH_PROVIDER=openrouter|composio|searxng`. Restart the backend after
+  changing any of them. Session-mode agents (below) already have the web
+  through your own Claude subscription.
+
 - **Local RAG on pgvector.** Documents are chunked, embedded, and searched in
   Postgres (`S3_VECTORS_ENABLED=false`) — no AWS needed.
 - **MinIO object storage.** An S3-compatible store (ports 9000 / 9001) holds
@@ -193,7 +221,9 @@ figure to invent. The full reference is the
   Tools → Sync**, which fetches every toolkit and its actions. Without a key
   the Tools page and Marketplace → Tools say *"Integrations are disabled — no
   Composio API key is configured."*, Composio tools are not offered to agents,
-  and the native platform tools keep working (PRD-233 S2).
+  and the native platform tools keep working (PRD-233 S2). Web access is
+  **not** one of these: `web_fetch` needs no key, and `web_search` works with
+  your OpenRouter key or a SearXNG container as well as with Composio.
 - **Durable memory (mem0) and field memory (Qdrant)** are not in the default
   stack; the backend degrades cleanly without them.
 

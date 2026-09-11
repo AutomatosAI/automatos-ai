@@ -97,7 +97,7 @@ Skills are portable, versioned capability packs — a system prompt, a set of to
 
 Every model provider is a route in one registry, and a model is installed *per route*. **Marketplace → LLMs** has a tab per provider and shows one card per route with that route's own price: *Kimi K3 · NVIDIA* is free, *Kimi K3 · OpenRouter* is $3 / $15 per million tokens, and installing one tags your workspace with that provider. The runtime routes to the tag — a free route is never silently rerouted to a paid one when it is busy.
 
-- **OpenRouter** — one key, 400+ models, priced per call.
+- **OpenRouter** — one key, 400+ models, priced per call — and web search for every model your agents run on ([web access](QUICKSTART.md#what-you-get-in-the-local-edition): reading pages needs no key at all).
 - **Direct keys** — OpenAI, Anthropic, Google, DeepSeek, Azure OpenAI, AWS Bedrock, Grok / xAI.
 - **NVIDIA** — the hosted open models on build.nvidia.com (Kimi, DeepSeek, Nemotron, Llama, Mistral, …) at no charge, under NVIDIA's trial terms and rate limit; the key is your own agreement with NVIDIA.
 - **Your Claude Code subscription** — as a session agent, not as an API.
