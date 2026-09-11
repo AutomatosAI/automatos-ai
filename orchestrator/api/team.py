@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
@@ -9,13 +9,16 @@ from core.auth.dependencies import RequestContext
 from core.auth.actor import resolve_internal_user_id
 from core.auth.clerk import get_clerk_auth
 from core.database.database import get_db
-from core.auth.workspace_permission import require_workspace_permission
+from core.auth.workspace_permission import require_workspace_permission, workspace_permission_granted
 from modules.policy.roles import WorkspaceRole
 from core.workspaces.invitations import WorkspaceInvitation, invite_member_to_workspace
 from core.workspaces.audit import AuditService
 from core.workspaces.models import WorkspaceMember
 from core.models.workspaces import Workspace
-from core.models.core import User
+from core.models.composio_cache import ToolExecutionLog
+from core.models.core import Chat, User
+from core.utils.timestamps import utc_iso
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -45,6 +48,28 @@ class TeamMemberResponse(BaseModel):
     name: Optional[str]
     role: str
     joined_at: Optional[str]
+    # 2026-09-11 — activity THIS workspace already records, surfaced per member.
+    # Field additions only: same route, so the route manifest is unchanged.
+    # Timestamps carry an explicit UTC offset (core/utils/timestamps) — the
+    # page renders elapsed time, which an offset-less string gets wrong by the
+    # viewer's own UTC offset.
+    #
+    # Deliberately NOT here: ``users.last_sign_in``. That stamp is platform-wide
+    # (core/auth/hybrid stamps every authenticated request, whichever workspace
+    # it was for), so surfacing it on a per-workspace page would tell workspace
+    # A's admins when a shared user was last active in workspace B. The team
+    # page reports what happened HERE; the super-admin console keeps the
+    # cross-tenant view.
+    #
+    # The three activity fields are shown only to callers holding
+    # ``audit:view`` (owner + admin in modules/policy/roles.py): per-teammate
+    # recency and volume is audit-class telemetry, and ``members:read`` is held
+    # by every role down to ``viewer``. For everyone else they are ``None`` —
+    # distinct from ``0``, which means "visible, and nothing happened".
+    last_active_at: Optional[str] = None   # max(last chat HERE, last tool run HERE)
+    tool_runs_30d: Optional[int] = None    # tool_execution_logs in THIS workspace, last 30 days
+    chats_30d: Optional[int] = None        # chats in THIS workspace, last 30 days
+    invited_by_email: Optional[str] = None  # roster metadata, like joined_at: every member sees it
     
 class InvitationResponse(BaseModel):
     id: int
@@ -63,6 +88,34 @@ class AcceptInvitationResponse(BaseModel):
     role: str
     already_member: bool
 
+ACTIVITY_WINDOW_DAYS = 30
+# Owner + admin only (modules/policy/roles.py). Reused rather than minted: the
+# activity columns answer "who did what, when", which is what audit:view guards.
+ACTIVITY_PERMISSION = "audit:view"
+
+
+def _activity_by_user(db, user_col, ts_col, ws_col, workspace_id, user_ids, since):
+    """``{user_id: (count_in_window, latest_ever)}`` for ONE activity table.
+
+    Scoped to the requested workspace on purpose — a member's activity in some
+    OTHER workspace must never show up on this team page. The count is
+    windowed (``since``); the latest is all-time, so "last active" does not go
+    blank the day the window rolls past someone's last action. One grouped
+    query per table, never one per member.
+    """
+    rows = (
+        db.query(
+            user_col,
+            func.count().filter(ts_col >= since),
+            func.max(ts_col),
+        )
+        .filter(ws_col == workspace_id, user_col.in_(user_ids))
+        .group_by(user_col)
+        .all()
+    )
+    return {uid: (int(count or 0), latest) for uid, count, latest in rows}
+
+
 @router.get(
     "/members",
     response_model=List[TeamMemberResponse],
@@ -75,41 +128,67 @@ async def list_team_members(
 ):
     """List all members of a workspace."""
     
-    # Check if we have a Clerk Org ID
-    if ctx.user.org_id:
-        clerk = get_clerk_auth()
-        try:
-            # Sync members from Clerk
-            # In a real sync engine, we'd upsert users/members properly.
-            # Here we just fetch them for display, or we could rely on existing DB records 
-            # if we trust we are syncing via webhooks.
-            # However, user requested integration.
-            # Let's fetch from DB, but maybe we could trigger a background sync?
-            # For simplicity & speed in this task, we will just return local DB members
-            # BUT ensuring the invite flow populates Clerk correctly.
-            pass
-        except Exception as e:
-            logger.error(f"Failed to sync with Clerk: {e}")
-
     members = db.query(WorkspaceMember).filter(
         WorkspaceMember.workspace_id == workspace_id,
         WorkspaceMember.is_active == True
     ).all()
-    
+    if not members:
+        return []
+
+    member_ids = {m.user_id for m in members}
+    inviter_ids = {m.invited_by for m in members if m.invited_by is not None}
+    # ONE users query covers the members and whoever invited them — this used to
+    # be a query per member.
+    users = db.query(User).filter(User.id.in_(member_ids | inviter_ids)).all()
+    user_by_id = {u.id: u for u in users}
+
+    # Editors and viewers get the roster and nothing else — the aggregate
+    # queries are not even issued for them.
+    show_activity = workspace_permission_granted(db, ctx, ACTIVITY_PERMISSION)
+    chats: dict = {}
+    tools: dict = {}
+    if show_activity:
+        since = datetime.utcnow() - timedelta(days=ACTIVITY_WINDOW_DAYS)
+        chats = _activity_by_user(
+            db, Chat.user_id, Chat.created_at, Chat.workspace_id, workspace_id, member_ids, since,
+        )
+        tools = _activity_by_user(
+            db, ToolExecutionLog.user_id, ToolExecutionLog.executed_at,
+            ToolExecutionLog.workspace_id, workspace_id, member_ids, since,
+        )
+
     response = []
     for m in members:
-        # Fetch user details
-        user = db.query(User).filter(User.id == m.user_id).first()
-        if user:
-            response.append(TeamMemberResponse(
-                id=m.id,
-                user_id=m.user_id,
-                email=user.email,
-                name=user.name,
-                role=m.role,
-                joined_at=m.joined_at.isoformat() if m.joined_at else None
-            ))
-            
+        user = user_by_id.get(m.user_id)
+        if not user:
+            continue  # a member row whose users row is gone — skipped before too
+        if show_activity:
+            chat_count, chat_last = chats.get(m.user_id, (0, None))
+            tool_count, tool_last = tools.get(m.user_id, (0, None))
+            # Both naive-UTC DateTime columns, so they compare directly. The
+            # global sign-in stamp is left out on purpose — see TeamMemberResponse.
+            seen = [t for t in (chat_last, tool_last) if t is not None]
+            last_active = utc_iso(max(seen)) if seen else None
+        else:
+            chat_count = tool_count = None
+            last_active = None
+        inviter = user_by_id.get(m.invited_by) if m.invited_by is not None else None
+        response.append(TeamMemberResponse(
+            id=m.id,
+            user_id=m.user_id,
+            email=user.email,
+            # NULL for every Clerk-provisioned user today (names were never
+            # synced into users.name); the page derives a display label. Not
+            # invented here.
+            name=user.name,
+            role=m.role,
+            joined_at=m.joined_at.isoformat() if m.joined_at else None,
+            last_active_at=last_active,
+            tool_runs_30d=tool_count,
+            chats_30d=chat_count,
+            invited_by_email=inviter.email if inviter else None,
+        ))
+
     return response
 
 @router.post(

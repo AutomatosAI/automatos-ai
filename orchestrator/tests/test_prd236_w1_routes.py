@@ -179,7 +179,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     last_seen = (versions / "users_last_sign_in_column.py").read_text()
     assert 'down_revision = "prd240_llm_usage_cache_tokens"' in last_seen
     guard = (Path(__file__).resolve().parent / "test_prd209_alembic_single_head.py").read_text()
-    assert 'EXPECTED_HEAD = "users_last_sign_in_column"' in guard
+    # 2026-09-11: tool_execution_logs_workspace_user_idx chains onto that (the team page's
+    # activity index); the guard follows it.
+    idx = (versions / "tool_execution_logs_workspace_user_idx.py").read_text()
+    assert 'down_revision = "users_last_sign_in_column"' in idx
+    assert 'EXPECTED_HEAD = "tool_execution_logs_workspace_user_idx"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
