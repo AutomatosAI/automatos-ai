@@ -477,6 +477,14 @@ preset's `initial_prompt` must be a pointer for the same reason.)
 
 ### 6.10 Verify at build — no spend, no live session
 
+**As built (Wave C, 2026-09-11):** `adapters/codex.py` + `tests/fake_codex.py` cover the mechanics
+in CI — the per-agent home, the linked login, the seeded `config.toml` with `[[hooks.<Event>]]`
+tables at `timeout = 30`, hooks firing only with `--dangerously-bypass-hook-trust`, the gate on
+`exec_command`/`apply_patch`, the id learned on `SessionStart`, the rollout reader on the §6.8
+shape, `codex resume <id>` into the same home and rollout with this turn's usage only. The six
+items below remain what a **live** run on the operator's machine must confirm; the login probe
+reads `auth.json`'s `auth_mode` label and whether `tokens` exist — never a value.
+
 1. **Auth mode.** `codex doctor` → `stored ChatGPT tokens: true` after `codex login`. Until then
    `preflight()` refuses (§9.1).
 2. **Hooks fire.** `codex app-server` → `initialize` → `hooks/list` lists our eight entries with

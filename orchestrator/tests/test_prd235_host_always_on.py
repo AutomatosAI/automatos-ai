@@ -81,7 +81,10 @@ def test_health_and_the_lane_see_which_clis_the_online_hosts_run():
     off.capabilities = {"providers": ["grok"]}
     db = _DB([on, on2, off], [], [])
     assert svc.serving_providers(db, "ws") == ["claude", "codex"]
-    assert svc.host_health(db, "ws")["providers_online"] == ["claude", "codex"]
+    health = svc.host_health(db, "ws")
+    assert health["providers_online"] == ["claude", "codex"]
+    assert [e["id"] for e in health["registry"]] == ["claude", "codex"]           # the picker renders from here
+    assert health["registry"][1]["label"] == "Codex" and "gpt-5.5" in health["registry"][1]["model_placeholder"]
     # What a host said, read strictly: never said → None (no filter); said none → [].
     assert svc.served_providers_of(SimpleNamespace(capabilities=None)) is None
     assert svc.served_providers_of(SimpleNamespace(capabilities={"claude": {"version": "2"}})) is None
