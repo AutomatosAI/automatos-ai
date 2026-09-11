@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from core.auth.hybrid import get_request_context_hybrid as get_request_context
 from core.auth.dependencies import RequestContext
+from core.auth.actor import resolve_internal_user_id
 from core.auth.clerk import get_clerk_auth
 from core.database.database import get_db
 from core.auth.workspace_permission import require_workspace_permission
@@ -26,21 +27,9 @@ router = APIRouter(prefix="/api/workspaces/{workspace_id}/team", tags=["team"])
 public_router = APIRouter(prefix="/api/team", tags=["team"])
 
 
-def _resolve_internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
-    """Resolve internal users.id (integer) from RequestContext.
-
-    ctx.user.id is a Clerk string ID or email — both audit_logs.user_id and
-    workspace_invitations.invited_by are Integer FKs to users.id, so we must
-    look up the matching row before writing.
-    """
-    if not ctx.user:
-        return None
-    user = None
-    if ctx.user.clerk_user_id:
-        user = db.query(User).filter(User.clerk_user_id == ctx.user.clerk_user_id).first()
-    if not user and ctx.user.email:
-        user = db.query(User).filter(User.email == ctx.user.email).first()
-    return user.id if user else None
+# The canonical resolver lives in core.auth.actor; the module-level name is kept
+# so every call site in this file (and its tests) reads unchanged.
+_resolve_internal_user_id = resolve_internal_user_id
 
 class InviteMemberRequest(BaseModel):
     email: EmailStr
