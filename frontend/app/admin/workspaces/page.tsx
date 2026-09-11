@@ -28,6 +28,10 @@ import { usePageAPI } from '@/hooks/use-page-api'
 import { apiClient } from '@/lib/api-client'
 import { SaasOnlyNotice } from '@/components/local/saas-only-notice'
 import { isRouteAvailableInEdition } from '@/lib/auth-edition'
+import {
+  WorkspacePlanSelect,
+  type PlanTier,
+} from '@/components/admin/workspace-plan-select'
 
 // ===================================================================
 // Types
@@ -46,6 +50,8 @@ interface WorkspaceRow {
   documents_count: number
   storage_bytes: number
   chats_count: number
+  members_count: number
+  last_active_at: string | null
   created_at: string | null
   paused_at: string | null
   paused_reason: string | null
@@ -82,6 +88,28 @@ function formatDate(iso: string | null): string {
     month: 'short',
     day: 'numeric',
   })
+}
+
+/**
+ * "Last active" reads as elapsed time, not a date — the console is scanned to
+ * spot who is live during a pilot, and "3d ago" answers that at a glance where
+ * a timestamp has to be subtracted first. Anything older than a month falls
+ * back to the absolute date, where the elapsed form stops being informative.
+ */
+function formatRelative(iso: string | null): string {
+  if (!iso) return 'never'
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return 'never'
+  const seconds = Math.floor((Date.now() - then) / 1000)
+  if (seconds < 0) return 'just now'
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 31) return `${days}d ago`
+  return formatDate(iso)
 }
 
 function stateBadge(w: WorkspaceRow) {
@@ -125,6 +153,10 @@ function AdminWorkspacesConsole() {
   const [sort, setSort] = useState<'created_at' | 'name' | 'storage_bytes' | 'agents_count'>('created_at')
   const [order, setOrder] = useState<'asc' | 'desc'>('desc')
 
+  // Fetched once for the whole table — the dropdown is rendered per row, but the
+  // catalogue behind it is identical for every row.
+  const [tiers, setTiers] = useState<PlanTier[]>([])
+
   const [actionId, setActionId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
@@ -164,6 +196,23 @@ function AdminWorkspacesConsole() {
   useEffect(() => {
     fetchWorkspaces()
   }, [fetchWorkspaces])
+
+  useEffect(() => {
+    let cancelled = false
+    apiClient
+      .request<{ tiers: PlanTier[] }>('/api/admin/workspaces/plans')
+      .then((data) => {
+        if (!cancelled) setTiers(data?.tiers ?? [])
+      })
+      .catch(() => {
+        // The table is still fully usable without the catalogue — the plan
+        // dropdown simply stays disabled rather than blocking the console.
+        if (!cancelled) setTiers([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function copyWorkspaceId(id: string) {
     try {
@@ -363,7 +412,7 @@ function AdminWorkspacesConsole() {
                   <tr>
                     <th className="text-left px-3 py-2.5 w-[260px]">Workspace</th>
                     <th className="text-left px-3 py-2.5 w-[200px]">Owner</th>
-                    <th className="text-left px-3 py-2.5 w-[110px]">Plan</th>
+                    <th className="text-left px-3 py-2.5 w-[150px]">Plan</th>
                     <th className="text-left px-3 py-2.5 w-[90px]">State</th>
                     <th className="text-right px-2 py-2.5 w-[52px]">
                       <Users className="h-3.5 w-3.5 inline" />
@@ -377,6 +426,7 @@ function AdminWorkspacesConsole() {
                     <th className="text-right px-2 py-2.5 w-[52px]">
                       <MessageSquare className="h-3.5 w-3.5 inline" />
                     </th>
+                    <th className="text-left px-3 py-2.5 w-[100px]">Last active</th>
                     <th className="text-left px-3 py-2.5 w-[90px]">Created</th>
                     <th className="text-right px-3 py-2.5 w-[100px]">Actions</th>
                   </tr>
@@ -384,14 +434,14 @@ function AdminWorkspacesConsole() {
                 <tbody>
                   {loading && workspaces.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="px-4 py-12 text-center">
+                      <td colSpan={11} className="px-4 py-12 text-center">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
                       </td>
                     </tr>
                   )}
                   {!loading && workspaces.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                      <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                         No workspaces found.
                       </td>
                     </tr>
@@ -432,14 +482,23 @@ function AdminWorkspacesConsole() {
                         </div>
                       </td>
                       <td className="px-3 py-2.5">
-                        <Badge variant="outline" className="capitalize">
-                          {w.plan || '—'}
-                        </Badge>
-                        {w.is_personal && (
-                          <Badge variant="outline" className="ml-1 text-[10px]">
-                            personal
-                          </Badge>
-                        )}
+                        <div className="flex items-center gap-1">
+                          <WorkspacePlanSelect
+                            workspaceId={w.id}
+                            workspaceName={w.name}
+                            plan={w.plan}
+                            membersCount={w.members_count}
+                            tiers={tiers}
+                            disabled={!!w.deleted_at || actionId === w.id}
+                            onChanged={fetchWorkspaces}
+                            onError={setError}
+                          />
+                          {w.is_personal && (
+                            <Badge variant="outline" className="text-[10px]">
+                              personal
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2.5">{stateBadge(w)}</td>
                       <td className="px-2 py-2.5 text-right tabular-nums">
@@ -453,6 +512,16 @@ function AdminWorkspacesConsole() {
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums">
                         {w.chats_count}
+                      </td>
+                      <td
+                        className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap"
+                        title={
+                          w.last_active_at
+                            ? new Date(w.last_active_at).toLocaleString()
+                            : 'Not seen since last-active tracking shipped'
+                        }
+                      >
+                        {formatRelative(w.last_active_at)}
                       </td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
                         {formatDate(w.created_at)}

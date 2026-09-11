@@ -173,8 +173,13 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     assert 'down_revision = "prd240_merge_heads"' in cache
     joins = (versions / "prd240_merge_heads.py").read_text()
     assert '"prd236w1_prd237_merge"' in joins and '"calendar_scheduled_board_tasks"' in joins
+    # 2026-09-11: users_last_sign_in_column chains onto the cache-tokens revision
+    # (declaring users.last_sign_in, which the operator console now reads); the
+    # guard follows it.
+    last_seen = (versions / "users_last_sign_in_column.py").read_text()
+    assert 'down_revision = "prd240_llm_usage_cache_tokens"' in last_seen
     guard = (Path(__file__).resolve().parent / "test_prd209_alembic_single_head.py").read_text()
-    assert 'EXPECTED_HEAD = "prd240_llm_usage_cache_tokens"' in guard
+    assert 'EXPECTED_HEAD = "users_last_sign_in_column"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

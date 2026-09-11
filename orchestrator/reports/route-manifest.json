@@ -1,5 +1,5 @@
 {
-  "route_count": 799,
+  "route_count": 801,
   "routes": [
     {
       "method": "GET",
@@ -138,6 +138,10 @@
       "path": "/api/admin/workspaces"
     },
     {
+      "method": "GET",
+      "path": "/api/admin/workspaces/plans"
+    },
+    {
       "method": "DELETE",
       "path": "/api/admin/workspaces/{workspace_id}"
     },
@@ -148,6 +152,10 @@
     {
       "method": "POST",
       "path": "/api/admin/workspaces/{workspace_id}/pause"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/workspaces/{workspace_id}/plan"
     },
     {
       "method": "POST",
