@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Users, UserPlus, Shield, Trash2, Mail, Search, RefreshCw, Clock, X } from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
+import { formatAbsoluteDate, formatRelative, isWithinDays } from '@/lib/format-relative'
 import { useWorkspace } from '@/hooks/use-workspace'
 import { InviteModal } from './invite-modal'
 import { useAuth } from '@/lib/auth-hooks'
@@ -16,9 +17,32 @@ interface TeamMember {
     id: number
     user_id: string
     email: string
-    name: string
+    name: string | null
     role: 'owner' | 'admin' | 'editor' | 'viewer'
     joined_at: string
+    last_active_at: string | null   // last chat or tool run IN THIS WORKSPACE
+    // null = not shown to this role (needs audit:view — owner/admin); 0 = nothing happened.
+    tool_runs_30d: number | null
+    chats_30d: number | null
+    invited_by_email: string | null
+}
+
+/** "Active this week": the pill's count and the row highlight share this window. */
+const ACTIVE_WITHIN_DAYS = 7
+
+/** "1 chat" / "4 chats" — the activity cell reads as a sentence, not a tally. */
+function plural(n: number, noun: string): string {
+    return `${n} ${noun}${n === 1 ? '' : 's'}`
+}
+
+/**
+ * The display label when `users.name` is empty — the email's local part.
+ * Every Clerk-provisioned user has a NULL name today (names were never synced
+ * into `users`), so "Unknown User" was the whole roster. This is derived from
+ * data the row already carries, not invented.
+ */
+function displayName(member: Pick<TeamMember, 'name' | 'email'>): string {
+    return member.name || member.email.split('@')[0]
 }
 
 interface PendingInvitation {
@@ -122,6 +146,10 @@ export function TeamManagement() {
         }
     }
 
+    // The API nulls the activity fields for roles without audit:view; render
+    // "—" for those, never a misleading "0 tool runs" or "never".
+    const canSeeActivity = members.some((m) => m.tool_runs_30d !== null)
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -135,6 +163,11 @@ export function TeamManagement() {
                         <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
                             <Users className="w-3 h-3 mr-1" />
                             {members.length} Members
+                            {canSeeActivity && (
+                                <span className="text-muted-foreground font-normal ml-1">
+                                    · {members.filter((m) => isWithinDays(m.last_active_at, ACTIVE_WITHIN_DAYS)).length} active this week
+                                </span>
+                            )}
                         </Badge>
 
                         <Button
@@ -215,11 +248,12 @@ export function TeamManagement() {
                 transition={{ duration: 0.6, delay: 0.2 }}
                 className="glass-card rounded-xl border border-border/30 overflow-hidden"
             >
-                <div className="p-4 border-b border-border/30 bg-white/5 hidden md:grid grid-cols-12 gap-4 font-medium text-sm text-muted-foreground">
-                    <div className="col-span-5">User</div>
-                    <div className="col-span-3">Role</div>
-                    <div className="col-span-3">Joined</div>
-                    <div className="col-span-1"></div>
+                <div className="p-4 pr-14 border-b border-border/30 bg-white/5 hidden md:grid grid-cols-12 gap-4 font-medium text-sm text-muted-foreground">
+                    <div className="col-span-4">User</div>
+                    <div className="col-span-2">Role</div>
+                    <div className="col-span-2">Last active</div>
+                    <div className="col-span-2">Activity · 30d</div>
+                    <div className="col-span-2">Joined</div>
                 </div>
 
                 {loading ? (
@@ -236,16 +270,16 @@ export function TeamManagement() {
                                 key={member.id}
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                className="flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 items-start md:items-center hover:bg-white/5 transition-colors group"
+                                className="relative flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 pr-14 items-start md:items-center hover:bg-white/5 transition-colors group"
                             >
-                                <div className="md:col-span-5 flex items-center gap-3 w-full md:w-auto">
+                                <div className="md:col-span-4 flex items-center gap-3 w-full md:w-auto min-w-0">
                                     <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-warning/20 to-purple-500/20 flex items-center justify-center border border-white/10 shrink-0">
                                         <span className="font-semibold text-foreground">
-                                            {member.name ? member.name[0].toUpperCase() : member.email[0].toUpperCase()}
+                                            {displayName(member).charAt(0).toUpperCase() || '?'}
                                         </span>
                                     </div>
                                     <div className="overflow-hidden">
-                                        <div className="font-medium text-foreground truncate">{member.name || 'Unknown User'}</div>
+                                        <div className="font-medium text-foreground truncate">{displayName(member)}</div>
                                         <div className="text-sm text-muted-foreground flex items-center gap-1 truncate">
                                             <Mail className="w-3 h-3 shrink-0" />
                                             {member.email}
@@ -253,7 +287,7 @@ export function TeamManagement() {
                                     </div>
                                 </div>
 
-                                <div className="md:col-span-3 flex items-center gap-2 pl-13 md:pl-0">
+                                <div className="md:col-span-2 flex items-center gap-2 pl-13 md:pl-0">
                                     <div className="relative inline-block">
                                         <select
                                             value={member.role}
@@ -272,11 +306,42 @@ export function TeamManagement() {
                                     </div>
                                 </div>
 
-                                <div className="md:col-span-3 text-sm text-muted-foreground pl-13 md:pl-0">
-                                    {new Date(member.joined_at).toLocaleDateString()}
+                                <div
+                                    className={`md:col-span-2 text-sm pl-13 md:pl-0 ${
+                                        isWithinDays(member.last_active_at, ACTIVE_WITHIN_DAYS) ? 'text-foreground' : 'text-muted-foreground'
+                                    }`}
+                                    title={
+                                        member.tool_runs_30d === null
+                                            ? 'Activity is shown to workspace owners and admins'
+                                            : member.last_active_at
+                                              ? 'Most recent chat or tool run in this workspace'
+                                              : 'No chats or tool runs in this workspace yet'
+                                    }
+                                >
+                                    {member.tool_runs_30d === null ? '—' : formatRelative(member.last_active_at)}
                                 </div>
 
-                                <div className="col-span-1 flex justify-end">
+                                <div className="md:col-span-2 text-sm text-muted-foreground pl-13 md:pl-0 tabular-nums leading-tight">
+                                    {member.tool_runs_30d === null || member.chats_30d === null ? (
+                                        '—'
+                                    ) : (
+                                        <>
+                                            <div>{plural(member.tool_runs_30d, 'tool run')}</div>
+                                            <div>{plural(member.chats_30d, 'chat')}</div>
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="md:col-span-2 text-sm text-muted-foreground pl-13 md:pl-0 min-w-0">
+                                    <div>{formatAbsoluteDate(member.joined_at)}</div>
+                                    {member.invited_by_email && (
+                                        <div className="text-xs truncate" title={`Invited by ${member.invited_by_email}`}>
+                                            by {member.invited_by_email}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="absolute right-3 top-3 md:top-1/2 md:-translate-y-1/2">
                                     {/* Don't allow deleting owner */}
                                     {member.role !== 'owner' && (
                                         <Button

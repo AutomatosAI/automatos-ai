@@ -168,7 +168,9 @@ def _svc(db):
 
 
 def _heartbeat_agent(agent_id, minutes=30, **hb):
-    cfg = {"heartbeat": {"interval_minutes": minutes, **hb}}
+    # Enabled unless the test says otherwise — the feed lists a heartbeat only
+    # when the scheduler would fire it (`enabled` truthy).
+    cfg = {"heartbeat": {"interval_minutes": minutes, "enabled": True, **hb}}
     return _Row(id=agent_id, name=f"Agent {agent_id}", configuration=cfg)
 
 
@@ -250,6 +252,19 @@ def test_get_schedule_disabled_heartbeat_excluded():
     out = _svc(db).get_schedule(range_days=7)
     ids = {i["id"] for i in out["scheduled"]}
     assert "routine-2" in ids and "routine-1" not in ids
+
+
+@_needs_croniter
+def test_get_schedule_heartbeat_without_enabled_flag_excluded():
+    """A block with no `enabled` key never fires (heartbeat_service loads only
+    truthy `enabled`), so it is not a routine. The old `is False` test showed
+    every such agent hourly on the calendar."""
+    unset = _Row(id=3, name="Agent 3", configuration={"heartbeat": {"interval_minutes": 60}})
+    null = _Row(id=4, name="Agent 4", configuration={"heartbeat": {"interval_minutes": 60, "enabled": None}})
+    db = _FakeScheduleDB(agents=[unset, null, _heartbeat_agent(5, 60)], templates=[], tasks=[])
+    out = _svc(db).get_schedule(range_days=7)
+    ids = {i["id"] for i in out["scheduled"]}
+    assert ids == {"routine-5"}
 
 
 # ── S2: mission SLA deadlines (the 5th feed source) ────────────────────────

@@ -138,6 +138,7 @@ ADMIN_GATED_IN_HANDLER = {
     ("POST", "/api/admin/prompts/{prompt_id}/rollback"),
     ("POST", "/api/admin/prompts/{prompt_id}/versions"),
     ("POST", "/api/admin/prompts/{prompt_id}/versions/{version_id}/activate"),
+    ("PATCH", "/api/admin/workspaces/{workspace_id}/plan"),
     ("POST", "/api/admin/workspaces/{workspace_id}/pause"),
     ("POST", "/api/admin/workspaces/{workspace_id}/purge"),
     ("POST", "/api/admin/workspaces/{workspace_id}/restore"),
