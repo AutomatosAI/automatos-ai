@@ -2257,8 +2257,18 @@
   :is(.studio, .cc-cal-root) .cc-cal-event {
     font-size: 11.5px; cursor: pointer;
     border-left-width: 3px;
+    /* a <button> centres its text; a calendar entry reads from the left edge */
+    text-align: left; padding: 3px 6px;
     transition: background 140ms ease, transform 140ms ease;
   }
+  /* Stacked card: a slot with more events than the column has lanes for */
+  :is(.studio, .cc-cal-root) .cc-cal-event.cc-cal-group {
+    box-shadow: 3px 3px 0 hsl(var(--border));
+  }
+  :is(.studio, .cc-cal-root) .cc-cal-event .agents {
+    display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle;
+  }
+  :is(.studio, .cc-cal-root) .cc-cal-event .agents .agent-dot { margin-right: 0; }
   :is(.studio, .cc-cal-root) .cc-cal-event:hover {
     background: hsl(var(--cc-hover, var(--muted))) !important;
     transform: translateX(1px);

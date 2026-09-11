@@ -46,6 +46,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -56,7 +59,14 @@ import {
 import { useToggleHeartbeat } from '@/hooks/use-heartbeats-api'
 import { useUpdateScheduledTaskStatus } from '@/hooks/use-scheduled-tasks-api'
 import { toneFor } from './agent-tones'
-import { KIND_META, KIND_ORDER, kindTone, layoutLanes, type ScheduleItemType } from './calendar-kinds'
+import {
+  KIND_META,
+  KIND_ORDER,
+  collapseCrowded,
+  kindTone,
+  layoutLanes,
+  type ScheduleItemType,
+} from './calendar-kinds'
 import {
   buildEventActions,
   isDeadlineItem,
@@ -70,11 +80,15 @@ const HOUR_PX = 44
 const START_HR = 0
 const END_HR = 22
 const HOURS = Array.from({ length: END_HR - START_HR + 1 }, (_, i) => i + START_HR)
-/** Smallest rendered event box. The overlap layout uses the same floor, so two
- *  short events closer together than this share the column instead of
- *  drawing on top of each other. */
-const MIN_EVENT_PX = 28
+/** Smallest rendered event box: the time line plus the title line (28px
+ *  clipped the title). The overlap layout uses the same floor, so two short
+ *  events closer together than this share the column instead of drawing on
+ *  top of each other. */
+const MIN_EVENT_PX = 38
 const MIN_EVENT_MIN = (MIN_EVENT_PX / HOUR_PX) * 60
+/** Lanes a column can show legibly per view; a slot needing more becomes one
+ *  stacked card with a submenu per member. */
+const MAX_LANES: Record<ViewMode, number> = { day: 6, week: 2, month: 1 }
 /** Routines this frequent or more (heartbeats every 5/15/30/60 min) live in the
  *  always-on band ONLY. Plotted, an hourly heartbeat is 12+ blocks a day per
  *  agent and buries the one-off work the grid is for (2026-09-11). */
@@ -319,22 +333,111 @@ function expandItem(item: ScheduleItem, span: WindowSpan): CalEvent[] {
   return []
 }
 
-function EventMenu({ actions, children }: { actions: EventAction[]; children: ReactNode }) {
+interface EventMenuGroup {
+  label: string
+  actions: EventAction[]
+}
+
+function MenuItems({ actions }: { actions: EventAction[] }) {
+  return (
+    <>
+      {actions.map((a) => (
+        <DropdownMenuItem
+          key={a.label}
+          onSelect={() => a.run()}
+          className={a.tone === 'danger' ? 'text-destructive focus:text-destructive' : undefined}
+        >
+          {a.label}
+        </DropdownMenuItem>
+      ))}
+    </>
+  )
+}
+
+/** One event's actions, or — for a stacked card — a submenu per member. */
+function EventMenu({
+  actions,
+  groups,
+  children,
+}: {
+  actions?: EventAction[]
+  groups?: EventMenuGroup[]
+  children: ReactNode
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[180px]">
-        {actions.map((a) => (
-          <DropdownMenuItem
-            key={a.label}
-            onSelect={() => a.run()}
-            className={a.tone === 'danger' ? 'text-destructive focus:text-destructive' : undefined}
-          >
-            {a.label}
-          </DropdownMenuItem>
+        {actions && <MenuItems actions={actions} />}
+        {(groups ?? []).map((g, i) => (
+          <DropdownMenuSub key={`${g.label}-${i}`}>
+            <DropdownMenuSubTrigger>{g.label}</DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <MenuItems actions={g.actions} />
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+const hhmm = (evt: CalEvent) =>
+  `${String(evt.hour).padStart(2, '0')}:${String(evt.min).padStart(2, '0')}`
+
+/** A slot with more overlapping events than the column has lanes for: one
+ *  card, the members' agent dots, and a submenu per member. */
+function GroupCard({
+  members,
+  start,
+  end,
+  actionDeps,
+}: {
+  members: CalEvent[]
+  start: number
+  end: number
+  actionDeps: EventActionDeps
+}) {
+  const first = members[0]
+  const kinds = new Set(members.map((m) => m.item.type))
+  const kind = kinds.size === 1 ? first.item.type : null
+  const what = kind ? KIND_META[kind].plural : 'items'
+  const names = members.map((m) => (m.item.type === 'routine' && m.agent ? m.agent : m.name))
+  const top = (first.hour - START_HR) * HOUR_PX + (first.min / 60) * HOUR_PX
+  const height = Math.max(((end - start) / 3_600_000) * HOUR_PX, MIN_EVENT_PX)
+  const groups = members.map((m) => ({
+    label: `${hhmm(m)} ${m.name}`,
+    actions: buildEventActions(m.item, actionDeps),
+  }))
+  return (
+    <EventMenu groups={groups}>
+      <button
+        type="button"
+        className="cc-cal-event cc-cal-group"
+        data-kind={kind ?? 'mixed'}
+        data-group-size={members.length}
+        style={{
+          top,
+          height,
+          left: 'calc(0% + 3px)',
+          width: 'calc(100% - 6px)',
+          right: 'auto',
+          borderLeftColor: kind ? kindTone(kind) : 'hsl(var(--muted-foreground))',
+          background: 'hsl(var(--secondary))',
+        }}
+        title={`${members.length} ${what}: ${names.join(', ')} — click for actions`}
+      >
+        <div className="nm">
+          {hhmm(first)} · {members.length} {what}
+          <span className="agents">
+            {members.slice(0, 8).map((m) => (
+              <span key={m.id} className="agent-dot" style={{ background: toneFor(m.agent).bg }} />
+            ))}
+          </span>
+        </div>
+        <div className="ttl">{names.join(', ')}</div>
+      </button>
+    </EventMenu>
   )
 }
 
@@ -751,7 +854,19 @@ export function CalendarTab() {
                     height: HOURS.length * HOUR_PX,
                   }}
                 >
-                  {layoutLanes(dayEvents, eventSpan).map(({ evt, lane, lanes }) => {
+                  {collapseCrowded(layoutLanes(dayEvents, eventSpan), MAX_LANES[mode], eventSpan).map((placed) => {
+                    if (placed.kind === 'group') {
+                      return (
+                        <GroupCard
+                          key={`group-${placed.start}`}
+                          members={placed.members}
+                          start={placed.start}
+                          end={placed.end}
+                          actionDeps={actionDeps}
+                        />
+                      )
+                    }
+                    const { evt, lane, lanes } = placed
                     const top =
                       (evt.hour - START_HR) * HOUR_PX +
                       (evt.min / 60) * HOUR_PX

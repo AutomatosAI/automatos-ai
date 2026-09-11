@@ -13,15 +13,17 @@ export type { ScheduleItemType } from '@/hooks/use-activity-api'
 
 export interface KindMeta {
   label: string
+  /** for a stacked card: "5 heartbeats" */
+  plural: string
   tone: string
 }
 
 export const KIND_META: Record<ScheduleItemType, KindMeta> = {
-  routine: { label: 'Heartbeat', tone: 'hsl(201 44% 40%)' },
-  recipe: { label: 'Playbook', tone: 'hsl(272 30% 45%)' },
-  task: { label: 'Scheduled task', tone: 'hsl(158 44% 35%)' },
-  mission: { label: 'Mission SLA', tone: 'hsl(28 70% 45%)' },
-  task_due: { label: 'Task deadline', tone: 'hsl(345 60% 45%)' },
+  routine: { label: 'Heartbeat', plural: 'heartbeats', tone: 'hsl(201 44% 40%)' },
+  recipe: { label: 'Playbook', plural: 'playbooks', tone: 'hsl(272 30% 45%)' },
+  task: { label: 'Scheduled task', plural: 'scheduled tasks', tone: 'hsl(158 44% 35%)' },
+  mission: { label: 'Mission SLA', plural: 'mission SLAs', tone: 'hsl(28 70% 45%)' },
+  task_due: { label: 'Task deadline', plural: 'deadlines', tone: 'hsl(345 60% 45%)' },
 }
 
 /** Legend order: recurring things first, deadlines last. */
@@ -37,6 +39,8 @@ export interface Laned<T> {
   lane: number
   /** how many columns the cluster needs — every member gets the same */
   lanes: number
+  /** which run of overlapping events this belongs to (0-based, by start) */
+  cluster: number
 }
 
 /**
@@ -60,10 +64,15 @@ export function layoutLanes<T>(
   let cluster: Array<{ evt: T; lane: number }> = []
   let laneEnds: number[] = []
   let clusterEnd = Number.NEGATIVE_INFINITY
+  let clusterId = 0
 
   const flush = () => {
-    const lanes = Math.max(laneEnds.length, 1)
-    cluster.forEach((member) => out.push({ evt: member.evt, lane: member.lane, lanes }))
+    if (cluster.length === 0) return
+    const lanes = laneEnds.length
+    cluster.forEach((member) =>
+      out.push({ evt: member.evt, lane: member.lane, lanes, cluster: clusterId }),
+    )
+    clusterId += 1
     cluster = []
     laneEnds = []
     clusterEnd = Number.NEGATIVE_INFINITY
@@ -78,5 +87,41 @@ export function layoutLanes<T>(
     clusterEnd = Math.max(clusterEnd, end)
   }
   flush()
+  return out
+}
+
+export type Placed<T> =
+  | { kind: 'single'; evt: T; lane: number; lanes: number }
+  | { kind: 'group'; members: T[]; start: number; end: number }
+
+/**
+ * A cluster that needs more lanes than the column can show legibly becomes
+ * one stacked card (five daily heartbeats at 10:00 were five unreadable
+ * slivers in the week view); every other event keeps its lane.
+ */
+export function collapseCrowded<T>(
+  laid: readonly Laned<T>[],
+  maxLanes: number,
+  span: (evt: T) => readonly [number, number],
+): Placed<T>[] {
+  const crowded = new Set(laid.filter((l) => l.lanes > maxLanes).map((l) => l.cluster))
+  const folded = new Set<number>()
+  const out: Placed<T>[] = []
+  for (const l of laid) {
+    if (!crowded.has(l.cluster)) {
+      out.push({ kind: 'single', evt: l.evt, lane: l.lane, lanes: l.lanes })
+      continue
+    }
+    if (folded.has(l.cluster)) continue
+    folded.add(l.cluster)
+    const members = laid.filter((m) => m.cluster === l.cluster).map((m) => m.evt)
+    const spans = members.map(span)
+    out.push({
+      kind: 'group',
+      members,
+      start: Math.min(...spans.map((s) => s[0])),
+      end: Math.max(...spans.map((s) => s[1])),
+    })
+  }
   return out
 }
