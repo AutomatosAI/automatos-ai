@@ -483,6 +483,14 @@ async def _boot_phase_2_extensions(app_instance: "FastAPI") -> "DeferredInitResu
                 except Exception as _st_err:
                     logger.warning("Could not load scheduled tasks: %s", _st_err)
 
+                # Leader reconcile tick: scheduled-task and heartbeat changes made on
+                # any worker reach this scheduler within a minute (not at next boot).
+                try:
+                    from services.schedule_reconcile import start_schedule_reconcile
+                    await start_schedule_reconcile(shared_sched)
+                except Exception as _rc_err:
+                    logger.warning("Could not start schedule reconcile tick: %s", _rc_err)
+
                 # PRD-82A: Coordinator tick — sequential mission orchestration
                 if config.COORDINATOR_ENABLED:
                     try:

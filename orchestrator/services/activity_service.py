@@ -891,7 +891,11 @@ class ActivityService:
         for agent in agents:
             cfg = agent.configuration if isinstance(agent.configuration, dict) else {}
             hb = cfg.get("heartbeat")
-            if not isinstance(hb, dict) or hb.get("enabled") is False:
+            # The same rule the scheduler applies (heartbeat_service._load_heartbeat_configs:
+            # `if hb.get("enabled")`) and the GET config reports (`enabled` defaults to
+            # False): a block without the flag never fires, so it is not a routine. The old
+            # `is False` test put every such agent on the calendar hourly (2026-09-11).
+            if not isinstance(hb, dict) or not hb.get("enabled"):
                 continue
             interval = _coerce_int(hb.get("interval_minutes"), default=60)
             tz = hb.get("timezone") or "UTC"

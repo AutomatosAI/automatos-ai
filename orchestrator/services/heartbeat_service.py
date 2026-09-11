@@ -149,6 +149,9 @@ class HeartbeatService:
         # probe writes a heartbeat_results row only on a state CHANGE (not every tick).
         self._last_durable_probe_status: Optional[str] = None
         self._max_concurrent_per_workspace = 5
+        # agent_id -> heartbeat_signature(...) of the job currently registered,
+        # so the reconcile tick re-adds a job only when its config changed.
+        self._hb_signatures: Dict[int, str] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -403,11 +406,57 @@ class HeartbeatService:
             trigger,
         )
 
+    @staticmethod
+    def heartbeat_signature(workspace_id: str, hb_config: dict) -> str:
+        """What decides a heartbeat job's trigger and args — compared by the
+        reconcile tick to re-add a job only when the config actually changed."""
+        import json as _json
+        return _json.dumps({"ws": str(workspace_id), "hb": hb_config}, sort_keys=True, default=str)
+
+    def reconcile_agent_heartbeats(self, db) -> Dict[str, int]:
+        """Make the scheduler worker's agent heartbeat jobs match the DB (all
+        workspaces): enabled blocks get a job, disabled ones lose theirs, a changed
+        block is re-added. The config PUT / toggle only touch the scheduler on the
+        worker that served the request; only one worker hosts APScheduler, so
+        without this the leader learned of a change at the next restart."""
+        from core.models import Agent
+
+        if not self._scheduler or not getattr(self._scheduler, "running", False):
+            return {"added": 0, "removed": 0, "changed": 0}
+        desired: Dict[int, tuple] = {}
+        for agent in db.query(Agent.id, Agent.workspace_id, Agent.configuration).all():
+            cfg = agent.configuration if isinstance(agent.configuration, dict) else {}
+            hb = cfg.get("heartbeat")
+            if isinstance(hb, dict) and hb.get("enabled"):
+                desired[int(agent.id)] = (str(agent.workspace_id), hb)
+        existing = {
+            int(str(job.id)[len("agent_hb_"):]): job
+            for job in self._scheduler.get_jobs()
+            if str(getattr(job, "id", "")).startswith("agent_hb_") and str(job.id)[len("agent_hb_"):].isdigit()
+        }
+        added = changed = removed = 0
+        for agent_id, (ws_id, hb) in desired.items():
+            signature = self.heartbeat_signature(ws_id, hb)
+            if agent_id not in existing:
+                self.schedule_agent_heartbeat(agent_id, ws_id, hb)
+                added += 1
+            elif self._hb_signatures.get(agent_id) != signature:
+                self.schedule_agent_heartbeat(agent_id, ws_id, hb)
+                changed += 1
+        for agent_id in existing:
+            if agent_id not in desired:
+                self.unschedule_heartbeat(f"agent_hb_{agent_id}")
+                removed += 1
+        if added or changed or removed:
+            logger.info("[Heartbeat] reconcile: %d added, %d changed, %d removed", added, changed, removed)
+        return {"added": added, "removed": removed, "changed": changed}
+
     def schedule_agent_heartbeat(
         self, agent_id: int, workspace_id: str, hb_config: dict
     ):
         """Schedule or reschedule an agent heartbeat job."""
         job_id = f"agent_hb_{agent_id}"
+        self._hb_signatures[int(agent_id)] = self.heartbeat_signature(workspace_id, hb_config)
         interval_minutes = hb_config.get("interval_minutes", 60)
 
         if self._scheduler.get_job(job_id):
@@ -431,7 +480,10 @@ class HeartbeatService:
         )
 
     def unschedule_heartbeat(self, job_id: str):
-        """Remove a scheduled heartbeat job."""
+        """Remove a scheduled heartbeat job (and forget its config signature)."""
+        suffix = job_id[len("agent_hb_"):]
+        if job_id.startswith("agent_hb_") and suffix.isdigit():
+            self._hb_signatures.pop(int(suffix), None)
         if self._scheduler and self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
             logger.info("[Heartbeat] Unscheduled job %s", job_id)
