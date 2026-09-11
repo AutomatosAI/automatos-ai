@@ -94,7 +94,7 @@ Each story: **Files** (reuse first), **Test**, **Editions**. Sizes S/M/L. Waves 
 
 ### Wave 6 — adapters and scale
 
-**S20 · Codex adapter — M.** Same lane, different binary: `codex exec` with an isolated `CODEX_HOME` provisioned by the user (`codex login --device-auth`), API keys stripped, results through the same ticket contract (PRD-234 S5). **Editions:** local only.
+**S20 · Codex adapter — M.** **SUPERSEDED 2026-09-10 by `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md`** — `codex exec` is the wrong transport (its hooks do not fire headless, and it repeats the billing posture PRD-234 withdrew); the supervised interactive session + a per-agent `CODEX_HOME` is the built design. Original text: Same lane, different binary: `codex exec` with an isolated `CODEX_HOME` provisioned by the user (`codex login --device-auth`), API keys stripped, results through the same ticket contract (PRD-234 S5). **Editions:** local only.
 **S21 · Community lane — S each.** PRD-234 S6 as written.
 **S22 · Manager scale — M.** Per-agent threads and back-pressure so Auto's context does not become the meeting room (munder issue #303: "at six agents everything collides in one orchestrator conversation"): one conversation per ticket thread, a work queue with limits per agent, hop caps on agent-to-agent messages. **Editions:** both.
 
