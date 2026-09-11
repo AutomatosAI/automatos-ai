@@ -246,6 +246,12 @@ class ToolExecutionLog(Base):
     executed_at = Column(DateTime, default=datetime.utcnow)
     
     __table_args__ = (
+        # The team page groups tool runs by member within ONE workspace
+        # (api/team._activity_by_user); without this the query sequential-scans an
+        # audit table that only grows. Same name as the migration that adds it to
+        # existing databases, so a create_all-first install and an upgraded one end
+        # up identical.
+        Index("ix_tool_execution_logs_workspace_user", "workspace_id", "user_id"),
         Index("idx_tool_logs_agent", "agent_id"),
         Index("idx_tool_logs_status", "status"),
         Index("idx_tool_logs_executed", "executed_at"),

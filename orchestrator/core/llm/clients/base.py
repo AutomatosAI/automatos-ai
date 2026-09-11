@@ -109,6 +109,9 @@ class LLMResponse:
     # PRD-238 S2: True when the text/reasoning were already delivered live to
     # an ``on_delta`` callback, so the caller must not emit them a second time.
     streamed: bool = False
+    # PRD-240 S4: sources a provider-executed web search cited for this reply
+    # ([{title, url}]), when the route carried a server-side search tool.
+    citations: Optional[List[Dict[str, Any]]] = None
 
 
 class BaseLLMProvider(ABC):

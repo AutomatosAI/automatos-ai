@@ -496,6 +496,74 @@ def _resolve_workspace_for_clerk_user(
 
 
 # ---------------------------------------------------------------------------
+# Last-seen stamp — the operator console's "Last active" column
+# ---------------------------------------------------------------------------
+
+# ``users.last_sign_in`` has existed on the model since the Clerk cutover but
+# nothing ever wrote it (1 of 25 rows populated in production, 2026-09-10), so
+# the admin console had no way to tell an active pilot tenant from a dormant one.
+# It is stamped HERE because the Clerk lane is the one place every authenticated
+# request passes through — which also makes it the hottest path in the app, so
+# the write is throttled twice over:
+#
+#   1. an in-process map skips the statement entirely for the whole interval —
+#      most requests do no DB work at all, and
+#   2. the UPDATE repeats the age predicate itself, so a cold process, a second
+#      Railway replica or a racing request can still only write once per
+#      interval. No read-then-write, so there is nothing to race.
+#
+# The semantics are therefore "last authenticated request", i.e. last SEEN —
+# browsing counts, not just a fresh login. The console labels it that way.
+_LAST_SEEN_THROTTLE_SECONDS = 900.0  # 15 minutes
+_LAST_SEEN_CACHE_MAX = 2048
+_last_seen_touched: dict = {}
+
+
+def _touch_last_seen(db, clerk_user_id: Optional[str]) -> None:
+    """Stamp ``users.last_sign_in`` for this caller, at most once per interval.
+
+    Best-effort and never fatal: nobody loses a request because a bookkeeping
+    write failed, so a failure rolls back (the caller reuses this session for
+    workspace resolution immediately afterwards) and returns quietly.
+    """
+    if not clerk_user_id:
+        return
+    now = time.monotonic()
+    seen_at = _last_seen_touched.get(clerk_user_id)
+    if seen_at is not None and (now - seen_at) < _LAST_SEEN_THROTTLE_SECONDS:
+        return
+    try:
+        db.execute(
+            text(
+                "UPDATE users SET last_sign_in = now() "
+                "WHERE clerk_user_id = :cid "
+                "  AND (last_sign_in IS NULL "
+                "       OR last_sign_in < now() - make_interval(secs => :age))"
+            ),
+            {"cid": clerk_user_id, "age": _LAST_SEEN_THROTTLE_SECONDS},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        # WARNING, not debug: a standing failure here means the console's
+        # "Last active" column is quietly dead, and nothing else would say so.
+        logger.warning(
+            "last_sign_in stamp failed for clerk_user_id=%s — backing off %.0fs",
+            clerk_user_id, _LAST_SEEN_THROTTLE_SECONDS, exc_info=True,
+        )
+    # Recorded on BOTH paths, deliberately.
+    #   success  — including an UPDATE that matched no row, because another
+    #              worker stamped it inside the interval;
+    #   failure  — because a PERSISTENT fault (a missing column, a revoked
+    #              grant) would otherwise retry on every single authenticated
+    #              request, turning a bookkeeping write into a hot-path storm.
+    #              Backing off costs at most one interval of staleness.
+    if len(_last_seen_touched) >= _LAST_SEEN_CACHE_MAX:
+        _last_seen_touched.clear()
+    _last_seen_touched[clerk_user_id] = now
+
+
+# ---------------------------------------------------------------------------
 # PRD-233 S6 — the local operator's identity: ONE users row, resolved by email
 # ---------------------------------------------------------------------------
 
@@ -803,6 +871,10 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             if claims:
                 info = clerk.extract_user_info(claims)
                 clerk_uid = info.get("clerk_user_id")
+
+                # Stamp last-seen before any branch below returns, so the admin
+                # console counts admin "__all__" calls as activity too.
+                _touch_last_seen(db, clerk_uid)
 
                 # Determine admin status
                 system_role = info.get("system_role") or info.get("role") or "user"

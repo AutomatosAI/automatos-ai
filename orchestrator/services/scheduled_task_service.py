@@ -15,7 +15,7 @@ like any other.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import timedelta, datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -32,6 +32,19 @@ MAX_TASKS_PER_AGENT = 10
 MAX_RECURRING_PER_WORKSPACE = 25
 # Operator-scheduled rows (no creator agent) share one workspace-wide cap.
 MAX_OPERATOR_TASKS_PER_WORKSPACE = 50
+
+# APScheduler job id prefix for a scheduled task; the reconcile tick keys on it.
+JOB_ID_PREFIX = "scheduled_task_"
+# The scheduler worker catches up with the DB within this many seconds
+# (services.schedule_reconcile). Creates, pauses, resumes and cancels land on
+# ANY uvicorn worker; only the one holding the scheduler lock has APScheduler.
+RECONCILE_INTERVAL_SECONDS = 60
+# A one-shot registered late (created on a non-leader worker, re-registered by
+# the tick, or loaded at boot) still fires if its run time is at most this far
+# in the past. APScheduler's default grace is 1 s, which drops it as "missed".
+# Older ones are left alone — the calendar shows them as missed — instead of
+# being re-added and missed again on every tick.
+ONE_SHOT_MISFIRE_GRACE_SECONDS = 3 * RECONCILE_INTERVAL_SECONDS
 
 # How a fired task is delivered.
 DELIVER_CHAT = "chat"              # PRD-77: open a chat with the target agent
@@ -372,8 +385,11 @@ class ScheduledTaskService:
 
         db = SessionLocal()
         try:
+            # FOR UPDATE: a second firing of the same row (the reconcile tick
+            # re-registering a one-shot whose completion commit is in flight)
+            # waits here and then finds it no longer active.
             task = db.execute(
-                text("SELECT * FROM agent_scheduled_tasks WHERE id = :id AND status = 'active'"),
+                text("SELECT * FROM agent_scheduled_tasks WHERE id = :id AND status = 'active' FOR UPDATE"),
                 {"id": task_id},
             ).fetchone()
 
@@ -655,14 +671,22 @@ class ScheduledTaskService:
 
             scheduler = get_unified_scheduler()
             if not scheduler.apscheduler or not scheduler.apscheduler.running:
-                logger.warning("[ScheduledTask] Scheduler not running — task %d will be picked up on restart", task_id)
+                # This worker does not host APScheduler (another one holds the lock):
+                # the DB row is the truth and the scheduler worker's reconcile tick
+                # registers it within RECONCILE_INTERVAL_SECONDS.
+                logger.info(
+                    "[ScheduledTask] Scheduler not on this worker — task %d is registered by the reconcile tick within %ds",
+                    task_id, RECONCILE_INTERVAL_SECONDS,
+                )
                 return
 
-            job_id = f"scheduled_task_{task_id}"
+            job_id = f"{JOB_ID_PREFIX}{task_id}"
 
+            job_kwargs: Dict[str, Any] = {}
             if task_type == "one_shot":
                 run_at = datetime.fromisoformat(schedule.replace("Z", "+00:00"))
                 trigger = DateTrigger(run_date=run_at)
+                job_kwargs["misfire_grace_time"] = ONE_SHOT_MISFIRE_GRACE_SECONDS
             else:
                 # Standard crontab semantics so firing matches the calendar's
                 # croniter next_run (PRD-162 — one schedule truth).
@@ -684,6 +708,7 @@ class ScheduledTaskService:
                 id=job_id,
                 replace_existing=True,
                 max_instances=1,
+                **job_kwargs,
             )
             logger.info("[ScheduledTask] Registered job %s with scheduler", job_id)
 
@@ -694,6 +719,68 @@ class ScheduledTaskService:
     def _next_cron_run(cron_expr: str) -> Optional[datetime]:
         """Next run from a cron expression via the shared schedule util (croniter)."""
         return _util_next_run(cron_expr, now=datetime.now(timezone.utc))
+
+    def reconcile_with_scheduler(self, scheduler: Any) -> Dict[str, Any]:
+        """Make the scheduler worker's APScheduler match the DB, all workspaces.
+
+        Active rows with no job get registered; jobs whose row is no longer active
+        (paused, cancelled, completed, deleted) are removed. Idempotent — an active
+        row with its job already present is left alone (re-adding a cron job would
+        recompute its next fire time). Runs on the leader every
+        RECONCILE_INTERVAL_SECONDS (services.schedule_reconcile) and once at boot.
+        """
+        if scheduler is None or not getattr(scheduler, "running", False):
+            return {"added": 0, "removed": 0, "stale": 0, "skipped": True}
+        rows = self.db.execute(
+            text("""
+                SELECT id, task_type, schedule, target_agent_id
+                FROM agent_scheduled_tasks
+                WHERE status = 'active'
+            """),
+        ).fetchall()
+        active = {int(row.id): row for row in rows}
+        existing = {
+            str(job.id) for job in scheduler.get_jobs()
+            if str(getattr(job, "id", "")).startswith(JOB_ID_PREFIX)
+        }
+        added = stale = 0
+        now = datetime.now(timezone.utc)
+        for task_id, row in active.items():
+            if f"{JOB_ID_PREFIX}{task_id}" in existing:
+                continue
+            if row.task_type == "one_shot" and self._one_shot_too_late(row.schedule, now):
+                # Just fired (its completion commit is racing this pass) or missed
+                # long ago: re-adding would run it late or be "missed" every tick.
+                stale += 1
+                continue
+            self._register_with_scheduler(row.id, row.task_type, row.schedule, row.target_agent_id)
+            added += 1
+        removed = 0
+        for job_id in existing:
+            try:
+                task_id = int(job_id[len(JOB_ID_PREFIX):])
+            except ValueError:
+                continue
+            if task_id not in active:
+                try:
+                    scheduler.remove_job(job_id)
+                except Exception:  # noqa: BLE001 — already gone
+                    pass
+                removed += 1
+        if added or removed:
+            logger.info("[ScheduledTask] reconcile: %d job(s) added, %d removed, %d stale one-shot(s) left", added, removed, stale)
+        return {"added": added, "removed": removed, "stale": stale, "skipped": False}
+
+    @staticmethod
+    def _one_shot_too_late(schedule: str, now: datetime) -> bool:
+        """True when a one-shot's run time is further in the past than the misfire grace."""
+        try:
+            run_at = datetime.fromisoformat(str(schedule).replace("Z", "+00:00"))
+        except ValueError:
+            return True  # cannot be registered either; don't retry it every tick
+        if run_at.tzinfo is None:
+            run_at = run_at.replace(tzinfo=timezone.utc)
+        return (now - run_at).total_seconds() > ONE_SHOT_MISFIRE_GRACE_SECONDS
 
     async def load_active_tasks_to_scheduler(self) -> int:
         """
