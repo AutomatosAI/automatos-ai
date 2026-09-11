@@ -51,7 +51,13 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-09-09 (analytics cost tracking): prd240_merge_heads joins that merge with the
 # calendar chain (calendar_scheduled_board_tasks); prd240_llm_usage_cache_tokens
 # chains onto it and is the single head.
-EXPECTED_HEAD = "prd240_llm_usage_cache_tokens"
+# 2026-09-11 (operator console): users_last_sign_in_column chains onto it —
+# users.last_sign_in was only ever a model attribute, never a declared column, and
+# the admin workspace routes now READ it (a missing column there is a 500 per load).
+# 2026-09-11 (team page activity): tool_execution_logs_workspace_user_idx chains onto it — the composite
+# index behind api/team._activity_by_user, declared on the model too for
+# create_all-first installs.
+EXPECTED_HEAD = "tool_execution_logs_workspace_user_idx"
 
 
 def _literal(node: ast.AST):

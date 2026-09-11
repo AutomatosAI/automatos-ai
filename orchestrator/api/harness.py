@@ -22,40 +22,27 @@ service account self-management authority over itself.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from api.harness_commands import handle_harness_command
+from core.auth.actor import resolve_internal_user_id
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.database.database import get_db
-from core.models.core import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/harness", tags=["HARNESS"])
 
 
-def _resolve_internal_user_id(db: Session, ctx: RequestContext) -> Optional[int]:
-    """Resolve the integer ``users.id`` for the authenticated principal.
-
-    ``ctx.user.id`` is a Clerk string id or email, but the HARNESS authz keys on
-    the integer ``workspace_members.user_id`` — so the row is looked up first.
-    Fail-closed: returns None when nothing matches, and the handler's admin gate
-    then refuses (an unresolved principal can never mutate state). Mirrors
-    ``api.team._resolve_internal_user_id`` — there is no shared util yet.
-    """
-    if not ctx.user:
-        return None
-    user = None
-    if ctx.user.clerk_user_id:
-        user = db.query(User).filter(User.clerk_user_id == ctx.user.clerk_user_id).first()
-    if not user and ctx.user.email:
-        user = db.query(User).filter(User.email == ctx.user.email).first()
-    return user.id if user else None
+# The canonical resolver lives in core.auth.actor (extracted from the copy that
+# used to sit here). Fail-closed semantics are unchanged: an unresolved
+# principal yields None, and the handler's admin gate then refuses.
+_resolve_internal_user_id = resolve_internal_user_id
 
 
 async def _run_command(

@@ -482,6 +482,48 @@ class Config:
     def IS_SAAS_EDITION(self) -> bool:
         return self.AUTH_EDITION == "saas"
 
+    # =============================================================================
+    # PRD-240 — agents can read and search the web (platform capability, not an app)
+    # =============================================================================
+    # WEB_ACCESS: on by default in the local edition (the operator's own machine,
+    # their own keys), off in saas unless an operator sets it. When off, no
+    # provider search tool is attached and web_fetch / web_search answer
+    # {available:false, reason}. Private, loopback, link-local and metadata
+    # ranges are ALWAYS refused (core/security/url_validator.py) — the denylist
+    # adds to that, never replaces it.
+    _WEB_ACCESS_RAW = (os.getenv("WEB_ACCESS", "") or "").strip().lower()
+    WEB_ACCESS: bool = (
+        _WEB_ACCESS_RAW in ("on", "true", "1", "yes")
+        if _WEB_ACCESS_RAW
+        else AUTH_EDITION == "local"
+    )
+    # Hosts agents may never reach, suffix-matched: "example.com" also blocks
+    # "www.example.com". Comma-separated, bare hostnames.
+    WEB_ACCESS_DENY: tuple = tuple(
+        h.strip().lower().lstrip(".")
+        for h in (os.getenv("WEB_ACCESS_DENY", "") or "").split(",")
+        if h.strip()
+    )
+    # Which engine answers web_search: auto = the first configured of
+    # openrouter -> composio -> searxng. "off" disables search but not fetch.
+    _WEB_SEARCH_PROVIDER_RAW = (os.getenv("WEB_SEARCH_PROVIDER", "auto") or "auto").strip().lower()
+    WEB_SEARCH_PROVIDER: str = (
+        _WEB_SEARCH_PROVIDER_RAW
+        if _WEB_SEARCH_PROVIDER_RAW in ("auto", "openrouter", "composio", "searxng", "off")
+        else "auto"
+    )
+    WEB_SEARCH_MAX_RESULTS: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
+    # Searches the model may run inside ONE turn on a route with a server-side
+    # search tool (OpenRouter). Each search is billed by the provider.
+    WEB_SEARCH_MAX_USES_PER_TURN: int = int(os.getenv("WEB_SEARCH_MAX_USES_PER_TURN", "3"))
+    # The cheap tool-capable model the web_search ACTION uses on OpenRouter to
+    # run one search (the engine does the searching; the model only lists it).
+    WEB_SEARCH_OPENROUTER_MODEL: str = os.getenv("WEB_SEARCH_OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    # Self-hosted SearXNG (docker compose --profile search): http://searxng:8080
+    SEARXNG_URL: str = (os.getenv("SEARXNG_URL", "") or "").strip().rstrip("/")
+    WEB_FETCH_MAX_BYTES: int = int(os.getenv("WEB_FETCH_MAX_BYTES", str(2 * 1024 * 1024)))
+    WEB_FETCH_TIMEOUT_SECONDS: int = int(os.getenv("WEB_FETCH_TIMEOUT_SECONDS", "20"))
+
     NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL")
     
     # =============================================================================
