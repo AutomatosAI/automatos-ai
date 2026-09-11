@@ -56,13 +56,29 @@ WS = uuid4()
 # ---------------------------------------------------------------------------
 
 
+PUBLIC_IP = "93.184.216.34"
+PRIVATE_IPS = {  # what a compose hostname / the host / metadata resolve to
+    "postgres": "172.18.0.3",
+    "minio": "172.18.0.5",
+    "host.docker.internal": "192.168.65.2",
+    "internal.host": "10.0.0.9",
+    "169.254.169.254": "169.254.169.254",
+    "localhost": "127.0.0.1",
+}
+
+
+def _fake_getaddrinfo(host, port, proto=None):
+    """No real DNS in a unit test: public names resolve to one public IP,
+    the compose/host names above resolve into blocked ranges."""
+    ip = PRIVATE_IPS.get(host, PUBLIC_IP)
+    return [(2, 1, 6, "", (ip, port))]
+
+
 @pytest.fixture
 def web_on(monkeypatch):
     monkeypatch.setattr(config, "WEB_ACCESS", True)
     monkeypatch.setattr(config, "WEB_ACCESS_DENY", ())
-    # No real DNS in a unit test: everything public resolves fine unless a test
-    # marks a host private.
-    monkeypatch.setattr(wa, "validate_webhook_url", lambda url: (True, "OK"))
+    monkeypatch.setattr(wa, "_getaddrinfo", _fake_getaddrinfo)
     yield
 
 
@@ -72,24 +88,27 @@ def web_off(monkeypatch):
     yield
 
 
-def _mark_private(monkeypatch, *hosts: str):
-    def _check(url: str):
-        host = httpx.URL(url).host
-        if host in hosts:
-            return False, "Resolved to blocked range (10.0.0.0/8)"
-        return True, "OK"
-    monkeypatch.setattr(wa, "validate_webhook_url", _check)
-
-
 def _stub_http(monkeypatch, handler):
-    """Route web_fetch's client through an httpx.MockTransport."""
-    transport = httpx.MockTransport(handler)
+    """Route web_fetch's client through an httpx.MockTransport and record
+    every request it actually sends (URL host = pinned IP, Host header = name)."""
+    sent: List[httpx.Request] = []
+
+    def _recording(req: httpx.Request):
+        sent.append(req)
+        return handler(req)
+
+    transport = httpx.MockTransport(_recording)
 
     def _factory(**kwargs):
         kwargs.pop("verify", None)
         return httpx.AsyncClient(transport=transport, **kwargs)
 
     monkeypatch.setattr(hw, "_async_client", _factory)
+    return sent
+
+
+def _host_of(req: httpx.Request) -> str:
+    return req.headers.get("host", "")
 
 
 # ---------------------------------------------------------------------------
@@ -121,32 +140,61 @@ def test_denylist_is_suffix_matched(monkeypatch):
     assert not wa.host_denied("")
 
 
-def test_validate_outbound_url_order(monkeypatch, web_on):
+def test_resolve_outbound_order_and_pinning(monkeypatch, web_on):
     monkeypatch.setattr(config, "WEB_ACCESS_DENY", ("blocked.test",))
-    _mark_private(monkeypatch, "postgres", "host.docker.internal")
-    assert wa.validate_outbound_url("https://docs.python.org/3/")[0] is True
+    t = wa.resolve_outbound("https://docs.python.org/3/")
+    assert t.ok and t.host == "docs.python.org" and t.ip == PUBLIC_IP and t.port == 443 and t.scheme == "https"
+    assert wa.resolve_outbound("http://docs.python.org/").port == 80
     ok, reason, _ = wa.validate_outbound_url("ftp://docs.python.org/x")
     assert not ok and "http" in reason
     ok, reason, _ = wa.validate_outbound_url("https://www.blocked.test/page")
     assert not ok and "WEB_ACCESS_DENY" in reason
     ok, reason, _ = wa.validate_outbound_url("http://postgres:5432/")
     assert not ok and "blocked range" in reason
-    ok, reason, _ = wa.validate_outbound_url("http://host.docker.internal/")
-    assert not ok
+    assert not wa.validate_outbound_url("http://host.docker.internal/")[0]
+    assert not wa.validate_outbound_url("http://localhost:8000/")[0]
 
 
 def test_switch_off_refuses_before_resolving(monkeypatch, web_off):
     calls: List[str] = []
-    monkeypatch.setattr(wa, "validate_webhook_url", lambda url: calls.append(url) or (True, "OK"))
+    monkeypatch.setattr(wa, "_getaddrinfo", lambda *a, **k: calls.append(a) or [(2, 1, 6, "", (PUBLIC_IP, 443))])
     ok, reason, _ = wa.validate_outbound_url("https://example.org/")
     assert not ok and "WEB_ACCESS=off" in reason
     assert calls == []
 
 
 def test_private_ranges_are_refused_even_with_an_empty_denylist(monkeypatch, web_on):
-    _mark_private(monkeypatch, "169.254.169.254")
     ok, reason, _ = wa.validate_outbound_url("http://169.254.169.254/latest/meta-data/")
-    assert not ok and "not reachable" in reason
+    assert not ok and "blocked range" in reason
+
+
+def test_a_name_with_one_private_answer_among_public_ones_is_refused(monkeypatch, web_on):
+    def split_horizon(host, port, proto=None):
+        return [(2, 1, 6, "", (PUBLIC_IP, port)), (2, 1, 6, "", ("10.1.1.1", port))]
+    monkeypatch.setattr(wa, "_getaddrinfo", split_horizon)
+    assert not wa.resolve_outbound("https://rebind.test/").ok
+
+
+def test_malformed_port_and_failed_dns_are_refusals_not_exceptions(monkeypatch, web_on):
+    ok, reason, _ = wa.validate_outbound_url("http://example.com:abc/")
+    assert not ok and "port" in reason.lower()
+
+    def nxdomain(host, port, proto=None):
+        import socket
+        raise socket.gaierror("no such host")
+    monkeypatch.setattr(wa, "_getaddrinfo", nxdomain)
+    ok, reason, _ = wa.validate_outbound_url("https://nope.invalid/")
+    assert not ok and "DNS" in reason
+
+
+def test_webhook_validator_shares_the_fix():
+    from core.security.url_validator import blocked_network_for, validate_webhook_url
+
+    assert blocked_network_for("10.2.3.4") == "10.0.0.0/8"
+    assert blocked_network_for("169.254.169.254") == "169.254.0.0/16"
+    assert blocked_network_for(PUBLIC_IP) is None
+    assert blocked_network_for("not-an-ip") == "invalid"
+    assert validate_webhook_url("http://example.com:abc/hook") == (False, "Malformed port in URL")
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +245,11 @@ _PAGE = """<html><head><title>Hello Page</title><script>alert(1)</script></head>
 
 @pytest.mark.asyncio
 async def test_fetch_reduces_html_to_text(monkeypatch, web_on):
-    _stub_http(monkeypatch, lambda req: httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"}, text=_PAGE))
+    sent = _stub_http(monkeypatch, lambda req: httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"}, text=_PAGE))
     out = await hw.web_fetch(MagicMock(), WS, {"url": "https://example.org/hello"})
     assert out["success"] is True
     data = out["data"]
+    assert data["final_url"] == "https://example.org/hello" and data["redirects"] == 0
     assert data["title"] == "Hello Page"
     assert "# Welcome" in data["content"] and "First paragraph." in data["content"]
     assert "- one" in data["content"]
@@ -216,31 +265,68 @@ async def test_fetch_requires_url_and_refuses_bad_schemes(monkeypatch, web_on):
 
 
 @pytest.mark.asyncio
-async def test_fetch_refuses_denied_and_private_hosts(monkeypatch, web_on):
-    monkeypatch.setattr(config, "WEB_ACCESS_DENY", ("blocked.test",))
-    _mark_private(monkeypatch, "minio")
-    called = []
-    _stub_http(monkeypatch, lambda req: called.append(str(req.url)) or httpx.Response(200, text="x"))
-    out = await hw.web_fetch(MagicMock(), WS, {"url": "https://blocked.test/"})
-    assert out["success"] is False and "WEB_ACCESS_DENY" in out["error"]
-    out = await hw.web_fetch(MagicMock(), WS, {"url": "http://minio:9000/bucket"})
-    assert out["success"] is False and "not reachable" in out["error"]
-    assert called == []  # refused before any request was made
+async def test_fetch_connects_to_the_checked_address_with_the_real_host_name(monkeypatch, web_on):
+    """Resolve-and-pin: the wire request goes to the IP that passed the check,
+    with the hostname as Host and SNI — a later DNS answer changes nothing."""
+    sent = _stub_http(monkeypatch, lambda req: httpx.Response(200, headers={"content-type": "text/plain"}, text="ok"))
+    out = await hw.web_fetch(MagicMock(), WS, {"url": "https://example.org/x?y=1"})
+    assert out["success"] is True
+    (req,) = sent
+    assert req.url.host == PUBLIC_IP and req.url.path == "/x" and req.url.query == b"y=1"
+    assert _host_of(req) == "example.org"
+    assert req.extensions.get("sni_hostname") == "example.org"
 
 
 @pytest.mark.asyncio
-async def test_fetch_rechecks_the_url_after_a_redirect(monkeypatch, web_on):
-    _mark_private(monkeypatch, "internal.host")
+async def test_fetch_refuses_denied_and_private_hosts(monkeypatch, web_on):
+    monkeypatch.setattr(config, "WEB_ACCESS_DENY", ("blocked.test",))
+    sent = _stub_http(monkeypatch, lambda req: httpx.Response(200, text="x"))
+    out = await hw.web_fetch(MagicMock(), WS, {"url": "https://blocked.test/"})
+    assert out["success"] is False and "WEB_ACCESS_DENY" in out["error"]
+    out = await hw.web_fetch(MagicMock(), WS, {"url": "http://minio:9000/bucket"})
+    assert out["success"] is False and "blocked range" in out["error"]
+    out = await hw.web_fetch(MagicMock(), WS, {"url": "http://169.254.169.254/latest/meta-data/"})
+    assert out["success"] is False
+    assert sent == []  # refused before any request was made
 
+
+@pytest.mark.asyncio
+async def test_fetch_never_follows_a_redirect_into_a_private_range(monkeypatch, web_on):
+    """The hop is checked BEFORE a request is sent to it: the private target
+    receives no request at all (not merely 'its body is not returned')."""
     def handler(req: httpx.Request):
-        if req.url.host == "public.test":
+        if _host_of(req) == "public.test":
             return httpx.Response(302, headers={"location": "http://internal.host/secret"})
         return httpx.Response(200, text="SECRET")
 
-    _stub_http(monkeypatch, handler)
+    sent = _stub_http(monkeypatch, handler)
     out = await hw.web_fetch(MagicMock(), WS, {"url": "https://public.test/go"})
-    assert out["success"] is False and "Redirected" in out["error"]
+    assert out["success"] is False and "Redirected" in out["error"] and "blocked range" in out["error"]
     assert "SECRET" not in json.dumps(out)
+    assert [_host_of(r) for r in sent] == ["public.test"]  # exactly one request, never to internal.host
+
+
+@pytest.mark.asyncio
+async def test_fetch_follows_a_public_redirect_and_reports_it(monkeypatch, web_on):
+    def handler(req: httpx.Request):
+        if _host_of(req) == "old.test":
+            return httpx.Response(301, headers={"location": "https://new.test/page"})
+        return httpx.Response(200, headers={"content-type": "text/plain"}, text="moved here")
+
+    sent = _stub_http(monkeypatch, handler)
+    out = await hw.web_fetch(MagicMock(), WS, {"url": "https://old.test/page"})
+    assert out["success"] is True
+    assert out["data"]["final_url"] == "https://new.test/page" and out["data"]["redirects"] == 1
+    assert out["data"]["content"] == "moved here"
+    assert [_host_of(r) for r in sent] == ["old.test", "new.test"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_stops_on_a_redirect_loop(monkeypatch, web_on):
+    sent = _stub_http(monkeypatch, lambda req: httpx.Response(302, headers={"location": "https://loop.test/again"}))
+    out = await hw.web_fetch(MagicMock(), WS, {"url": "https://loop.test/start"})
+    assert out["success"] is False and "Too many redirects" in out["error"]
+    assert len(sent) == hw.MAX_REDIRECTS + 1
 
 
 @pytest.mark.asyncio
@@ -344,6 +430,23 @@ async def test_search_delegates_and_filters_denied_hosts(monkeypatch, web_on):
 
 
 @pytest.mark.asyncio
+async def test_search_resolver_fault_is_a_result(monkeypatch, web_on):
+    def boom(db, ws_id):
+        raise RuntimeError("probe exploded")
+    monkeypatch.setattr(ws, "resolve_backend", boom)
+    out = await hw.web_search(MagicMock(), WS, {"query": "q"})
+    assert out["success"] is False and "probe exploded" in out["error"]
+
+
+def test_composio_probe_faults_read_as_not_configured(monkeypatch):
+    import core.composio.client as cc
+    def boom():
+        raise RuntimeError("sdk broke")
+    monkeypatch.setattr(cc, "composio_available", boom)
+    assert ws.composio_key_available() is False
+
+
+@pytest.mark.asyncio
 async def test_search_backend_failure_is_a_result(monkeypatch, web_on):
     _keys(monkeypatch, searxng=True)
 
@@ -387,7 +490,18 @@ async def test_openrouter_backend_falls_back_to_urls_in_text(monkeypatch):
     import core.llm.manager as mgr
     monkeypatch.setattr(mgr, "create_llm_manager", lambda **kw: _Manager())
     results = await ws._search_openrouter("fastapi", 5, WS)
-    assert results == [{"title": "FastAPI docs", "url": "https://fastapi.tiangolo.com/", "snippet": ""}]
+    assert results == [{"title": "FastAPI docs", "url": "https://fastapi.tiangolo.com/", "snippet": "", "unverified": True}]
+
+
+@pytest.mark.asyncio
+async def test_search_surfaces_unverified_links_in_a_note(monkeypatch, web_on):
+    _keys(monkeypatch, openrouter=True)
+
+    async def fake(query, max_results, workspace_id):
+        return [{"title": "Maybe", "url": "https://maybe.test/", "snippet": "", "unverified": True}]
+    monkeypatch.setattr(ws, "_search_openrouter", fake)
+    out = await hw.web_search(MagicMock(), WS, {"query": "q"})
+    assert out["success"] is True and "model's memory" in out["data"]["note"]
 
 
 def test_composio_payload_shapes_are_parsed_defensively():
@@ -445,6 +559,36 @@ def test_server_tool_attached_only_when_allowed(monkeypatch, web_on):
 
 def test_server_tool_never_attached_when_switched_off(monkeypatch, web_off):
     assert _client_stub()(None) is None
+
+
+def test_request_kwargs_skip_the_server_tool_on_a_forced_tool_turn(monkeypatch, web_on):
+    """'You MUST call composio_execute' ⇒ tool_choice required — a web search
+    must not be able to satisfy that instead of the forced tool."""
+    from core.llm.clients.openai_compatible_client import OpenAICompatibleProvider
+
+    stub = SimpleNamespace(
+        spec=SimpleNamespace(web_search_tool="openrouter:web_search", reports_cost=False),
+        _base_kwargs=lambda messages: {"model": "m", "messages": messages},
+        _sanitize_tools=lambda tools: tools,
+    )
+    stub._web_search_server_tool = lambda tools: OpenAICompatibleProvider._web_search_server_tool(stub, tools)
+    fn_tool = {"type": "function", "function": {"name": "composio_execute", "parameters": {}}}
+    forced = [{"role": "system", "content": "You MUST call `composio_execute` now."}]
+    kwargs = OpenAICompatibleProvider._request_kwargs(stub, forced, [fn_tool])
+    assert kwargs["tool_choice"] == "required"
+    assert kwargs["tools"] == [fn_tool]
+    # an ordinary turn — with or without function tools — carries the server tool
+    kwargs = OpenAICompatibleProvider._request_kwargs(stub, [{"role": "user", "content": "hi"}], [fn_tool])
+    assert kwargs["tool_choice"] == "auto" and kwargs["tools"][-1]["type"] == "openrouter:web_search"
+    kwargs = OpenAICompatibleProvider._request_kwargs(stub, [{"role": "user", "content": "hi"}], None)
+    assert [t["type"] for t in kwargs["tools"]] == ["openrouter:web_search"] and "tool_choice" not in kwargs
+
+
+def test_retry_paths_judge_the_outgoing_tools_not_the_callers():
+    src = (_ORCH / "core/llm/clients/openai_compatible_client.py").read_text(encoding="utf-8")
+    assert 'if kwargs.get("tools") and ("not support tool use"' in src
+    assert 'if kwargs.get("tools") and "Tool choice must be auto"' in src
+    assert "if tools and (" not in src
 
 
 def test_server_tool_survives_the_tool_sanitiser():
@@ -510,6 +654,11 @@ _DIALS = (
     "WEB_SEARCH_MAX_USES_PER_TURN", "WEB_SEARCH_OPENROUTER_MODEL", "SEARXNG_URL",
     "WEB_FETCH_MAX_BYTES", "WEB_FETCH_TIMEOUT_SECONDS",
 )
+
+
+def test_config_surface_is_sorted():
+    names = json.loads((_ORCH / "reports/config-surface.json").read_text())["settings"]
+    assert names == sorted(names)
 
 
 def test_every_dial_is_in_the_config_surface_and_on_the_config():

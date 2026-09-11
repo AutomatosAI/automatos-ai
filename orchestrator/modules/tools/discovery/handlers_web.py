@@ -13,8 +13,10 @@ refused URL, a missing search engine and a failed fetch are all plain results.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
@@ -23,7 +25,8 @@ from sqlalchemy.orm import Session
 from config import config
 from core.security.web_access import (
     WEB_ACCESS_OFF_REASON,
-    validate_outbound_url,
+    OutboundTarget,
+    resolve_outbound,
     web_access_enabled,
 )
 
@@ -35,6 +38,8 @@ _TEXT_CONTENT_TYPES = ("text/", "application/json", "application/xml", "applicat
 _DROP_TAGS = ("script", "style", "noscript", "svg", "canvas", "template", "iframe")
 _CHROME_TAGS = ("nav", "footer", "header", "aside", "form")
 _USER_AGENT = "AutomatosAgent/1.0 (+https://github.com/AutomatosAI/automatos-ai)"
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+MAX_REDIRECTS = 5
 
 
 def _async_client(**kwargs: Any) -> httpx.AsyncClient:
@@ -80,56 +85,98 @@ def html_to_text(html: str) -> tuple[str, str]:
     return title, "\n".join(lines).strip()
 
 
+def _pinned_request(client: httpx.AsyncClient, url: str, target: OutboundTarget) -> httpx.Request:
+    """The request for ``url`` sent to the address that was checked.
+
+    The URL's host becomes the pinned IP; the real hostname rides as ``Host``
+    and as SNI (``sni_hostname``), so TLS is still verified against the name.
+    A DNS answer that changes after the check therefore changes nothing.
+    """
+    pinned_url = httpx.URL(url).copy_with(host=target.ip)  # httpx brackets IPv6 itself
+    return client.build_request(
+        "GET",
+        pinned_url,
+        headers={"Host": target.host},
+        extensions={"sni_hostname": target.host},
+    )
+
+
+async def _resolve(url: str) -> OutboundTarget:
+    # System DNS is blocking; keep it off the event loop.
+    return await asyncio.to_thread(resolve_outbound, url)
+
+
 async def web_fetch(
     db: Session, workspace_id: UUID, params: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Read one public URL and return its text (US: S2)."""
+    """Read one public URL and return its text (US: S2).
+
+    Redirects are followed by hand: every hop is resolved and checked BEFORE a
+    request is sent to it, and each request goes to the address that was
+    checked. httpx's own ``follow_redirects`` would have fetched the whole
+    chain — including a hop into a private range — before returning.
+    """
     url = (params.get("url") or "").strip()
     if not url:
         return {"success": False, "error": "url is required"}
     max_chars = _clamp_chars(params.get("max_chars", DEFAULT_MAX_CHARS))
 
-    ok, reason, _host = validate_outbound_url(url)
-    if not ok:
+    target = await _resolve(url)
+    if not target.ok:
         if not web_access_enabled():
-            return _unavailable(reason)
-        return {"success": False, "error": reason, "url": url}
+            return _unavailable(target.reason)
+        return {"success": False, "error": target.reason, "url": url}
 
     max_bytes = int(config.WEB_FETCH_MAX_BYTES)
     timeout = httpx.Timeout(float(config.WEB_FETCH_TIMEOUT_SECONDS))
+    current = url
+    hops = 0
+    resp: Optional[httpx.Response] = None
     try:
         async with _async_client(
-            follow_redirects=True,
+            follow_redirects=False,
             verify=True,
             timeout=timeout,
             headers={"User-Agent": _USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5"},
         ) as client:
-            async with client.stream("GET", url) as resp:
-                final_url = str(resp.url)
-                if final_url != url:
-                    # A redirect may land somewhere the first check never saw.
-                    ok, reason, _ = validate_outbound_url(final_url)
-                    if not ok:
-                        return {"success": False, "error": f"Redirected to a refused address: {reason}", "url": url}
-                content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
-                if content_type and not content_type.startswith(_TEXT_CONTENT_TYPES):
-                    return {
-                        "success": False,
-                        "error": f"Unsupported content type '{content_type}' — web_fetch reads text, HTML, JSON and XML pages.",
-                        "url": final_url,
-                    }
-                chunks: List[bytes] = []
-                received = 0
-                truncated = False
-                async for chunk in resp.aiter_bytes():
-                    received += len(chunk)
-                    if received > max_bytes:
-                        chunks.append(chunk[: max(0, max_bytes - (received - len(chunk)))])
-                        truncated = True
-                        break
-                    chunks.append(chunk)
-                status = resp.status_code
-                encoding = resp.charset_encoding or "utf-8"
+            while True:
+                resp = await client.send(_pinned_request(client, current, target), stream=True)
+                location = resp.headers.get("location")
+                if resp.status_code in _REDIRECT_STATUSES and location:
+                    await resp.aclose()
+                    hops += 1
+                    if hops > MAX_REDIRECTS:
+                        return {"success": False, "error": f"Too many redirects (more than {MAX_REDIRECTS})", "url": url}
+                    next_url = urljoin(current, location)
+                    target = await _resolve(next_url)
+                    if not target.ok:
+                        return {"success": False, "error": f"Redirected to a refused address: {target.reason}", "url": url}
+                    current = next_url
+                    continue
+                break
+
+            final_url = current
+            content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+            if content_type and not content_type.startswith(_TEXT_CONTENT_TYPES):
+                await resp.aclose()
+                return {
+                    "success": False,
+                    "error": f"Unsupported content type '{content_type}' — web_fetch reads text, HTML, JSON and XML pages.",
+                    "url": final_url,
+                }
+            chunks: List[bytes] = []
+            received = 0
+            truncated = False
+            async for chunk in resp.aiter_bytes():
+                received += len(chunk)
+                if received > max_bytes:
+                    chunks.append(chunk[: max(0, max_bytes - (received - len(chunk)))])
+                    truncated = True
+                    break
+                chunks.append(chunk)
+            status = resp.status_code
+            encoding = resp.charset_encoding or "utf-8"
+            await resp.aclose()
     except httpx.TimeoutException:
         return {"success": False, "error": f"Timed out after {config.WEB_FETCH_TIMEOUT_SECONDS}s fetching {url}", "url": url}
     except httpx.HTTPError as exc:
@@ -157,6 +204,7 @@ async def web_fetch(
             "content": text,
             "chars": len(text),
             "truncated": truncated,
+            "redirects": hops,
         },
     }
 
@@ -173,7 +221,11 @@ async def web_search(
 
     from services.web_search import NO_BACKEND_OPTIONS, resolve_backend, search
 
-    backend = resolve_backend(db, workspace_id)
+    try:
+        backend = resolve_backend(db, workspace_id)
+    except Exception as exc:  # noqa: BLE001 — a probe fault is a result, not a crash
+        logger.warning("[web_search] backend resolution failed: %s", exc, exc_info=True)
+        return {"success": False, "error": f"Could not determine a search engine: {exc}"}
     if backend is None:
         return _unavailable(
             "No web search engine is configured on this server.",
@@ -189,7 +241,11 @@ async def web_search(
     except Exception as exc:  # noqa: BLE001 — a search engine failure is a result, not a crash
         logger.warning("[web_search] %s backend failed: %s", backend, exc, exc_info=True)
         return {"success": False, "error": f"Search via {backend} failed: {exc}", "backend": backend}
-    return {
-        "success": True,
-        "data": {"query": query, "backend": backend, "results": results, "count": len(results)},
-    }
+    unverified = sum(1 for r in results if r.get("unverified"))
+    data: Dict[str, Any] = {"query": query, "backend": backend, "results": results, "count": len(results)}
+    if unverified:
+        data["note"] = (
+            f"{unverified} of these links came from the model's memory, not from a search — "
+            "web_fetch them before relying on them."
+        )
+    return {"success": True, "data": data}

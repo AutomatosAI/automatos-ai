@@ -47,9 +47,10 @@ NO_BACKEND_OPTIONS = [
 ]
 
 _OPENROUTER_SEARCH_INSTRUCTION = (
-    "Use the web search tool once for the query below and reply with a numbered "
-    "list of the most relevant results: title — URL — one-line summary. No "
-    "commentary, no answer of your own.\n\nQuery: "
+    "You MUST call the web search tool for the query below — never answer from "
+    "memory. Then reply with a numbered list of the results it returned: "
+    "title — URL — one-line summary. No commentary, no answer of your own.\n\n"
+    "Query: "
 )
 
 
@@ -91,9 +92,13 @@ def openrouter_key_available(db: Any, workspace_id: Any) -> bool:
 
 
 def composio_key_available() -> bool:
-    from core.composio.client import composio_available
+    try:
+        from core.composio.client import composio_available
 
-    return composio_available()
+        return bool(composio_available())
+    except Exception:  # noqa: BLE001 — an SDK/import fault reads as "not configured"
+        logger.debug("composio availability probe failed", exc_info=True)
+        return False
 
 
 def searxng_available() -> bool:
@@ -209,9 +214,13 @@ async def _search_openrouter(query: str, max_results: int, workspace_id: Any) ->
     ]
     if results:
         return results
-    # No annotations (a model that answered without searching): the text is
-    # the only evidence — pull any URLs it listed so the caller still gets links.
-    return _urls_from_text(getattr(response, "content", "") or "")
+    # No annotations means the model answered WITHOUT searching. Any URLs in
+    # its text are recollection, not results — returned only with an
+    # ``unverified`` mark so an agent never presents them as found pages.
+    return [
+        {**r, "unverified": True}
+        for r in _urls_from_text(getattr(response, "content", "") or "")
+    ]
 
 
 def _urls_from_text(text: str) -> List[Dict[str, Any]]:

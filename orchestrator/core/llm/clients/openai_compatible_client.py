@@ -313,9 +313,13 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             body = dict(kwargs.get("extra_body") or {})
             body["usage"] = {"include": True}
             kwargs["extra_body"] = body
-        server_tool = self._web_search_server_tool(kwargs.get("tools"))
-        if server_tool is not None:
-            kwargs["tools"] = [*(kwargs.get("tools") or []), server_tool]
+        # A caller forcing a specific tool ("You MUST call …" ⇒ tool_choice
+        # "required") must not be satisfiable by a web search instead — no
+        # server tool on that turn.
+        if kwargs.get("tool_choice") != "required":
+            server_tool = self._web_search_server_tool(kwargs.get("tools"))
+            if server_tool is not None:
+                kwargs["tools"] = [*(kwargs.get("tools") or []), server_tool]
         return kwargs
 
     def _web_search_server_tool(self, tools: Optional[List[Dict]]) -> Optional[Dict[str, Any]]:
@@ -364,7 +368,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                     if typed is not None:
                         raise typed from exc
                     err_str = str(exc)
-                    if tools and ("not support tool use" in err_str or "No endpoints found that support tool" in err_str):
+                    # Judge the OUTGOING tools: a tool-less call may still carry the
+                    # provider's search tool (PRD-240) and needs the same recovery.
+                    if kwargs.get("tools") and ("not support tool use" in err_str or "No endpoints found that support tool" in err_str):
                         logger.warning(
                             "Model %s does not support tool use — retrying without tools",
                             self.config.model,
@@ -372,7 +378,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                         kwargs.pop("tools", None)
                         kwargs.pop("tool_choice", None)
                         return self.client.chat.completions.create(**kwargs)
-                    if tools and "Tool choice must be auto" in err_str and kwargs.get("tool_choice") != "auto":
+                    if kwargs.get("tools") and "Tool choice must be auto" in err_str and kwargs.get("tool_choice") != "auto":
                         logger.warning(
                             "Model %s provider requires tool_choice=auto — retrying",
                             self.config.model,
