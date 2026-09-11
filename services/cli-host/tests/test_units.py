@@ -482,3 +482,26 @@ def test_default_root_flag_is_parsed_and_wins_over_the_allowlist_order(tmp_path)
     assert allowlist.choose_default_root(saved, None) == (saved, saved[0])
     with pytest.raises(allowlist.NotAllowed):
         allowlist.choose_default_root([], None)
+
+
+def test_capabilities_are_redetected_so_a_login_shows_up_without_a_restart(short_tmp, monkeypatch):
+    """CLI adapter design §8.2: `codex login` while the host runs → served on the
+    next heartbeat after the TTL, never "restart the host to notice"."""
+    import automatos_cli_host.host as host_mod
+    from automatos_cli_host.config import HostConfig
+    from automatos_cli_host.host import Host
+
+    cfg = HostConfig(state_dir=short_tmp / "state", terminal_enabled=False)
+    host = Host(cfg)
+    calls = {"n": 0}
+
+    def _detect(_cfg):
+        calls["n"] += 1
+        return {"providers": ["claude"] if calls["n"] > 1 else [], "clis": {}}
+
+    monkeypatch.setattr(host_mod, "host_capabilities", _detect)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(host_mod.time, "time", lambda: clock["t"])
+    assert host.capabilities()["providers"] == [] and host.capabilities()["providers"] == []   # cached
+    clock["t"] += host_mod.CAPABILITIES_TTL_SECONDS + 1
+    assert host.capabilities()["providers"] == ["claude"] and calls["n"] == 2                  # re-detected
