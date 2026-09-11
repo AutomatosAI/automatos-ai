@@ -73,7 +73,7 @@ function SessionBlock({ task }: { task: BoardTask }) {
   const interactive = ref.mode === 'terminal'
   return (
     <div>
-      <SectionLabel icon={<TerminalSquare className="w-3 h-3" />}>Claude Code session</SectionLabel>
+      <SectionLabel icon={<TerminalSquare className="w-3 h-3" />}>{`${ref.provider_label || ref.provider || 'CLI'} session`}</SectionLabel>
       <div className="glass-card rounded-lg p-4 text-sm space-y-2">
         <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
           <span className="text-muted-foreground">Provider · model</span>
@@ -268,7 +268,7 @@ function AssignedContent({ task }: { task: BoardTask }) {
         <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/30" data-testid="assigned-waiting-host">
           <TerminalSquare className="w-4 h-4 mt-0.5 text-[hsl(var(--warning))] shrink-0" />
           <div className="text-sm">
-            <p className="font-medium text-[hsl(var(--warning))]">Waiting for your Claude Code host</p>
+            <p className="font-medium text-[hsl(var(--warning))]">Waiting for your CLI host</p>
             <p className="text-xs text-muted-foreground mt-0.5">{task.blocked_reason}</p>
           </div>
         </div>

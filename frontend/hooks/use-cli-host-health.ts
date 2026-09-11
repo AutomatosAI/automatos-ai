@@ -13,6 +13,9 @@ export interface CliHostHealth {
   waiting_tickets: number
   host_contract?: string
   expected_host_version?: string
+  /** CLI adapter design §8.2/§8.3: the CLIs online hosts run now, and every CLI the registry knows. */
+  providers_online?: string[]
+  registry?: Array<{ id: string; label: string; model_hint: string; model_placeholder: string }>
 }
 
 export function useCliHostHealth(options?: { enabled?: boolean }) {

@@ -232,7 +232,7 @@ def test_capabilities_announce_the_allowed_directories(tmp_path):
     # CLI adapter design §8.2: every CLI the registry knows is announced; ``providers``
     # is only what would actually run — the backend's claim filter reads it.
     assert caps["clis"]["claude"]["served"] is False and "not installed" in caps["clis"]["claude"]["reason"]
-    assert caps["clis"]["codex"]["served"] is False and "no adapter" in caps["clis"]["codex"]["reason"]
+    assert caps["clis"]["codex"]["served"] is False and caps["clis"]["codex"]["tier"] == "hooks"   # no codex on this PATH
     assert caps["providers"] == []
 
 

@@ -38,7 +38,7 @@ CONFIG_WORKTREE_KEY = "worktree_per_ticket"
 # every importer keeps its name.
 from core.cli_presets import (  # noqa: E402,F401
     BILLING_SUBSCRIPTION, CLI_PRESETS, CLI_PROVIDERS, PROVIDER_CLAUDE, PROVIDER_CODEX,
-    USAGE_PROVIDER_LABELS, USAGE_PROVIDER_SLUGS, is_valid_cli_model, usage_provider_slug,
+    USAGE_PROVIDER_LABELS, USAGE_PROVIDER_SLUGS, is_valid_cli_model, registry_public, usage_provider_slug,
 )
 
 

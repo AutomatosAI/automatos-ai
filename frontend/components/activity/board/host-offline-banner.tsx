@@ -33,7 +33,7 @@ export function HostOfflineBanner() {
       <TerminalSquare className="w-4 h-4 mt-0.5 text-[hsl(var(--warning))] shrink-0" />
       <div className="text-sm">
         <p className="font-medium text-[hsl(var(--warning))]">
-          Your Claude Code host is offline
+          Your CLI host is offline
           {data.paired_hosts > 0 ? ` (last seen ${since(data.last_seen_at)})` : ' (none paired yet)'}
           {waiting > 0 ? ` — ${waiting} ticket${waiting === 1 ? '' : 's'} waiting` : ''}
         </p>

@@ -96,7 +96,7 @@ export function CanvasTerminal({ taskId, cwd, autoOpen = false, runtime = false,
       ws.onclose = () => {
         if (wsRef.current === ws) wsRef.current = null
         setStatus('closed')
-        setNote(grant.launch?.kind === 'claude' ? 'The session ended. Reopen to continue it.' : 'The shell ended. Open a new terminal to continue.')
+        setNote(grant.launch?.kind ? 'The session ended. Reopen to continue it.' : 'The shell ended. Open a new terminal to continue.')
       }
       ws.onerror = () => {
         setStatus('error')

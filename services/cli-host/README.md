@@ -15,6 +15,11 @@ files and a folder:
 | `adapters/base.py` | the seven-method contract every CLI runs through; `PresetAdapter` implements all of it from the preset |
 | `adapters/<cli>.py` | only what a preset cannot say — where a config home lives, a translating hook shim, a different transcript |
 
+Served today: **Claude Code** (native tier) and **Codex** (hooks tier — a per-agent
+`CODEX_HOME` under the host's state dir with your `~/.codex/auth.json` linked in,
+hooks as `config.toml` tables, `codex resume <id>` for continuity; `codex login`
+with your ChatGPT plan is required — an API-key login is refused before spawn).
+
 The host announces every CLI in the registry with `served: true/false` and why;
 the backend claims a ticket for a host only when that host serves the ticket's
 CLI. A CLI the registry knows but this host cannot run is an honest line on the
