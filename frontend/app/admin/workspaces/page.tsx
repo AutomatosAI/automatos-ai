@@ -28,6 +28,7 @@ import { usePageAPI } from '@/hooks/use-page-api'
 import { apiClient } from '@/lib/api-client'
 import { SaasOnlyNotice } from '@/components/local/saas-only-notice'
 import { isRouteAvailableInEdition } from '@/lib/auth-edition'
+import { formatAbsoluteDate as formatDate, formatRelative } from '@/lib/format-relative'
 import {
   WorkspacePlanSelect,
   type PlanTier,
@@ -79,37 +80,6 @@ function formatBytes(bytes: number): string {
     i++
   }
   return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-/**
- * "Last active" reads as elapsed time, not a date — the console is scanned to
- * spot who is live during a pilot, and "3d ago" answers that at a glance where
- * a timestamp has to be subtracted first. Anything older than a month falls
- * back to the absolute date, where the elapsed form stops being informative.
- */
-function formatRelative(iso: string | null): string {
-  if (!iso) return 'never'
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return 'never'
-  const seconds = Math.floor((Date.now() - then) / 1000)
-  if (seconds < 0) return 'just now'
-  if (seconds < 60) return 'just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 31) return `${days}d ago`
-  return formatDate(iso)
 }
 
 function stateBadge(w: WorkspaceRow) {

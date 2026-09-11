@@ -17,7 +17,7 @@ the normal list view (use `?include_deleted=true` to see them).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -33,6 +33,7 @@ from core.database.database import get_db
 from core.models.core import Agent, Chat, Document, Message, User
 from core.models.workspaces import Workspace
 from core.workspaces.audit import AuditService
+from core.utils.timestamps import utc_iso
 from core.workspaces.models import WorkspaceMember
 from services.plan_tiers import assign_plan, assignable_tiers, exposure_for_plan, get_tier
 from services.workspace_purge import purge_workspace_sync
@@ -46,22 +47,9 @@ router = APIRouter(prefix="/api/admin/workspaces", tags=["Admin Workspaces"])
 # Helpers
 # ===================================================================
 
-def _utc_iso(value: Optional[datetime]) -> Optional[str]:
-    """A naive-UTC timestamp as an ISO-8601 string that SAYS it is UTC.
-
-    ``users.last_sign_in`` is ``timestamp without time zone`` stamped from
-    Postgres ``now()`` on a UTC server, so the value is UTC but carries no
-    offset. Plain ``.isoformat()`` would emit ``2026-09-11T09:20:20`` — and
-    ECMAScript parses a date-time string with NO offset as LOCAL time, so
-    ``new Date(...)`` in a UK browser would read it an hour early and the
-    console's elapsed-time column would be wrong by the viewer's UTC offset.
-    Stamping the offset here fixes it at the boundary, for every reader.
-    """
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.isoformat()
+# The UTC-explicit serialiser now lives in core.utils.timestamps; the module-level
+# name is kept so call sites and tests in this file read unchanged.
+_utc_iso = utc_iso
 
 
 def _is_admin(ctx: RequestContext) -> bool:
