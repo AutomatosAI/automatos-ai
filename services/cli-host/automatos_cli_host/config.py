@@ -11,6 +11,9 @@ Everything the host needs to know about ITS machine and the backend it serves:
 * ``--name``                        — how this host appears in the fleet
 * ``--once``                        — one claim/run cycle then exit (tests, cron)
 * ``--max-sessions``                — 0 = no cap (owner decision Q5)
+* ``--cli-binary ID=PATH`` (repeatable) / ``AUTOMATOS_CLI_BINARIES`` — an explicit
+  binary for one CLI (``claude=/opt/homebrew/bin/claude``); default = the
+  operator's login-shell PATH, per CLI (design §7)
 
 No secrets are ever taken from flags or the environment: the host token is
 minted by the backend at pairing and lives only in the state directory.
@@ -22,7 +25,7 @@ import os
 import socket
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 DEFAULT_URL = "http://127.0.0.1:8000"
 DEFAULT_STATE_DIR = Path.home() / ".automatos" / "cli-host"
@@ -53,7 +56,7 @@ class HostConfig:
     ask_timeout: float = 120.0
     startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS
     claim_batch: int = DEFAULT_CLAIM_BATCH
-    claude_binary: Optional[str] = None  # explicit path; default = the user's PATH
+    cli_binaries: Dict[str, str] = field(default_factory=dict)  # per-CLI explicit path; default = the user's PATH
     use_worktrees: bool = True
     verbose: bool = False
     # PRD-239 S7: the Canvas terminal — the operator's own shell served on the
@@ -109,8 +112,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--once", action="store_true", help="one claim/run cycle, then exit")
     p.add_argument("--max-sessions", type=int, default=0,
                    help="concurrent sessions (0 = no cap, the default)")
-    p.add_argument("--claude", default=os.environ.get("AUTOMATOS_CLAUDE_BINARY"),
-                   help="path to the claude binary (default: the one on your login-shell PATH)")
+    p.add_argument("--cli-binary", action="append", default=[], metavar="ID=PATH",
+                   help="an explicit binary for one CLI, e.g. claude=/opt/homebrew/bin/claude (repeatable; "
+                        "default: the one on your login-shell PATH). Env: AUTOMATOS_CLI_BINARIES=claude=/p,codex=/q")
     p.add_argument("--no-worktrees", action="store_true",
                    help="run sessions in the registered directory itself instead of a git worktree")
     p.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
@@ -139,6 +143,22 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def parse_cli_binaries(flags: List[str], env_value: Optional[str] = None) -> Dict[str, str]:
+    """``ID=PATH`` pairs from the repeatable flag and the comma-separated env var;
+    flags win over the environment. A pair without ``=`` or an empty side is refused."""
+    out: Dict[str, str] = {}
+    pairs = [x.strip() for x in (env_value or "").split(",") if x.strip()] + list(flags or [])
+    for pair in pairs:
+        if "=" not in pair:
+            raise SystemExit(f"--cli-binary expects ID=PATH, got {pair!r}")
+        cli_id, path = pair.split("=", 1)
+        cli_id, path = cli_id.strip().lower(), path.strip()
+        if not cli_id or not path:
+            raise SystemExit(f"--cli-binary expects ID=PATH, got {pair!r}")
+        out[cli_id] = path
+    return out
+
+
 def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
     ns = build_parser().parse_args(argv)
     cfg = HostConfig(
@@ -153,7 +173,7 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         session_timeout_seconds=max(60.0, ns.session_timeout),
         ask_timeout=max(5.0, ns.ask_timeout),
         startup_timeout_seconds=max(10.0, ns.startup_timeout),
-        claude_binary=ns.claude,
+        cli_binaries=parse_cli_binaries(ns.cli_binary, os.environ.get("AUTOMATOS_CLI_BINARIES")),
         use_worktrees=not ns.no_worktrees,
         verbose=ns.verbose,
         service_action=ns.service_action,

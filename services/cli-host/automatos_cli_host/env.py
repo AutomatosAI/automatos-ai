@@ -14,6 +14,12 @@ the PRD-234 §Terms invariant:
   stripped: a session must bill the user's plan, never a key, and never be
   redirected through a proxy.
 * ``CLAUDE_CODE_ENTRYPOINT`` is never set (no identity games).
+
+CLI adapter design §9.1: WHICH keys and markers is the preset's business
+(``strip_env`` / ``strip_env_prefixes`` / ``keep_env``) — the same guarantee is
+spelled differently on every binary, and a global constant would silently mean
+"unchecked" for CLI #2. The operator's own shell (the Canvas terminal) gets the
+union over every preset.
 """
 from __future__ import annotations
 
@@ -21,28 +27,12 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Dict, List, Optional
+from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
+
+from .presets import CliPreset, union_strip_env
 
 _FENCE = "__AUTOMATOS_SHELL_FENCE__"
 _SAFE_COMMAND_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
-_CLAUDE_MARKER_RE = re.compile(r"^CLAUDE(CODE|_)")
-
-# Configuration, not identity: the operator's own choices about how the CLI runs.
-CLAUDE_CONFIG_KEEP = frozenset({
-    "CLAUDE_CONFIG_DIR",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-})
-
-# Never forwarded into a session (billing / redirection / identity).
-STRIPPED_EXACT = frozenset({
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CODE_ENTRYPOINT",
-    "CLAUDE_CODE_OAUTH_TOKEN",  # the CLI reads its own login; we never carry a token
-})
 
 # Common install locations appended after the shell PATH (munder's list).
 _EXTRA_BIN_DIRS = (
@@ -102,22 +92,25 @@ def resolve_binary(command: str, path: Optional[str] = None) -> Optional[str]:
     return shutil.which(command, path=path or user_shell_path())
 
 
-def build_session_env(
+def _forbidden(key: str, strip: FrozenSet[str], prefixes: Sequence[str], keep: FrozenSet[str]) -> bool:
+    if key in strip:
+        return True
+    return any(key.startswith(p) for p in prefixes) and key not in keep
+
+
+def build_env(
     parent: Optional[Dict[str, str]] = None,
     *,
+    strip: FrozenSet[str],
+    prefixes: Sequence[str],
+    keep: FrozenSet[str],
     extra: Optional[Dict[str, str]] = None,
     path: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Layer the session environment: inherited minus markers/credentials, then
+    """Layer an environment: inherited minus the given credentials/markers, then
     the host's own values (``extra``), which always win."""
     src = dict(os.environ if parent is None else parent)
-    env: Dict[str, str] = {}
-    for key, value in src.items():
-        if key in STRIPPED_EXACT:
-            continue
-        if _CLAUDE_MARKER_RE.match(key) and key not in CLAUDE_CONFIG_KEEP:
-            continue
-        env[key] = value
+    env: Dict[str, str] = {k: v for k, v in src.items() if not _forbidden(k, strip, prefixes, keep)}
     env["PATH"] = path or user_shell_path()
     env.setdefault("TERM", "xterm-256color")
     env.setdefault("COLORTERM", "truecolor")
@@ -127,6 +120,38 @@ def build_session_env(
     return env
 
 
-def forbidden_keys_present(env: Dict[str, str]) -> List[str]:
-    """Source-guard helper: which forbidden keys a built environment still carries."""
-    return sorted(k for k in env if k in STRIPPED_EXACT or (_CLAUDE_MARKER_RE.match(k) and k not in CLAUDE_CONFIG_KEEP))
+def build_session_env(
+    preset: CliPreset,
+    parent: Optional[Dict[str, str]] = None,
+    *,
+    extra: Optional[Dict[str, str]] = None,
+    path: Optional[str] = None,
+) -> Dict[str, str]:
+    """The environment for one CLI's session: the preset says what must not leak
+    and what operator configuration is kept; the preset's own ``extra_env`` sits
+    under the host's values."""
+    merged = {**dict(preset.extra_env), **(extra or {})}
+    return build_env(parent, strip=preset.strip_env, prefixes=preset.strip_env_prefixes, keep=preset.keep_env,
+                     extra=merged, path=path)
+
+
+def build_shell_env(
+    parent: Optional[Dict[str, str]] = None,
+    *,
+    extra: Optional[Dict[str, str]] = None,
+    path: Optional[str] = None,
+) -> Dict[str, str]:
+    """The operator's own shell in the Canvas: no CLI's credential or session
+    marker is inherited, every CLI's configuration is."""
+    strip, prefixes, keep = union_strip_env()
+    return build_env(parent, strip=strip, prefixes=prefixes, keep=keep, extra=extra, path=path)
+
+
+def forbidden_keys_present(env: Dict[str, str], preset: Optional[CliPreset] = None) -> List[str]:
+    """Source-guard helper: which forbidden keys a built environment still carries
+    — for one CLI, or for every CLI when no preset is given."""
+    if preset is not None:
+        strip, prefixes, keep = preset.strip_env, preset.strip_env_prefixes, preset.keep_env
+    else:
+        strip, prefixes, keep = union_strip_env()
+    return sorted(k for k in env if _forbidden(k, strip, prefixes, keep))
