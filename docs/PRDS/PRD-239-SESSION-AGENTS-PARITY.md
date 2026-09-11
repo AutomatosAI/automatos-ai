@@ -103,7 +103,7 @@ Parity today for a session agent: tickets, heartbeats, schedules, channels, webh
 ## Not in this PRD (owner decisions)
 
 - **D-4 · Platform tools inside a session** (an Automatos MCP server in the session settings). Must not break the subscription invariants (no `-p`, no identity games, hooks-only settings). To be looked at after S1–S5 test.
-- **D-5 · A Codex adapter in the host** — the runtime config accepts `codex`; the host runs only `claude` today.
+- **D-5 · A Codex adapter in the host** — the runtime config accepts `codex`; the host runs only `claude` today. **Designed 2026-09-10:** `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md` — the adapter pattern (preset table + four bridge tiers) that makes the CLI a parameter, with Codex as its first non-Claude preset.
 
 ## Test plan (owner, local edition)
 

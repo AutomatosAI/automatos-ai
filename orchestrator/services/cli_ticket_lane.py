@@ -20,7 +20,8 @@ from typing import Any, Callable, Optional, Sequence, Tuple
 from sqlalchemy.orm import Session
 
 from core.cli_runtime import (
-    CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, RUNTIME_CLI, runtime_kind_of,
+    CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, PROVIDER_CLAUDE, RUNTIME_CLI,
+    runtime_kind_of,
 )
 from core.models.core import Agent, BoardTask
 
@@ -32,6 +33,46 @@ NO_HOST_REASON = (
     "Waiting for a CLI host — none is online. Start it with `make cli-host`; "
     "the ticket is claimed on its first poll."
 )
+# CLI adapter design §8.2: hosts are online, but none of them runs this agent's CLI.
+NO_CLI_HOST_PREFIX = "Waiting for a CLI host that runs "
+NO_CLI_HOST_REASON = (
+    NO_CLI_HOST_PREFIX + "{cli} — the host(s) online serve {served}. Install and log in to "
+    "{cli} on a host (or pick another CLI for this agent); the ticket is claimed on the next poll."
+)
+
+
+def is_no_cli_host_reason(reason: Any) -> bool:
+    return isinstance(reason, str) and reason.startswith(NO_CLI_HOST_PREFIX)
+
+
+def agent_cli_provider(db: Session, agent_id: Optional[int]) -> str:
+    """The CLI a session agent runs on (``configuration.provider``); ``claude``
+    when absent or unreadable — what every session agent ran on before the field."""
+    if agent_id is None:
+        return PROVIDER_CLAUDE
+    try:
+        row = db.query(Agent.configuration).filter(Agent.id == agent_id).first()
+    except Exception:  # noqa: BLE001 — a test double or a broken session
+        logger.debug("[CliTicketLane] provider lookup unavailable for agent %s", agent_id, exc_info=True)
+        return PROVIDER_CLAUDE
+    configuration = row[0] if isinstance(row, (tuple, list)) else getattr(row, "configuration", row)
+    provider = configuration.get(CONFIG_PROVIDER_KEY) if isinstance(configuration, dict) else None
+    return provider if isinstance(provider, str) and provider else PROVIDER_CLAUDE
+
+
+def no_cli_host_reason_for(db: Session, workspace_id: Any, cli: str) -> Optional[str]:
+    """The blocked line when hosts are online but none serves ``cli``; ``None``
+    when one does — or when it cannot be determined (a line that may be wrong is
+    worse than no line; the claim filter is the real guard)."""
+    try:
+        from services import cli_host_service
+        served = cli_host_service.serving_providers(db, workspace_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("[CliTicketLane] served-CLI lookup unavailable", exc_info=True)
+        return None
+    if cli in served:
+        return None
+    return NO_CLI_HOST_REASON.format(cli=cli, served=", ".join(served) or "no CLI")
 
 
 def is_cli_agent(db: Session, agent_id: Optional[int]) -> bool:
@@ -141,6 +182,8 @@ def file_cli_ticket(
         }
     if not host_online(db, workspace_id):
         task.blocked_reason = NO_HOST_REASON
+    else:
+        task.blocked_reason = no_cli_host_reason_for(db, workspace_id, agent_cli_provider(db, agent_id))
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -161,7 +204,11 @@ def file_cli_ticket(
 def queued_line(task: BoardTask) -> str:
     """The one line a lane replies with."""
     line = QUEUED_LINE.format(task_id=task.id)
-    if getattr(task, "blocked_reason", None):
+    reason = getattr(task, "blocked_reason", None)
+    if is_no_cli_host_reason(reason):
+        head = reason.split(" — ")[0]                      # "Waiting for a CLI host that runs codex"
+        line += f" ({head[0].lower()}{head[1:]} — none online runs it yet)"
+    elif reason:
         line += " (no CLI host is online yet — start it with `make cli-host`)"
     return line
 

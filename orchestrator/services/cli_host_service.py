@@ -228,11 +228,45 @@ def host_health(db: Session, workspace_id: Any) -> Dict[str, Any]:
         "online": bool(online),
         "paired_hosts": len(hosts),
         "online_hosts": [h.to_dict() for h in online],
+        # CLI adapter design §8.2/§8.3: which CLIs a ticket can be claimed for now.
+        "providers_online": sorted({p for h in online for p in (served_providers_of(h) or [])}),
         "last_seen_at": last_seen.isoformat() if last_seen else None,
         "cli_agents": len(cli_agent_ids),
         "waiting_tickets": waiting,
         **contract_fields(),
     }
+
+
+def served_providers_of(host: Any) -> Optional[List[str]]:
+    """The CLIs a host announced it can run (``capabilities.providers``, the list
+    the host builds from what is installed and logged in). ``None`` when the host
+    never said — no filter is applied, as before the field existed; ``[]`` when it
+    said it has none — it claims nothing."""
+    caps = getattr(host, "capabilities", None)
+    if not isinstance(caps, dict) or "providers" not in caps:
+        return None
+    raw = caps.get("providers")
+    if not isinstance(raw, list):
+        return []
+    return [p for p in raw if isinstance(p, str) and p]
+
+
+def serving_providers(db: Session, workspace_id: Any) -> List[str]:
+    """The union of CLIs the workspace's ONLINE hosts serve — what a session ticket
+    can be claimed for right now. The lane's blocked line and the picker read it."""
+    hosts = (
+        db.query(CliHost)
+        .filter(CliHost.workspace_id == workspace_id, CliHost.status == CliHostStatus.PAIRED.value)
+        .all()
+    )
+    out: List[str] = []
+    for host in hosts:
+        if not host.is_online():
+            continue
+        for provider in served_providers_of(host) or []:
+            if provider not in out:
+                out.append(provider)
+    return sorted(out)
 
 
 def host_allow_dirs(db: Session, workspace_id: Any) -> List[str]:
@@ -650,6 +684,13 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
     from uuid import uuid4
 
     limit = max(1, min(int(limit or 1), MAX_CLAIM_LIMIT))
+    # CLI adapter design §8.2: the claim is filtered by the CLIs this host serves.
+    # A host that announced no CLI at all takes nothing — refusing a ticket after
+    # the claim would bounce it between hosts of different CLIs every poll.
+    providers = served_providers_of(host)
+    if providers is not None and not providers:
+        logger.info("[cli-host] host %s announces no CLI it can run — claiming nothing", host.id)
+        return {"tasks": [], "parked": []}
     claimed = claim_tasks(
         db,
         worker_id=f"cli-host:{host.id}",
@@ -658,6 +699,7 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         max_slots_per_agent=None,
         runtime=RUNTIME_CLI,
         workspace_id=host.workspace_id,
+        providers=providers,
     )
     out: List[Dict[str, Any]] = []
     parked: List[Dict[str, Any]] = []
@@ -666,9 +708,9 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
             db.refresh(task)
             parked.append({"task_id": task.id, "title": task.title, "reason": task.blocked_reason})
             continue  # parked ``blocked`` by the gate; the answered-resume loop returns it
-        from services.cli_ticket_lane import NO_HOST_REASON
-        if task.blocked_reason == NO_HOST_REASON:
-            task.blocked_reason = None  # a host is here now
+        from services.cli_ticket_lane import NO_HOST_REASON, is_no_cli_host_reason
+        if task.blocked_reason == NO_HOST_REASON or is_no_cli_host_reason(task.blocked_reason):
+            task.blocked_reason = None  # a host that runs this CLI is here now
         agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first()
         cfg = (getattr(agent, "configuration", None) if agent else None) or {}
         prior = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
