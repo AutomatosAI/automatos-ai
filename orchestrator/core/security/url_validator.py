@@ -32,6 +32,23 @@ _BLOCKED_NETWORKS = [
 
 _ALLOWED_SCHEMES = {"http", "https"}
 
+# PRD-240: the same list, importable — web access pins its connection to an
+# address it has checked against exactly these ranges.
+BLOCKED_NETWORKS = tuple(_BLOCKED_NETWORKS)
+
+
+def blocked_network_for(ip_str: str) -> str | None:
+    """The blocked range ``ip_str`` falls in, ``"invalid"`` for a non-address,
+    or ``None`` when the address is routable."""
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return "invalid"
+    for network in _BLOCKED_NETWORKS:
+        if addr in network:
+            return str(network)
+    return None
+
 
 def validate_webhook_url(url: str) -> tuple[bool, str]:
     """
@@ -53,21 +70,23 @@ def validate_webhook_url(url: str) -> tuple[bool, str]:
     if not hostname:
         return False, "No hostname in URL"
 
-    # Resolve DNS to get actual IP(s)
+    # Resolve DNS to get actual IP(s). ``parsed.port`` raises ValueError on a
+    # malformed port ("example.com:abc") — a refusal, never an exception.
     try:
-        addrinfos = socket.getaddrinfo(hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
+        port = parsed.port or 443
+    except ValueError:
+        return False, "Malformed port in URL"
+    try:
+        addrinfos = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, OSError, ValueError):
         return False, f"DNS resolution failed for {hostname}"
 
     for family, _, _, _, sockaddr in addrinfos:
         ip_str = sockaddr[0]
-        try:
-            addr = ipaddress.ip_address(ip_str)
-        except ValueError:
+        blocked = blocked_network_for(ip_str)
+        if blocked == "invalid":
             return False, f"Invalid IP from DNS: {ip_str}"
-
-        for network in _BLOCKED_NETWORKS:
-            if addr in network:
-                return False, f"Resolved to blocked range ({network})"
+        if blocked:
+            return False, f"Resolved to blocked range ({blocked})"
 
     return True, "OK"

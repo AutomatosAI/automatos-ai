@@ -274,6 +274,10 @@ from modules.tools.discovery.handlers_intake import (  # PRD-222 W1S8
     get_intake_status,
     scan_business_site,
 )
+from modules.tools.discovery.handlers_web import (  # PRD-240
+    web_fetch,
+    web_search,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -544,6 +548,9 @@ class PlatformActionExecutor:
             # PRD-222 W1S8: business-intake pipeline as Auto tools
             "platform_scan_business_site": scan_business_site,
             "platform_get_intake_status": get_intake_status,
+            # PRD-240: the web as a platform capability (no app, no assignment)
+            "web_fetch": web_fetch,
+            "web_search": web_search,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,

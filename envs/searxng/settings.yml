@@ -1,0 +1,20 @@
+# SearXNG settings for the Automatos `search` compose profile (PRD-240 S5).
+# Everything not set here comes from SearXNG's defaults. The one thing the
+# platform needs is the JSON result format, which SearXNG ships disabled.
+use_default_settings: true
+
+general:
+  instance_name: "Automatos search"
+  debug: false
+
+server:
+  # The container reads SEARXNG_SECRET from its environment (docker-compose.yml).
+  secret_key: "${SEARXNG_SECRET}"
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
