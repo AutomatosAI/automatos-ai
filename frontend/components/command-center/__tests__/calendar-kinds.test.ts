@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { KIND_META, KIND_ORDER, kindTone, layoutLanes } from '../calendar-kinds'
+import { KIND_META, KIND_ORDER, collapseCrowded, kindTone, layoutLanes } from '../calendar-kinds'
 
 describe('calendar kinds', () => {
   it('every feed kind has a legend entry and a distinct colour', () => {
@@ -37,9 +37,42 @@ describe('layoutLanes', () => {
     expect(out[2]).toMatchObject({ lane: 0, lanes: 1 })
   })
 
+  it('numbers clusters by start order', () => {
+    const out = layoutLanes([{ s: 0, e: 10 }, { s: 5, e: 15 }, { s: 30, e: 40 }], span)
+    expect(out.map((l) => l.cluster)).toEqual([0, 0, 1])
+  })
+
   it('does not mutate its input', () => {
     const input = [{ s: 5, e: 15 }, { s: 0, e: 10 }]
     layoutLanes(input, span)
     expect(input).toEqual([{ s: 5, e: 15 }, { s: 0, e: 10 }])
+  })
+})
+
+describe('collapseCrowded', () => {
+  const span = (e: { s: number; e: number }): [number, number] => [e.s, e.e]
+
+  it('folds a cluster that needs more lanes than allowed into one card and leaves the rest', () => {
+    const laid = layoutLanes(
+      [{ s: 0, e: 10 }, { s: 0, e: 10 }, { s: 0, e: 10 }, { s: 50, e: 60 }, { s: 55, e: 65 }],
+      span,
+    )
+    const out = collapseCrowded(laid, 2, span)
+    expect(out.map((p) => p.kind)).toEqual(['group', 'single', 'single'])
+    expect(out[0]).toMatchObject({ kind: 'group', start: 0, end: 10 })
+    expect(out[0].kind === 'group' && out[0].members).toHaveLength(3)
+    expect(out[1]).toMatchObject({ kind: 'single', lane: 0, lanes: 2 })
+  })
+
+  it('a cluster within the limit is untouched', () => {
+    const out = collapseCrowded(layoutLanes([{ s: 0, e: 10 }, { s: 5, e: 15 }], span), 2, span)
+    expect(out.every((p) => p.kind === 'single')).toBe(true)
+  })
+
+  it('the card spans the earliest start to the latest end of its members', () => {
+    const out = collapseCrowded(layoutLanes([{ s: 0, e: 10 }, { s: 2, e: 30 }, { s: 4, e: 12 }], span), 2, span)
+    expect(out).toEqual([
+      { kind: 'group', members: [{ s: 0, e: 10 }, { s: 2, e: 30 }, { s: 4, e: 12 }], start: 0, end: 30 },
+    ])
   })
 })

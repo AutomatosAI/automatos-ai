@@ -168,6 +168,32 @@ describe('CalendarTab — kinds, lanes, legend', () => {
     expect(lanes).toEqual(['2', '2'])
   })
 
+  it('a crowded slot is one stacked card in week view and lanes in day view', () => {
+    // Five daily heartbeats at the same minute (the prod 10:00 row).
+    const at = midToday()
+    feed.items = ['Vector', 'QA', 'Fixer', 'Auto', 'Sentinel'].map((n, i) => routine(10 + i, n, 1440, at))
+    const { container } = render(<CalendarTab />)
+    const cards = container.querySelectorAll('.cc-cal-group')
+    expect(cards.length).toBe(7) // one per day column
+    expect(cards[0].getAttribute('data-group-size')).toBe('5')
+    expect(cards[0].textContent).toContain('5 heartbeats')
+    expect(cards[0].querySelectorAll('.agent-dot').length).toBe(5)
+    expect(container.querySelectorAll('.cc-cal-event:not(.cc-cal-group)').length).toBe(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Day' }))
+    expect(container.querySelectorAll('.cc-cal-group').length).toBe(0)
+    const lanes = Array.from(container.querySelectorAll('.cc-cal-event')).map((e) =>
+      e.getAttribute('data-lanes'),
+    )
+    expect(lanes).toEqual(['5', '5', '5', '5', '5'])
+  })
+
+  it('a short event box is tall enough for its two lines', () => {
+    feed.items = [deadline(1, 'Short', new Date(midToday().getTime() + 60 * 60_000))]
+    const { container } = render(<CalendarTab />)
+    expect((container.querySelector('.cc-cal-event') as HTMLElement).style.height).toBe('38px')
+  })
+
   it('a legend chip hides its kind from the grid, band and Next Up', () => {
     feed.items = [
       routine(1, 'Ops', 15, midToday()),
