@@ -580,6 +580,12 @@ export function AgentConfigurationModal({
   // PRD-55: Save heartbeat config
   const saveHeartbeatConfig = async () => {
     if (!agentId) return
+    if (heartbeatLoadError) {
+      // The form holds defaults, not this agent's settings: saving would
+      // overwrite a live heartbeat with "off".
+      toast.error('Heartbeat settings didn’t load — nothing was saved')
+      return
+    }
     try {
       await apiClient.request(`/api/heartbeat/agents/${agentId}/config`, {
         method: 'PUT',
@@ -1859,6 +1865,7 @@ export function AgentConfigurationModal({
                           variant="outline"
                           size="sm"
                           onClick={saveHeartbeatConfig}
+                          disabled={Boolean(heartbeatLoadError)}
                           className="flex-1"
                         >
                           <Save className="w-4 h-4 mr-2" />

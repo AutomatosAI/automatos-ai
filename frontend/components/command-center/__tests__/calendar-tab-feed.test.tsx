@@ -157,6 +157,17 @@ describe('CalendarTab — kinds, lanes, legend', () => {
     ])
   })
 
+  it('short events closer together than the minimum box height share the column', () => {
+    // 15-minute deadlines 20 minutes apart: their 28px boxes would overlap.
+    const at = new Date(midToday().getTime() + 2 * 60 * 60_000)
+    feed.items = [deadline(1, 'A', at), deadline(2, 'B', new Date(at.getTime() + 20 * 60_000))]
+    const { container } = render(<CalendarTab />)
+    const lanes = Array.from(container.querySelectorAll('.cc-cal-event')).map((e) =>
+      e.getAttribute('data-lanes'),
+    )
+    expect(lanes).toEqual(['2', '2'])
+  })
+
   it('a legend chip hides its kind from the grid, band and Next Up', () => {
     feed.items = [
       routine(1, 'Ops', 15, midToday()),

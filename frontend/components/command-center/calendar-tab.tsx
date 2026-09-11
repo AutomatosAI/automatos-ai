@@ -70,6 +70,11 @@ const HOUR_PX = 44
 const START_HR = 0
 const END_HR = 22
 const HOURS = Array.from({ length: END_HR - START_HR + 1 }, (_, i) => i + START_HR)
+/** Smallest rendered event box. The overlap layout uses the same floor, so two
+ *  short events closer together than this share the column instead of
+ *  drawing on top of each other. */
+const MIN_EVENT_PX = 28
+const MIN_EVENT_MIN = (MIN_EVENT_PX / HOUR_PX) * 60
 /** Routines this frequent or more (heartbeats every 5/15/30/60 min) live in the
  *  always-on band ONLY. Plotted, an hourly heartbeat is 12+ blocks a day per
  *  agent and buries the one-off work the grid is for (2026-09-11). */
@@ -234,10 +239,11 @@ function occurrence(item: ScheduleItem, d: Date, durMin: number, recurring: bool
   }
 }
 
-/** [start, end] in ms — what the overlap layout compares. */
+/** [start, end] in ms — what the overlap layout compares. The end is the
+ *  rendered box, never shorter than MIN_EVENT_MIN. */
 const eventSpan = (evt: CalEvent): [number, number] => [
   evt.date.getTime(),
-  evt.date.getTime() + evt.durMin * 60_000,
+  evt.date.getTime() + Math.max(evt.durMin, MIN_EVENT_MIN) * 60_000,
 ]
 
 /** Walk an interval backwards and forwards from its anchor across the window. */
@@ -749,7 +755,7 @@ export function CalendarTab() {
                     const top =
                       (evt.hour - START_HR) * HOUR_PX +
                       (evt.min / 60) * HOUR_PX
-                    const height = Math.max((evt.durMin / 60) * HOUR_PX, 28)
+                    const height = Math.max((evt.durMin / 60) * HOUR_PX, MIN_EVENT_PX)
                     const tone = toneFor(evt.agent)
                     const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
                     const kind = KIND_META[evt.item.type]?.label ?? evt.item.type
