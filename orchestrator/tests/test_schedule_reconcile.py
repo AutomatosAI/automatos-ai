@@ -31,7 +31,11 @@ if str(_ORCH) not in sys.path:
 
 from services import schedule_reconcile as sr  # noqa: E402
 from services.heartbeat_service import HeartbeatService  # noqa: E402
-from services.scheduled_task_service import JOB_ID_PREFIX, ScheduledTaskService  # noqa: E402
+from services.scheduled_task_service import (  # noqa: E402
+    JOB_ID_PREFIX,
+    ONE_SHOT_MISFIRE_GRACE_SECONDS,
+    ScheduledTaskService,
+)
 
 
 class _Job:
@@ -46,6 +50,7 @@ class _FakeScheduler:
         self.running = running
         self._jobs = {job_id: _Job(job_id) for job_id in jobs}
         self.added: list = []
+        self.added_kwargs: dict = {}
         self.removed: list = []
 
     def get_jobs(self):
@@ -57,6 +62,7 @@ class _FakeScheduler:
     def add_job(self, func, trigger=None, id=None, **kw):  # noqa: A002 — APScheduler's name
         self._jobs[id] = _Job(id)
         self.added.append(id)
+        self.added_kwargs[id] = kw
         return self._jobs[id]
 
     def remove_job(self, job_id):
@@ -132,7 +138,8 @@ class TestScheduledTaskReconcile:
 
         out = ScheduledTaskService(db, workspace_id=None).reconcile_with_scheduler(unified)
 
-        assert out == {"added": 1, "removed": 1, "skipped": False}
+        assert out == {"added": 1, "removed": 1, "stale": 0, "skipped": False}
+        assert "misfire_grace_time" not in unified.added_kwargs[f"{JOB_ID_PREFIX}1"]  # cron: no catch-up
         assert unified.added == [f"{JOB_ID_PREFIX}1"]  # task 2 present: NOT re-added
         assert unified.removed == [f"{JOB_ID_PREFIX}3"]  # cancelled elsewhere
         assert unified.ids() == {f"{JOB_ID_PREFIX}1", f"{JOB_ID_PREFIX}2", "agent_hb_9"}
@@ -141,7 +148,7 @@ class TestScheduledTaskReconcile:
         db = _FakeTaskDB([_task_row(1)])
         svc = ScheduledTaskService(db, workspace_id=None)
         svc.reconcile_with_scheduler(unified)
-        assert svc.reconcile_with_scheduler(unified) == {"added": 0, "removed": 0, "skipped": False}
+        assert svc.reconcile_with_scheduler(unified) == {"added": 0, "removed": 0, "stale": 0, "skipped": False}
 
     def test_skips_off_the_leader_without_touching_the_db(self):
         db = _FakeTaskDB([_task_row(1)])
@@ -149,6 +156,34 @@ class TestScheduledTaskReconcile:
         assert svc.reconcile_with_scheduler(_FakeScheduler(running=False))["skipped"] is True
         assert svc.reconcile_with_scheduler(None)["skipped"] is True
         assert db.execute_calls == 0
+
+    def test_stale_one_shot_is_left_alone_but_a_recent_one_fires_with_grace(self, unified):
+        """APScheduler's default 1 s misfire grace drops a late one-shot as "missed";
+        registered with a grace, one the tick learns of a minute late still fires.
+        One missed long ago is not re-added (it would be missed again every tick,
+        or — if it just fired — run twice)."""
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        old = _task_row(1, task_type="one_shot", schedule=(now - timedelta(minutes=10)).isoformat())
+        recent = _task_row(2, task_type="one_shot", schedule=(now - timedelta(seconds=30)).isoformat())
+        future = _task_row(3, task_type="one_shot", schedule=(now + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"))
+        db = _FakeTaskDB([old, recent, future])
+
+        out = ScheduledTaskService(db, workspace_id=None).reconcile_with_scheduler(unified)
+
+        assert out == {"added": 2, "removed": 0, "stale": 1, "skipped": False}
+        assert unified.added == [f"{JOB_ID_PREFIX}2", f"{JOB_ID_PREFIX}3"]
+        for job_id in unified.added:
+            assert unified.added_kwargs[job_id]["misfire_grace_time"] == ONE_SHOT_MISFIRE_GRACE_SECONDS
+
+    def test_execute_claims_the_row_with_a_lock(self):
+        """A re-registered one-shot that fires while the first run's completion
+        commit is in flight must wait for it and then see the row inactive."""
+        import inspect
+
+        src = inspect.getsource(ScheduledTaskService.execute_task)
+        assert "status = 'active' FOR UPDATE" in src
 
     def test_non_leader_register_points_at_the_tick_not_a_restart(self, monkeypatch, caplog):
         import services.scheduler as sched_mod
@@ -195,6 +230,15 @@ class TestHeartbeatReconcile:
         assert 4 not in svc._hb_signatures
         # a second pass with the same DB changes nothing
         assert svc.reconcile_agent_heartbeats(db) == {"added": 0, "removed": 0, "changed": 0}
+
+    def test_unschedule_forgets_the_signature(self):
+        fake = _FakeScheduler()
+        svc = self._service(fake)
+        hb = {"enabled": True, "interval_minutes": 30}
+        svc.schedule_agent_heartbeat(8, "ws-1", hb)
+        svc.unschedule_heartbeat("agent_hb_8")
+        assert 8 not in svc._hb_signatures
+        assert fake.ids() == set()
 
     def test_no_scheduler_on_this_worker_is_a_noop(self):
         svc = HeartbeatService()
@@ -244,6 +288,26 @@ class TestTick:
         monkeypatch.setattr(sr, "run_reconcile_once", lambda s, db=None: passes.append(s) or {})
         assert asyncio.run(sr.start_schedule_reconcile(fake)) is True
         assert fake.added == [sr.RECONCILE_JOB_ID]
+        assert passes == [fake]
+
+    def test_tick_job_carries_no_scheduler_argument(self, monkeypatch):
+        """A job store pickles job args (RedisJobStore); a scheduler instance
+        refuses to be serialized, which would kill the tick at registration."""
+        fake = _FakeScheduler()
+        monkeypatch.setattr(sr, "run_reconcile_once", lambda s, db=None: {})
+        asyncio.run(sr.start_schedule_reconcile(fake))
+        kwargs = fake.added_kwargs[sr.RECONCILE_JOB_ID]
+        assert "args" not in kwargs and "kwargs" not in kwargs
+        assert kwargs["replace_existing"] is True and kwargs["max_instances"] == 1
+
+    def test_tick_resolves_the_live_scheduler_at_call_time(self, monkeypatch):
+        fake = _FakeScheduler()
+        import services.scheduler as sched_mod
+
+        monkeypatch.setattr(sched_mod, "get_unified_scheduler", lambda: SimpleNamespace(apscheduler=fake))
+        passes: list = []
+        monkeypatch.setattr(sr, "run_reconcile_once", lambda s, db=None: passes.append(s) or {})
+        sr._tick()
         assert passes == [fake]
 
     def test_start_is_a_noop_off_the_leader(self):

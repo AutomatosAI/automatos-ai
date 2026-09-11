@@ -446,7 +446,6 @@ class HeartbeatService:
         for agent_id in existing:
             if agent_id not in desired:
                 self.unschedule_heartbeat(f"agent_hb_{agent_id}")
-                self._hb_signatures.pop(agent_id, None)
                 removed += 1
         if added or changed or removed:
             logger.info("[Heartbeat] reconcile: %d added, %d changed, %d removed", added, changed, removed)
@@ -481,7 +480,10 @@ class HeartbeatService:
         )
 
     def unschedule_heartbeat(self, job_id: str):
-        """Remove a scheduled heartbeat job."""
+        """Remove a scheduled heartbeat job (and forget its config signature)."""
+        suffix = job_id[len("agent_hb_"):]
+        if job_id.startswith("agent_hb_") and suffix.isdigit():
+            self._hb_signatures.pop(int(suffix), None)
         if self._scheduler and self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
             logger.info("[Heartbeat] Unscheduled job %s", job_id)

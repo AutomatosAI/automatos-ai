@@ -46,8 +46,15 @@ def run_reconcile_once(scheduler: Any, db: Optional[Any] = None) -> Dict[str, An
     return {"tasks": tasks, "heartbeats": heartbeats}
 
 
-def _tick(scheduler: Any) -> None:
+def _tick(scheduler: Any = None) -> None:
+    """One pass. Registered WITHOUT args: a job store pickles job args
+    (RedisJobStore) and a scheduler instance refuses to be serialized, so the
+    live scheduler is resolved at call time instead."""
     try:
+        if scheduler is None:
+            from services.scheduler import get_unified_scheduler
+
+            scheduler = get_unified_scheduler().apscheduler
         run_reconcile_once(scheduler)
     except Exception as exc:  # noqa: BLE001 — a failed pass must not kill the job
         logger.warning("[ScheduleReconcile] pass failed: %s", exc)
@@ -66,7 +73,6 @@ async def start_schedule_reconcile(scheduler: Any) -> bool:
         _tick,
         IntervalTrigger(seconds=RECONCILE_INTERVAL_SECONDS),
         id=RECONCILE_JOB_ID,
-        args=[scheduler],
         replace_existing=True,
         max_instances=1,
         coalesce=True,
