@@ -52,7 +52,7 @@ from .actions_capabilities import register_capabilities_actions  # tool-surface 
 from .actions_onboarding import register_onboarding_actions  # PRD-222 W1S3
 from .actions_intake import register_intake_actions  # PRD-222 W1S8
 from .actions_packages import register_package_actions  # PRD-230 US-006
-from .actions_web import register_web_actions  # PRD-240: web_fetch + web_search
+from .actions_web import register_web_actions  # PRD-240: platform_web_fetch + platform_web_search
 
 
 def register_all_actions(registry: ActionRegistry) -> None:

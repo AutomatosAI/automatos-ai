@@ -1,10 +1,10 @@
 """Web handlers for PlatformActionExecutor (PRD-240 S2/S3).
 
-``web_fetch`` is native and keyless: an HTTP GET from the backend container,
+``platform_web_fetch`` is native and keyless: an HTTP GET from the backend container,
 allowed only through ``core.security.web_access`` (the switch, the operator's
 denylist, and the private-range check that keeps agents off the compose
 network and the host), TLS verified, redirects re-checked, bytes capped, HTML
-reduced to readable text. ``web_search`` hands the query to
+reduced to readable text. ``platform_web_search`` hands the query to
 ``services.web_search`` — whichever engine the deployment has.
 
 Both answer honestly and never raise into the agent loop: web access off, a
@@ -246,6 +246,6 @@ async def web_search(
     if unverified:
         data["note"] = (
             f"{unverified} of these links came from the model's memory, not from a search — "
-            "web_fetch them before relying on them."
+            "platform_web_fetch them before relying on them."
         )
     return {"success": True, "data": data}

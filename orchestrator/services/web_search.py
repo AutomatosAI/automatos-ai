@@ -1,4 +1,4 @@
-"""PRD-240 S3 — one ``web_search`` for every route, through whatever engine the
+"""PRD-240 S3 — one ``platform_web_search`` for every route, through whatever engine the
 deployment has.
 
 No search engine of our own and no new key: the backends are things the user
