@@ -87,7 +87,9 @@ def test_available_with_key_and_sdk(composio_on):
 def test_unavailable_without_key(composio_off):
     assert cc.composio_available() is False
     assert cc.composio_unavailable_reason() == cc.COMPOSIO_UNAVAILABLE_NO_KEY
-    assert "COMPOSIO_API_KEY" in cc.composio_unavailable_reason()
+    # #724 renamed the operator-facing env var to COMPOSIO_KEY (the name a local
+    # .env actually sets); the reason must name THAT, not the config attribute.
+    assert "COMPOSIO_KEY" in cc.composio_unavailable_reason()
 
 
 def test_unavailable_when_sdk_missing(monkeypatch):
