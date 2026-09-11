@@ -62,6 +62,10 @@ describe('CalendarTab — styled outside the studio theme', () => {
     }
   })
 
+  it('event text reads from the left edge (a <button> centres by default)', () => {
+    expect(css).toMatch(/:is\(\.studio, \.cc-cal-root\) \.cc-cal-event \{[^}]*text-align: left/)
+  })
+
   it('hover and live-dot colours fall back to theme tokens outside studio', () => {
     // CD's cream hover is a studio-only token; a dark-theme event must not
     // flash near-white on hover.

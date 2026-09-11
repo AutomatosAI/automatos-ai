@@ -64,11 +64,22 @@ def assignable_tiers(tiers: Optional[dict] = None) -> dict:
     return {name: t for name, t in resolved.items() if is_assignable(name, resolved)}
 
 
-def plan_limits_for_tier(plan: str, tiers: Optional[dict] = None) -> dict:
+def plan_limits_for_tier(
+    plan: str, tiers: Optional[dict] = None, with_budget: bool = True
+) -> dict:
     """The ``plan_limits`` fragment a tier implies, keyed for the LIVE consumers.
 
     Raises :class:`ValueError` for a non-assignable / unknown plan — the caller
     must never write limits for a tier that cannot be assigned.
+
+    ``with_budget=False`` omits the tier-owned ``budget`` key entirely, so the
+    tier's seats/agents apply WITHOUT minting a spend ceiling. The operator
+    console passes this (owner decision 2026-09-11): an admin moving a live
+    tenant between tiers must never hand it a ``check_budget`` throttle it did
+    not have a moment ago. Combined with :func:`assign_plan`'s existing
+    tier-owned-budget cleanup, the admin path also STRIPS a stale tier ceiling a
+    previous assignment wrote, and still never touches an admin custom budget
+    (``source != "tier"``).
     """
     resolved = _tiers(tiers)
     if not is_assignable(plan, resolved):
@@ -82,7 +93,7 @@ def plan_limits_for_tier(plan: str, tiers: Optional[dict] = None) -> dict:
         "marketplace_depth": tier["marketplace_depth"],
     }
     budget_usd = tier.get("budget_usd") or 0
-    if budget_usd and budget_usd > 0:
+    if with_budget and budget_usd and budget_usd > 0:
         # A tier-OWNED ceiling (``source="tier"``): re-derived on every assignment
         # and cleared when the workspace moves to a no-ceiling tier (see
         # :func:`assign_plan`). An admin budget carries no such marker and is never
@@ -94,7 +105,12 @@ def plan_limits_for_tier(plan: str, tiers: Optional[dict] = None) -> dict:
 
 
 def assign_plan(
-    db: Any, workspace: Any, plan: str, tiers: Optional[dict] = None, commit: bool = True
+    db: Any,
+    workspace: Any,
+    plan: str,
+    tiers: Optional[dict] = None,
+    commit: bool = True,
+    with_budget: bool = True,
 ) -> dict:
     """Set ``workspace.plan`` and merge the tier's limits into ``plan_limits``.
 
@@ -113,8 +129,14 @@ def assign_plan(
     ``plan_limits`` (GET /budget would otherwise still show it, and an enforce
     stage would throttle at it). An admin custom budget — ``source != "tier"`` —
     is the customer's own explicit ceiling and is left untouched on any tier.
+
+    ``with_budget=False`` (the admin console's plan dropdown) applies the tier's
+    seats/agents but mints NO ceiling: no ``budget`` key is produced, so the
+    cleanup below also clears a tier-owned ceiling a prior assignment left. An
+    admin custom budget still survives, exactly as on the budget-carrying path.
     """
-    limits = plan_limits_for_tier(plan, tiers)  # validates assignability first
+    # validates assignability first
+    limits = plan_limits_for_tier(plan, tiers, with_budget=with_budget)
     new_limits = dict(workspace.plan_limits or {})
     new_limits.update(limits)
     # RVW-4: a 0-budget tier implies NO 'budget' key, so the merge above cannot

@@ -26,11 +26,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
+from core.auth.actor import resolve_internal_user_id
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import Agent, Chat, Document, Message, User
 from core.models.workspaces import Workspace
+from core.workspaces.audit import AuditService
+from core.utils.timestamps import utc_iso
+from core.workspaces.models import WorkspaceMember
+from services.plan_tiers import assign_plan, assignable_tiers, exposure_for_plan, get_tier
 from services.workspace_purge import purge_workspace_sync
 
 logger = logging.getLogger(__name__)
@@ -41,6 +46,11 @@ router = APIRouter(prefix="/api/admin/workspaces", tags=["Admin Workspaces"])
 # ===================================================================
 # Helpers
 # ===================================================================
+
+# The UTC-explicit serialiser now lives in core.utils.timestamps; the module-level
+# name is kept so call sites and tests in this file read unchanged.
+_utc_iso = utc_iso
+
 
 def _is_admin(ctx: RequestContext) -> bool:
     if not ctx.user:
@@ -72,6 +82,12 @@ class WorkspaceListItem(BaseModel):
     documents_count: int = 0
     storage_bytes: int = 0
     chats_count: int = 0
+    members_count: int = 0
+    # Max ``users.last_sign_in`` across the workspace's active members and its
+    # owner — "last authenticated request", stamped by core.auth.hybrid. None
+    # means nobody on this workspace has been seen since the stamp shipped.
+    last_active_at: Optional[str] = None
+    plan_limits: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[str] = None
     paused_at: Optional[str] = None
     paused_reason: Optional[str] = None
@@ -164,6 +180,25 @@ async def list_workspaces(
             .all()
         ) if workspace_ids else {}
 
+        # Active members + last-seen, batched the same way (never N+1). The seat
+        # cap in core/workspaces/invitations.py counts exactly these rows
+        # (is_active members), so members_count is directly comparable to a
+        # tier's seats — that is what the console's downgrade warning reads.
+        member_agg = (
+            db.query(
+                WorkspaceMember.workspace_id,
+                func.count(WorkspaceMember.id),
+                func.max(User.last_sign_in),
+            )
+            .join(User, User.id == WorkspaceMember.user_id)
+            .filter(WorkspaceMember.workspace_id.in_(workspace_ids))
+            .filter(WorkspaceMember.is_active.is_(True))
+            .group_by(WorkspaceMember.workspace_id)
+            .all()
+        ) if workspace_ids else []
+        members_by_ws = {ws_id: cnt for ws_id, cnt, _ in member_agg}
+        member_seen_by_ws = {ws_id: seen for ws_id, _, seen in member_agg}
+
         # Owner lookup (bulk)
         owner_ids = {w.owner_id for w in workspaces if w.owner_id is not None}
         owners = (
@@ -174,6 +209,13 @@ async def list_workspaces(
         items: List[WorkspaceListItem] = []
         for w in workspaces:
             owner = owner_by_id.get(w.owner_id) if w.owner_id else None
+            # The owner is counted even when no membership row exists for them —
+            # a solo workspace is otherwise reported as never active.
+            seen_candidates = [
+                t for t in (member_seen_by_ws.get(w.id), getattr(owner, "last_sign_in", None))
+                if t is not None
+            ]
+            last_active = max(seen_candidates) if seen_candidates else None
             items.append(WorkspaceListItem(
                 id=str(w.id),
                 name=w.name,
@@ -187,6 +229,9 @@ async def list_workspaces(
                 documents_count=docs_count_by_ws.get(w.id, 0),
                 storage_bytes=storage_by_ws.get(w.id, 0),
                 chats_count=chats_by_ws.get(w.id, 0),
+                members_count=members_by_ws.get(w.id, 0),
+                last_active_at=_utc_iso(last_active),
+                plan_limits=dict(w.plan_limits or {}),
                 created_at=w.created_at.isoformat() if w.created_at else None,
                 paused_at=w.paused_at.isoformat() if w.paused_at else None,
                 paused_reason=w.paused_reason,
@@ -212,6 +257,181 @@ async def list_workspaces(
     except Exception as e:
         logger.exception("Error listing workspaces: %s", e)
         raise HTTPException(status_code=500, detail="Failed to list workspaces")
+
+
+# ── Plan tiers (operator console) ────────────────────────────────────────────
+#
+# Declared BEFORE the ``/{workspace_id}`` detail route on purpose: a literal
+# segment registered after a path-parameter route is shadowed by it (the
+# PRD-220 route-order trap). ``workspace_id`` is typed ``UUID`` so "plans" would
+# 422 rather than fall through, but order is the thing that makes it correct.
+
+
+class PlanTierInfo(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    assignable: bool = False
+    coming_soon: bool = False
+    seats: Optional[int] = None
+    max_agents: Optional[int] = None
+    marketplace_depth: int = 1
+    families: Dict[str, bool] = Field(default_factory=dict)
+    nav: Dict[str, bool] = Field(default_factory=dict)
+
+
+class PlanChangeBody(BaseModel):
+    plan: str = Field(..., min_length=1, max_length=50)
+
+
+@router.get("/plans")
+async def list_plan_tiers(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+) -> Dict[str, Any]:
+    """The tier catalogue behind the console's plan dropdown. Admin-only.
+
+    Every tier is returned, not just the assignable ones, so a workspace sitting
+    on a non-assignable tier (``enterprise`` today) still renders its own plan
+    as the current value instead of showing blank. ``assignable`` says which the
+    dropdown may actually select.
+
+    ``nav`` is the same exposure the client gets from
+    ``GET /api/workspaces/current`` — it is what makes the consequence of a tier
+    legible in the console ("Basic hides Team and Analytics") rather than
+    something the operator has to infer from the families map.
+    """
+    _assert_admin(ctx)
+    from config import PLAN_TIERS
+
+    selectable = assignable_tiers()
+    tiers = [
+        PlanTierInfo(
+            name=name,
+            display_name=tier.get("display_name"),
+            assignable=name in selectable,
+            coming_soon=bool(tier.get("coming_soon")),
+            seats=tier.get("seats"),
+            max_agents=tier.get("max_agents"),
+            marketplace_depth=int(tier.get("marketplace_depth", 1) or 1),
+            families=dict(tier.get("families") or {}),
+            nav=dict(exposure_for_plan(name).get("nav") or {}),
+        ).model_dump()
+        for name, tier in PLAN_TIERS.items()
+        if isinstance(tier, dict)
+    ]
+    # No budget figure is advertised: the console never writes one (see below).
+    return {"tiers": tiers}
+
+
+@router.patch("/{workspace_id}/plan")
+async def change_workspace_plan(
+    workspace_id: UUID,
+    body: PlanChangeBody,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Move a workspace onto another tier. Admin-only.
+
+    Routed through ``services.plan_tiers.assign_plan`` — the ONE writer of
+    ``workspaces.plan`` / ``plan_limits`` (FR-4 auditability) — so the tier's
+    seats and agent cap apply exactly as they do on the onboarding path.
+
+    ``with_budget=False`` (owner decision, 2026-09-11): an operator retiering a
+    LIVE tenant must never hand it a spend ceiling it did not have a moment ago.
+    ``modules/policy/budget.py`` enforces ``plan_limits.budget`` through
+    ``check_budget``, and a workspace with no budget key is ceiling-less today —
+    so minting one here would silently throttle a pilot. The same switch clears a
+    stale TIER-owned ceiling a previous assignment left behind, while an admin
+    custom budget (``source != "tier"``) is the customer's own and survives
+    untouched.
+
+    Downgrades are permitted but reported: a tier whose ``seats`` sit below the
+    workspace's active member count comes back in ``warnings``. Nothing is
+    removed — the cap binds the NEXT invitation
+    (``core/workspaces/invitations.py``), never the members already in place.
+    """
+    _assert_admin(ctx)
+
+    workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    # Every sibling mutator in this router refuses on a soft-deleted workspace;
+    # the console disables the control too, but that is client-side only and a
+    # purge is already queued against these rows (services/workspace_purge.py).
+    if workspace.deleted_at:
+        raise HTTPException(
+            status_code=400, detail="Cannot change the plan of a deleted workspace"
+        )
+
+    previous_plan = workspace.plan
+    previous_limits = dict(workspace.plan_limits or {})
+
+    try:
+        new_limits = assign_plan(db, workspace, body.plan, with_budget=False)
+    except ValueError as exc:
+        # Unknown / non-assignable tier — the caller's input, not a server fault.
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Plan change failed for workspace %s: %s", workspace_id, exc)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to change plan")
+
+    limits_changed = {
+        key: {"from": previous_limits.get(key), "to": new_limits.get(key)}
+        for key in sorted(set(previous_limits) | set(new_limits))
+        if previous_limits.get(key) != new_limits.get(key)
+    }
+
+    members_count = (
+        db.query(func.count(WorkspaceMember.id))
+        .filter(WorkspaceMember.workspace_id == workspace.id)
+        .filter(WorkspaceMember.is_active.is_(True))
+        .scalar()
+    ) or 0
+
+    warnings: List[str] = []
+    seats = (get_tier(workspace.plan) or {}).get("seats")
+    # Mirror the enforcement exactly (core/workspaces/invitations.py): -1 is the
+    # only "unlimited" sentinel there, so a tier tuned to seats=0 via
+    # AUTOMATOS_PLAN_TIERS_JSON blocks EVERY invite and must still warn. Do not
+    # borrow the 0-means-unlimited convention that plan_tiers documents for
+    # max_agents / watcher_limit — that is a different key with a different rule.
+    if isinstance(seats, int) and seats != -1 and seats < members_count:
+        warnings.append(
+            f"{workspace.name} has {members_count} active members but "
+            f"{workspace.plan} allows {seats}. No one was removed — the cap "
+            f"applies to the next invitation."
+        )
+
+    AuditService(db).log(
+        workspace_id=str(workspace.id),
+        user_id=resolve_internal_user_id(db, ctx),
+        action="workspace.plan_changed",
+        resource_type="workspace",
+        resource_id=str(workspace.id),
+        resource_name=workspace.name,
+        details={
+            "from_plan": previous_plan,
+            "to_plan": workspace.plan,
+            "limits_changed": limits_changed,
+            "budget_applied": False,
+            "actor_email": getattr(ctx.user, "email", None),
+            "warnings": warnings,
+        },
+    )
+    logger.info(
+        "[admin] workspace %s plan %s -> %s by %s",
+        workspace.id, previous_plan, workspace.plan, getattr(ctx.user, "email", "?"),
+    )
+
+    return {
+        "id": str(workspace.id),
+        "plan": workspace.plan,
+        "previous_plan": previous_plan,
+        "plan_limits": new_limits,
+        "limits_changed": limits_changed,
+        "members_count": members_count,
+        "warnings": warnings,
+    }
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceDetail)
@@ -253,6 +473,21 @@ async def get_workspace(
             Message.workspace_id == workspace_id
         ).scalar() or 0
 
+        # Same shape as the list route — the detail view inherits these fields,
+        # so leaving them at their defaults would report 0 members and no limits
+        # for a workspace that has both.
+        members_count, member_seen = (
+            db.query(func.count(WorkspaceMember.id), func.max(User.last_sign_in))
+            .join(User, User.id == WorkspaceMember.user_id)
+            .filter(WorkspaceMember.workspace_id == workspace_id)
+            .filter(WorkspaceMember.is_active.is_(True))
+            .one()
+        )
+        seen_candidates = [
+            t for t in (member_seen, getattr(owner, "last_sign_in", None)) if t is not None
+        ]
+        last_active = max(seen_candidates) if seen_candidates else None
+
         return WorkspaceDetail(
             id=str(w.id),
             name=w.name,
@@ -268,6 +503,9 @@ async def get_workspace(
             storage_bytes=int(storage_bytes),
             chats_count=chats_count,
             messages_count=messages_count,
+            members_count=members_count or 0,
+            last_active_at=_utc_iso(last_active),
+            plan_limits=dict(w.plan_limits or {}),
             created_at=w.created_at.isoformat() if w.created_at else None,
             updated_at=w.updated_at.isoformat() if w.updated_at else None,
             paused_at=w.paused_at.isoformat() if w.paused_at else None,

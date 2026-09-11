@@ -291,6 +291,51 @@ Without a key the platform is honest rather than empty:
 `key_configured`, `apps_cached`, `last_sync` and `sync_status` — the same
 predicate the router uses.
 
+## 7a. Web access for agents (PRD-240)
+
+Agents can read and search the web as a **platform capability** — nothing in
+the marketplace, nothing to connect, nothing to assign. Two platform actions
+every agent has:
+
+| Action | Needs | What it does |
+|---|---|---|
+| `web_fetch` | nothing | GET a public URL from the backend container, TLS verified, redirects re-checked, body capped (`WEB_FETCH_MAX_BYTES`), HTML reduced to readable text. |
+| `web_search` | one engine (below) | `[{title, url, snippet}]` for a query, through the first engine configured. |
+
+**Search engines, resolved in this order** (`WEB_SEARCH_PROVIDER=auto`):
+
+1. **OpenRouter** — any OpenRouter key the platform can see (env, the
+   operator workspace's key, or this workspace's Settings → API Keys). The
+   action runs one cheap completion (`WEB_SEARCH_OPENROUTER_MODEL`, default
+   `openai/gpt-4o-mini`) carrying OpenRouter's `openrouter:web_search` server
+   tool; the engine (Exa by default) does the searching and the pages come
+   back as citations. Billed per search on your OpenRouter account. An agent
+   whose own route is OpenRouter also gets the server tool attached to its
+   turns (`WEB_SEARCH_MAX_USES_PER_TURN`, default 3) — the model decides when
+   to search and the reply ends with a **Sources** list.
+2. **Composio** — `COMPOSIO_KEY` set (§7). The no-auth Composio Search toolkit
+   is called as an internal engine; no app is added to the workspace.
+3. **SearXNG** — `docker compose --profile search up -d` starts
+   `searxng/searxng` on `127.0.0.1:${SEARXNG_PORT:-8888}` with JSON output
+   enabled (`envs/searxng/settings.yml`); set `SEARXNG_URL=http://searxng:8080`.
+
+Without any of the three, `web_search` returns `{available:false, options}`
+naming them; `web_fetch` keeps working.
+
+**What is always refused, in every configuration:** private, loopback,
+link-local and metadata ranges (`10/8`, `172.16/12`, `192.168/16`, `127/8`,
+`169.254/16` and the IPv6 equivalents), resolved through DNS
+(`core/security/url_validator.py`). That is what keeps an agent out of
+`postgres:5432`, `minio:9000`, `host.docker.internal` and a cloud VM's
+metadata endpoint. `WEB_ACCESS_DENY` adds hosts to that (suffix match:
+`example.com` also blocks `www.example.com`) — it never widens it.
+
+**The switch.** `WEB_ACCESS` defaults to **on** when `AUTH_EDITION=local` and
+**off** otherwise. Off means: no provider search tool on any request, and
+both actions answer `{available:false, reason}`. In the hosted edition an
+operator must set `WEB_ACCESS=on` explicitly. All of these are read at process
+start — change them in `.env` and `docker compose up -d backend`.
+
 ## 8. What a fresh instance contains
 
 Every boot in the local edition runs an idempotent first-run seed

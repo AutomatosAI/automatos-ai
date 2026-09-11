@@ -87,7 +87,8 @@ def test_available_with_key_and_sdk(composio_on):
 def test_unavailable_without_key(composio_off):
     assert cc.composio_available() is False
     assert cc.composio_unavailable_reason() == cc.COMPOSIO_UNAVAILABLE_NO_KEY
-    assert "COMPOSIO_API_KEY" in cc.composio_unavailable_reason()
+    # #724: COMPOSIO_KEY is the canonical name (COMPOSIO_API_KEY the alias); the reason names it.
+    assert "COMPOSIO_KEY" in cc.composio_unavailable_reason()
 
 
 def test_unavailable_when_sdk_missing(monkeypatch):
