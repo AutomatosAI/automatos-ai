@@ -1,0 +1,94 @@
+# PRD-232 US-005 — synthetic utterance corpus (category: web)
+# =============================================================================
+# Seed INPUT data for the Intent Graph (NOT eval gold; decision §6.3). Every
+# registered non-super_admin_only action in this category gets 15-25 diverse
+# utterances a user might type to invoke it. Consumed by US-006
+# (ActionSemanticIndex embedding text) and US-007 (seeded intent clusters).
+#
+# PRD-240: the two web actions every agent has — reading a page (no key) and
+# searching the web (through whichever engine the deployment has).
+#
+# Schema:
+#   version:  1                     corpus schema version
+#   category: web                   registry category (== filename stem)
+#   actions:
+#     <action_name>:
+#       - text: <utterance>
+#         source: authored | example | phrase_map
+version: 1
+category: web
+actions:
+  platform_web_fetch:
+  - text: read https://docs.python.org/3/whatsnew/3.13.html
+    source: example
+  - text: open the page the search found and summarise it
+    source: example
+  - text: fetch this url and tell me what it says https://example.com/pricing
+    source: authored
+  - text: read the README at that github link and summarise it
+    source: authored
+  - text: open https://fastapi.tiangolo.com/release-notes/ and pull out the breaking changes
+    source: authored
+  - text: what does this article say — https://www.bbc.co.uk/news/technology
+    source: authored
+  - text: go to the docs page I pasted and find the section on rate limits
+    source: authored
+  - text: pull the text of that blog post so we can quote it
+    source: authored
+  - text: read the competitor's pricing page and list the tiers
+    source: authored
+  - text: open the first result and give me the key points
+    source: authored
+  - text: fetch the changelog page and tell me what changed in the last release
+    source: authored
+  - text: read this page for me, I can't open it right now
+    source: authored
+  - text: grab the content of https://openrouter.ai/docs/features/web-search
+    source: authored
+  - text: look at the linked spec and extract the required fields
+    source: authored
+  - text: read that wikipedia page and summarise the history section
+    source: authored
+  - text: open the job posting url and list the requirements
+    source: authored
+  - text: what's on this page https://status.github.com
+    source: authored
+  - text: load the terms page and check whether they allow commercial use
+    source: authored
+  platform_web_search:
+  - text: research the current state of EU AI Act enforcement
+    source: example
+  - text: find the latest release notes for fastapi
+    source: example
+  - text: search the web for recent news about our competitor acme
+    source: authored
+  - text: look up who won the champions league final this year
+    source: authored
+  - text: research x for me — the best practices for postgres connection pooling in 2026
+    source: authored
+  - text: find me three sources on the new UK data protection rules
+    source: authored
+  - text: what's the latest on the openai responses api, search for it
+    source: authored
+  - text: google the current price of the macbook pro 16 inch
+    source: authored
+  - text: do some research on searxng and tell me if it's still maintained
+    source: authored
+  - text: search for tutorials on docker compose profiles
+    source: authored
+  - text: find recent articles about quantum computing breakthroughs
+    source: authored
+  - text: look online for the release date of python 3.15
+    source: authored
+  - text: what are people saying about the new composio pricing, search the web
+    source: authored
+  - text: research the market for ai agent platforms and list the main players
+    source: authored
+  - text: find the official documentation for the anthropic web search tool
+    source: authored
+  - text: search the internet for the shopify api rate limits
+    source: authored
+  - text: is there any news today about railway.app outages
+    source: authored
+  - text: find me the current exchange rate gbp to usd
+    source: authored

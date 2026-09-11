@@ -1,7 +1,7 @@
 """Web ActionDefinitions (PRD-240) — every agent can read and search the web.
 
 A platform capability, not a marketplace app: nothing to connect, nothing to
-assign. ``web_fetch`` needs no key at all. ``web_search`` answers through the
+assign. ``platform_web_fetch`` needs no key at all. ``platform_web_search`` answers through the
 first search engine the deployment has — the OpenRouter key, the Composio key,
 or a SearXNG container — and says plainly which options exist when it has none.
 Schema truth from birth: each ``required`` names exactly the param its handler
@@ -12,10 +12,10 @@ from .action_registry import ActionDefinition, ActionRegistry
 
 
 def register_web_actions(registry: ActionRegistry) -> None:
-    """Register web_fetch + web_search (PRD-240 S2/S3)."""
+    """Register platform_web_fetch + platform_web_search (PRD-240 S2/S3)."""
 
     registry.register(ActionDefinition(
-        name="web_fetch",
+        name="platform_web_fetch",
         description=(
             "Read a public web page or document by URL and get its text back "
             "(title, headings, paragraphs, links) — no key needed. Use it to open "
@@ -50,11 +50,11 @@ def register_web_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
-        name="web_search",
+        name="platform_web_search",
         description=(
             "Search the web for pages about a topic and get back "
             "[{title, url, snippet}]. Use it for anything current, changing or "
-            "outside your training data — then web_fetch the results worth "
+            "outside your training data — then platform_web_fetch the results worth "
             "reading. Answers through whichever search engine this server has "
             "(OpenRouter, Composio or SearXNG); when it has none it returns "
             "{available:false, reason, options} naming how to enable one — tell "

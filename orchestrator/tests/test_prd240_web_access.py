@@ -6,10 +6,10 @@ network, no provider. Locked here:
 * the switch (local on / saas off / explicit wins) and the denylist (suffix
   match, adds to — never replaces — the private-range refusal);
 * the two actions are registered with schema truth and reach the executor;
-* ``web_fetch`` refuses bad schemes, denied and private hosts, redirects that
+* ``platform_web_fetch`` refuses bad schemes, denied and private hosts, redirects that
   land somewhere refused, non-text content; caps bytes; reduces HTML to text;
   answers ``{available:false}`` when the switch is off — never an exception;
-* ``web_search`` resolves openrouter → composio → searxng, honours the pin and
+* ``platform_web_search`` resolves openrouter → composio → searxng, honours the pin and
   ``off``, names the three options when it has nothing, and turns a backend
   failure into a result;
 * the OpenRouter route attaches its server-side search tool only when
@@ -210,9 +210,9 @@ def _defs():
 
 def test_both_actions_registered_with_schema_truth():
     d = _defs()
-    assert d["web_fetch"].parameters["required"] == ["url"]
-    assert d["web_search"].parameters["required"] == ["query"]
-    for name in ("web_fetch", "web_search"):
+    assert d["platform_web_fetch"].parameters["required"] == ["url"]
+    assert d["platform_web_search"].parameters["required"] == ["query"]
+    for name in ("platform_web_fetch", "platform_web_search"):
         assert d[name].category == "web"
         assert d[name].permission_level == "read"
         assert d[name].requires_confirmation is False
@@ -223,13 +223,13 @@ def test_executor_maps_both_handlers():
     from modules.tools.discovery.platform_executor import PlatformActionExecutor
 
     ex = PlatformActionExecutor(MagicMock(), WS)
-    assert ex._handlers["web_fetch"] is hw.web_fetch
-    assert ex._handlers["web_search"] is hw.web_search
+    assert ex._handlers["platform_web_fetch"] is hw.web_fetch
+    assert ex._handlers["platform_web_search"] is hw.web_search
 
 
 def test_rag_hint_points_at_the_native_actions():
     src = (_ORCH / "modules/tools/registry/tool_registry.py").read_text(encoding="utf-8")
-    assert "use web_search / web_fetch" in src
+    assert "use platform_web_search / platform_web_fetch" in src
     assert "TAVILY_SEARCH" not in src
 
 
