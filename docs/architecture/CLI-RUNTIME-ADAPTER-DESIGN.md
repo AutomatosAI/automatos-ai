@@ -506,8 +506,31 @@ preset's `initial_prompt` must be a pointer for the same reason.)
 | `config.py` | `--claude` → `--cli-binary <id>=<path>` (repeatable); keep `--claude` as an alias | ~20 |
 | `session.host_capabilities` | announce **detected** providers, per-CLI version + login state | ~40 |
 
-`session.py` gets **smaller**. Nothing in `host.py`, `hook_server.py`, `allowlist.py`, `state.py`,
-`api.py` or `terminal_log.py` is touched.
+`session.py` gets **smaller**. Nothing in `hook_server.py`, `allowlist.py`, `state.py`, `api.py` or
+`terminal_log.py` is touched; `host.py` changes in two lines (the fingerprint walks the subpackage;
+the terminal server takes `cli_binaries`).
+
+**As built (Wave 0/B, 2026-09-11) — four decisions made while building, recorded here:**
+
+- **Moved, not wrapped.** `build_args`, `claude_settings.py`, `_subject_of`, `FILE_TOOLS` and friends
+  moved into `adapters/claude.py`; no module-level Claude names survive in `session.py` or
+  `policy.py` (repo rule: no dual paths). Tests changed imports and signatures only — every verdict
+  and every assertion is the same.
+- **`--claude <path>` is gone; `--cli-binary ID=PATH` (repeatable) and `AUTOMATOS_CLI_BINARIES`
+  replace it.** The login service reproduces it. `make cli-host` never passed `--claude`, so no
+  installed service carries the old flag.
+- **The Canvas terminal's plain shell strips the union of every preset's credentials and
+  markers** (`build_shell_env`); a *launched* session gets its own CLI's hygiene. The terminal
+  injects the soul only for a CLI with a system-prompt flag — a terminal has no hooks, so for the
+  others the operator gets their plain CLI, said plainly in `command_for`.
+- **Capabilities changed shape** (host 0.7.0): every registry CLI under `clis.<id>` with
+  `{path, version, served, reason, tier}`; `providers` = the served ids. `capabilities.claude` is
+  gone; the Settings tab reads `clis.claude`. A preset without an adapter (Codex until its wave)
+  is announced `served: false` — the picker can show *why*, and the claim filter keeps its
+  tickets for a host that can.
+- **The refusal code is data.** `AuthProbe.code` is the ticket's `exit_reason`
+  (`claude_not_onboarded`, `codex_api_key_login`); the base adapter emits `<id>_missing` for an
+  absent binary. Nothing in the backend interprets the codes beyond display.
 
 `terminal_server.py` has its own hardcoded `launch.kind != "claude"` refusal (`:462`) for the Canvas
 takeover terminal. Same treatment, same preset: `codex resume <id>` in the session's effective cwd,

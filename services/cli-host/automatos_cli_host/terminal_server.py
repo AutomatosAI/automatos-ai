@@ -44,11 +44,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from .adapters import NotServed, UnknownCli, adapter_for
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed
-from .claude_settings import record_directory_trust
-from .env import build_session_env, resolve_binary
+from .env import build_session_env, build_shell_env
 from .session import assert_args_honour_invariant
-from .transcript import empty_usage, read_usage, transcript_path, usage_delta
+from .transcript import empty_usage, usage_delta
 
 
 def _public(launched: Dict[str, Any]) -> Dict[str, Any]:
@@ -243,43 +243,9 @@ class LaunchError(RuntimeError):
     """The grant asked for a session this host cannot start."""
 
 
-def build_terminal_args(
-    claude: str,
-    *,
-    session_id: str,
-    resume: bool,
-    system_prompt_path: Optional[Path],
-    model: Optional[str],
-    task_id: Optional[str],
-) -> List[str]:
-    """The interactive command for a Runtime Canvas terminal.
-
-    Exactly what the operator gets by typing ``claude`` in that folder — their
-    settings at every scope, the folder's CLAUDE.md files, its ``.mcp.json``
-    servers — plus the agent's soul appended. Nothing that assumed nobody was
-    at the keyboard: no ``--permission-mode acceptEdits`` (the human answers
-    Claude's own prompts), no hooks, no ``--worktree``, no positional prompt,
-    and none of the unattended lane's ``--setting-sources user`` /
-    ``--strict-mcp-config`` narrowing. ``--resume`` continues a session whose
-    transcript exists in this folder; otherwise ``--session-id`` starts it
-    under the id the backend recorded on the ticket, so the next open resumes it.
-    """
-    args = [claude, "--resume" if resume else "--session-id", session_id]
-    if system_prompt_path is not None:
-        args += ["--append-system-prompt-file", str(system_prompt_path)]
-    if task_id:
-        args += ["--name", f"automatos #{task_id}"]
-    if model:
-        args += ["--model", str(model)]
-    return args
-
-
-def transcript_exists(cwd: Path, session_id: str, home: Optional[Path] = None) -> bool:
-    """Whether ``claude --resume <session_id>`` run in ``cwd`` would find its
-    conversation. Claude Code keeps transcripts per project directory, so only
-    the exact path counts — a transcript elsewhere would make ``--resume``
-    answer "No conversation found" and the terminal die."""
-    return transcript_path(str(cwd), session_id, home).exists()
+# ``build_terminal_args`` and ``transcript_exists`` moved behind the seam: the
+# adapter of the grant's CLI builds the interactive command from its preset
+# (``terminal_args``) and knows where its transcript lives (design §7).
 
 
 # ── the server ───────────────────────────────────────────────────────────────
@@ -295,20 +261,21 @@ class TerminalServer:
         shell: Optional[str] = None,
         max_terminals: int = MAX_TERMINALS,
         idle_timeout: float = IDLE_TIMEOUT_SECONDS,
-        claude: Optional[str] = None,
+        cli_binaries: Optional[Dict[str, str]] = None,
         sessions_dir: Optional[Path] = None,
         on_event: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
-        claude_home: Optional[Path] = None,
+        home: Optional[Path] = None,
     ) -> None:
         self.allow_roots = list(allow_roots)
         self.default_root = default_root
-        # PRD-239 S7 v2: the Runtime Canvas launches the agent's Claude Code
-        # session in the PTY; ``on_event`` receives TerminalOpened/TerminalClosed
-        # for the ticket so the backend can show the session as attached.
-        self._claude = claude
+        # PRD-239 S7 v2: the Runtime Canvas launches the agent's own CLI session
+        # in the PTY; ``on_event`` receives TerminalOpened/TerminalClosed for the
+        # ticket so the backend can show the session as attached. ``home`` is the
+        # operator's home the CLIs keep their state under (tests give a fake one).
+        self._cli_binaries = dict(cli_binaries or {})
         self._sessions_dir = sessions_dir
         self._on_event = on_event
-        self._claude_home = claude_home
+        self._home = home
         self.requested_port = int(port or 0)
         self.port: Optional[int] = None
         self.grants = GrantStore()
@@ -459,47 +426,55 @@ class TerminalServer:
         launch = grant.launch
         if not launch:
             return [self._shell, "-l"], None
-        if launch.get("kind") != "claude":
-            raise LaunchError(f"unknown launch kind: {launch.get('kind')!r}")
+        # The grant names the CLI (``kind``); its adapter spells the command (design §7).
+        try:
+            adapter = adapter_for(launch.get("kind"), self._cli_binaries)
+        except (UnknownCli, NotServed) as exc:
+            raise LaunchError(str(exc)) from None
+        preset = adapter.preset
         session_id = str(launch.get("session_id") or "")
         if not _SESSION_ID_RE.match(session_id):
             raise LaunchError("the grant carries no valid session id")
-        claude = self._claude or resolve_binary("claude")
-        if not claude or not (os.path.isfile(claude) and os.access(claude, os.X_OK)):
-            raise LaunchError("Claude Code is not installed on this machine (no runnable `claude` found)")
+        binary = adapter.resolve_binary()
+        if not binary or not (os.path.isfile(binary) and os.access(binary, os.X_OK)):
+            raise LaunchError(preset.install_hint or f"{preset.label} is not installed on this machine")
         system_prompt_path: Optional[Path] = None
         soul = launch.get("system_prompt")
-        if isinstance(soul, str) and soul.strip() and self._sessions_dir is not None and grant.task_id:
+        # A terminal has no hooks, so the soul rides the command line — only for a
+        # CLI that takes one there (Claude). Others run the operator's plain CLI.
+        if (isinstance(soul, str) and soul.strip() and preset.system_prompt_flag
+                and self._sessions_dir is not None and grant.task_id):
             session_dir = self._sessions_dir / grant.task_id
             session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             system_prompt_path = session_dir / "system_prompt.md"
             system_prompt_path.write_text(soul, encoding="utf-8")
-        resumed = transcript_exists(cwd, session_id, self._claude_home)
-        args = build_terminal_args(
-            claude,
+        resumed = adapter.transcript_exists(cwd, session_id, self._home)
+        args = adapter.terminal_args(
+            binary,
             session_id=session_id,
             resume=resumed,
             system_prompt_path=system_prompt_path,
             model=str(launch["model"]) if launch.get("model") else None,
             task_id=grant.task_id,
         )
-        assert_args_honour_invariant(args)
+        assert_args_honour_invariant(args, preset.forbidden_args)
         try:
-            record_directory_trust(cwd, self._claude_home)
+            adapter.record_trust(cwd, self._home)
         except OSError as exc:
             log.warning("could not record trust for %s: %s", cwd, exc)
         # The turn's usage is the transcript's growth while the terminal is open:
         # snapshot the totals a resumed session already carries (2026-09-09).
-        own_transcript = transcript_path(str(cwd), session_id, self._claude_home)
-        usage_before = read_usage(own_transcript) if resumed and own_transcript.exists() else empty_usage()
+        own_transcript = adapter.transcript_path(str(cwd), session_id, self._home)
+        usage_before = adapter.read_usage(own_transcript) if resumed and own_transcript and own_transcript.exists() else empty_usage()
         return args, {"session_id": session_id, "resumed": resumed, "agent_name": launch.get("agent_name"),
-                      "usage_before": usage_before}
+                      "cli": preset.id, "usage_before": usage_before}
 
     def _turn_usage(self, cwd: Path, launched: Dict[str, Any]) -> Dict[str, Any]:
         """Tokens THIS terminal session added to the transcript (never the history)."""
         try:
-            own = transcript_path(str(cwd), str(launched.get("session_id") or ""), self._claude_home)
-            after = read_usage(own) if own.exists() else empty_usage()
+            adapter = adapter_for(launched.get("cli"), self._cli_binaries)
+            own = adapter.transcript_path(str(cwd), str(launched.get("session_id") or ""), self._home)
+            after = adapter.read_usage(own) if own and own.exists() else empty_usage()
             return usage_delta(after, launched.get("usage_before"))
         except Exception:  # noqa: BLE001 — a receipt never breaks the close
             log.debug("could not read the session's usage for %s", cwd, exc_info=True)
@@ -516,7 +491,10 @@ class TerminalServer:
     # ── the PTY bridge ──────────────────────────────────────────────────────
     def _bridge(self, conn: socket.socket, cwd: Path, grant: Grant, command: List[str],
                 launched: Optional[Dict[str, Any]]) -> None:
-        env = build_session_env(extra={"TERM": "xterm-256color", "AUTOMATOS_TERMINAL": "1",
+        # The operator's own shell inherits no CLI's credential (the union over every
+        # preset); a launched session gets its CLI's own hygiene.
+        build = (lambda **kw: build_session_env(adapter_for(launched["cli"], self._cli_binaries).preset, **kw)) if launched else build_shell_env
+        env = build(extra={"TERM": "xterm-256color", "AUTOMATOS_TERMINAL": "1",
                                        **({"AUTOMATOS_TASK_ID": grant.task_id} if grant.task_id else {})})
         master, slave = pty.openpty()
         try:
@@ -536,7 +514,7 @@ class TerminalServer:
         )
         os.close(slave)
         if launched:
-            log.info("terminal: Claude Code session %s %s in %s (pid %s, ticket %s)", launched["session_id"],
+            log.info("terminal: %s session %s %s in %s (pid %s, ticket %s)", launched.get("cli"), launched["session_id"],
                      "resumed" if launched["resumed"] else "started", cwd, proc.pid, grant.task_id)
             self._emit(grant, "TerminalOpened", {**_public(launched), "cwd": str(cwd), "pid": proc.pid})
         else:

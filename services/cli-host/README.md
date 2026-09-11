@@ -1,8 +1,24 @@
 # Automatos CLI host (PRD-234 Session Mode)
 
-The local process that runs `runtime: cli` tickets as **your own Claude Code
-sessions on your machine**, with Automatos (the local edition, in Docker) as the
-manager above them. Standard-library Python 3.9+, nothing to install.
+The local process that runs `runtime: cli` tickets as **your own CLI sessions on
+your machine** — Claude Code today, the others as their adapters land — with
+Automatos (the local edition, in Docker) as the manager above them.
+Standard-library Python 3.9+, nothing to install.
+
+**Which CLI is a parameter of the ticket.** The pattern is
+`docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md`; in this package it is two
+files and a folder:
+
+| Where | What |
+|---|---|
+| `presets.py` | one `CliPreset` row per CLI — how it is *spelled*: binary, flags, hook events and timeout literal, the env it must never inherit, the arguments that break the subscription or our gate, how to tell "logged in with the operator's own plan" |
+| `adapters/base.py` | the seven-method contract every CLI runs through; `PresetAdapter` implements all of it from the preset |
+| `adapters/<cli>.py` | only what a preset cannot say — where a config home lives, a translating hook shim, a different transcript |
+
+The host announces every CLI in the registry with `served: true/false` and why;
+the backend claims a ticket for a host only when that host serves the ticket's
+CLI. A CLI the registry knows but this host cannot run is an honest line on the
+ticket, never a silent fallback to another CLI.
 
 ```
 make cli-host PAIR=XXXX-XXXX   # first time — the code comes from Settings → Session mode
@@ -47,26 +63,34 @@ simply exits; start it again.
    (the ticket, a stable system prompt, a hooks-only `settings.json`) — never into
    your repository — and records the folder-trust decision where Claude Code reads
    it (`~/.claude.json`, one flag, backup kept).
-4. Spawns **your** `claude`, interactively, under a pseudo-terminal it only drains:
-   `--session-id`, `--permission-mode acceptEdits`, `--append-system-prompt-file`,
-   `--settings`, `--setting-sources user`, `--strict-mcp-config`, `--add-dir`,
-   `--name`, `--model` when the agent has one, `--worktree` for git repositories,
-   and a short pointer prompt. Never `-p`, never `--bare`.
-5. Hooks carry the turn: `PreToolUse` is the policy gate (file tools inside the
-   directory, a Bash allowlist, never `git push`), `PostToolUse` the files touched,
-   `Stop` the end of the turn with the final text. A permission prompt that would
-   reach the TUI is denied — nobody is watching it.
+4. Spawns **your** CLI, interactively, under a pseudo-terminal it only drains,
+   with the argv its preset spells — for Claude Code: `--session-id`,
+   `--permission-mode acceptEdits`, `--append-system-prompt-file`, `--settings`,
+   `--setting-sources user`, `--strict-mcp-config`, `--add-dir`, `--name`,
+   `--model` when the agent has one, `--worktree` for git repositories, and a
+   short pointer prompt. Never `-p`, never `--bare` (the preset's forbidden list
+   is asserted on every command line).
+5. Hooks carry the turn over one bus, whatever the CLI: `PreToolUse` is the
+   policy gate — it reads what the call *does* (read, write, run a shell) so the
+   rules are the same for every CLI: file tools inside the directory, a shell
+   allowlist, never `git push`; `PostToolUse` the files touched; `Stop` the end
+   of the turn with the final text. A permission prompt that would reach the TUI
+   is denied — nobody is watching it.
 6. On `Stop` it reads the transcript for token usage, terminates the process and
    posts the result. Any denial lands the ticket in `review`, never `done`.
 
 ## The invariant it keeps (PRD-234 §Terms)
 
-- the unmodified `claude` from your login-shell `PATH`; nothing bundled or patched;
-- your own login (`claude login`); no credential is ever read, copied or set;
-  `CLAUDE_CONFIG_DIR` is never overridden;
-- no identity games: `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_ENTRYPOINT`
-  and every `CLAUDE*` session marker are stripped from the session environment;
-- interactive sessions only — the surface Anthropic keeps on your plan;
+- the unmodified CLI from your login-shell `PATH` (or `--cli-binary claude=/path`);
+  nothing bundled or patched;
+- your own login (`claude login`, `codex login`); no credential is ever read,
+  copied or set; `CLAUDE_CONFIG_DIR` is never overridden;
+- no identity games: each preset names the keys and session markers stripped from
+  its session environment (`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
+  `CLAUDE_CODE_ENTRYPOINT`, every `CLAUDE*` marker for Claude Code); the Canvas
+  terminal's shell gets the union over every CLI;
+- interactive sessions only — the surface each vendor keeps on your plan; no
+  headless mode, ever (each preset names the flags that would be one);
 - one user, one machine; the host refuses any backend that is not the local
   edition with `CLI_RUNTIME_ENABLED=true`.
 
@@ -85,4 +109,14 @@ simply exits; start it again.
 `pytest -q tests` (from this directory). `tests/fake_claude.py` stands in for the
 CLI: it refuses forbidden arguments, fires the hooks from the settings file,
 writes a transcript where Claude Code would, and idles until terminated — so the
-whole loop runs in CI without a real session or a subscription.
+whole loop runs in CI without a real session or a subscription. Every CLI gets
+such a fake, in *its* vocabulary and transcript shape, when its adapter lands.
+
+## Adding a CLI
+
+The checklist is §10 of the design doc. In short: classify its tier and how a
+turn ends; check it has a first-party login for the operator's own plan; add its
+`CliPreset` row; write `adapters/<cli>.py` only if its preset cannot say where its
+hook config lives or how its payloads translate; add `tests/fake_<cli>.py`; add
+its id to `orchestrator/core/cli_presets.py` (a parity test keeps the two in step).
+Nothing in `host.py`, nothing in the backend lane, nothing in the frontend.

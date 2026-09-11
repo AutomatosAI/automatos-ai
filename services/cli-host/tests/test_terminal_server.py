@@ -182,13 +182,16 @@ def test_an_unknown_or_reused_grant_and_a_foreign_origin_are_refused(tmp_path):
 # ── S7 v2: launch grants — the agent's own Claude Code session in the PTY ────
 
 def test_terminal_args_start_or_resume_and_honour_the_subscription_invariant(tmp_path):
+    from automatos_cli_host.adapters.claude import ClaudeAdapter
+    from automatos_cli_host.presets import CLAUDE
+    adapter = ClaudeAdapter(CLAUDE)
     prompt = tmp_path / "system_prompt.md"
-    started = ts.build_terminal_args("/usr/local/bin/claude", session_id="abc", resume=False,
-                                     system_prompt_path=prompt, model="opus", task_id="93")
+    started = adapter.terminal_args("/usr/local/bin/claude", session_id="abc", resume=False,
+                                    system_prompt_path=prompt, model="opus", task_id="93")
     assert started[:3] == ["/usr/local/bin/claude", "--session-id", "abc"]
     assert started[3:5] == ["--append-system-prompt-file", str(prompt)]
     assert started[-4:] == ["--name", "automatos #93", "--model", "opus"]
-    resumed = ts.build_terminal_args("claude", session_id="abc", resume=True, system_prompt_path=None, model=None, task_id=None)
+    resumed = adapter.terminal_args("claude", session_id="abc", resume=True, system_prompt_path=None, model=None, task_id=None)
     assert resumed == ["claude", "--resume", "abc"]
     # the operator's own `claude` in that folder: no unattended-lane narrowing,
     # nothing that assumes nobody is at the keyboard, nothing the subscription rules forbid
@@ -196,25 +199,28 @@ def test_terminal_args_start_or_resume_and_honour_the_subscription_invariant(tmp
         assert "--setting-sources" not in args and "--strict-mcp-config" not in args
         assert "--permission-mode" not in args and "--settings" not in args and "--worktree" not in args
         assert "-p" not in args and "--print" not in args and "--bare" not in args
-        ts.assert_args_honour_invariant(args)
+        ts.assert_args_honour_invariant(args, CLAUDE.forbidden_args)
 
 
 def test_transcript_lookup_counts_only_the_sessions_own_folder(tmp_path):
+    from automatos_cli_host.adapters.claude import ClaudeAdapter
+    from automatos_cli_host.presets import CLAUDE
     from automatos_cli_host.transcript import transcript_path
+    adapter = ClaudeAdapter(CLAUDE)
 
     home = tmp_path / "home"
     cwd = tmp_path / "repo"
     cwd.mkdir()
     sid = "11111111-1111-1111-1111-111111111111"
-    assert ts.transcript_exists(cwd, sid, home) is False
+    assert adapter.transcript_exists(cwd, sid, home) is False
     elsewhere = home / ".claude" / "projects" / "-some-other-folder"
     elsewhere.mkdir(parents=True)
     (elsewhere / f"{sid}.jsonl").write_text("{}\n")
-    assert ts.transcript_exists(cwd, sid, home) is False   # --resume here would say "No conversation found"
+    assert adapter.transcript_exists(cwd, sid, home) is False   # --resume here would say "No conversation found"
     own = transcript_path(str(cwd), sid, home)
     own.parent.mkdir(parents=True, exist_ok=True)
     own.write_text("{}\n")
-    assert ts.transcript_exists(cwd, sid, home) is True
+    assert adapter.transcript_exists(cwd, sid, home) is True
 
 
 def _fake_claude(tmp_path) -> str:
@@ -255,9 +261,9 @@ def test_a_launch_grant_runs_the_agents_session_and_reports_open_and_close(tmp_p
     home = tmp_path / "home"
     events = []
     server = ts.TerminalServer(
-        [str(root)], str(root), shell="/bin/sh", claude=_fake_claude(tmp_path),
+        [str(root)], str(root), shell="/bin/sh", cli_binaries={"claude": _fake_claude(tmp_path)},
         sessions_dir=tmp_path / "sessions", on_event=lambda task_id, ev, payload: events.append((task_id, ev, payload)),
-        claude_home=home,
+        home=home,
     )
     port = server.start()
     sid = "22222222-2222-2222-2222-222222222222"
@@ -294,7 +300,7 @@ def test_a_launch_grant_runs_the_agents_session_and_reports_open_and_close(tmp_p
 def test_a_launch_the_host_cannot_honour_is_refused_before_any_shell_runs(tmp_path):
     root = tmp_path / "ws"
     root.mkdir()
-    server = ts.TerminalServer([str(root)], str(root), shell="/bin/sh", claude=str(tmp_path / "missing-claude"))
+    server = ts.TerminalServer([str(root)], str(root), shell="/bin/sh", cli_binaries={"claude": str(tmp_path / "missing-claude")})
     port = server.start()
     try:
         server.admit([

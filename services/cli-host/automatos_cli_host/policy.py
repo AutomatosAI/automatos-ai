@@ -1,20 +1,21 @@
 """The tool policy a session runs under (PRD-234 §Design 4, v1).
 
 Decided here, enforced through the ``PreToolUse`` hook — never left to a TUI
-prompt nobody watches:
+prompt nobody watches. CLI adapter design §4.2: the policy reads a
+``ToolIntent`` — what the call DOES (a class plus the paths/command it touches),
+never what the CLI calls the tool — so the rules are the same for every CLI:
 
-* file tools (Read/Edit/Write/MultiEdit/NotebookEdit/Glob/Grep) — allowed
-  inside the session's working directory (and its git worktree), denied outside;
-* Bash — allowed when the command matches the ticket's allowlist (agent
+* file reads and writes — allowed inside the session's working directory (and
+  its git worktree), denied outside;
+* a shell command — allowed when it matches the ticket's allowlist (agent
   configuration ``allowed_tools``, else the defaults below); ``git push`` and
   friends are always denied (sessions never push — the manager integrates);
-  anything else is denied with a reason, or HELD for the approvals inbox when
-  the ticket marks it ``ask``;
-* web/search tools — allowed (read-only);
-* everything else (MCP tools, Task, …) — denied by default; the operator's own
-  Claude Code settings are the other half of the surface.
+  anything else is HELD for the approvals inbox;
+* web/search tools and benign bookkeeping — allowed;
+* everything else (MCP tools, Task, an unknown tool) — denied by default; the
+  operator's own CLI settings are the other half of the surface.
 
-Pure functions: the session hands in the payload and its context, gets a
+Pure functions: the session hands in the intent and its context, gets a
 decision back.
 """
 from __future__ import annotations
@@ -25,9 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
-FILE_TOOLS = frozenset({"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS"})
-READONLY_WEB_TOOLS = frozenset({"WebFetch", "WebSearch"})
-BENIGN_TOOLS = frozenset({"TodoWrite", "TodoRead", "AskUserQuestion"})
+from .adapters.base import ToolClass, ToolIntent
 
 # Sessions never publish. The manager (Auto) integrates.
 NEVER_ALLOWED_BASH = (
@@ -162,20 +161,20 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     return Decision("ask", f"{_first_words(command)!r} is outside this ticket's Bash allowlist")
 
 
-def decide(tool_name: str, tool_input: dict, ctx: PolicyContext) -> Decision:
+def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     roots = [ctx.cwd, *ctx.extra_dirs]
-    if tool_name in FILE_TOOLS:
-        target = tool_input.get("file_path") or tool_input.get("path") or tool_input.get("notebook_path")
-        if not target:
-            return Decision("allow")  # Glob/Grep without a path work in cwd
-        if _inside(str(target), roots):
-            return Decision("allow")
-        return Decision("deny", f"{tool_name} outside the session directory: {target}")
-    if tool_name == "Bash":
-        return decide_bash(str(tool_input.get("command") or ""), ctx)
-    if tool_name in READONLY_WEB_TOOLS or tool_name in BENIGN_TOOLS:
+    if intent.cls in (ToolClass.FILE_READ, ToolClass.FILE_WRITE):
+        if not intent.paths:
+            return Decision("allow")  # a search without a path works in cwd
+        for target in intent.paths:
+            if not _inside(str(target), roots):
+                return Decision("deny", f"{intent.tool} outside the session directory: {target}")
         return Decision("allow")
-    return Decision("deny", f"tool {tool_name!r} is not enabled for session tickets")
+    if intent.cls is ToolClass.SHELL:
+        return decide_bash(str(intent.command or ""), ctx)
+    if intent.cls in (ToolClass.WEB, ToolClass.BENIGN):
+        return Decision("allow")
+    return Decision("deny", f"tool {intent.tool!r} is not enabled for session tickets")
 
 
 def bash_allowlist_from_config(configured: Optional[Iterable[str]]) -> Sequence[str]:

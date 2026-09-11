@@ -1,24 +1,29 @@
-"""One ticket, one supervised interactive Claude Code session (PRD-234 §Design 2).
+"""One ticket, one supervised interactive CLI session (PRD-234 §Design 2).
 
-The turn:
+The turn is the same for every CLI; the adapter says how the CLI is spelled
+(CLI adapter design, ``docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md``):
 
 1. resolve the working directory against the host's allowlist; refuse otherwise;
-2. write the session's files under the host's state dir (never into the user's
+2. ask the adapter to preflight — the operator's own binary, logged in with the
+   operator's own plan (never a key);
+3. write the session's files under the host's state dir (never into the user's
    repo): ``ticket.md`` (the dispatch contract), ``system_prompt.md`` (stable
-   per agent — nothing volatile, munder's prompt-cache rule), ``settings.json``
-   (hooks → this host); record the trust decision for the directory;
-3. spawn the user's own ``claude`` INTERACTIVELY under a pseudo-terminal the
-   host only drains: ``--session-id <pre-assigned>`` (or ``--resume`` for a
-   continuation), ``--permission-mode acceptEdits``, ``--append-system-prompt-file``,
-   ``--settings``, ``--setting-sources user``, ``--strict-mcp-config``,
-   ``--add-dir <session dir>``, ``--name``, ``--model`` when the ticket has one,
-   ``--worktree`` for git repositories, and a short positional pointer prompt;
-4. hooks carry the turn: ``PreToolUse`` is the policy gate, ``PostToolUse`` the
-   files touched, ``Notification`` the needs-a-human / limit signals, ``Stop`` the
-   end of the turn (with the final text);
-5. on ``Stop`` read the transcript for usage, terminate the process, report.
+   per agent — nothing volatile, munder's prompt-cache rule), and whatever the
+   adapter ``prepare()``s (Claude: a hooks-only ``settings.json``; Codex: a
+   config home); record the trust decision for the directory;
+4. spawn the user's own CLI INTERACTIVELY under a pseudo-terminal the host only
+   drains, with the argv the adapter builds from its preset and a short
+   positional pointer prompt;
+5. hooks carry the turn over the bus: ``PreToolUse`` is the policy gate
+   (``ToolIntent`` — what the call does, not what the CLI calls it),
+   ``PostToolUse`` the files touched, ``Notification`` the needs-a-human / limit
+   signals, ``Stop`` the end of the turn (with the final text). The adapter
+   translates each payload in and each reply out;
+6. on the turn's end read the transcript (the adapter knows where and how),
+   terminate the process, report.
 
-No typing into the TUI, no output parsing. Never ``-p``, never ``--bare``.
+No typing into the TUI, no output parsing. Never a headless mode, never a
+bypass of our gate — each preset names what that means for its binary.
 """
 from __future__ import annotations
 
@@ -38,20 +43,21 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from . import __version__
+from .adapters import NotServed, UnknownCli, adapter_for, adapters
+from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, resolve_allowed, default_session_cwd
-from .claude_settings import has_completed_onboarding, record_directory_trust, write_settings
 from .config import HostConfig
-from .env import build_session_env, resolve_binary
+from .env import build_session_env
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
+from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
-from .transcript import empty_usage, last_assistant_text, read_usage, usage_delta
+from .transcript import empty_usage, usage_delta
 
 log = logging.getLogger("automatos.cli_host.session")
 
-FORBIDDEN_ARGS = ("-p", "--print", "--bare", "--dangerously-skip-permissions", "--permission-mode bypassPermissions")
 STOP_GRACE_SECONDS = 2.0
 KILL_GRACE_SECONDS = 5.0
 PTY_ROWS, PTY_COLS = 50, 200
@@ -104,7 +110,7 @@ SESSION_RULES = (
 )
 
 
-def build_system_prompt(ticket: Dict[str, Any]) -> str:
+def build_system_prompt(ticket: Dict[str, Any], cli_label: str = "Claude Code") -> str:
     """Stable per agent: no ids, no dates, no counters (prompt-cache invariant).
 
     PRD-239 S1: the backend renders the agent's soul — description, persona and
@@ -113,7 +119,7 @@ def build_system_prompt(ticket: Dict[str, Any]) -> str:
     exactly the name and the rules, as before.
     """
     name = ticket.get("agent_name") or "an Automatos agent"
-    intro = f"You are {name}, working as a supervised Claude Code session managed by Automatos.\n"
+    intro = f"You are {name}, working as a supervised {cli_label} session managed by Automatos.\n"
     soul = ticket.get("system_prompt")
     soul = soul.strip() if isinstance(soul, str) else ""
     if soul:
@@ -128,45 +134,10 @@ def build_ticket_file(ticket: Dict[str, Any]) -> str:
     )
 
 
-def build_args(
-    claude: str,
-    *,
-    session_id: str,
-    resume_session_id: Optional[str],
-    system_prompt_path: Path,
-    settings_path: Path,
-    session_dir: Path,
-    ticket_path: Path,
-    task_id: Any,
-    model: Optional[str],
-    worktree_name: Optional[str],
-) -> List[str]:
-    args = [claude]
-    if resume_session_id:
-        args += ["--resume", resume_session_id]
-    else:
-        args += ["--session-id", session_id]
-    args += [
-        "--permission-mode", "acceptEdits",
-        "--append-system-prompt-file", str(system_prompt_path),
-        "--settings", str(settings_path),
-        "--setting-sources", "user",
-        "--strict-mcp-config",
-        "--add-dir", str(session_dir),
-        "--name", f"automatos #{task_id}",
-    ]
-    if model:
-        args += ["--model", str(model)]
-    if worktree_name:
-        args += ["--worktree", worktree_name]
-    # The positional prompt is a short pointer — nothing sensitive in argv.
-    args.append(f"Work the Automatos ticket described in {ticket_path}. Read it first.")
-    return args
-
-
-def assert_args_honour_invariant(args: List[str]) -> None:
+def assert_args_honour_invariant(args: Sequence[str], forbidden: Sequence[str]) -> None:
+    """The preset's forbidden arguments never reach a command line (design §9.2)."""
     joined = " ".join(args)
-    for bad in FORBIDDEN_ARGS:
+    for bad in forbidden:
         if f" {bad} " in f" {joined} " or joined.endswith(f" {bad}"):
             raise RuntimeError(f"forbidden argument in session command: {bad}")
 
@@ -175,10 +146,11 @@ def _is_git_repo(path: Path) -> bool:
     return (path / ".git").exists()
 
 
-def compact_event(event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def compact_event(event: str, payload: Dict[str, Any], subject: Optional[str] = None) -> Dict[str, Any]:
     """The event the backend receives: the few facts the board needs, never the
     whole hook payload. ``cwd`` (PRD-235 W2) is the session's effective working
-    directory — SessionStart carries it — so the ticket can deep-link the editor."""
+    directory — SessionStart carries it — so the ticket can deep-link the editor.
+    ``subject`` is the one thing a tool call is about (the adapter's ``ToolIntent``)."""
     compact = {
         "event": event,
         "at": time.time(),
@@ -186,24 +158,11 @@ def compact_event(event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         "transcript_path": payload.get("transcript_path"),
         "cwd": payload.get("cwd"),
         "tool_name": payload.get("tool_name"),
-        "subject": _subject_of(payload),
+        "subject": subject,
         "notification_type": payload.get("notification_type"),
         "message": (payload.get("message") or "")[:500] or None,
     }
     return {k: v for k, v in compact.items() if v is not None}
-
-
-def _subject_of(payload: Dict[str, Any]) -> Optional[str]:
-    """The one thing a tool call is about — a command, a path, a pattern — for the
-    ticket's live log. Never the whole tool input."""
-    ti = payload.get("tool_input")
-    if not isinstance(ti, dict):
-        return None
-    for key in ("command", "file_path", "notebook_path", "path", "pattern", "url", "query"):
-        value = ti.get(key)
-        if value:
-            return str(value)[:200]
-    return None
 
 
 class Session:
@@ -220,6 +179,14 @@ class Session:
         self.task_id = str(ticket.get("task_id"))
         self.attempt = int(ticket.get("attempt") or 0)
         self.session_id = str(ticket.get("session_id") or "")
+        # The adapter for the ticket's CLI (design §4). A CLI this host cannot run is
+        # an honest error at preflight, never a silent fallback to another CLI.
+        self.adapter = None
+        self._adapter_error: Optional[str] = None
+        try:
+            self.adapter = adapter_for(ticket.get("provider"), getattr(cfg, "cli_binaries", None))
+        except (UnknownCli, NotServed) as exc:
+            self._adapter_error = str(exc)
         self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self.cancel_requested = threading.Event()
         self.stopped = threading.Event()
@@ -245,10 +212,24 @@ class Session:
         self._contract_injected = False
         self._policy: Optional[PolicyContext] = None
 
+    @property
+    def cli(self) -> str:
+        return self.adapter.id if self.adapter is not None else str(self.ticket.get("provider") or "?")
+
     # ── hook handling (called on the hook server's threads) ────────────────
-    def handle_hook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def handle_hook(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """One hook in, one answer out — through the adapter both ways (design §5)."""
+        if self.adapter is None:
+            return {}
+        payload = self.adapter.normalize_event(raw)
+        if payload is None:
+            return {}
         event = payload.get("hook_event_name") or ""
         self._emit(event, payload)
+        reply = self._reply_for(event, payload)
+        return self.adapter.render_response(event, reply) or {}
+
+    def _reply_for(self, event: str, payload: Dict[str, Any]) -> Reply:
         if event == "SessionStart":
             self.session_started.set()
             self.reported_session_id = payload.get("session_id") or self.reported_session_id
@@ -258,68 +239,64 @@ class Session:
             # only what THIS run used (2026-09-09 analytics).
             if self.ticket.get("resume_session_id") and self.transcript_path and self._usage_before is None:
                 path = Path(self.transcript_path)
-                self._usage_before = read_usage(path) if path.exists() else empty_usage()
+                self._usage_before = self.adapter.read_usage(path) if path.exists() else empty_usage()
             cwd = payload.get("cwd")
             if cwd:
                 self.effective_cwd = Path(cwd)
                 if self._policy is not None and self.effective_cwd not in self._policy.extra_dirs:
                     self._policy.extra_dirs = (*self._policy.extra_dirs, self.effective_cwd)
-            return {}
+            return Reply.none()
         if event == "UserPromptSubmit":
             if self._contract_injected:
-                return {}
+                return Reply.none()
             self._contract_injected = True
-            return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                           "additionalContext": build_ticket_file(self.ticket)}}
+            return Reply.with_context(build_ticket_file(self.ticket))
         if event == "PreToolUse":
             return self._pre_tool_use(payload)
         if event == "PermissionRequest":
             tool = payload.get("tool_name") or "?"
             reason = "a permission prompt reached the TUI — sessions are policy-gated, not prompted"
             self.denials.append({"tool": tool, "reason": reason, "stage": "PermissionRequest"})
-            return {"hookSpecificOutput": {"hookEventName": "PermissionRequest",
-                                           "decision": {"behavior": "deny", "message": reason}}}
+            return Reply.deny(reason)
         if event == "PostToolUse":
             self._track_file(payload)
-            return {}
+            return Reply.none()
         if event == "Notification":
             self.notifications.append({"type": payload.get("notification_type"), "message": payload.get("message")})
-            return {}
+            return Reply.none()
         if event == "Stop":
             self.last_assistant_message = payload.get("last_assistant_message") or self.last_assistant_message
             self.stopped.set()
-            return {}
+            return Reply.none()
         if event == "SessionEnd":
             self.ended.set()
-            return {}
-        return {}
+            return Reply.none()
+        return Reply.none()
 
-    def _pre_tool_use(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _pre_tool_use(self, payload: Dict[str, Any]) -> Reply:
         tool = str(payload.get("tool_name") or "")
         tool_input = payload.get("tool_input") or {}
         if not isinstance(tool_input, dict):
             tool_input = {}
+        intent = self.adapter.tool_intent(tool, tool_input)
         if self._policy is None:
             decision = Decision("deny", "session policy not initialised")
         else:
-            decision = decide(tool, tool_input, self._policy)
+            decision = decide(intent, self._policy)
         if decision.behavior == "ask":
-            decision = self._ask_operator(tool, tool_input, decision.reason)
+            decision = self._ask_operator(tool, intent.subject, decision.reason)
         if decision.allow:
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}
+            return Reply.allow()
         self.denials.append({"tool": tool, "reason": decision.reason, "stage": "PreToolUse",
                              "input": {k: v for k, v in tool_input.items() if k in ("command", "file_path", "path")}})
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                       "permissionDecision": "deny",
-                                       "permissionDecisionReason": decision.reason}}
+        return Reply.deny(decision.reason)
 
-    def _ask_operator(self, tool: str, tool_input: Dict[str, Any], reason: str) -> Decision:
+    def _ask_operator(self, tool: str, subject: Optional[str], reason: str) -> Decision:
         """PRD-235 W2 S3: hold this tool call while the operator answers a card on the
         ticket's Canvas. The question travels with the next event flush; the answer
         comes back on that same channel (``resolve_ask``). No answer within
         ``ask_timeout`` seconds → deny, honestly worded."""
         request_id = uuid.uuid4().hex
-        subject = _subject_of({"tool_input": tool_input})
         done = threading.Event()
         with self._ask_lock:
             self._pending_asks[request_id] = done
@@ -349,15 +326,23 @@ class Session:
         ev.set()
         return True
 
+    def _intent_of(self, payload: Dict[str, Any]):
+        tool = payload.get("tool_name")
+        if not tool or self.adapter is None:
+            return None
+        ti = payload.get("tool_input")
+        return self.adapter.tool_intent(str(tool), ti if isinstance(ti, dict) else {})
+
     def _track_file(self, payload: Dict[str, Any]) -> None:
-        if payload.get("tool_name") in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
-            ti = payload.get("tool_input") or {}
-            path = ti.get("file_path") or ti.get("notebook_path") if isinstance(ti, dict) else None
-            if path and path not in self.files_touched:
-                self.files_touched.append(str(path))
+        intent = self._intent_of(payload)
+        if intent is not None and intent.cls is ToolClass.FILE_WRITE:
+            for path in intent.paths:
+                if path not in self.files_touched:
+                    self.files_touched.append(str(path))
 
     def _emit(self, event: str, payload: Dict[str, Any]) -> None:
-        self.events.put(compact_event(event, payload))
+        intent = self._intent_of(payload)
+        self.events.put(compact_event(event, payload, subject=intent.subject if intent else None))
 
     # ── the run ─────────────────────────────────────────────────────────────
     def run(self) -> SessionOutcome:
@@ -382,26 +367,26 @@ class Session:
         if not cwd.is_dir():
             return self._outcome("error", error=f"working directory does not exist: {cwd}", exit_reason="cwd_missing")
 
-        # 2. preflight — the user's own CLI and login
-        claude = self.cfg.claude_binary or resolve_binary("claude")
-        if not claude:
-            return self._outcome("error", error="Claude Code is not installed on this machine (no `claude` on your PATH). Install it and run `claude login`.", exit_reason="claude_missing")
-        if not has_completed_onboarding():
-            return self._outcome("error", error="Claude Code has never been run interactively on this machine. Run `claude` once in your terminal and log in, then retry.", exit_reason="claude_not_onboarded")
+        # 2. preflight — which CLI, the user's own binary and login
+        if self.adapter is None:
+            return self._outcome("error", error=self._adapter_error or "no CLI adapter", exit_reason="cli_not_served")
+        preset = self.adapter.preset
+        if preset.turn_end not in (TURN_END_STOP_HOOK, TURN_END_PROCESS_EXIT):
+            return self._outcome("error", error=f"{preset.label}: turn end {preset.turn_end!r} is not implemented by this host",
+                                 exit_reason="turn_end_unsupported")
+        refusal = self.adapter.preflight()
+        if refusal is not None:
+            return self._outcome("error", error=refusal.message, exit_reason=refusal.code)
+        binary = self.adapter.resolve_binary()
 
-        # 3. files + trust
+        # 3. files + what the adapter prepares (settings/config home + trust)
         session_dir = self.cfg.sessions_dir / self.task_id
         session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         ticket_path = session_dir / "ticket.md"
         ticket_path.write_text(build_ticket_file(self.ticket), encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
-        system_prompt_path.write_text(build_system_prompt(self.ticket), encoding="utf-8")
-        settings_path = write_settings(session_dir / "settings.json")
+        system_prompt_path.write_text(build_system_prompt(self.ticket, preset.label), encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
-        try:
-            record_directory_trust(cwd)
-        except OSError as exc:
-            log.warning("could not record trust for %s: %s", cwd, exc)
 
         self._policy = PolicyContext(
             cwd=cwd,
@@ -409,34 +394,32 @@ class Session:
             extra_dirs=(session_dir,),
         )
 
-        # 4. spawn
         # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
         # (the checkout stays untouched); a workspace of many repos, whose own
         # git tracks next to nothing, must not (the worktree would be empty).
         wants_worktree = self.ticket.get("worktree", True) is not False
         worktree = f"automatos-{_slug(str(self.task_id))}" if (self.cfg.use_worktrees and wants_worktree and _is_git_repo(cwd)) else None
-        args = build_args(
-            claude,
-            session_id=self.session_id,
-            resume_session_id=self.ticket.get("resume_session_id"),
-            system_prompt_path=system_prompt_path,
-            settings_path=settings_path,
-            session_dir=session_dir,
-            ticket_path=ticket_path,
-            task_id=self.task_id,
-            model=self.ticket.get("model"),
-            worktree_name=worktree,
+        ctx = LaunchContext(
+            cwd=cwd, session_dir=session_dir, ticket_path=ticket_path, system_prompt_path=system_prompt_path,
+            task_id=self.task_id, session_id=self.session_id, resume_session_id=self.ticket.get("resume_session_id"),
+            model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
         )
-        assert_args_honour_invariant(args)
+        prepared = self.adapter.prepare(ctx)
+
+        # 4. spawn
+        args = self.adapter.launch_args(ctx, prepared)
+        assert_args_honour_invariant(args, preset.forbidden_args)
         package_root = str(Path(__file__).resolve().parents[1])
         inherited_pp = os.environ.get("PYTHONPATH", "")
-        env = build_session_env(extra={
+        env = build_session_env(preset, extra={
             "AUTOMATOS_HOST_SOCK": str(self.sock_path),
             "AUTOMATOS_TASK_ID": self.task_id,
+            "AUTOMATOS_CLI": preset.id,
             "AUTOMATOS_HOOK_WAIT_SECONDS": "560",
             # Hooks run from the session's directory: the shim (`python -m
             # automatos_cli_host.hook_shim`) must find this package from there.
             "PYTHONPATH": package_root + (os.pathsep + inherited_pp if inherited_pp else ""),
+            **prepared.env,
         })
         master, slave = pty.openpty()
         try:
@@ -457,18 +440,19 @@ class Session:
         os.close(slave)
         self.pgid = self.proc.pid
         threading.Thread(target=self._drain, args=(master,), daemon=True, name=f"pty-drain-{self.task_id}").start()
-        log.info("task %s: session %s started (pid %s) in %s%s", self.task_id, self.session_id, self.proc.pid, cwd,
+        log.info("task %s: %s session %s started (pid %s) in %s%s", self.task_id, preset.id, self.session_id, self.proc.pid, cwd,
                  f" worktree={worktree}" if worktree else "")
 
-        # 5. wait for Stop / exit / cancel / timeout
+        # 5. wait for the turn's end / exit / cancel / timeout — the preset says how a turn ends
         deadline = self.started_at + self.cfg.session_timeout_seconds
         exit_reason = "completed"
+        hook_driven = preset.turn_end == TURN_END_STOP_HOOK
         while True:
-            if self.stopped.is_set():
+            if hook_driven and self.stopped.is_set():
                 self.ended.wait(STOP_GRACE_SECONDS)
                 break
             if self.proc.poll() is not None:
-                exit_reason = "exited_before_stop"
+                exit_reason = "exited_before_stop" if hook_driven else "completed"
                 break
             if self.cancel_requested.is_set():
                 exit_reason = "cancelled"
@@ -476,12 +460,12 @@ class Session:
             if time.time() > deadline:
                 exit_reason = "timeout"
                 break
-            if not self.session_started.is_set() and time.time() - self.started_at > self.cfg.startup_timeout_seconds:
+            if hook_driven and not self.session_started.is_set() and time.time() - self.started_at > self.cfg.startup_timeout_seconds:
                 exit_reason = "no_session_start"
                 break
             time.sleep(0.25)
         self._terminate()
-        return self._collect(exit_reason, cwd)
+        return self._collect(exit_reason, cwd, binary or preset.binary)
 
     def _drain(self, master: int) -> None:
         try:
@@ -525,12 +509,21 @@ class Session:
     def request_cancel(self) -> None:
         self.cancel_requested.set()
 
-    def _collect(self, exit_reason: str, cwd: Path) -> SessionOutcome:
+    def _collect(self, exit_reason: str, cwd: Path, binary: str) -> SessionOutcome:
+        preset = self.adapter.preset
         transcript = Path(self.transcript_path) if self.transcript_path else None
-        usage = read_usage(transcript) if transcript and transcript.exists() else {}
+        if transcript is None:
+            # No hook told us (a print-mode CLI): the adapter knows where it would be.
+            guess = self.adapter.transcript_path(str(self.effective_cwd or cwd), self.reported_session_id or self.session_id)
+            transcript = guess if guess and guess.exists() else None
+            self.transcript_path = str(transcript) if transcript else None
+        usage = self.adapter.read_usage(transcript) if transcript and transcript.exists() else {}
         if usage and self._usage_before is not None:
             usage = usage_delta(usage, self._usage_before)
-        text = self.last_assistant_message or (last_assistant_text(transcript) if transcript and transcript.exists() else None) or ""
+        text = self.last_assistant_message or (self.adapter.last_text(transcript) if transcript and transcript.exists() else None) or ""
+        if not text and preset.turn_end == TURN_END_PROCESS_EXIT:
+            text = bytes(self.output_tail).decode("utf-8", "replace").strip()   # print mode: stdout IS the answer
+        name = os.path.basename(binary)
         if exit_reason == "completed":
             status = "success"
             error = None
@@ -541,14 +534,14 @@ class Session:
         elif exit_reason == "no_session_start":
             tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
             status, error = "error", (
-                f"claude did not start a session within {int(self.cfg.startup_timeout_seconds)} s — "
-                "it is probably showing a login screen or a dialog. Run `claude` in that directory once "
+                f"{name} did not start a session within {int(self.cfg.startup_timeout_seconds)} s — "
+                f"it is probably showing a login screen or a dialog. Run `{name}` in that directory once "
                 f"and log in, then retry. Last output:\n{tail}"
             )
         else:
             tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
             code = self.proc.returncode if self.proc else None
-            status, error = "error", f"claude exited (code {code}) before finishing the turn. Last output:\n{tail}"
+            status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
         return self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd)
 
     def _outcome(self, status: str, *, result_text: str = "", error: Optional[str] = None,
@@ -564,24 +557,27 @@ class Session:
 
 
 def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:
-    """What the host announces: the user's CLI, its version, onboarding state, platform."""
+    """What the host announces: every CLI the registry knows — present, version,
+    served (preflight would pass) and, when not, why; ``providers`` is the served
+    subset, which the backend's claim filter reads (design §8.2). Never a credential."""
     import platform
     import sys
 
-    claude = cfg.claude_binary or resolve_binary("claude")
-    version = None
-    if claude:
-        try:
-            out = subprocess.run([claude, "--version"], capture_output=True, text=True, timeout=15, check=False)
-            version = (out.stdout or out.stderr or "").strip().split("\n")[0][:80] or None
-        except (OSError, subprocess.SubprocessError):
-            version = None
+    binaries = getattr(cfg, "cli_binaries", None) or {}
+    served = adapters(binaries)
+    clis: Dict[str, Any] = {}
+    for cli_id, preset in REGISTRY.items():
+        if cli_id in served:
+            clis[cli_id] = served[cli_id].detect()
+        else:
+            clis[cli_id] = {"path": None, "version": None, "served": False, "tier": preset.tier,
+                            "reason": f"{preset.label} is not served by this host yet (no adapter)"}
     return {
         "host_version": __version__,
         "platform": platform.platform(),
         "python": sys.version.split()[0],
-        "claude": {"path": claude, "version": version, "onboarded": has_completed_onboarding()} if claude else None,
-        "providers": ["claude"] if claude else [],
+        "clis": clis,
+        "providers": [cli_id for cli_id, info in clis.items() if info.get("served")],
         "worktrees": cfg.use_worktrees,
         # PRD-239 S6: the directories this host may run sessions in — the backend
         # checks an agent's working_directory against them before it is saved.

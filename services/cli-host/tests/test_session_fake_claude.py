@@ -24,7 +24,7 @@ from conftest import FAKE_CLAUDE
 
 
 def _cfg(short_tmp, **over) -> HostConfig:
-    base = dict(state_dir=short_tmp / "state", claude_binary=str(FAKE_CLAUDE), use_worktrees=False,
+    base = dict(state_dir=short_tmp / "state", cli_binaries={"claude": str(FAKE_CLAUDE)}, use_worktrees=False,
                 session_timeout_seconds=120)
     base.update(over)
     return HostConfig(**base)
