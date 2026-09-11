@@ -23,6 +23,10 @@
  * playbook / mission / board card, pause a routine, pause or cancel a
  * scheduled task. Every action rides an endpoint that already exists (see
  * calendar-actions.ts). Deadline items carry a DUE tag; overdue ones go amber.
+ * Colour is by KIND (heartbeat / playbook / scheduled task / mission SLA /
+ * task deadline — calendar-kinds.ts); the agent is the small dot. Legend chips
+ * in the toolbar hide a kind. Heartbeats at the band cadence or faster stay in
+ * the 24/7 band and off the grid.
  *
  * Prev / Today / Next actually move the visible window. No speculative
  * "Schedule task" / "Filter" / "Export" CTAs — those don't belong on a
@@ -52,6 +56,7 @@ import {
 import { useToggleHeartbeat } from '@/hooks/use-heartbeats-api'
 import { useUpdateScheduledTaskStatus } from '@/hooks/use-scheduled-tasks-api'
 import { toneFor } from './agent-tones'
+import { KIND_META, KIND_ORDER, kindTone, layoutLanes, type ScheduleItemType } from './calendar-kinds'
 import {
   buildEventActions,
   isDeadlineItem,
@@ -65,11 +70,17 @@ const HOUR_PX = 44
 const START_HR = 0
 const END_HR = 22
 const HOURS = Array.from({ length: END_HR - START_HR + 1 }, (_, i) => i + START_HR)
-/** Routines more frequent than this stay in the always-on band: on the grid
- *  they would clutter every column. */
-const GRID_MIN_INTERVAL_MIN = 30
-/** Routines at least this frequent are summarised in the always-on band. */
+/** Smallest rendered event box. The overlap layout uses the same floor, so two
+ *  short events closer together than this share the column instead of
+ *  drawing on top of each other. */
+const MIN_EVENT_PX = 28
+const MIN_EVENT_MIN = (MIN_EVENT_PX / HOUR_PX) * 60
+/** Routines this frequent or more (heartbeats every 5/15/30/60 min) live in the
+ *  always-on band ONLY. Plotted, an hourly heartbeat is 12+ blocks a day per
+ *  agent and buries the one-off work the grid is for (2026-09-11). */
 const BAND_MAX_INTERVAL_MIN = 60
+/** Next Up keeps an overdue deadline this long; after that it is the board's problem. */
+const NEXTUP_OVERDUE_MAX_MS = 7 * 24 * 60 * 60_000
 /** Safety cap per item so a frequent routine can't run away across a month. */
 const MAX_OCCURRENCES = 200
 const ROUTINE_MIN_DUR_MIN = 15
@@ -228,6 +239,13 @@ function occurrence(item: ScheduleItem, d: Date, durMin: number, recurring: bool
   }
 }
 
+/** [start, end] in ms — what the overlap layout compares. The end is the
+ *  rendered box, never shorter than MIN_EVENT_MIN. */
+const eventSpan = (evt: CalEvent): [number, number] => [
+  evt.date.getTime(),
+  evt.date.getTime() + Math.max(evt.durMin, MIN_EVENT_MIN) * 60_000,
+]
+
 /** Walk an interval backwards and forwards from its anchor across the window. */
 function expandInterval(
   item: ScheduleItem,
@@ -261,11 +279,12 @@ function expandInterval(
 /** Every occurrence of one feed item inside the window. */
 function expandItem(item: ScheduleItem, span: WindowSpan): CalEvent[] {
   if (item.type === 'routine') {
-    // Structured recurrence from the feed — no string parsing. Sub-30-minute
-    // routines live in the always-on band only; a routine with no next run
-    // (outside its active hours for the whole horizon) has nothing to place.
+    // Structured recurrence from the feed — no string parsing. Routines at the
+    // band cadence or faster live in the always-on band only; a routine with
+    // no next run (outside its active hours for the whole horizon) has
+    // nothing to place.
     const interval = item.recurrence?.interval_minutes ?? null
-    if (interval === null || interval < GRID_MIN_INTERVAL_MIN || !item.next_run_at) return []
+    if (interval === null || interval <= BAND_MAX_INTERVAL_MIN || !item.next_run_at) return []
     const dur = Math.min(Math.max(interval, ROUTINE_MIN_DUR_MIN), ROUTINE_MAX_DUR_MIN)
     return expandInterval(item, new Date(item.next_run_at), interval, span, dur)
   }
@@ -362,19 +381,34 @@ export function CalendarTab() {
   const week = useMemo(() => buildWeek(anchor), [anchor])
   const monthCells = useMemo(() => buildMonthGrid(anchor), [anchor])
 
+  // Legend chips hide a kind everywhere (grid, band, Next Up) for this view.
+  const [hiddenKinds, setHiddenKinds] = useState<ReadonlySet<ScheduleItemType>>(() => new Set())
+  const toggleKind = (kind: ScheduleItemType) =>
+    setHiddenKinds((prev) => {
+      const next = new Set(prev)
+      if (next.has(kind)) next.delete(kind)
+      else next.add(kind)
+      return next
+    })
+  const visibleItems = useMemo(
+    () => (schedule?.scheduled ?? []).filter((i) => !hiddenKinds.has(i.type)),
+    [schedule, hiddenKinds],
+  )
+
   // Ported from the deleted classic ActivityCalendar (PRD-162 S4): the soonest
-  // upcoming items, straight from the DB-first schedule feed.
+  // upcoming items, straight from the DB-first schedule feed. A deadline
+  // overdue by more than a week drops out — it is a board problem by then.
   const nextUp = useMemo(() => {
-    const items = schedule?.scheduled ?? []
-    return [...items]
-      .filter((i) => i.next_run_at)
+    const floor = Date.now() - NEXTUP_OVERDUE_MAX_MS
+    return [...visibleItems]
+      .filter((i) => i.next_run_at && new Date(i.next_run_at).getTime() >= floor)
       .sort(
         (a, b) =>
           new Date(a.next_run_at as string).getTime() -
           new Date(b.next_run_at as string).getTime(),
       )
       .slice(0, 6)
-  }, [schedule])
+  }, [visibleItems])
 
   const visibleDays = useMemo<DayCell[]>(
     () => (mode === 'day' ? [toDayCell(new Date(anchor))] : week),
@@ -404,19 +438,19 @@ export function CalendarTab() {
   }, [mode, anchor])
 
   const events = useMemo<CalEvent[]>(
-    () => (schedule?.scheduled ?? []).flatMap((item) => expandItem(item, windowSpan)),
-    [schedule, windowSpan],
+    () => visibleItems.flatMap((item) => expandItem(item, windowSpan)),
+    [visibleItems, windowSpan],
   )
 
   // Routines frequent enough to summarise rather than plot, from the same feed.
   const alwaysOn = useMemo(
     () =>
-      (schedule?.scheduled ?? []).filter(
+      visibleItems.filter(
         (s) =>
           s.type === 'routine' &&
           (s.recurrence?.interval_minutes ?? Number.POSITIVE_INFINITY) <= BAND_MAX_INTERVAL_MIN,
       ),
-    [schedule],
+    [visibleItems],
   )
 
   const now = new Date()
@@ -517,6 +551,25 @@ export function CalendarTab() {
         >
           {monthLabel}
         </span>
+        <div className="cc-cal-legend" role="group" aria-label="Show on calendar">
+          {KIND_ORDER.map((kind) => {
+            const hidden = hiddenKinds.has(kind)
+            const { label, tone } = KIND_META[kind]
+            return (
+              <button
+                key={kind}
+                type="button"
+                className={hidden ? 'off' : ''}
+                aria-pressed={!hidden}
+                onClick={() => toggleKind(kind)}
+                title={hidden ? `Show ${label}` : `Hide ${label}`}
+              >
+                <span className="sw" style={{ background: tone }} />
+                {label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {health?.healthy === false && (
@@ -568,10 +621,10 @@ export function CalendarTab() {
                   <button
                     type="button"
                     className="pill"
-                    style={{ borderLeftColor: tone.bg, cursor: 'pointer' }}
-                    title={`${s.agent_name} routine — click for actions`}
+                    style={{ borderLeftColor: kindTone('routine'), cursor: 'pointer' }}
+                    title={`${s.agent_name} heartbeat — click for actions`}
                   >
-                    <span className="dot" />
+                    <span className="dot" style={{ background: tone.bg }} />
                     {s.agent_name} · every {s.recurrence?.interval_minutes}m
                   </button>
                 </EventMenu>
@@ -611,7 +664,7 @@ export function CalendarTab() {
             const overdue = item.next_run_at
               ? new Date(item.next_run_at).getTime() < Date.now()
               : false
-            const accent = overdue ? OVERDUE_TONE : 'hsl(var(--muted-foreground))'
+            const accent = overdue ? OVERDUE_TONE : kindTone(item.type)
             const due = isDeadlineItem(item)
             return (
               <span
@@ -698,32 +751,41 @@ export function CalendarTab() {
                     height: HOURS.length * HOUR_PX,
                   }}
                 >
-                  {dayEvents.map((evt) => {
+                  {layoutLanes(dayEvents, eventSpan).map(({ evt, lane, lanes }) => {
                     const top =
                       (evt.hour - START_HR) * HOUR_PX +
                       (evt.min / 60) * HOUR_PX
-                    const height = Math.max((evt.durMin / 60) * HOUR_PX, 28)
+                    const height = Math.max((evt.durMin / 60) * HOUR_PX, MIN_EVENT_PX)
                     const tone = toneFor(evt.agent)
                     const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
+                    const kind = KIND_META[evt.item.type]?.label ?? evt.item.type
                     return (
                       <EventMenu key={evt.id} actions={buildEventActions(evt.item, actionDeps)}>
                         <button
                           type="button"
                           className="cc-cal-event"
+                          data-kind={evt.item.type}
+                          data-lane={lane}
+                          data-lanes={lanes}
                           style={{
                             top,
                             height,
-                            borderLeftColor: overdue ? OVERDUE_TONE : tone.bg,
+                            // overlapping events share the column instead of stacking
+                            left: `calc(${(lane / lanes) * 100}% + 3px)`,
+                            width: `calc(${100 / lanes}% - 6px)`,
+                            right: 'auto',
+                            borderLeftColor: overdue ? OVERDUE_TONE : kindTone(evt.item.type),
                             background: 'hsl(var(--secondary))',
                           }}
-                          title={`${evt.name} — click for actions`}
+                          title={`${kind}: ${evt.name} — click for actions`}
                         >
                           <div className="nm">
                             {String(evt.hour).padStart(2, '0')}:
                             {String(evt.min).padStart(2, '0')}
                             {evt.agent && (
                               <span style={{ marginLeft: 6, opacity: 0.85 }}>
-                                · {evt.agent}
+                                <span className="agent-dot" style={{ background: tone.bg }} />
+                                {evt.agent}
                               </span>
                             )}
                             {evt.due && <DueTag overdue={overdue} />}
@@ -796,15 +858,15 @@ function MonthGrid({
               <div className="n">{d.today ? <span>{d.n}</span> : d.n}</div>
               <div className="evts">
                 {dayEvents.slice(0, 3).map((evt) => {
-                  const tone = toneFor(evt.agent)
                   const overdue = Boolean(evt.due) && evt.date.getTime() < Date.now()
                   return (
                     <EventMenu key={evt.id} actions={buildEventActions(evt.item, actionDeps)}>
                       <button
                         type="button"
                         className="cc-cal-month-evt"
+                        data-kind={evt.item.type}
                         style={{
-                          borderLeftColor: overdue ? OVERDUE_TONE : tone.bg,
+                          borderLeftColor: overdue ? OVERDUE_TONE : kindTone(evt.item.type),
                           opacity: past && !evt.due ? 0.5 : 1,
                         }}
                         title={evt.name}
