@@ -2111,6 +2111,34 @@
   :is(.studio, .cc-cal-root) .cc-cal-toolbar {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   }
+  /* Legend — one chip per kind (calendar-kinds.ts); a chip hides its kind. */
+  :is(.studio, .cc-cal-root) .cc-cal-legend {
+    display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    margin-left: auto;
+  }
+  :is(.studio, .cc-cal-root) .cc-cal-legend button {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 999px;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--secondary)); color: hsl(var(--foreground));
+    font-family: var(--font-geist-mono, monospace);
+    font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+    cursor: pointer;
+  }
+  :is(.studio, .cc-cal-root) .cc-cal-legend button .sw {
+    width: 8px; height: 8px; border-radius: 2px;
+  }
+  :is(.studio, .cc-cal-root) .cc-cal-legend button.off {
+    opacity: 0.45; text-decoration: line-through;
+  }
+  :is(.studio, .cc-cal-root) .cc-cal-legend button:hover {
+    background: hsl(var(--cc-hover, var(--muted)));
+  }
+  /* The agent is the dot; the kind is the border. */
+  :is(.studio, .cc-cal-root) .cc-cal-event .agent-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    margin-right: 4px; vertical-align: middle;
+  }
   :is(.studio, .cc-cal-root) .cc-cal-frame {
     flex: 1; min-height: 0; overflow: hidden;
     background: hsl(var(--card)); border: 1px solid hsl(var(--border));

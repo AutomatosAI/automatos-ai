@@ -165,6 +165,7 @@ export function AgentConfigurationModal({
     channel_id: '',
   })
   const [heartbeatRunning, setHeartbeatRunning] = useState(false)
+  const [heartbeatLoadError, setHeartbeatLoadError] = useState<string | null>(null)
   const [lastHeartbeatResult, setLastHeartbeatResult] = useState<any>(null)
   const [connectedIntegrations, setConnectedIntegrations] = useState<Array<{ key: string; platform: string }>>([])
 
@@ -320,6 +321,7 @@ export function AgentConfigurationModal({
   useEffect(() => {
     if (!open || !agentId) return
     let mounted = true
+    setHeartbeatLoadError(null)
     apiClient.request<any>(`/api/heartbeat/agents/${agentId}/config`)
       .then((data) => {
         if (!mounted) return
@@ -327,7 +329,13 @@ export function AgentConfigurationModal({
           setHeartbeatConfig(prev => ({ ...prev, ...data }))
         }
       })
-      .catch(() => { })
+      .catch((err: unknown) => {
+        // Rendering the form default (off) as this agent's state was a lie:
+        // the heartbeat router is super-admin-locked (PRD-143), so for anyone
+        // else every agent looked disabled while the scheduler kept firing it.
+        if (!mounted) return
+        setHeartbeatLoadError(err instanceof Error ? err.message : 'request failed')
+      })
     // Load last heartbeat result
     apiClient.request<any>(`/api/heartbeat/agents/${agentId}/last`)
       .then((data) => {
@@ -1684,6 +1692,16 @@ export function AgentConfigurationModal({
                       </p>
                     </CardHeader>
                     <CardContent className="space-y-6">
+                      {heartbeatLoadError && (
+                        <p
+                          role="alert"
+                          className="text-xs rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive"
+                        >
+                          Couldn’t load this agent’s heartbeat settings ({heartbeatLoadError}). The form below
+                          shows defaults, not the saved state — the Command Center calendar shows what is
+                          actually scheduled.
+                        </p>
+                      )}
                       {/* Enable Heartbeat */}
                       <div className="flex items-center justify-between">
                         <div>
@@ -1692,6 +1710,7 @@ export function AgentConfigurationModal({
                         </div>
                         <Switch
                           checked={heartbeatConfig.enabled}
+                          disabled={Boolean(heartbeatLoadError)}
                           onCheckedChange={(v) => setHeartbeatConfig(prev => ({ ...prev, enabled: v }))}
                         />
                       </div>
