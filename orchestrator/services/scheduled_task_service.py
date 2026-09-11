@@ -33,6 +33,13 @@ MAX_RECURRING_PER_WORKSPACE = 25
 # Operator-scheduled rows (no creator agent) share one workspace-wide cap.
 MAX_OPERATOR_TASKS_PER_WORKSPACE = 50
 
+# APScheduler job id prefix for a scheduled task; the reconcile tick keys on it.
+JOB_ID_PREFIX = "scheduled_task_"
+# The scheduler worker catches up with the DB within this many seconds
+# (services.schedule_reconcile). Creates, pauses, resumes and cancels land on
+# ANY uvicorn worker; only the one holding the scheduler lock has APScheduler.
+RECONCILE_INTERVAL_SECONDS = 60
+
 # How a fired task is delivered.
 DELIVER_CHAT = "chat"              # PRD-77: open a chat with the target agent
 DELIVER_BOARD_TASK = "board_task"  # file a board ticket (assigned, or Inbox)
@@ -655,10 +662,16 @@ class ScheduledTaskService:
 
             scheduler = get_unified_scheduler()
             if not scheduler.apscheduler or not scheduler.apscheduler.running:
-                logger.warning("[ScheduledTask] Scheduler not running — task %d will be picked up on restart", task_id)
+                # This worker does not host APScheduler (another one holds the lock):
+                # the DB row is the truth and the scheduler worker's reconcile tick
+                # registers it within RECONCILE_INTERVAL_SECONDS.
+                logger.info(
+                    "[ScheduledTask] Scheduler not on this worker — task %d is registered by the reconcile tick within %ds",
+                    task_id, RECONCILE_INTERVAL_SECONDS,
+                )
                 return
 
-            job_id = f"scheduled_task_{task_id}"
+            job_id = f"{JOB_ID_PREFIX}{task_id}"
 
             if task_type == "one_shot":
                 run_at = datetime.fromisoformat(schedule.replace("Z", "+00:00"))
@@ -694,6 +707,50 @@ class ScheduledTaskService:
     def _next_cron_run(cron_expr: str) -> Optional[datetime]:
         """Next run from a cron expression via the shared schedule util (croniter)."""
         return _util_next_run(cron_expr, now=datetime.now(timezone.utc))
+
+    def reconcile_with_scheduler(self, scheduler: Any) -> Dict[str, Any]:
+        """Make the scheduler worker's APScheduler match the DB, all workspaces.
+
+        Active rows with no job get registered; jobs whose row is no longer active
+        (paused, cancelled, completed, deleted) are removed. Idempotent — an active
+        row with its job already present is left alone (re-adding a cron job would
+        recompute its next fire time). Runs on the leader every
+        RECONCILE_INTERVAL_SECONDS (services.schedule_reconcile) and once at boot.
+        """
+        if scheduler is None or not getattr(scheduler, "running", False):
+            return {"added": 0, "removed": 0, "skipped": True}
+        rows = self.db.execute(
+            text("""
+                SELECT id, task_type, schedule, target_agent_id
+                FROM agent_scheduled_tasks
+                WHERE status = 'active'
+            """),
+        ).fetchall()
+        active = {int(row.id): row for row in rows}
+        existing = {
+            str(job.id) for job in scheduler.get_jobs()
+            if str(getattr(job, "id", "")).startswith(JOB_ID_PREFIX)
+        }
+        added = 0
+        for task_id, row in active.items():
+            if f"{JOB_ID_PREFIX}{task_id}" not in existing:
+                self._register_with_scheduler(row.id, row.task_type, row.schedule, row.target_agent_id)
+                added += 1
+        removed = 0
+        for job_id in existing:
+            try:
+                task_id = int(job_id[len(JOB_ID_PREFIX):])
+            except ValueError:
+                continue
+            if task_id not in active:
+                try:
+                    scheduler.remove_job(job_id)
+                except Exception:  # noqa: BLE001 — already gone
+                    pass
+                removed += 1
+        if added or removed:
+            logger.info("[ScheduledTask] reconcile: %d job(s) added, %d removed", added, removed)
+        return {"added": added, "removed": removed, "skipped": False}
 
     async def load_active_tasks_to_scheduler(self) -> int:
         """
