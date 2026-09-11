@@ -181,7 +181,7 @@ describe('CalendarTab — kinds, lanes, legend', () => {
     const ancient = new Date(Date.now() - 8 * 24 * 60 * 60_000)
     feed.items = [deadline(1, 'Soon ticket', soon), deadline(2, 'Ancient ticket', ancient)]
     render(<CalendarTab />)
-    expect(screen.getByText('Soon ticket')).toBeInTheDocument()
+    expect(screen.getAllByText('Soon ticket').length).toBeGreaterThan(0) // Next Up and the grid
     expect(screen.queryByText('Ancient ticket')).toBeNull()
   })
 })
