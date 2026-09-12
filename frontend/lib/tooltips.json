@@ -51,7 +51,6 @@
       }
     }
   },
-
   "agents": {
     "page": {
       "title": "Agent Management",
@@ -234,7 +233,6 @@
       }
     }
   },
-
   "chat": {
     "input": {
       "text": "Type your message and press Enter. The Universal Router automatically sends it to the best agent.",
@@ -271,7 +269,6 @@
       }
     }
   },
-
   "tools": {
     "page": {
       "title": "Tools & Integrations",
@@ -318,7 +315,6 @@
       }
     }
   },
-
   "knowledge": {
     "page": {
       "title": "Knowledge Bases",
@@ -429,7 +425,6 @@
       }
     }
   },
-
   "marketplace": {
     "page": {
       "title": "Community Marketplace",
@@ -490,7 +485,6 @@
       }
     }
   },
-
   "team": {
     "page": {
       "title": "Team Management",
@@ -509,7 +503,6 @@
       "docLink": "/team"
     }
   },
-
   "analytics": {
     "page": {
       "title": "Analytics",
@@ -564,7 +557,6 @@
       }
     }
   },
-
   "settings": {
     "page": {
       "title": "Settings",
@@ -860,7 +852,6 @@
       }
     }
   },
-
   "recipes": {
     "schedule": {
       "type": {
@@ -910,7 +901,6 @@
       }
     }
   },
-
   "common": {
     "filters": {
       "time_range": {
@@ -930,6 +920,57 @@
       "export": {
         "text": "Export data as CSV for external analysis or reporting.",
         "docLink": "/"
+      }
+    }
+  },
+  "deliverables": {
+    "templates": {
+      "gallery": {
+        "title": {
+          "text": "Templates are branded document layouts your agents fill. Starters are copy-on-customise; your own can be edited, generated from, or deleted. Each card shows the data.* fields an agent must supply.",
+          "docLink": "/deliverables"
+        }
+      },
+      "editor": {
+        "name": {
+          "text": "Agents pick a template by name or id (platform_list_templates). Use a name people would say in chat, e.g. \"Weekly Report\".",
+          "docLink": "/deliverables"
+        },
+        "category": {
+          "text": "A filter for people and agents: report, letter, invoice, proposal, contract, data, general. Agents can ask for \"invoice templates\".",
+          "docLink": "/deliverables"
+        },
+        "format": {
+          "text": "PDF renders through the brand-aware HTML engine; DOCX compiles the same blocks into an editable Word file. Either can be requested at generation time.",
+          "docLink": "/deliverables",
+          "example": "Client-facing → PDF | Something the team will edit → DOCX"
+        },
+        "fill_in_fields": {
+          "text": "Every {{data.*}} chip in the template becomes a field here. An agent fills these from its research when it calls generate_document; you can type preview values to see the layout with real text. They are saved as the template's sample data.",
+          "docLink": "/deliverables"
+        },
+        "preview": {
+          "text": "Rendered by the server exactly as the PDF will be. Red [[markers]] show chips with no value — a document is never delivered while one remains.",
+          "docLink": "/deliverables"
+        }
+      }
+    },
+    "brand_kit": {
+      "title": {
+        "text": "One kit per workspace. The logo, colours and font are applied to every rendered PDF/DOCX; the fields also fill the {{brand.*}} and {{company.*}} chips.",
+        "docLink": "/deliverables"
+      },
+      "logo": {
+        "text": "Upload a PNG or JPEG (2 MB max). It is stored in the platform and embedded in documents directly, so it works without a public URL. SVG is not supported because Word files cannot embed it.",
+        "docLink": "/deliverables"
+      },
+      "use_profile": {
+        "text": "Fills the EMPTY fields from what the platform already knows: your onboarding business profile (company name, website, tagline, scanned logo), the workspace name, and your account email. Nothing you typed is overwritten.",
+        "docLink": "/deliverables"
+      },
+      "company": {
+        "text": "Contact details for letterheads and footers — {{company.name}}, {{company.address}}, {{company.email}}, {{company.phone}}, {{company.website}}. Company name falls back to your business profile.",
+        "docLink": "/deliverables"
       }
     }
   }

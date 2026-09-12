@@ -22,6 +22,7 @@ from consumers.chatbot.auto import Action, AutoBrain, apply_assign_bias
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
+from core.auth.principal import resolve_user_pk
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
@@ -117,39 +118,15 @@ def get_user_id(db: Session, ctx=None) -> int:
     (_driving_clerk derives from this) to user 1.
 
     IMPORTANT: ``UserContext.id`` carries the *Clerk subject string* (or email)
-    for SaaS auth — NOT the integer ``users.id``. But ``chats.user_id`` and the
-    ``messages`` / ``votes`` FKs are INTEGER references to ``users.id``. Returning
-    the raw Clerk string wrote ``'user_xxx'`` into an INTEGER column and 500'd
-    every chat request. So resolve the principal to the integer PK via
-    ``users.clerk_user_id`` — the same pattern team.py, harness.py, marketplace.py
-    and hybrid.py's own provisioning already use.
+    for SaaS auth — NOT the integer ``users.id`` (see
+    ``core.auth.principal.resolve_user_pk``, the one resolver every integer-FK
+    site must use; PRD-242 moved the lookup there so the document renderers
+    stopped 500-ing on the same bug).
     """
-    if ctx is not None and getattr(ctx, "user", None) is not None:
-        uid = getattr(ctx.user, "id", None)
-        # Fast path: an auth lane that already carries the integer PK.
-        if isinstance(uid, int):
-            return uid
-        # SaaS/Clerk lane: ``uid`` is the Clerk subject string (or email).
-        # Resolve to the integer users.id. The row is guaranteed present —
-        # hybrid auth provisions it on first sign-in (INSERT ... ON CONFLICT).
-        clerk_uid = getattr(ctx.user, "clerk_user_id", None) or (uid if isinstance(uid, str) else None)
-        if clerk_uid:
-            row = db.execute(
-                text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-                {"cid": clerk_uid},
-            ).fetchone()
-            if row:
-                return int(row[0])
-        email = getattr(ctx.user, "email", None)
-        if email:
-            row = db.execute(
-                text("SELECT id FROM users WHERE email = :em LIMIT 1"),
-                {"em": email},
-            ).fetchone()
-            if row:
-                return int(row[0])
-        # Authenticated but unresolvable (should not happen post-provisioning) —
-        # fall through to the default below rather than 500-ing the chat.
+    resolved = resolve_user_pk(db, ctx)
+    if resolved is not None:
+        return resolved
+    # Principal-less (system/anonymous) or unresolvable — the chat default user.
     result = db.execute(text("SELECT id FROM users WHERE id = 1 LIMIT 1")).fetchone()
     if not result:
         result = db.execute(text("SELECT id FROM users LIMIT 1")).fetchone()

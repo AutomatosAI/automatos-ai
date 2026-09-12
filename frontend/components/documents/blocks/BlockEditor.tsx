@@ -130,7 +130,7 @@ function HeadingEditor({ block, onChange, variables }: { block: HeadingBlock; on
 }
 
 function TextEditor({ block, onChange, variables }: { block: TextBlock; onChange: (b: Block) => void; variables: VariableEntry[] }) {
-  return <InlineField content={block.content} onChange={(content) => onChange({ ...block, content })} variables={variables} multiline placeholder="Paragraph text… use Insert variable for {{chips}}" />
+  return <InlineField content={block.content} onChange={(content) => onChange({ ...block, content })} variables={variables} multiline placeholder="Paragraph text… add {{chips}} with Insert variable, e.g. Dear {{data.recipient_name}}," />
 }
 
 function ImageEditor({ block, onChange }: { block: ImageBlock; onChange: (b: Block) => void }) {
@@ -240,10 +240,13 @@ function TableEditor({ block, onChange, variables }: { block: TableBlock; onChan
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Type <code>{'{{data.field}}'}</code> chips straight into a cell (e.g. <code>{'{{data.total}}'}</code>) — the picker below lists every path.
+      </p>
       <VariablePicker
         variables={variables}
-        label="Copy a {{chip}} to paste into a cell"
-        onInsert={() => { /* chips are typed directly into cells; picker here is a reference */ }}
+        label="Browse variable paths"
+        onInsert={() => { /* chips are typed directly into cells; the picker is a reference */ }}
       />
     </div>
   )

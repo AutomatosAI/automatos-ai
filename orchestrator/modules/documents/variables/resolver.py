@@ -24,6 +24,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..brand_kit import get_brand_kit
+from ..brand_logo import BRAND_LOGO_ROUTE
 from .catalog import is_dynamic_path, is_known_path, DYNAMIC_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -89,10 +90,15 @@ def build_context(
         "phone": company_contact.get("phone", ""),
     }
 
+    # PRD-242 S3: an uploaded logo has no public URL; the chip resolves to the
+    # platform route that streams it (the renderers inline the bytes instead).
+    logo_url = brand_kit.get("logo_url", "") or (
+        BRAND_LOGO_ROUTE if brand_kit.get("logo_path") else ""
+    )
     brand_ctx = {
         "name": brand_kit.get("name") or company_name or "",
         "tagline": brand_kit.get("tagline", ""),
-        "logo_url": brand_kit.get("logo_url", ""),
+        "logo_url": logo_url,
         "primary_color": brand_kit.get("primary_color", ""),
         "secondary_color": brand_kit.get("secondary_color", ""),
         "accent_color": brand_kit.get("accent_color", ""),

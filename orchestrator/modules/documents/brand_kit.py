@@ -51,6 +51,10 @@ class BrandKit(BaseModel):
     name: str = ""
     tagline: str = ""
     logo_url: str = ""
+    # PRD-242 S3: storage-relative path of an UPLOADED logo (``<ws>/brand/logo.png``).
+    # Server-managed — set by the logo upload route, never by a client PUT. When
+    # present the renderers inline it (modules.documents.brand_logo).
+    logo_path: str = ""
     primary_color: str = DEFAULT_PRIMARY
     secondary_color: str = DEFAULT_SECONDARY
     accent_color: str = DEFAULT_ACCENT
@@ -64,6 +68,16 @@ class BrandKit(BaseModel):
         if v and not _HEX_RE.match(v):
             raise ValueError("must be a hex color such as #1a1a2e or #abc")
         return v
+
+
+def is_acceptable_logo_url(value: Optional[str]) -> bool:
+    """An external logo URL is empty or http(s) — the only schemes the render-time
+    fetchers will ever open (PRD-156 S4 keeps the host checks). Applied on the WRITE
+    path (the API request model), never on read: a lenient read must not drop a
+    whole stored kit over one bad field."""
+    if not value:
+        return True
+    return value.startswith(("http://", "https://"))
 
 
 def get_brand_kit(settings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -87,6 +101,9 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     Raises ``pydantic.ValidationError`` (surfaced as 422 by the API) on bad input.
     """
     base = get_brand_kit({BRAND_KIT_SETTINGS_KEY: existing} if existing else None)
+    # ``logo_path`` is owned by the upload/delete routes; a client patch cannot
+    # point the kit at an arbitrary stored file.
+    patch = {k: v for k, v in patch.items() if k != "logo_path"}
     merged = {**base, **{k: v for k, v in patch.items() if v is not None}}
     if "company" in patch and patch["company"] is not None:
         merged["company"] = {**base.get("company", {}), **patch["company"]}
@@ -98,6 +115,7 @@ __all__ = [
     "BrandKit",
     "CompanyContact",
     "get_brand_kit",
+    "is_acceptable_logo_url",
     "validate_brand_kit",
     "DEFAULT_FONT",
 ]

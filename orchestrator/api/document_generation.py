@@ -17,14 +17,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from core.auth.hybrid import get_request_context_hybrid
+from core.auth.principal import resolve_user_pk
 from core.auth.workspace_permission import require_workspace_permission
 from core.auth.dependencies import RequestContext
 from core.database.database import get_db
 from config import config
 from modules.documents.models import UnresolvedDeliverableError
+from api.document_brand_kit import router as brand_kit_router
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["document-generation"])
+# PRD-242 S3: brand kit + logo routes live in their own module (file-size rule);
+# included here so they mount under /api/documents without a new main.py mount.
+router.include_router(brand_kit_router)
 
 GENERATED_DIR = config.DOCUMENT_STORAGE_DIR
 
@@ -56,18 +61,6 @@ class TemplateUpdateRequest(BaseModel):
     blocks: Optional[dict] = None  # PRD-167 S2
 
 
-class BrandKitUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    tagline: Optional[str] = None
-    logo_url: Optional[str] = None
-    primary_color: Optional[str] = None
-    secondary_color: Optional[str] = None
-    accent_color: Optional[str] = None
-    text_color: Optional[str] = None
-    font_family: Optional[str] = None
-    company: Optional[dict] = None
-
-
 class PreviewBlocksRequest(BaseModel):
     """Live-preview a block tree without persisting (PRD-167 S5)."""
     blocks: dict
@@ -88,6 +81,14 @@ class GenerateDocumentResponse(BaseModel):
     format: str
     download_url: str
     size_kb: int
+    # PRD-242 S4: a UI/API generation is a Deliverable too, and callers get the
+    # links an agent would (in-app feed + a no-sign-in share link when storage
+    # holds a copy).
+    deliverable_id: Optional[str] = None
+    app_url: Optional[str] = None
+    share_url: Optional[str] = None
+    template_id: Optional[str] = None
+    template_name: Optional[str] = None
 
 
 # ------------------------------------------------------------------
@@ -146,6 +147,7 @@ async def create_template(
         "format": template.format,
         "category": template.category,
         "version": template.version,
+        "has_blocks": bool(template.blocks),
     }
 
 
@@ -156,28 +158,21 @@ async def list_templates(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """List document templates for the workspace."""
+    """List document templates for the workspace.
+
+    PRD-242 S2: each entry also says whether it is block-editable
+    (``has_blocks``), a platform starter (``is_starter``), and which ``data.*``
+    fields an agent must supply (``data_fields``) — the gallery renders those
+    instead of a bare name.
+    """
     from modules.documents.template_service import DocumentTemplateService
+    from modules.documents.template_summary import summarize_template
 
     service = DocumentTemplateService(db)
     templates = service.list_templates(
         workspace_id=ctx.workspace_id, format=format, category=category
     )
-    return [
-        {
-            "id": str(t.id),
-            "name": t.name,
-            "description": t.description,
-            "format": t.format,
-            "category": t.category,
-            "tags": t.tags or [],
-            "version": t.version,
-            "data_schema": t.data_schema,
-            "sample_data": t.sample_data,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-        }
-        for t in templates
-    ]
+    return [summarize_template(t) for t in templates]
 
 
 @router.get("/templates/{template_id}")
@@ -189,25 +184,17 @@ async def get_template(
     """Get a single template with full details."""
     from modules.documents.template_service import DocumentTemplateService
 
+    from modules.documents.template_summary import summarize_template
+
     service = DocumentTemplateService(db)
     template = service.get_template(template_id, ctx.workspace_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     return {
-        "id": str(template.id),
-        "name": template.name,
-        "description": template.description,
-        "format": template.format,
-        "category": template.category,
-        "tags": template.tags or [],
-        "version": template.version,
+        **summarize_template(template),
         "template_content": template.template_content,
         "template_file_path": template.template_file_path,
-        "data_schema": template.data_schema,
-        "sample_data": template.sample_data,
         "blocks": template.blocks,
-        "created_at": template.created_at.isoformat() if template.created_at else None,
-        "updated_at": template.updated_at.isoformat() if template.updated_at else None,
     }
 
 
@@ -276,7 +263,7 @@ async def preview_template(
             data=preview_data,
             workspace_id=ctx.workspace_id,
             template_id=template.id,
-            user_id=ctx.user.id if ctx.user else None,
+            user_id=resolve_user_pk(db, ctx),
         )
     except UnresolvedDeliverableError as e:
         # P2-09 S3: the finalisation gate — tell the caller WHICH variables
@@ -369,8 +356,19 @@ async def generate_document(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Generate a document from data + template."""
-    from modules.documents.generation_service import DocumentGenerationService
+    """Generate a document from data + template.
+
+    PRD-242 S4: the file is registered as a Deliverable (it used to vanish
+    into the download link — only agent generations reached the feed), and the
+    response carries the same links an agent gets: the in-app feed and a
+    no-sign-in share link when object storage holds a copy.
+    """
+    from modules.documents.generation_service import DocumentGenerationService, deliverables_app_url
+
+    try:
+        template_uuid = UUID(body.template_id) if body.template_id else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="template_id must be a UUID")
 
     service = DocumentGenerationService(db, ctx.workspace_id)
     try:
@@ -380,8 +378,8 @@ async def generate_document(
             data=body.data,
             workspace_id=ctx.workspace_id,
             template_name=body.template_name,
-            template_id=UUID(body.template_id) if body.template_id else None,
-            user_id=ctx.user.id if ctx.user else None,
+            template_id=template_uuid,
+            user_id=resolve_user_pk(db, ctx),
         )
     except UnresolvedDeliverableError as e:
         # P2-09 S3: a Deliverable with [[unresolved]]/unknown variables is
@@ -405,17 +403,28 @@ async def generate_document(
         logger.exception("Document generation failed")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+    registration = service.register_as_deliverable(
+        result,
+        title=body.title,
+        source_type="document",
+        template_id=UUID(result.template_id) if result.template_id else None,
+    )
     return GenerateDocumentResponse(
         status="success",
         filename=result.filename,
         format=result.format,
         download_url=result.download_url,
         size_kb=result.size // 1024,
+        deliverable_id=(registration or {}).get("deliverable_id"),
+        app_url=deliverables_app_url(),
+        share_url=service.share_link(result),
+        template_id=result.template_id,
+        template_name=result.template_name,
     )
 
 
 # ------------------------------------------------------------------
-# Variables + Brand Kit (PRD-167 S3 / S4)
+# Variables + live preview (PRD-167 S3 / S5). Brand kit: api/document_brand_kit.py
 # ------------------------------------------------------------------
 
 
@@ -435,9 +444,9 @@ async def list_variables(
 
     resolver = VariableResolver(db)
     paths = [e["path"] for e in CATALOG]
-    resolved = resolver.resolve(
-        ctx.workspace_id, ctx.user.id if ctx.user else None, paths
-    )
+    # PRD-242 S1: ``ctx.user.id`` is the Clerk string / operator email, never the
+    # integer PK — handing it to ``User.id`` 500'd this endpoint in both editions.
+    resolved = resolver.resolve(ctx.workspace_id, resolve_user_pk(db, ctx), paths)
     entries = [
         {
             "path": e["path"],
@@ -454,50 +463,6 @@ async def list_variables(
     for entry in entries:
         grouped.setdefault(entry["category"], []).append(entry)
     return {"variables": entries, "by_category": grouped}
-
-
-@router.get("/brand-kit")
-async def get_brand_kit_endpoint(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Return the workspace brand kit (defaults merged in)."""
-    from core.models.workspaces import Workspace
-    from modules.documents.brand_kit import get_brand_kit
-
-    ws = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-    return get_brand_kit(ws.settings)
-
-
-@router.put("/brand-kit", dependencies=[Depends(require_workspace_permission("workspace:manage"))])
-async def update_brand_kit_endpoint(
-    body: BrandKitUpdateRequest,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """Update the workspace brand kit (validated, persisted on workspace.settings)."""
-    from pydantic import ValidationError
-
-    from core.models.workspaces import Workspace
-    from modules.documents.brand_kit import BRAND_KIT_SETTINGS_KEY, get_brand_kit, validate_brand_kit
-
-    ws = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
-    if not ws:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    existing = (ws.settings or {}).get(BRAND_KIT_SETTINGS_KEY)
-    patch = {k: v for k, v in body.model_dump().items() if v is not None}
-    try:
-        new_kit = validate_brand_kit(patch, existing)
-    except ValidationError as e:
-        raise HTTPException(status_code=422, detail={"message": "Invalid brand kit", "errors": e.errors()})
-
-    # Reassign settings (not in-place mutate) so SQLAlchemy tracks the JSONB change.
-    ws.settings = {**(ws.settings or {}), BRAND_KIT_SETTINGS_KEY: new_kit}
-    db.commit()
-    return new_kit
 
 
 @router.post("/preview-blocks", dependencies=[Depends(require_workspace_permission("documents:create"))])
@@ -518,6 +483,7 @@ async def preview_blocks(
         validate_blocks,
     )
     from modules.documents.brand_kit import get_brand_kit
+    from modules.documents.brand_logo import brand_kit_for_render
     from modules.documents.variables.resolver import VariableResolver
     from core.models.workspaces import Workspace
 
@@ -529,10 +495,11 @@ async def preview_blocks(
     paths = collect_variable_paths(block_doc)
     resolver = VariableResolver(db)
     resolved = resolver.resolve(
-        ctx.workspace_id, ctx.user.id if ctx.user else None, paths, extra_data=body.data
+        ctx.workspace_id, resolve_user_pk(db, ctx), paths, extra_data=body.data
     )
     ws = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
-    brand_kit = get_brand_kit(getattr(ws, "settings", None))
+    # Render-ready kit: an uploaded logo is inlined so the live preview shows it.
+    brand_kit = brand_kit_for_render(get_brand_kit(getattr(ws, "settings", None)))
     rendered = render_document_html(block_doc, resolved.values, brand_kit, title="Preview")
     return {
         "html": rendered.html,
