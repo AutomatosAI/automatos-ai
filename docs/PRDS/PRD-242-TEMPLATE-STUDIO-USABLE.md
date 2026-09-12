@@ -1,6 +1,6 @@
 # PRD-242: Template Studio — from "Failed to fetch" to a feature a non-technical user can run
 
-> **Status:** BUILT 2026-09-12 on `feat/prd-242-template-studio` (cut from `main` @ `258a10e07`, #737). Grounded @ the 2026-09-11 report ("the templates page fails to fetch") and a deep review of the PRD-167/PRD-190 surface against the running local stack.
+> **Status:** BUILT 2026-09-12 — PR #739 on `feat/prd-242-template-studio-signed` (cut from `main` @ `258a10e07`, #737; #738 was the same change without the DCO sign-off). Grounded @ the 2026-09-11 report ("the templates page fails to fetch") and a deep review of the PRD-167/PRD-190 surface against the running local stack.
 
 ---
 
