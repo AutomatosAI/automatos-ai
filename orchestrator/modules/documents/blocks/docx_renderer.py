@@ -14,6 +14,8 @@ font from ``brand.font_family`` — no hardcoded Automatos styling.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import ipaddress
 import logging
 import os
@@ -85,16 +87,35 @@ def _safe_local_image(src: str) -> Optional[BytesIO]:
         return None
 
 
+def _inline_image_bytes(src: str) -> Optional[BytesIO]:
+    """Decode a base64 ``data:image/…`` URI (PRD-242 S3 — the inlined brand logo).
+
+    Same size cap as fetched images; anything that is not a base64 image URI
+    (or does not decode) yields ``None`` so the caller falls back to alt text."""
+    header, sep, payload = src.partition(",")
+    if not sep or not header.startswith("data:image/") or ";base64" not in header:
+        return None
+    if len(payload) > _MAX_IMAGE_BYTES * 4 // 3 + 4:
+        return None
+    try:
+        return BytesIO(base64.b64decode(payload, validate=True))
+    except (ValueError, binascii.Error):
+        return None
+
+
 def _safe_image_bytes(src: str) -> Optional[BytesIO]:
     """Best-effort, SSRF-guarded image fetch for DOCX embedding.
 
-    Local/upload paths are read only from within the document-storage root
+    ``data:`` URIs (the inlined brand logo, PRD-242 S3) are decoded in-process;
+    local/upload paths are read only from within the document-storage root
     (:func:`_safe_local_image`); http(s) URLs are fetched only when every resolved
     address is public AND redirects are refused (a 30x must not pivot into a private
     host — mirrors and tightens the PRD-156 S4 WeasyPrint SSRF posture). Any failure
     returns ``None`` (the caller falls back to alt text)."""
     if not src:
         return None
+    if src.startswith("data:"):
+        return _inline_image_bytes(src)
     if not src.startswith(("http://", "https://")):
         return _safe_local_image(src)
     parsed = urlparse(src)

@@ -1,71 +1,65 @@
 'use client'
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, Copy, FileText, Palette, Pencil, Plus, Save } from 'lucide-react'
+import { Palette, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { apiClient } from '@/lib/api-client'
-import { BlockEditor } from './BlockEditor'
-import { PreviewPane } from './PreviewPane'
-import { BrandKitDialog } from './BrandKitDialog'
+import { HelpTooltip } from '@/components/ui/help-tooltip'
+import { DeleteConfirmation, ErrorState, LoadingState } from '@/components/shared'
 import { templateBlocksApi } from './api'
+import { BrandKitDialog } from './BrandKitDialog'
+import { GenerateDocumentDialog } from './GenerateDocumentDialog'
+import { TemplateCards } from './TemplateCards'
+import { TemplateEditor, type EditorDraft } from './TemplateEditor'
+import { TemplateGuide } from './TemplateGuide'
 import { newBlockId } from './inline'
+import { collectMissingOnFile } from './templateFields'
 import { SCHEMA_VERSION } from './types'
-import type { Block, BlockDocument, VariableEntry } from './types'
+import type { BlockDocument, TemplateSummary, VariableEntry } from './types'
 
-interface TemplateSummary {
-  id: string
-  name: string
-  description?: string
-  format: string
-  category: string
-  has_blocks?: boolean
+function blankDraft(): EditorDraft {
+  return {
+    id: null,
+    name: '',
+    description: '',
+    category: 'report',
+    format: 'pdf',
+    blocks: [{ type: 'heading', id: newBlockId(), level: 1, content: [] }],
+    previewData: {},
+  }
 }
 
-const CATEGORIES = ['general', 'report', 'invoice', 'contract', 'letter', 'proposal', 'data']
+function sampleDataOf(sample: Record<string, any> | null | undefined): Record<string, any> {
+  if (!sample || typeof sample !== 'object') return {}
+  const inner = (sample as Record<string, any>).data
+  return inner && typeof inner === 'object' ? inner : sample
+}
 
-// PRD-167 S5: the non-technical block-template studio — gallery (copy-on-customise),
-// block editor, live preview, and brand-kit access in one surface.
+// PRD-167 S5 → PRD-242 S5: the non-technical Template Studio — a guided gallery
+// (copy-on-customise), the block editor with live preview, brand kit, and a
+// generate-now path that lands in Deliverables. Errors show their cause and retry.
 export function TemplateStudio() {
   const [mode, setMode] = useState<'gallery' | 'editor'>('gallery')
   const [templates, setTemplates] = useState<TemplateSummary[]>([])
   const [variables, setVariables] = useState<VariableEntry[]>([])
-  const [brandOpen, setBrandOpen] = useState(false)
   const [loading, setLoading] = useState(true)
-
-  // Editor state
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [category, setCategory] = useState('report')
-  const [format, setFormat] = useState('pdf')
-  const [blocks, setBlocks] = useState<Block[]>([])
-  const [previewData, setPreviewData] = useState('{\n  "data": {}\n}')
+  const [loadError, setLoadError] = useState<unknown>(null)
+  const [brandOpen, setBrandOpen] = useState(false)
+  const [draft, setDraft] = useState<EditorDraft>(blankDraft)
   const [saving, setSaving] = useState(false)
+  const [generateFor, setGenerateFor] = useState<TemplateSummary | null>(null)
+  const [generateData, setGenerateData] = useState<Record<string, any> | undefined>(undefined)
+  const [deleteFor, setDeleteFor] = useState<TemplateSummary | null>(null)
 
   const loadGallery = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
-      const [tpls, vars] = await Promise.all([
-        apiClient.get<TemplateSummary[]>('/api/documents/templates'),
-        templateBlocksApi.getVariables(),
-      ])
+      const [tpls, vars] = await Promise.all([templateBlocksApi.listTemplates(), templateBlocksApi.getVariables()])
       setTemplates(tpls)
       setVariables(vars.variables)
     } catch (e) {
-      toast.error('Failed to load templates')
+      setLoadError(e)
     } finally {
       setLoading(false)
     }
@@ -76,140 +70,145 @@ export function TemplateStudio() {
   }, [loadGallery])
 
   const startBlank = () => {
-    setEditingId(null)
-    setName('')
-    setDescription('')
-    setCategory('report')
-    setFormat('pdf')
-    setBlocks([{ type: 'heading', id: newBlockId(), level: 1, content: [] }])
-    setPreviewData('{\n  "data": {}\n}')
+    setDraft(blankDraft())
     setMode('editor')
   }
 
-  const openTemplate = async (id: string, asCopy: boolean) => {
+  const openTemplate = async (t: TemplateSummary, asCopy: boolean) => {
     try {
-      const full = await apiClient.get<any>(`/api/documents/templates/${id}`)
-      setEditingId(asCopy ? null : id)
-      setName(asCopy ? `${full.name} (copy)` : full.name)
-      setDescription(full.description || '')
-      setCategory(full.category || 'report')
-      setFormat(full.format || 'pdf')
+      const full = await templateBlocksApi.getTemplate(t.id)
       const doc: BlockDocument | null = full.blocks
-      setBlocks(doc?.blocks ?? [])
-      setPreviewData(JSON.stringify(full.sample_data || { data: {} }, null, 2))
+      setDraft({
+        id: asCopy ? null : full.id,
+        name: asCopy ? `${full.name} (copy)` : full.name,
+        description: full.description || '',
+        category: full.category || 'report',
+        format: full.format || 'pdf',
+        blocks: doc?.blocks ?? blankDraft().blocks,
+        previewData: sampleDataOf(full.sample_data),
+      })
       setMode('editor')
-    } catch {
-      toast.error('Failed to open template')
+      if (asCopy && !full.has_blocks) {
+        toast.info('This layout is not block-based — your copy starts as a blank block template with its sample values.')
+      }
+    } catch (e: any) {
+      toast.error(`Could not open template: ${e?.message || 'unknown error'}`)
     }
   }
 
-  const parsedPreviewData = (() => {
-    try {
-      return JSON.parse(previewData)
-    } catch {
-      return {}
-    }
-  })()
-
   const save = async () => {
-    if (!name.trim()) {
+    if (!draft.name.trim()) {
       toast.error('Template needs a name')
       return
     }
     setSaving(true)
-    const doc: BlockDocument = { version: SCHEMA_VERSION, blocks }
-    const body = { name, description, category, format, blocks: doc }
+    const body = {
+      name: draft.name.trim(),
+      description: draft.description,
+      category: draft.category,
+      format: draft.format,
+      blocks: { version: SCHEMA_VERSION, blocks: draft.blocks },
+      sample_data: { data: draft.previewData },
+    }
     try {
-      if (editingId) {
-        await apiClient.put(`/api/documents/templates/${editingId}`, body)
+      if (draft.id) {
+        await templateBlocksApi.updateTemplate(draft.id, body)
+        toast.success('Template saved')
       } else {
-        await apiClient.post('/api/documents/templates', body)
+        const created = await templateBlocksApi.createTemplate(body)
+        setDraft({ ...draft, id: created.id })
+        toast.success('Template created — you can now generate from it or hand it to Auto')
       }
-      toast.success('Template saved')
-      setMode('gallery')
-      loadGallery()
+      await loadGallery()
     } catch (e: any) {
-      // Surface field-level block errors from the 422 (PRD-167 S2).
-      const detail = e?.response?.data?.detail
-      if (detail?.errors) {
-        toast.error(`Invalid blocks: ${detail.errors.map((x: any) => `${x.loc} ${x.msg}`).join('; ')}`)
-      } else {
-        toast.error(e?.message || 'Failed to save template')
+      // Field-level block errors from the 422 arrive as a stringified detail (PRD-167 S2).
+      const message = String(e?.message || '')
+      try {
+        const detail = JSON.parse(message)
+        if (detail?.errors) {
+          toast.error(`Invalid blocks: ${detail.errors.map((x: any) => `${x.loc} ${x.msg}`).join('; ')}`)
+          return
+        }
+      } catch {
+        /* not JSON — fall through */
       }
+      toast.error(message || 'Failed to save template')
     } finally {
       setSaving(false)
     }
   }
 
-  if (mode === 'editor') {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setMode('gallery')}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> Back
-          </Button>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setBrandOpen(true)}>
-              <Palette className="mr-2 h-4 w-4" /> Brand Kit
-            </Button>
-            <Button size="sm" onClick={save} disabled={saving}>
-              <Save className="mr-2 h-4 w-4" /> {saving ? 'Saving…' : 'Save template'}
-            </Button>
-          </div>
-        </div>
+  const confirmDelete = async () => {
+    if (!deleteFor) return
+    try {
+      await templateBlocksApi.deleteTemplate(deleteFor.id)
+      toast.success(`Deleted “${deleteFor.name}”`)
+      setDeleteFor(null)
+      await loadGallery()
+    } catch (e: any) {
+      // DeleteConfirmation stays open on throw; say why so the user is not left guessing.
+      toast.error(`Could not delete “${deleteFor.name}”: ${e?.message || 'unknown error'}`)
+    }
+  }
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="sm:col-span-1">
-            <Label className="text-xs">Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Branded Letter" />
-          </div>
-          <div>
-            <Label className="text-xs">Category</Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {CATEGORIES.map((c) => (
-                  <SelectItem key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs">Description</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this template is for" />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="space-y-3">
-            <BlockEditor blocks={blocks} variables={variables} onChange={setBlocks} />
-            <div>
-              <Label className="text-xs text-muted-foreground">Preview data (fills {'{{data.*}}'} chips)</Label>
-              <Textarea
-                value={previewData}
-                onChange={(e) => setPreviewData(e.target.value)}
-                className="font-mono text-xs min-h-[80px]"
-              />
-            </div>
-          </div>
-          <div className="lg:sticky lg:top-4 lg:h-[80vh]">
-            <PreviewPane doc={{ version: SCHEMA_VERSION, blocks }} data={parsedPreviewData.data || parsedPreviewData} />
-          </div>
-        </div>
-
-        <BrandKitDialog open={brandOpen} onOpenChange={setBrandOpen} />
-      </div>
+  const openGenerateForDraft = () => {
+    if (!draft.id) return
+    const current = templates.find((t) => t.id === draft.id)
+    setGenerateData(draft.previewData)
+    setGenerateFor(
+      current ?? {
+        id: draft.id,
+        name: draft.name,
+        description: draft.description,
+        format: draft.format,
+        category: draft.category,
+        tags: [],
+        version: 1,
+        has_blocks: true,
+        is_starter: false,
+        variable_paths: [],
+        data_fields: [],
+      },
     )
   }
 
-  // Gallery
+  const missingForGenerate = generateFor ? collectMissingOnFile(generateFor.variable_paths, variables) : []
+
+  if (mode === 'editor') {
+    return (
+      <>
+        <TemplateEditor
+          draft={draft}
+          variables={variables}
+          saving={saving}
+          onChange={setDraft}
+          onBack={() => setMode('gallery')}
+          onSave={save}
+          onGenerate={openGenerateForDraft}
+          onOpenBrandKit={() => setBrandOpen(true)}
+        />
+        <BrandKitDialog open={brandOpen} onOpenChange={setBrandOpen} onSaved={() => loadGallery()} />
+        <GenerateDocumentDialog
+          open={!!generateFor}
+          onOpenChange={(open) => !open && setGenerateFor(null)}
+          template={generateFor}
+          initialData={generateData}
+          missingOnFile={missingForGenerate}
+          onOpenBrandKit={() => setBrandOpen(true)}
+        />
+      </>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h2 className="text-xl font-bold">Template Studio</h2>
+          <h2 className="flex items-center text-xl font-bold">
+            Template Studio <HelpTooltip id="deliverables.templates.gallery.title" inline />
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Build branded document templates with blocks and variable chips — no code.
+            Branded document templates your agents fill — reports, letters, invoices — no code.
           </p>
         </div>
         <div className="flex gap-2">
@@ -222,52 +221,47 @@ export function TemplateStudio() {
         </div>
       </div>
 
+      <TemplateGuide onOpenBrandKit={() => setBrandOpen(true)} />
+
       {loading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="animate-pulse"><CardContent className="h-32 p-6" /></Card>
-          ))}
-        </div>
+        <LoadingState variant="cards" count={3} label="Loading templates" />
+      ) : loadError ? (
+        <ErrorState
+          title="Templates could not be loaded"
+          error={loadError}
+          onRetry={loadGallery}
+          retryLabel="Try again"
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {templates.map((t) => (
-            <Card key={t.id} className="group transition-colors hover:border-primary/30">
-              <CardContent className="p-5">
-                <div className="mb-3 flex items-start justify-between">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate font-semibold">{t.name}</h3>
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{t.description || 'No description'}</p>
-                  </div>
-                  <Badge variant="outline" className="uppercase">{t.format}</Badge>
-                </div>
-                <div className="mt-4 flex items-center justify-between">
-                  <Badge variant="secondary" className="text-xs">{t.category}</Badge>
-                  <div className="flex gap-1">
-                    {t.has_blocks && (
-                      <Button variant="ghost" size="sm" className="h-7" onClick={() => openTemplate(t.id, false)}>
-                        <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
-                      </Button>
-                    )}
-                    <Button variant="ghost" size="sm" className="h-7" onClick={() => openTemplate(t.id, true)}>
-                      <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-          {templates.length === 0 && (
-            <Card className="md:col-span-2 lg:col-span-3">
-              <CardContent className="p-12 text-center text-muted-foreground">
-                <FileText className="mx-auto mb-4 h-12 w-12 opacity-50" />
-                <p>No templates yet. Create one to get started.</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        <TemplateCards
+          templates={templates}
+          onEdit={(t) => openTemplate(t, false)}
+          onCopy={(t) => openTemplate(t, true)}
+          onGenerate={(t) => {
+            setGenerateData(undefined)
+            setGenerateFor(t)
+          }}
+          onDelete={setDeleteFor}
+          onCreate={startBlank}
+        />
       )}
 
-      <BrandKitDialog open={brandOpen} onOpenChange={setBrandOpen} />
+      <BrandKitDialog open={brandOpen} onOpenChange={setBrandOpen} onSaved={() => loadGallery()} />
+      <GenerateDocumentDialog
+        open={!!generateFor}
+        onOpenChange={(open) => !open && setGenerateFor(null)}
+        template={generateFor}
+        initialData={generateData}
+        missingOnFile={missingForGenerate}
+        onOpenBrandKit={() => setBrandOpen(true)}
+      />
+      <DeleteConfirmation
+        open={!!deleteFor}
+        onOpenChange={(open) => !open && setDeleteFor(null)}
+        title="Delete template?"
+        itemName={deleteFor?.name}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

@@ -56,12 +56,13 @@ def _safe_url_fetcher(url, *args, **kwargs):
     return default_url_fetcher(url, *args, **kwargs)
 
 from config import config
-from core.storage import ensure_bucket, get_s3_client, is_storage_configured
+from core.storage import ensure_bucket, get_public_s3_client, get_s3_client, is_storage_configured
 from core.models.core import DocumentTemplate
 from core.models.workspaces import Workspace
 from modules.documents.models import GeneratedDocument, UnresolvedDeliverableError
 from modules.documents.template_service import DocumentTemplateService
 from modules.documents.brand_kit import get_brand_kit
+from modules.documents.brand_logo import brand_kit_for_render
 from modules.documents.blocks import (
     blocks_from_legacy,
     collect_variable_paths,
@@ -75,6 +76,17 @@ logger = logging.getLogger(__name__)
 
 # Base directory for generated documents
 GENERATED_DIR = config.DOCUMENT_STORAGE_DIR
+
+# PRD-242 S4: a share link is a presigned URL on the S3 persistence copy — the
+# only link that works for someone who cannot sign in (an emailed report). S3
+# caps SigV4 presigns at 7 days.
+SHARE_LINK_TTL_SECONDS = 7 * 24 * 3600
+DELIVERABLES_APP_PATH = "/deliverables?tab=outputs"
+
+
+def deliverables_app_url() -> str:
+    """Absolute link to the Deliverables feed for messages that leave the app."""
+    return f"{(config.FRONTEND_URL or '').rstrip('/')}{DELIVERABLES_APP_PATH}"
 
 # PRD-167 S2/S4: the hardcoded `_FALLBACK_PDF_TEMPLATE` (with the `#ff6b35` Automatos
 # orange) is gone. When a template has no blocks and no template_content, the no-template
@@ -165,6 +177,12 @@ class DocumentGenerationService:
 
         # Attach markdown content for live widget display
         result.content = self._data_to_markdown(data, title)
+        # PRD-242 S4: attribution rides the result so callers (tool result,
+        # Deliverable extra, playbook step output) can say WHICH template filled it.
+        if template is not None:
+            template_pk = getattr(template, "id", None)
+            result.template_id = str(template_pk) if template_pk else None
+            result.template_name = getattr(template, "name", None)
         return result
 
     # ------------------------------------------------------------------
@@ -172,8 +190,10 @@ class DocumentGenerationService:
     # ------------------------------------------------------------------
 
     def _brand_kit_for(self, workspace_id: UUID) -> dict:
+        """The workspace brand kit, render-ready: an uploaded logo is inlined as a
+        ``data:`` URI so neither renderer needs to reach the object store (PRD-242 S3)."""
         ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
-        return get_brand_kit(getattr(ws, "settings", None))
+        return brand_kit_for_render(get_brand_kit(getattr(ws, "settings", None)))
 
     def _render_block_html(self, block_doc, data, workspace_id, user_id, title):
         """Resolve a block document's variables and render it to a full HTML page.
@@ -231,6 +251,8 @@ class DocumentGenerationService:
             }
             if template_id:
                 extra["template_id"] = str(template_id)
+            if getattr(result, "template_name", None):
+                extra["template_name"] = result.template_name
             return DeliverableService(self.db, ws).register(
                 file_path=f"generated/{result.filename}",
                 title=title or result.filename,
@@ -247,6 +269,31 @@ class DocumentGenerationService:
             )
         except Exception:
             logger.exception("[DocGen] deliverable registration failed (non-fatal)")
+            return None
+
+    def share_link(self, result: GeneratedDocument, expires_in: int = SHARE_LINK_TTL_SECONDS) -> Optional[str]:
+        """A time-limited link to the S3 persistence copy that needs no sign-in (PRD-242 S4).
+
+        This is what an agent puts in an email or a Slack message: the stable
+        ``download_url`` is an authenticated app route and dead for anyone
+        outside the workspace. ``None`` when storage is off or the upload never
+        happened (the caller then offers the in-app link only).
+        """
+        if not result.s3_key or not is_storage_configured():
+            return None
+        bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
+        try:
+            return get_public_s3_client().generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": bucket,
+                    "Key": result.s3_key,
+                    "ResponseContentDisposition": f'attachment; filename="{result.filename}"',
+                },
+                ExpiresIn=expires_in,
+            )
+        except Exception:  # noqa: BLE001 — a share link is optional; never fail the generation
+            logger.exception("[DocGen] share link presign failed for %s", result.filename)
             return None
 
     # ------------------------------------------------------------------
@@ -704,7 +751,7 @@ class DocumentGenerationService:
         # Upload a persistence copy to S3 (containers are ephemeral); the link we
         # persist stays the app path — the re-mint endpoint owns presigning.
         download_url = f"/api/documents/generated/{filename}"
-        self._upload_to_s3(path, filename, workspace_id)
+        uploaded = self._upload_to_s3(path, filename, workspace_id)
 
         return GeneratedDocument(
             path=path,
@@ -716,7 +763,12 @@ class DocumentGenerationService:
             unresolved=list(unresolved or []),
             unknown=list(unknown or []),
             template_lane=template_lane,
+            s3_key=self._s3_key(filename, workspace_id) if uploaded else None,
         )
+
+    def _s3_key(self, filename: str, workspace_id: UUID = None) -> str:
+        ws_id = workspace_id or self.workspace_id
+        return f"workspaces/{ws_id}/generated-documents/{filename}"
 
     def _upload_to_s3(
         self, local_path: str, filename: str, workspace_id: UUID = None
@@ -732,9 +784,8 @@ class DocumentGenerationService:
             logger.debug("[DocGen] object storage not configured, skipping S3 upload")
             return False
 
-        ws_id = workspace_id or self.workspace_id
         bucket = config.S3_DOCUMENTS_BUCKET or "automatos-ai"
-        s3_key = f"workspaces/{ws_id}/generated-documents/{filename}"
+        s3_key = self._s3_key(filename, workspace_id)
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
         try:
