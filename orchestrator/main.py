@@ -856,6 +856,14 @@ else:
         "Set OPENROUTER_API_KEY on the API service to unblock pilot users."
     )
 
+# PRD-242 S1: unhandled errors become a JSON 500 INSIDE the CORS layer. Starlette
+# wraps later-added middleware OUTSIDE earlier ones, so this must be registered
+# BEFORE CORSMiddleware: a 500 minted by the global handler (ServerErrorMiddleware,
+# outermost) carries no Access-Control-Allow-Origin and the browser reports every
+# backend crash as "TypeError: Failed to fetch" instead of the real status.
+from core.observability.error_response import json_500_for_unhandled_errors
+app.middleware("http")(json_500_for_unhandled_errors)
+
 # CORS middleware - use centralized config
 # Parse and clean CORS origins (handle comma-separated list with whitespace)
 cors_origins = [origin.strip() for origin in config.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
@@ -917,7 +925,7 @@ if _policy_plane_on:
 # Request body size limit middleware (10MB default, 50MB for uploads)
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
-UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/documents/templates/upload", "/api/knowledge/graph/import")
+UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/documents/templates/upload", "/api/documents/brand-kit/logo", "/api/knowledge/graph/import")
 
 @app.middleware("http")
 async def limit_request_body(request, call_next):

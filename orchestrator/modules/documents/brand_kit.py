@@ -51,6 +51,10 @@ class BrandKit(BaseModel):
     name: str = ""
     tagline: str = ""
     logo_url: str = ""
+    # PRD-242 S3: storage-relative path of an UPLOADED logo (``<ws>/brand/logo.png``).
+    # Server-managed — set by the logo upload route, never by a client PUT. When
+    # present the renderers inline it (modules.documents.brand_logo).
+    logo_path: str = ""
     primary_color: str = DEFAULT_PRIMARY
     secondary_color: str = DEFAULT_SECONDARY
     accent_color: str = DEFAULT_ACCENT
@@ -87,6 +91,9 @@ def validate_brand_kit(patch: Dict[str, Any], existing: Optional[Dict[str, Any]]
     Raises ``pydantic.ValidationError`` (surfaced as 422 by the API) on bad input.
     """
     base = get_brand_kit({BRAND_KIT_SETTINGS_KEY: existing} if existing else None)
+    # ``logo_path`` is owned by the upload/delete routes; a client patch cannot
+    # point the kit at an arbitrary stored file.
+    patch = {k: v for k, v in patch.items() if k != "logo_path"}
     merged = {**base, **{k: v for k, v in patch.items() if v is not None}}
     if "company" in patch and patch["company"] is not None:
         merged["company"] = {**base.get("company", {}), **patch["company"]}
