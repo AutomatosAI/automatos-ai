@@ -68,7 +68,8 @@ def test_without_the_converter_the_500_has_no_cors_header():
 def test_request_id_is_sanitised_before_it_is_logged_or_echoed():
     # A client-supplied header must not forge log lines (CRLF) or bloat the body.
     assert safe_request_id("req-1.a:b_c") == "req-1.a:b_c"
-    assert safe_request_id("evil\r\nINFO: forged line") == "evilINFOforgedline"
+    # ':' is kept on purpose (trace:span style ids); CR/LF/space/quotes are not.
+    assert safe_request_id("evil\r\nINFO: forged line") == "evilINFO:forgedline"
     assert safe_request_id(None) == ""
     assert len(safe_request_id("x" * 1000)) == MAX_REQUEST_ID_LEN
     client = TestClient(_app(convert_inside_cors=True), raise_server_exceptions=False)
