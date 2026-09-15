@@ -50,7 +50,8 @@ def _table(path="data.line_items", empty_text=None, columns=None):
         "type": "data_table",
         "id": "t",
         "path": path,
-        "columns": columns or [{"key": "description", "label": "Description"}, {"key": "total", "label": "Total", "align": "right"}],
+        # ``columns=[]`` must reach the validator (an empty list is falsy — never ``or`` it away).
+        "columns": columns if columns is not None else [{"key": "description", "label": "Description"}, {"key": "total", "label": "Total", "align": "right"}],
     }
     if empty_text is not None:
         block["empty_text"] = empty_text
