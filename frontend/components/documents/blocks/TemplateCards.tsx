@@ -66,6 +66,7 @@ function FieldsLine({ t }: { t: TemplateSummary }) {
       {t.data_fields.map((f) => (
         <code key={f} className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
           {f}
+          {(t.list_fields ?? []).some((lf) => lf.field === f) ? '[]' : ''}
         </code>
       ))}
     </div>

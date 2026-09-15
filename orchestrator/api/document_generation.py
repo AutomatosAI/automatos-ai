@@ -175,6 +175,16 @@ async def list_templates(
     return [summarize_template(t) for t in templates]
 
 
+@router.get("/templates/presets")
+async def list_template_presets(ctx: RequestContext = Depends(get_request_context_hybrid)):
+    """The layout each category starts from (PRD-243) — what "New template → Letter"
+    loads, what the starters are seeded from. Declared BEFORE ``/templates/{id}`` so
+    the literal segment is not swallowed by the UUID path parameter."""
+    from modules.documents.presets import PRESETS, preset_payload
+
+    return [preset_payload(p) for p in PRESETS]
+
+
 @router.get("/templates/{template_id}")
 async def get_template(
     template_id: UUID,
@@ -500,7 +510,7 @@ async def preview_blocks(
     ws = db.query(Workspace).filter(Workspace.id == ctx.workspace_id).first()
     # Render-ready kit: an uploaded logo is inlined so the live preview shows it.
     brand_kit = brand_kit_for_render(get_brand_kit(getattr(ws, "settings", None)))
-    rendered = render_document_html(block_doc, resolved.values, brand_kit, title="Preview")
+    rendered = render_document_html(block_doc, resolved.values, brand_kit, title="Preview", data=body.data)
     return {
         "html": rendered.html,
         "unresolved": rendered.unresolved,

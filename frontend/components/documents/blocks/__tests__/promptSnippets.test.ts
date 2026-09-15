@@ -18,6 +18,11 @@ describe('promptSnippets', () => {
     expect(schedulePrompt(t, 'x', 'every Friday at 17:00')).toMatch(/^Every Friday at 17:00: Research x/)
     expect(emailPrompt(t, 'x', 'marketing@acme.com')).toContain('email the share link to marketing@acme.com')
   })
+  it('explains list fields as rows with keys (PRD-243)', () => {
+    const inv = { ...t, name: 'Branded Invoice', data_fields: ['client_name', 'line_items'], list_fields: [{ field: 'line_items', columns: ['description', 'quantity', 'total'] }] }
+    expect(autoPrompt(inv, 'x')).toContain('line_items is a list of rows, each with description, quantity, total.')
+    expect(JSON.parse(playbookStepJson(inv)).data).toEqual({ client_name: '{{step_1.output}}', line_items: [] })
+  })
   it('emits a valid generate_document playbook step', () => {
     const step = JSON.parse(playbookStepJson(t))
     expect(step).toEqual({

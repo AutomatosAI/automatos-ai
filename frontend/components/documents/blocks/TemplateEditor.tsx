@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useMemo } from 'react'
-import { ArrowLeft, FileText, Palette, Save } from 'lucide-react'
+import { ArrowLeft, FileText, Layers, Palette, Save } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,7 @@ import { BlockEditor } from './BlockEditor'
 import { PreviewDataForm } from './PreviewDataForm'
 import { PreviewPane } from './PreviewPane'
 import { UseWithAutoPopover } from './UseWithAutoPopover'
-import { collectDataFields, collectMissingOnFile, collectVariablePaths } from './templateFields'
+import { collectDataFields, collectListFields, collectMissingOnFile, collectVariablePaths } from './templateFields'
 import { SCHEMA_VERSION } from './types'
 import type { Block, VariableEntry } from './types'
 
@@ -38,6 +38,8 @@ interface TemplateEditorProps {
   onSave: () => void
   onGenerate: () => void
   onOpenBrandKit: () => void
+  // Open the layout picker in replace mode (PRD-243).
+  onChangeLayout: () => void
 }
 
 // The authoring surface (PRD-167 S5 → PRD-242 S5): template metadata, the block
@@ -52,9 +54,11 @@ export function TemplateEditor({
   onSave,
   onGenerate,
   onOpenBrandKit,
+  onChangeLayout,
 }: TemplateEditorProps) {
   const paths = useMemo(() => collectVariablePaths(draft.blocks), [draft.blocks])
   const dataFields = useMemo(() => collectDataFields(draft.blocks), [draft.blocks])
+  const listFields = useMemo(() => collectListFields(draft.blocks), [draft.blocks])
   const missingOnFile = useMemo(() => collectMissingOnFile(paths, variables), [paths, variables])
   const autoFilled = paths.filter((p) => !p.startsWith('data.'))
   const patch = (p: Partial<EditorDraft>) => onChange({ ...draft, ...p })
@@ -66,11 +70,14 @@ export function TemplateEditor({
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to templates
         </Button>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onChangeLayout}>
+            <Layers className="mr-2 h-4 w-4" /> Change layout
+          </Button>
           <Button variant="outline" size="sm" onClick={onOpenBrandKit}>
             <Palette className="mr-2 h-4 w-4" /> Brand Kit
           </Button>
           {draft.id && (
-            <UseWithAutoPopover template={{ id: draft.id, name: draft.name, format: draft.format, data_fields: dataFields }} />
+            <UseWithAutoPopover template={{ id: draft.id, name: draft.name, format: draft.format, data_fields: dataFields, list_fields: listFields }} />
           )}
           <Button variant="outline" size="sm" onClick={onGenerate} disabled={!draft.id}>
             <FileText className="mr-2 h-4 w-4" /> Generate a document
@@ -131,7 +138,10 @@ export function TemplateEditor({
         <span className="font-medium">Chips in this template:</span>
         {paths.length === 0 && <span className="text-muted-foreground">none yet — use “Insert variable” inside a block</span>}
         {dataFields.map((f) => (
-          <Badge key={f} variant="outline" className="font-mono text-[10px]">data.{f}</Badge>
+          <Badge key={f} variant="outline" className="font-mono text-[10px]">
+            data.{f}
+            {listFields.some((lf) => lf.field === f) ? '[]' : ''}
+          </Badge>
         ))}
         {autoFilled.map((p) => (
           <Badge key={p} variant="secondary" className="font-mono text-[10px]">{p}</Badge>
@@ -148,6 +158,7 @@ export function TemplateEditor({
           <BlockEditor blocks={draft.blocks} variables={variables} onChange={(blocks) => patch({ blocks })} />
           <PreviewDataForm
             fields={dataFields}
+            listFields={listFields}
             data={draft.previewData}
             onChange={(previewData) => patch({ previewData })}
             missingOnFile={missingOnFile}

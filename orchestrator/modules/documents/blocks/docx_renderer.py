@@ -23,10 +23,11 @@ import socket
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from ..variables.catalog import walk_dynamic
 from .schema import BlockDocument
 
 logger = logging.getLogger(__name__)
@@ -166,7 +167,43 @@ def _add_inline(paragraph, content: list, values: Dict[str, str], unresolved: Li
                 run.font.name = font
 
 
-def _add_block(doc, block, values, brand_kit, unresolved, *, primary_rgb, font):
+def _cell_value(row: Any, key: str, index: int) -> str:
+    if isinstance(row, dict):
+        value = row.get(key, "")
+    elif isinstance(row, (list, tuple)):
+        value = row[index] if index < len(row) else ""
+    else:
+        value = row if index == 0 else ""
+    return "" if value is None else str(value)
+
+
+def _add_data_table(doc, block, data: Optional[Dict[str, Any]], unresolved: List[str], font: Optional[str]):
+    """Rows from the per-generation ``data.*`` list (PRD-243); mirrors the HTML renderer's
+    empty policy (unresolved unless ``empty_text`` is set)."""
+    rows = walk_dynamic(data or {}, block.path)
+    if not isinstance(rows, list) or not rows:
+        if block.empty_text is not None:
+            doc.add_paragraph(block.empty_text)
+            return
+        unresolved.append(block.path)
+        doc.add_paragraph(f"[[{block.path}]]")
+        return
+    table = doc.add_table(rows=len(rows) + 1, cols=len(block.columns))
+    table.style = "Light Grid Accent 1"
+    for c_idx, col in enumerate(block.columns):
+        para = table.cell(0, c_idx).paragraphs[0]
+        run = para.add_run(col.label or col.key)
+        run.bold = True
+        if font:
+            run.font.name = font
+    for r_idx, row in enumerate(rows, start=1):
+        for c_idx, col in enumerate(block.columns):
+            run = table.cell(r_idx, c_idx).paragraphs[0].add_run(_cell_value(row, col.key, c_idx))
+            if font:
+                run.font.name = font
+
+
+def _add_block(doc, block, values, brand_kit, unresolved, *, primary_rgb, font, data=None):
     from docx.shared import Mm
 
     kind = block.type
@@ -210,6 +247,8 @@ def _add_block(doc, block, values, brand_kit, unresolved, *, primary_rgb, font):
     elif kind == "variable":
         p = doc.add_paragraph()
         p.add_run(_resolve_var(block.path, block.fallback, values, unresolved))
+    elif kind == "data_table":
+        _add_data_table(doc, block, data, unresolved, font)
     elif kind == "page_break":
         doc.add_page_break()
     elif kind == "section":
@@ -219,11 +258,14 @@ def _add_block(doc, block, values, brand_kit, unresolved, *, primary_rgb, font):
                 for run in h.runs:
                     run.font.color.rgb = primary_rgb
         for child in block.children:
-            _add_block(doc, child, values, brand_kit, unresolved, primary_rgb=primary_rgb, font=font)
+            _add_block(doc, child, values, brand_kit, unresolved, primary_rgb=primary_rgb, font=font, data=data)
 
 
-def render_document_docx(doc_model: BlockDocument, values: Dict[str, str], brand_kit: Dict) -> RenderedDocx:
-    """Render a block document to a python-docx Document + unresolved-path list."""
+def render_document_docx(
+    doc_model: BlockDocument, values: Dict[str, str], brand_kit: Dict, data: Optional[Dict[str, Any]] = None
+) -> RenderedDocx:
+    """Render a block document to a python-docx Document + unresolved-path list.
+    ``data`` is the raw per-generation object read by ``data_table`` blocks."""
     from docx import Document
 
     document = Document()
@@ -234,7 +276,7 @@ def render_document_docx(doc_model: BlockDocument, values: Dict[str, str], brand
 
     unresolved: List[str] = []
     for block in doc_model.blocks:
-        _add_block(document, block, values, bk, unresolved, primary_rgb=primary_rgb, font=font_stack)
+        _add_block(document, block, values, bk, unresolved, primary_rgb=primary_rgb, font=font_stack, data=data)
 
     seen: Dict[str, None] = {}
     for path in unresolved:

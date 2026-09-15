@@ -9,31 +9,14 @@ import { DeleteConfirmation, ErrorState, LoadingState } from '@/components/share
 import { templateBlocksApi } from './api'
 import { BrandKitDialog } from './BrandKitDialog'
 import { GenerateDocumentDialog } from './GenerateDocumentDialog'
+import { PresetPicker } from './PresetPicker'
 import { TemplateCards } from './TemplateCards'
 import { TemplateEditor, type EditorDraft } from './TemplateEditor'
 import { TemplateGuide } from './TemplateGuide'
-import { newBlockId } from './inline'
+import { applyPresetLayout, blankDraft, draftFromPreset, sampleDataOf } from './presetDraft'
 import { collectMissingOnFile } from './templateFields'
 import { SCHEMA_VERSION } from './types'
-import type { BlockDocument, TemplateSummary, VariableEntry } from './types'
-
-function blankDraft(): EditorDraft {
-  return {
-    id: null,
-    name: '',
-    description: '',
-    category: 'report',
-    format: 'pdf',
-    blocks: [{ type: 'heading', id: newBlockId(), level: 1, content: [] }],
-    previewData: {},
-  }
-}
-
-function sampleDataOf(sample: Record<string, any> | null | undefined): Record<string, any> {
-  if (!sample || typeof sample !== 'object') return {}
-  const inner = (sample as Record<string, any>).data
-  return inner && typeof inner === 'object' ? inner : sample
-}
+import type { BlockDocument, TemplatePreset, TemplateSummary, VariableEntry } from './types'
 
 // PRD-167 S5 → PRD-242 S5: the non-technical Template Studio — a guided gallery
 // (copy-on-customise), the block editor with live preview, brand kit, and a
@@ -42,6 +25,9 @@ export function TemplateStudio() {
   const [mode, setMode] = useState<'gallery' | 'editor'>('gallery')
   const [templates, setTemplates] = useState<TemplateSummary[]>([])
   const [variables, setVariables] = useState<VariableEntry[]>([])
+  const [presets, setPresets] = useState<TemplatePreset[]>([])
+  const [presetsLoading, setPresetsLoading] = useState(true)
+  const [picker, setPicker] = useState<'new' | 'replace' | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [brandOpen, setBrandOpen] = useState(false)
@@ -69,28 +55,55 @@ export function TemplateStudio() {
     loadGallery()
   }, [loadGallery])
 
-  const startBlank = () => {
-    setDraft(blankDraft())
-    setMode('editor')
+  // Layouts are static; a failure here degrades to "Blank" only, it never hides the gallery.
+  useEffect(() => {
+    templateBlocksApi
+      .listPresets()
+      .then(setPresets)
+      .catch(() => setPresets([]))
+      .finally(() => setPresetsLoading(false))
+  }, [])
+
+  const startNew = () => setPicker('new')
+
+  const pickPreset = (preset: TemplatePreset | null) => {
+    if (picker === 'replace') {
+      setDraft((d) => (preset ? applyPresetLayout(d, preset) : { ...blankDraft(), id: d.id, name: d.name, description: d.description }))
+      toast.success(preset ? `Layout replaced with ${preset.name}` : 'Layout cleared')
+    } else {
+      setDraft(preset ? draftFromPreset(preset) : blankDraft())
+      setMode('editor')
+    }
+    setPicker(null)
   }
 
   const openTemplate = async (t: TemplateSummary, asCopy: boolean) => {
     try {
       const full = await templateBlocksApi.getTemplate(t.id)
       const doc: BlockDocument | null = full.blocks
+      if (asCopy && !full.has_blocks) {
+        // A legacy (Jinja / uploaded) template cannot be block-edited: the copy
+        // starts from its category's layout instead of an empty heading (PRD-243).
+        const preset = presets.find((p) => p.category === (full.category || 'general')) ?? presets.find((p) => p.category === 'general')
+        setDraft(
+          preset
+            ? draftFromPreset(preset, { name: `${full.name} (copy)`, description: full.description || preset.description })
+            : { ...blankDraft(), name: `${full.name} (copy)`, description: full.description || '' },
+        )
+        setMode('editor')
+        toast.info(preset ? `Started from the ${preset.name} layout — the original is a built-in design that cannot be block-edited.` : 'Started blank.')
+        return
+      }
       setDraft({
         id: asCopy ? null : full.id,
         name: asCopy ? `${full.name} (copy)` : full.name,
         description: full.description || '',
-        category: full.category || 'report',
+        category: full.category || 'general',
         format: full.format || 'pdf',
         blocks: doc?.blocks ?? blankDraft().blocks,
         previewData: sampleDataOf(full.sample_data),
       })
       setMode('editor')
-      if (asCopy && !full.has_blocks) {
-        toast.info('This layout is not block-based — your copy starts as a blank block template with its sample values.')
-      }
     } catch (e: any) {
       toast.error(`Could not open template: ${e?.message || 'unknown error'}`)
     }
@@ -168,6 +181,7 @@ export function TemplateStudio() {
         is_starter: false,
         variable_paths: [],
         data_fields: [],
+        list_fields: [],
       },
     )
   }
@@ -186,7 +200,9 @@ export function TemplateStudio() {
           onSave={save}
           onGenerate={openGenerateForDraft}
           onOpenBrandKit={() => setBrandOpen(true)}
+          onChangeLayout={() => setPicker('replace')}
         />
+        <PresetPicker open={picker !== null} onOpenChange={(open) => !open && setPicker(null)} presets={presets} loading={presetsLoading} mode={picker ?? 'replace'} onPick={pickPreset} />
         <BrandKitDialog open={brandOpen} onOpenChange={setBrandOpen} onSaved={() => loadGallery()} />
         <GenerateDocumentDialog
           open={!!generateFor}
@@ -215,7 +231,7 @@ export function TemplateStudio() {
           <Button variant="outline" onClick={() => setBrandOpen(true)}>
             <Palette className="mr-2 h-4 w-4" /> Brand Kit
           </Button>
-          <Button onClick={startBlank}>
+          <Button onClick={startNew}>
             <Plus className="mr-2 h-4 w-4" /> New template
           </Button>
         </div>
@@ -242,10 +258,11 @@ export function TemplateStudio() {
             setGenerateFor(t)
           }}
           onDelete={setDeleteFor}
-          onCreate={startBlank}
+          onCreate={startNew}
         />
       )}
 
+      <PresetPicker open={picker !== null} onOpenChange={(open) => !open && setPicker(null)} presets={presets} loading={presetsLoading} mode={picker ?? 'new'} onPick={pickPreset} />
       <BrandKitDialog open={brandOpen} onOpenChange={setBrandOpen} onSaved={() => loadGallery()} />
       <GenerateDocumentDialog
         open={!!generateFor}

@@ -54,6 +54,21 @@ export interface VariableBlock {
   fallback?: string | null
 }
 
+// PRD-243: a table whose rows come from a data.* list supplied at generation time.
+export interface DataTableColumn {
+  key: string
+  label: string
+  align?: 'left' | 'right' | 'center'
+}
+
+export interface DataTableBlock {
+  type: 'data_table'
+  id: string
+  path: string // must be data.<field>
+  columns: DataTableColumn[]
+  empty_text?: string | null
+}
+
 export interface PageBreakBlock {
   type: 'page_break'
   id: string
@@ -72,6 +87,7 @@ export type Block =
   | TableBlock
   | ImageBlock
   | VariableBlock
+  | DataTableBlock
   | PageBreakBlock
   | SectionBlock
 
@@ -133,6 +149,25 @@ export type BrandSuggestions = Partial<
 
 export type TemplateFormat = 'pdf' | 'docx' | 'xlsx'
 
+export interface ListField {
+  field: string
+  columns: string[]
+}
+
+// GET /api/documents/templates/presets — the layout a category starts from (PRD-243).
+export interface TemplatePreset {
+  category: string
+  name: string
+  description: string
+  format: TemplateFormat | string
+  includes: string[]
+  variable_paths: string[]
+  data_fields: string[]
+  list_fields: ListField[]
+  blocks: BlockDocument
+  sample_data: Record<string, any>
+}
+
 // GET /api/documents/templates entry (PRD-242 S2 — modules/documents/template_summary.py)
 export interface TemplateSummary {
   id: string
@@ -151,6 +186,8 @@ export interface TemplateSummary {
   // Every variable chip the template references, and the data.* names an agent must supply.
   variable_paths: string[]
   data_fields: string[]
+  // The data.* LIST fields (data_table blocks) with their column keys (PRD-243).
+  list_fields: ListField[]
   created_at?: string | null
   updated_at?: string | null
 }

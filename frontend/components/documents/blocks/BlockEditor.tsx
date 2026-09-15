@@ -14,6 +14,7 @@ import {
   Type,
   Variable as VariableIcon,
   FoldVertical,
+  Rows,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { VariablePicker } from './VariablePicker'
+import { DataTableEditor } from './DataTableEditor'
 import { insertToken, newBlockId, parseInline, serializeInline } from './inline'
 import type {
   Block,
@@ -267,6 +269,16 @@ function makeBlock(type: BlockType): Block {
       return { type, id, source: 'brand_logo', alt: '', width_mm: 40 }
     case 'variable':
       return { type, id, path: 'data.value' }
+    case 'data_table':
+      return {
+        type,
+        id,
+        path: 'data.items',
+        columns: [
+          { key: 'name', label: 'Name', align: 'left' },
+          { key: 'value', label: 'Value', align: 'right' },
+        ],
+      }
     case 'page_break':
       return { type, id }
     case 'section':
@@ -277,7 +289,8 @@ function makeBlock(type: BlockType): Block {
 const BLOCK_MENU: { type: BlockType; label: string; icon: React.ComponentType<any> }[] = [
   { type: 'heading', label: 'Heading', icon: Heading },
   { type: 'text', label: 'Text', icon: Type },
-  { type: 'table', label: 'Table', icon: TableIcon },
+  { type: 'table', label: 'Table (typed in)', icon: TableIcon },
+  { type: 'data_table', label: 'Table from data (agent fills rows)', icon: Rows },
   { type: 'image', label: 'Image / Logo', icon: ImageIcon },
   { type: 'variable', label: 'Variable', icon: VariableIcon },
   { type: 'section', label: 'Section', icon: FoldVertical },
@@ -307,6 +320,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   heading: 'Heading',
   text: 'Text',
   table: 'Table',
+  data_table: 'Table from data',
   image: 'Image',
   variable: 'Variable',
   page_break: 'Page break',
@@ -354,6 +368,7 @@ export function BlockEditor({ blocks, variables, onChange }: BlockEditorProps) {
           {block.type === 'table' && <TableEditor block={block} onChange={(b) => updateAt(i, b)} variables={variables} />}
           {block.type === 'image' && <ImageEditor block={block} onChange={(b) => updateAt(i, b)} />}
           {block.type === 'variable' && <VariableBlockEditor block={block} onChange={(b) => updateAt(i, b)} variables={variables} />}
+          {block.type === 'data_table' && <DataTableEditor block={block} onChange={(b) => updateAt(i, b)} />}
           {block.type === 'page_break' && <p className="text-xs italic text-muted-foreground">Forces a new page when rendered.</p>}
           {block.type === 'section' && (
             <div className="space-y-2">

@@ -2,7 +2,7 @@
 // which data.* fields an agent (or a person) must supply, and an immutable
 // nested get/set for dotted field names. Mirrors
 // orchestrator/modules/documents/template_summary.py.
-import type { Block, Inline, VariableEntry } from './types'
+import type { Block, Inline, ListField, VariableEntry } from './types'
 
 export const DATA_PREFIX = 'data.'
 
@@ -18,6 +18,7 @@ function blockPaths(block: Block): string[] {
     case 'table':
       return block.rows.flatMap((row) => row.flatMap((cell) => inlinePaths(cell)))
     case 'variable':
+    case 'data_table':
       return [block.path]
     case 'image':
       return block.source === 'brand_logo' ? ['brand.logo_url'] : []
@@ -38,6 +39,25 @@ export function collectDataFields(blocks: Block[]): string[] {
   return collectVariablePaths(blocks)
     .filter((p) => p.startsWith(DATA_PREFIX) && p.length > DATA_PREFIX.length)
     .map((p) => p.slice(DATA_PREFIX.length))
+}
+
+// The data.* LIST fields (data_table blocks) with their column keys, in document order.
+export function collectListFields(blocks: Block[]): ListField[] {
+  const out: ListField[] = []
+  const seen = new Set<string>()
+  const walk = (block: Block) => {
+    if (block.type === 'data_table') {
+      const field = block.path.startsWith(DATA_PREFIX) ? block.path.slice(DATA_PREFIX.length) : block.path
+      if (!seen.has(field)) {
+        seen.add(field)
+        out.push({ field, columns: block.columns.map((c) => c.key) })
+      }
+    } else if (block.type === 'section') {
+      block.children.forEach(walk)
+    }
+  }
+  blocks.forEach(walk)
+  return out
 }
 
 // Catalog chips the template uses that have NO value on file for this workspace/user

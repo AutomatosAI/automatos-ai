@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from ..brand_kit import get_brand_kit
 from ..brand_logo import BRAND_LOGO_ROUTE
-from .catalog import is_dynamic_path, is_known_path, DYNAMIC_PREFIX
+from .catalog import is_dynamic_path, is_known_path, walk_dynamic
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +40,6 @@ class ResolvedVariables:
 def _long_date(now: datetime) -> str:
     # Avoid %-d (not portable to Windows); build the long form manually.
     return f"{now.strftime('%B')} {now.day}, {now.year}"
-
-
-def _walk(data: Any, dotted_key: str) -> Any:
-    """Walk a dotted key through nested dicts (for the ``data.*`` namespace)."""
-    cur = data
-    for part in dotted_key.split("."):
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(part)
-    return cur
 
 
 def build_context(
@@ -128,7 +118,7 @@ def resolve_paths(context: Dict[str, Any], paths: Iterable[str]) -> ResolvedVari
     out = ResolvedVariables()
     for path in sorted(set(paths)):
         if is_dynamic_path(path):
-            value = _walk(context.get("data", {}), path[len(DYNAMIC_PREFIX):])
+            value = walk_dynamic(context.get("data", {}), path)
             if value is None or value == "":
                 out.unresolved.append(path)
             else:
