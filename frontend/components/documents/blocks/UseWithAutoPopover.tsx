@@ -10,7 +10,7 @@ import { autoPrompt, emailPrompt, playbookStepJson, schedulePrompt } from './pro
 import type { TemplateSummary } from './types'
 
 interface UseWithAutoPopoverProps {
-  template: Pick<TemplateSummary, 'id' | 'name' | 'format' | 'data_fields'>
+  template: Pick<TemplateSummary, 'id' | 'name' | 'format' | 'data_fields'> & Partial<Pick<TemplateSummary, 'list_fields'>>
   size?: 'sm' | 'default'
 }
 

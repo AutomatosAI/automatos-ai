@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useMemo } from 'react'
-import { ArrowLeft, FileText, Palette, Save } from 'lucide-react'
+import { ArrowLeft, FileText, Layers, Palette, Save } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,9 +12,10 @@ import { BlockEditor } from './BlockEditor'
 import { PreviewDataForm } from './PreviewDataForm'
 import { PreviewPane } from './PreviewPane'
 import { UseWithAutoPopover } from './UseWithAutoPopover'
-import { collectDataFields, collectMissingOnFile, collectVariablePaths } from './templateFields'
+import { applyPresetLayout, isBlankDraft } from './presetDraft'
+import { collectDataFields, collectListFields, collectMissingOnFile, collectVariablePaths } from './templateFields'
 import { SCHEMA_VERSION } from './types'
-import type { Block, VariableEntry } from './types'
+import type { Block, TemplatePreset, VariableEntry } from './types'
 
 export const CATEGORIES = ['general', 'report', 'invoice', 'contract', 'letter', 'proposal', 'data']
 export const FORMATS = ['pdf', 'docx']
@@ -32,12 +33,16 @@ export interface EditorDraft {
 interface TemplateEditorProps {
   draft: EditorDraft
   variables: VariableEntry[]
+  // The layouts per category (PRD-243): picking a category on a blank draft applies its layout.
+  presets: TemplatePreset[]
   saving: boolean
   onChange: (draft: EditorDraft) => void
   onBack: () => void
   onSave: () => void
   onGenerate: () => void
   onOpenBrandKit: () => void
+  // Open the layout picker in replace mode (PRD-243).
+  onChangeLayout: () => void
 }
 
 // The authoring surface (PRD-167 S5 → PRD-242 S5): template metadata, the block
@@ -46,18 +51,33 @@ interface TemplateEditorProps {
 export function TemplateEditor({
   draft,
   variables,
+  presets,
   saving,
   onChange,
   onBack,
   onSave,
   onGenerate,
   onOpenBrandKit,
+  onChangeLayout,
 }: TemplateEditorProps) {
   const paths = useMemo(() => collectVariablePaths(draft.blocks), [draft.blocks])
   const dataFields = useMemo(() => collectDataFields(draft.blocks), [draft.blocks])
+  const listFields = useMemo(() => collectListFields(draft.blocks), [draft.blocks])
   const missingOnFile = useMemo(() => collectMissingOnFile(paths, variables), [paths, variables])
   const autoFilled = paths.filter((p) => !p.startsWith('data.'))
   const patch = (p: Partial<EditorDraft>) => onChange({ ...draft, ...p })
+  const presetFor = (category: string) => presets.find((pr) => pr.category === category)
+  // The category select must DO something: on a blank draft it loads that category's
+  // layout outright; on a draft with content it only tags, and offers the layout.
+  const changeCategory = (category: string) => {
+    const preset = presetFor(category)
+    if (preset && isBlankDraft(draft)) {
+      onChange(applyPresetLayout({ ...draft, category }, preset))
+      return
+    }
+    patch({ category })
+  }
+  const layoutHint = !isBlankDraft(draft) && presetFor(draft.category) && draft.blocks !== presetFor(draft.category)?.blocks.blocks
 
   return (
     <div className="space-y-4">
@@ -66,11 +86,14 @@ export function TemplateEditor({
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to templates
         </Button>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onChangeLayout}>
+            <Layers className="mr-2 h-4 w-4" /> Change layout
+          </Button>
           <Button variant="outline" size="sm" onClick={onOpenBrandKit}>
             <Palette className="mr-2 h-4 w-4" /> Brand Kit
           </Button>
           {draft.id && (
-            <UseWithAutoPopover template={{ id: draft.id, name: draft.name, format: draft.format, data_fields: dataFields }} />
+            <UseWithAutoPopover template={{ id: draft.id, name: draft.name, format: draft.format, data_fields: dataFields, list_fields: listFields }} />
           )}
           <Button variant="outline" size="sm" onClick={onGenerate} disabled={!draft.id}>
             <FileText className="mr-2 h-4 w-4" /> Generate a document
@@ -95,7 +118,7 @@ export function TemplateEditor({
           <Label className="flex items-center text-xs">
             Category <FieldHelp id="deliverables.templates.editor.category" />
           </Label>
-          <Select value={draft.category} onValueChange={(category) => patch({ category })}>
+          <Select value={draft.category} onValueChange={changeCategory}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {CATEGORIES.map((c) => (
@@ -103,6 +126,11 @@ export function TemplateEditor({
               ))}
             </SelectContent>
           </Select>
+          {layoutHint && (
+            <button type="button" className="mt-1 text-[11px] text-primary underline-offset-2 hover:underline" onClick={onChangeLayout}>
+              Use the {draft.category} layout instead
+            </button>
+          )}
         </div>
         <div>
           <Label className="flex items-center text-xs">
@@ -131,7 +159,10 @@ export function TemplateEditor({
         <span className="font-medium">Chips in this template:</span>
         {paths.length === 0 && <span className="text-muted-foreground">none yet — use “Insert variable” inside a block</span>}
         {dataFields.map((f) => (
-          <Badge key={f} variant="outline" className="font-mono text-[10px]">data.{f}</Badge>
+          <Badge key={f} variant="outline" className="font-mono text-[10px]">
+            data.{f}
+            {listFields.some((lf) => lf.field === f) ? '[]' : ''}
+          </Badge>
         ))}
         {autoFilled.map((p) => (
           <Badge key={p} variant="secondary" className="font-mono text-[10px]">{p}</Badge>
@@ -148,6 +179,7 @@ export function TemplateEditor({
           <BlockEditor blocks={draft.blocks} variables={variables} onChange={(blocks) => patch({ blocks })} />
           <PreviewDataForm
             fields={dataFields}
+            listFields={listFields}
             data={draft.previewData}
             onChange={(previewData) => patch({ previewData })}
             missingOnFile={missingOnFile}

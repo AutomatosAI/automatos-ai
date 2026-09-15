@@ -208,7 +208,7 @@ class DocumentGenerationService:
         resolver = VariableResolver(self.db)
         resolved = resolver.resolve(workspace_id, user_id, paths, extra_data=data)
         brand_kit = self._brand_kit_for(workspace_id)
-        rendered = render_document_html(block_doc, resolved.values, brand_kit, title=title)
+        rendered = render_document_html(block_doc, resolved.values, brand_kit, title=title, data=data)
         unknown = list(resolved.unknown)
         unresolved = [p for p in rendered.unresolved if p not in set(unknown)]
         return rendered.html, unresolved, unknown
@@ -402,7 +402,7 @@ class DocumentGenerationService:
                 workspace_id, user_id, paths, extra_data=data
             )
             brand_kit = self._brand_kit_for(workspace_id)
-            rendered = render_document_docx(block_doc, resolved.values, brand_kit)
+            rendered = render_document_docx(block_doc, resolved.values, brand_kit, data=data)
             # P2-09 S3: capture the render-honesty lists for the finalisation
             # gate in generate() — same unknown/unresolved split as the HTML path.
             unknown = list(resolved.unknown)

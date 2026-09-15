@@ -6,7 +6,10 @@ serialises to/from this schema via a thin adapter; the renderers (``html_rendere
 editor, keep the schema and renderers.
 
 Block types (PRD-167 S2): ``heading``, ``text``, ``table``, ``image`` (incl. logo via
-``source="brand_logo"``), ``variable``, ``page_break``, ``section``.
+``source="brand_logo"``), ``variable``, ``page_break``, ``section``; PRD-243 adds
+``data_table`` — a table whose ROWS come from a ``data.*`` list supplied at
+generation time (invoice line items, report metrics), the gap the invoice and
+report presets could not be built without.
 
 Inline content is a list of *runs*: ``text`` runs (with marks) and ``variable`` runs —
 the chips that resolve from profiles/workspace/brand/date at render time.
@@ -20,7 +23,7 @@ from __future__ import annotations
 
 from typing import Annotated, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Bump when the schema changes shape in a non-additive way; stored alongside blocks
 # so a future migration can detect and upgrade old documents.
@@ -130,6 +133,46 @@ class VariableBlock(_Base):
     fallback: Optional[str] = None
 
 
+class DataTableColumn(_Base):
+    """One column of a :class:`DataTableBlock`: ``key`` is read from each row object,
+    ``label`` is the header text (defaults to the key)."""
+
+    key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_]+$")
+    label: str = ""
+    align: Literal["left", "right", "center"] = "left"
+
+
+class DataTableBlock(_Base):
+    """A table whose rows are supplied per generation (PRD-243).
+
+    ``path`` names a ``data.*`` list (e.g. ``data.line_items``); each element is a
+    row — an object keyed by the column keys (a plain list is read by position).
+    An empty or missing list is UNRESOLVED (the document is blocked at
+    finalisation, like an empty chip) unless the author sets ``empty_text``, in
+    which case that sentence renders instead of the table.
+    """
+
+    type: Literal["data_table"] = "data_table"
+    id: str
+    path: str
+    columns: List[DataTableColumn] = Field(min_length=1)
+    empty_text: Optional[str] = None
+
+    @field_validator("path")
+    @classmethod
+    def _dynamic_path_only(cls, v: str) -> str:
+        if not v.startswith("data.") or len(v) <= len("data."):
+            raise ValueError("data_table path must be a data.* field, e.g. data.line_items")
+        return v
+
+    @model_validator(mode="after")
+    def _unique_column_keys(self) -> "DataTableBlock":
+        keys = [c.key for c in self.columns]
+        if len(set(keys)) != len(keys):
+            raise ValueError("data_table column keys must be unique")
+        return self
+
+
 class PageBreakBlock(_Base):
     type: Literal["page_break"] = "page_break"
     id: str
@@ -152,6 +195,7 @@ Block = Annotated[
         TableBlock,
         ImageBlock,
         VariableBlock,
+        DataTableBlock,
         PageBreakBlock,
         SectionBlock,
     ],
@@ -182,6 +226,8 @@ __all__ = [
     "TableBlock",
     "ImageBlock",
     "VariableBlock",
+    "DataTableColumn",
+    "DataTableBlock",
     "PageBreakBlock",
     "SectionBlock",
     "Block",

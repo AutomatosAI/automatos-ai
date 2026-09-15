@@ -6,6 +6,7 @@ import type {
   BrandSuggestions,
   GenerateDocumentResult,
   TemplateDetail,
+  TemplatePreset,
   TemplateSummary,
   TemplateWriteBody,
   VariablesResponse,
@@ -25,6 +26,8 @@ export const templateBlocksApi = {
 
   // Templates
   listTemplates: () => apiClient.get<TemplateSummary[]>('/api/documents/templates'),
+  // The layout each category starts from (PRD-243).
+  listPresets: () => apiClient.get<TemplatePreset[]>('/api/documents/templates/presets'),
   getTemplate: (id: string) => apiClient.get<TemplateDetail>(`/api/documents/templates/${id}`),
   createTemplate: (body: TemplateWriteBody) =>
     apiClient.post<{ id: string; name: string }>('/api/documents/templates', body),

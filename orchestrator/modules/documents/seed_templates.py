@@ -4,12 +4,14 @@ Seed built-in starter templates for document generation (PRD-63).
 
 import logging
 import os
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from core.models.core import DocumentTemplate
-from modules.documents.block_starters import STARTER_BLOCK_TEMPLATES
+from modules.documents.presets import PRESETS
+from modules.documents.template_summary import STARTER_CREATOR
 
 logger = logging.getLogger(__name__)
 
@@ -248,35 +250,69 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
         db.add(record)
         created += 1
 
-    # PRD-167 S2: block-native starters (copy-on-customise). These carry a `blocks`
-    # body and render through the canonical block path.
-    for tmpl in STARTER_BLOCK_TEMPLATES:
-        exists = (
+    # PRD-167 S2 → PRD-243: block-native starters, ONE per category, from the
+    # presets the Studio itself offers. Copy-on-customise, so a platform-owned
+    # starter (created_by="system") is refreshed in place when the preset changes;
+    # a row a user made under the same name is never touched.
+    refreshed = 0
+    for preset in PRESETS:
+        existing = (
             db.query(DocumentTemplate)
             .filter(
                 DocumentTemplate.workspace_id == workspace_id,
-                DocumentTemplate.name == tmpl["name"],
+                DocumentTemplate.name == preset["name"],
             )
             .first()
         )
-        if exists:
-            continue
-        record = DocumentTemplate(
-            workspace_id=workspace_id,
-            name=tmpl["name"],
-            description=tmpl["description"],
-            format=tmpl["format"],
-            category=tmpl["category"],
-            blocks=tmpl["blocks"],
-            sample_data=tmpl.get("sample_data", {}),
-            is_active=True,
-            version=1,
-            created_by="system",
-        )
-        db.add(record)
-        created += 1
+        outcome = starter_outcome(existing, preset)
+        if outcome == "created":
+            db.add(
+                DocumentTemplate(
+                    workspace_id=workspace_id,
+                    is_active=True,
+                    version=1,
+                    created_by=STARTER_CREATOR,
+                    **starter_columns(preset),
+                )
+            )
+            created += 1
+        elif outcome == "refreshed":
+            for column, value in starter_columns(preset).items():
+                setattr(existing, column, value)
+            existing.updated_at = datetime.utcnow()
+            refreshed += 1
 
-    if created:
+    if created or refreshed:
         db.commit()
-        logger.info(f"Seeded {created} starter templates for workspace {workspace_id}")
+        logger.info(
+            "Seeded starter templates for workspace %s: %d created, %d refreshed", workspace_id, created, refreshed
+        )
     return created
+
+
+def starter_columns(preset: dict) -> dict:
+    """The columns a starter row carries from its preset. Pure."""
+    return {
+        "name": preset["name"],
+        "description": preset["description"],
+        "format": preset["format"],
+        "category": preset["category"],
+        "blocks": preset["blocks"],
+        "sample_data": preset.get("sample_data", {}),
+    }
+
+
+def starter_outcome(existing, preset: dict) -> str:
+    """``created`` (no row), ``refreshed`` (a platform-owned row that drifted from the
+    preset), ``unchanged`` (platform-owned and identical), ``user_owned`` (a row a
+    person created under the same name — never overwritten), or ``deleted_by_user``
+    (a platform starter the person soft-deleted — never resurrected, never
+    re-created: their gallery stays the way they left it). Pure."""
+    if existing is None:
+        return "created"
+    if (getattr(existing, "created_by", None) or "") != STARTER_CREATOR:
+        return "user_owned"
+    if getattr(existing, "is_active", True) is False:
+        return "deleted_by_user"
+    current = {column: getattr(existing, column, None) for column in starter_columns(preset)}
+    return "unchanged" if current == starter_columns(preset) else "refreshed"

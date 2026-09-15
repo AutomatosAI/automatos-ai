@@ -3,11 +3,13 @@
 // generate_document(template_id=…) takes, so an agent cannot pick the wrong one.
 import type { TemplateSummary } from './types'
 
-type TemplateRef = Pick<TemplateSummary, 'id' | 'name' | 'format' | 'data_fields'>
+type TemplateRef = Pick<TemplateSummary, 'id' | 'name' | 'format' | 'data_fields'> & Partial<Pick<TemplateSummary, 'list_fields'>>
 
 function fieldsClause(t: TemplateRef): string {
   if (!t.data_fields.length) return 'The template has no fill-in fields.'
-  return `Fill these fields from your research: ${t.data_fields.join(', ')}.`
+  const lists = (t.list_fields ?? []).filter((lf) => t.data_fields.includes(lf.field))
+  const listNote = lists.map((lf) => ` ${lf.field} is a list of rows, each with ${lf.columns.join(', ')}.`).join('')
+  return `Fill these fields from your research: ${t.data_fields.join(', ')}.${listNote}`
 }
 
 function fmt(t: TemplateRef): string {
@@ -35,7 +37,8 @@ export function emailPrompt(t: TemplateRef, topic = '<what to research>', recipi
 
 // A deterministic playbook step (recipe_executor generate_document step type).
 export function playbookStepJson(t: TemplateRef): string {
-  const data = Object.fromEntries(t.data_fields.map((f) => [f, `{{step_1.output}}`]))
+  const listNames = new Set((t.list_fields ?? []).map((lf) => lf.field))
+  const data = Object.fromEntries(t.data_fields.map((f) => [f, listNames.has(f) ? [] : `{{step_1.output}}`]))
   return JSON.stringify(
     {
       type: 'generate_document',

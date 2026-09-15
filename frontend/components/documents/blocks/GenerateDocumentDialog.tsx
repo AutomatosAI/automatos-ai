@@ -194,6 +194,7 @@ export function GenerateDocumentDialog({
             </div>
             <PreviewDataForm
               fields={template?.data_fields ?? []}
+              listFields={template?.list_fields ?? []}
               data={data}
               onChange={setData}
               missingOnFile={missingOnFile}

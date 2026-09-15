@@ -33,8 +33,8 @@ const STEPS: { icon: React.ComponentType<{ className?: string }>; title: string;
   },
   {
     icon: Braces,
-    title: '2 · Build a template from blocks',
-    body: 'Headings, text, tables, your logo. Drop in chips: {{user.name}} and {{date.long}} fill themselves; {{data.title}} and other data.* chips are the fields an agent (or you) supplies when a document is generated.',
+    title: '2 · Start from a layout, then edit',
+    body: 'New template offers a complete layout per category — letterhead for a letter, line items for an invoice. Edit the blocks; chips like {{user.name}} and {{date.long}} fill themselves, data.* chips are the fields an agent (or you) supplies per document.',
   },
   {
     icon: Bot,

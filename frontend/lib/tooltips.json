@@ -927,7 +927,7 @@
     "templates": {
       "gallery": {
         "title": {
-          "text": "Templates are branded document layouts your agents fill. Starters are copy-on-customise; your own can be edited, generated from, or deleted. Each card shows the data.* fields an agent must supply.",
+          "text": "Templates are branded document layouts your agents fill. Every category (letter, invoice, report, proposal, agreement, data sheet, page) has a starter you copy and edit, and New template starts from one of those layouts. Each card shows the data.* fields an agent must supply; a name ending in [] is a list of rows.",
           "docLink": "/deliverables"
         }
       },
@@ -937,7 +937,7 @@
           "docLink": "/deliverables"
         },
         "category": {
-          "text": "A filter for people and agents: report, letter, invoice, proposal, contract, data, general. Agents can ask for \"invoice templates\".",
+          "text": "The kind of document. It is the layout you start from (a letter has a letterhead and a sign-off, an invoice has line items and totals) and the filter people and agents use (\"list invoice templates\"). Use Change layout to swap the blocks for another category's layout.",
           "docLink": "/deliverables"
         },
         "format": {

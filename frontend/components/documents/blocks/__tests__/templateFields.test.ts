@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   collectDataFields,
+  collectListFields,
   collectMissingOnFile,
   collectVariablePaths,
   fieldLabel,
@@ -24,6 +25,14 @@ const blocks: Block[] = [
   { type: 'table', id: 'tb', header: true, rows: [[[{ type: 'variable', path: 'data.client.name' }], []]] },
   { type: 'page_break', id: 'pb' },
   { type: 'text', id: 'dup', content: [{ type: 'variable', path: 'data.title' }] },
+  {
+    type: 'section',
+    id: 's2',
+    title: 'Items',
+    children: [
+      { type: 'data_table', id: 'dt', path: 'data.line_items', columns: [{ key: 'description', label: 'Description' }, { key: 'total', label: 'Total', align: 'right' }] },
+    ],
+  },
 ]
 
 describe('collectVariablePaths / collectDataFields', () => {
@@ -31,13 +40,18 @@ describe('collectVariablePaths / collectDataFields', () => {
     expect(collectVariablePaths(blocks)).toEqual([
       'brand.logo_url',
       'data.client.name',
+      'data.line_items',
       'data.summary',
       'data.title',
       'user.name',
     ])
   })
   it('strips the data. prefix for the fill-in fields', () => {
-    expect(collectDataFields(blocks)).toEqual(['client.name', 'summary', 'title'])
+    expect(collectDataFields(blocks)).toEqual(['client.name', 'line_items', 'summary', 'title'])
+  })
+  it('reports data_table blocks as list fields with their column keys (PRD-243)', () => {
+    expect(collectListFields(blocks)).toEqual([{ field: 'line_items', columns: ['description', 'total'] }])
+    expect(collectListFields([])).toEqual([])
   })
   it('handles an empty tree', () => {
     expect(collectVariablePaths([])).toEqual([])

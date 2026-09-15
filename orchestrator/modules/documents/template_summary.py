@@ -20,7 +20,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from modules.documents.blocks import BlockValidationError, collect_variable_paths, validate_blocks
+from modules.documents.blocks import (
+    BlockValidationError,
+    collect_list_fields,
+    collect_variable_paths,
+    validate_blocks,
+)
 from modules.documents.variables.catalog import DYNAMIC_PREFIX
 
 STARTER_CREATOR = "system"
@@ -35,6 +40,16 @@ def variable_paths_of(blocks: Optional[dict]) -> List[str]:
     except BlockValidationError:
         return []
     return sorted(set(collect_variable_paths(doc)))
+
+
+def list_fields_of(blocks: Optional[dict]) -> List[Dict[str, Any]]:
+    """The ``data.*`` LIST fields (``data_table`` blocks) with their column keys ([] when none)."""
+    if not blocks:
+        return []
+    try:
+        return collect_list_fields(validate_blocks(blocks))
+    except BlockValidationError:
+        return []
 
 
 def data_fields_of(paths: List[str]) -> List[str]:
@@ -62,9 +77,10 @@ def summarize_template(t: Any) -> Dict[str, Any]:
         "is_starter": (getattr(t, "created_by", None) or "") == STARTER_CREATOR,
         "variable_paths": paths,
         "data_fields": data_fields_of(paths),
+        "list_fields": list_fields_of(blocks),
         "created_at": created_at.isoformat() if created_at else None,
         "updated_at": updated_at.isoformat() if updated_at else None,
     }
 
 
-__all__ = ["STARTER_CREATOR", "data_fields_of", "summarize_template", "variable_paths_of"]
+__all__ = ["STARTER_CREATOR", "data_fields_of", "list_fields_of", "summarize_template", "variable_paths_of"]

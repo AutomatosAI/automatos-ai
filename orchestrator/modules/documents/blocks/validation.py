@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from .schema import (
     BlockDocument,
+    DataTableBlock,
     SectionBlock,
     TableBlock,
     VariableBlock,
@@ -36,7 +37,7 @@ class BlockValidationError(Exception):
 # Discriminator tags Pydantic injects into error locations (the Literal `type` values).
 # Stripped from `loc` so an editor sees `blocks.0.level`, not `blocks.0.heading.level`.
 _DISCRIMINATOR_TAGS = frozenset(
-    {"heading", "text", "table", "image", "variable", "page_break", "section"}
+    {"heading", "text", "table", "image", "variable", "data_table", "page_break", "section"}
 )
 
 
@@ -95,7 +96,7 @@ def collect_variable_paths(doc: BlockDocument) -> Set[str]:
                 paths.add(run.path)
 
     def walk_block(block) -> None:
-        if isinstance(block, VariableBlock):
+        if isinstance(block, (VariableBlock, DataTableBlock)):
             paths.add(block.path)
         elif isinstance(block, TableBlock):
             for row in block.rows:
@@ -112,4 +113,27 @@ def collect_variable_paths(doc: BlockDocument) -> Set[str]:
     return paths
 
 
-__all__ = ["BlockValidationError", "validate_blocks", "collect_variable_paths"]
+def collect_list_fields(doc: BlockDocument) -> List[Dict[str, Any]]:
+    """The ``data.*`` LIST fields the document expects (PRD-243): one entry per
+    ``data_table`` block — ``{"field": "line_items", "columns": ["description", ...]}``
+    — so the Studio form and the agent tool schema can say "a list of rows, each with
+    these keys" instead of treating it like a scalar chip."""
+    found: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+
+    def walk(block) -> None:
+        if isinstance(block, DataTableBlock):
+            field = block.path[len("data."):]
+            if field not in seen:
+                seen.add(field)
+                found.append({"field": field, "columns": [c.key for c in block.columns]})
+        elif isinstance(block, SectionBlock):
+            for child in block.children:
+                walk(child)
+
+    for block in doc.blocks:
+        walk(block)
+    return found
+
+
+__all__ = ["BlockValidationError", "validate_blocks", "collect_variable_paths", "collect_list_fields"]

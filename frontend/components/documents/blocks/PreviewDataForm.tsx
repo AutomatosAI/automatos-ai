@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Braces, Palette } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -9,10 +9,13 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { FieldHelp } from '@/components/ui/help-tooltip'
 import { fieldLabel, getDataField, setDataField } from './templateFields'
+import type { ListField } from './types'
 
 interface PreviewDataFormProps {
   // The data.* names the template references (prefix stripped).
   fields: string[]
+  // The data.* LIST fields (data_table blocks) — edited as JSON rows (PRD-243).
+  listFields?: ListField[]
   // The `data` object (what generate_document's `data` carries).
   data: Record<string, any>
   onChange: (data: Record<string, any>) => void
@@ -24,8 +27,66 @@ interface PreviewDataFormProps {
 
 // One input per data.* chip, so an author sees exactly the contract an agent must fill
 // (PRD-242 S5). The raw JSON stays one toggle away for nested/legacy shapes.
+function ListFieldEditor({
+  field,
+  columns,
+  data,
+  onChange,
+}: {
+  field: ListField
+  columns: string[]
+  data: Record<string, any>
+  onChange: (data: Record<string, any>) => void
+}) {
+  const current = data[field.field]
+  const rows = Array.isArray(current) ? current : []
+  const incoming = JSON.stringify(rows)
+  const [text, setText] = useState(() => JSON.stringify(rows, null, 2))
+  const [error, setError] = useState<string | null>(null)
+  // What this editor last emitted. When the parent's value differs from it, the change
+  // came from outside (the dialog seeding sample rows after mount, "Change layout") and
+  // the textarea must follow; the author's own keystrokes never get reformatted.
+  const emitted = useRef(incoming)
+  useEffect(() => {
+    if (incoming !== emitted.current) {
+      emitted.current = incoming
+      setText(JSON.stringify(rows, null, 2))
+      setError(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming])
+  const example = `{ ${columns.map((c) => `"${c}": "…"`).join(', ')} }`
+  const apply = (next: string) => {
+    setText(next)
+    try {
+      const parsed = JSON.parse(next)
+      if (!Array.isArray(parsed)) {
+        setError('Must be a JSON list of rows')
+        return
+      }
+      setError(null)
+      emitted.current = JSON.stringify(parsed)
+      onChange({ ...data, [field.field]: parsed })
+    } catch (e: any) {
+      setError(e?.message || 'Invalid JSON')
+    }
+  }
+  return (
+    <div className="sm:col-span-2">
+      <Label className="text-xs">
+        {fieldLabel(field.field)} <span className="font-mono text-[10px] text-muted-foreground">data.{field.field}[]</span>
+      </Label>
+      <Textarea value={text} onChange={(e) => apply(e.target.value)} className="min-h-[96px] font-mono text-xs" aria-label={`Rows for ${field.field}`} />
+      <p className={`mt-1 text-[11px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>
+        {error ? error : `A list of rows; each row: ${example}`}
+      </p>
+    </div>
+  )
+}
+
 export function PreviewDataForm({
   fields,
+  listFields = [],
   data,
   onChange,
   missingOnFile,
@@ -96,13 +157,13 @@ export function PreviewDataForm({
             <p className="text-xs text-muted-foreground">This is the object an agent passes as <code>data</code> to generate_document.</p>
           )}
         </div>
-      ) : fields.length === 0 ? (
+      ) : fields.length === 0 && listFields.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           This template has no <code>data.*</code> chips — add one with “Insert variable → data” to create a fill-in field.
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {fields.map((field) => {
+          {fields.filter((f) => !listFields.some((lf) => lf.field === f)).map((field) => {
             const value = getDataField(data, field)
             const long = value.length > 80 || /summary|body|details|content|notes|appendix/i.test(field)
             return (
@@ -118,6 +179,9 @@ export function PreviewDataForm({
               </div>
             )
           })}
+          {listFields.map((lf) => (
+            <ListFieldEditor key={lf.field} field={lf} columns={lf.columns} data={data} onChange={onChange} />
+          ))}
         </div>
       )}
     </div>
