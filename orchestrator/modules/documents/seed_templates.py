@@ -279,7 +279,6 @@ def seed_starter_templates(db: Session, workspace_id: UUID) -> int:
         elif outcome == "refreshed":
             for column, value in starter_columns(preset).items():
                 setattr(existing, column, value)
-            existing.is_active = True
             existing.updated_at = datetime.utcnow()
             refreshed += 1
 
@@ -305,11 +304,15 @@ def starter_columns(preset: dict) -> dict:
 
 def starter_outcome(existing, preset: dict) -> str:
     """``created`` (no row), ``refreshed`` (a platform-owned row that drifted from the
-    preset), ``unchanged`` (platform-owned and identical), or ``user_owned`` (a row a
-    person created under the same name — never overwritten). Pure."""
+    preset), ``unchanged`` (platform-owned and identical), ``user_owned`` (a row a
+    person created under the same name — never overwritten), or ``deleted_by_user``
+    (a platform starter the person soft-deleted — never resurrected, never
+    re-created: their gallery stays the way they left it). Pure."""
     if existing is None:
         return "created"
     if (getattr(existing, "created_by", None) or "") != STARTER_CREATOR:
         return "user_owned"
+    if getattr(existing, "is_active", True) is False:
+        return "deleted_by_user"
     current = {column: getattr(existing, column, None) for column in starter_columns(preset)}
     return "unchanged" if current == starter_columns(preset) else "refreshed"

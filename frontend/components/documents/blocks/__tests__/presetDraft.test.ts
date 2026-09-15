@@ -48,6 +48,14 @@ describe('presetDraft', () => {
     expect(sampleDataOf(null)).toEqual({})
     expect(sampleDataOf({ data: [1] })).toEqual({ data: [1] })
   })
+  it('a category picked on a blank draft yields that layout (what the editor does on select)', () => {
+    const blank = { ...blankDraft(), category: 'general' }
+    expect(isBlankDraft(blank)).toBe(true)
+    const next = applyPresetLayout({ ...blank, category: 'invoice' }, preset)
+    expect(next.category).toBe('invoice')
+    expect(next.blocks).toBe(preset.blocks.blocks)
+    expect(isBlankDraft(next)).toBe(false)
+  })
   it('knows a blank draft when it sees one', () => {
     expect(isBlankDraft(blankDraft())).toBe(true)
     expect(isBlankDraft({ ...blankDraft(), blocks: [] })).toBe(true)

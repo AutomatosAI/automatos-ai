@@ -22,6 +22,8 @@
 - **D4 · No rules under headings.** Headings are colour + weight + spacing only; table header rows keep the primary fill; body cells use a hairline bottom border. `h1` 22pt, `h2` 15pt, `h3` 12.5pt.
 - **D5 · Every preset must render clean with its own sample data** against a filled brand kit and user — a parametrised test, so a starter can never ship a blocked document. Optional contact details (`company.address/email/phone/website`, `user.email`) carry `fallback=""`; the fields a document is *about* have none.
 
+- **D6 · The category select does something (code review, same day).** On a blank draft, picking a category loads that category's layout outright; on a draft with content it only re-tags and offers "Use the … layout instead" (which opens Change layout). A starter a person soft-deleted is `deleted_by_user` to the seeder: never refreshed, never resurrected — the refresh path no longer forces `is_active`. The list-rows editor follows outside changes to its value (dialog seeding, Change layout) without reformatting the author's own typing.
+
 ## Stories
 
 - **S1 · `data_table` block** — `blocks/schema.py` (`DataTableColumn`, `DataTableBlock`: path must be `data.*`, unique keys), `blocks/validation.py` (`collect_list_fields`, discriminator tag), `blocks/html_renderer.py` + `blocks/docx_renderer.py` (`data=` kwarg; rows by key or position; empty policy), `variables/catalog.py::walk_dynamic` (shared reader; the resolver's `_walk` moved there), `generation_service.py` + the preview route thread the raw `data` through, `template_summary.py` adds `list_fields`.

@@ -84,7 +84,18 @@ export function TemplateStudio() {
       if (asCopy && !full.has_blocks) {
         // A legacy (Jinja / uploaded) template cannot be block-edited: the copy
         // starts from its category's layout instead of an empty heading (PRD-243).
-        const preset = presets.find((p) => p.category === (full.category || 'general')) ?? presets.find((p) => p.category === 'general')
+        // Layouts load separately; if they are not here yet, fetch them now rather
+        // than silently falling back to blank.
+        let available = presets
+        if (available.length === 0) {
+          try {
+            available = await templateBlocksApi.listPresets()
+            setPresets(available)
+          } catch {
+            available = []
+          }
+        }
+        const preset = available.find((p) => p.category === (full.category || 'general')) ?? available.find((p) => p.category === 'general')
         setDraft(
           preset
             ? draftFromPreset(preset, { name: `${full.name} (copy)`, description: full.description || preset.description })
@@ -194,6 +205,7 @@ export function TemplateStudio() {
         <TemplateEditor
           draft={draft}
           variables={variables}
+          presets={presets}
           saving={saving}
           onChange={setDraft}
           onBack={() => setMode('gallery')}
@@ -202,7 +214,7 @@ export function TemplateStudio() {
           onOpenBrandKit={() => setBrandOpen(true)}
           onChangeLayout={() => setPicker('replace')}
         />
-        <PresetPicker open={picker !== null} onOpenChange={(open) => !open && setPicker(null)} presets={presets} loading={presetsLoading} mode={picker ?? 'replace'} onPick={pickPreset} />
+        <PresetPicker open={picker !== null} onOpenChange={(open) => !open && setPicker(null)} presets={presets} loading={presetsLoading} mode={picker ?? 'new'} onPick={pickPreset} />
         <BrandKitDialog open={brandOpen} onOpenChange={setBrandOpen} onSaved={() => loadGallery()} />
         <GenerateDocumentDialog
           open={!!generateFor}

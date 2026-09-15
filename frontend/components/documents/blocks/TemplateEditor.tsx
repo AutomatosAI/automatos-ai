@@ -12,9 +12,10 @@ import { BlockEditor } from './BlockEditor'
 import { PreviewDataForm } from './PreviewDataForm'
 import { PreviewPane } from './PreviewPane'
 import { UseWithAutoPopover } from './UseWithAutoPopover'
+import { applyPresetLayout, isBlankDraft } from './presetDraft'
 import { collectDataFields, collectListFields, collectMissingOnFile, collectVariablePaths } from './templateFields'
 import { SCHEMA_VERSION } from './types'
-import type { Block, VariableEntry } from './types'
+import type { Block, TemplatePreset, VariableEntry } from './types'
 
 export const CATEGORIES = ['general', 'report', 'invoice', 'contract', 'letter', 'proposal', 'data']
 export const FORMATS = ['pdf', 'docx']
@@ -32,6 +33,8 @@ export interface EditorDraft {
 interface TemplateEditorProps {
   draft: EditorDraft
   variables: VariableEntry[]
+  // The layouts per category (PRD-243): picking a category on a blank draft applies its layout.
+  presets: TemplatePreset[]
   saving: boolean
   onChange: (draft: EditorDraft) => void
   onBack: () => void
@@ -48,6 +51,7 @@ interface TemplateEditorProps {
 export function TemplateEditor({
   draft,
   variables,
+  presets,
   saving,
   onChange,
   onBack,
@@ -62,6 +66,18 @@ export function TemplateEditor({
   const missingOnFile = useMemo(() => collectMissingOnFile(paths, variables), [paths, variables])
   const autoFilled = paths.filter((p) => !p.startsWith('data.'))
   const patch = (p: Partial<EditorDraft>) => onChange({ ...draft, ...p })
+  const presetFor = (category: string) => presets.find((pr) => pr.category === category)
+  // The category select must DO something: on a blank draft it loads that category's
+  // layout outright; on a draft with content it only tags, and offers the layout.
+  const changeCategory = (category: string) => {
+    const preset = presetFor(category)
+    if (preset && isBlankDraft(draft)) {
+      onChange(applyPresetLayout({ ...draft, category }, preset))
+      return
+    }
+    patch({ category })
+  }
+  const layoutHint = !isBlankDraft(draft) && presetFor(draft.category) && draft.blocks !== presetFor(draft.category)?.blocks.blocks
 
   return (
     <div className="space-y-4">
@@ -102,7 +118,7 @@ export function TemplateEditor({
           <Label className="flex items-center text-xs">
             Category <FieldHelp id="deliverables.templates.editor.category" />
           </Label>
-          <Select value={draft.category} onValueChange={(category) => patch({ category })}>
+          <Select value={draft.category} onValueChange={changeCategory}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {CATEGORIES.map((c) => (
@@ -110,6 +126,11 @@ export function TemplateEditor({
               ))}
             </SelectContent>
           </Select>
+          {layoutHint && (
+            <button type="button" className="mt-1 text-[11px] text-primary underline-offset-2 hover:underline" onClick={onChangeLayout}>
+              Use the {draft.category} layout instead
+            </button>
+          )}
         </div>
         <div>
           <Label className="flex items-center text-xs">

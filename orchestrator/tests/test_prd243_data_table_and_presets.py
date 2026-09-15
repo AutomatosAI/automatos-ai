@@ -184,6 +184,19 @@ def test_starter_outcome_creates_refreshes_or_leaves_user_rows():
     assert starter_outcome(drifted, preset) == "refreshed"
     users_row = SimpleNamespace(created_by="user_abc", **{**starter_columns(preset), "blocks": {"version": 1, "blocks": []}})
     assert starter_outcome(users_row, preset) == "user_owned"
+    # A starter the person soft-deleted is neither refreshed nor resurrected, even when drifted.
+    deleted = SimpleNamespace(created_by="system", is_active=False, **{**starter_columns(preset), "blocks": {"version": 1, "blocks": []}})
+    assert starter_outcome(deleted, preset) == "deleted_by_user"
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=[p["category"] for p in PRESETS])
+def test_starter_columns_survive_a_json_round_trip(preset):
+    """The refresh check compares the stored JSONB with the preset; a value that does
+    not round-trip through JSON (a float, a tuple) would make every boot 'refresh'."""
+    import json
+
+    columns = starter_columns(preset)
+    assert json.loads(json.dumps(columns)) == columns
 
 
 # --------------------------------------------------------------------------- #

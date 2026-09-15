@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Braces, Palette } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -39,8 +39,22 @@ function ListFieldEditor({
   onChange: (data: Record<string, any>) => void
 }) {
   const current = data[field.field]
-  const [text, setText] = useState(() => JSON.stringify(Array.isArray(current) ? current : [], null, 2))
+  const rows = Array.isArray(current) ? current : []
+  const incoming = JSON.stringify(rows)
+  const [text, setText] = useState(() => JSON.stringify(rows, null, 2))
   const [error, setError] = useState<string | null>(null)
+  // What this editor last emitted. When the parent's value differs from it, the change
+  // came from outside (the dialog seeding sample rows after mount, "Change layout") and
+  // the textarea must follow; the author's own keystrokes never get reformatted.
+  const emitted = useRef(incoming)
+  useEffect(() => {
+    if (incoming !== emitted.current) {
+      emitted.current = incoming
+      setText(JSON.stringify(rows, null, 2))
+      setError(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming])
   const example = `{ ${columns.map((c) => `"${c}": "…"`).join(', ')} }`
   const apply = (next: string) => {
     setText(next)
@@ -51,6 +65,7 @@ function ListFieldEditor({
         return
       }
       setError(null)
+      emitted.current = JSON.stringify(parsed)
       onChange({ ...data, [field.field]: parsed })
     } catch (e: any) {
       setError(e?.message || 'Invalid JSON')
