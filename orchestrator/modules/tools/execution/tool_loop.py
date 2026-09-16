@@ -23,6 +23,7 @@ Stdlib-only at import time so unit tests can load it without dragging the
 from __future__ import annotations
 
 import json
+import re
 import logging
 import time
 from dataclasses import dataclass, field
@@ -235,6 +236,14 @@ class ToolLoopExecutor:
         current = initial_response
         iteration = 0
         max_reached = False
+
+        # 2026-09-16: a first reply that NARRATES tool use ("Now let me create
+        # OPS and TRACKER… Good — both created", invented ids and all) without a
+        # single tool call is the documented Opus failure mode with thinking off:
+        # the call is written into the visible text instead of being made. One
+        # nudge, one retry — the model either calls the tools or says plainly
+        # that it did not act.
+        current = await self._recover_narrated_actions(current, messages, tools)
 
         if not _has_tool_calls(current):
             return ToolLoopResult(response=current, iterations=0)
@@ -514,9 +523,67 @@ class ToolLoopExecutor:
         return await self._llm(messages, tools)
 
 
+    async def _recover_narrated_actions(
+        self,
+        current: LLMResponse,
+        messages: List[Message],
+        tools: Optional[List[Dict[str, Any]]],
+    ) -> LLMResponse:
+        """Retry once when tools were offered, none was called, and the reply
+        reads like a tool loop told in prose. The narration stays in the
+        history so the model sees exactly what it claimed; the nudge names the
+        rule. A retry that still makes no call is returned as-is (the chat lane
+        then tells the user nothing was executed)."""
+        if not tools or _has_tool_calls(current):
+            return current
+        text = getattr(current, "content", "") or ""
+        if not looks_like_narrated_action(text):
+            return current
+        logger.warning(
+            "[tool-loop] reply narrated actions without a tool call (%d chars) — nudging once",
+            len(text),
+        )
+        messages.append({"role": "assistant", "content": text})
+        messages.append({"role": "system", "content": _NARRATION_RECOVERY_MSG})
+        return await self._llm(messages, tools)
+
+
 # ---------------------------------------------------------------------------
 # Helpers — pure, stdlib only.
 # ---------------------------------------------------------------------------
+
+_NARRATION_RECOVERY_MSG = (
+    "Your previous reply described actions (\"let me create…\", \"now let me "
+    "assign…\", \"both created\") but made NO tool call, so nothing was executed "
+    "and nothing you reported exists. Either call the tools now, in this "
+    "response, or state plainly that you did not do it and what you need. "
+    "Never describe an action as done without a tool result, and never "
+    "invent ids, models or statuses."
+)
+
+_NARRATION_CUES = re.compile(
+    r"\b(let me|now let me|let'?s (now )?(create|build|assign|install|update|set up|wire)|"
+    r"i'?ll (now )?(create|build|assign|install|update|set up|wire)|creating|assigning|installing)\b",
+    re.IGNORECASE,
+)
+_NARRATION_CLAIMS = re.compile(
+    r"(\bboth created\b|\bcreated (and|&) wired\b|\bnow (exists|created|configured|installed)\b|"
+    r"\bconfirmed real\b|\bi('ve| have) (created|installed|assigned|updated|configured|wired|deleted)\b|"
+    r"\bgood\s*[—-]\s*(both|all|done)\b|\bhere'?s what actually exists\b|✅)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_narrated_action(text: str) -> bool:
+    """True when a reply reads like a tool loop told in prose — several
+    "let me / now let me / creating" cues, or a cue plus a completion claim
+    ("both created", "✅", "confirmed real"). A plain answer, a question, or a
+    single "let me know" never trips it."""
+    if not text:
+        return False
+    cues = len(_NARRATION_CUES.findall(text))
+    claims = len(_NARRATION_CLAIMS.findall(text))
+    return cues >= 2 or (cues >= 1 and claims >= 1)
 
 
 def _has_tool_calls(response: Any) -> bool:
