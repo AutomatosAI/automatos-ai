@@ -6,7 +6,6 @@ Manage and monitor heartbeat ticks for orchestrator and agents.
 PRD-72 adds workspace listing, toggle, and execution history endpoints.
 """
 
-import asyncio
 import json
 import logging
 from datetime import datetime
@@ -22,7 +21,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
 from core.auth.workspace_permission import require_workspace_permission
-from core.security.web_access import validate_outbound_url
+from core.security.web_access import resolve_outbound_async
 from core.models import Agent
 
 logger = logging.getLogger(__name__)
@@ -134,11 +133,10 @@ async def save_agent_heartbeat_config(
         # here with the reason so the form can say why; the sink re-checks and
         # pins the address at send time (services/heartbeat_service.py), so a
         # DNS answer that changes later cannot undo this.
-        ok, reason, _host = await asyncio.to_thread(
-            validate_outbound_url, webhook_url, enforce_switch=False
-        )
-        if not ok:
-            raise HTTPException(400, f"webhook_url refused: {reason}")
+        target = await resolve_outbound_async(webhook_url, enforce_switch=False)
+        if not target.ok:
+            raise HTTPException(400, f"webhook_url refused: {target.reason}")
+    stored = {**payload.dict(), "webhook_url": webhook_url or None}
 
     # Read current configuration (immutable pattern — build new dict)
     row = db.execute(
@@ -147,7 +145,7 @@ async def save_agent_heartbeat_config(
     ).fetchone()
 
     current_config = dict(row.configuration) if row and row.configuration else {}
-    new_config = {**current_config, "heartbeat": payload.dict()}
+    new_config = {**current_config, "heartbeat": stored}
 
     db.execute(
         text("UPDATE agents SET configuration = :cfg WHERE id = :aid"),
@@ -161,7 +159,7 @@ async def save_agent_heartbeat_config(
         service = get_heartbeat_service()
         if payload.enabled:
             service.schedule_agent_heartbeat(
-                agent_id, str(ctx.workspace_id), payload.dict()
+                agent_id, str(ctx.workspace_id), stored
             )
         else:
             service.unschedule_heartbeat(f"agent_hb_{agent_id}")

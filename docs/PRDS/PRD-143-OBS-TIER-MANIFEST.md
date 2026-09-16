@@ -29,11 +29,10 @@ its own dial, never set it.
 
 ---
 
-## Locked obs/analytics HTTP routers (13)
+## Locked obs/analytics HTTP routers (12)
 
 Router-wide `require_super_admin` (`orchestrator/core/auth/super_admin.py`) —
-except `api/heartbeat.py`, where since 2026-09-16 only the observability routes carry
-the lock (per route; see its row) — every endpoint on these routers returns **403 "Super admin only"** for any
+every endpoint on these routers returns **403 "Super admin only"** for any
 principal that is not literally `system_role == 'super_admin'`, including
 workspace admins/owners and API keys (`system_role='admin'`). The dashboards
 backed by these routers 403 for non-super-admins — the ACCEPTED Rev 2
@@ -43,11 +42,24 @@ consequence (PRD-143 Open Q4).
 
 | Router | Prefix |
 |---|---|
-| `orchestrator/api/heartbeat.py` | `/api/heartbeat` — **obs routes only** since 2026-09-16: `GET /status` (every scheduler job across all workspaces), `GET /analytics`, `POST /orchestrator/run`, `GET /orchestrator/history`, locked per route. The per-agent heartbeat routes (`/agents/{id}/config|last|run|history`, `/workspace`, `/{id}/toggle`, `/{id}/executions`) are an ordinary agent setting, gated on the workspace matrix (`agents:read` / `agents:update` / `agents:execute`) exactly like editing the agent; `tests/test_heartbeat_routes_workspace_gate.py` refuses any route on that router that carries neither gate. |
 | `orchestrator/api/analytics.py` | `/analytics` |
 | `orchestrator/api/analytics_api.py` | `/api/analytics` |
 | `orchestrator/api/analytics_real.py` | `/api/analytics` |
 | `orchestrator/api/analytics_charts.py` | `/api/analytics/charts` |
+
+### Unlocked on 2026-09-16 — `orchestrator/api/heartbeat.py` carries two tiers per route
+
+Not in the table above: the router no longer carries the lock. Its observability
+routes — `GET /api/heartbeat/status` (every scheduler job across all workspaces),
+`GET /analytics`, `POST /orchestrator/run`, `GET /orchestrator/history` — keep
+`require_super_admin`, declared per route. The per-agent heartbeat routes
+(`/agents/{id}/config|last|run|history`, `/workspace`, `/{id}/toggle`,
+`/{id}/executions`) are an ordinary agent setting, gated on the workspace matrix
+(`agents:read` / `agents:update` / `agents:execute`) exactly like editing the
+agent. `tests/test_heartbeat_routes_workspace_gate.py` pins that router's full
+route table (every route carries exactly one of the two gates);
+`tests/test_prd143_boundary_sweep.py` parses only the table rows above, so this
+note does not re-lock it.
 
 ### Batch 2 (S7)
 

@@ -136,6 +136,29 @@ def test_switch_off_does_not_govern_webhooks_but_the_denylist_does(monkeypatch):
     assert len(sent) == 1  # refused: nothing new was sent
 
 
+def test_a_resolver_that_never_answers_is_a_refusal(monkeypatch):
+    import time
+
+    sent = _stub_client(monkeypatch, lambda req: httpx.Response(200, text="ok"))
+    monkeypatch.setattr(wa, "RESOLVE_TIMEOUT_SECONDS", 0.05)
+
+    def _slow(host, port, proto=None):
+        time.sleep(0.3)
+        return _fake_getaddrinfo(host, port, proto)
+
+    monkeypatch.setattr(wa, "_getaddrinfo", _slow)
+    _deliver("https://hooks.example/heartbeat")
+    assert sent == []  # refused, not stalled
+
+
+def test_the_real_client_never_follows_redirects():
+    client = HeartbeatService._webhook_client()
+    try:
+        assert client.follow_redirects is False
+    finally:
+        asyncio.run(client.aclose())
+
+
 def test_delivery_failure_is_logged_never_raised(monkeypatch):
     def _boom(req):
         raise httpx.ConnectError("refused")

@@ -135,6 +135,30 @@ def resolve_outbound(url: str, *, enforce_switch: bool = True) -> OutboundTarget
     return OutboundTarget(True, "OK", host, pinned, port, scheme)
 
 
+# System DNS has no timeout of its own; a resolver that never answers must
+# not hold a request (or a thread-pool slot) for longer than this.
+RESOLVE_TIMEOUT_SECONDS = 5.0
+
+
+async def resolve_outbound_async(url: str, *, enforce_switch: bool = True) -> OutboundTarget:
+    """:func:`resolve_outbound` off the event loop and bounded: a resolver that
+    never answers is a refusal, not a stalled request. (The worker thread
+    finishes on its own; only the caller stops waiting.)"""
+    import asyncio
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(resolve_outbound, url, enforce_switch=enforce_switch),
+            timeout=RESOLVE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        try:
+            host = (urlparse((url or "").strip()).hostname or "").lower()
+        except Exception:  # noqa: BLE001 — the URL is already suspect
+            host = ""
+        return OutboundTarget(False, f"DNS resolution timed out for {host or 'the URL'}", host)
+
+
 def validate_outbound_url(url: str, *, enforce_switch: bool = True) -> Tuple[bool, str, str]:
     """(ok, reason, host) — the yes/no view of :func:`resolve_outbound`."""
     target = resolve_outbound(url, enforce_switch=enforce_switch)

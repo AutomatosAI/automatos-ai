@@ -1530,10 +1530,10 @@ class HeartbeatService:
         followed: a hop could land in a blocked range.
         """
         try:
-            from core.security.web_access import build_pinned_request, resolve_outbound
+            from core.security.web_access import build_pinned_request, resolve_outbound_async
 
-            # System DNS is blocking; keep it off the event loop.
-            target = await asyncio.to_thread(resolve_outbound, webhook_url, enforce_switch=False)
+            # Off the event loop and bounded (RESOLVE_TIMEOUT_SECONDS).
+            target = await resolve_outbound_async(webhook_url, enforce_switch=False)
             if not target.ok:
                 logger.warning(
                     "[Heartbeat] report_to=webhook refused for agent=%s: %s",
@@ -1553,9 +1553,10 @@ class HeartbeatService:
                 resp = await client.send(
                     build_pinned_request(client, "POST", webhook_url, target, json=payload)
                 )
+                # Host only: webhook URLs often carry a secret in the path.
                 logger.info(
-                    "[Heartbeat] report_to=webhook: POST %s → %s (agent=%s)",
-                    webhook_url, resp.status_code, agent_id,
+                    "[Heartbeat] report_to=webhook: POST to %s → %s (agent=%s)",
+                    target.host, resp.status_code, agent_id,
                 )
         except Exception as e:
             logger.warning(

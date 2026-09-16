@@ -13,7 +13,6 @@ refused URL, a missing search engine and a failed fetch are all plain results.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
@@ -24,10 +23,10 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.security.web_access import (
+    resolve_outbound_async,
     build_pinned_request,
     WEB_ACCESS_OFF_REASON,
     OutboundTarget,
-    resolve_outbound,
     web_access_enabled,
 )
 
@@ -94,8 +93,9 @@ def _pinned_request(client: httpx.AsyncClient, url: str, target: OutboundTarget)
 
 
 async def _resolve(url: str) -> OutboundTarget:
-    # System DNS is blocking; keep it off the event loop.
-    return await asyncio.to_thread(resolve_outbound, url)
+    # System DNS is blocking; keep it off the event loop, and bounded — a
+    # resolver that never answers is a refusal (RESOLVE_TIMEOUT_SECONDS).
+    return await resolve_outbound_async(url)
 
 
 async def web_fetch(
