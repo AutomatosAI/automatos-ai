@@ -9,7 +9,7 @@ Supports per-service configuration via system settings.
 import re
 import time
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Tuple, Dict, Any, List, Optional
 from functools import lru_cache
 
 from config import config
@@ -702,6 +702,7 @@ class LLMManager:
             output_tokens=output_tokens,
             latency_ms=latency_ms,
             status=status,
+            reported_cost=reported_cost if isinstance(reported_cost, (int, float)) else None,
         )
 
         # ------------------------------------------------------------------
@@ -779,10 +780,23 @@ class LLMManager:
         output_tokens: int,
         latency_ms: int,
         status: str,
+        reported_cost: Optional[float] = None,
     ) -> None:
-        """Emit a structured cost audit log line for every LLM call."""
+        """Emit a structured cost audit log line for every LLM call.
+
+        ``reported_cost`` is the provider's own figure for the call (OpenRouter
+        returns the credits it charged); when present it IS the number — the
+        static-map estimate is only for routes that report nothing. The line
+        says which (``cost_source=reported|estimate``): on 2026-09-16 the
+        estimate priced an Opus 4.6 turn at a third of the recorded figure.
+        """
         try:
-            cost_usd = self._estimate_cost(input_tokens, output_tokens)
+            reported = (
+                float(reported_cost)
+                if isinstance(reported_cost, (int, float)) and reported_cost > 0
+                else None
+            )
+            cost_usd = reported if reported is not None else self._estimate_cost(input_tokens, output_tokens)
             model = self.config.model or "unknown"
             provider = self.config.provider.value if self.config.provider else "unknown"
             agent_id = self._tracking_ctx.get("agent_id")
@@ -792,11 +806,11 @@ class LLMManager:
                 "LLM_CALL service=%s provider=%s model=%s "
                 "input_tokens=%d output_tokens=%d total_tokens=%d "
                 "est_cost_usd=%.4f latency_ms=%d status=%s "
-                "agent_id=%s execution_id=%s",
+                "agent_id=%s execution_id=%s cost_source=%s",
                 self.service_name, provider, model,
                 input_tokens, output_tokens, input_tokens + output_tokens,
                 cost_usd, latency_ms, status,
-                agent_id, execution_id,
+                agent_id, execution_id, "reported" if reported is not None else "estimate",
             )
 
             # Budget alert: warn if single call is expensive
@@ -875,7 +889,11 @@ def create_llm_manager(
 # prices off that same registry via ``modules.policy.pricing``. Deliberately
 # NO DB session here: this runs on every LLM call — a per-call price query
 # would add a round-trip + pool checkout to the hottest path in the system.
-MODEL_COST_MAP: Dict[str, tuple] = {
+# Per 1k tokens (input, output). Substring-matched against the model id, so the
+# lookup below orders keys longest-first: a more specific key ("gpt-4.1-mini")
+# is tried before the one it contains ("gpt-4.1") — the reverse priced
+# gpt-4.1-mini at five times its rate (2026-09-16). Add entries in any order.
+_MODEL_COST_ENTRIES: Dict[str, Tuple[float, float]] = {
     "claude-3-opus":       (0.015, 0.075),
     "claude-3.5-sonnet":   (0.003, 0.015),
     "claude-sonnet-4":     (0.003, 0.015),
@@ -889,7 +907,14 @@ MODEL_COST_MAP: Dict[str, tuple] = {
     "gemini-2.0-flash":    (0.0001, 0.0004),
     "glm-5.1":             (0.0005, 0.001),
     "deepseek-chat":       (0.00014, 0.00028),
+    "claude-opus-4": (0.005, 0.025),
+    "gemini-2.5-flash": (0.0003, 0.0025),
+    "gemini-2.5-pro": (0.00125, 0.01),
+    "gpt-5.5": (0.005, 0.03),
 }
+MODEL_COST_MAP: Dict[str, Tuple[float, float]] = dict(
+    sorted(_MODEL_COST_ENTRIES.items(), key=lambda kv: -len(kv[0]))
+)
 
 
 def estimate_cost_usd(model: Optional[str], input_tokens: int, output_tokens: int) -> float:

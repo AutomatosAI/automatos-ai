@@ -491,6 +491,13 @@ class Config:
     # {available:false, reason}. Private, loopback, link-local and metadata
     # ranges are ALWAYS refused (core/security/url_validator.py) — the denylist
     # adds to that, never replaces it.
+    # Prompt caching on the OpenRouter route (2026-09-16): Anthropic models get an
+    # explicit cache_control breakpoint on the stable system prefix plus automatic
+    # caching of the conversation tail. Default TTL 5 minutes (a cache write costs
+    # 1.25x input, a read 0.1x); PROMPT_CACHE_TTL_1H=on switches to the 1-hour TTL
+    # (write 2x) for turns that usually arrive more than 5 minutes apart — it pays
+    # for itself from the second read in an hour.
+    PROMPT_CACHE_TTL_1H: bool = (os.getenv("PROMPT_CACHE_TTL_1H", "") or "").strip().lower() in ("on", "true", "1", "yes")
     _WEB_ACCESS_RAW = (os.getenv("WEB_ACCESS", "") or "").strip().lower()
     WEB_ACCESS: bool = (
         _WEB_ACCESS_RAW in ("on", "true", "1", "yes")

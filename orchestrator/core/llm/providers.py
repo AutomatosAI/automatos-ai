@@ -63,6 +63,10 @@ class ProviderSpec:
     validation: str = VALIDATION_NONE
     attribution_headers: bool = False      # send HTTP-Referer / X-Title (OpenRouter)
     reports_cost: bool = False             # returns the credits charged per call in ``usage.cost``
+    # Passes Anthropic ``cache_control`` breakpoints through on an OpenAI-shaped
+    # request (OpenRouter). The client then marks the stable system prefix and
+    # asks for automatic caching of the conversation tail (2026-09-16).
+    prompt_cache_control: bool = False
     # PRD-240: the provider-executed web search tool a request may carry, or None.
     # Attached by the client when config.WEB_ACCESS is on; the model decides when
     # to search and the provider bills each search on the user's own account.
@@ -116,7 +120,7 @@ _SPECS: Tuple[ProviderSpec, ...] = (
         enum_value="openrouter", env_key="OPENROUTER_API_KEY", base_url_key="OPENROUTER_BASE_URL",
         hosts_vendor_models=True, validation=VALIDATION_MODELS_LIST, attribution_headers=True,
         reports_cost=True, embeddings=True, key_placeholder="sk-or-…", docs_url="https://openrouter.ai/keys",
-        web_search_tool="openrouter:web_search",
+        web_search_tool="openrouter:web_search", prompt_cache_control=True,
     ),
     ProviderSpec(
         slug="nvidia", label="NVIDIA", kind=KIND_HOSTED_OPEN, adapter=ADAPTER_OPENAI_COMPATIBLE,

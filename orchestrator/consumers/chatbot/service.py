@@ -1546,19 +1546,22 @@ class StreamingChatService:
 
         def _governor_track(resp):
             nonlocal turn_llm_cost_usd
+            from core.llm.turn_cost import call_cost_usd
+
             usage = getattr(resp, "usage", None) or {}
-            _in = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0) or 0
-            _out = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0) or 0
-            if _in or _out:
-                _mgr = agent_runtime.llm_manager
-                if hasattr(_mgr, "_estimate_cost"):
-                    # PRD-236: per ROUTE — a free provider (NVIDIA trial) adds $0,
-                    # so the governor never forces synthesis over money not spent.
-                    turn_llm_cost_usd += _mgr._estimate_cost(_in, _out)
-                else:
-                    from core.llm.manager import estimate_cost_usd
-                    _model = getattr(getattr(_mgr, "config", None), "model", None)
-                    turn_llm_cost_usd += estimate_cost_usd(_model, _in, _out)
+            _mgr = agent_runtime.llm_manager
+            if hasattr(_mgr, "_estimate_cost"):
+                # PRD-236: per ROUTE — a free provider (NVIDIA trial) adds $0,
+                # so the governor never forces synthesis over money not spent.
+                _estimate = _mgr._estimate_cost
+            else:
+                from core.llm.manager import estimate_cost_usd
+                _model = getattr(getattr(_mgr, "config", None), "model", None)
+                _estimate = lambda _i, _o: estimate_cost_usd(_model, _i, _o)  # noqa: E731
+            # 2026-09-16: the provider's reported cost (OpenRouter's credits for
+            # the call, cache discounts included) beats the estimate — the
+            # estimate let a $4-recorded turn through a $1.50 ceiling.
+            turn_llm_cost_usd += call_cost_usd(usage, _estimate)
             return resp
 
         # State shared by callbacks within this turn.
@@ -1798,7 +1801,7 @@ class StreamingChatService:
             # researching and answer with what we have.
             if turn_cost_ceiling > 0 and turn_llm_cost_usd >= turn_cost_ceiling:
                 logger.warning(
-                    f"[tool-loop] Turn cost governor tripped: est ${turn_llm_cost_usd:.2f} "
+                    f"[tool-loop] Turn cost governor tripped: ${turn_llm_cost_usd:.2f} so far "
                     f">= ceiling ${turn_cost_ceiling:.2f} — forcing synthesis (PRD-223)"
                 )
                 await sse_queue.put(self.streaming_handler.format_aisdk_limit_reached(

@@ -58,12 +58,14 @@ def usage_dict(usage: Any) -> Dict[str, Any]:
         return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     details = getattr(usage, "prompt_tokens_details", None)
     cached = int(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    # OpenRouter reports Anthropic cache writes beside the reads (2026-09-16).
+    written = int(_extra(details, "cache_write_tokens") or 0) if details is not None else 0
     out: Dict[str, Any] = {
         "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
         "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
         "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
         "cache_read_tokens": cached,
-        "cache_write_tokens": 0,
+        "cache_write_tokens": written,
     }
     cost = _extra(usage, "cost")
     if isinstance(cost, (int, float)):
@@ -297,6 +299,23 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
     def _request_kwargs(self, messages: List[Dict[str, str]], tools: Optional[List[Dict]]) -> Dict[str, Any]:
         """The chat-completions request for ``messages`` (+ tools and tool_choice)."""
+        from config import config as platform_config
+        from core.llm.prompt_cache import apply_openai_cache_control, strip_cache_hints, text_of
+
+        # Prompt caching (2026-09-16): on a provider that passes Anthropic
+        # breakpoints through, an Anthropic model's first system message becomes
+        # content parts with the marker on the assembler's stable prefix, and the
+        # request asks for automatic caching of the conversation tail. The
+        # assembler's hint never leaves the process on any route.
+        auto_cache: Optional[Dict[str, str]] = None
+        if getattr(self.spec, "prompt_cache_control", False):
+            messages, auto_cache = apply_openai_cache_control(
+                messages,
+                getattr(self.config, "model", None),
+                ttl_1h=bool(getattr(platform_config, "PROMPT_CACHE_TTL_1H", False)),
+            )
+        else:
+            messages = strip_cache_hints(messages)
         kwargs = self._base_kwargs(messages)
         if tools:
             kwargs["tools"] = self._sanitize_tools(tools)
@@ -305,13 +324,16 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 kwargs["tool_choice"] = "auto"
             else:
                 force_tool_choice = any(
-                    (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                    (m.get("role") == "system" and "You MUST call" in text_of(m.get("content")))
                     for m in (messages or [])
                 )
                 kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
-        if self.spec.reports_cost:
+        if getattr(self.spec, "reports_cost", False) or auto_cache is not None:
             body = dict(kwargs.get("extra_body") or {})
-            body["usage"] = {"include": True}
+            if getattr(self.spec, "reports_cost", False):
+                body["usage"] = {"include": True}
+            if auto_cache is not None:
+                body["cache_control"] = auto_cache
             kwargs["extra_body"] = body
         # A caller forcing a specific tool ("You MUST call …" ⇒ tool_choice
         # "required") must not be satisfiable by a web search instead — no

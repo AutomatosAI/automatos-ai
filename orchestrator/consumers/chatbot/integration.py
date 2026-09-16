@@ -159,9 +159,13 @@ def apply_orchestration_to_messages(
 
     Returns messages with system prompt at the start.
     """
-    final_messages = [
-        {"role": "system", "content": orchestrated.system_prompt}
-    ]
+    system_message: Dict[str, Any] = {"role": "system", "content": orchestrated.system_prompt}
+    prefix = getattr(orchestrated, "cacheable_prefix", None)
+    if prefix:
+        # PRD-201 S4 hint for the LLM client's cache_control breakpoint; the
+        # client strips it before the request leaves the process.
+        system_message["cache_prefix"] = prefix
+    final_messages = [system_message]
     final_messages.extend(orchestrated.messages)
     return final_messages
 

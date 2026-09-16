@@ -90,6 +90,12 @@ class OrchestratedRequest:
     # badge). [{"attachment_id", "filename", "reason"}]
     attachment_failures: List[Dict[str, Any]] = field(default_factory=list)
 
+    # PRD-201 S4 / 2026-09-16: the assembler's cache-stable prefix (identity,
+    # skills, platform actions) so the client can put its cache_control
+    # breakpoint there — the volatile tail (datetime, onboarding state) stays
+    # outside the cached bytes.
+    cacheable_prefix: Optional[str] = None
+
 
 @dataclass
 class ConversationState:
@@ -293,6 +299,7 @@ class SmartChatOrchestrator:
             requires_memory=intent_result.requires_memory,
             preparation_time_ms=preparation_time,
             attachment_failures=list(getattr(context, "attachment_failures", []) or []),
+            cacheable_prefix=getattr(context, "cacheable_prefix", None),
         )
 
     def _should_fetch_memory(self, intent_result: IntentResult) -> bool:
