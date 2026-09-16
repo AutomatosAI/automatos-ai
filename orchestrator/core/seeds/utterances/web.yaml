@@ -15,6 +15,17 @@
 #     <action_name>:
 #       - text: <utterance>
 #         source: authored | example | phrase_map
+#
+#   source provenance:
+#     example    — folded verbatim from ActionDefinition.examples
+#     phrase_map — folded verbatim from AutoBrain _PLATFORM_KEYWORDS (incl. the
+#                  legacy recipe->playbook remap)
+#     authored   — written for this corpus (colloquial / terse / verbose /
+#                  register variants: ticket·task·card·item, mail·email·inbox,
+#                  close·finish·clear·kill·done)
+#
+# Regenerate/lint:  cd orchestrator && python -m scripts.generate_utterance_corpus
+# super_admin_only actions are EXCLUDED (fail-closed, read from the registry flag).
 version: 1
 category: web
 actions:

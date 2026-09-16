@@ -307,7 +307,7 @@ every agent has:
 1. **OpenRouter** — any OpenRouter key the platform can see (env, the
    operator workspace's key, or this workspace's Settings → API Keys). The
    action runs one cheap completion (`WEB_SEARCH_OPENROUTER_MODEL`, default
-   `openai/gpt-4o-mini`) carrying OpenRouter's `openrouter:platform_web_search` server
+   `openai/gpt-4o-mini`) carrying OpenRouter's `openrouter:web_search` server
    tool; the engine (Exa by default) does the searching and the pages come
    back as citations. Billed per search on your OpenRouter account. An agent
    whose own route is OpenRouter also gets the server tool attached to its

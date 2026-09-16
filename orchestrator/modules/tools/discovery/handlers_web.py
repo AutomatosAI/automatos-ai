@@ -13,7 +13,6 @@ refused URL, a missing search engine and a failed fetch are all plain results.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
@@ -24,9 +23,10 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.security.web_access import (
+    resolve_outbound_async,
+    build_pinned_request,
     WEB_ACCESS_OFF_REASON,
     OutboundTarget,
-    resolve_outbound,
     web_access_enabled,
 )
 
@@ -86,24 +86,16 @@ def html_to_text(html: str) -> tuple[str, str]:
 
 
 def _pinned_request(client: httpx.AsyncClient, url: str, target: OutboundTarget) -> httpx.Request:
-    """The request for ``url`` sent to the address that was checked.
-
-    The URL's host becomes the pinned IP; the real hostname rides as ``Host``
-    and as SNI (``sni_hostname``), so TLS is still verified against the name.
-    A DNS answer that changes after the check therefore changes nothing.
-    """
-    pinned_url = httpx.URL(url).copy_with(host=target.ip)  # httpx brackets IPv6 itself
-    return client.build_request(
-        "GET",
-        pinned_url,
-        headers={"Host": target.host},
-        extensions={"sni_hostname": target.host},
-    )
+    """The GET for ``url`` sent to the address that was checked — see
+    :func:`core.security.web_access.build_pinned_request`, the one place the
+    resolve-and-pin request is built (the heartbeat webhook shares it)."""
+    return build_pinned_request(client, "GET", url, target)
 
 
 async def _resolve(url: str) -> OutboundTarget:
-    # System DNS is blocking; keep it off the event loop.
-    return await asyncio.to_thread(resolve_outbound, url)
+    # System DNS is blocking; keep it off the event loop, and bounded — a
+    # resolver that never answers is a refusal (RESOLVE_TIMEOUT_SECONDS).
+    return await resolve_outbound_async(url)
 
 
 async def web_fetch(
