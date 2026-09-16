@@ -6,6 +6,7 @@ Manage and monitor heartbeat ticks for orchestrator and agents.
 PRD-72 adds workspace listing, toggle, and execution history endpoints.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -20,16 +21,38 @@ from core.database.database import get_db
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.auth.super_admin import require_super_admin
+from core.auth.workspace_permission import require_workspace_permission
+from core.security.web_access import validate_outbound_url
 from core.models import Agent
 
 logger = logging.getLogger(__name__)
 
-# PRD-143 S6: observability tier — router-wide super-admin lock (fail-closed).
+# Two tiers on one router (2026-09-16):
+#
+# - Per-agent heartbeat routes (``/agents/{id}/*``, ``/workspace``,
+#   ``/{id}/toggle``, ``/{id}/executions``) are an ordinary agent setting —
+#   gated on the workspace permission matrix (``modules/policy/roles.py``)
+#   exactly like editing the agent itself: ``agents:read`` to see,
+#   ``agents:update`` to change, ``agents:execute`` to fire a tick. The
+#   handlers scope every row to ``ctx.workspace_id``.
+# - The observability routes (``/status`` — every scheduler job across all
+#   workspaces — ``/analytics``, and the orchestrator heartbeat) keep the
+#   PRD-143 S6 super-admin lock, declared per route. ``tests/
+#   test_heartbeat_routes_workspace_gate.py`` walks the route table and refuses
+#   any endpoint that carries neither gate, so a new route cannot land open.
+#
+# Before this split the whole router was ``require_super_admin`` and the agent
+# editor's heartbeat tab 403'd for every workspace owner while the scheduler
+# kept firing whatever the block said.
 router = APIRouter(
     prefix="/api/heartbeat",
     tags=["heartbeat"],
-    dependencies=[Depends(require_super_admin)],
 )
+
+_READ = Depends(require_workspace_permission("agents:read"))
+_UPDATE = Depends(require_workspace_permission("agents:update"))
+_EXECUTE = Depends(require_workspace_permission("agents:execute"))
+_SU = Depends(require_super_admin)
 
 
 # ── Heartbeat Config Schema ───────────────────────────────────────
@@ -50,18 +73,21 @@ class HeartbeatConfigPayload(BaseModel):
 # ── Agent Heartbeat Config CRUD ───────────────────────────────────
 
 def _verify_agent_ownership(agent_id: int, workspace_id: str, db: Session):
-    """Verify agent belongs to workspace. Raises HTTPException on failure."""
+    """404 unless the agent exists IN THIS WORKSPACE.
+
+    One answer for "no such agent" and "someone else's agent", so agent ids
+    are not an oracle across tenants — the toggle/executions routes below
+    already answer this way.
+    """
     row = db.execute(
         text("SELECT workspace_id FROM agents WHERE id = :aid"),
         {"aid": agent_id},
     ).fetchone()
-    if not row:
-        raise HTTPException(404, f"Agent {agent_id} not found")
-    if str(row.workspace_id) != str(workspace_id):
-        raise HTTPException(403, "Agent does not belong to this workspace")
+    if not row or str(row.workspace_id) != str(workspace_id):
+        raise HTTPException(404, f"Agent {agent_id} not found in this workspace")
 
 
-@router.get("/agents/{agent_id}/config")
+@router.get("/agents/{agent_id}/config", dependencies=[_READ])
 async def get_agent_heartbeat_config(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -91,7 +117,7 @@ async def get_agent_heartbeat_config(
     }
 
 
-@router.put("/agents/{agent_id}/config")
+@router.put("/agents/{agent_id}/config", dependencies=[_UPDATE])
 async def save_agent_heartbeat_config(
     agent_id: int,
     payload: HeartbeatConfigPayload,
@@ -100,6 +126,19 @@ async def save_agent_heartbeat_config(
 ):
     """Save heartbeat config for an agent, updating agent.configuration.heartbeat."""
     _verify_agent_ownership(agent_id, str(ctx.workspace_id), db)
+
+    webhook_url = (payload.webhook_url or "").strip()
+    if webhook_url:
+        # An operator-configured destination: the blocked ranges and the
+        # operator denylist apply, the WEB_ACCESS switch does not. Refused
+        # here with the reason so the form can say why; the sink re-checks and
+        # pins the address at send time (services/heartbeat_service.py), so a
+        # DNS answer that changes later cannot undo this.
+        ok, reason, _host = await asyncio.to_thread(
+            validate_outbound_url, webhook_url, enforce_switch=False
+        )
+        if not ok:
+            raise HTTPException(400, f"webhook_url refused: {reason}")
 
     # Read current configuration (immutable pattern — build new dict)
     row = db.execute(
@@ -132,7 +171,7 @@ async def save_agent_heartbeat_config(
     return {"ok": True}
 
 
-@router.get("/agents/{agent_id}/last")
+@router.get("/agents/{agent_id}/last", dependencies=[_READ])
 async def get_agent_last_heartbeat(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -168,7 +207,7 @@ async def get_agent_last_heartbeat(
 
 # ── Orchestrator Heartbeat ─────────────────────────────────────────
 
-@router.post("/orchestrator/run")
+@router.post("/orchestrator/run", dependencies=[_SU])
 async def run_orchestrator_heartbeat(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -183,7 +222,7 @@ async def run_orchestrator_heartbeat(
         raise HTTPException(500, "Internal server error")
 
 
-@router.get("/orchestrator/history")
+@router.get("/orchestrator/history", dependencies=[_SU])
 async def get_orchestrator_heartbeat_history(
     limit: int = Query(20, ge=1, le=100),
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -217,7 +256,7 @@ async def get_orchestrator_heartbeat_history(
 
 # ── Agent Heartbeat ────────────────────────────────────────────────
 
-@router.post("/agents/{agent_id}/run")
+@router.post("/agents/{agent_id}/run", dependencies=[_EXECUTE])
 async def run_agent_heartbeat(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -236,7 +275,7 @@ async def run_agent_heartbeat(
         raise HTTPException(500, "Internal server error")
 
 
-@router.get("/agents/{agent_id}/history")
+@router.get("/agents/{agent_id}/history", dependencies=[_READ])
 async def get_agent_heartbeat_history(
     agent_id: int,
     limit: int = Query(20, ge=1, le=100),
@@ -244,6 +283,8 @@ async def get_agent_heartbeat_history(
     db: Session = Depends(get_db),
 ):
     """List recent heartbeat results for a specific agent."""
+    _verify_agent_ownership(agent_id, str(ctx.workspace_id), db)
+
     rows = db.execute(
         text("""
             SELECT id, status, findings, actions_taken, tokens_used, cost, created_at
@@ -271,7 +312,7 @@ async def get_agent_heartbeat_history(
 
 # ── Global Status ──────────────────────────────────────────────────
 
-@router.get("/status")
+@router.get("/status", dependencies=[_SU])
 async def get_heartbeat_status(
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
@@ -287,7 +328,7 @@ async def get_heartbeat_status(
 
 # ── Analytics ──────────────────────────────────────────────────────
 
-@router.get("/analytics")
+@router.get("/analytics", dependencies=[_SU])
 async def get_heartbeat_analytics(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -352,7 +393,7 @@ async def get_heartbeat_analytics(
 
 # ── PRD-72: Activity Command Centre Endpoints ─────────────────────
 
-@router.get("/workspace")
+@router.get("/workspace", dependencies=[_READ])
 async def list_workspace_heartbeats(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -432,7 +473,7 @@ async def list_workspace_heartbeats(
         raise HTTPException(500, "Internal server error")
 
 
-@router.patch("/{heartbeat_id}/toggle")
+@router.patch("/{heartbeat_id}/toggle", dependencies=[_UPDATE])
 async def toggle_heartbeat(
     heartbeat_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -489,7 +530,7 @@ async def toggle_heartbeat(
     }
 
 
-@router.get("/{heartbeat_id}/executions")
+@router.get("/{heartbeat_id}/executions", dependencies=[_READ])
 async def get_heartbeat_executions(
     heartbeat_id: int,
     limit: int = Query(10, ge=1, le=100),

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.security.web_access import (
+    build_pinned_request,
     WEB_ACCESS_OFF_REASON,
     OutboundTarget,
     resolve_outbound,
@@ -86,19 +87,10 @@ def html_to_text(html: str) -> tuple[str, str]:
 
 
 def _pinned_request(client: httpx.AsyncClient, url: str, target: OutboundTarget) -> httpx.Request:
-    """The request for ``url`` sent to the address that was checked.
-
-    The URL's host becomes the pinned IP; the real hostname rides as ``Host``
-    and as SNI (``sni_hostname``), so TLS is still verified against the name.
-    A DNS answer that changes after the check therefore changes nothing.
-    """
-    pinned_url = httpx.URL(url).copy_with(host=target.ip)  # httpx brackets IPv6 itself
-    return client.build_request(
-        "GET",
-        pinned_url,
-        headers={"Host": target.host},
-        extensions={"sni_hostname": target.host},
-    )
+    """The GET for ``url`` sent to the address that was checked — see
+    :func:`core.security.web_access.build_pinned_request`, the one place the
+    resolve-and-pin request is built (the heartbeat webhook shares it)."""
+    return build_pinned_request(client, "GET", url, target)
 
 
 async def _resolve(url: str) -> OutboundTarget:
