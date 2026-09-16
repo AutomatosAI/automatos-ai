@@ -49,6 +49,39 @@ A free provider's multiplier (0) and a subscription's `cost_override=(0, 0)`
 short-circuit all of it. Cache reads/writes are re-priced at the vendor's
 published multipliers (Anthropic 0.1× / 1.25×, OpenAI 0.5×).
 
+## Prompt caching on the OpenRouter route (2026-09-16)
+
+An Anthropic model reached through OpenRouter (`anthropic/…`) now gets the
+PRD-201 breakpoint the native Anthropic client already had: the first system
+message is sent as content parts with one `cache_control` marker on the
+assembler's stable prefix (identity, skills, platform actions — the
+`cache_prefix` hint the chat lane and the agent factory stamp on the system
+message, stripped before the request leaves), and the request carries a
+top-level `cache_control` so OpenRouter places the automatic breakpoint on the
+growing conversation tail. Tools render before system, so the marker caches
+tools + stable system together. Within a tool-loop turn every step after the
+first reads that prefix at ~0.1x instead of paying full price; the write costs
+1.25x once (2x on the 1-hour TTL, `PROMPT_CACHE_TTL_1H=on`). Cross-turn reuse
+needs the tool list to be byte-stable between turns — today the semantic
+narrowing changes it, so the prefix is rewritten per turn (a single-shot turn
+therefore pays the write premium on the cached part and reads nothing back).
+`llm_usage.cache_read_tokens` / `cache_write_tokens` (OpenRouter reports both)
+are the measurement.
+
+The chat lane's turn cost governor (`model_policy.turn_cost_ceiling_usd`)
+books each call at the provider's reported cost when there is one
+(`core/llm/turn_cost.py`), the route estimate otherwise; the `LLM_CALL` audit
+line does the same and says which (`cost_source=reported|estimate`). The
+static map (`_MODEL_COST_ENTRIES`) is ordered longest-key-first so a
+`-mini` model is never priced as its parent.
+
+Open (2026-09-16): every OpenRouter row records exactly 2.0x the OpenRouter
+list price — the client sums `usage.cost` and
+`usage.cost_details.upstream_inference_cost`, which OpenRouter documents as
+null except on BYOK requests. Which of the two the account is billed for is
+settled by one OpenRouter Activity row; until then the page's OpenRouter
+figures are an upper bound.
+
 ## Sessions (Claude Code)
 
 The host reads the transcript's per-model token totals (`transcript.py`) and

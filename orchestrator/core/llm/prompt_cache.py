@@ -15,7 +15,7 @@ Max 4 breakpoints per request — this emits exactly one.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Tuple, Any, Dict, List, Optional, Union
 
 # GA Anthropic parameter shapes (confirmed via the claude-api skill). Do not
 # invent variants beyond these.
@@ -98,3 +98,79 @@ def read_cache_usage(usage: Any) -> Dict[str, int]:
         "cache_creation_input_tokens": _get("cache_creation_input_tokens"),
         "input_tokens": _get("input_tokens"),
     }
+
+
+# ---------------------------------------------------------------------------
+# The OpenAI-shaped route (OpenRouter → Anthropic), 2026-09-16
+# ---------------------------------------------------------------------------
+
+CACHE_HINT_KEY = "cache_prefix"  # the assembler's hint on a system message — ours, never sent
+
+
+def strip_cache_hints(messages: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """New message dicts without the assembler's ``cache_prefix`` hint."""
+    return [
+        {k: v for k, v in m.items() if k != CACHE_HINT_KEY} if isinstance(m, dict) else m
+        for m in (messages or [])
+    ]
+
+
+def needs_explicit_breakpoints(model: Optional[str]) -> bool:
+    """Only Anthropic models need ``cache_control`` markers — OpenAI and Gemini
+    models cache their prefixes automatically. ``anthropic/…`` is the vendor-
+    prefixed OpenRouter id; a bare ``claude…`` id covers a direct route."""
+    m = (model or "").strip().lower()
+    return m.startswith("anthropic/") or m.startswith("claude")
+
+
+def apply_openai_cache_control(
+    messages: Optional[List[Dict[str, Any]]],
+    model: Optional[str],
+    *,
+    ttl_1h: bool = False,
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, str]]]:
+    """``(messages, top_level)`` for an OpenAI-shaped request through a provider
+    that passes Anthropic breakpoints through (OpenRouter).
+
+    - the hint is stripped from every message;
+    - for an Anthropic model the FIRST non-empty system message becomes content
+      parts with ONE explicit breakpoint on the assembler's stable prefix (the
+      whole system when there is no hint), so tools + the stable system are
+      billed once per TTL and read at ~0.1x on every later step of the turn;
+      ``top_level`` is the request-level ``cache_control`` that lets the provider
+      place the automatic breakpoint on the growing conversation tail (the
+      robust agent-loop combination: one explicit marker + automatic);
+    - for any other model only the strip happens: ``(messages, None)``.
+    """
+    cc = EPHEMERAL_1H if ttl_1h else EPHEMERAL
+    stripped = strip_cache_hints(messages)
+    if not needs_explicit_breakpoints(model):
+        return stripped, None
+    out: List[Dict[str, Any]] = []
+    converted = False
+    for original, msg in zip(messages or [], stripped):
+        if (
+            not converted
+            and isinstance(msg, dict)
+            and msg.get("role") == "system"
+            and isinstance(msg.get("content"), str)
+            and msg["content"]
+        ):
+            hint = original.get(CACHE_HINT_KEY) if isinstance(original, dict) else None
+            msg = {**msg, "content": build_cached_system(msg["content"], hint, cache_control=cc)}
+            converted = True
+        out.append(msg)
+    return out, dict(cc)
+
+
+def text_of(content: Any) -> str:
+    """The text of a message ``content`` that may be a string or content parts."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
