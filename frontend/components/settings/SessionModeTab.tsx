@@ -27,7 +27,11 @@ interface HostRow {
   online: boolean
   last_seen_at?: string | null
   paired_at?: string | null
-  capabilities?: { claude?: { version?: string | null; path?: string | null; onboarded?: boolean } | null } | null
+  /** Host 0.7.0 (CLI adapter design): every CLI the host knows, served or not, under `clis`; `providers` = the served ids. */
+  capabilities?: {
+    clis?: Record<string, { version?: string | null; path?: string | null; served?: boolean; reason?: string | null }> | null
+    providers?: string[] | null
+  } | null
 }
 
 interface PairingCode {
@@ -226,7 +230,7 @@ export function SessionModeTab() {
                         <span className="font-medium">{h.name}</span>
                         <span className="text-muted-foreground">
                           {h.status !== 'paired' ? h.status : h.online ? 'connected' : 'not running'}
-                          {h.capabilities?.claude?.version ? ` · Claude Code ${h.capabilities.claude.version}` : ''}
+                          {h.capabilities?.clis?.claude?.version ? ` · Claude Code ${h.capabilities.clis.claude.version}` : ''}
                         </span>
                       </div>
                       <span className="font-mono text-xs text-muted-foreground">{h.id.slice(0, 8)}</span>

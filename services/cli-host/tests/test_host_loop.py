@@ -91,7 +91,7 @@ class FakeBackend:
 
 def _cfg(short_tmp, url, **over):
     base = dict(url=url, state_dir=short_tmp / "state", allow_dirs=[short_tmp / "ws"], pair_code="ABCD-2345",
-                name="test-host", once=True, claude_binary=str(FAKE_CLAUDE), use_worktrees=False,
+                name="test-host", once=True, cli_binaries={"claude": str(FAKE_CLAUDE)}, use_worktrees=False,
                 poll_seconds=1.0, heartbeat_seconds=1.0, event_flush_seconds=0.5, session_timeout_seconds=120)
     base.update(over)
     return HostConfig(**base)
@@ -120,7 +120,9 @@ def test_once_cycle_pairs_claims_runs_and_reports(short_tmp, fake_home, env_clea
     assert "SessionStart" in names and "Stop" in names
     heartbeat_calls = [c for c in backend.calls if c[1].endswith("/heartbeat")]
     assert heartbeat_calls and heartbeat_calls[0][3] == backend.token
-    assert heartbeat_calls[0][2]["capabilities"]["claude"]["version"].startswith("9.9.9")
+    caps = heartbeat_calls[0][2]["capabilities"]
+    assert caps["clis"]["claude"]["version"].startswith("9.9.9") and caps["clis"]["claude"]["served"] is True
+    assert caps["providers"] == ["claude"]   # what the backend's claim filter reads (design §8.2)
     # Pairing sent no secret: only the code and capabilities.
     pair_call = next(c for c in backend.calls if c[1].endswith("/pair"))
     assert set(pair_call[2]) == {"code", "name", "capabilities"}

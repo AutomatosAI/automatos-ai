@@ -45,9 +45,11 @@ def source_fingerprint() -> str:
     import hashlib
     root = Path(__file__).resolve().parent
     h = hashlib.sha1()
-    for f in sorted(root.glob("*.py")):
+    # rglob: the adapters live in a subpackage — a changed adapter must restart
+    # the host exactly like a changed session.py does.
+    for f in sorted(root.rglob("*.py")):
         st = f.stat()
-        h.update(f"{f.name}:{st.st_size}:{int(st.st_mtime)}\n".encode())
+        h.update(f"{f.relative_to(root)}:{st.st_size}:{int(st.st_mtime)}\n".encode())
     return h.hexdigest()[:16]
 
 
@@ -132,9 +134,9 @@ class Host:
             self.terminal = TerminalServer(
                 self.allow_roots, self.allow_roots[0], port=self.cfg.terminal_port,
                 workspace_id=lambda: str((self.identity or {}).get("workspace_id") or ""),
-                # PRD-239 S7 v2: the Runtime Canvas launches the agent's own Claude
-                # Code session in the PTY; its open/close reach the ticket as events.
-                claude=self.cfg.claude_binary, sessions_dir=self.cfg.sessions_dir,
+                # PRD-239 S7 v2: the Runtime Canvas launches the agent's own CLI
+                # session in the PTY; its open/close reach the ticket as events.
+                cli_binaries=self.cfg.cli_binaries, sessions_dir=self.cfg.sessions_dir,
                 on_event=self._terminal_event,
             )
             log.info("terminal server on 127.0.0.1:%s (the Canvas terminal)", self.terminal.start())

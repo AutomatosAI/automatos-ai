@@ -17,7 +17,6 @@ Pure module: no DB, no config import — callers pass ``cli_enabled`` in.
 """
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Mapping, Optional
 
 RUNTIME_API = "api"
@@ -34,29 +33,13 @@ CONFIG_ALLOWED_TOOLS_KEY = "allowed_tools"
 # repos must not — its own git tracks next to nothing, the worktree would be empty.
 CONFIG_WORKTREE_KEY = "worktree_per_ticket"
 
-PROVIDER_CLAUDE = "claude"
-PROVIDER_CODEX = "codex"
-CLI_PROVIDERS = (PROVIDER_CLAUDE, PROVIDER_CODEX)
-
-# How a session's spend is tagged in ``llm_usage.provider`` — a slug of its own
-# (never a registry API provider: a Claude Code session is the user's plan, not
-# an Anthropic API key) and the human label the analytics page shows.
-USAGE_PROVIDER_SLUGS = {PROVIDER_CLAUDE: "claude_code", PROVIDER_CODEX: "codex"}
-USAGE_PROVIDER_LABELS = {"claude_code": "Claude Code", "codex": "Codex"}
-BILLING_SUBSCRIPTION = "subscription"
-
-
-def usage_provider_slug(cli_provider: Optional[str]) -> str:
-    """``claude`` → ``claude_code``; an unknown CLI keeps its name."""
-    key = str(cli_provider or "").strip().lower()
-    return USAGE_PROVIDER_SLUGS.get(key, key or "unknown")
-
-# What ``claude --model`` accepts: an alias or a full model id. Deliberately
-# narrow — a session agent never carries an OpenRouter id (PRD-223: the model
-# route used to validate nothing).
-_CLAUDE_MODEL_ALIASES = frozenset({"opus", "sonnet", "haiku", "fable", "default"})
-_CLAUDE_MODEL_ID_RE = re.compile(r"^claude-[a-z0-9][a-z0-9.\-]*(\[1m\])?$")
-_CODEX_MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9.\-]*$")
+# The CLI registry (id, label, model rule, usage slug) lives in ``core/cli_presets.py``,
+# kept in step with the host's preset table by a parity test; re-exported here so
+# every importer keeps its name.
+from core.cli_presets import (  # noqa: E402,F401
+    BILLING_SUBSCRIPTION, CLI_PRESETS, CLI_PROVIDERS, PROVIDER_CLAUDE, PROVIDER_CODEX,
+    USAGE_PROVIDER_LABELS, USAGE_PROVIDER_SLUGS, is_valid_cli_model, usage_provider_slug,
+)
 
 
 class RuntimeMismatchError(RuntimeError):
@@ -98,20 +81,6 @@ def runtime_kind_of(configuration: Optional[Mapping[str, Any]]) -> str:
 
 def is_cli_agent(configuration: Optional[Mapping[str, Any]]) -> bool:
     return runtime_kind_of(configuration) == RUNTIME_CLI
-
-
-def is_valid_cli_model(provider: str, model: Optional[str]) -> bool:
-    """``None``/empty = the CLI's own default; otherwise provider-shaped."""
-    if model is None or model == "":
-        return True
-    if not isinstance(model, str):
-        return False
-    candidate = model.strip()
-    if provider == PROVIDER_CLAUDE:
-        return candidate in _CLAUDE_MODEL_ALIASES or bool(_CLAUDE_MODEL_ID_RE.match(candidate))
-    if provider == PROVIDER_CODEX:
-        return bool(_CODEX_MODEL_RE.match(candidate))
-    return False
 
 
 def validate_working_directory(value: Any) -> List[str]:

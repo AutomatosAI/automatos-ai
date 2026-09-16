@@ -46,8 +46,8 @@ def service_argv(cfg: HostConfig, passthrough: Optional[List[str]] = None) -> Li
         argv += ["--default-root", str(Path(cfg.default_root).expanduser().resolve())]
     if cfg.max_sessions > 0:
         argv += ["--max-sessions", str(cfg.max_sessions)]
-    if cfg.claude_binary:
-        argv += ["--claude", cfg.claude_binary]
+    for cli_id, path in sorted(cfg.cli_binaries.items()):
+        argv += ["--cli-binary", f"{cli_id}={path}"]
     if not cfg.use_worktrees:
         argv.append("--no-worktrees")
     if not cfg.terminal_enabled:
@@ -87,7 +87,7 @@ def install_launchd(cfg: HostConfig, passthrough: Optional[List[str]] = None) ->
         "ThrottleInterval": 15,
         "StandardOutPath": str(_log_path(cfg)),
         "StandardErrorPath": str(_log_path(cfg)),
-        # launchd gives agents a bare PATH; the host must find YOUR claude.
+        # launchd gives agents a bare PATH; the host must find YOUR CLIs.
         "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
                                  "HOME": str(Path.home())},
     }

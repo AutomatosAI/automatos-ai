@@ -168,9 +168,9 @@ def revoke_host(db: Session, host: CliHost) -> None:
 # was built for. A host that sees the fingerprint change drains and exits; its
 # service manager brings it back on the new code. Bump EXPECTED_CLI_HOST_VERSION
 # whenever the wire contract changes so a stale checkout is told, not surprised.
-EXPECTED_CLI_HOST_VERSION = "0.6.0"  # 2026-09-09: a no-folder ticket runs in <deliverables root>/sessions/<ticket>; --default-root (#722). 0.5.0: results and TerminalClosed carry the turn's token usage
+EXPECTED_CLI_HOST_VERSION = "0.7.0"  # 2026-09-11: the CLI is a parameter — capabilities carry every CLI under ``clis`` with served/reason, ``providers`` = the served ids (CLI adapter design). 0.6.0: a no-folder ticket runs in <deliverables root>/sessions/<ticket>
 
-_CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py")
+_CONTRACT_MODULES = ("api/cli_hosts.py", "services/cli_host_service.py", "core/cli_runtime.py", "core/cli_presets.py")
 
 
 def _compute_host_contract() -> str:
