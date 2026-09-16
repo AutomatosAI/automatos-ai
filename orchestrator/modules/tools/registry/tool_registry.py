@@ -408,7 +408,7 @@ class ToolRegistry:
                 "Search INTERNAL workspace knowledge base — uploaded documents, guides, PDFs, and ingested files. "
                 "Returns only content that was previously uploaded to this workspace. "
                 "IMPORTANT: For live/current information, competitor research, market data, or anything NOT in your "
-                "uploaded documents, use web_search / web_fetch (via platform_execute) instead. "
+                "uploaded documents, use platform_web_search / platform_web_fetch (via platform_execute) instead. "
                 "This tool searches local docs only. 2-attempt limit — vary your query if first attempt misses."
             ),
             executor_class="AgentPlatformTools",

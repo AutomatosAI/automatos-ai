@@ -1,16 +1,25 @@
 """PRD-143 S6 — obs routers batch 1 locked to the super admin.
 
 Router-wide ``require_super_admin`` (core/auth/super_admin.py, S5) on:
-api/heartbeat.py, api/analytics.py, api/analytics_api.py,
-api/analytics_real.py, api/analytics_charts.py.
+api/analytics.py, api/analytics_api.py, api/analytics_real.py,
+api/analytics_charts.py.
+
+api/heartbeat.py (2026-09-16): the lock moved from the router to its
+observability routes (``/status``, ``/analytics``, ``/orchestrator/*``); the
+per-agent heartbeat routes are gated on the workspace permission matrix like
+the agent editor. The representative ``/api/heartbeat/status`` below proves
+the obs lock still holds; ``tests/test_heartbeat_routes_workspace_gate.py``
+walks that router's full route table so no endpoint can land without one of
+the two gates.
 
 Every endpoint on these routers must 403 for any principal that is not
 literally ``system_role == 'super_admin'`` — member, workspace admin/owner,
 API-key admin (hybrid.py:783) — and must NOT 401/403 the super admin.
 
-Parametrized over one representative GET per router; the dependency is
-router-wide, so one representative proves the whole router (a per-route
-decoration could miss future endpoints — that is the point of the AC).
+Parametrized over one representative GET per router; on the analytics
+routers the dependency is router-wide, so one representative proves the
+whole router (a per-route decoration could miss future endpoints — that is
+the point of the AC).
 """
 from __future__ import annotations
 
@@ -47,6 +56,8 @@ SUPER_ADMIN = UserContext(id="u-gerard", role="admin", system_role="super_admin"
 
 # (router module, representative GET path) — one per locked router.
 ROUTERS = [
+    # heartbeat: per-route obs lock (see module docstring) — /status is the
+    # cross-workspace scheduler view and stays super-admin.
     pytest.param("api.heartbeat", "/api/heartbeat/status", id="heartbeat"),
     pytest.param("api.analytics", "/analytics/dashboard/summary", id="analytics"),
     pytest.param("api.analytics_api", "/api/analytics/dashboard/overview", id="analytics_api"),

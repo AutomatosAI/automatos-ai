@@ -213,8 +213,17 @@ SU_LOCKED_ENDPOINT_MODULES = {
     "api.analytics_charts",
     "api.llm_analytics",
     "api.memory_stats",
-    "api.heartbeat",
     "api.reports",
+}
+
+# api.heartbeat (2026-09-16): the lock moved from the router to its obs routes.
+# Its per-agent mutating routes (PUT /agents/{id}/config, POST /agents/{id}/run,
+# PATCH /{id}/toggle) are workspace-gated (agents:update / agents:execute) and
+# classify as gated[...] above; the one obs mutating route stays super-admin and
+# is asserted here by route. tests/test_heartbeat_routes_workspace_gate.py
+# pins the full table of that router.
+SU_LOCKED_ROUTES = {
+    ("POST", "/api/heartbeat/orchestrator/run"),
 }
 
 
@@ -387,13 +396,16 @@ def test_obs_tier_mutating_routes_stay_super_admin_locked(app_records):
     for rec in app_records:
         if rec["method"] not in MUTATING_METHODS:
             continue
-        if rec["module"] in SU_LOCKED_ENDPOINT_MODULES:
+        if rec["module"] in SU_LOCKED_ENDPOINT_MODULES or (rec["method"], rec["path"]) in SU_LOCKED_ROUTES:
             checked += 1
             assert rec["su"], (
                 f"{rec['method']} {rec['path']} on {rec['module']} lost its "
                 "require_super_admin lock"
             )
-    assert checked >= 10, f"su sweep went vacuous (checked={checked})"
+    # 8 mutating routes across the five modules (2026-09-16: analytics_api 3,
+    # analytics_charts 1, llm_analytics 1, memory_stats 2, reports 1) + the
+    # heartbeat orchestrator run — below that the sweep is not looking.
+    assert checked >= 9, f"su sweep went vacuous (checked={checked})"
 
 
 if __name__ == "__main__":

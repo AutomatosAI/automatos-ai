@@ -23,6 +23,9 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),
     ipaddress.ip_network("0.0.0.0/8"),
+    # CGNAT — cloud private networking (Railway's internal v4 side) and some
+    # providers' metadata endpoints live here (2026-09-16 webhook review).
+    ipaddress.ip_network("100.64.0.0/10"),
     # IPv6
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
@@ -44,8 +47,13 @@ def blocked_network_for(ip_str: str) -> str | None:
         addr = ipaddress.ip_address(ip_str)
     except ValueError:
         return "invalid"
+    # An IPv4-mapped IPv6 literal (``::ffff:10.0.0.1``) names a v4 address, and
+    # stdlib containment never crosses families — check the address it maps to.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        addr = mapped
     for network in _BLOCKED_NETWORKS:
-        if addr in network:
+        if addr.version == network.version and addr in network:
             return str(network)
     return None
 

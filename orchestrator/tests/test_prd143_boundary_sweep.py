@@ -173,8 +173,11 @@ _ENUM_CONTROL = sorted(
 # obs perimeter; the tool half is parity-tested against the registry).
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MANIFEST_PATH = _REPO_ROOT / "docs" / "PRDS" / "PRD-143-OBS-TIER-MANIFEST.md"
+# Table rows only (``| `orchestrator/api/x.py` |``): the manifest's prose may name a
+# router that is deliberately NOT router-wide locked (api/heartbeat.py since
+# 2026-09-16 — per-route tiers, pinned by test_heartbeat_routes_workspace_gate.py).
 _LOCKED_API_MODULES: List[str] = sorted(set(
-    re.findall(r"`orchestrator/api/(\w+)\.py`", _MANIFEST_PATH.read_text(encoding="utf-8"))
+    re.findall(r"^\| `orchestrator/api/(\w+)\.py`", _MANIFEST_PATH.read_text(encoding="utf-8"), re.M)
 )) if _MANIFEST_PATH.exists() else []
 
 _WS = uuid.uuid4()
@@ -199,7 +202,7 @@ def test_sweep_sources_are_nonvacuous():
         action = _REGISTRY.get(name)
         assert action is not None, f"operator control missing from catalogue: {name}"
         assert action.super_admin_only is False
-    assert len(_LOCKED_API_MODULES) >= 13, (
+    assert len(_LOCKED_API_MODULES) >= 12, (  # 13 until api/heartbeat.py went per-route (2026-09-16)
         f"manifest router table parsed to {_LOCKED_API_MODULES} — manifest moved?"
     )
 

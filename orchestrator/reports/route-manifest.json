@@ -1,5 +1,5 @@
 {
-  "route_count": 801,
+  "route_count": 806,
   "routes": [
     {
       "method": "GET",
@@ -1034,6 +1034,22 @@
       "path": "/api/documents/brand-kit"
     },
     {
+      "method": "DELETE",
+      "path": "/api/documents/brand-kit/logo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/brand-kit/logo"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/brand-kit/logo"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/brand-kit/suggestions"
+    },
+    {
       "method": "POST",
       "path": "/api/documents/bulk-team-access"
     },
@@ -1092,6 +1108,10 @@
     {
       "method": "POST",
       "path": "/api/documents/templates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/templates/presets"
     },
     {
       "method": "POST",

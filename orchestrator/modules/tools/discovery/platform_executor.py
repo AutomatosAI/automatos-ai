@@ -549,8 +549,8 @@ class PlatformActionExecutor:
             "platform_scan_business_site": scan_business_site,
             "platform_get_intake_status": get_intake_status,
             # PRD-240: the web as a platform capability (no app, no assignment)
-            "web_fetch": web_fetch,
-            "web_search": web_search,
+            "platform_web_fetch": web_fetch,
+            "platform_web_search": web_search,
             # PRD-76: Agent Reports
             "platform_submit_report": submit_report,
             "platform_get_latest_report": get_latest_report,
