@@ -29,7 +29,7 @@ from uuid import uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from core.cli_runtime import RUNTIME_API, RUNTIME_CLI
+from core.cli_runtime import PROVIDER_CLAUDE, RUNTIME_API, RUNTIME_CLI
 from core.models.core import BoardTask
 from services.board_events import notify_board_event
 
@@ -73,6 +73,24 @@ def recipe_exclusion_sql(runtime: str, alias: str = "board_tasks") -> str:
     return f"AND {alias}.source_type <> 'recipe'"
 
 
+def provider_predicate_sql(providers: Optional[Sequence[str]], alias: str = "board_tasks") -> str:
+    """CLI adapter design §8.2: a host claims only the tickets of agents whose CLI
+    it serves (``capabilities.providers``). ``None`` = no filter (the API runtime,
+    or a host that announced nothing); an empty list claims nothing — a host with
+    no CLI installed must never take work it cannot run, and it must never be
+    refused *after* the claim (that is a claim/release loop across two hosts of
+    different CLIs). The provider is read from the agent's configuration; a
+    ``cli`` agent without one is ``claude`` (what every session agent ran on
+    before the field existed)."""
+    if providers is None:
+        return ""
+    provider = (
+        f"COALESCE((SELECT a.configuration->>'provider' FROM agents a "
+        f"WHERE a.id = {alias}.assigned_agent_id), '{PROVIDER_CLAUDE}')"
+    )
+    return f"AND {provider} = ANY(CAST(:providers AS text[]))"
+
+
 def notify_task_available(db: Session, *, workspace_id, task_id: int) -> None:
     """Fire ``pg_notify`` so a listening claimant wakes immediately.
 
@@ -97,12 +115,15 @@ def claim_tasks(
     max_slots_per_agent: Optional[int] = None,
     runtime: str = RUNTIME_API,
     workspace_id=None,
+    providers: Optional[Sequence[str]] = None,
 ) -> List[BoardTask]:
     """Atomically claim up to ``limit`` assigned tasks for this worker.
 
     PRD-234 S1a: ``runtime`` selects whose tickets are claimable — ``api`` (the
     dispatch loop, default: behaviour unchanged) or ``cli`` (a paired CLI host);
-    ``workspace_id`` confines a host's claim to its own workspace.
+    ``workspace_id`` confines a host's claim to its own workspace; ``providers``
+    confines it to the tickets of agents whose CLI that host serves (CLI adapter
+    design §8.2 — ``None`` = no filter, ``[]`` = nothing).
 
     ``FOR UPDATE SKIP LOCKED`` is the exactly-once guarantee: the locked SELECT
     grabs only rows no other transaction holds, and the surrounding UPDATE flips
@@ -130,6 +151,10 @@ def claim_tasks(
     ws_sql = "AND workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_sql_t = "AND t.workspace_id = CAST(:ws AS uuid)" if workspace_id is not None else ""
     ws_params = {"ws": str(workspace_id)} if workspace_id is not None else {}
+    provider_sql = provider_predicate_sql(providers, alias="board_tasks")
+    provider_sql_t = provider_predicate_sql(providers, alias="t")
+    if providers is not None:
+        ws_params = {**ws_params, "providers": list(providers)}
 
     if max_slots_per_agent is None:
         # No cap: single-statement exactly-once claim.
@@ -141,6 +166,7 @@ def claim_tasks(
                {recipe_sql}
                AND {runtime_sql}
                {ws_sql}
+               {provider_sql}
              ORDER BY {_PRIORITY_ORDER_SQL}, created_at
              FOR UPDATE SKIP LOCKED
              LIMIT :limit
@@ -173,6 +199,7 @@ def claim_tasks(
                        {recipe_sql_t}
                        AND {runtime_sql_t}
                        {ws_sql_t}
+                       {provider_sql_t}
                 )
                 SELECT id FROM ranked WHERE rn <= free ORDER BY rn, id LIMIT :limit
                 """

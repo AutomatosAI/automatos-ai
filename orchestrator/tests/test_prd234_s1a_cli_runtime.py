@@ -164,16 +164,34 @@ class _CapturingDb:
         pass
 
 
-def _claim_sql(runtime, workspace_id=None, slots=None):
+def _claim_sql(runtime, workspace_id=None, slots=None, providers=None):
     from services import board_dispatcher as bd
 
     db = _CapturingDb()
     out = bd.claim_tasks(
         db, worker_id="w", limit=5, lease_seconds=60,
-        max_slots_per_agent=slots, runtime=runtime, workspace_id=workspace_id,
+        max_slots_per_agent=slots, runtime=runtime, workspace_id=workspace_id, providers=providers,
     )
     assert out == []
     return db.statements[0]
+
+
+def test_host_claim_takes_only_the_clis_it_serves():
+    """CLI adapter design §8.2: the filter is in the claim statement — a host of
+    one CLI never takes (and then has to release) another CLI's ticket."""
+    sql, params = _claim_sql("cli", workspace_id=uuid4(), providers=["claude", "codex"])
+    assert "a.configuration->>'provider'" in sql and "= ANY(CAST(:providers AS text[]))" in sql
+    assert "'claude')" in sql                          # an agent without the field is a claude agent
+    assert params["providers"] == ["claude", "codex"]
+    slotted, slotted_params = _claim_sql("cli", workspace_id=uuid4(), providers=["codex"], slots=2)
+    assert "= ANY(CAST(:providers AS text[]))" in slotted and "t.assigned_agent_id" in slotted
+    assert slotted_params["providers"] == ["codex"]
+    # A host that announced nothing gets the pre-filter statement, byte for byte.
+    plain, plain_params = _claim_sql("cli", workspace_id=uuid4())
+    assert "->>'provider'" not in plain and "providers" not in plain_params
+    # An empty list is a real filter that matches nothing — never "no filter".
+    none, none_params = _claim_sql("cli", workspace_id=uuid4(), providers=[])
+    assert "= ANY(CAST(:providers AS text[]))" in none and none_params["providers"] == []
 
 
 def test_dispatcher_claim_excludes_cli_agents_by_default():

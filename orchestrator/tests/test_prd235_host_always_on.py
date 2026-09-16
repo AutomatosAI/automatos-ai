@@ -68,6 +68,34 @@ def test_host_health_reports_online():
     assert out["online"] is True and len(out["online_hosts"]) == 1 and out["waiting_tickets"] == 0
 
 
+def test_health_and_the_lane_see_which_clis_the_online_hosts_run():
+    """CLI adapter design §8.2/§8.3: ``providers_online`` is the union over ONLINE
+    hosts of what each announced (``capabilities.providers``); an offline host's
+    CLIs do not count, and the same CLI on two hosts is listed once."""
+    on = _Host(online=True, seen_minutes_ago=0)
+    on.capabilities = {"providers": ["claude"]}
+    on2 = _Host(online=True, seen_minutes_ago=0)
+    on2.capabilities = {"providers": ["codex", "claude"]}
+    off = _Host(online=False, seen_minutes_ago=90)
+    off.capabilities = {"providers": ["grok"]}
+    db = _DB([on, on2, off], [], [])
+    assert svc.serving_providers(db, "ws") == ["claude", "codex"]
+    assert svc.host_health(db, "ws")["providers_online"] == ["claude", "codex"]
+    # What a host said, read strictly: never said → None (no filter); said none → [].
+    assert svc.served_providers_of(SimpleNamespace(capabilities=None)) is None
+    assert svc.served_providers_of(SimpleNamespace(capabilities={"claude": {"version": "2"}})) is None
+    assert svc.served_providers_of(SimpleNamespace(capabilities={"providers": []})) == []
+    assert svc.served_providers_of(SimpleNamespace(capabilities={"providers": ["claude", 3, ""]})) == ["claude"]
+
+
+def test_a_host_that_announced_no_cli_claims_nothing_without_touching_the_board():
+    class _Untouchable:
+        def query(self, *a, **k):
+            raise AssertionError("a host with no CLI must not reach the claim statement")
+    host = SimpleNamespace(id="h1", workspace_id="ws", capabilities={"providers": []})
+    assert svc.claim_for_host(_Untouchable(), host, 5) == {"tasks": [], "parked": []}
+
+
 def test_route_manifest_lists_the_health_endpoint():
     manifest = json.loads((Path(__file__).resolve().parents[1] / "reports" / "route-manifest.json").read_text())
     assert {"method": "GET", "path": "/api/v1/cli-hosts/health"} in manifest["routes"]

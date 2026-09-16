@@ -41,6 +41,9 @@ class _DB:
 def _quiet(monkeypatch, *, existing=None, online=True):
     monkeypatch.setattr(lane, "open_ticket_for_source", lambda db, ws, st, sid: existing)
     monkeypatch.setattr(lane, "host_online", lambda db, ws: online)
+    # CLI adapter design §8.2: the online hosts serve the agent's CLI unless a test says otherwise.
+    monkeypatch.setattr(lane, "agent_cli_provider", lambda db, agent_id: "claude")
+    monkeypatch.setattr(lane, "no_cli_host_reason_for", lambda db, ws, cli: None)
     monkeypatch.setattr(lane, "_notify", lambda db, ws, task: None)
     # The lane also records the operator's standing consent on the local edition
     # (its own commit; covered by test_prd234_lane_consent.py) — not this shape.
@@ -68,6 +71,39 @@ def test_an_open_ticket_from_the_same_source_is_reused_not_duplicated(monkeypatc
     t = lane.file_cli_ticket(db, workspace_id="ws", agent_id=15, title="x", prompt="y",
                              source_type="heartbeat", source_id="agent:15")
     assert t is existing and not db.added and db.commits == 0
+
+
+def test_hosts_online_but_none_runs_the_agents_cli_is_said_on_the_ticket(monkeypatch):
+    """CLI adapter design §8.2: a Codex agent's ticket on a workspace whose only
+    online host runs Claude Code waits, and says for which CLI."""
+    _quiet(monkeypatch, online=True)
+    monkeypatch.setattr(lane, "agent_cli_provider", lambda db, agent_id: "codex")
+    monkeypatch.setattr(lane, "no_cli_host_reason_for",
+                        lambda db, ws, cli: lane.NO_CLI_HOST_REASON.format(cli=cli, served="claude"))
+    db = _DB()
+    t = lane.file_cli_ticket(db, workspace_id="ws", agent_id=15, title="x", prompt="y",
+                             source_type="schedule", source_id="task:9:20260911T1200")
+    assert t.status == "assigned"
+    assert t.blocked_reason.startswith("Waiting for a CLI host that runs codex") and "serve claude" in t.blocked_reason
+    assert lane.is_no_cli_host_reason(t.blocked_reason) and not lane.is_no_cli_host_reason(lane.NO_HOST_REASON)
+    assert "runs codex" in lane.queued_line(t) and "none online runs it yet" in lane.queued_line(t)
+
+
+def test_no_cli_host_reason_reads_the_online_hosts_and_stays_quiet_when_it_cannot(monkeypatch):
+    import services.cli_host_service as hosts
+    monkeypatch.setattr(hosts, "serving_providers", lambda db, ws: ["claude"])
+    assert lane.no_cli_host_reason_for(None, "ws", "claude") is None
+    reason = lane.no_cli_host_reason_for(None, "ws", "codex")
+    assert reason.startswith("Waiting for a CLI host that runs codex") and "serve claude" in reason
+    monkeypatch.setattr(hosts, "serving_providers", lambda db, ws: [])
+    assert "serve no CLI" in lane.no_cli_host_reason_for(None, "ws", "codex")
+
+    def _boom(db, ws):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(hosts, "serving_providers", _boom)
+    assert lane.no_cli_host_reason_for(None, "ws", "codex") is None   # a wrong line is worse than none
+    # the provider lookup is tolerant of a double with no query()
+    assert lane.agent_cli_provider(object(), 15) == "claude" and lane.agent_cli_provider(None, None) == "claude"
 
 
 def test_no_host_online_is_said_on_the_ticket_and_in_the_reply(monkeypatch):

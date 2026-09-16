@@ -1265,12 +1265,20 @@ def _note_no_host_for_cli(db: Session, task: "BoardTask") -> bool:
         return False
     if _agent_runtime_kind(db, agent_id) != RUNTIME_CLI:
         return False
-    from services.cli_ticket_lane import NO_HOST_REASON, host_online
+    from services.cli_ticket_lane import (
+        NO_HOST_REASON, agent_cli_provider, host_online, is_no_cli_host_reason, no_cli_host_reason_for,
+    )
+    ours = task.blocked_reason == NO_HOST_REASON or is_no_cli_host_reason(task.blocked_reason)
     if not host_online(db, task.workspace_id):
-        if task.blocked_reason != NO_HOST_REASON:
-            task.blocked_reason = NO_HOST_REASON
+        wanted = NO_HOST_REASON
+    else:
+        # CLI adapter design §8.2: online, but does any host run THIS agent's CLI?
+        wanted = no_cli_host_reason_for(db, task.workspace_id, agent_cli_provider(db, agent_id))
+    if wanted:
+        if task.blocked_reason != wanted:
+            task.blocked_reason = wanted
             return True
-    elif task.blocked_reason == NO_HOST_REASON:
+    elif ours:
         task.blocked_reason = None
         return True
     return False
