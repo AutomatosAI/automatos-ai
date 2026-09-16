@@ -49,10 +49,11 @@ def usage_dict(usage: Any) -> Dict[str, Any]:
     """The platform's usage dict from an OpenAI-shaped ``usage`` object.
 
     ``prompt_tokens`` already INCLUDES cached prompt tokens
-    (``prompt_tokens_details.cached_tokens``) — reported beside it. OpenRouter
-    adds ``cost`` (the credits it charged for THIS call, in USD) when the
-    request asked for it (``usage: {include: true}``) — that exact figure beats
-    every price estimate downstream (2026-09-09).
+    (``prompt_tokens_details.cached_tokens``) — reported beside it, with the
+    cache writes. OpenRouter adds ``cost`` (the credits it charged for THIS
+    call, in USD) when the request asked for it (``usage: {include: true}``) —
+    that exact figure beats every price estimate downstream (2026-09-09). The
+    provider-side ``upstream_inference_cost`` is added only on a BYOK call.
     """
     if usage is None:
         return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -69,12 +70,20 @@ def usage_dict(usage: Any) -> Dict[str, Any]:
     }
     cost = _extra(usage, "cost")
     if isinstance(cost, (int, float)):
+        # ``cost`` is what OpenRouter charged the account. ``cost_details.
+        # upstream_inference_cost`` is documented as the provider's own charge on
+        # a BYOK request (the account pays OpenRouter a fee, the provider bills
+        # the user's key) — but on a plain request OpenRouter returns it EQUAL to
+        # ``cost`` (observed 2026-09-16: cost 4.6e-06, upstream 4.6e-06,
+        # is_byok false), so adding the two doubled every OpenRouter row since
+        # 2026-09-09. Add the upstream figure only when the call really was BYOK.
         upstream = 0.0
-        cost_details = _extra(usage, "cost_details")
-        if isinstance(cost_details, dict):
-            upstream = float(cost_details.get("upstream_inference_cost") or 0)
-        elif cost_details is not None:
-            upstream = float(_extra(cost_details, "upstream_inference_cost") or 0)
+        if bool(_extra(usage, "is_byok")):
+            cost_details = _extra(usage, "cost_details")
+            if isinstance(cost_details, dict):
+                upstream = float(cost_details.get("upstream_inference_cost") or 0)
+            elif cost_details is not None:
+                upstream = float(_extra(cost_details, "upstream_inference_cost") or 0)
         out["cost"] = float(cost) + upstream
     return out
 

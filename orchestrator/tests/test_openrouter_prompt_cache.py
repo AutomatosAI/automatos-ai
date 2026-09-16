@@ -182,6 +182,33 @@ def test_usage_dict_reads_cache_writes_beside_reads():
     assert out["cost"] == pytest.approx(0.0412)
 
 
+def test_usage_dict_books_openrouter_cost_once_on_a_plain_request():
+    """The raw usage block OpenRouter returned on 2026-09-16 for a plain (non-BYOK)
+    call — ``upstream_inference_cost`` equals ``cost``; adding them doubled every
+    OpenRouter row for a week (OpenRouter's own key endpoint: $5.91 for the day,
+    the platform's rows: $11.81)."""
+    raw = {
+        "cost": 4.6e-06,
+        "is_byok": False,
+        "cost_details": {
+            "upstream_inference_cost": 4.6e-06,
+            "upstream_inference_prompt_cost": 2.1e-06,
+            "upstream_inference_completions_cost": 2.5e-06,
+        },
+    }
+    usage = SimpleNamespace(prompt_tokens=7, completion_tokens=1, total_tokens=8,
+                            prompt_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+                            model_extra=raw)
+    assert usage_dict(usage)["cost"] == pytest.approx(4.6e-06)
+
+
+def test_usage_dict_adds_the_provider_bill_only_on_a_byok_call():
+    raw = {"cost": 0.011, "is_byok": True, "cost_details": {"upstream_inference_cost": 0.2166}}
+    usage = SimpleNamespace(prompt_tokens=39577, completion_tokens=750, total_tokens=40327,
+                            prompt_tokens_details=None, model_extra=raw)
+    assert usage_dict(usage)["cost"] == pytest.approx(0.2276)
+
+
 # ── 5. the governor's per-call figure ─────────────────────────────
 
 def test_call_cost_prefers_the_reported_cost_then_the_estimate():

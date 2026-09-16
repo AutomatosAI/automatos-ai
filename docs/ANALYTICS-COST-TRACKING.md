@@ -75,12 +75,17 @@ line does the same and says which (`cost_source=reported|estimate`). The
 static map (`_MODEL_COST_ENTRIES`) is ordered longest-key-first so a
 `-mini` model is never priced as its parent.
 
-Open (2026-09-16): every OpenRouter row records exactly 2.0x the OpenRouter
-list price — the client sums `usage.cost` and
-`usage.cost_details.upstream_inference_cost`, which OpenRouter documents as
-null except on BYOK requests. Which of the two the account is billed for is
-settled by one OpenRouter Activity row; until then the page's OpenRouter
-figures are an upper bound.
+Resolved (2026-09-16): every OpenRouter row from 2026-09-09 to this fix
+recorded exactly 2.0x what OpenRouter charged. The client summed `usage.cost`
+and `usage.cost_details.upstream_inference_cost`; OpenRouter documents the
+latter as null except on BYOK requests, but a plain request returns it EQUAL
+to `cost` (raw block captured: `cost 4.6e-06, is_byok false,
+upstream_inference_cost 4.6e-06`), and OpenRouter's own key endpoint put the
+day at $5.91 against $11.81 in the table. The upstream figure is now added
+only when `usage.is_byok` is true. Rows written before the fix carry double
+the true cost; halving `input_cost`/`output_cost`/`total_cost` on
+`provider='openrouter'` rows from 2026-09-09 up to the deploy is the one-off
+data correction, Gerard's call.
 
 ## Sessions (Claude Code)
 
