@@ -86,7 +86,7 @@ def test_a_redis_that_never_answers_never_delays_a_chunk(monkeypatch):
         ]
         elapsed = time.monotonic() - started
         await asyncio.wait_for(hook.done.wait(), timeout=2)
-        await asyncio.sleep(0)  # let the cancelled watcher finish
+        await asyncio.sleep(0.05)  # let the cancelled watcher finish
         return got, produced, elapsed, hook.calls, reg.polls, _watchers()
 
     got, produced, elapsed, calls, polls, watchers = asyncio.run(scenario())
