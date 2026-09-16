@@ -566,12 +566,15 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.CHATBOT.value,
             "key": "max_tool_iterations",
-            "default_value": "8",
+            "default_value": "40",
             "value_type": "number",
             "description": (
                 "How many tool-call turns Auto gets per user message before it "
-                "is forced to wrap up. Chat-scale budget (PRD-223) — mission "
-                "work uses coordinator.task_max_tool_iterations instead. "
+                "is forced to wrap up. 40 since 2026-09-16: a build-out turn "
+                "creates agents, sweeps the marketplace and configures them, and "
+                "PRD-223's 8 cut it off mid-job. The per-turn cost governor "
+                "(model_policy.turn_cost_ceiling_usd) is the governing limit; "
+                "mission work uses coordinator.task_max_tool_iterations instead. "
                 "Per-agent override: set agent.configuration.max_iterations."
             ),
             "is_required": True,
