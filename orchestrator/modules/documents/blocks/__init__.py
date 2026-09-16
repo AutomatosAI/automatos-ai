@@ -8,7 +8,7 @@ from .docx_renderer import RenderedDocx, render_document_docx
 from .html_renderer import RenderedHtml, render_document_html
 from .legacy_mapper import blocks_from_legacy
 from .schema import SCHEMA_VERSION, BlockDocument
-from .validation import BlockValidationError, collect_variable_paths, validate_blocks
+from .validation import BlockValidationError, collect_list_fields, collect_variable_paths, validate_blocks
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -16,6 +16,7 @@ __all__ = [
     "BlockValidationError",
     "validate_blocks",
     "collect_variable_paths",
+    "collect_list_fields",
     "render_document_html",
     "RenderedHtml",
     "render_document_docx",

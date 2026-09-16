@@ -299,8 +299,8 @@ every agent has:
 
 | Action | Needs | What it does |
 |---|---|---|
-| `web_fetch` | nothing | GET a public URL from the backend container, TLS verified, redirects re-checked, body capped (`WEB_FETCH_MAX_BYTES`), HTML reduced to readable text. |
-| `web_search` | one engine (below) | `[{title, url, snippet}]` for a query, through the first engine configured. |
+| `platform_web_fetch` | nothing | GET a public URL from the backend container, TLS verified, redirects re-checked, body capped (`WEB_FETCH_MAX_BYTES`), HTML reduced to readable text. |
+| `platform_web_search` | one engine (below) | `[{title, url, snippet}]` for a query, through the first engine configured. |
 
 **Search engines, resolved in this order** (`WEB_SEARCH_PROVIDER=auto`):
 
@@ -319,8 +319,8 @@ every agent has:
    `searxng/searxng` on `127.0.0.1:${SEARXNG_PORT:-8888}` with JSON output
    enabled (`envs/searxng/settings.yml`); set `SEARXNG_URL=http://searxng:8080`.
 
-Without any of the three, `web_search` returns `{available:false, options}`
-naming them; `web_fetch` keeps working.
+Without any of the three, `platform_web_search` returns `{available:false, options}`
+naming them; `platform_web_fetch` keeps working.
 
 **What is always refused, in every configuration:** private, loopback,
 link-local and metadata ranges (`10/8`, `172.16/12`, `192.168/16`, `127/8`,

@@ -88,15 +88,20 @@ def _resolve_addresses(host: str, port: int) -> Tuple[List[str], Optional[str]]:
     return addresses, None
 
 
-def resolve_outbound(url: str) -> OutboundTarget:
+def resolve_outbound(url: str, *, enforce_switch: bool = True) -> OutboundTarget:
     """Decide whether ``url`` may be fetched and pin the address to use.
 
     Order matters: the switch, then the scheme, then the denylist, then the
     port, then DNS + the private-range check on every answer — so a denied
     host is named as denied rather than surfacing a DNS failure, and a
     switched-off server never resolves anything.
+
+    ``enforce_switch=False`` skips ONLY the ``WEB_ACCESS`` switch: an
+    operator-configured destination (a heartbeat webhook) is not agent web
+    access, so the switch does not govern it — the always-refused ranges and
+    the operator denylist still do.
     """
-    if not web_access_enabled():
+    if enforce_switch and not web_access_enabled():
         return OutboundTarget(False, WEB_ACCESS_OFF_REASON)
     try:
         parsed = urlparse((url or "").strip())
@@ -130,7 +135,54 @@ def resolve_outbound(url: str) -> OutboundTarget:
     return OutboundTarget(True, "OK", host, pinned, port, scheme)
 
 
-def validate_outbound_url(url: str) -> Tuple[bool, str, str]:
+# System DNS has no timeout of its own; a resolver that never answers must
+# not hold a request (or a thread-pool slot) for longer than this.
+RESOLVE_TIMEOUT_SECONDS = 5.0
+
+
+async def resolve_outbound_async(url: str, *, enforce_switch: bool = True) -> OutboundTarget:
+    """:func:`resolve_outbound` off the event loop and bounded: a resolver that
+    never answers is a refusal, not a stalled request. (The worker thread
+    finishes on its own; only the caller stops waiting.)"""
+    import asyncio
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(resolve_outbound, url, enforce_switch=enforce_switch),
+            timeout=RESOLVE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        try:
+            host = (urlparse((url or "").strip()).hostname or "").lower()
+        except Exception:  # noqa: BLE001 — the URL is already suspect
+            host = ""
+        return OutboundTarget(False, f"DNS resolution timed out for {host or 'the URL'}", host)
+
+
+def validate_outbound_url(url: str, *, enforce_switch: bool = True) -> Tuple[bool, str, str]:
     """(ok, reason, host) — the yes/no view of :func:`resolve_outbound`."""
-    target = resolve_outbound(url)
+    target = resolve_outbound(url, enforce_switch=enforce_switch)
     return target.ok, target.reason, target.host
+
+
+def build_pinned_request(client, method: str, url: str, target: OutboundTarget, **kwargs):
+    """The request for ``url`` sent to the address ``target`` was checked at.
+
+    The URL's host becomes the pinned IP; the real hostname rides as ``Host``
+    and as SNI (``sni_hostname``), so TLS is still verified against the name
+    and a DNS answer that changes after the check changes nothing. ``kwargs``
+    (``json=``, ``content=``, extra ``headers=`` …) go to
+    ``client.build_request``. Shared by ``web_fetch`` and the heartbeat
+    webhook — the one place the resolve-and-pin request is built.
+    """
+    import httpx
+
+    pinned_url = httpx.URL(url).copy_with(host=target.ip)  # httpx brackets IPv6 itself
+    headers = {"Host": target.host, **(kwargs.pop("headers", None) or {})}
+    return client.build_request(
+        method,
+        pinned_url,
+        headers=headers,
+        extensions={"sni_hostname": target.host},
+        **kwargs,
+    )

@@ -1475,24 +1475,35 @@ async def _execute_recipe_inner(
             step_type = step.get("type", "agent")
             if step_type == "generate_document":
                 try:
-                    from modules.documents.generation_service import DocumentGenerationService
-                    gen_config = step.get("config", step)
-                    gen_title = gen_config.get("title", "Document")
-                    gen_format = gen_config.get("format", "pdf")
-                    gen_data = gen_config.get("data", {})
-                    gen_template_name = gen_config.get("template_name")
+                    from modules.documents.generation_service import (
+                        DocumentGenerationService,
+                        deliverables_app_url,
+                    )
+                    gen = _document_step_config(step)
 
                     # Resolve {{step_N.field}} variables in data from scratchpad
+                    gen_data = gen["data"]
                     if scratchpad and isinstance(gen_data, dict):
                         gen_data = _resolve_doc_step_variables(gen_data, scratchpad)
 
                     gen_service = DocumentGenerationService(db, workspace_id)
                     gen_result = await gen_service.generate(
-                        title=gen_title,
-                        format=gen_format,
+                        title=gen["title"],
+                        format=gen["format"],
                         data=gen_data,
                         workspace_id=workspace_id,
-                        template_name=gen_template_name,
+                        template_name=gen["template_name"],
+                        template_id=gen["template_id"],
+                    )
+                    # PRD-242 S4: a playbook-rendered document is a Deliverable —
+                    # it used to live only inside the step's output JSON.
+                    registration = gen_service.register_as_deliverable(
+                        gen_result,
+                        title=gen["title"],
+                        source_type="playbook",
+                        source_id=str(getattr(execution, "execution_id", "") or ""),
+                        agent_name=getattr(recipe, "name", None),
+                        template_id=gen["template_id"],
                     )
 
                     step_result["status"] = "completed"
@@ -1501,6 +1512,11 @@ async def _execute_recipe_inner(
                         "filename": gen_result.filename,
                         "format": gen_result.format,
                         "size_kb": gen_result.size // 1024,
+                        "deliverable_id": (registration or {}).get("deliverable_id"),
+                        "app_url": deliverables_app_url(),
+                        "share_url": gen_service.share_link(gen_result),
+                        "template_id": gen_result.template_id,
+                        "template_name": gen_result.template_name,
                     })
                     step_result["duration_ms"] = int((time.time() - step_start) * 1000)
                     step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -2065,6 +2081,32 @@ def _resolve_prompt(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _document_step_config(step: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalise a ``generate_document`` playbook step (PRD-242 S4). Pure.
+
+    The step may carry its settings under ``config`` or inline. ``template_id``
+    (a UUID string — the id ``platform_list_templates`` hands out) is parsed
+    here so an invalid one fails the step with a clear message instead of a
+    stack trace deep in the renderer; it takes precedence over ``template_name``.
+    """
+    cfg = step.get("config", step) if isinstance(step, dict) else {}
+    raw_id = cfg.get("template_id")
+    template_id = None
+    if raw_id:
+        try:
+            template_id = UUID(str(raw_id))
+        except (ValueError, TypeError):
+            raise ValueError(f"generate_document step: template_id {raw_id!r} is not a UUID")
+    data = cfg.get("data", {})
+    return {
+        "title": cfg.get("title", "Document"),
+        "format": cfg.get("format", "pdf"),
+        "data": data if isinstance(data, dict) else {},
+        "template_name": cfg.get("template_name"),
+        "template_id": template_id,
+    }
+
 
 def _resolve_doc_step_variables(data: Any, scratchpad) -> Any:
     """

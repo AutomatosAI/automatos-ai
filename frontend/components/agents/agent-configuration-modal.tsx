@@ -330,9 +330,10 @@ export function AgentConfigurationModal({
         }
       })
       .catch((err: unknown) => {
-        // Rendering the form default (off) as this agent's state was a lie:
-        // the heartbeat router is super-admin-locked (PRD-143), so for anyone
-        // else every agent looked disabled while the scheduler kept firing it.
+        // Rendering the form default (off) as this agent's state would be a lie:
+        // the GET is gated on agents:read (a non-member 403s) and the scheduler
+        // keeps firing whatever the saved block says, so keep the form disabled
+        // and say why instead of showing defaults as the saved state.
         if (!mounted) return
         setHeartbeatLoadError(err instanceof Error ? err.message : 'request failed')
       })

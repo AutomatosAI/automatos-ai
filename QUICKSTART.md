@@ -121,9 +121,9 @@ finished and 200 once the instance is usable.
   brief* — and a welcome Deliverable under **Deliverables → Blogs**. Run the
   Playbook from the Playbooks page with a topic of your own.
 - **Web access for your agents (PRD-240).** Reading a page works out of the
-  box — every agent has `web_fetch`, no key, no app to connect, nothing to
+  box — every agent has `platform_web_fetch`, no key, no app to connect, nothing to
   assign. Private and internal addresses are always refused. Searching the
-  web (`web_search`) uses the first engine you have, in this order:
+  web (`platform_web_search`) uses the first engine you have, in this order:
   1. **Your OpenRouter key** — search on any model, including free NVIDIA
      ones; the model on an OpenRouter route also searches inside its own
      turn and cites its sources. Billed per search on your OpenRouter account
@@ -222,7 +222,7 @@ figure to invent. The full reference is the
   the Tools page and Marketplace → Tools say *"Integrations are disabled — no
   Composio API key is configured."*, Composio tools are not offered to agents,
   and the native platform tools keep working (PRD-233 S2). Web access is
-  **not** one of these: `web_fetch` needs no key, and `web_search` works with
+  **not** one of these: `platform_web_fetch` needs no key, and `platform_web_search` works with
   your OpenRouter key or a SearXNG container as well as with Composio.
 - **Durable memory (mem0) and field memory (Qdrant)** are not in the default
   stack; the backend degrades cleanly without them.

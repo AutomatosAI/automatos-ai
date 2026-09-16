@@ -52,3 +52,9 @@ class GeneratedDocument:
     # HTML / uploaded-docx). None when no template render applies (xlsx).
     # Persisted on the Deliverable ``extra`` so lane coverage is a tracked number.
     template_lane: Optional[str] = None
+    # PRD-242 S4: which template produced the file (attribution for the
+    # Deliverable + the tool result), and the S3 object key when the
+    # persistence copy landed (a share link can only be minted for that copy).
+    template_id: Optional[str] = None
+    template_name: Optional[str] = None
+    s3_key: Optional[str] = None

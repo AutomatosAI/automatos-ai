@@ -197,6 +197,10 @@ services:
       # the process and integrations stayed off with no way to tell why.
       COMPOSIO_KEY: ${COMPOSIO_KEY:-}
       COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
+      # Firecrawl (the onboarding site scan, api/wizard.py): config.py reads
+      # FIRECRAWL_API_KEY but it was never forwarded — a .env key could not reach
+      # the process and the scan reported "Firecrawl is not configured" regardless.
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
       # PRD-240 — agents read and search the web. On by default in the local
       # edition; WEB_ACCESS_DENY blocks hosts (suffix match); WEB_SEARCH_PROVIDER
       # pins the search engine (auto = openrouter -> composio -> searxng).

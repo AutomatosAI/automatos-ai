@@ -856,6 +856,14 @@ else:
         "Set OPENROUTER_API_KEY on the API service to unblock pilot users."
     )
 
+# PRD-242 S1: unhandled errors become a JSON 500 INSIDE the CORS layer. Starlette
+# wraps later-added middleware OUTSIDE earlier ones, so this must be registered
+# BEFORE CORSMiddleware: a 500 minted by the global handler (ServerErrorMiddleware,
+# outermost) carries no Access-Control-Allow-Origin and the browser reports every
+# backend crash as "TypeError: Failed to fetch" instead of the real status.
+from core.observability.error_response import json_500_for_unhandled_errors
+app.middleware("http")(json_500_for_unhandled_errors)
+
 # CORS middleware - use centralized config
 # Parse and clean CORS origins (handle comma-separated list with whitespace)
 cors_origins = [origin.strip() for origin in config.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
@@ -918,12 +926,25 @@ if _policy_plane_on:
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 UPLOAD_PATHS = ("/api/documents/upload", "/api/admin/plugins/upload", "/api/documents/templates/upload", "/api/knowledge/graph/import")
+# PRD-242 S3: the brand logo is capped at 2 MB by the route; the transport cap
+# stays just above it so an oversized multipart body is refused before the
+# parser spools it (a 50 MB bucket for a 2 MB file is 25x wasted churn).
+from modules.documents.brand_logo import BRAND_LOGO_ROUTE, MAX_LOGO_BYTES
+PATH_BODY_LIMITS = {BRAND_LOGO_ROUTE: MAX_LOGO_BYTES + 512 * 1024}
+
+
+def _body_limit_for(path: str) -> int:
+    for prefix, limit in PATH_BODY_LIMITS.items():
+        if path.startswith(prefix):
+            return limit
+    return MAX_UPLOAD_SIZE if any(path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
+
 
 @app.middleware("http")
 async def limit_request_body(request, call_next):
     from starlette.responses import JSONResponse
     content_length = request.headers.get("content-length")
-    limit = MAX_UPLOAD_SIZE if any(request.url.path.startswith(p) for p in UPLOAD_PATHS) else MAX_BODY_SIZE
+    limit = _body_limit_for(request.url.path)
     if content_length:
         try:
             if int(content_length) > limit:

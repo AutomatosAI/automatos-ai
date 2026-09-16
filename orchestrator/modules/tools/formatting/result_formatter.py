@@ -751,6 +751,12 @@ class ToolResultFormatter:
                 'size_kb': doc_result.get('size_kb', 0),
                 'title': doc_result.get('title', doc_result.get('filename', 'Document')),
                 'content': doc_result.get('content', ''),
+                # PRD-242 S4: delivery links + template attribution ride to the widget.
+                'deliverable_id': doc_result.get('deliverable_id'),
+                'app_url': doc_result.get('app_url'),
+                'share_url': doc_result.get('share_url'),
+                'template_id': doc_result.get('template_id'),
+                'template_name': doc_result.get('template_name'),
             }
             logger.info(f"[FrontendData] generate_document: {frontend_data['generated_document']['filename']}")
 
@@ -949,8 +955,20 @@ class ToolResultFormatter:
             size_kb = doc_result.get('size_kb', 0)
             download_url = doc_result.get('download_url', '')
             summary_parts.append(f"\nGenerated {fmt.upper()} document: {filename} ({size_kb} KB)")
+            if doc_result.get('template_name'):
+                summary_parts.append(f"Template used: {doc_result['template_name']}")
             summary_parts.append(f"Download URL: {download_url}")
             summary_parts.append("IMPORTANT: Show the download link to the user using the exact URL above. Do NOT invent document:// links.")
+            # PRD-242 S4: the document is already saved; say where, and hand over the
+            # ONE link that works for someone who cannot sign in (email / Slack).
+            if doc_result.get('deliverable_id'):
+                summary_parts.append(f"Saved to Deliverables (id {doc_result['deliverable_id']}); in-app: {doc_result.get('app_url') or 'Deliverables page'}")
+            if doc_result.get('share_url'):
+                summary_parts.append(
+                    f"Share link (no sign-in needed, valid 7 days) — use THIS when emailing or messaging the document: {doc_result['share_url']}"
+                )
+            else:
+                summary_parts.append("No share link is available (object storage has no copy); the download URL requires a signed-in workspace member.")
 
         full_summary = "\n".join(summary_parts)
         
