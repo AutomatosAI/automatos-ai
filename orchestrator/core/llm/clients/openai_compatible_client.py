@@ -299,6 +299,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
 
     def _request_kwargs(self, messages: List[Dict[str, str]], tools: Optional[List[Dict]]) -> Dict[str, Any]:
         """The chat-completions request for ``messages`` (+ tools and tool_choice)."""
+        from config import config as platform_config
         from core.llm.prompt_cache import apply_openai_cache_control, strip_cache_hints, text_of
 
         # Prompt caching (2026-09-16): on a provider that passes Anthropic
@@ -311,7 +312,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             messages, auto_cache = apply_openai_cache_control(
                 messages,
                 getattr(self.config, "model", None),
-                ttl_1h=bool(getattr(config, "PROMPT_CACHE_TTL_1H", False)),
+                ttl_1h=bool(getattr(platform_config, "PROMPT_CACHE_TTL_1H", False)),
             )
         else:
             messages = strip_cache_hints(messages)

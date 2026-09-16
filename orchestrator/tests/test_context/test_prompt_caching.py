@@ -122,14 +122,22 @@ def test_cache_control_emitted_on_anthropic_route():
 
 
 def test_no_cache_control_on_non_anthropic_client_source():
-    # Structural: cache_control emission lives only in the Anthropic client seam
-    # (+ the pre-existing dead Bedrock passthrough). OpenAI/OpenRouter/etc. routes
-    # never emit it.
+    # Structural: cache_control emission lives in the Anthropic client seam (+ the
+    # pre-existing dead Bedrock passthrough) and, since 2026-09-16, in the
+    # OpenAI-compatible client — gated by MODEL, not by file: it emits the marker
+    # only for Anthropic ids reached through a provider that passes breakpoints
+    # through (OpenRouter), via core/llm/prompt_cache.apply_openai_cache_control.
+    # tests/test_openrouter_prompt_cache.py pins that a Gemini/OpenAI id on the same
+    # route gets no marker. Every other client file still never emits it.
     clients = _ORCH / "core" / "llm" / "clients"
+    allowed = {"anthropic_client.py", "bedrock_client.py", "openai_compatible_client.py"}
     offenders = [
         p.name
         for p in clients.glob("*.py")
-        if "cache_control" in p.read_text(encoding="utf-8")
-        and p.name not in {"anthropic_client.py", "bedrock_client.py"}
+        if "cache_control" in p.read_text(encoding="utf-8") and p.name not in allowed
     ]
     assert offenders == [], f"unexpected cache_control on non-Anthropic clients: {offenders}"
+    # The OpenAI-compatible client's emission goes through the gated seam, never a
+    # hand-rolled marker on the messages it receives.
+    src = (clients / "openai_compatible_client.py").read_text(encoding="utf-8")
+    assert "apply_openai_cache_control(" in src
