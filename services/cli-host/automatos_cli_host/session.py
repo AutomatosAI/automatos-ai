@@ -403,6 +403,7 @@ class Session:
             cwd=cwd, session_dir=session_dir, ticket_path=ticket_path, system_prompt_path=system_prompt_path,
             task_id=self.task_id, session_id=self.session_id, resume_session_id=self.ticket.get("resume_session_id"),
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
+            state_dir=getattr(self.cfg, "state_dir", None),
         )
         prepared = self.adapter.prepare(ctx)
 

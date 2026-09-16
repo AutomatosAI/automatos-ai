@@ -12,9 +12,11 @@ from typing import Callable, Dict, Mapping, Optional
 from ..presets import REGISTRY, CliPreset, UnknownCli, preset_for
 from .base import LaunchContext, Prepared, PresetAdapter, Reply, ToolClass, ToolIntent, hook_command
 from .claude import ClaudeAdapter
+from .codex import CodexAdapter
 
 _ADAPTERS: Dict[str, Callable[[CliPreset, Optional[str]], PresetAdapter]] = {
     "claude": ClaudeAdapter,
+    "codex": CodexAdapter,
 }
 
 

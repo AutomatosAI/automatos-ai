@@ -27,12 +27,7 @@ from sqlalchemy.orm import Session
 
 from config import config
 from core.cli_runtime import (
-    CONFIG_ALLOWED_TOOLS_KEY,
-    CONFIG_WORKTREE_KEY,
-    CONFIG_MODEL_KEY,
-    CONFIG_PROVIDER_KEY,
-    CONFIG_WORKING_DIRECTORY_KEY,
-    RUNTIME_CLI,
+    CLI_PRESETS, CONFIG_ALLOWED_TOOLS_KEY, CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, CONFIG_WORKTREE_KEY, PROVIDER_CLAUDE, RUNTIME_CLI, registry_public,
 )
 from core.llm.usage_context import LANE_BOARD_TASK, LANE_SESSION
 from core.models.cli_hosts import CliHost, CliHostStatus
@@ -230,6 +225,8 @@ def host_health(db: Session, workspace_id: Any) -> Dict[str, Any]:
         "online_hosts": [h.to_dict() for h in online],
         # CLI adapter design §8.2/§8.3: which CLIs a ticket can be claimed for now.
         "providers_online": sorted({p for h in online for p in (served_providers_of(h) or [])}),
+        # …and the CLIs the registry knows at all, so the picker renders from here, not a hardcoded list.
+        "registry": registry_public(),
         "last_seen_at": last_seen.isoformat() if last_seen else None,
         "cli_agents": len(cli_agent_ids),
         "waiting_tickets": waiting,
@@ -554,7 +551,8 @@ def _terminal_launch_for(db: Session, task: BoardTask, ref: Dict[str, Any], host
         # The session moves with the operator: the host that opens it owns its events.
         task.runtime_ref = {**ref, "host_id": str(host.id)}
     return {
-        "kind": "claude",
+        # The grant names the CLI; the host's adapter for it spells the command (design §7).
+        "kind": ref.get("provider") or PROVIDER_CLAUDE,
         "session_id": str(session_id),
         "system_prompt": _session_system_prompt(agent),
         "model": ref.get("model"),
@@ -716,9 +714,11 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         prior = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
         resume_session_id = _resume_session_for(prior, host)
         session_id = str(uuid4())
+        provider = cfg.get(CONFIG_PROVIDER_KEY) or PROVIDER_CLAUDE
         ref = {
             "runtime": RUNTIME_CLI,
-            "provider": cfg.get(CONFIG_PROVIDER_KEY),
+            "provider": provider,
+            "provider_label": CLI_PRESETS[provider].label if provider in CLI_PRESETS else provider,
             "model": cfg.get(CONFIG_MODEL_KEY),
             "host_id": str(host.id),
             "session_id": session_id,

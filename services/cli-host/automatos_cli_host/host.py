@@ -35,6 +35,7 @@ log = logging.getLogger("automatos.cli_host")
 
 
 RESTART_EXIT_CODE = 75  # EX_TEMPFAIL: "bring me back" — the service manager restarts non-zero exits
+CAPABILITIES_TTL_SECONDS = 60.0  # re-detect the CLIs (installed? logged in?) this often
 
 
 def source_fingerprint() -> str:
@@ -96,6 +97,7 @@ class Host:
         self._last_flush = 0.0
         self._claimed_once = False
         self._capabilities: Optional[Dict[str, Any]] = None
+        self._capabilities_at = 0.0
         self._announced_parked: set = set()
         # PRD-235 W3: drift → drain → restart
         self._source_fingerprint = source_fingerprint()
@@ -159,12 +161,17 @@ class Host:
         self.hooks.start()
 
     def capabilities(self) -> Dict[str, Any]:
-        if self._capabilities is None:
+        """What the host announces. Re-detected every CAPABILITIES_TTL_SECONDS: a
+        CLI the operator installs or logs into (``codex login``) while the host
+        runs becomes ``served`` on the next heartbeat, no restart (design §8.2)."""
+        now = time.time()
+        if self._capabilities is None or now - self._capabilities_at > CAPABILITIES_TTL_SECONDS:
             caps = host_capabilities(self.cfg)
             # PRD-239 S7: where the Canvas terminal listens (loopback only).
             caps["terminal_port"] = self.terminal.port if self.terminal is not None else None
             caps["max_terminals"] = MAX_TERMINALS if self.terminal is not None else 0
             self._capabilities = caps
+            self._capabilities_at = now
         return self._capabilities
 
     def _reap_previous_run(self) -> None:

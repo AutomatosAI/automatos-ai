@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 PROVIDER_CLAUDE = "claude"
 PROVIDER_CODEX = "codex"
@@ -43,12 +43,31 @@ class CliPresetInfo:
     label: str
     usage_slug: str                       # ``llm_usage.provider`` — a slug of its own, never an API provider
     model_ok: Callable[[str], bool]       # the rule a saved model must satisfy (blank = the CLI's default)
+    model_hint: str                       # the help line under the picker's model field
+    model_placeholder: str
+
+    def public(self) -> Dict[str, str]:
+        """What the picker renders (design §8.3) — never the rule itself."""
+        return {"id": self.id, "label": self.label, "model_hint": self.model_hint, "model_placeholder": self.model_placeholder}
 
 
 CLI_PRESETS: Dict[str, CliPresetInfo] = {
-    PROVIDER_CLAUDE: CliPresetInfo(PROVIDER_CLAUDE, "Claude Code", "claude_code", _claude_model_ok),
-    PROVIDER_CODEX: CliPresetInfo(PROVIDER_CODEX, "Codex", "codex", _codex_model_ok),
+    PROVIDER_CLAUDE: CliPresetInfo(
+        PROVIDER_CLAUDE, "Claude Code", "claude_code", _claude_model_ok,
+        "Claude Code's own aliases, lowercase (fable · opus · sonnet · haiku) or a full id such as claude-opus-5. "
+        "Blank = the CLI's default. The model must be available to your login; it is not one of the API models below.",
+        "fable · opus · sonnet · haiku · or claude-opus-5",
+    ),
+    PROVIDER_CODEX: CliPresetInfo(
+        PROVIDER_CODEX, "Codex", "codex", _codex_model_ok,
+        "A model your ChatGPT plan offers in Codex (for example gpt-5.5). Blank = the CLI's default from your ~/.codex/config.toml.",
+        "gpt-5.5",
+    ),
 }
+
+
+def registry_public() -> List[Dict[str, str]]:
+    return [info.public() for info in CLI_PRESETS.values()]
 CLI_PROVIDERS = tuple(CLI_PRESETS)
 
 # How a session's spend is tagged in ``llm_usage.provider`` (never a registry API

@@ -7,6 +7,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
+const HEALTH = {
+  registry: [
+    { id: 'claude', label: 'Claude Code', model_hint: 'aliases', model_placeholder: 'fable · opus' },
+    { id: 'codex', label: 'Codex', model_hint: 'a ChatGPT-plan model', model_placeholder: 'gpt-5.5' },
+  ],
+  providers_online: ['claude'],
+}
+
 async function load(edition: 'local' | 'saas') {
   vi.resetModules()
   vi.doMock('@/lib/auth-edition', () => ({
@@ -14,12 +22,35 @@ async function load(edition: 'local' | 'saas') {
     isLocal: edition === 'local',
     isSaaS: edition === 'saas',
   }))
+  // CLI adapter design §8.3: the picker asks the backend which CLIs exist and which are served.
+  vi.doMock('@/lib/api-client', () => ({ apiClient: { request: vi.fn().mockResolvedValue(HEALTH) } }))
   return import('../runtime-section')
 }
 
 afterEach(() => {
   vi.doUnmock('@/lib/auth-edition')
+  vi.doUnmock('@/lib/api-client')
   vi.resetModules()
+})
+
+// CLI adapter design §8.3: the options come from the registry; a CLI no online host runs says so;
+// a saved choice survives an unreadable registry.
+describe('providerOptions', () => {
+  it('lists every registry CLI and notes the ones no online host runs', async () => {
+    const { providerOptions } = await load('local')
+    const options = providerOptions(HEALTH, 'claude')
+    expect(options.map((o) => o.id)).toEqual(['claude', 'codex'])
+    expect(options[0]).toMatchObject({ label: 'Claude Code', served: true, note: null })
+    expect(options[1]).toMatchObject({ label: 'Codex', served: false, note: 'no online host runs it yet' })
+  })
+
+  it('keeps the current value when the registry is unavailable or does not know it', async () => {
+    const { providerOptions } = await load('local')
+    expect(providerOptions(null, 'codex')).toEqual([{ id: 'codex', label: 'codex', served: false, note: null }])
+    const unknown = providerOptions(HEALTH, 'grok')
+    expect(unknown.map((o) => o.id)).toEqual(['claude', 'codex', 'grok'])
+    expect(unknown[2].note).toContain('not in this instance')
+  })
 })
 
 describe('runtime configuration helpers', () => {

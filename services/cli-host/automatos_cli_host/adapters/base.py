@@ -86,6 +86,7 @@ class LaunchContext:
     model: Optional[str] = None
     worktree_name: Optional[str] = None
     agent_id: Optional[str] = None
+    state_dir: Optional[Path] = None  # the host's state dir — per-agent config homes live under it
     hook_command: str = ""            # the shim invocation the CLI's hook config points at
 
 

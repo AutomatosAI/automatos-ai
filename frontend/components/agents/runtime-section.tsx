@@ -5,7 +5,8 @@
  *
  * Shared by the create wizard and the configuration modal so both offer the
  * same choice: an API model (the default — this workspace's keys or OpenRouter)
- * or the user's own Claude Code session on their machine. Local edition only:
+ * or the user's own CLI session on their machine (Claude Code, Codex, … — the
+ * options come from the backend's registry, design §8.3). Local edition only:
  * in saas the group does not render and every agent stays `api`.
  *
  * The fields ride `Agent.configuration` (runtime / provider / model /
@@ -41,8 +42,71 @@ export const DEFAULT_RUNTIME_FIELDS: RuntimeFields = {
   cli_worktree: true,
 }
 
-/** The aliases Claude Code itself resolves (`claude --model`); a full `claude-…` id also works. */
-export const CLAUDE_MODEL_ALIASES = ['fable', 'opus', 'sonnet', 'haiku'] as const
+/** CLI adapter design §8.3: the CLIs the backend's registry knows, and which of them an online host runs now (`GET /api/v1/cli-hosts/health`). */
+export interface CliRegistryEntry {
+  id: string
+  label: string
+  model_hint: string
+  model_placeholder: string
+}
+
+export interface CliAvailability {
+  registry: CliRegistryEntry[]
+  providers_online: string[]
+}
+
+export interface ProviderOption {
+  id: string
+  label: string
+  /** an online host announced it can run this CLI (installed + logged in with the operator's own plan) */
+  served: boolean
+  /** the line after the label when it is not served; null when it is */
+  note: string | null
+}
+
+/**
+ * The picker's options: every CLI the registry knows, with a note when no online host runs it;
+ * the current value is kept even when the registry could not be read, so a saved agent never
+ * loses its choice. Pure.
+ */
+export function providerOptions(avail: CliAvailability | null, current: string): ProviderOption[] {
+  const registry = avail?.registry ?? []
+  const online = new Set(avail?.providers_online ?? [])
+  const options: ProviderOption[] = registry.map((e) => ({
+    id: e.id,
+    label: e.label,
+    served: online.has(e.id),
+    note: avail && !online.has(e.id) ? 'no online host runs it yet' : null,
+  }))
+  if (current && !options.some((o) => o.id === current)) {
+    options.push({ id: current, label: current, served: online.has(current), note: avail ? "not in this instance's registry" : null })
+  }
+  return options
+}
+
+const DEFAULT_MODEL_HINT = "Blank = the CLI's default. The model must be available to your login; it is not one of the API models below."
+
+/** Ask the backend which CLIs exist and which are served now; never throws, null until it answers. */
+function useCliAvailability(enabled: boolean): CliAvailability | null {
+  const [avail, setAvail] = useState<CliAvailability | null>(null)
+  useEffect(() => {
+    if (!enabled) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const { apiClient } = await import('@/lib/api-client')
+        const health = await apiClient.request<{ registry?: CliRegistryEntry[]; providers_online?: string[] }>('/api/v1/cli-hosts/health')
+        if (!cancelled) setAvail({ registry: health.registry ?? [], providers_online: health.providers_online ?? [] })
+      } catch {
+        if (!cancelled) setAvail(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [enabled])
+  return avail
+}
 
 function str(value: unknown): string {
   return typeof value === 'string' ? value : ''
@@ -188,6 +252,10 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
   // PRD-239 S6: the verdict on the typed working directory, live.
   const { check, loading } = useWorkspaceCheck(value.cli_working_directory, isLocal && value.runtime === 'cli')
   const verdict = check ? describeWorkspaceCheck(check) : null
+  const avail = useCliAvailability(isLocal && value.runtime === 'cli')
+  const provider = value.cli_provider || DEFAULT_CLI_PROVIDER
+  const options = providerOptions(avail, provider)
+  const entry = avail?.registry.find((e) => e.id === provider) ?? null
   if (!isLocal) return null
   return (
     <div className="space-y-4 rounded-lg border border-border/40 p-4" data-testid="runtime-section">
@@ -204,14 +272,14 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="api">API model (this workspace&apos;s keys or OpenRouter)</SelectItem>
-          <SelectItem value="cli">Claude Code session (your own login, on your machine)</SelectItem>
+          <SelectItem value="cli">CLI session (your own login, on your machine — Claude Code, Codex, …)</SelectItem>
         </SelectContent>
       </Select>
       {value.runtime === 'cli' && (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Tickets for this agent are run by your paired CLI host as interactive Claude Code sessions.
-            The model settings below do not apply to sessions.
+            Tickets for this agent are run by your paired CLI host as interactive sessions of the CLI you pick,
+            under your own login. The model settings below do not apply to sessions.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -222,8 +290,12 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
               >
                 <SelectTrigger id="cli-provider"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="claude">Claude Code</SelectItem>
-                  <SelectItem value="codex">Codex (S5 — not yet served by the host)</SelectItem>
+                  {options.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
+                      {o.note ? ` — ${o.note}` : ''}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -231,14 +303,11 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
               <Label htmlFor="cli-model" className="text-xs">Model (optional)</Label>
               <Input
                 id="cli-model"
-                placeholder={`${CLAUDE_MODEL_ALIASES.join(' · ')} · or a full id such as claude-opus-5`}
+                placeholder={entry?.model_placeholder ?? "the CLI's default"}
                 value={value.cli_model}
                 onChange={(e) => onChange('cli_model', e.target.value)}
               />
-              <p className="text-xs text-muted-foreground">
-                Claude Code&apos;s own aliases, lowercase. Blank = the CLI&apos;s default. The model must be
-                available to your login; it is not one of the API models below.
-              </p>
+              <p className="text-xs text-muted-foreground">{entry?.model_hint ?? DEFAULT_MODEL_HINT}</p>
             </div>
           </div>
           <div className="space-y-1">
@@ -250,7 +319,7 @@ export function RuntimeSection({ value, onChange }: RuntimeSectionProps) {
               onChange={(e) => onChange('cli_working_directory', e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Claude Code starts here and loads this folder&apos;s CLAUDE.md files; the Canvas explorer opens here. One repo or a whole workspace of repos — your choice. Blank = the host&apos;s default <span className="font-mono">./workspaces</span>.
+              The CLI starts here and loads this folder&apos;s instruction files (CLAUDE.md, AGENTS.md); the Canvas explorer opens here. One repo or a whole workspace of repos — your choice. Blank = the host&apos;s default <span className="font-mono">./workspaces</span>.
             </p>
             <label className="flex items-start gap-2 text-xs text-muted-foreground" data-testid="cli-worktree">
               <input
