@@ -1945,6 +1945,26 @@ class StreamingChatService:
         except Exception:
             logger.debug("[tool-gap] no-tool-call gap write skipped", exc_info=True)
 
+        # 2026-09-16: if, even after the loop's one nudge, the reply still narrates
+        # actions with no tool call, say so where the user can see it — a reply
+        # that reads "both created ✅" with nothing executed is a fabrication the
+        # UI cannot expose on its own.
+        try:
+            if use_tools and not executor.tracker.tool_counts:
+                from modules.tools.execution.tool_loop import looks_like_narrated_action
+                if looks_like_narrated_action(getattr(result.response, "content", "") or ""):
+                    logger.warning("[chat] reply narrates actions but no tool ran — notice emitted")
+                    yield self.streaming_handler.format_aisdk_limit_reached(
+                        limit="no_tool_call",
+                        value=0,
+                        message=(
+                            "No tools ran in this reply, so nothing it describes was "
+                            "executed. Tell me to do it and I will make the calls."
+                        ),
+                    )
+        except Exception:
+            logger.debug("[no-tool-call] notice skipped", exc_info=True)
+
         # Max-iterations reached → emit limit_reached SSE + synthesize.
         if result.max_iterations_reached:
             yield self.streaming_handler.format_aisdk_limit_reached(
