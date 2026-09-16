@@ -827,6 +827,11 @@ class AgentPlatformTools:
                     )
 
                 self.logger.info(f"  ✅ Document generated: {result.filename} ({result.size // 1024}KB)")
+                # PRD-242 S4: the links an agent needs to DELIVER the document, not
+                # just download it — the in-app feed (workspace members) and a
+                # no-sign-in share link for an email/Slack recipient (None when
+                # object storage holds no copy). Plus which template filled it.
+                from modules.documents.generation_service import deliverables_app_url
                 return ToolResultFormatter.standardize_result(
                     {
                         "success": True,
@@ -837,6 +842,11 @@ class AgentPlatformTools:
                             "download_url": result.download_url,
                             "size_kb": result.size // 1024,
                             "content": result.content,
+                            "deliverable_id": (registration or {}).get("deliverable_id"),
+                            "app_url": deliverables_app_url(),
+                            "share_url": gen_service.share_link(result),
+                            "template_id": result.template_id,
+                            "template_name": result.template_name,
                         }],
                     },
                     tool_name

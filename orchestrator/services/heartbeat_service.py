@@ -1518,9 +1518,28 @@ class HeartbeatService:
         Bypasses the workspace-level NotificationDispatcher because the
         agent has its own destination. Failure is logged but never raised
         — heartbeat completion isn't blocked by a flaky downstream URL.
+
+        The URL is whatever a workspace editor typed into the agent's
+        heartbeat form, and this runs from the API worker's own network
+        position, so it goes through the PRD-240 seam: resolved once, every
+        answer checked against the blocked ranges (private, loopback,
+        link-local, metadata) and the operator denylist, and the POST sent to
+        the address that was checked — Host + SNI carry the name. The
+        ``WEB_ACCESS`` switch does not apply (an operator-configured
+        destination is not agent web access). A redirect is reported, never
+        followed: a hop could land in a blocked range.
         """
         try:
-            import httpx
+            from core.security.web_access import build_pinned_request, resolve_outbound_async
+
+            # Off the event loop and bounded (RESOLVE_TIMEOUT_SECONDS).
+            target = await resolve_outbound_async(webhook_url, enforce_switch=False)
+            if not target.ok:
+                logger.warning(
+                    "[Heartbeat] report_to=webhook refused for agent=%s: %s",
+                    agent_id, target.reason,
+                )
+                return
             payload = {
                 "event": "heartbeat_complete",
                 "title": title,
@@ -1530,17 +1549,28 @@ class HeartbeatService:
                 "status": status,
                 "report_id": str(link_id) if link_id is not None else None,
             }
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(webhook_url, json=payload)
+            async with self._webhook_client() as client:
+                resp = await client.send(
+                    build_pinned_request(client, "POST", webhook_url, target, json=payload)
+                )
+                # Host only: webhook URLs often carry a secret in the path.
                 logger.info(
-                    "[Heartbeat] report_to=webhook: POST %s → %s (agent=%s)",
-                    webhook_url, resp.status_code, agent_id,
+                    "[Heartbeat] report_to=webhook: POST to %s → %s (agent=%s)",
+                    target.host, resp.status_code, agent_id,
                 )
         except Exception as e:
             logger.warning(
                 "[Heartbeat] Per-agent webhook delivery failed for agent=%s: %s",
                 agent_id, e,
             )
+
+    @staticmethod
+    def _webhook_client():
+        """The client the webhook POST goes through (tests route it into an
+        ``httpx.MockTransport``). Redirects are never followed here."""
+        import httpx
+
+        return httpx.AsyncClient(timeout=10.0, follow_redirects=False)
 
     # ------------------------------------------------------------------
     # Public API (manual triggers)

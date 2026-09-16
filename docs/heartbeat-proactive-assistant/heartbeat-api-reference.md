@@ -45,7 +45,7 @@ For architectural details on how heartbeats are scheduled via APScheduler, see [
 
 ## 1. Overview & Authentication
 
-The Heartbeat REST API exposes endpoints under the `/api/heartbeat` prefix [orchestrator/api/heartbeat.py:28-32](). Routes are secured via hybrid authentication (`get_request_context_hybrid`) and super-admin dependency gates (`require_super_admin`) to protect administrative heartbeat configurations and manual trigger actions [orchestrator/api/heartbeat.py:20-32]().
+The Heartbeat REST API exposes endpoints under the `/api/heartbeat` prefix [orchestrator/api/heartbeat.py:28-32](). Every route is authenticated via `get_request_context_hybrid`, and since 2026-09-16 the router carries two gate tiers, declared per route: the per-agent routes (`/agents/{id}/config|last|run|history`, `/workspace`, `/{id}/toggle`, `/{id}/executions`) are an ordinary agent setting, gated on the workspace permission matrix like editing the agent (`require_workspace_permission`: `agents:read` to see, `agents:update` to change, `agents:execute` to fire), while the observability routes (`GET /status`, `GET /analytics`, `POST /orchestrator/run`, `GET /orchestrator/history`) keep the PRD-143 super-admin lock (`require_super_admin`). A `webhook_url` is refused at save time when it points into a private, loopback, link-local or metadata range or a denylisted host, and the delivery re-checks and pins the address at send time.
 
 Sources: [orchestrator/api/heartbeat.py:20-32]()
 

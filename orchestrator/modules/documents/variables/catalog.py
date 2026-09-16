@@ -12,7 +12,7 @@ business profile), ``brand.*`` (the workspace brand kit — PRD-167 S4), ``date.
 
 from __future__ import annotations
 
-from typing import Dict, List, TypedDict
+from typing import Any, Dict, List, TypedDict
 
 
 class VariableEntry(TypedDict):
@@ -63,6 +63,19 @@ KNOWN_PATHS = frozenset(CATALOG_BY_PATH)
 DYNAMIC_PREFIX = "data."
 
 
+def walk_dynamic(data: Any, path: str) -> Any:
+    """Read a ``data.*`` path (or a bare dotted key) out of nested dicts; ``None`` when
+    absent. Shared by the resolver (scalar chips) and the ``data_table`` renderer
+    (list rows) so both read the same object the same way."""
+    key = path[len(DYNAMIC_PREFIX):] if path.startswith(DYNAMIC_PREFIX) else path
+    cur = data
+    for part in key.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
 def is_known_path(path: str) -> bool:
     return path in KNOWN_PATHS
 
@@ -85,4 +98,5 @@ __all__ = [
     "is_known_path",
     "is_dynamic_path",
     "is_valid_path",
+    "walk_dynamic",
 ]

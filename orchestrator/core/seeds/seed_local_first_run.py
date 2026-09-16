@@ -62,6 +62,7 @@ from core.models.core import Agent, BlogPost, User, WorkflowTemplate
 from core.models.workspaces import Workspace
 from core.seeds.seed_auto_agent import seed_auto_agent
 
+from modules.documents.seed_templates import seed_starter_templates
 # NOTE: nothing from core.services is imported here on purpose. The seed
 # loader (core/database/load_seed_data.py) puts /app/core at sys.path[0], so
 # under it `core/services/__init__` → analytics_engine → core.redis resolves
@@ -773,6 +774,10 @@ def seed_local_first_run(db: Session) -> dict[str, Any]:
     result["agents"] = dict(Counter(_upsert_agent(ctx, spec) for spec in ROSTER))
     result["playbooks"] = dict(Counter([_upsert_playbook(ctx, PLAYBOOK, _roster_ids(ctx))]))
     result["deliverables"] = dict(Counter([_upsert_welcome_post(ctx, auto.id)]))
+    # PRD-242 S2: the starter document templates were seeded only at SaaS
+    # workspace provisioning (core/auth/hybrid.py), so a local install opened the
+    # Template Studio to an empty gallery. Same idempotent seeder, by name.
+    result["templates"] = {"created": seed_starter_templates(db, workspace_id)}
     result["ledger_updated"] = _record_ledger(workspace, ctx)
     db.flush()
 
