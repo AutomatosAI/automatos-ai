@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, Plus, Trash2, Zap, CheckCircle2, XCircle, MessageSquare } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
+import { isLocal } from '@/lib/auth-edition'
 
 interface ChannelConnection {
   id: string
@@ -147,9 +148,29 @@ const MULTI_MODE_PLATFORMS: Record<string, Array<{ value: 'webhook' | 'polling';
     {
       value: 'polling',
       label: 'Polling',
-      hint: 'Long-poll getUpdates from inside the orchestrator. Requires python-telegram-bot. Conflicts with webhook mode.',
+      hint: 'Long-poll getUpdates from inside the orchestrator — no public URL needed. Requires python-telegram-bot. Conflicts with webhook mode.',
     },
   ],
+}
+
+/** Platforms whose inbound path runs without a public URL: Telegram long-polls. */
+export const POLLING_CAPABLE_PLATFORMS: ReadonlySet<string> = new Set(['telegram'])
+
+/**
+ * The mode a new connection starts in. A local install cannot receive webhooks
+ * without a tunnel, so a platform that can poll starts on polling there; the
+ * hosted edition keeps the platform's first (recommended) mode.
+ */
+export function defaultModeFor(platform: string, local: boolean = isLocal): 'webhook' | 'polling' | undefined {
+  const modes = MULTI_MODE_PLATFORMS[platform]
+  if (!modes) return undefined
+  if (local && modes.some((m) => m.value === 'polling')) return 'polling'
+  return modes[0].value
+}
+
+/** In the local edition a webhook-only platform's INBOUND needs a public URL in front of the orchestrator; outbound works regardless. */
+export function needsPublicUrlLocally(platform: string, local: boolean = isLocal): boolean {
+  return local && !POLLING_CAPABLE_PLATFORMS.has(platform)
 }
 
 export function ChannelsSettingsTab() {
@@ -203,7 +224,7 @@ export function ChannelsSettingsTab() {
     setFieldErrors(prev => ({ ...prev, [platform]: {} }))
     setConnecting(platform)
     try {
-      const mode = newModes[platform] ?? (MULTI_MODE_PLATFORMS[platform]?.[0].value)
+      const mode = newModes[platform] ?? defaultModeFor(platform)
       const body: Record<string, any> = { platform, config }
       if (mode) body.mode = mode
       const resp = await apiClient.request<{
@@ -372,7 +393,7 @@ export function ChannelsSettingsTab() {
                         <div className="space-y-1">
                           <Label className="text-xs">Connection mode</Label>
                           <select
-                            value={newModes[platform.id] ?? MULTI_MODE_PLATFORMS[platform.id][0].value}
+                            value={newModes[platform.id] ?? defaultModeFor(platform.id)}
                             onChange={(e) => setNewModes(prev => ({
                               ...prev,
                               [platform.id]: e.target.value as 'webhook' | 'polling',
@@ -387,11 +408,16 @@ export function ChannelsSettingsTab() {
                           </select>
                           <p className="text-[10px] text-muted-foreground">
                             {(() => {
-                              const selected = newModes[platform.id] ?? MULTI_MODE_PLATFORMS[platform.id][0].value
+                              const selected = newModes[platform.id] ?? defaultModeFor(platform.id)
                               return MULTI_MODE_PLATFORMS[platform.id].find(o => o.value === selected)?.hint
                             })()}
                           </p>
                         </div>
+                      )}
+                      {needsPublicUrlLocally(platform.id) && (
+                        <p className="text-[10px] text-muted-foreground" data-testid={`public-url-note-${platform.id}`}>
+                          Inbound messages for {platform.name} need a public URL for this orchestrator — put a tunnel in front of it on a local install. Outbound delivery works without one.
+                        </p>
                       )}
                       {platform.fields.map(field => {
                         const hasError = !!fieldErrors[platform.id]?.[field.key]

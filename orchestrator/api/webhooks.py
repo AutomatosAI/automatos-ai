@@ -392,6 +392,58 @@ async def _apply_telegram_answer(
     }
 
 
+async def maybe_answer_polled_telegram_message(
+    workspace_id: Any,
+    *,
+    text: str,
+    chat_id: Any,
+    from_id: Any,
+    reply_to_message_id: Optional[Any],
+) -> bool:
+    """PRD-225 US-005 on the POLLING path.
+
+    The webhook handler runs ``_maybe_answer_question`` before routing. A bot in
+    polling mode — python-telegram-bot ``start_polling`` in
+    ``channels.telegram_adapter``, the only mode a local install without a
+    public URL can run — receives the same messages and never came through here,
+    so a reply to a delivered question reached the agent as chat instead of
+    answering the ask (2026-09-17). Build the body and reply context the webhook
+    path would have seen and apply the same correlation, the same authorization
+    (the delivery chat only) and the same shared answer service. Own DB session:
+    the adapter holds none. True when the message was consumed as an answer —
+    the caller must not route it.
+    """
+    from types import SimpleNamespace
+    from uuid import UUID
+
+    text = (text or "").strip()
+    if not text:
+        return False
+    msg: Dict[str, Any] = {"text": text, "chat": {"id": chat_id}, "from": {"id": from_id}}
+    if reply_to_message_id is not None:
+        msg["reply_to_message"] = {"message_id": reply_to_message_id}
+    body = {"message": msg}
+    reply_ctx = _extract_reply_context(body, "telegram")
+    try:
+        workspace = SimpleNamespace(id=UUID(str(workspace_id)))
+    except (TypeError, ValueError):
+        return False
+
+    from core.database.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        handled = await _maybe_answer_question(db, workspace, body, reply_ctx, {})
+        return handled is not None
+    except Exception:  # noqa: BLE001 — an answer bridge that fails must never eat the chat message
+        logger.warning(
+            "[telegram-poll] answer bridge failed for workspace %s", workspace_id, exc_info=True
+        )
+        return False
+    finally:
+        db.close()
+
+
 # =============================================================================
 # PRD-225 US-006 — the per-channel ingress trust gate
 # =============================================================================

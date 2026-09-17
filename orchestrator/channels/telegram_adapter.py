@@ -213,6 +213,27 @@ class TelegramAdapter(BaseChannelAdapter):
             if not text_content and attachment_ids:
                 text_content = "[Attachment received]"
 
+            # PRD-225 US-005: a reply to a delivered question, or ``/answer <id> …``,
+            # answers the ask and never reaches the agent as chat — the same
+            # correlation the webhook path applies before routing. Polling mode is
+            # the only mode a local install without a public URL can run.
+            if update.message.text and not attachment_ids:
+                from api.webhooks import maybe_answer_polled_telegram_message
+
+                reply_to = getattr(update.message, "reply_to_message", None)
+                if await maybe_answer_polled_telegram_message(
+                    self.workspace_id,
+                    text=text_content,
+                    chat_id=update.effective_chat.id,
+                    from_id=update.effective_user.id if update.effective_user else None,
+                    reply_to_message_id=getattr(reply_to, "message_id", None),
+                ):
+                    logger.info(
+                        "[Telegram:%s] message consumed as an answer to a pending question",
+                        self.connection_id,
+                    )
+                    return
+
             platform_msg = {
                 "channel_id": str(update.effective_chat.id),
                 "reply_channel_id": str(update.effective_chat.id),

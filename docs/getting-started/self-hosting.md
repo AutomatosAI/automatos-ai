@@ -36,6 +36,8 @@ empty value stops `docker compose up` with the message shown:
 | `REDIS_PASSWORD` | `REDIS_PASSWORD is required - set in .env file` | redis, backend, workspace-worker |
 | `API_KEY` | `API_KEY is required - set in .env file` | backend (its own API-key principal) |
 
+**Channels (Settings → Channels).** Available in the local edition. Telegram runs in *polling* mode by default here, so a bot works — and answers agent questions from Telegram replies (PRD-225) — with no public URL. Slack, Discord and WhatsApp receive inbound messages only through webhooks, so their inbound needs a public URL in front of the orchestrator (a tunnel); outbound delivery works for every platform without one.
+
 Any non-empty values work on a private machine. They have no defaults on
 purpose: a public repository must not ship known passwords.
 
