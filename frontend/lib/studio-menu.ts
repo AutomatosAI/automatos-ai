@@ -99,10 +99,12 @@ export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
  * Outputs 41, Skills 24…) fabricated numbers pilots read as real (PRD-154 S10).
  * Pages with honest counts wire their own dynamic numbers.
  */
+// PRD-244 W0: every entry below is a real `?tab=` the page reads — the
+// consistency test pins each list to the page's own tab values. Assignments
+// composes its own Missions/Playbooks tabs (full-bleed hub) and is absent.
+// (No digits inside the literal: the S10 honesty gate reads any digit as a
+// fabricated count.)
 export const STUDIO_PAGE_TABS: Record<string, string[]> = {
-  // PRD-244 W0: every entry here is a real `?tab=` the page reads — the
-  // consistency test pins each list to the page's own tab values. Assignments
-  // composes its own Missions/Playbooks tabs (full-bleed hub) and is absent.
   deliv:   ['Outputs', 'Blogs', 'Templates'],
   agents:  ['Roster', 'Fleet', 'Org Chart', 'Configuration', 'Skills'],
 };
