@@ -60,7 +60,8 @@ class _FakeSDK:
 
 def _client(sdk) -> cc.ComposioClient:
     client = cc.ComposioClient.__new__(cc.ComposioClient)
-    client.composio = sdk
+    client.api_key = "test-key-not-a-secret"
+    client._composio = sdk  # the lazy ``composio`` property returns this once set
     client._auth_config_cache = {}
     client._auth_config_cache_ttl = 3600
     client._auth_config_miss_ttl = 30
