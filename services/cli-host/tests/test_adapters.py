@@ -384,3 +384,103 @@ def test_claude_reads_our_mcp_tools_as_platform_and_everyone_elses_as_unknown():
     # someone else's server (the operator's own, were one ever loaded) is not ours
     assert adapter.tool_intent("mcp__notebooklm__notebook_query", {}).cls is ToolClass.UNKNOWN
     assert adapter.tool_intent("mcp__automatos__", {}).cls is ToolClass.PLATFORM   # empty name → denied by policy
+
+
+# ── PRD-245 W4: the bridge, for Codex ───────────────────────────────────────
+
+def test_codex_writes_the_mcp_table_and_carries_the_token_in_the_environment(tmp_path):
+    """Codex reads a streamable-HTTP server's bearer token from an ENVIRONMENT
+    VARIABLE named in its config, where Claude Code takes a literal header.
+
+    The table below is byte-for-byte what ``codex mcp add --url … 
+    --bearer-token-env-var …`` writes on 0.154.0. The env route is also the right
+    one here rather than merely the available one: a Codex config home is per
+    AGENT, so a token written into that FILE would outlive the ticket that minted
+    it and be read by the agent's next one."""
+    from automatos_cli_host.adapters.base import LaunchContext
+    from automatos_cli_host.adapters.codex import (
+        MCP_SERVER_NAME, MCP_TOKEN_ENV_VAR, CodexAdapter,
+    )
+    from automatos_cli_host.presets import CODEX
+
+    operator = tmp_path / "home" / ".codex"
+    operator.mkdir(parents=True)
+    (operator / "config.toml").write_text(
+        'model = "gpt-5"\n\n[mcp_servers.mine]\ncommand = "npx"\n\n[model_providers.x]\nname = "X"\n')
+    state = tmp_path / "state"
+    session_dir = state / "sessions" / "300"
+    session_dir.mkdir(parents=True)
+    adapter = CodexAdapter(CODEX, home=tmp_path / "home")
+
+    ctx = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="300", session_id="sid",
+        agent_id="264", state_dir=state,
+        session_tools={"names": ["board_summary"],
+                       "url": "http://127.0.0.1:8000/api/v1/session-tools/mcp", "token": "tok-secret"},
+    )
+    prepared = adapter.prepare(ctx)
+    config = (Path(prepared.env["CODEX_HOME"]) / "config.toml").read_text()
+
+    assert f"[mcp_servers.{MCP_SERVER_NAME}]" in config
+    assert 'url = "http://127.0.0.1:8000/api/v1/session-tools/mcp"' in config
+    assert f'bearer_token_env_var = "{MCP_TOKEN_ENV_VAR}"' in config
+    # the token itself is in the ENVIRONMENT (per process), never in the per-agent file
+    assert prepared.env[MCP_TOKEN_ENV_VAR] == "tok-secret"
+    assert "tok-secret" not in config
+    # the operator's own servers are still stripped; everything else of theirs stays
+    assert "[mcp_servers.mine]" not in config and "npx" not in config
+    assert 'model = "gpt-5"' in config and "[model_providers.x]" in config
+    assert "[[hooks." in config and "trust_level" in config
+
+
+def test_codex_without_an_offer_gets_no_table_and_no_variable(tmp_path):
+    """A ticket the backend offered no tools (an older backend, or the bridge
+    off) launches exactly as it did before — and because ``prepare`` REWRITES the
+    config every spawn, a previous ticket's table cannot linger in the agent's
+    shared config home."""
+    from automatos_cli_host.adapters.base import LaunchContext
+    from automatos_cli_host.adapters.codex import MCP_TOKEN_ENV_VAR, CodexAdapter
+    from automatos_cli_host.presets import CODEX
+
+    (tmp_path / "home" / ".codex").mkdir(parents=True)
+    state = tmp_path / "state"
+    session_dir = state / "sessions" / "301"
+    session_dir.mkdir(parents=True)
+    adapter = CodexAdapter(CODEX, home=tmp_path / "home")
+    ctx = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="301", session_id="sid",
+        agent_id="264", state_dir=state,
+    )
+    prepared = adapter.prepare(ctx)
+    config = (Path(prepared.env["CODEX_HOME"]) / "config.toml").read_text()
+    assert "mcp_servers" not in config and MCP_TOKEN_ENV_VAR not in prepared.env
+    # half an offer is no offer
+    half = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="301", session_id="sid",
+        agent_id="264", state_dir=state, session_tools={"names": ["x"], "url": "", "token": "t"},
+    )
+    assert MCP_TOKEN_ENV_VAR not in adapter.prepare(half).env
+
+
+def test_codex_reads_our_mcp_tool_under_every_spelling_it_might_use(tmp_path):
+    """NOT yet observed on a live Codex run (design §6.10): it may name an MCP
+    tool as Claude does, dotted, or slashed. All of them map to the same tool and
+    anything else stays UNKNOWN — which the policy denies. Widening this cannot
+    weaken the gate: the NAME must still be on the ticket's own list."""
+    from automatos_cli_host.adapters.base import ToolClass
+    from automatos_cli_host.adapters.codex import CodexAdapter
+    from automatos_cli_host.presets import CODEX
+
+    adapter = CodexAdapter(CODEX, home=tmp_path)
+    for spelling in ("mcp__automatos__board_summary", "automatos__board_summary",
+                     "automatos.board_summary", "automatos/board_summary",
+                     "mcp.automatos.board_summary"):
+        intent = adapter.tool_intent(spelling, {})
+        assert intent.cls is ToolClass.PLATFORM, spelling
+        assert intent.command == "board_summary", spelling
+    for other in ("mcp__notebooklm__notebook_query", "shell", "apply_patch",
+                  "web_search", "automatos", "otherautomatos__x"):
+        assert adapter.tool_intent(other, {}).cls is not ToolClass.PLATFORM, other

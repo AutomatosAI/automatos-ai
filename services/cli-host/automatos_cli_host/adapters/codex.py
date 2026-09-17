@@ -32,6 +32,25 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .base import LaunchContext, Prepared, PresetAdapter, Refusal, ToolClass, ToolIntent, hook_command
 
+MCP_SERVER_NAME = "automatos"
+# Codex reads a streamable-HTTP server's bearer token from an ENVIRONMENT
+# VARIABLE named in its config (``codex mcp add --bearer-token-env-var``), where
+# Claude Code takes a literal header. Verified against Codex 0.154.0: the table
+# it writes is exactly ``url`` + ``bearer_token_env_var``.
+#
+# The env route is also the RIGHT one here, not merely the available one: a Codex
+# config home is per AGENT (design §6.1), so a token written into that file would
+# outlive the ticket that minted it and be read by the agent's next one. An
+# environment variable lives and dies with the session process.
+MCP_TOKEN_ENV_VAR = "AUTOMATOS_SESSION_TOKEN"
+# How a Codex MCP tool call names itself in the hook payload. NOT yet observed on
+# a live run (§6.10 verification): Codex may spell it like Claude
+# (``mcp__automatos__board_summary``), dotted, or slashed, so every plausible
+# spelling maps to the same tool and anything else stays UNKNOWN — which the
+# policy denies. Widening this later cannot weaken the gate: the NAME must still
+# be on the ticket's own list.
+_MCP_TOOL_RE = re.compile(rf"^(?:mcp[_.]{{0,2}})?{MCP_SERVER_NAME}(?:__|[./:])(?P<tool>[A-Za-z0-9_]+)$")
+
 SHELL_TOOLS = frozenset({"exec_command", "unified_exec", "shell", "container.exec"})
 PATCH_TOOLS = frozenset({"apply_patch"})
 READ_TOOLS = frozenset({"view_image", "read_file"})
@@ -43,6 +62,7 @@ BENIGN_TOOLS = frozenset({"update_plan", "request_user_input", "write_stdin"})
 _PATCH_FILE_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+?)\s*$", re.M)
 _PATCH_MOVE_RE = re.compile(r"^\*\*\* Move to: (.+?)\s*$", re.M)
 _HOOKS_MARK = "# --- automatos-cli-host lifecycle hooks (auto-generated; do not edit) ---"
+_MCP_MARK = "# --- automatos session tools (auto-generated per ticket; do not edit) ---"
 # The operator's MCP servers never ride into a session (PRD-245 D9): a Claude
 # ticket has --strict-mcp-config, a Codex ticket gets its seeded config scrubbed.
 # A TOML table name may be quoted, and a quoted segment may hold a ``]`` —
@@ -241,7 +261,33 @@ class CodexAdapter(PresetAdapter):
         if src.exists():
             os.symlink(src, dest)   # the operator's own login, in place; never a copy
 
-    def _config_text(self, cwd: Path) -> str:
+    @staticmethod
+    def _offer(session_tools: Optional[Mapping[str, Any]]) -> Optional[Tuple[str, str]]:
+        """``(url, token)`` when the claim offered Automatos tools, else ``None``.
+        ONE rule, read by both the config table and the environment: half an offer
+        is no offer, so a token can never reach the environment with no server
+        declared to use it."""
+        if not isinstance(session_tools, Mapping):
+            return None
+        url = str(session_tools.get("url") or "").strip()
+        token = str(session_tools.get("token") or "").strip()
+        return (url, token) if url and token else None
+
+    def _mcp_table(self, session_tools: Optional[Mapping[str, Any]]) -> List[str]:
+        """``[mcp_servers.automatos]`` for THIS ticket's Automatos tools, or
+        nothing when the claim offered none. The token itself is not in here —
+        only the name of the variable the session's environment carries it in."""
+        offer = self._offer(session_tools)
+        if offer is None:
+            return []
+        url, _token = offer
+        return ["", _MCP_MARK,
+                f"[mcp_servers.{MCP_SERVER_NAME}]",
+                f"url = {json.dumps(url)}",
+                f"bearer_token_env_var = {json.dumps(MCP_TOKEN_ENV_VAR)}",
+                ""]
+
+    def _config_text(self, cwd: Path, session_tools: Optional[Mapping[str, Any]] = None) -> str:
         operator = self.operator_home() / "config.toml"
         try:
             base = operator.read_text(encoding="utf-8") if operator.exists() else ""
@@ -257,6 +303,7 @@ class CodexAdapter(PresetAdapter):
         trust_header = f"[projects.{json.dumps(str(cwd))}]"
         if trust_header not in base:
             lines += [trust_header, 'trust_level = "trusted"', ""]
+        lines += self._mcp_table(session_tools)
         return base.rstrip("\n") + "\n" + "\n".join(lines)
 
     def prepare(self, ctx: LaunchContext) -> Prepared:
@@ -267,9 +314,15 @@ class CodexAdapter(PresetAdapter):
         self._link(operator / "auth.json", home / "auth.json")
         self._link(operator / "packages", home / "packages")
         config = home / "config.toml"
-        config.write_text(self._config_text(ctx.cwd), encoding="utf-8")
+        config.write_text(self._config_text(ctx.cwd, ctx.session_tools), encoding="utf-8")
         os.chmod(config, 0o600)
-        return Prepared(env={"CODEX_HOME": str(home)})
+        env = {"CODEX_HOME": str(home)}
+        offer = self._offer(ctx.session_tools)
+        if offer is not None:
+            # The variable the config above names. Per PROCESS, so it dies with
+            # this session — unlike the per-agent config file it is named in.
+            env[MCP_TOKEN_ENV_VAR] = offer[1]
+        return Prepared(env=env)
 
     def record_trust(self, cwd: Path, home: Optional[Path] = None) -> bool:
         return False   # trust lives in OUR config.toml (prepare); the operator's is never written
@@ -289,6 +342,9 @@ class CodexAdapter(PresetAdapter):
             return ToolIntent(tool=tool_name, cls=ToolClass.WEB, paths=tuple(str(ti[k]) for k in ("query", "url") if ti.get(k)))
         if tool_name in BENIGN_TOOLS:
             return ToolIntent(tool=tool_name, cls=ToolClass.BENIGN)
+        match = _MCP_TOOL_RE.match(tool_name or "")
+        if match:
+            return ToolIntent(tool=tool_name, cls=ToolClass.PLATFORM, command=match.group("tool"))
         return ToolIntent(tool=tool_name, cls=ToolClass.UNKNOWN)
 
     # ── the record ──────────────────────────────────────────────────────────
