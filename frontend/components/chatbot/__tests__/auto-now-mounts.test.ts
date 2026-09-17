@@ -7,13 +7,18 @@ const ROOT = path.resolve(__dirname, '..', '..', '..')
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), 'utf8')
 
 describe('Auto now mounts', () => {
-  it('the Studio shell mounts the rail inside its rail aside, above the mission section, and its bar control is the pill', () => {
+  it('the Studio shell mounts the rail above the mission section, and its bar control is the pill', () => {
+    // PRD-246 US-003 moved the rail's content into a `railPanel` const so the
+    // SAME rail can be the grid's third column on a desktop and the pill's
+    // sheet below 1280 — one rail, two homes. The order it asserts is inside
+    // that panel now, not inside the aside.
     const src = read('components/chatbot/studio-chat-shell.tsx')
-    const aside = src.indexOf('<aside className="sh-chat-rail" aria-label="Auto now rail">')
-    expect(aside).toBeGreaterThan(-1)
-    expect(src.indexOf('<AutoNowRail />', aside)).toBeGreaterThan(aside)
-    expect(src.indexOf('<MissionSection', aside)).toBeGreaterThan(src.indexOf('<AutoNowRail />', aside))
-    expect(src).toContain('<AutoNowPill open={!railCollapsed} onToggle={toggleRail}')
+    const panel = src.indexOf('const railPanel = (')
+    expect(panel).toBeGreaterThan(-1)
+    expect(src.indexOf('<AutoNowRail />', panel)).toBeGreaterThan(panel)
+    expect(src.indexOf('<MissionSection', panel)).toBeGreaterThan(src.indexOf('<AutoNowRail />', panel))
+    expect(src).toContain('<aside className="sh-chat-rail" aria-label="Auto now rail">')
+    expect(src).toContain('<AutoNowPill open={railShown} onToggle={toggleRailPanel}')
     expect(src).not.toContain('function MissionRail')
   })
 

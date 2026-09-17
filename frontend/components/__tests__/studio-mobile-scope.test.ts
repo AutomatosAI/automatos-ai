@@ -137,6 +137,18 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
     expect(css.slice(0, OPENS)).toContain('grid-auto-flow: column')
   })
 
+  it('Chat: one column, the sides behind the one Sheet (US-003)', () => {
+    const c = band(1023)
+    expect(c).toContain(':is(.studio, .sh-chat) .sh-chat-grid { grid-template-columns: 1fr; }')
+    expect(c, 'the breadcrumb collapses to the title and the two controls').toContain('.sh-chat-crumb')
+    expect(c).toContain('.sh-chat-bar .sh-chat-active')
+    const shell = read('components/chatbot/studio-chat-shell.tsx')
+    expect(shell).toContain("from '@/components/ui/sheet'")
+    expect(shell, 'the sheets are portals — they need the inset themselves').toMatch(
+      /SheetContent side="left"[\s\S]{0,80}safe-bottom/,
+    )
+  })
+
   it('the tab-strip behaviour is one hook, not a copy per surface', () => {
     const hook = read('hooks/use-tab-strip-scroll.ts')
     expect(hook).toContain('useIsTabletOrBelow')

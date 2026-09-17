@@ -88,11 +88,11 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   // sheet pattern for now. Falls through to classic layout below.
   // ────────────────────────────────────────────────────────────────────
   if (isStudio && !isMobileLayout) {
+    // `safe-bottom` (the one safe-area helper, globals.css) keeps the shell's
+    // bottom edge — the scrolling main and the rail alike — clear of a
+    // notched phone's home bar. The shell is 100dvh with border-box sizing,
+    // so the inset comes out of its height.
     return (
-      {/* `safe-bottom` (the one safe-area helper, globals.css) keeps the
-          shell's bottom edge — the scrolling main and the rail alike — clear
-          of a notched phone's home bar. The shell is 100dvh with
-          border-box sizing, so the inset comes out of its height. */}
       <div className="sh-shell safe-bottom">
         <StudioSidebar
           collapsed={studioSidebarCollapsed}

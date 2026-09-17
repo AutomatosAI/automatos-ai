@@ -2985,6 +2985,26 @@
       gap: 12px; font-size: 13.5px;
     }
     .studio .sh-side .sh-item .sh-ic { width: 16px; height: 16px; }
+
+    /* ── Chat · US-003 ─────────────────────────────────────────────────
+       One column: the conversation. The threads list and the Auto now rail
+       are the same components, rendered by the shell into the app's one
+       Sheet primitive — nothing is duplicated and no second drawer exists.
+       The rail's own threshold is PRD-244 D5's 1280 (above). */
+    :is(.studio, .sh-chat) .sh-chat-grid { grid-template-columns: 1fr; }
+
+    /* The breadcrumb collapses to the active thread's title between the two
+       controls that open the sheets. The bar itself keeps `flex-shrink: 0`
+       from the chrome guard; this is its CONTENT, which may truncate. */
+    :is(.studio, .sh-chat) .sh-chat-bar { padding: 8px 12px; gap: 8px; }
+    :is(.studio, .sh-chat) .sh-chat-bar
+      :is(.sh-chat-eyebrow, .sh-chat-sep, .sh-chat-crumb, .sh-chat-chev, .sh-chat-pill) {
+      display: none;
+    }
+    :is(.studio, .sh-chat) .sh-chat-bar .sh-chat-active {
+      flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
   }
 
   @media (max-width: 767px) {

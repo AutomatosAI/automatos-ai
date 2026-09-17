@@ -16,6 +16,12 @@
  *
  * Both side columns persist their collapsed state to localStorage so the
  * user's preference sticks across reloads.
+ *
+ * PRD-246 US-003 — the compact form. Below 1024 px the grid is ONE column,
+ * the conversation, and the two side panels move behind the bar's controls
+ * into the app's one `Sheet` primitive: the threads from the left toggle, the
+ * rail from the Auto now pill. Both panels are the same JSX in either home
+ * (`threadsPanel` / `railPanel`) — one list, one rail, no second drawer.
  */
 
 import { useEffect, useState } from 'react'
@@ -27,6 +33,8 @@ import {
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
 import { useMission } from '@/hooks/use-missions-api'
 import { AutoNowRail } from './auto-now-rail'
@@ -70,8 +78,28 @@ export function StudioChatShell({
   const [threads, setThreads] = useState<ChatType[]>([])
   const [loadingThreads, setLoadingThreads] = useState(true)
   const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
+  // Desktop: the two columns collapse and remember it. Compact: they are
+  // sheets, which always start closed — a collapse preference stored on a
+  // desktop must not open a sheet over the conversation on a phone.
   const [threadsCollapsed, setThreadsCollapsed] = useState(false)
   const [railCollapsed, setRailCollapsed] = useState(false)
+  const [threadsSheetOpen, setThreadsSheetOpen] = useState(false)
+  const [railSheetOpen, setRailSheetOpen] = useState(false)
+  const isCompact = useIsTabletOrBelow()
+
+  // PRD-244 D5 states the rail's threshold once — AUTO_NOW_RAIL_MIN_WIDTH,
+  // which globals.css mirrors by hiding `.sh-chat-rail` below 1279. Below it
+  // the rail's content belongs in a sheet, and that is what the pill opens.
+  // This is D5's existing threshold, not a third Studio breakpoint: the two
+  // compact FORMS still fork at 1024 and 768 (PRD-246 M2).
+  const [railInSheet, setRailInSheet] = useState(false)
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${AUTO_NOW_RAIL_MIN_WIDTH - 1}px)`)
+    const sync = () => setRailInSheet(mql.matches)
+    sync()
+    mql.addEventListener('change', sync)
+    return () => mql.removeEventListener('change', sync)
+  }, [])
 
   const activeMissionId = useMissionStore((s) => s.activePlanningMissionId)
   const { data: mission, isLoading: missionLoading } = useMission(activeMissionId)
@@ -162,6 +190,129 @@ export function StudioChatShell({
 
   const activeTitle = selectedChat?.title ?? titles[selectedChatId] ?? 'New conversation'
 
+  // One control per panel: it collapses a column on a desktop and opens a
+  // sheet on a compact viewport.
+  const threadsShown = isCompact ? threadsSheetOpen : !threadsCollapsed
+  const toggleThreadsPanel = () =>
+    isCompact ? setThreadsSheetOpen((open) => !open) : toggleThreads()
+  const railShown = railInSheet ? railSheetOpen : !railCollapsed
+  const toggleRailPanel = () =>
+    railInSheet ? setRailSheetOpen((open) => !open) : toggleRail()
+
+  // The threads list and the rail, each defined ONCE. A desktop puts them in
+  // the grid's side columns; a compact viewport puts the same JSX in a Sheet.
+  const threadsPanel = (
+    <>
+      <div className="sh-chat-threads-head">
+        <span className="sh-chat-eyebrow-mono">Threads</span>
+        <button type="button" className="sh-chat-act" onClick={onNewChat}>
+          <Plus style={{ width: 11, height: 11 }} />
+          <span>New</span>
+        </button>
+      </div>
+      {openChatIds.length > 0 && (
+        <div className="sh-chat-thread-list" aria-label="Open conversations">
+          <div className="sh-chat-thread-empty" style={{ paddingBottom: 2 }}>Open</div>
+          {openChatIds.map((chatId) => {
+            const isActive = chatId === selectedChatId
+            const isOpening = chatId === openingThreadId
+            const title = titles[chatId] ?? threads.find((t) => t.id === chatId)?.title ?? 'Conversation'
+            const unread = unreadChatIds.includes(chatId)
+            return (
+              <div
+                key={chatId}
+                role="button"
+                tabIndex={0}
+                className={'sh-chat-thread' + (isActive ? ' active' : '') + (isOpening ? ' opening' : '')}
+                onClick={() => handleOpenTabClick(chatId)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    handleOpenTabClick(chatId)
+                  }
+                }}
+                title={title}
+              >
+                <span
+                  className={`sh-chat-thread-dot${isActive || unread ? ' warn' : ' ok'}`}
+                  aria-hidden
+                />
+                <span className="sh-chat-thread-title">{title}</span>
+                {unread && <span className="sh-chat-pill brand">new</span>}
+                {onCloseTab && (
+                  <button
+                    type="button"
+                    className="sh-chat-thread-close"
+                    aria-label={`Close ${title}`}
+                    title="Close tab"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onCloseTab(chatId)
+                    }}
+                  >
+                    <X style={{ width: 11, height: 11 }} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
+          <div className="sh-chat-thread-empty" style={{ paddingTop: 8, paddingBottom: 2 }}>Recent</div>
+        </div>
+      )}
+      <div className="sh-chat-thread-list">
+        {loadingThreads ? (
+          <div className="sh-chat-thread-empty">Loading…</div>
+        ) : threads.length === 0 ? (
+          <div className="sh-chat-thread-empty">No conversations yet</div>
+        ) : (
+          threads.map((t) => {
+            const isActive = t.id === selectedChatId
+            const isOpening = t.id === openingThreadId
+            const rel = relativeTime(t.createdAt)
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={
+                  'sh-chat-thread' +
+                  (isActive ? ' active' : '') +
+                  (isOpening ? ' opening' : '')
+                }
+                onClick={() => handleThreadClick(t)}
+                disabled={isOpening}
+                title={t.title}
+              >
+                <span
+                  className={`sh-chat-thread-dot${isActive ? ' warn' : ' ok'}`}
+                  aria-hidden
+                />
+                <span className="sh-chat-thread-title">{t.title}</span>
+                {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
+                {t.kind === 'auto' && (
+                  <span className="sh-chat-pill brand">Auto</span>
+                )}
+                <span className="sh-chat-thread-ts">
+                  {isOpening ? '…' : rel}
+                </span>
+              </button>
+            )
+          })
+        )}
+      </div>
+    </>
+  )
+
+  const railPanel = (
+    <>
+      <AutoNowRail />
+      <MissionSection
+        missionId={activeMissionId}
+        mission={mission}
+        loading={missionLoading}
+      />
+    </>
+  )
+
   return (
     <div
       className={
@@ -175,14 +326,14 @@ export function StudioChatShell({
         <button
           type="button"
           className="sh-chat-side-toggle"
-          onClick={toggleThreads}
-          aria-label={threadsCollapsed ? 'Show threads' : 'Hide threads'}
-          title={threadsCollapsed ? 'Show threads' : 'Hide threads'}
+          onClick={toggleThreadsPanel}
+          aria-label={threadsShown ? 'Hide threads' : 'Show threads'}
+          title={threadsShown ? 'Hide threads' : 'Show threads'}
         >
-          {threadsCollapsed ? (
-            <PanelLeftOpen style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
-          ) : (
+          {threadsShown ? (
             <PanelLeftClose style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
+          ) : (
+            <PanelLeftOpen style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
           )}
         </button>
         <span className="sh-chat-eyebrow">Operations</span>
@@ -198,110 +349,15 @@ export function StudioChatShell({
           </span>
         )}
         {/* PRD-244 D5: the rail's control carries the two counts that need a human. */}
-        <AutoNowPill open={!railCollapsed} onToggle={toggleRail} className="sh-chat-autonow" style={{ marginLeft: 'auto' }} />
+        <AutoNowPill open={railShown} onToggle={toggleRailPanel} className="sh-chat-autonow" style={{ marginLeft: 'auto' }} />
       </div>
 
-      {/* Grid body */}
+      {/* Grid body — one column below 1024, where the sides are sheets */}
       <div className="sh-chat-grid">
         {/* Threads list */}
-        {!threadsCollapsed && (
+        {!isCompact && !threadsCollapsed && (
           <aside className="sh-chat-threads" aria-label="Chat threads">
-            <div className="sh-chat-threads-head">
-              <span className="sh-chat-eyebrow-mono">Threads</span>
-              <button type="button" className="sh-chat-act" onClick={onNewChat}>
-                <Plus style={{ width: 11, height: 11 }} />
-                <span>New</span>
-              </button>
-            </div>
-            {openChatIds.length > 0 && (
-              <div className="sh-chat-thread-list" aria-label="Open conversations">
-                <div className="sh-chat-thread-empty" style={{ paddingBottom: 2 }}>Open</div>
-                {openChatIds.map((chatId) => {
-                  const isActive = chatId === selectedChatId
-                  const isOpening = chatId === openingThreadId
-                  const title = titles[chatId] ?? threads.find((t) => t.id === chatId)?.title ?? 'Conversation'
-                  const unread = unreadChatIds.includes(chatId)
-                  return (
-                    <div
-                      key={chatId}
-                      role="button"
-                      tabIndex={0}
-                      className={'sh-chat-thread' + (isActive ? ' active' : '') + (isOpening ? ' opening' : '')}
-                      onClick={() => handleOpenTabClick(chatId)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          handleOpenTabClick(chatId)
-                        }
-                      }}
-                      title={title}
-                    >
-                      <span
-                        className={`sh-chat-thread-dot${isActive || unread ? ' warn' : ' ok'}`}
-                        aria-hidden
-                      />
-                      <span className="sh-chat-thread-title">{title}</span>
-                      {unread && <span className="sh-chat-pill brand">new</span>}
-                      {onCloseTab && (
-                        <button
-                          type="button"
-                          className="sh-chat-thread-close"
-                          aria-label={`Close ${title}`}
-                          title="Close tab"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onCloseTab(chatId)
-                          }}
-                        >
-                          <X style={{ width: 11, height: 11 }} />
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-                <div className="sh-chat-thread-empty" style={{ paddingTop: 8, paddingBottom: 2 }}>Recent</div>
-              </div>
-            )}
-            <div className="sh-chat-thread-list">
-              {loadingThreads ? (
-                <div className="sh-chat-thread-empty">Loading…</div>
-              ) : threads.length === 0 ? (
-                <div className="sh-chat-thread-empty">No conversations yet</div>
-              ) : (
-                threads.map((t) => {
-                  const isActive = t.id === selectedChatId
-                  const isOpening = t.id === openingThreadId
-                  const rel = relativeTime(t.createdAt)
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={
-                        'sh-chat-thread' +
-                        (isActive ? ' active' : '') +
-                        (isOpening ? ' opening' : '')
-                      }
-                      onClick={() => handleThreadClick(t)}
-                      disabled={isOpening}
-                      title={t.title}
-                    >
-                      <span
-                        className={`sh-chat-thread-dot${isActive ? ' warn' : ' ok'}`}
-                        aria-hidden
-                      />
-                      <span className="sh-chat-thread-title">{t.title}</span>
-                      {/* PRD-205 S7: mark the thread where Auto speaks unprompted */}
-                      {t.kind === 'auto' && (
-                        <span className="sh-chat-pill brand">Auto</span>
-                      )}
-                      <span className="sh-chat-thread-ts">
-                        {isOpening ? '…' : rel}
-                      </span>
-                    </button>
-                  )
-                })
-              )}
-            </div>
+            {threadsPanel}
           </aside>
         )}
 
@@ -310,17 +366,33 @@ export function StudioChatShell({
 
         {/* PRD-244 D5: the rail — "Auto now" (the floor's live objects) above
             the mission of this thread (real data or editorial empty state). */}
-        {!railCollapsed && (
+        {!railInSheet && !railCollapsed && (
           <aside className="sh-chat-rail" aria-label="Auto now rail">
-            <AutoNowRail />
-            <MissionSection
-              missionId={activeMissionId}
-              mission={mission}
-              loading={missionLoading}
-            />
+            {railPanel}
           </aside>
         )}
       </div>
+
+      {/* PRD-246 US-003 — the compact homes. The app's one Sheet primitive,
+          opened by the same two bar controls; no second drawer exists. */}
+      {isCompact && (
+        <Sheet open={threadsSheetOpen} onOpenChange={setThreadsSheetOpen}>
+          <SheetContent side="left" className="w-[280px] p-0 safe-bottom">
+            <aside className="sh-chat-threads h-full border-r-0" aria-label="Chat threads">
+              {threadsPanel}
+            </aside>
+          </SheetContent>
+        </Sheet>
+      )}
+      {railInSheet && (
+        <Sheet open={railSheetOpen} onOpenChange={setRailSheetOpen}>
+          <SheetContent side="right" className="w-[320px] p-0 safe-bottom">
+            <aside className="sh-chat-rail h-full border-l-0" aria-label="Auto now rail">
+              {railPanel}
+            </aside>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   )
 }
