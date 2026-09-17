@@ -1,0 +1,123 @@
+{
+  "project": "Automatos AI \u2014 PRD-246 Studio on mobile (the compact form of the design system)",
+  "branchName": "ralph/prd-246-studio-mobile",
+  "baseBranch": "studio",
+  "description": "Give every Studio surface a compact form so a phone gets the design system rather than the hybrid it gets today (Studio chrome + Studio tokens + classic bodies). Spec: docs/PRDS/PRD-246-STUDIO-MOBILE.md \u2014 decisions M1-M8 are LOCKED. Base is `studio`, NEVER `main`: prod is frozen until Gerard signs both the desktop pass and the phone pass. Build order matters: US-007 flips the route forks and must be last.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Foundations: the compact conventions, safe area and touch targets",
+      "description": "Establish where compact rules live and the primitives every later story reuses. (a) In app/globals.css add ONE clearly-commented '\u2500\u2500 Studio compact (< 1024) \u2500\u2500' region inside @layer components, after the chrome guard, where every surface's compact rules go; later stories append there, they do not scatter @media blocks. (b) The Studio shell and any bottom-anchored Studio surface respect env(safe-area-inset-bottom) \u2014 reuse the existing .safe-bottom helper (globals.css ~:3034), do not invent a second one. (c) Every Studio control that is a tap target (.sh-item, .cc-tab, .cc-btn, .cc-filter-pill, .cc-seg button) is at least 44px high under 768px. (d) .md-view defaults to its compact density under 768px (the desktop rules stay). No surface layout changes in this story.",
+      "acceptanceCriteria": [
+        "A '\u2500\u2500 Studio compact' region exists in app/globals.css inside @layer components, after the chrome-guard block, with a comment naming it as the home for compact rules.",
+        "components/layout/main-layout.tsx (or the Studio shell markup it renders) applies .safe-bottom (or env(safe-area-inset-bottom)) to the mobile sheet and the shell's bottom edge; no second safe-area helper is introduced (grep: exactly one 'safe-area-inset-bottom' definition).",
+        "A media query under 768px raises .sh-item, .cc-tab, .cc-btn, .cc-filter-pill and .cc-seg button to min-height 44px.",
+        "A media query under 768px applies the .md-view-compact metrics to .md-view (font-size and block spacing), without changing the desktop rules.",
+        "cd frontend && npm run test -- components/shared/__tests__/markdown-typography.test.ts app/__tests__/page-frames.test.ts \u2192 green (the desktop guards are untouched)."
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "The chrome guard added in the PRD-244 review lives just above; do NOT remove or weaken it \u2014 a compact rule must never give a chrome row flex-shrink: 1."
+    },
+    {
+      "id": "US-002",
+      "title": "Command Centre compact",
+      "description": "The Command Centre reads on a phone. Tabs (.cc-tabs) scroll horizontally with the active tab scrolled into view on mount; .cc-stats goes 2-up under 768; .cc-sum-grid is already 1-up at 1199 \u2014 verify and keep; the board (.cc-kb-grid) keeps one row per status and gains scroll-snap with a sticky .cc-kb-head; the activity view uses its card density under 768 (the table is desktop-only); the calendar offers month/day rather than a shrunken grid. CSS in the compact region wherever possible; touch components only where behaviour (scroll-into-view, density default) demands it.",
+      "acceptanceCriteria": [
+        "Under 768px .cc-stats is 2 columns and .cc-tabs scrolls horizontally without clipping the active tab; a test asserts the rules exist in the compact region.",
+        "The active .cc-tab is scrolled into view when the Command Centre mounts on a narrow viewport (component behaviour, asserted with a mocked width).",
+        "The board keeps grid-auto-flow: column with scroll-snap under 768px and .cc-kb-head is sticky within its column; the chrome guard still lists .cc-kb-head.",
+        "components/command-center/activity-tab.tsx defaults to its card density (not the table) when useIsMobile() is true, with a test.",
+        "cd frontend && npm run test -- components/command-center app/command-center \u2192 green."
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "cc-stats already steps 6\u21923 at 1199 and \u21922 at 700 (globals.css :1621/:1625) \u2014 move the 2-up boundary to 768 rather than adding a fourth breakpoint."
+    },
+    {
+      "id": "US-003",
+      "title": "Chat compact: one column, sheets for the rest",
+      "description": "On a phone the Studio chat is the conversation and nothing else. The three-column .sh-chat-grid becomes one column under 1024; threads move behind the existing left sheet (the classic layout's pattern \u2014 reuse it, do not build a second drawer); Auto now stays the pill added in PRD-244 W4 and opens the rail's content in a sheet; the breadcrumb bar (.sh-chat-bar) collapses to the active thread title plus the two controls; the composer is safe-area aware and is never covered by the keyboard.",
+      "acceptanceCriteria": [
+        "Under 1024px .sh-chat-grid is a single column and .sh-chat-threads is not rendered inline; a test asserts the rule and the component behaviour with a mocked width.",
+        "Threads open in a Sheet on narrow viewports, reusing the existing Sheet primitive; no second drawer component is added (grep: no new *-drawer.tsx).",
+        "The Auto now pill opens the rail's content in a Sheet under 1280px; AutoNowRail itself is unchanged (one rail component, per PRD-244 D5).",
+        "The composer carries the safe-area padding from US-001 and the conversation's scroll container accounts for it (no content trapped under the home bar).",
+        "cd frontend && npm run test -- components/chatbot app/chat \u2192 green, including the existing chat-page-resume suite."
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "app/chat/page.tsx already forks on useIsMobile for the history sheet in the CLASSIC layout \u2014 that is the pattern to reuse for the Studio shell; do not touch the classic branch."
+    },
+    {
+      "id": "US-004",
+      "title": "Assignments hub compact",
+      "description": "The hub works one-handed. The entry grid (.entry-grid) is 1-up under 768; the flip tabs (.cc-tabs in the hub) scroll like the Command Centre's; mission and playbook cards stack their meta beneath the title instead of truncating; .status-head wraps. CSS only unless a card's structure genuinely cannot respond.",
+      "acceptanceCriteria": [
+        "Under 768px .entry-grid is one column and the hub's cards stack their meta; rules live in the compact region.",
+        "The hub's tab strip scrolls horizontally and keeps its active tab visible, matching the Command Centre's behaviour from US-002.",
+        ".status-head wraps rather than truncating under 768px, and remains in the chrome guard.",
+        "cd frontend && npm run test -- components/assignments app/assignments \u2192 green."
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "The hub's root is .cc-page and its rules hang off :is(.studio, .cc-page) \u2014 keep that scoping; a bare .entry-grid rule would leak into Classic."
+    },
+    {
+      "id": "US-005",
+      "title": "Agents, Deliverables and Tools compact",
+      "description": "The three bespoke Studio pages read on a phone: their in-page .cc-tabs scroll (US-002's behaviour), .cc-stats is 2-up (US-001/US-002's rule covers it \u2014 verify, do not duplicate), roster and marketplace cards are 1-up, and .cc-toolbar wraps its search, pills and segmented controls rather than overflowing.",
+      "acceptanceCriteria": [
+        "Under 768px the roster grid, the deliverables cards and the tools application grid are one column.",
+        ".cc-toolbar wraps under 768px with its controls full-width where sensible; no horizontal overflow at 390px on any of the three pages.",
+        "The three pages' tab strips scroll and keep the active tab visible (shared behaviour, not three copies).",
+        "cd frontend && npm run test -- components/agents components/deliverables components/tools \u2192 green."
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Tools is a frame variant inside a 1,035-line component (ToolsDashboard variant='studio') \u2014 change the frame's CSS, not the shared grid or modals."
+    },
+    {
+      "id": "US-006",
+      "title": "The framed pages, in one move",
+      "description": "PageHeader, StatsBar and FilterTabs get compact forms, which converts every page built on them at once: Team, Analytics, Settings and its sub-pages, Knowledge Base, Marketplace and its sub-pages, mission detail, and the three admin surfaces. In Studio: the head's eyebrow/title/lede stack with actions below, StatsBar is 2-up, FilterTabs scrolls. Classic's render is untouched in both forms.",
+      "acceptanceCriteria": [
+        "Under 768px the Studio PageHeader stacks its actions beneath the head; StatsBar's cc-stats form is 2-up; the Studio FilterTabs strip scrolls with its active tab visible.",
+        "The Classic branches of all three primitives are byte-unchanged (a test asserts the classic markup still renders the gradient title, the card grid and the Radix tablist).",
+        "A test renders each primitive at a mocked narrow width in the Studio style and asserts the compact structure.",
+        "cd frontend && npm run test -- components/shared \u2192 green, including the studio-frame-primitives suite."
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "These three primitives are the leverage that converted 24/11/9 pages in PRD-244 W5d-g \u2014 a change here reaches every framed page, so keep it conservative and test both branches."
+    },
+    {
+      "id": "US-007",
+      "title": "The route forks flip to the style axis",
+      "description": "With every Studio surface compact, the six routes stop choosing a COMPONENT by width: app/chat, app/command-center, app/assignments, app/agents, app/deliverables and app/tools render the Studio component whenever the style is Studio, at any width, and the classic component whenever the style is Classic. Width now only informs layout INSIDE a component. Classic components stay exactly where they are (PRD-246 M6) and no file is deleted.",
+      "acceptanceCriteria": [
+        "All six routes fork on isStudio alone; useIsTabletOrBelow no longer selects between components in any of them (grep: no 'isStudio && !is' pattern left in app/**/page.tsx).",
+        "Each route's test asserts: Studio style at phone width renders the Studio component; Classic style at any width renders the classic component.",
+        "No classic component is deleted or unmounted \u2014 /missions and /playbooks redirects keep working at every width.",
+        "cd frontend && npm run test -- app \u2192 green."
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "This story is LAST for a reason: flipping it before US-002..006 would put a desktop-shaped Studio on every phone. If any earlier story is un-DONE, do not start this one."
+    },
+    {
+      "id": "US-008",
+      "title": "Gates and the pass checklist",
+      "description": "Lock the work in. A mobile scope gate asserts every Studio class family that renders on a phone has compact rules in the compact region; the route tests from US-007 are the behavioural gate; and the manual checklist in the PRD's tail is the human gate. Do not weaken any PRD-244 gate to make these pass.",
+      "acceptanceCriteria": [
+        "A new test (e.g. components/__tests__/studio-mobile-scope.test.ts) asserts the compact region exists and covers each family: sh-chat, cc-tabs, cc-stats, entry-grid, the card families and the toolbar.",
+        "The PRD-244 gates all still pass unchanged: prd244-w0-honesty, studio-honest-chrome, cc-page-scope, studio-surfaces-scope, markdown-typography, page-frames.",
+        "bash scripts/ralph/acceptance-prd246.sh exits 0.",
+        "cd frontend && npm run test \u2192 the full frontend suite is green."
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "If a PRD-244 gate genuinely contradicts a mobile requirement, RALPH_BLOCKED with the grep \u2014 never edit a gate to make a story pass."
+    }
+  ]
+}

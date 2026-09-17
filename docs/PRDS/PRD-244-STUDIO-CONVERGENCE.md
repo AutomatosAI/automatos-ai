@@ -2,6 +2,8 @@
 
 > **Status:** APPROVED 2026-09-17 by Gerard; **model amended the same evening after the local test of Waves 1–2** — see *The second review* below. Build and test on the **local** edition first; nothing here reaches prod before the manual pass is signed. **Mechanism (Gerard, 09-17):** `main` deploys to prod on every push (Railway), so every wave merges into the `studio` integration branch (cut from `main` @ `757814531`, CI gates widened to it); the local stack runs a test branch that merges the unmerged wave branches (Gerard tests **before** merging); one PR takes `studio` → `main` after the pass, and `main` is merged into `studio` whenever it moves. Grounded @ the Studio audit of `main` @ `2aad76154` (every file reference below was read, not recalled). PR #397 (`feat/studio-rebrand-phase1`, opened 2026-05-29) stays **parked**; §D4 harvested what was still unique (PR #755).
 
+> **Mobile pass = PRD-246**, not 245: that number belongs to the session-lane workstream. See `docs/PRDS/PRD-246-STUDIO-MOBILE.md`.
+
 ## The review (2026-09-17)
 
 1. *"I can't see the Questions tab on either local or prod."* — PRD-225's tab exists, but only in the Command Centre shell that renders when the theme is **Studio** and the viewport is **≥ 1024 CSS px** (`app/command-center/page.tsx:12-17`). The default theme is `system` (`components/providers.tsx:91`), the picker labels Studio "preview" (`components/ui/theme-toggle.tsx:66-72`), and nothing ever defaults to it. Everyone else gets the legacy `ActivityPage` (Summary · Board · Calendar · Feed · History) — no Questions, no Watchlist, no Governance; the bell's `?tab=questions` link lands there and does nothing.
@@ -44,7 +46,7 @@ The first cut of D2/D3 rendered the Studio-designed Command Centre shell, chat l
 - **D3 · The Studio-designed pages render only in Studio; Classic rolls back to `main`.** Chat ledger shell and Assignments hub: Studio desktop only; classic chat layout and `AssignmentsPage`: Classic desktop and every style below 1024 px. `/missions` keeps its query params in every style (a fix). The Studio shell gains the `?from=assignments` back button.
 - **D4 · #397 harvested (PR #755), then closed.** Four files were still unique: the playbook card's real `schedule_config` shape + cron humaniser + honest success %, dialog centring, and the two icon-style guards. Everything else was rewritten on `main` or superseded.
 - **D5 · Chat gets "Auto now", a live rail, not a dashboard — in both styles.** One shared rail component whose sections are the floor's live objects, each a one-line row deep-linking to its Command Centre tab: **Working now** (`useActivityStats('1d')` + top fleet rows via `useFleetState`), **Questions** (`useQuestions`, answer inline through `useAnswerQuestion`), **Watchlist** (`useWatches`), **Decisions** (`useDecisionsNeeded` → Governance), **Mission** (today's rail). Studio mounts it in the ledger's `sh-chat-rail`; Classic mounts it in an aside of its own layout (the existing `motion.aside` pattern). No new endpoint; empty sections say so; under 1280 px a header pill with the two counts that need a human.
-- **D6 · Mobile stays classic in both styles for now; a mobile pass precedes prod.** Below 1024 px the classic trees serve both styles through the Studio pass; PRD-245 is built and tested on local **before** anything reaches prod.
+- **D6 · Mobile stays classic in both styles for now; a mobile pass precedes prod.** Below 1024 px the classic trees serve both styles through the Studio pass; PRD-246 is built and tested on local **before** anything reaches prod.
 - **D7 · The audit's dead config is fixed (Wave 0, done).**
 - **D8 · Studio: the full redesign on every page, in two tones (Gerard, 09-17).** Pages with a Studio design today: chat, Command Centre, Assignments. Pages that still render classic components under Studio chrome: Deliverables, Agent Management, Tools & Integrations, Knowledge Base, Marketplace, Analytics, Settings, Workspace Admin (Docs is external). Each gets a Studio page — a Studio layout of the shared components, no overrides on classic markup — in both tones, with the duplicated tab strips resolved (the Studio page tabs are the only tabs). Design source: there is no Figma for Studio (`FigmaDesigns/` holds academy and markets only); the Studio system lives in code — its tokens, chrome and the three designed pages — and each page is designed from it and judged on local, page by page.
 
@@ -65,7 +67,7 @@ The first cut of D2/D3 rendered the Studio-designed Command Centre shell, chat l
 - **5d Knowledge Base, 5e Marketplace, 5f Analytics, 5g Settings + Workspace Admin (#763, one PR)** — the **shared frame primitives** `PageHeader`, `StatsBar` and `FilterTabs` render the Studio frame in the Studio style and their classic markup otherwise, so every page built from them is a Studio page in both tones with no per-page copy (24 / 11 / 9 pages respectively, Team included).
 Acceptance per page: Gerard's local pass in Studio Light and Dark; Classic byte-for-byte as on `main`. Fixes from the review land as follow-up commits on the wave branches.
 
-**Wave 6 — the manual pass (Gerard; local first, then SaaS).** The checklist below on both styles × both tones × both editions, desktop and tablet, fresh and existing browser. CI is the only gate for code; this pass is the gate for `studio` → `main`. Then PRD-245 (mobile), then the one PR.
+**Wave 6 — the manual pass (Gerard; local first, then SaaS).** The checklist below on both styles × both tones × both editions, desktop and tablet, fresh and existing browser. CI is the only gate for code; this pass is the gate for `studio` → `main`. Then PRD-246 (mobile), then the one PR.
 
 ## Manual test checklist (the pass Wave 4 executes)
 
@@ -87,7 +89,7 @@ Acceptance per page: Gerard's local pass in Studio Light and Dark; Classic byte-
 Pick **Classic** and the app is exactly the app on `main`, in Light or Dark, with three more tabs in the Command Centre and, later, the "Auto now" aside in chat. Pick **Studio** and every page is the Studio design, in cream paper or in ink, with the same features in Studio's idiom. Nothing is "preview" any more, and nothing is a mixture.
 
 ## Open questions (Gerard's call)
-1. ~~Mobile~~ — decided: PRD-245 after the Studio pass, before prod (D6).
+1. ~~Mobile~~ — decided: PRD-246 after the Studio pass, before prod (D6).
 2. ~~Matte~~ — decided: retired; Studio Dark takes the dark role on the Studio side (D1).
 3. **"Auto now" cadence.** The rail inherits each hook's polling (10 s fleet, 30 s questions, 60 s watches). Fine for a pilot; a single aggregate read would cut chat's request count if it matters on SaaS. Not built unless you say.
 4. ~~Harvest scope for #397~~ — decided: the four unique fixes, PR #755.
