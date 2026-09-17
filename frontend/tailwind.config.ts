@@ -1,8 +1,8 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  // Treat both `.dark` and `.matte` as dark-mode triggers so existing
-  // `dark:` Tailwind prefixes apply in matte theme too.
+  // `dark:` prefixes key off the `.dark` class next-themes sets for the Dark
+  // tone — in both styles (PRD-244: Classic and Studio each have Light/Dark).
   darkMode: ['variant', ['&:is(.dark *)']],
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
