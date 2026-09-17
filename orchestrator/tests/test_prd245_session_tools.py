@@ -302,14 +302,28 @@ class _Req:
 
 
 class _CountingDb:
+    """A database that counts in one statement, the way the real one does."""
+
     def __init__(self, fail=False):
         self.commits = 0
         self.fail = fail
+        self.value = 0
+        self.statements = []
+
+    def execute(self, statement, params=None):
+        if self.fail:
+            raise RuntimeError("bookkeeping is down")
+        self.statements.append(str(statement))
+        self.value += 1
+        return SimpleNamespace(first=lambda: (self.value,))
 
     def commit(self):
         if self.fail:
             raise RuntimeError("bookkeeping is down")
         self.commits += 1
+
+    def rollback(self):
+        pass
 
 
 def test_the_bearer_is_read_from_either_header_and_trimmed():
@@ -362,6 +376,20 @@ def test_the_allowance_counts_on_the_ticket_and_refuses_in_words(monkeypatch):
     assert "finish your turn" in refusal
     assert task.runtime_ref[api_st.CALLS_KEY] == 4
     assert db.commits == 4
+    # ONE key, not the whole document: the host writes pending_permissions onto
+    # this same row while the session runs, and that list decides whether a held
+    # command sends the ticket to review.
+    assert all("jsonb_set" in stmt and api_st.CALLS_KEY in stmt for stmt in db.statements)
+
+
+def test_the_counter_does_not_write_back_the_whole_ref(monkeypatch):
+    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 10)
+    task = SimpleNamespace(id=119, runtime_ref={"runtime": "cli", "pending_permissions": [{"request_id": "r1"}]})
+    api_st.call_allowance(_CountingDb(), task)
+    # what the host recorded is still there, and untouched
+    assert task.runtime_ref["pending_permissions"] == [{"request_id": "r1"}]
+    assert task.runtime_ref["runtime"] == "cli"
+    assert task.runtime_ref[api_st.CALLS_KEY] == 1
 
 
 def test_the_allowance_rebuilds_the_ref_rather_than_mutating_it(monkeypatch):
@@ -374,16 +402,28 @@ def test_the_allowance_rebuilds_the_ref_rather_than_mutating_it(monkeypatch):
     assert task.runtime_ref["session_id"] == "s-119"                  # nothing else lost
 
 
-def test_a_broken_counter_never_refuses_the_call(monkeypatch):
-    """Fail-open on purpose: bookkeeping must not be the reason a ticket cannot
-    work. A cap of zero is 'no cap', not 'no calls'."""
-    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 1)
-    assert api_st.call_allowance(_CountingDb(fail=True), SimpleNamespace(id=1, runtime_ref={})) is None
+def test_a_broken_counter_still_counts(monkeypatch):
+    """Fail-open on the WRITE, not on the rule.
 
-    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 0)
+    The cap is the only bound on this endpoint. Returning early when the persist
+    fails used to remove it for that call — and a database that is unhappy once
+    is usually unhappy for the rest of the run, so the bound quietly disappeared
+    exactly when things were going wrong. The count now lives in the request too.
+    """
+    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 2)
     task = SimpleNamespace(id=1, runtime_ref={})
+    broken = _CountingDb(fail=True)
+    assert api_st.call_allowance(broken, task) is None                # 1
+    assert api_st.call_allowance(broken, task) is None                # 2
+    assert api_st.call_allowance(broken, task) is not None            # 3 — still refused
+    assert task.runtime_ref[api_st.CALLS_KEY] == 3
+
+    # a cap of zero is "no cap", not "no calls"
+    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 0)
+    open_task = SimpleNamespace(id=2, runtime_ref={})
+    db = _CountingDb()
     for _ in range(50):
-        assert api_st.call_allowance(_CountingDb(), task) is None
+        assert api_st.call_allowance(db, open_task) is None
 
 
 # ---------------------------------------------------------------------------

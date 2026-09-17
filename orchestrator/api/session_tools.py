@@ -90,24 +90,66 @@ async def require_session(
 
 def call_allowance(db: Session, task: Any) -> Optional[str]:
     """Count this call against the ticket's allowance; a string is the refusal
-    the model reads. Fail-open on a bookkeeping error — a counter must never be
-    the reason a ticket cannot work."""
+    the model reads.
+
+    The counter is written with ``jsonb_set`` — ONE key, in one statement —
+    rather than by writing back a whole ``runtime_ref`` read at the start of the
+    request. The host flushes its events onto the same row while the session is
+    calling tools, and a whole-document write would silently drop whatever it
+    had just recorded. One of the things it records is ``pending_permissions``,
+    which is what decides whether a held command sends the ticket to review, so
+    a lost update there would turn "the operator never answered" into a ticket
+    that reads as finished.
+
+    Fail-open on a bookkeeping error, but still COUNT: the cap is the only bound
+    on this endpoint, and a database hiccup must not quietly remove it for the
+    rest of the run.
+    """
     cap = int(getattr(config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 0) or 0)
-    try:
-        ref = dict(task.runtime_ref or {})
-        used = int(ref.get(CALLS_KEY) or 0) + 1
-        ref[CALLS_KEY] = used
-        task.runtime_ref = ref
-        db.commit()
-    except Exception:  # noqa: BLE001
-        logger.debug("[session-tools] call counter not recorded for ticket #%s", getattr(task, "id", "?"), exc_info=True)
-        return None
+    used = _count_call(db, task)
     if cap and used > cap:
         return (
             f"This ticket has used its {cap} Automatos tool calls. Work with what you have and "
             "finish your turn; say in your result that you hit the limit."
         )
     return None
+
+
+def _count_call(db: Session, task: Any) -> int:
+    """This call's number. Persisted where it can be; counted regardless."""
+    from sqlalchemy import text as sql_text
+
+    in_memory = int((task.runtime_ref or {}).get(CALLS_KEY) or 0) + 1
+    try:
+        row = db.execute(
+            sql_text(
+                """
+                UPDATE board_tasks
+                   SET runtime_ref = jsonb_set(
+                           COALESCE(runtime_ref, '{}'::jsonb),
+                           :key,
+                           to_jsonb(COALESCE((runtime_ref ->> :field)::int, 0) + 1),
+                           true)
+                 WHERE id = :task_id
+             RETURNING (runtime_ref ->> :field)::int
+                """
+            ),
+            {"key": "{" + CALLS_KEY + "}", "field": CALLS_KEY, "task_id": int(task.id)},
+        ).first()
+        db.commit()
+        if row and row[0] is not None:
+            # keep the in-session object in step without writing the whole document
+            task.runtime_ref = {**(task.runtime_ref or {}), CALLS_KEY: int(row[0])}
+            return int(row[0])
+    except Exception:  # noqa: BLE001 — a counter must never be why a ticket cannot work
+        logger.debug("[session-tools] call counter not persisted for ticket #%s",
+                     getattr(task, "id", "?"), exc_info=True)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+    task.runtime_ref = {**(task.runtime_ref or {}), CALLS_KEY: in_memory}
+    return in_memory
 
 
 # Only POST is defined on ``/mcp`` ON PURPOSE. A client opens a GET for a
