@@ -244,9 +244,11 @@ async def list_connections(
         # For pending connections, check Composio API for actual status
         if status == "pending":
             try:
+                _meta = entity_manager.get_connection_metadata(entity["id"], conn["app_name"]) or {}
                 composio_status = client.get_connection_status(
                     entity_id=entity["composio_entity_id"],
-                    app=conn["app_name"]
+                    app=conn["app_name"],
+                    auth_config_id=_meta.get("auth_config_id") or None,
                 )
                 if composio_status and composio_status.get("status") in ("ACTIVE", "INITIATED"):
                     # Connection completed on Composio side — upgrade to active
@@ -440,9 +442,11 @@ async def connection_callback(
     if not resolved_connection_id:
         try:
             client = get_composio_client()
+            _meta = entity_manager.get_connection_metadata(entity["id"], app_name.upper()) or {}
             composio_status = client.get_connection_status(
                 entity_id=entity["composio_entity_id"],
-                app=app_name.upper()
+                app=app_name.upper(),
+                auth_config_id=_meta.get("auth_config_id") or None,
             )
             if composio_status:
                 resolved_connection_id = composio_status.get("id")

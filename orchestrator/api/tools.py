@@ -313,6 +313,16 @@ async def integrations_status(
     )
 
 
+def _stored_auth_config_id(entity_manager, entity_id, app_name: str) -> Optional[str]:
+    """The Auth Config the connect flow recorded for this app, if any — the
+    exact key for the Composio lookup (see ComposioClient.get_connection_status)."""
+    try:
+        meta = entity_manager.get_connection_metadata(entity_id, (app_name or "").upper()) or {}
+        return meta.get("auth_config_id") or None
+    except Exception:  # noqa: BLE001 — metadata is a hint; the lookup still has its fallbacks
+        return None
+
+
 @router.get("/connected")
 async def connected(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -335,6 +345,7 @@ async def connected(
                 composio_status = client.get_connection_status(
                     entity_id=entity["composio_entity_id"],
                     app=conn.get("app_name", ""),
+                    auth_config_id=_stored_auth_config_id(entity_manager, entity["id"], conn.get("app_name", "")),
                 )
                 if composio_status and composio_status.get("status") in ("ACTIVE", "INITIATED"):
                     entity_manager.update_connection_status(
@@ -363,7 +374,7 @@ async def connected(
                                 ctx.workspace_id, sync_err,
                             )
             except Exception as e:
-                logger.debug(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
+                logger.warning(f"[CONNECTED_APPS] Pending sync failed for {conn.get('app_name')}: {e}")
 
     # Include active (connected), added (in workspace, auth revoked), and pending (OAuth in progress) apps.
     # All three represent apps the user has interacted with in their workspace.
@@ -858,6 +869,7 @@ async def refresh_connections(
             composio_status = client.get_connection_status(
                 entity_id=entity["composio_entity_id"],
                 app=(conn.get("app_name") or "").upper(),
+                auth_config_id=_stored_auth_config_id(entity_manager, entity["id"], conn.get("app_name") or ""),
             )
             if composio_status and composio_status.get("status") == "ACTIVE":
                 entity_manager.update_connection_status(
