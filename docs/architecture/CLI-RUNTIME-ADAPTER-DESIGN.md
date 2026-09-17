@@ -671,16 +671,29 @@ The deliverable this whole design exists to produce.
    entries are written, how trust is recorded. Point them at the shim we already ship.
    *Not Claude-shaped:* `normalize_event` + `render_response` — a name map each way.
    *Tier-3:* the sidecar. *Tier-4:* declare it ungated and accept D-3's answer.
-5. **Map its tools** in `tool_intent()` — the shell tool, the edit tool, the read tools.
-6. **Map its usage** in `read_usage()` — where the counts are, which record carries the model,
+5. **Map its tools** in `tool_intent()` — the shell tool, the edit tool, the read tools, and the
+   platform tools the Automatos MCP server offers (PRD-245): whatever prefix this CLI puts on them,
+   strip it and return `ToolClass.PLATFORM` with the bare tool name as the command, or its sessions
+   are gated on a name the policy has never heard of.
+6. **Write its MCP server entry** (PRD-245 W1/W4) — one remote HTTP server carrying the ticket's
+   bearer token, built from the `session_tools` the claim brings. Two spellings exist so far: Claude
+   Code takes a JSON file via `--mcp-config` under `--strict-mcp-config`, with the token written
+   LITERALLY (it substitutes an EMPTY string for any `${VAR}` in a remote server's headers whose name
+   reads as a credential); Codex takes an `[mcp_servers.<name>]` table with `bearer_token_env_var`
+   and the token in the environment. A CLI with no way to express an HTTP MCP server with a static
+   credential has no platform tools, and the honest move is to say so on its preset row rather than
+   let its sessions look capable and fail. Whichever way it goes, the operator's OWN MCP servers must
+   not survive into the session config.
+7. **Map its usage** in `read_usage()` — where the counts are, which record carries the model,
    cumulative or per-turn.
-7. **Add a fake-CLI fixture** mirroring `tests/fake_claude.py`: refuse the forbidden args, drive the
+8. **Add a fake-CLI fixture** mirroring `tests/fake_claude.py`: refuse the forbidden args, drive the
    hooks in *its* vocabulary, write a transcript in *its* shape.
-8. **Add its id** to `orchestrator/core/cli_presets.py`. The parity test (§8.1) will tell you if you
+9. **Add its id** to `orchestrator/core/cli_presets.py`. The parity test (§8.1) will tell you if you
    forgot.
-9. Nothing in the frontend. Nothing in `host.py`. Nothing in the backend lane.
+10. Nothing in the frontend. Nothing in `host.py`. Nothing in the backend lane.
 
-Steps 1–3, 7, 8 are a row and a fixture. Step 4 is the only real code, and only for tier 2+.
+Steps 1–3, 8, 9 are a row and a fixture. Steps 4 and 6 are the only real code, and 4 only for
+tier 2+.
 
 ---
 
@@ -737,6 +750,14 @@ CI-only, no spend, no live CLI (workspace rule).
   only if `GROK_HOME` breaks the login. Needs the binary to decide.
 - **D-6 · Proxy tier admissibility** (§9.4). Local-upstream only, or not at all? *Recommended:*
   local-upstream only, marked on the ticket. Not needed before Qwen/Crush.
+- **D-8 · Platform tools inside a session — SETTLED** by PRD-245 (2026-09-17), which supersedes
+  PRD-239's D-4. A session reaches Automatos through a loopback MCP server handed to the CLI at
+  launch, carrying a per-ticket bearer token minted at claim and dead when the ticket ends. Every
+  call lands on the same `platform_execute` dispatcher an API-runtime agent uses, so the policy gate,
+  the telemetry and the workspace scoping are the existing ones; the session's own gate classifies
+  those calls as `ToolClass.PLATFORM` and allows only the advertised names. Composio rides the same
+  bridge through a single `composio_execute` tool, so a session never holds a connection secret.
+  This is a per-CLI surface — §10 step 6 — not a property of the seam.
 - **D-7 · `exposeCodexDataDirs`** (§6.1). Write a namespaced `sessions/` folder into the operator's
   global `~/.codex` so their own `codex resume` picker sees Automatos sessions? *Recommended:* off
   by default, an operator opt-in — it is a global write, however tidy.

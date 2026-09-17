@@ -94,7 +94,7 @@ On turn end the host copies files the session wrote under its own session folder
 **Editions:** local only.
 
 **S0.9 · Docs (S)**
-`services/cli-host/README.md`: the allowlist rules as built (S0.1/S0.2), the review rule (S0.3), where held commands appear (S0.4), the deliverables folder (S0.7). `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md` §12 records D-4 as settled by this PRD.
+`services/cli-host/README.md`: the allowlist rules as built (S0.1/S0.2), the review rule (S0.3), where held commands appear (S0.4), the deliverables folder (S0.7). `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md`: §12 records this as settled — as **D-8**, not D-4; that document's D-4 is where `--worktree` truth lives, and the decision this PRD settles is **PRD-239's** D-4, which W0 annotates in place. §10's add-a-CLI checklist gains the two steps a new CLI now has: classify the platform tools its MCP prefix produces, and write its MCP server entry — with the note that a CLI which cannot express an HTTP server with a static credential has no platform tools and should say so on its preset row.
 
 ### Wave 1 — the bridge and the read tools
 
