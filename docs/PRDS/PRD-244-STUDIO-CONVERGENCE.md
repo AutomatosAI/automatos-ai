@@ -59,7 +59,11 @@ The first cut of D2/D3 rendered the Studio-designed Command Centre shell, chat l
 
 **Wave 4 — "Auto now" (D5), shared component, both styles.** Sections, empty states, the small-width pill; a vitest per section on fake hook data. Acceptance: with one open question, one due watch and one running ticket, the rail shows three honest rows in either style and each row lands on the right tab.
 
-**Waves 5a–5g — Studio on every page, two tones (D8).** One wave per page, proposed order by visibility: 5a Agent Management (Roster · Fleet · Org Chart · Configuration · Skills, the duplicated tab strips resolved), 5b Deliverables, 5c Tools & Integrations, 5d Knowledge Base, 5e Marketplace, 5f Analytics, 5g Settings + Workspace Admin. Each wave: a Studio page component, both tones, the page's existing tests kept, a scope test that the page's Studio rules hang off its own root. Acceptance per wave: Gerard's local pass in Studio Light and Dark; Classic untouched.
+**Waves 5a–5g — Studio on every page, two tones (D8). Built 09-17, three mechanisms by page shape:**
+- **5a Agent Management (#760)** and **5b Deliverables (#761)** — bespoke Studio pages (`components/<page>/studio/…`): the editorial head, **in-page** `cc-tabs` driven by `?tab=`, the same tab bodies. With 5b the header sub-nav strip (`StudioPageTabs`, `STUDIO_PAGE_TABS`) is deleted: every Studio page composes its own tabs.
+- **5c Tools & Integrations (#762)** — a **frame variant** on the existing 1,035-line component (`variant="studio"`): head, stats and toolbar swapped, the grid and modals shared.
+- **5d Knowledge Base, 5e Marketplace, 5f Analytics, 5g Settings + Workspace Admin (#763, one PR)** — the **shared frame primitives** `PageHeader`, `StatsBar` and `FilterTabs` render the Studio frame in the Studio style and their classic markup otherwise, so every page built from them is a Studio page in both tones with no per-page copy (24 / 11 / 9 pages respectively, Team included).
+Acceptance per page: Gerard's local pass in Studio Light and Dark; Classic byte-for-byte as on `main`. Fixes from the review land as follow-up commits on the wave branches.
 
 **Wave 6 — the manual pass (Gerard; local first, then SaaS).** The checklist below on both styles × both tones × both editions, desktop and tablet, fresh and existing browser. CI is the only gate for code; this pass is the gate for `studio` → `main`. Then PRD-245 (mobile), then the one PR.
 
