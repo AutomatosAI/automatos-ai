@@ -24,9 +24,21 @@ from tests.test_prd225_telegram_bridge import (  # noqa: F401 — fixtures (repl
 )
 
 
+class _Session(_FakeSession):
+    """The webhook bridge fakes never close (the request owns the session);
+    the polling entry point opens and closes its own."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 @pytest.fixture()
 def fake_db(monkeypatch):
-    db = _FakeSession()
+    db = _Session()
     monkeypatch.setattr("core.database.database.SessionLocal", lambda: db)
     return db
 
@@ -45,6 +57,7 @@ async def test_polled_reply_to_a_delivered_question_answers_it(fake_db, replies)
     assert grant.answer_text == "Vendor B"
     assert grant.answered_by == "telegram:555"
     assert replies and replies[0]["text"].startswith("Answer")
+    assert fake_db.closed, "the polling entry point owns its session and closes it"
 
 
 @pytest.mark.asyncio
@@ -83,7 +96,7 @@ async def test_bridge_failure_never_eats_the_message(monkeypatch):
     async def _boom(*a, **k):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr("core.database.database.SessionLocal", lambda: _FakeSession())
+    monkeypatch.setattr("core.database.database.SessionLocal", lambda: _Session())
     monkeypatch.setattr(webhooks, "_maybe_answer_question", _boom)
     assert await webhooks.maybe_answer_polled_telegram_message(
         str(uuid4()), text="yes", chat_id="c1", from_id=1, reply_to_message_id=1,
@@ -103,7 +116,11 @@ def _update(text="Vendor B", reply_to=900):
         text=text, caption=None, photo=None, document=None, message_id=7,
         reply_to_message=SimpleNamespace(message_id=reply_to) if reply_to is not None else None,
     )
-    return SimpleNamespace(message=message, effective_chat=SimpleNamespace(id=1), effective_user=SimpleNamespace(id=555))
+    return SimpleNamespace(
+        message=message,
+        effective_chat=SimpleNamespace(id=1),
+        effective_user=SimpleNamespace(id=555, first_name="Ger"),  # the routed message carries the name
+    )
 
 
 class _Bot:
