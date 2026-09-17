@@ -13,7 +13,9 @@ It does what the host relies on, and nothing else:
 * after ``Stop`` it idles like a TUI waiting for input until it is terminated.
 
 Scenario knobs (environment): ``FAKE_CLAUDE_SCENARIO`` = ``happy`` (default),
-``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop), ``no-start`` (never fires a hook).
+``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop), ``no-start`` (never fires a hook);
+``FAKE_CLAUDE_SESSION_NOTE=1`` also writes ``note.md`` into the ticket folder (the
+``--add-dir``) and reports an edit of the host's own ``ticket.md`` there (PRD-245 S0.7).
 """
 from __future__ import annotations
 
@@ -64,6 +66,22 @@ def _run_hooks(settings: dict, event: str, payload: dict) -> dict:
     return answer
 
 
+def _allowed(answer: dict) -> bool:
+    return ((answer.get("hookSpecificOutput") or {}).get("permissionDecision")) == "allow"
+
+
+def _write_session_note(hook, session_dir: str) -> None:
+    """PRD-245 S0.7: a note in the ticket folder (must land as a deliverable copy) and
+    a reported edit of the host's ticket file (must never be copied)."""
+    note = {"file_path": os.path.join(session_dir, "note.md"), "content": "# note\n"}
+    if _allowed(hook("PreToolUse", tool_name="Write", tool_input=note, tool_use_id="toolu_4")):
+        Path(note["file_path"]).write_text("# note\nwritten in the session folder\n")
+        hook("PostToolUse", tool_name="Write", tool_input=note, tool_use_id="toolu_4", tool_response={"type": "text", "text": "ok"})
+    own = {"file_path": os.path.join(session_dir, "ticket.md"), "old_string": "#", "new_string": "#"}
+    if _allowed(hook("PreToolUse", tool_name="Edit", tool_input=own, tool_use_id="toolu_5")):
+        hook("PostToolUse", tool_name="Edit", tool_input=own, tool_use_id="toolu_5", tool_response={"type": "text", "text": "ok"})
+
+
 def main(argv) -> int:
     args = list(argv)
     if "--version" in args:
@@ -111,6 +129,8 @@ def main(argv) -> int:
     if ((d1.get("hookSpecificOutput") or {}).get("permissionDecision")) == "allow":
         Path(edit["file_path"]).write_text("hi\n")
         hook("PostToolUse", tool_name="Write", tool_input=edit, tool_use_id="toolu_1", tool_response={"type": "text", "text": "ok"})
+    if os.environ.get("FAKE_CLAUDE_SESSION_NOTE") and _arg(args, "--add-dir"):
+        _write_session_note(hook, _arg(args, "--add-dir"))
     d2 = hook("PreToolUse", tool_name="Bash", tool_input={"command": "git push origin main"}, tool_use_id="toolu_2")
     denied = ((d2.get("hookSpecificOutput") or {}).get("permissionDecision")) == "deny"
     # Something a TUI would prompt for — the safety net must deny it, never park.

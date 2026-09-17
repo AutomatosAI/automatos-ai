@@ -246,3 +246,73 @@ def test_codex_login_probe_reads_the_mode_never_a_value(tmp_path):
     assert a.preflight() is None and a.login_mode() == "chatgpt"
     info = a.detect()
     assert info["served"] is True and info["login_mode"] == "chatgpt" and info["tier"] == "hooks"
+
+
+def test_codex_seeding_drops_the_operators_mcp_servers(tmp_path):
+    """PRD-245 S0.8 (D9): a Codex ticket must not inherit the operator's MCP
+    servers — every ``[mcp_servers.*]`` table goes, every other table stays
+    byte for byte, hooks and trust are still appended."""
+    from automatos_cli_host.adapters.codex import CodexAdapter, strip_mcp_servers
+    base = (
+        'model = "gpt-fake"\n'
+        'mcp_servers.inline.command = "x"\n'
+        '\n'
+        '[mcp_servers]\n'
+        '\n'
+        '[mcp_servers.context7]\n'
+        'command = "npx"\n'
+        'args = ["-y", "@upstash/context7-mcp"]\n'
+        '\n'
+        '[mcp_servers.context7.env]\n'
+        'TOKEN = "fixture"\n'
+        '\n'
+        '[model]\n'
+        'reasoning_effort = "medium"\n'
+        '\n'
+        '[mcp_servers.github]  # a comment\n'
+        'url = "https://example.invalid/mcp"\n'
+        '\n'
+        '[projects."/somewhere/else"]\n'
+        'trust_level = "trusted"\n'
+    )
+    stripped = strip_mcp_servers(base)
+    assert stripped == 'model = "gpt-fake"\n\n[model]\nreasoning_effort = "medium"\n\n[projects."/somewhere/else"]\ntrust_level = "trusted"\n'
+    assert "mcp_servers" not in stripped and "context7" not in stripped and "fixture" not in stripped
+    assert strip_mcp_servers("") == "" and strip_mcp_servers('model = "m"\n') == 'model = "m"\n'
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex" / "config.toml").write_text(base)
+    text = CodexAdapter(CODEX, home=home)._config_text(tmp_path / "repo")
+    assert text.startswith('model = "gpt-fake"') and "mcp_servers" not in text
+    assert '[model]\nreasoning_effort = "medium"' in text and '[projects."/somewhere/else"]' in text
+    assert "[[hooks.PreToolUse]]" in text and f'[projects.{json.dumps(str(tmp_path / "repo"))}]' in text
+    assert (home / ".codex" / "config.toml").read_text() == base            # the operator's file is never written
+
+
+def test_codex_seeding_drops_an_mcp_table_whose_name_is_quoted():
+    """A TOML table name may be quoted and a quoted segment may hold a ``]``;
+    such a header must still read as one table, or its server survives the strip."""
+    from automatos_cli_host.adapters.codex import strip_mcp_servers
+
+    base = (
+        'model = "gpt-fake"\n'
+        '\n'
+        '[mcp_servers."x]y"]\n'
+        'command = "weird"\n'
+        '\n'
+        "[mcp_servers.'lit]eral']\n"
+        'command = "literal"\n'
+        '\n'
+        '[[mcp_servers.arrayed]]\n'
+        'command = "arrayed"\n'
+        '\n'
+        '[mcp_servers]\n'
+        '\n'
+        '[model_providers.openai]\n'
+        'name = "OpenAI"\n'
+    )
+    stripped = strip_mcp_servers(base)
+    assert "mcp_servers" not in stripped
+    for gone in ("weird", "literal", "arrayed"):
+        assert gone not in stripped
+    assert stripped == 'model = "gpt-fake"\n\n[model_providers.openai]\nname = "OpenAI"\n'

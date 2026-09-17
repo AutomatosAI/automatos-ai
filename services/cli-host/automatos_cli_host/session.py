@@ -33,6 +33,7 @@ import os
 import pty
 import queue
 import re
+import shutil
 import signal
 import struct
 import subprocess
@@ -48,7 +49,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from . import __version__
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
-from .allowlist import NotAllowed, resolve_allowed, default_session_cwd
+from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
 from .env import build_session_env
 from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
@@ -100,6 +101,8 @@ def _slug(text: str, limit: int = 40) -> str:
     return _SLUG_RE.sub("-", text).strip("-")[:limit] or "ticket"
 
 
+# Stable per agent — no ids, dates or counters (the prompt-cache invariant).
+# PRD-245 S0.6: the session is told what it can and cannot reach, and how to ask.
 SESSION_RULES = (
     "The ticket you are working is described in the file named in your first message; "
     "read it fully before acting.\n"
@@ -107,6 +110,13 @@ SESSION_RULES = (
     "never push, publish or open pull requests — the manager integrates your work; "
     "keep changes scoped to the ticket's OBJECTIVE and BOUNDARIES; when you are done, "
     "reply with a concise summary of what changed, what you verified, and anything left open.\n"
+    "Tools in this session: file tools work only inside the working folder and the ticket "
+    "folder; Bash runs an allowlist of read, build and test verbs, and anything else is held "
+    "for the operator; the platform tools named in your skills (composio_execute, platform_*, "
+    "search_knowledge, scratchpad_*, workspace_*) are not available in a session unless the "
+    "ticket says otherwise — do not call them and do not wait for them.\n"
+    "To ask a question: state it in your final message and end the turn; never wait for an "
+    "answer inside the session.\n"
 )
 
 
@@ -127,11 +137,92 @@ def build_system_prompt(ticket: Dict[str, Any], cli_label: str = "Claude Code") 
     return intro + SESSION_RULES
 
 
-def build_ticket_file(ticket: Dict[str, Any]) -> str:
+def build_ticket_file(ticket: Dict[str, Any], default_root: Optional[str] = None) -> str:
+    """The dispatch contract. With the host's default root known, the ticket names
+    its own deliverables folder (PRD-245 S0.7); without one there is no such line."""
+    folder = session_deliverables_dir(default_root, str(ticket.get("task_id")))
+    deliverables = f"\nDeliverables: save any file you produce under {folder}/\n" if folder else ""
     return (
         f"# Ticket #{ticket.get('task_id')} — {ticket.get('title') or ''}\n\n"
         f"{ticket.get('prompt') or ''}\n"
+        f"{deliverables}"
     )
+
+
+# What the host itself writes into a session folder — never a deliverable.
+HOST_OWNED_SESSION_FILES = frozenset({"ticket.md", "settings.json", "system_prompt.md", TERMINAL_LOG_FILENAME, "mcp.json"})
+# A host-owned file is excluded by CONTENT as well as by name: a session can read
+# one and write it back under another name, and from Wave 1 one of them carries
+# the ticket's own credential. Only small files are compared (the terminal log is
+# bounded but large, and no session hand-copies it).
+MAX_HOST_FILE_COMPARE_BYTES = 256 * 1024
+
+
+def host_owned_blobs(session_dir: Path) -> List[bytes]:
+    """The bytes of the host's own files in this session folder, for the content
+    check below. Unreadable or oversized files are simply not compared."""
+    blobs: List[bytes] = []
+    for name in sorted(HOST_OWNED_SESSION_FILES):
+        path = session_dir / name
+        try:
+            if path.is_file() and path.stat().st_size <= MAX_HOST_FILE_COMPARE_BYTES:
+                blobs = [*blobs, path.read_bytes()]
+        except OSError:
+            continue
+    return blobs
+
+
+def _is_host_copy(path: Path, blobs: Sequence[bytes]) -> bool:
+    """True when this file is one of the host's own under another name."""
+    try:
+        size = path.stat().st_size
+        if size > MAX_HOST_FILE_COMPARE_BYTES:
+            return False
+        candidates = [b for b in blobs if len(b) == size]
+        return bool(candidates) and path.read_bytes() in candidates
+    except OSError:
+        return False
+
+
+def session_deliverables(files_touched: Sequence[str], session_dir: Path, cwd: Path) -> List[Path]:
+    """The files a session wrote inside its own folder, relative to it (PRD-245
+    S0.7) — never the host's own files (by name or by content), each once."""
+    root = session_dir.resolve()
+    blobs = host_owned_blobs(root)
+    found: List[Path] = []
+    for raw in files_touched:
+        path = Path(raw)
+        try:
+            resolved = (path if path.is_absolute() else cwd / path).resolve()
+            rel = resolved.relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not rel.parts or str(rel) in HOST_OWNED_SESSION_FILES or rel in found:
+            continue
+        if _is_host_copy(resolved, blobs):
+            log.warning("deliverable %s is a copy of one of the host's own session files — not landed", resolved)
+            continue
+        found = [*found, rel]
+    return found
+
+
+def land_session_deliverables(relatives: Sequence[Path], session_dir: Path, dest: Path) -> List[str]:
+    """Copy each file into the ticket's deliverables folder — created on demand
+    (0o755), names kept, an earlier copy overwritten. One file failing is a
+    warning, never a lost result. Returns the copies' paths."""
+    landed: List[str] = []
+    for rel in relatives:
+        source, target = session_dir / rel, dest / rel
+        try:
+            if not source.is_file():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            shutil.copy2(source, target)
+        except OSError as exc:
+            log.warning("deliverable %s not copied to %s: %s", source, target, exc)
+            continue
+        landed = [*landed, str(target)]
+    return landed
 
 
 def assert_args_honour_invariant(args: Sequence[str], forbidden: Sequence[str]) -> None:
@@ -196,6 +287,7 @@ class Session:
         self.proc: Optional[subprocess.Popen] = None
         self.pgid: Optional[int] = None
         self.effective_cwd: Optional[Path] = None
+        self.session_dir: Optional[Path] = None
         self.transcript_path: Optional[str] = None
         self._usage_before: Optional[Dict[str, Any]] = None
         self.reported_session_id: Optional[str] = None
@@ -250,7 +342,7 @@ class Session:
             if self._contract_injected:
                 return Reply.none()
             self._contract_injected = True
-            return Reply.with_context(build_ticket_file(self.ticket))
+            return Reply.with_context(build_ticket_file(self.ticket, self.default_root))
         if event == "PreToolUse":
             return self._pre_tool_use(payload)
         if event == "PermissionRequest":
@@ -382,8 +474,9 @@ class Session:
         # 3. files + what the adapter prepares (settings/config home + trust)
         session_dir = self.cfg.sessions_dir / self.task_id
         session_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.session_dir = session_dir
         ticket_path = session_dir / "ticket.md"
-        ticket_path.write_text(build_ticket_file(self.ticket), encoding="utf-8")
+        ticket_path.write_text(build_ticket_file(self.ticket, self.default_root), encoding="utf-8")
         system_prompt_path = session_dir / "system_prompt.md"
         system_prompt_path.write_text(build_system_prompt(self.ticket, preset.label), encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
@@ -543,13 +636,26 @@ class Session:
             tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
             code = self.proc.returncode if self.proc else None
             status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
-        return self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd)
+        files = [*self.files_touched, *self._land_deliverables(cwd)]
+        return self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
+                             files_touched=files)
+
+    def _land_deliverables(self, cwd: Path) -> List[str]:
+        """PRD-245 S0.7: what the session wrote in its own folder is copied into the
+        ticket's deliverables folder, where the backend registers it as today.
+        Nothing to do without a default root."""
+        dest = session_deliverables_dir(self.default_root, self.task_id)
+        if dest is None or self.session_dir is None:
+            return []
+        found = session_deliverables(self.files_touched, self.session_dir, self.effective_cwd or cwd)
+        return land_session_deliverables(found, self.session_dir, dest)
 
     def _outcome(self, status: str, *, result_text: str = "", error: Optional[str] = None,
-                 exit_reason: str = "", usage: Optional[Dict[str, Any]] = None, cwd: Optional[Path] = None) -> SessionOutcome:
+                 exit_reason: str = "", usage: Optional[Dict[str, Any]] = None, cwd: Optional[Path] = None,
+                 files_touched: Optional[List[str]] = None) -> SessionOutcome:
         return SessionOutcome(
             status=status, result_text=result_text, error=error, exit_reason=exit_reason,
-            usage=usage or {}, files_touched=list(self.files_touched),
+            usage=usage or {}, files_touched=list(self.files_touched if files_touched is None else files_touched),
             permission_denials=list(self.denials),
             session_id=self.reported_session_id or self.session_id or None,
             transcript_path=self.transcript_path,

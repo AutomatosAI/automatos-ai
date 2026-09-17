@@ -28,7 +28,7 @@ import os
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .base import LaunchContext, Prepared, PresetAdapter, Refusal, ToolClass, ToolIntent, hook_command
 
@@ -43,6 +43,17 @@ BENIGN_TOOLS = frozenset({"update_plan", "request_user_input", "write_stdin"})
 _PATCH_FILE_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+?)\s*$", re.M)
 _PATCH_MOVE_RE = re.compile(r"^\*\*\* Move to: (.+?)\s*$", re.M)
 _HOOKS_MARK = "# --- automatos-cli-host lifecycle hooks (auto-generated; do not edit) ---"
+# The operator's MCP servers never ride into a session (PRD-245 D9): a Claude
+# ticket has --strict-mcp-config, a Codex ticket gets its seeded config scrubbed.
+# A TOML table name may be quoted, and a quoted segment may hold a ``]`` —
+# ``[mcp_servers."x]y"]`` is one table, not a header that ends early.
+_MCP_HEADER_RE = re.compile(
+    r"^\s*\[\[?\s*mcp_servers"
+    r"(?:\s*\.\s*(?:\"(?:[^\"\\]|\\.)*\"|'[^']*'|[A-Za-z0-9_-]+))*"
+    r"\s*\]\]?\s*(?:#.*)?$"
+)
+_TABLE_HEADER_RE = re.compile(r"^\s*\[")
+_MCP_ROOT_KEY_RE = re.compile(r"^\s*mcp_servers\s*[.=]")
 _USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
@@ -62,6 +73,30 @@ def shell_command_of(tool_input: Mapping[str, Any]) -> str:
     if isinstance(raw, (list, tuple)):
         return shlex.join(str(x) for x in raw)
     return str(raw or "")
+
+
+def strip_mcp_servers(base: str) -> str:
+    """The operator's config without their MCP servers (PRD-245 S0.8): every
+    ``[mcp_servers.<name>]`` table — its header through the line before the next
+    ``[`` header or the end of the file — any bare ``[mcp_servers]`` header, and a
+    root-level ``mcp_servers…`` key. Every other line is kept byte for byte.
+    Line-based on purpose (the host parses no TOML): a header-shaped line inside
+    a multi-line value would end a dropped table early, and Codex then refuses the
+    config instead of loading a server."""
+    kept: List[str] = []
+    dropping = False
+    in_table = False
+    for line in base.splitlines(keepends=True):
+        if _MCP_HEADER_RE.match(line):
+            dropping, in_table = True, True
+            continue
+        if _TABLE_HEADER_RE.match(line):
+            dropping, in_table = False, True
+        elif not in_table and _MCP_ROOT_KEY_RE.match(line):
+            continue
+        if not dropping:
+            kept = [*kept, line]
+    return "".join(kept)
 
 
 # ── the rollout (design §6.8) ────────────────────────────────────────────────
@@ -213,6 +248,7 @@ class CodexAdapter(PresetAdapter):
         except OSError:
             base = ""
         base = base.split(_HOOKS_MARK)[0].rstrip() + "\n" if _HOOKS_MARK in base else base
+        base = strip_mcp_servers(base)
         cmd = hook_command()
         lines = ["", _HOOKS_MARK]
         for event in sorted(self.preset.hook_events):
@@ -269,4 +305,5 @@ class CodexAdapter(PresetAdapter):
         return find_rollout(root, session_id)
 
 
-__all__ = ["CodexAdapter", "find_rollout", "last_agent_message", "patch_paths", "read_rollout_usage", "shell_command_of"]
+__all__ = ["CodexAdapter", "find_rollout", "last_agent_message", "patch_paths", "read_rollout_usage", "shell_command_of",
+           "strip_mcp_servers"]
