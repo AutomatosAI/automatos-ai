@@ -12,6 +12,9 @@ import { ChatTabs, type ChatTab } from '@/components/chatbot/chat-tabs'
 import { FirstRunNudge } from '@/components/local/first-run-nudge'
 import { AppSidebar } from '@/components/chatbot/sidebar'
 import { StudioChatShell } from '@/components/chatbot/studio-chat-shell'
+import { AutoNowRail } from '@/components/chatbot/auto-now-rail'
+import { AutoNowPill } from '@/components/chatbot/auto-now-pill'
+import { useAutoNowOpen } from '@/hooks/use-auto-now'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { usePageAPI } from '@/hooks/use-page-api'
@@ -93,6 +96,9 @@ export default function ChatPage() {
   const [view, setView] = useState<ConversationView | null>(null)
   const [draftInstance, setDraftInstance] = useState(0)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  // PRD-244 D5: the "Auto now" aside of the Classic layout (the Studio shell
+  // carries the same rail); persisted per browser, off on phones.
+  const [autoNowOpen, setAutoNowOpen] = useAutoNowOpen('classicChatAutoNowOpen')
   // Monotonic token so a slow fetch can't stomp a newer tab change.
   const loadSeqRef = useRef(0)
   const coldStartRef = useRef(false)
@@ -346,6 +352,34 @@ export default function ChatPage() {
                 </motion.aside>
               )}
             </AnimatePresence>
+          )}
+
+          {!isMobile && (
+            <>
+              <div className="absolute top-2 right-3 z-30">
+                <AutoNowPill
+                  open={autoNowOpen}
+                  onToggle={() => setAutoNowOpen(!autoNowOpen)}
+                  className="rounded-full border border-border bg-background/70 px-2.5 py-1 text-[11px] text-muted-foreground backdrop-blur hover:text-foreground"
+                />
+              </div>
+              <AnimatePresence>
+                {autoNowOpen && (
+                  <motion.aside
+                    initial={{ x: 24, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    exit={{ x: 24, opacity: 0 }}
+                    transition={{ type: 'spring', stiffness: 320, damping: 30 }}
+                    className="absolute right-0 top-0 z-20 h-full w-[320px]"
+                    aria-label="Auto now rail"
+                  >
+                    <div className="h-full overflow-y-auto rounded-l-3xl border-l border-warning/20 bg-background/35 p-4 pt-12 backdrop-blur-xl shadow-[0_0_80px_rgba(0,0,0,0.55)]">
+                      <AutoNowRail />
+                    </div>
+                  </motion.aside>
+                )}
+              </AnimatePresence>
+            </>
           )}
 
           <div className="h-full">{chatBody}</div>

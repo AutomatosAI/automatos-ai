@@ -24,13 +24,14 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getChat, getChatHistory, getChatMessages } from '@/lib/chat/api'
 import { useMission } from '@/hooks/use-missions-api'
+import { AutoNowRail } from './auto-now-rail'
+import { AutoNowPill } from './auto-now-pill'
+import { AUTO_NOW_RAIL_MIN_WIDTH } from '@/hooks/use-auto-now'
 import { useMissionStore } from '@/stores/mission-store'
 import {
   computeMissionStats,
@@ -79,7 +80,11 @@ export function StudioChatShell({
   useEffect(() => {
     try {
       if (localStorage.getItem(THREADS_KEY) === '1') setThreadsCollapsed(true)
-      if (localStorage.getItem(RAIL_KEY) === '1') setRailCollapsed(true)
+      const rail = localStorage.getItem(RAIL_KEY)
+      if (rail === '1') setRailCollapsed(true)
+      // PRD-244 D5: with no stored choice the rail yields to the pill on
+      // narrow desktops.
+      else if (rail === null && window.innerWidth < AUTO_NOW_RAIL_MIN_WIDTH) setRailCollapsed(true)
     } catch {}
   }, [])
 
@@ -192,20 +197,8 @@ export function StudioChatShell({
             {selectedChatId.slice(0, 8)}
           </span>
         )}
-        <button
-          type="button"
-          className="sh-chat-side-toggle"
-          onClick={toggleRail}
-          aria-label={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
-          title={railCollapsed ? 'Show mission rail' : 'Hide mission rail'}
-          style={{ marginLeft: 'auto' }}
-        >
-          {railCollapsed ? (
-            <PanelRightOpen style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
-          ) : (
-            <PanelRightClose style={{ width: 14, height: 14, strokeWidth: 1.6 }} />
-          )}
-        </button>
+        {/* PRD-244 D5: the rail's control carries the two counts that need a human. */}
+        <AutoNowPill open={!railCollapsed} onToggle={toggleRail} className="sh-chat-autonow" style={{ marginLeft: 'auto' }} />
       </div>
 
       {/* Grid body */}
@@ -315,51 +308,52 @@ export function StudioChatShell({
         {/* Main thread */}
         <div className="sh-chat-main">{children}</div>
 
-        {/* Mission rail — real data or editorial empty state */}
+        {/* PRD-244 D5: the rail — "Auto now" (the floor's live objects) above
+            the mission of this thread (real data or editorial empty state). */}
         {!railCollapsed && (
-          <MissionRail
-            missionId={activeMissionId}
-            mission={mission}
-            loading={missionLoading}
-          />
+          <aside className="sh-chat-rail" aria-label="Auto now rail">
+            <AutoNowRail />
+            <MissionSection
+              missionId={activeMissionId}
+              mission={mission}
+              loading={missionLoading}
+            />
+          </aside>
         )}
       </div>
     </div>
   )
 }
 
-interface MissionRailProps {
+interface MissionSectionProps {
   missionId: string | null
   mission: ReturnType<typeof useMission>['data']
   loading: boolean
 }
 
-function MissionRail({ missionId, mission, loading }: MissionRailProps) {
+/** The mission of this thread — the rail's lower half (the aside is the shell's). */
+function MissionSection({ missionId, mission, loading }: MissionSectionProps) {
   // No mission attached — editorial empty state
   if (!missionId) {
     return (
-      <aside className="sh-chat-rail" aria-label="Mission rail">
-        <div className="sh-chat-rail-empty">
-          <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
-          <p className="sh-chat-rail-empty-body">
-            No mission attached. Ask the agent to plan one, or open Mission
-            Mode from the composer to start tracking work here.
-          </p>
-        </div>
-      </aside>
+      <div className="sh-chat-rail-empty" aria-label="Mission">
+        <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
+        <p className="sh-chat-rail-empty-body">
+          No mission attached. Ask the agent to plan one, or open Mission
+          Mode from the composer to start tracking work here.
+        </p>
+      </div>
     )
   }
 
   // Mission exists but data hasn't arrived yet
   if (loading || !mission) {
     return (
-      <aside className="sh-chat-rail" aria-label="Mission rail">
-        <div>
-          <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
-          <div className="sh-chat-rail-title">Loading mission…</div>
-          <div className="sh-chat-rail-id">{missionId.slice(0, 14)}</div>
-        </div>
-      </aside>
+      <div aria-label="Mission">
+        <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
+        <div className="sh-chat-rail-title">Loading mission…</div>
+        <div className="sh-chat-rail-id">{missionId.slice(0, 14)}</div>
+      </div>
     )
   }
 
@@ -371,7 +365,7 @@ function MissionRail({ missionId, mission, loading }: MissionRailProps) {
   const taskSlice = tasksOrdered.slice(0, 6)
 
   return (
-    <aside className="sh-chat-rail" aria-label="Mission rail">
+    <div className="contents" aria-label="Mission">
       <div>
         <p className="sh-chat-rail-eyebrow">Mission · this thread</p>
         <div className="sh-chat-rail-title">{mission.goal}</div>
@@ -417,7 +411,7 @@ function MissionRail({ missionId, mission, loading }: MissionRailProps) {
       >
         Open mission detail →
       </a>
-    </aside>
+    </div>
   )
 }
 

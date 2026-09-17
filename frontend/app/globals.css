@@ -1218,6 +1218,21 @@
     font-size: 12px;
     flex-shrink: 0;
   }
+  /* PRD-244 D5: the Auto now control in the shell bar — the side-toggle look, with a label and the needs-you count. */
+  :is(.studio, .sh-chat) .sh-chat-autonow {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 24px; padding: 0 8px; border-radius: 999px;
+    border: 1px solid hsl(var(--border)); background: transparent;
+    font-family: var(--font-geist-mono, monospace); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--fg-2); cursor: pointer;
+  }
+  :is(.studio, .sh-chat) .sh-chat-autonow:hover { color: var(--fg); border-color: var(--border-2); background: hsl(var(--cc-hover)); }
+  .auto-now-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+    background: hsl(var(--accent)); color: hsl(var(--accent-foreground));
+    font-size: 10px; font-weight: 600; line-height: 1;
+  }
   :is(.studio, .sh-chat) .sh-chat-side-toggle {
     width: 24px; height: 24px; border-radius: 5px;
     display: inline-flex; align-items: center; justify-content: center;
