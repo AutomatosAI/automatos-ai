@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 # model can act on, instead of a bare failure.
 PLATFORM_DISPATCHER = "platform_execute"
 
+# How a tool reaches the executor. Most Automatos tools ARE platform actions, so
+# they go through the PRD-64 dispatcher, which validates the action against the
+# registry and reports a missing parameter with a hint. ``composio_execute`` is
+# not a platform action — it is a tool name the executor routes to the Composio
+# router itself — so it is dispatched DIRECTLY under that name.
+DISPATCH_PLATFORM_ACTION = "platform_action"
+DISPATCH_TOOL_NAME = "tool_name"
+
 # A session may move its own ticket here — never to a terminal status. "Done" is
 # a fact the host observes when the session ends (PRD-245 D3); a session that
 # could close its own ticket could report success for work it did not do.
@@ -54,12 +62,14 @@ class SessionTool:
     """One tool a session sees: what the model reads, and what it runs."""
 
     name: str                                   # as the session sees it (mcp__automatos__<name>)
-    action: str                                 # the platform action it dispatches to
+    action: str                                 # the platform action, or the tool name, it runs
     description: str                            # stable text — part of the prompt
     input_schema: Dict[str, Any]
     # params the session sent → params the action gets, with this ticket's scope
     # forced on. ``None`` passes them through unchanged.
     scope: Optional[Callable[[Dict[str, Any], "SessionContext"], Dict[str, Any]]] = None
+    # Which of the two ``action`` is (a defaulted field, so it sits with the rest).
+    dispatch: str = DISPATCH_PLATFORM_ACTION
     # A tool that only reads is safe to retry and cannot change the board.
     reads_only: bool = True
     tags: Tuple[str, ...] = field(default_factory=tuple)
@@ -151,6 +161,29 @@ def _scope_ask_human(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, A
     if options:
         out["options"] = options[:MAX_QUESTION_OPTIONS]
     return out
+
+
+def _scope_composio(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
+    """The action and its parameters, and nothing else.
+
+    There is no ticket scope to force here — WHICH apps are reachable is the
+    workspace's own business (its Composio connections, plus any per-agent app
+    assignment), enforced where the credential lives. What this does enforce is
+    the shape: an action is required, and parameters the session put at the top
+    level (the mistake every skill body invites) are folded into ``params``
+    rather than silently dropped."""
+    action = str(params.get("action") or "").strip()
+    if not action:
+        raise SessionToolRefused(
+            "composio_execute needs an action, e.g. action=\"GMAIL_FETCH_EMAILS\". "
+            "Your skill lists the ones it uses."
+        )
+    nested = params.get("params")
+    inner: Dict[str, Any] = dict(nested) if isinstance(nested, Mapping) else {}
+    for key, value in params.items():
+        if key not in ("action", "params") and key not in inner:
+            inner[key] = value
+    return {"action": action, "params": inner}
 
 
 def _scope_search(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -267,6 +300,33 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         runner=_run_ask_human,
     ),
     SessionTool(
+        name="composio_execute",
+        action="composio_execute",
+        dispatch=DISPATCH_TOOL_NAME,
+        description=(
+            "Run one action on a connected app — Gmail, Google Calendar, Composio Search, "
+            "GitHub, whatever this workspace has connected. Pass the action name and its "
+            "parameters, exactly as your skills document them, e.g. "
+            "action=\"GOOGLECALENDAR_FIND_EVENT\" with params={\"calendar_id\": \"primary\", "
+            "\"time_min\": \"2026-09-18T00:00:00Z\"}. Automatos holds the credential and makes "
+            "the call: you never see a key and never need one. An app this workspace has not "
+            "connected is refused by name, so read the refusal rather than retrying."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string",
+                           "description": "The action, e.g. GMAIL_FETCH_EMAILS or GOOGLECALENDAR_CREATE_EVENT."},
+                "params": {"type": "object",
+                           "description": "The action's own parameters, as your skill documents them."},
+            },
+            "required": ["action"],
+        },
+        scope=_scope_composio,
+        reads_only=False,
+        tags=("composio",),
+    ),
+    SessionTool(
         name="search_knowledge",
         action="platform_search_memory",
         description=(
@@ -348,10 +408,11 @@ async def call_tool(db: Any, tool: SessionTool, params: Dict[str, Any], ctx: Ses
 
     from modules.tools.execution.unified_executor import UnifiedToolExecutor
 
+    direct = tool.dispatch == DISPATCH_TOOL_NAME
     executor = UnifiedToolExecutor(db)
     result = await executor.execute_tool(
-        tool_name=PLATFORM_DISPATCHER,
-        parameters={"action": tool.action, "params": params},
+        tool_name=tool.action if direct else PLATFORM_DISPATCHER,
+        parameters=params if direct else {"action": tool.action, "params": params},
         agent_id=int(ctx.agent_id or 0),
         workspace_id=ctx.workspace_id,
         trace_id=f"session:{ctx.task_id}:{tool.name}",

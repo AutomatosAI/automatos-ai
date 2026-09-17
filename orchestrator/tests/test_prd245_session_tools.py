@@ -47,7 +47,7 @@ def _recorder():
 def test_the_tool_list_is_the_one_definition_and_is_stable():
     names = st.tool_names()
     assert names == ("board_summary", "list_tasks", "update_ticket", "submit_report",
-                     "ask_human", "search_knowledge")
+                     "ask_human", "composio_execute", "search_knowledge")
     assert st.tool_names() == names                      # stable per process
     first = json.dumps(st.definitions(), sort_keys=True)
     assert json.dumps(st.definitions(), sort_keys=True) == first   # byte-stable (prompt cache)
@@ -69,7 +69,7 @@ def test_a_skill_that_names_the_api_spelling_is_pointed_at_the_session_one():
     assert st.equivalent_of("platform_submit_report") == "submit_report"
     assert st.equivalent_of("platform_search_memory") == "search_knowledge"
     assert st.equivalent_of("submit_report") == "submit_report"
-    assert st.equivalent_of("composio_execute") is None          # W3
+    assert st.equivalent_of("composio_execute") == "composio_execute"   # W3: the skills' own name
     assert st.equivalent_of("") is None and st.equivalent_of(None) is None
 
 
