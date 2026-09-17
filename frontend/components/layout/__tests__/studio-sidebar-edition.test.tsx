@@ -19,6 +19,13 @@ const workspaceRef = vi.hoisted(() => ({ current: null as any }))
 vi.mock('@/components/workspace-provider', () => ({
   useWorkspaceOptional: () => ({ workspace: workspaceRef.current }),
 }))
+// PRD-244 W0: the rail gates Workspace Admin + Settings by system role, like
+// the classic rail. Admin by default here so the edition cases read as before;
+// the role cases below flip it.
+const roleRef = vi.hoisted(() => ({ current: { isAdmin: true } as { isAdmin: boolean } | null }))
+vi.mock('@/contexts/role-context', () => ({
+  useSystemRoleOptional: () => roleRef.current,
+}))
 
 const LOCAL_BASIC_EXPOSURE = { plan: 'basic', families: {}, marketplace_depth: 1, nav: { analytics: false, team: false } }
 const BUSINESS_EXPOSURE = { plan: 'business', families: {}, marketplace_depth: 3, nav: { analytics: true, team: true } }
@@ -44,6 +51,26 @@ afterEach(() => {
   vi.unstubAllEnvs()
   vi.resetModules()
   workspaceRef.current = null
+  roleRef.current = { isAdmin: true }
+})
+
+describe('PRD-244 W0 — role gates match the classic rail', () => {
+  it('a member sees neither Workspace Admin nor Settings', async () => {
+    roleRef.current = { isAdmin: false }
+    workspaceRef.current = { exposure: BUSINESS_EXPOSURE }
+    const { container } = await renderStudio('saas')
+    expect(railHrefs(container)).toEqual(SAAS_RAIL.filter((h) => h !== '/admin/workspaces'))
+    expect(container.querySelector('a[href="/settings"]')).toBeNull()
+    expect(container.querySelector('a[href="https://docs.automatos.app"]')).not.toBeNull()
+  })
+
+  it('an unknown role (no provider) is not an admin', async () => {
+    roleRef.current = null
+    workspaceRef.current = { exposure: BUSINESS_EXPOSURE }
+    const { container } = await renderStudio('saas')
+    expect(screen.queryByText('Workspace Admin')).toBeNull()
+    expect(container.querySelector('a[href="/settings"]')).toBeNull()
+  })
 })
 
 describe('StudioSidebar — local edition (PRD-233 S7)', () => {

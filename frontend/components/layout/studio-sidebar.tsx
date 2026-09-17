@@ -10,6 +10,7 @@ import {
   type StudioMenuGroup,
 } from '@/lib/studio-menu';
 import { useWorkspaceOptional } from '@/components/workspace-provider';
+import { useSystemRoleOptional } from '@/contexts/role-context';
 import { isNavItemVisible } from '@/lib/nav-exposure';
 import { filterNavForEdition, navExposureForEdition } from '@/lib/auth-edition';
 
@@ -57,8 +58,12 @@ export function StudioSidebar({
   const exposure = navExposureForEdition(useWorkspaceOptional()?.workspace?.exposure);
   // PRD-233 S7: SaaS-only entries (Team, Workspace Admin) are absent in local —
   // the seam's explicit list, applied once per menu; not the operator's role.
-  const primaryMenu = filterNavForEdition(STUDIO_MENU_PRIMARY);
-  const footerMenu = filterNavForEdition(STUDIO_MENU_FOOTER);
+  // PRD-244 W0: the same system-role gate as the classic rail. Unknown (no
+  // provider) is not an admin — admin-only items are hidden, never guessed in.
+  const isAdmin = useSystemRoleOptional()?.isAdmin ?? false;
+  const roleAllows = (item: { requiredRole?: 'admin' }) => !item.requiredRole || isAdmin;
+  const primaryMenu = filterNavForEdition(STUDIO_MENU_PRIMARY).filter(roleAllows);
+  const footerMenu = filterNavForEdition(STUDIO_MENU_FOOTER).filter(roleAllows);
 
   return (
     <aside

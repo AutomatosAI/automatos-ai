@@ -2,32 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
-import { useSearchParams } from 'next/navigation';
-
-const STUDIO_FLAG_VALUE = 'studio-preview';
-
-/**
- * Detects `?theme=studio-preview` in the URL and persists the Studio theme via
- * next-themes. Once flipped on, persists across pages until the user picks a
- * different theme via the menu toggle. PRD §3 / Phase 1 feature flag.
- *
- * Mounted once near the top of the tree (e.g. in Providers). No DOM render.
- */
-export function useStudioThemeFlag(): void {
-  const params = useSearchParams();
-  const { setTheme, theme } = useTheme();
-
-  useEffect(() => {
-    const requested = params?.get('theme');
-    if (requested === STUDIO_FLAG_VALUE && theme !== 'studio') {
-      setTheme('studio');
-    }
-  }, [params, setTheme, theme]);
-}
 
 /**
  * Returns whether the Studio theme is currently active. Use in components that
  * need to branch on theme (rare — most styling should flow via CSS variables).
+ *
+ * PRD-244: Studio is chosen in the theme picker only (the URL flag is gone);
+ * the remaining branches on this hook are deleted wave by wave (D2, D3), which
+ * is what removes the classic-first paint, since next-themes only knows the
+ * theme in the browser.
  */
 export function useIsStudio(): boolean {
   const { theme, resolvedTheme } = useTheme();
