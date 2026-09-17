@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import DOMPurify from 'dompurify'
-import ReactMarkdown from 'react-markdown'
+import { MarkdownView } from '@/components/shared/markdown-view'
 import { Save, Sparkles, Pencil, Upload, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -487,7 +487,7 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
                 </div>
               )}
               {content ? (
-                <ReactMarkdown>{content}</ReactMarkdown>
+                <MarkdownView>{content}</MarkdownView>
               ) : (
                 <p className="text-muted-foreground italic">Start writing to see preview...</p>
               )}

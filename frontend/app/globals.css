@@ -1491,7 +1491,7 @@
     gap: 18px;
     overflow-y: auto;
   }
-  :is(.studio, .cc-page) .cc-headrow { display: flex; align-items: flex-end; gap: 18px; }
+  :is(.studio, .cc-page) .cc-headrow { display: flex; align-items: flex-end; gap: 18px; flex-shrink: 0; }
   :is(.studio, .cc-page) .cc-headrow > .cc-head { flex: 1; min-width: 0; }
   :is(.studio, .cc-page) .cc-eyebrow {
     font-family: var(--font-geist-mono, monospace);
@@ -1535,6 +1535,11 @@
   /* Tabs strip (bespoke to /command-center) */
   :is(.studio, .cc-page) .cc-tabs {
     display: flex; gap: 0;
+    /* PRD-244 review (Gerard, 09-17): `overflow-x: auto` below zeroes this
+       flex item's automatic minimum size, so on a page taller than the
+       viewport (Deliverables) the column squashed the strip to nothing and
+       the tabs vanished. Never let the page chrome absorb the overflow. */
+    flex-shrink: 0;
     border-bottom: 1px solid hsl(var(--border));
     overflow-x: auto; scrollbar-width: none;
     margin: 0 -28px;
@@ -2852,6 +2857,93 @@
     font-family: var(--font-geist-mono, monospace);
     font-size: 10px; color: var(--fg-3); font-weight: 600;
   }
+
+  /* ── Markdown documents (file previews, reports, results) ─────────────
+     PRD-244 review (Gerard, 09-17): `@tailwindcss/typography` is not a
+     dependency, so every `prose` class in the app was inert and preflight had
+     stripped heading sizes, list markers and block margins — a report read as
+     a wall of text. This is that typography, on tokens, so it follows both
+     styles and both tones. Owned by <MarkdownView>. */
+  .md-view {
+    color: hsl(var(--foreground));
+    font-size: 14px; line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+  .md-view > * + * { margin-top: 0.9em; }
+  .md-view > :first-child { margin-top: 0; }
+  .md-view p { margin: 0; }
+  .md-view h1, .md-view h2, .md-view h3,
+  .md-view h4, .md-view h5, .md-view h6 {
+    color: hsl(var(--foreground));
+    font-weight: 600; line-height: 1.25; letter-spacing: -0.01em;
+    margin-top: 1.7em;
+  }
+  .md-view h1 {
+    font-size: 1.5rem;
+    padding-bottom: 0.3em; border-bottom: 1px solid hsl(var(--border));
+  }
+  .md-view h2 {
+    font-size: 1.25rem;
+    padding-bottom: 0.25em; border-bottom: 1px solid hsl(var(--border) / 0.6);
+  }
+  .md-view h3 { font-size: 1.0625rem; }
+  .md-view h4 { font-size: 0.9375rem; }
+  .md-view h5, .md-view h6 { font-size: 0.875rem; color: hsl(var(--muted-foreground)); }
+  .md-view strong { font-weight: 650; color: hsl(var(--foreground)); }
+  .md-view em { font-style: italic; }
+  .md-view a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 2px; }
+  .md-view a:hover { opacity: 0.82; }
+  .md-view ul { list-style: disc; padding-left: 1.35em; }
+  .md-view ol { list-style: decimal; padding-left: 1.45em; }
+  .md-view li { margin: 0; }
+  .md-view li + li { margin-top: 0.35em; }
+  .md-view li > ul, .md-view li > ol { margin-top: 0.35em; }
+  .md-view li > p + p { margin-top: 0.5em; }
+  .md-view li::marker { color: hsl(var(--muted-foreground)); }
+  .md-view .contains-task-list { list-style: none; padding-left: 0; }
+  .md-view .task-list-item { display: flex; align-items: baseline; gap: 0.5em; }
+  .md-view .md-task { accent-color: hsl(var(--accent)); }
+  .md-view code {
+    font-family: var(--font-geist-mono, ui-monospace, SFMono-Regular, monospace);
+    font-size: 0.875em;
+    padding: 0.1em 0.35em; border-radius: 4px;
+    background: hsl(var(--muted) / 0.7);
+    border: 1px solid hsl(var(--border) / 0.7);
+  }
+  .md-view pre { overflow-x: auto; }
+  .md-view pre code { background: none; border: 0; padding: 0; font-size: 0.8125rem; }
+  .md-view blockquote {
+    border-left: 3px solid hsl(var(--accent) / 0.5);
+    padding: 0.15em 0 0.15em 1em;
+    color: hsl(var(--muted-foreground));
+  }
+  .md-view hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 1.6em 0; }
+  .md-view img { max-width: 100%; border-radius: 8px; }
+  .md-view table {
+    display: block; width: 100%; overflow-x: auto;
+    border-collapse: collapse; font-size: 0.8125rem;
+  }
+  .md-view th, .md-view td {
+    border: 1px solid hsl(var(--border));
+    padding: 6px 10px; text-align: left; vertical-align: top;
+  }
+  .md-view th { background: hsl(var(--muted) / 0.6); font-weight: 600; }
+
+  /* Side panels and cards — the same document, tighter. */
+  .md-view-compact { font-size: 12.5px; line-height: 1.55; }
+  .md-view-compact > * + * { margin-top: 0.7em; }
+  .md-view-compact h1, .md-view-compact h2,
+  .md-view-compact h3, .md-view-compact h4 { margin-top: 1.15em; }
+  .md-view-compact h1 { font-size: 1.125rem; }
+  .md-view-compact h2 { font-size: 1rem; }
+  .md-view-compact h3, .md-view-compact h4 { font-size: 0.9375rem; }
+
+  /* Studio: paper serif headings, navy links. */
+  .studio .md-view h1, .studio .md-view h2, .studio .md-view h3 {
+    font-family: var(--serif);
+    font-weight: 500; letter-spacing: -0.015em;
+  }
+  .studio .md-view a { color: var(--navy); }
 }
 
 html {

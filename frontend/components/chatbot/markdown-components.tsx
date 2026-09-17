@@ -23,7 +23,7 @@ interface CodeNodeProps {
 }
 
 /** Pull the code text + language off the `code` element nested in a `pre`. */
-function extractCodeChild(children: ReactNode): { code: string; language: string } | null {
+export function extractCodeChild(children: ReactNode): { code: string; language: string } | null {
   const nodes = Array.isArray(children) ? children : [children]
   const codeEl = nodes.find((c) => isValidElement<CodeNodeProps>(c))
   if (!codeEl || !isValidElement<CodeNodeProps>(codeEl)) return null

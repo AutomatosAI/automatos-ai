@@ -3,6 +3,7 @@ export { StatusBadge, type StatusBadgeProps, type StatusVariant } from './status
 export { PageHeader, type PageHeaderProps } from './page-header'
 export { StatsBar, type StatsBarProps, type StatItem } from './stats-bar'
 export { FilterTabs, TabsContent, type FilterTabsProps, type FilterTab } from './filter-tabs'
+export { MarkdownView, documentMarkdownComponents, type MarkdownViewProps } from './markdown-view'
 export { ItemCard, type ItemCardProps } from './item-card'
 export { EmptyState, type EmptyStateProps } from './empty-state'
 export { ErrorState, type ErrorStateProps } from './error-state'

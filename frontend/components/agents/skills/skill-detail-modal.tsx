@@ -23,7 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, FileText, Code, Package, GitBranch } from 'lucide-react';
 import { useSkillsApi } from '@/hooks/use-skills-api';
 import { Skill, SkillContentResponse } from '@/types/skills';
-import ReactMarkdown from 'react-markdown';
+import { MarkdownView } from '@/components/shared/markdown-view'
 
 interface SkillDetailModalProps {
   skill: Skill;
@@ -93,59 +93,7 @@ export function SkillDetailModal({ skill, open, onOpenChange }: SkillDetailModal
                   <Loader2 className="h-8 w-8 animate-spin" />
                 </div>
               ) : content ? (
-              <div
-                className="prose prose-sm max-w-none dark:prose-invert break-words whitespace-pre-wrap overflow-x-hidden prose-pre:whitespace-pre-wrap prose-pre:break-words prose-code:break-words"
-                style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
-              >
-                  <ReactMarkdown
-                    components={{
-                      p: ({ node, ...props }) => (
-                        <p
-                          style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
-                          {...props}
-                        />
-                      ),
-                      li: ({ node, ...props }) => (
-                        <li
-                          style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
-                          {...props}
-                        />
-                      ),
-                      h1: ({ node, ...props }) => (
-                        <h1 style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }} {...props} />
-                      ),
-                      h2: ({ node, ...props }) => (
-                        <h2 style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }} {...props} />
-                      ),
-                      h3: ({ node, ...props }) => (
-                        <h3 style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }} {...props} />
-                      ),
-                      h4: ({ node, ...props }) => (
-                        <h4 style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }} {...props} />
-                      ),
-                      pre: ({ node, ...props }) => (
-                        <pre
-                          style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
-                          {...props}
-                        />
-                      ),
-                      code: ({ node, ...props }) => (
-                        <code
-                          style={{ wordBreak: 'break-all', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
-                          {...props}
-                        />
-                      ),
-                      td: ({ node, ...props }) => (
-                        <td style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }} {...props} />
-                      ),
-                      th: ({ node, ...props }) => (
-                        <th style={{ wordBreak: 'break-all', overflowWrap: 'anywhere' }} {...props} />
-                      ),
-                    }}
-                  >
-                    {content.content}
-                  </ReactMarkdown>
-                </div>
+              <MarkdownView>{content}</MarkdownView>
               ) : (
                 <p className="text-muted-foreground">No content available</p>
               )}

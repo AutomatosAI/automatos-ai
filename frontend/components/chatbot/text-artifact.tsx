@@ -1,10 +1,9 @@
 'use client'
 
 import { useMemo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { ExternalLink, Copy } from 'lucide-react'
+import { MarkdownView } from '@/components/shared/markdown-view'
 
 export interface TextArtifactProps {
   content: string
@@ -28,79 +27,22 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
   const chunks = Array.isArray(metadata?.chunks) ? (metadata?.chunks as Array<{ content: string; excerpt?: string }>) : null
   const downloadUrl = metadata?.download_url as string | undefined
 
+  /** Sandbox links are runtime artifacts, not destinations — show the label only. */
+  const artifactLinkComponents = {
+    a: ({ href, children, ...props }: any) =>
+      href?.startsWith('sandbox://') ? (
+        <span className="inline-flex items-center text-primary/80">
+          {children ?? href.replace('sandbox://', '')}
+        </span>
+      ) : (
+        <a {...props} href={href} target="_blank" rel="noreferrer">
+          {children}
+        </a>
+      ),
+  }
+
   const renderMarkdown = (markdown: string) => (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      className="prose prose-sm max-w-none dark:prose-invert"
-      components={{
-        a: ({ href, children, ...props }) => {
-          if (href?.startsWith('sandbox://')) {
-            const label = children ?? href.replace('sandbox://', '')
-            return (
-              <span className="inline-flex items-center text-primary/80">
-                {label}
-              </span>
-            )
-          }
-          return (
-            <a
-              {...props}
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary hover:text-primary/80 underline"
-            >
-              {children}
-            </a>
-          )
-        },
-        code: ({ children }) => (
-          <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-foreground dark:bg-background/60 dark:text-gray-100">
-            {children}
-          </code>
-        ),
-        pre: ({ children }) => (
-          <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 text-foreground dark:bg-background/70 dark:border-gray-800/60 dark:text-gray-100">
-            {children}
-          </pre>
-        ),
-        ul: ({ children }) => (
-          <ul className="list-disc space-y-2 pl-5 text-foreground dark:text-gray-100">{children}</ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="list-decimal space-y-2 pl-5 text-foreground dark:text-gray-100">{children}</ol>
-        ),
-        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-        table: ({ children }) => (
-          <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-background/40">
-            <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
-              {children}
-            </table>
-          </div>
-        ),
-        thead: ({ children }) => (
-          <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-background/60 dark:text-muted-foreground">
-            {children}
-          </thead>
-        ),
-        tbody: ({ children }) => (
-          <tbody className="divide-y divide-border/50 dark:divide-gray-800/70">{children}</tbody>
-        ),
-        tr: ({ children }) => (
-          <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-background/60">{children}</tr>
-        ),
-        th: ({ children }) => (
-          <th className="px-4 py-3 text-left font-semibold text-foreground/80 dark:text-foreground/90">
-            {children}
-          </th>
-        ),
-        td: ({ children }) => (
-          <td className="px-4 py-3 align-top text-foreground dark:text-gray-200">{children}</td>
-        ),
-      }}
-    >
-      {markdown}
-    </ReactMarkdown>
+    <MarkdownView components={artifactLinkComponents}>{markdown}</MarkdownView>
   )
 
   return (
