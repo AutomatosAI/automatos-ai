@@ -14,9 +14,9 @@ export default function PlaybooksPage() {
   const isStudio = useIsStudio()
   const isMobileLayout = useIsTabletOrBelow()
 
-  // Studio: the Assignments hub is the canonical view. Forward to it
-  // with the Playbooks tab pre-selected and any other params preserved
-  // (e.g. ?id=<recipe> for the detail panel).
+  // Studio style, desktop: the Assignments hub is the canonical view — forward
+  // with the Playbooks tab pre-selected and other params preserved (e.g.
+  // ?id=<recipe> for the detail panel). PRD-244 (two styles).
   useEffect(() => {
     if (!isStudio || isMobileLayout) return
     const params = new URLSearchParams(searchParams?.toString() ?? '')
@@ -24,7 +24,7 @@ export default function PlaybooksPage() {
     router.replace(`/assignments?${params.toString()}` as any)
   }, [router, searchParams, isStudio, isMobileLayout])
 
-  // Classic theme + mobile keep the existing standalone Playbooks panel.
+  // Classic style (and every style below 1024 px) keeps the standalone panel.
   if (isStudio && !isMobileLayout) {
     return <MainLayout fullBleed>{null}</MainLayout>
   }

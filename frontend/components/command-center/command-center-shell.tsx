@@ -14,7 +14,7 @@
  * state changes.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { RotateCw } from 'lucide-react'
 
@@ -30,6 +30,7 @@ import { TrialBalancePill } from '@/components/onboarding/trial-balance-pill'
 import { SetupChecklistCard } from '@/components/onboarding/setup-checklist-card'
 
 import { StatsStrip } from './stats-strip'
+import { PeriodSelect, type Period } from './period-select'
 import { IsItWorkingStrip } from './is-it-working-strip'
 import { SummaryTab } from './summary-tab'
 import { BoardTab } from './board-tab'
@@ -86,10 +87,15 @@ export function CommandCenterShell() {
   const rawTab = (searchParams?.get('tab') ?? 'summary') as TabKey
   const activeTab: TabKey = VALID_TABS.has(rawTab) ? rawTab : 'summary'
 
-  const { data: stats } = useActivityStats('1d')
+  // PRD-244 W1: the legacy page's period selector, kept — one period drives
+  // the stats, the Summary tab's read and the Activity stream.
+  const [period, setPeriod] = useState<Period>('1d')
+  const { data: stats } = useActivityStats(period)
   const { columns } = useBoardTasks()
   const { data: schedule } = useActivitySchedule('7d')
-  const { data: feed } = useActivityFeed({ limit: 200 })
+  // The backend caps `limit` at 100 (api/activity.py) — 200 was a 422 and an
+  // empty Activity count; PR #397 found the same on the tab (harvested here).
+  const { data: feed } = useActivityFeed({ limit: 100 })
   const { data: decisions } = useDecisionsNeeded(10)
   // PRD-204 S11: live watches only (the default list) -- the tab badge is
   // "how many things is Auto supervising right now".
@@ -167,6 +173,7 @@ export function CommandCenterShell() {
           <p className="cc-sub">{lede}</p>
         </div>
         <div className="cc-actions">
+          <PeriodSelect value={period} onChange={setPeriod} />
           {/* PRD-222 US-014: trial balance, honest on the Command Center too —
               same snapshot the chat pill reads; self-hides once converted. */}
           <TrialBalancePill />
@@ -210,10 +217,10 @@ export function CommandCenterShell() {
       </nav>
 
       <div className="cc-body">
-        {activeTab === 'summary' && <SummaryTab />}
+        {activeTab === 'summary' && <SummaryTab period={period} />}
         {activeTab === 'board' && <BoardTab />}
         {activeTab === 'calendar' && <CalendarTab />}
-        {activeTab === 'activity' && <ActivityTab />}
+        {activeTab === 'activity' && <ActivityTab period={period} />}
         {activeTab === 'watchlist' && <WatchlistTab />}
         {activeTab === 'questions' && <QuestionsTab />}
         {activeTab === 'governance' && <GovernanceTab />}
