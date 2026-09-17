@@ -82,6 +82,13 @@ export function AgentManagement() {
     setViewDetailsAgentId(null)
     apiClient.setCurrentPage('agents')
   }, [])
+  // PRD-244 review: /agents?agent=<id>&panel=<tab> opens that agent's details
+  // (an activity routine row lands on its Reports panel).
+  const deepLinkAgent = useSearchParams()?.get('agent') ?? null
+  const deepLinkPanel = useSearchParams()?.get('panel') ?? undefined
+  useEffect(() => {
+    if (deepLinkAgent) setViewDetailsAgentId(deepLinkAgent)
+  }, [deepLinkAgent])
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [ref, inView] = useInView({
@@ -298,6 +305,7 @@ export function AgentManagement() {
           agentId={Number(viewDetailsAgentId)}
           open={!!viewDetailsAgentId}
           onClose={() => setViewDetailsAgentId(null)}
+          initialTab={deepLinkPanel}
         />
       )}
 

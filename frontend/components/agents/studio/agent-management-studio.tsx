@@ -52,6 +52,10 @@ export function AgentManagementStudio() {
   const [viewMode, setViewMode] = useViewMode('agents')
 
   const requested = searchParams?.get('tab') ?? null
+  // PRD-244 review: ?agent=<id>&panel=<tab> opens that agent's details (an
+  // activity routine row lands on its Reports panel).
+  const deepLinkAgent = searchParams?.get('agent') ?? null
+  const deepLinkPanel = searchParams?.get('panel') ?? undefined
   const tab: AgentTab = isAgentTab(requested) ? requested : 'roster'
   const selectTab = useCallback(
     (next: AgentTab) => {
@@ -67,6 +71,10 @@ export function AgentManagementStudio() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [viewDetailsAgentId, setViewDetailsAgentId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+
+  useEffect(() => {
+    if (deepLinkAgent) setViewDetailsAgentId(deepLinkAgent)
+  }, [deepLinkAgent])
 
   const roster = agents as Array<{ id: number | string; status?: string | null }>
   const summary = useMemo(() => summariseAgents(roster, agentStats as any), [roster, agentStats])
@@ -220,7 +228,7 @@ export function AgentManagementStudio() {
       {tab === 'skills' && <WorkspaceSkillsTab viewMode={viewMode} />}
 
       {viewDetailsAgentId && (
-        <AgentDetailsModal agentId={Number(viewDetailsAgentId)} open onClose={() => setViewDetailsAgentId(null)} />
+        <AgentDetailsModal agentId={Number(viewDetailsAgentId)} open onClose={() => setViewDetailsAgentId(null)} initialTab={deepLinkPanel} />
       )}
       <CreateAgentModal
         open={showCreate}

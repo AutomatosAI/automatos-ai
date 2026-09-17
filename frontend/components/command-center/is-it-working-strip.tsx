@@ -185,11 +185,12 @@ export function IsItWorkingStrip() {
       delta:
         primKnown === 0
           ? 'awaiting checks'
-          : primDown > 0
-            ? `${primDown} down`
-            : primDegraded > 0
-              ? `${primDegraded} degraded`
-              : 'all green',
+          : [
+              primDown > 0 ? `${primDown} down` : primDegraded > 0 ? `${primDegraded} degraded` : 'all green',
+              primKnown < primTotal ? `${primTotal - primKnown} unmeasured` : null,
+            ]
+              .filter(Boolean)
+              .join(' · '),
     },
     {
       // PRD-197 S4: substrate health — documents / memory / field seams.
@@ -201,11 +202,18 @@ export function IsItWorkingStrip() {
       delta:
         seamKnown === 0
           ? 'awaiting searches'
-          : seamDown.length > 0
-            ? `${seamDown[0].seam} down`
-            : seamDegraded.length > 0
-              ? `${seamDegraded[0].seam} degraded`
-              : 'all seams green · 24h',
+          : [
+              seamDown.length > 0
+                ? `${seamDown[0].seam} down`
+                : seamDegraded.length > 0
+                  ? `${seamDegraded[0].seam} degraded`
+                  : seamKnown === seamsTotal
+                    ? 'all seams green · 24h'
+                    : `${seamGreen} green · 24h`,
+              seamKnown < seamsTotal ? `${seamsTotal - seamKnown} unmeasured` : null,
+            ]
+              .filter(Boolean)
+              .join(' · '),
     },
     {
       // PRD-196 S3: is governance actually enforcing? OFF is shown loudly (the
