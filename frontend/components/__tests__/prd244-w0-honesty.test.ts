@@ -25,7 +25,7 @@ describe('PRD-244 W0 honesty', () => {
     expect(src).toContain("themes={['light', 'dark']}")
     expect(src).toContain('<UiStyleProvider initialStyle={initialUiStyle}>')
     expect(src).not.toContain('StudioThemeFlag')
-    expect(src).toContain('defaultTheme="system"')
+    expect(src).toContain('defaultTheme="dark"') // PRD-244 D1: Studio + Dark are the defaults (Gerard, 09-17)
   })
 
   it('the stylesheet carries no Matte rules', () => {

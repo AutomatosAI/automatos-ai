@@ -11,10 +11,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTheme } from 'next-themes'
 import {
+  APPEARANCE_DEFAULTS_KEY,
+  APPEARANCE_DEFAULTS_VERSION,
+  DEFAULT_TONE,
   DEFAULT_UI_STYLE,
-  LEGACY_STUDIO_TONE_VALUE,
   STUDIO_HTML_CLASS,
-  TONE_STORAGE_KEY,
   UI_STYLE_COOKIE,
   UI_STYLE_COOKIE_MAX_AGE_S,
   UI_STYLE_STORAGE_KEY,
@@ -42,11 +43,12 @@ export function applyUiStyleToDocument(style: UiStyle): void {
   }
 }
 
-function readLegacyStudioTone(): boolean {
+/** The stored defaults version, or null when storage is unavailable or unset. */
+function readAppliedDefaultsVersion(): string | null {
   try {
-    return window.localStorage.getItem(TONE_STORAGE_KEY) === LEGACY_STUDIO_TONE_VALUE
+    return window.localStorage.getItem(APPEARANCE_DEFAULTS_KEY)
   } catch {
-    return false
+    return null
   }
 }
 
@@ -57,21 +59,27 @@ interface UiStyleProviderProps {
 
 export function UiStyleProvider({ initialStyle = DEFAULT_UI_STYLE, children }: UiStyleProviderProps) {
   const [style, setStyleState] = useState<UiStyle>(initialStyle)
-  const { theme, setTheme } = useTheme()
+  const { setTheme } = useTheme()
 
   const setStyle = useCallback((next: UiStyle) => {
     setStyleState(next)
     applyUiStyleToDocument(next)
   }, [])
 
-  // One-time migration: before W3 "Studio" was a value of the tone key. Such a
-  // browser becomes Studio style + System tone, once, on its first load.
+  // PRD-244 D1 (Gerard, 2026-09-17): Studio + Dark are the defaults for
+  // everyone, once — a browser that has not seen this defaults version is moved
+  // to them on its next load and then picks freely. This also retires the
+  // pre-W3 "studio" tone value, since the tone is rewritten here.
   useEffect(() => {
-    if (theme === LEGACY_STUDIO_TONE_VALUE || readLegacyStudioTone()) {
-      setStyle('studio')
-      setTheme('system')
+    if (readAppliedDefaultsVersion() === APPEARANCE_DEFAULTS_VERSION) return
+    setStyle(DEFAULT_UI_STYLE)
+    setTheme(DEFAULT_TONE)
+    try {
+      window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
+    } catch {
+      // Storage blocked: the defaults apply again next load, which is harmless.
     }
-  }, [theme, setTheme, setStyle])
+  }, [setTheme, setStyle])
 
   const value = useMemo<UiStyleContextValue>(
     () => ({ style, setStyle, isStudio: style === 'studio' }),

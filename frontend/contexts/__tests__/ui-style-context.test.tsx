@@ -6,7 +6,10 @@ const tone = vi.hoisted(() => ({ theme: 'dark', setTheme: vi.fn() }))
 vi.mock('next-themes', () => ({ useTheme: () => tone }))
 
 import { UiStyleProvider, useUiStyle } from '@/contexts/ui-style-context'
-import { STUDIO_HTML_CLASS, TONE_STORAGE_KEY, UI_STYLE_COOKIE, UI_STYLE_STORAGE_KEY } from '@/lib/ui-style'
+import { APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION, STUDIO_HTML_CLASS, UI_STYLE_COOKIE, UI_STYLE_STORAGE_KEY } from '@/lib/ui-style'
+
+/** A browser that has already been moved to the current defaults. */
+const seenDefaults = () => window.localStorage.setItem(APPEARANCE_DEFAULTS_KEY, APPEARANCE_DEFAULTS_VERSION)
 
 function Probe() {
   const { style, setStyle, isStudio } = useUiStyle()
@@ -31,12 +34,14 @@ afterEach(cleanup)
 
 describe('UiStyleProvider', () => {
   it('starts from the server-read style and reports it', () => {
+    seenDefaults()
     render(<UiStyleProvider initialStyle="studio"><Probe /></UiStyleProvider>)
     expect(screen.getByTestId('style').textContent).toBe('studio')
     expect(screen.getByTestId('studio').textContent).toBe('true')
   })
 
   it('switching writes the html class, the cookie and storage — and never the tone', () => {
+    seenDefaults()
     render(<UiStyleProvider initialStyle="classic"><Probe /></UiStyleProvider>)
     act(() => { screen.getByText('go studio').click() })
     expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(true)
@@ -48,11 +53,18 @@ describe('UiStyleProvider', () => {
     expect(document.cookie).toContain(`${UI_STYLE_COOKIE}=classic`)
   })
 
-  it('migrates a browser whose tone key still says "studio": Studio style + System tone, once', () => {
-    window.localStorage.setItem(TONE_STORAGE_KEY, 'studio')
+  it('moves a browser that has not seen the current defaults to Studio + Dark, once', () => {
     render(<UiStyleProvider initialStyle="classic"><Probe /></UiStyleProvider>)
     expect(screen.getByTestId('style').textContent).toBe('studio')
     expect(document.documentElement.classList.contains(STUDIO_HTML_CLASS)).toBe(true)
-    expect(tone.setTheme).toHaveBeenCalledWith('system')
+    expect(tone.setTheme).toHaveBeenCalledWith('dark')
+    expect(window.localStorage.getItem(APPEARANCE_DEFAULTS_KEY)).toBe(APPEARANCE_DEFAULTS_VERSION)
+  })
+
+  it('leaves a browser that has seen the defaults on its own choice', () => {
+    seenDefaults()
+    render(<UiStyleProvider initialStyle="classic"><Probe /></UiStyleProvider>)
+    expect(screen.getByTestId('style').textContent).toBe('classic')
+    expect(tone.setTheme).not.toHaveBeenCalled()
   })
 })

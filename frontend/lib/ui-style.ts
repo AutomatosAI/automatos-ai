@@ -11,7 +11,23 @@
 export type UiStyle = 'classic' | 'studio'
 
 export const UI_STYLES: readonly UiStyle[] = ['classic', 'studio'] as const
-export const DEFAULT_UI_STYLE: UiStyle = 'classic'
+
+/**
+ * The defaults (Gerard, 2026-09-17): Studio in the Dark tone. A browser with
+ * no stored choice gets them on the server (the style) and from next-themes
+ * (the tone); every browser is moved to them ONCE — see
+ * APPEARANCE_DEFAULTS_VERSION — and picks freely afterwards.
+ */
+export const DEFAULT_UI_STYLE: UiStyle = 'studio'
+export const DEFAULT_TONE = 'dark'
+
+/**
+ * Bump to move every browser to the current defaults one more time. The
+ * provider compares the stored value on mount and applies the defaults when
+ * it differs, then stores the version.
+ */
+export const APPEARANCE_DEFAULTS_KEY = 'automatos-appearance-defaults'
+export const APPEARANCE_DEFAULTS_VERSION = '2026-09-17-studio-dark'
 
 /** Cookie + localStorage key for the style. */
 export const UI_STYLE_COOKIE = 'automatos-style'
@@ -20,13 +36,6 @@ export const UI_STYLE_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 365
 
 /** The class the Studio stylesheet hangs off (`.studio {}` in globals.css). */
 export const STUDIO_HTML_CLASS = 'studio'
-
-/**
- * next-themes' storage key (components/providers.tsx). Before W3 "Studio" was
- * a value of this key; UiStyleProvider migrates such a browser once.
- */
-export const TONE_STORAGE_KEY = 'automatos-theme'
-export const LEGACY_STUDIO_TONE_VALUE = 'studio'
 
 export function isUiStyle(value: unknown): value is UiStyle {
   return value === 'classic' || value === 'studio'

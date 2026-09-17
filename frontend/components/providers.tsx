@@ -93,7 +93,7 @@ export function Providers({ children, initialUiStyle }: ProvidersProps) {
       <RoleProvider>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="dark"
           enableSystem
           themes={['light', 'dark']}
           storageKey="automatos-theme"
