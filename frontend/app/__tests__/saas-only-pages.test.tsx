@@ -37,6 +37,9 @@ vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children: React.ReactNode }) => <div data-testid="main-layout">{children}</div>,
 }))
 vi.mock('@/hooks/use-page-api', () => ({ usePageAPI: () => {} }))
+// PRD-244: the admin pages now use the shared StatsBar, which reads the icon
+// config through react-query. This suite is about edition gating, not icons.
+vi.mock('@/hooks/use-system-config-api', () => ({ useSystemIcons: () => ({ data: {} }) }))
 vi.mock('@/components/team/team-management', () => ({
   TeamManagement: () => <div data-testid="team-management" />,
 }))
