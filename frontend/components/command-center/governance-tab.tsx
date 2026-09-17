@@ -14,6 +14,7 @@
  */
 
 import { useState } from 'react'
+import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ApprovalsInbox } from './governance/approvals-inbox'
 import { AuditPane } from './governance/audit-pane'
 import { PolicyPane } from './governance/policy-pane'
@@ -36,9 +37,34 @@ const PANES: Pane[] = [
   { key: 'compliance', label: 'Compliance', node: <CompliancePane /> },
 ]
 
-export function GovernanceTab() {
+interface GovernanceTabProps {
+  /**
+   * PRD-244 (two styles): the page that mounts the tab picks the sub-tab strip
+   * in its own style — the Studio shell keeps `cc-tabs`, the Classic Command
+   * Centre uses the shared FilterTabs primitive. The panes are shared.
+   */
+  variant?: 'studio' | 'classic'
+}
+
+export function GovernanceTab({ variant = 'studio' }: GovernanceTabProps = {}) {
   const [pane, setPane] = useState<PaneKey>('approvals')
   const active = PANES.find((p) => p.key === pane) ?? PANES[0]
+
+  if (variant === 'classic') {
+    return (
+      <FilterTabs
+        tabs={PANES.map((p) => ({ value: p.key, label: p.label }))}
+        value={pane}
+        onValueChange={(v) => setPane(v as PaneKey)}
+      >
+        {PANES.map((p) => (
+          <TabsContent key={p.key} value={p.key}>
+            {p.node}
+          </TabsContent>
+        ))}
+      </FilterTabs>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">

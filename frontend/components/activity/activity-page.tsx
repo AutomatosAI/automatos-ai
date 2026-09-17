@@ -18,6 +18,9 @@ import {
   Zap,
   MessageSquare,
   Boxes,
+  Eye,
+  HelpCircle,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -28,6 +31,12 @@ import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ActivityFeed } from './activity-feed'
 import { CommandCenterHistory } from './command-center-history'
 import { CalendarTab } from '@/components/command-center/calendar-tab'
+// PRD-244 (two styles): the same tab bodies the Studio shell mounts — built
+// from the shared primitives, so they render here in the Classic style.
+import { WatchlistTab } from '@/components/command-center/watchlist-tab'
+import { QuestionsTab } from '@/components/command-center/questions-tab'
+import { GovernanceTab } from '@/components/command-center/governance-tab'
+import { useQuestions } from '@/hooks/use-approval-grants'
 import { useActivityStats } from '@/hooks/use-activity-api'
 import {
   useActivationMetrics,
@@ -92,6 +101,10 @@ const TAB_DEFS = [
   { value: 'calendar', label: 'Calendar', icon: Calendar },
   { value: 'feed', label: 'Feed', icon: Rss },
   { value: 'history', label: 'History', icon: History },
+  // PRD-204 S11 / PRD-225 / PRD-196 — the Munder Difflin surfaces, in both styles.
+  { value: 'watchlist', label: 'Watchlist', icon: Eye },
+  { value: 'questions', label: 'Questions', icon: HelpCircle },
+  { value: 'governance', label: 'Governance', icon: ShieldCheck },
 ]
 
 export function ActivityPage() {
@@ -130,6 +143,14 @@ export function ActivityPage() {
   }, [])
 
   const { data: liveStats } = useActivityStats(period)
+
+  // PRD-225: the Questions tab badge is the live count of open asks — the same
+  // read and the same number as the Studio shell's badge.
+  const { data: questions } = useQuestions()
+  const openQuestions = questions?.grants?.length ?? 0
+  const tabs = TAB_DEFS.map((t) =>
+    t.value === 'questions' && openQuestions > 0 ? { ...t, count: openQuestions } : t,
+  )
 
   const stats: StatItem[] = [
     { label: 'Working Now', value: liveStats?.working_now ?? 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]', globalIconKey: 'global_activity' },
@@ -239,7 +260,7 @@ export function ActivityPage() {
       </div>
 
       <div>
-        <FilterTabs tabs={TAB_DEFS} value={activeTab} onValueChange={setActiveTab}>
+        <FilterTabs tabs={tabs} value={activeTab} onValueChange={setActiveTab}>
           <TabsContent value="summary">
             <div className="space-y-4">
               <AutosRead period={period} />
@@ -276,6 +297,24 @@ export function ActivityPage() {
           <TabsContent value="history">
             <div>
               <CommandCenterHistory period={period} />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="watchlist">
+            <div>
+              <WatchlistTab />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="questions">
+            <div>
+              <QuestionsTab />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="governance">
+            <div>
+              <GovernanceTab variant="classic" />
             </div>
           </TabsContent>
 
