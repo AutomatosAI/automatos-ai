@@ -26,18 +26,12 @@ describe('S10 studio chrome — no fabricated metrics', () => {
     expect(layout).not.toContain('StudioTicker')
   })
 
-  it('drops fabricated per-tab counts from STUDIO_PAGE_TABS', () => {
+  it('the header sub-nav (and its fabricated per-tab counts) is gone — Studio pages compose their own tabs', () => {
     const src = readFileSync(path.join(ROOT, 'lib/studio-menu.ts'), 'utf8')
-    const start = src.indexOf('STUDIO_PAGE_TABS')
-    expect(start).toBeGreaterThan(-1)
-    // The declaration runs to the first `};` after it.
-    const block = src.slice(start, src.indexOf('};', start))
-    // Tab labels carry no digits, so any digit in this block is a fake count.
-    expect(block).not.toMatch(/\d/)
-    // None of the specific fabricated counts survive.
-    for (const fake of ['18', '41', '24', '12', '9']) {
-      expect(block).not.toContain(fake)
-    }
+    expect(src).not.toContain('STUDIO_PAGE_TABS')
+    expect(existsSync(path.join(ROOT, 'components/layout/studio-page-tabs.tsx'))).toBe(false)
+    expect(readFileSync(path.join(ROOT, 'components/layout/main-layout.tsx'), 'utf8')).not.toContain('StudioPageTabs')
+    expect(readFileSync(path.join(ROOT, 'app/globals.css'), 'utf8')).not.toContain('.sh-tabs')
   })
 
   it('renders tabs without a count badge', () => {
