@@ -2,7 +2,8 @@
 from services.activity_service import ActivityService
 
 
-def test_purpose_and_finding_make_the_line():
+def test_the_conclusion_beats_the_boilerplate():
+    # agent_health comes first in the findings list; the analysis is still the line shown.
     findings = [
         {"check": "agent_health", "detail": "Agent responsive"},
         {"check": "llm_analysis", "detail": "Two invoices are overdue; flagged both.\nMore detail here."},
