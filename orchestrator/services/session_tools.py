@@ -43,6 +43,10 @@ SESSION_TICKET_STATUSES: Tuple[str, ...] = ("in_progress", "blocked", "review")
 REFUSED_TICKET_STATUSES: Tuple[str, ...] = ("done", "failed", "cancelled", "inbox", "assigned")
 
 MAX_TOOL_RESULT_CHARS = 40000
+# The operator reads a question on a CARD, not in a terminal: past a short
+# paragraph plus its options it is a report, not a question (PRD-225's own rule).
+MAX_QUESTION_CHARS = 700
+MAX_QUESTION_OPTIONS = 6
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,12 @@ class SessionTool:
     # A tool that only reads is safe to retry and cannot change the board.
     reads_only: bool = True
     tags: Tuple[str, ...] = field(default_factory=tuple)
+    # Almost every tool IS its platform action, dispatched. ``ask_human`` is not:
+    # the action would park the ticket this instant (it is a board-task ask) while
+    # the session is still mid-turn, and a parked ticket cannot take its own
+    # result. So it brings a runner that files the question UNPARKED and lets the
+    # turn's end do the parking. One exception, named here, not a second path.
+    runner: Optional[Callable[[Any, Dict[str, Any], "SessionContext"], Any]] = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +117,40 @@ def _scope_nothing(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any
 
 def _scope_list_tasks(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
     return {k: v for k, v in params.items() if k in ("status", "assigned_agent_name", "limit")}
+
+
+async def _run_ask_human(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
+    """File the question through PRD-225's shared internals, UNPARKED, and
+    remember it on the ticket. Lazy import: the host service reads this table."""
+    from services.cli_host_service import raise_session_ask
+
+    return await raise_session_ask(
+        db, task_id=ctx.task_id, workspace_id=ctx.workspace_id,
+        agent_id=ctx.agent_id, agent_name=ctx.agent_name,
+        question=params.get("question") or "", options=params.get("options"),
+    )
+
+
+def _scope_ask_human(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
+    """The subject is THIS ticket, always: a session asks about its own work.
+
+    The shared internals only resume a ``board_task`` subject, which is what a
+    ticket is — so the ask is answerable and the answer has somewhere to go."""
+    question = str(params.get("question") or "").strip()
+    if not question:
+        raise SessionToolRefused(
+            "ask_human needs a question. State the one decision you need, in a sentence or two."
+        )
+    if len(question) > MAX_QUESTION_CHARS:
+        raise SessionToolRefused(
+            f"that question is {len(question)} characters; the operator reads it on a card, so keep it "
+            f"under {MAX_QUESTION_CHARS}. Cut the narrative and keep the decision."
+        )
+    out: Dict[str, Any] = {"subject_type": "board_task", "subject_id": str(ctx.task_id), "question": question}
+    options = [str(o).strip() for o in (params.get("options") or []) if str(o).strip()]
+    if options:
+        out["options"] = options[:MAX_QUESTION_OPTIONS]
+    return out
 
 
 def _scope_search(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -197,6 +241,32 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         tags=("report",),
     ),
     SessionTool(
+        name="ask_human",
+        action="platform_ask_human",
+        description=(
+            "Ask the operator ONE short question when you genuinely cannot proceed without "
+            "an answer — a missing file, a decision only they can make. Your ticket parks "
+            "when your turn ends and picks up here, with the answer, once they reply. So "
+            "finish everything that does not depend on the answer FIRST, then ask and end "
+            "your turn. Never wait, never guess, never ask twice. A sentence or two of "
+            "markdown, with options when there are discrete choices."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string",
+                             "description": "The question, in markdown. One decision, stated plainly."},
+                "options": {"type": "array", "items": {"type": "string"},
+                            "description": "The discrete choices, when there are some."},
+            },
+            "required": ["question"],
+        },
+        scope=_scope_ask_human,
+        reads_only=False,
+        tags=("ask",),
+        runner=_run_ask_human,
+    ),
+    SessionTool(
         name="search_knowledge",
         action="platform_search_memory",
         description=(
@@ -273,6 +343,9 @@ async def call_tool(db: Any, tool: SessionTool, params: Dict[str, Any], ctx: Ses
     exception: the caller renders it as tool output the model can read and act
     on, which is what the MCP contract asks for.
     """
+    if tool.runner is not None:
+        return await tool.runner(db, params, ctx)
+
     from modules.tools.execution.unified_executor import UnifiedToolExecutor
 
     executor = UnifiedToolExecutor(db)
