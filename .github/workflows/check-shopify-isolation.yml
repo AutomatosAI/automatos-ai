@@ -10,10 +10,12 @@ on:
   push:
     branches:
       - main
+      - studio
       - "ralph/**"
   pull_request:
     branches:
       - main
+      - studio
 
 jobs:
   check-shopify-isolation:

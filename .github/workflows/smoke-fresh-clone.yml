@@ -27,6 +27,7 @@ on:
   pull_request:
     branches:
       - main
+      - studio
     paths:
       - "docker-compose.yml"
       - "docker-entrypoint.sh"
