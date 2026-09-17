@@ -14,7 +14,9 @@ export interface PremiumIconProps {
 }
 
 function resolveIconSrc(iconFilename: string, iconStyle: string): string {
-  if (iconStyle === 'default') {
+  // Defensive: if iconStyle is anything but a non-empty string, fall back
+  // to the default path. Prevents "[object Object]" landing in the URL.
+  if (typeof iconStyle !== 'string' || iconStyle === '' || iconStyle === 'default') {
     return `/assets/icons/${iconFilename}`;
   }
   return `/assets/icons/${iconStyle}/${iconFilename}`;

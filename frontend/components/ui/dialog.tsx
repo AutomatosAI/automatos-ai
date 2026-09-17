@@ -50,8 +50,16 @@ const DialogContent = React.forwardRef<
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // Centering via inline transform. Tailwind Animate's slide-* and
+      // zoom-* keyframes write to the `transform` property directly,
+      // which previously overrode the centering translate mid-animation
+      // and left the dialog anchored at viewport-center top-left — i.e.
+      // visually drifted into the bottom-right quadrant. Inline style
+      // wins specificity and we only use opacity-based fades here so
+      // nothing competes for the `transform` property.
+      style={{ transform: 'translate(-50%, -50%)' }}
       className={cn(
-        'fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 p-4 md:p-6 max-h-[90vh] overflow-y-auto duration-200 glass-card card-glow data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]',
+        'fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] gap-4 p-4 md:p-6 max-h-[90vh] overflow-y-auto duration-200 glass-card card-glow data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         dialogSizeClasses[size],
         className
       )}
