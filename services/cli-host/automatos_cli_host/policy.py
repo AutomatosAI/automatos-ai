@@ -84,11 +84,21 @@ FIND_PLACEHOLDERS = ("{}", "+")
 # on the allowlist (a ticket needs ``sed -n`` and ``awk '{print $1}'``); its
 # program is read for the constructs that escape, and a program the gate cannot
 # read at all (``-f progfile``) is refused.
-_AWK_ESCAPE_RE = re.compile(r"system\s*\(|\bgetline\b|\||print(?:f)?[^;}\n]*>")
-# ``e`` as a COMMAND: after an address (``1e cmd``, ``/x/e cmd``, ``$e cmd``) and
-# followed by its command — never a letter's neighbour (``line`` ends in one) and
-# never followed by a delimiter (``/e/d`` is an ``e`` inside a regex).
-_SED_ESCAPE_RE = re.compile(r"(?<![a-zA-Z\\])e(?:[ \t;]|$)|s(.)(?:\\.|(?!\1).)*\1(?:\\.|(?!\1).)*\1[a-zA-Z0-9]*e")
+# Every quantifier here is BOUNDED and no alternation is ambiguous: the program
+# is a session's own text, so a pattern that can backtrack exponentially on it
+# would hang the hook thread the gate answers from (CodeQL py/redos).
+_AWK_ESCAPE_RE = re.compile(r"system\s{0,8}\(|\bgetline\b|\||print(?:f)?[^;}\n]{0,200}>")
+# ``e`` as a COMMAND — after an address (``1e cmd``, ``/x/e cmd``, ``$e cmd``)
+# and followed by its command; never a letter's neighbour (``line`` ends in one)
+# and never followed by a delimiter (``/e/d`` is an ``e`` inside a regex). Then
+# ``e`` among the FLAGS of an ``s`` command (``s/a/b/e``), recognised by the
+# delimiter that closes it and the command boundary after the flags — matching
+# the two delimited halves instead would need an ambiguous alternation, and an
+# untrusted program must never be able to make this pattern backtrack.
+_SED_ESCAPE_RE = re.compile(
+    r"(?<![a-zA-Z\\])e(?:[ \t;]|$)"
+    r"|[^a-zA-Z0-9\s][a-zA-Z0-9]{0,16}e[a-zA-Z0-9]{0,16}(?:[;\n}]|$)"
+)
 
 # Global options that may sit between ``git`` and its subcommand. Peeled before
 # the verb is judged, so no spelling of a global hides a ``push`` from the

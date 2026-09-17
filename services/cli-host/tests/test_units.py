@@ -835,3 +835,22 @@ def test_a_host_owned_file_under_another_name_is_not_a_deliverable(tmp_path):
     written = [str(session_dir / name) for name in
                ("note.md", "copy.md", "leak.json", "ticket.md", "mcp.json")] + ["/etc/hosts"]
     assert [str(p) for p in session.session_deliverables(written, session_dir, tmp_path)] == ["note.md"]
+
+
+def test_script_guards_cannot_be_made_to_backtrack(tmp_path):
+    """The program of a script verb is a SESSION'S OWN text, so the patterns that
+    read it must not backtrack on it — an exponential one would hang the hook
+    thread every decision is answered from (CodeQL py/redos). The shapes below
+    are the ones that blew up the first cut; they now finish in microseconds, so
+    a generous bound still catches a regression."""
+    import time
+
+    ctx, fill = _layout(tmp_path)
+    probes = ["s" + "\\a" * 2000, "sa" + "\\a" * 2000, "print" + "x" * 20000, "/" + "a1" * 10000]
+    started = time.monotonic()
+    for probe in probes:
+        policy._SED_ESCAPE_RE.search(probe)
+        policy._AWK_ESCAPE_RE.search(probe)
+    assert time.monotonic() - started < 2.0
+    # …and a program made of those shapes is still judged, not hung.
+    assert _decide("Bash", {"command": fill("sed 's/" + "\\a" * 500 + "/x/' <ROOT>/f")}, ctx).behavior == "allow"
