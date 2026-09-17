@@ -104,9 +104,10 @@ export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
 // composes its own Missions/Playbooks tabs (full-bleed hub) and is absent.
 // (No digits inside the literal: the S10 honesty gate reads any digit as a
 // fabricated count.)
+// Agent Management composes its own tabs in Studio (the hub's pattern), so it
+// is no longer listed here; Deliverables follows when its Studio page lands.
 export const STUDIO_PAGE_TABS: Record<string, string[]> = {
   deliv:   ['Outputs', 'Blogs', 'Templates'],
-  agents:  ['Roster', 'Fleet', 'Org Chart', 'Configuration', 'Skills'],
 };
 
 /** The `?tab=` slug a page-tab label resolves to — one rule, shared with the pages. */

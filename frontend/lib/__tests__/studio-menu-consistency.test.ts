@@ -12,7 +12,6 @@ import {
   resolveActiveMenuId,
   slugifyTab,
 } from '@/lib/studio-menu'
-import { AGENT_TAB_VALUES } from '@/lib/agents/tabs'
 import { DELIVERABLE_TABS } from '@/lib/deliverables/tabs'
 
 describe('studio menu consistency', () => {
@@ -25,11 +24,11 @@ describe('studio menu consistency', () => {
     const ids = new Set(STUDIO_MENU_PRIMARY.map((m) => m.id))
     for (const key of Object.keys(STUDIO_PAGE_TABS)) expect(ids.has(key)).toBe(true)
     expect(STUDIO_PAGE_TABS).not.toHaveProperty('assign') // the hub composes its own tabs
+    expect(STUDIO_PAGE_TABS).not.toHaveProperty('agents') // W5a: the Studio page composes its own
   })
 
-  it('links every deliverables and agents tab to a value the page reads', () => {
+  it('links every deliverables tab to a value the page reads', () => {
     expect(STUDIO_PAGE_TABS.deliv.map(slugifyTab)).toEqual([...DELIVERABLE_TABS])
-    expect(STUDIO_PAGE_TABS.agents.map(slugifyTab)).toEqual([...AGENT_TAB_VALUES])
   })
 
   it('keeps execution detail pages under Command Centre', () => {

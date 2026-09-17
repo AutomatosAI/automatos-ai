@@ -122,9 +122,9 @@ export function StatsStrip() {
 function Dot({ tone }: { tone: SparklineTone }) {
   if (tone === 'muted') return null
   const colors: Record<SparklineTone, string> = {
-    ok: 'hsl(82 50% 22%)',
+    ok: 'hsl(var(--olive))',
     err: 'hsl(var(--accent))',
-    warn: 'hsl(38 78% 27%)',
+    warn: 'hsl(var(--warn-ink))',
     info: 'hsl(var(--info))',
     muted: 'transparent',
   }
