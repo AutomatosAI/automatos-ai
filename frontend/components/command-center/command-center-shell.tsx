@@ -93,7 +93,9 @@ export function CommandCenterShell() {
   const { data: stats } = useActivityStats(period)
   const { columns } = useBoardTasks()
   const { data: schedule } = useActivitySchedule('7d')
-  const { data: feed } = useActivityFeed({ limit: 200 })
+  // The backend caps `limit` at 100 (api/activity.py) — 200 was a 422 and an
+  // empty Activity count; PR #397 found the same on the tab (harvested here).
+  const { data: feed } = useActivityFeed({ limit: 100 })
   const { data: decisions } = useDecisionsNeeded(10)
   // PRD-204 S11: live watches only (the default list) -- the tab badge is
   // "how many things is Auto supervising right now".

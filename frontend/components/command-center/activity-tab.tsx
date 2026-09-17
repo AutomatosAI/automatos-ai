@@ -155,7 +155,7 @@ export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
   const totalShown = items.length
 
   // Unfiltered fetch just to power the filter-pill counts.
-  const { data: allData } = useActivityFeed({ period, limit: 200 })
+  const { data: allData } = useActivityFeed({ period, limit: 100 }) // backend caps limit at 100
   const counts = useMemo(() => {
     const all = allData?.items ?? items
     const errs = all.filter((i) => i.status === 'failed').length
