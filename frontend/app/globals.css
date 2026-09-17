@@ -2958,6 +2958,64 @@
     font-weight: 500; letter-spacing: -0.015em;
   }
   .studio .md-view a { color: var(--navy); }
+
+  /* ── Studio compact (< 1024) ──────────────────────────────────────────
+     PRD-246 (2026-09-17). Below 1024 px the Studio surfaces render their
+     COMPACT form: a designed second form — what stacks, what moves behind a
+     sheet, what scrolls — never a shrunken desktop (M3).
+
+     THIS IS THE ONE HOME FOR COMPACT RULES. A surface responds here, beside
+     its neighbours, inside the band it belongs to; a `@media` block anywhere
+     else in this file is a review finding (M5). Two bands, both already in
+     `hooks/use-mobile.ts` (M2): 1023px is `useIsTabletOrBelow` — "compact",
+     the width where the rail lives in a sheet — and 767px is `useIsMobile` —
+     "phone". There is no third breakpoint.
+
+     Two standing rules for anything added here:
+       · SCOPE IT. Studio rules hang off `:is(.studio, <own root>)` exactly as
+         the desktop rules above do. A bare `.cc-stats` or `.entry-grid` rule
+         reaches Classic, which this PRD does not touch (M6).
+       · NEVER CONTRADICT THE CHROME GUARD. No compact rule may give a named
+         chrome row `flex-shrink: 1`, or let it absorb the page's overflow.
+     ─────────────────────────────────────────────────────────────────── */
+
+  @media (max-width: 1023px) {
+    /* The rail is a sheet at this width (main-layout), so its rows are read
+       and tapped with a thumb rather than pointed at (M4). */
+    .studio .sh-side .sh-item {
+      min-height: 44px; padding: 9px 10px;
+      gap: 12px; font-size: 13.5px;
+    }
+    .studio .sh-side .sh-item .sh-ic { width: 16px; height: 16px; }
+  }
+
+  @media (max-width: 767px) {
+    /* Phone: every Studio control that is tapped is a 44px target (M4).
+       Each of these centres its content with flex, so the min-height is the
+       whole change — no padding or type is disturbed. */
+    .studio .sh-side .sh-item,
+    :is(.studio, .cc-page) .cc-tab,
+    :is(.studio, .cc-page) .cc-filter-pill,
+    :is(.studio, .cc-cal-root) .cc-btn,
+    :is(.studio, .cc-cal-root) .cc-seg button {
+      min-height: 44px;
+    }
+
+    /* Phone: a document reads at the compact density by default. These are
+       the metrics of `.md-view-compact` above — which stays the opt-in for
+       dense surfaces at every width — and the desktop rules are untouched.
+       `.md-view` is a cross-style primitive owned by <MarkdownView> and is
+       unscoped throughout, unlike the Studio families. */
+    .md-view { font-size: 12.5px; line-height: 1.55; }
+    .md-view > * + * { margin-top: 0.7em; }
+    .md-view h1, .md-view h2,
+    .md-view h3, .md-view h4 { margin-top: 1.15em; }
+    .md-view h1 { font-size: 1.125rem; }
+    .md-view h2 { font-size: 1rem; }
+    .md-view h3, .md-view h4 { font-size: 0.9375rem; }
+  }
+
+  /* ─── end of the compact region · a new surface is appended above ──── */
 }
 
 html {

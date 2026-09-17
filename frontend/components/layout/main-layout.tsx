@@ -89,7 +89,11 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   // ────────────────────────────────────────────────────────────────────
   if (isStudio && !isMobileLayout) {
     return (
-      <div className="sh-shell">
+      {/* `safe-bottom` (the one safe-area helper, globals.css) keeps the
+          shell's bottom edge — the scrolling main and the rail alike — clear
+          of a notched phone's home bar. The shell is 100dvh with
+          border-box sizing, so the inset comes out of its height. */}
+      <div className="sh-shell safe-bottom">
         <StudioSidebar
           collapsed={studioSidebarCollapsed}
           onToggle={toggleStudioSidebar}
@@ -147,7 +151,7 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
             side="left"
             className={
               isStudio
-                ? 'w-[260px] p-0 bg-secondary border-r border-border'
+                ? 'w-[260px] p-0 bg-secondary border-r border-border safe-bottom'
                 : 'w-[280px] p-0 glass-card border-r border-primary/15 bg-background/95 backdrop-blur-lg'
             }
           >
