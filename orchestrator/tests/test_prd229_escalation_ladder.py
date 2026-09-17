@@ -179,6 +179,90 @@ async def test_ask_human_still_refuses_a_tool_call_subject():
     assert "ask_id" not in result
 
 
+class _FakeSession:
+    """Enough session to run the REAL ``create_grant``: rows in a list, ids on add."""
+
+    def __init__(self):
+        self.rows = []
+        self.commits = 0
+
+    def add(self, obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = len(self.rows) + 1
+        self.rows.append(obj)
+
+    def flush(self):
+        pass
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+    def refresh(self, obj):
+        pass
+
+    def query(self, model):
+        # Only the cascade count reaches here, and its caller swallows the error
+        # on purpose — a count must never unfile an ask that is already committed.
+        raise RuntimeError("no queries in this fake")
+
+
+@pytest.mark.asyncio
+async def test_the_real_ask_internals_accept_a_tool_call_subject(monkeypatch):
+    """The other half of the fix, and the half the old tests never had.
+
+    Every other test here stubs ``stage_question`` with a fake that accepts
+    anything, so they prove the ladder CALLS it — not that it is ALLOWED to. That
+    is the exact gap that let the bug ship: the collaborator was stubbed, so the
+    refusal on the other side was invisible for two PRDs. This runs the REAL
+    ``stage_question`` (and the real ``create_grant`` under it) with the subject
+    the ladder actually sends, so a subject-type whitelist appearing in
+    ``create_grant`` — the standing precedent is ``handlers_asks._SUBJECTS`` —
+    fails HERE, loudly, instead of silently degrading every escalation to
+    proceed-with-assumption.
+    """
+    from core.models.approval_grants import KIND_QUESTION
+
+    bell, telegram = [], []
+
+    async def _bell(db, workspace_id, **kw):
+        bell.append(kw)
+
+    async def _telegram(db, workspace_id, grant, **kw):
+        telegram.append(grant.id)
+
+    monkeypatch.setattr(ha, "_dispatch_question_pending", _bell)
+    monkeypatch.setattr(ha, "_capture_question_telegram", _telegram)
+    # The cascade count imports inside the function, so it cannot be patched from
+    # here — it runs for real against the fake session, raises, and is swallowed
+    # by the guard that exists so a count can never unfile a committed ask.
+
+    db = _FakeSession()
+    ws = uuid4()
+
+    res = await ha.stage_question(
+        db, ws,
+        subject_type="tool_call", subject_id="task-1",
+        question="Which vendor?", asked_by_agent_id=5, agent_name="QUILL", park=None,
+    )
+
+    # a real row, not a refusal dict read as None
+    assert res["success"] is True
+    assert isinstance(res["ask_id"], int)
+    # park=None: the ladder parks its own OrchestrationTask, nothing here does
+    assert res["parked"] is False
+
+    grants = [r for r in db.rows if getattr(r, "kind", None) == KIND_QUESTION]
+    assert len(grants) == 1
+    assert grants[0].subject_type == "tool_call"
+    assert grants[0].subject_id == "task-1"
+    assert grants[0].id == res["ask_id"]
+    # the human is actually told
+    assert bell and telegram == [res["ask_id"]]
+
+
 @pytest.mark.asyncio
 async def test_escalate_does_not_park_when_no_question_row_was_filed(
     stub_stage_question_returning_nothing, spy_events,
