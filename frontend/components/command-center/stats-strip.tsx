@@ -6,11 +6,11 @@
  *   WORKING · AGENTS · QUEUE · ATTENTION · CACHE-HIT · $ / REQ
  *
  * Live values come from `useActivityStats('1d')` for the workforce four,
- * `useCostAnalyticsUnified(7)` for $/REQ, and `useHeartbeats()` for the
- * scheduled count. Cache-hit doesn't have a dedicated endpoint yet — we
- * render `—` with a "metric pending" delta rather than fabricate a
- * number. The strip always renders — no auto-swap to prose. Idle cells
- * show their zero state honestly ("idle", "0 high", "0 open").
+ * `useCostAnalyticsUnified(7)` for CACHE-HIT (the share of input tokens the
+ * providers served from prompt cache, PRD-231/#745) and $/REQ, and
+ * `useHeartbeats()` for the scheduled count. The strip always renders — no
+ * auto-swap to prose. Idle cells show their zero state honestly ("idle",
+ * "0 high", "0 open", "no cached reads yet").
  */
 
 import { useHeartbeats } from '@/hooks/use-heartbeats-api'
@@ -46,6 +46,9 @@ export function StatsStrip() {
     return `$${v.toFixed(4)}`
   })()
 
+  const cacheShare = cost?.summary?.cacheShare ?? 0
+  const cacheReadTokens = cost?.summary?.cacheReadTokens ?? 0
+
   const costSpark = cost?.costTrend
     ? cost.costTrend
         .slice(-10)
@@ -79,9 +82,9 @@ export function StatsStrip() {
     },
     {
       label: 'CACHE-HIT',
-      value: '—',
-      tone: 'muted',
-      delta: 'metric pending',
+      value: cacheShare > 0 ? `${Math.round(cacheShare * 100)}%` : cost?.summary?.totalRequests ? '0%' : '—',
+      tone: cacheShare > 0 ? 'ok' : 'muted',
+      delta: cacheShare > 0 ? `${formatTokens(cacheReadTokens)} cached · 7d` : cost?.summary?.totalRequests ? 'no cached reads · 7d' : 'no requests · 7d',
     },
     {
       label: '$ / REQ',
@@ -119,12 +122,18 @@ export function StatsStrip() {
   )
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k tok`
+  return `${n} tok`
+}
+
 function Dot({ tone }: { tone: SparklineTone }) {
   if (tone === 'muted') return null
   const colors: Record<SparklineTone, string> = {
-    ok: 'hsl(82 50% 22%)',
+    ok: 'hsl(var(--olive))',
     err: 'hsl(var(--accent))',
-    warn: 'hsl(38 78% 27%)',
+    warn: 'hsl(var(--warn-ink))',
     info: 'hsl(var(--info))',
     muted: 'transparent',
   }

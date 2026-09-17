@@ -2,8 +2,6 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { ChevronDown, CheckCircle2, XCircle, Copy, Check, FileText, Download, Package, Terminal } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -16,14 +14,12 @@ import { cn } from '@/lib/utils'
 import type { TaskResponse, MissionDetailResponse } from '@/types/missions'
 import { TASK_STATE_CONFIG } from '@/types/missions'
 import { toast } from 'sonner'
+import { MarkdownView } from '@/components/shared/markdown-view'
 
 interface MissionResultsPanelProps {
   mission: MissionDetailResponse
   className?: string
 }
-
-const proseClass =
-  'prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-p:text-foreground prose-a:text-primary dark:prose-a:text-primary prose-li:text-foreground prose-strong:text-foreground'
 
 type ResultsView = 'combined' | 'per-task'
 
@@ -214,11 +210,9 @@ export function MissionResultsPanel({ mission, className }: MissionResultsPanelP
         {view === 'combined' ? (
           <div className="p-4">
             {combinedMarkdown ? (
-              <div className={cn(proseClass, 'text-xs leading-relaxed')}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} unwrapDisallowed>
-                  {combinedMarkdown}
-                </ReactMarkdown>
-              </div>
+              <MarkdownView density="compact" disallowedElements={['img']}>
+                {combinedMarkdown}
+              </MarkdownView>
             ) : (
               <p className="text-xs text-muted-foreground text-center py-8">
                 No completed tasks yet
@@ -315,11 +309,9 @@ function TaskResultItem({ task }: { task: TaskResponse }) {
 
             {/* Markdown output */}
             {task.output ? (
-              <div className={cn(proseClass, 'text-xs leading-relaxed')}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} disallowedElements={['img']} unwrapDisallowed>
-                  {task.output}
-                </ReactMarkdown>
-              </div>
+              <MarkdownView density="compact" disallowedElements={['img']}>
+                {task.output}
+              </MarkdownView>
             ) : task.failure_detail ? (
               <div className="text-xs text-destructive/80 bg-destructive/5 rounded p-2 mt-2">
                 {task.failure_detail}

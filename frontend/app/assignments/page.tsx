@@ -12,8 +12,9 @@ export default function AssignmentsRoute() {
   const isStudio = useIsStudio()
   const isMobileLayout = useIsTabletOrBelow()
 
-  // Studio desktop renders CD's HUB-A. Mobile + classic theme keep the
-  // existing AssignmentsPage until CD ships a mobile pass.
+  // PRD-244 (two styles, two tones): the Studio style renders the hub on
+  // desktop; the Classic style keeps the AssignmentsPage. Below 1024 px both
+  // styles use the AssignmentsPage until the mobile pass (PRD-245).
   if (isStudio && !isMobileLayout) {
     return (
       <MainLayout fullBleed>

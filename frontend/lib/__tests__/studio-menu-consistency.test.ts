@@ -1,19 +1,13 @@
 /**
- * PRD-244 W0 — the Studio menu config tells the truth: every page tab is a
- * `?tab=` its page reads, the primary count matches the file's own claim, and
- * the role gates mirror the classic rail.
+ * PRD-244 — the Studio menu config tells the truth: the primary count matches
+ * the file's own claim, the role gates mirror the classic rail, and there is no
+ * header sub-nav config any more (W5b): every Studio page composes its own tabs.
  */
 import { describe, it, expect } from 'vitest'
 
-import {
-  STUDIO_MENU_FOOTER,
-  STUDIO_MENU_PRIMARY,
-  STUDIO_PAGE_TABS,
-  resolveActiveMenuId,
-  slugifyTab,
-} from '@/lib/studio-menu'
-import { AGENT_TAB_VALUES } from '@/lib/agents/tabs'
-import { DELIVERABLE_TABS } from '@/lib/deliverables/tabs'
+import * as menu from '@/lib/studio-menu'
+
+const { STUDIO_MENU_FOOTER, STUDIO_MENU_PRIMARY, resolveActiveMenuId } = menu
 
 describe('studio menu consistency', () => {
   it('has eleven primary items with unique ids', () => {
@@ -21,15 +15,9 @@ describe('studio menu consistency', () => {
     expect(new Set(STUDIO_MENU_PRIMARY.map((m) => m.id)).size).toBe(11)
   })
 
-  it('registers page tabs only for menu ids that exist', () => {
-    const ids = new Set(STUDIO_MENU_PRIMARY.map((m) => m.id))
-    for (const key of Object.keys(STUDIO_PAGE_TABS)) expect(ids.has(key)).toBe(true)
-    expect(STUDIO_PAGE_TABS).not.toHaveProperty('assign') // the hub composes its own tabs
-  })
-
-  it('links every deliverables and agents tab to a value the page reads', () => {
-    expect(STUDIO_PAGE_TABS.deliv.map(slugifyTab)).toEqual([...DELIVERABLE_TABS])
-    expect(STUDIO_PAGE_TABS.agents.map(slugifyTab)).toEqual([...AGENT_TAB_VALUES])
+  it('carries no header sub-nav config — every Studio page composes its own tabs', () => {
+    expect(Object.keys(menu)).not.toContain('STUDIO_PAGE_TABS')
+    expect(Object.keys(menu)).not.toContain('slugifyTab')
   })
 
   it('keeps execution detail pages under Command Centre', () => {

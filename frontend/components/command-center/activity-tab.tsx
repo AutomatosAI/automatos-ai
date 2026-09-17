@@ -106,7 +106,7 @@ function fmtTokens(tokens: number | null | undefined): string {
   return `${tokens} tok`
 }
 
-function rowHref(item: ActivityFeedItem): string | null {
+export function rowHref(item: ActivityFeedItem): string | null {
   // Mirror the classic ActivityFeed's deep-link behaviour. Only playbooks
   // (recipes) belong in the ExecutionKitchen viewer. Routines are
   // heartbeats — they should go to the agent that owns them, not the
@@ -127,12 +127,15 @@ function rowHref(item: ActivityFeedItem): string | null {
         item.id.replace(/^recipe-/, ''),
       )}&recipeId=${encodeURIComponent(item.source_id)}`
     case 'task':
+      // The board opens the ticket for ?task_id= (its deep-link contract).
       return item.source_id
-        ? `/command-center?tab=board&task=${encodeURIComponent(item.source_id)}`
+        ? `/command-center?tab=board&task_id=${encodeURIComponent(item.source_id)}`
         : null
     case 'routine':
-      // Heartbeat — open the owning agent so the user can pause/tune it
-      return item.agent?.id ? `/agents?agent=${item.agent.id}` : null
+      // Heartbeat — the report it produced (file explorer, like the Agent
+      // Reports widget) when there is one; else the agent's Reports panel.
+      if (item.source_url?.startsWith('/deliverables/explorer')) return item.source_url
+      return item.agent?.id ? `/agents?agent=${item.agent.id}&panel=reports` : null
     default:
       return null
   }

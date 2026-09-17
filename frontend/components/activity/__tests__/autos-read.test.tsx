@@ -22,6 +22,8 @@ import { AutosRead } from '@/components/activity/autos-read'
 describe('AutosRead', () => {
   beforeEach(() => {
     mutate.mockClear()
+    window.localStorage.clear()
+    digestData = { ...digestData, state_hash: 'hash-1' }
   })
 
   it('renders the digest text and the needs-attention badge', () => {
@@ -36,6 +38,26 @@ describe('AutosRead', () => {
     render(<AutosRead />)
     fireEvent.click(screen.getByLabelText('Helpful'))
     expect(mutate).toHaveBeenCalledWith({ state_hash: 'hash-1', rating: 1 })
+  })
+
+  it('a thumbs-up collapses the card to one line; the chevron reopens it', () => {
+    render(<AutosRead />)
+    fireEvent.click(screen.getByLabelText('Helpful'))
+    expect(screen.getByTestId('autos-read')).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.getByText(/· Your workspace is healthy\./)).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText("Show Auto's read"))
+    expect(screen.getByTestId('autos-read')).toHaveAttribute('data-collapsed', 'false')
+  })
+
+  it('a collapsed read stays collapsed for the same state_hash and reappears for a new one', () => {
+    const { unmount } = render(<AutosRead />)
+    fireEvent.click(screen.getByLabelText("Hide Auto's read"))
+    unmount()
+    render(<AutosRead />)
+    expect(screen.getByTestId('autos-read')).toHaveAttribute('data-collapsed', 'true')
+    digestData = { ...digestData, state_hash: 'hash-2' }
+    const second = render(<AutosRead />)
+    expect(second.getAllByTestId('autos-read').at(-1)).toHaveAttribute('data-collapsed', 'false')
   })
 
   it('posts a thumbs-down and then locks further rating', () => {

@@ -24,6 +24,10 @@ vi.mock('@/hooks/use-page-api', () => ({ usePageAPI: () => {} }))
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, useIsTabletOrBelow: () => false }))
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => false }))
 vi.mock('@/components/local/first-run-nudge', () => ({ FirstRunNudge: () => null }))
+// PRD-244 D5: the Auto now rail/pill read the floor through react-query hooks — not this test's concern.
+vi.mock('@/components/chatbot/auto-now-rail', () => ({ AutoNowRail: () => null }))
+vi.mock('@/components/chatbot/auto-now-pill', () => ({ AutoNowPill: () => null }))
+vi.mock('@/hooks/use-auto-now', () => ({ useAutoNowOpen: () => [false, () => {}] }))
 vi.mock('@/components/chatbot/sidebar', () => ({ AppSidebar: () => <div data-testid="history" /> }))
 vi.mock('@/components/chatbot/studio-chat-shell', () => ({
   StudioChatShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

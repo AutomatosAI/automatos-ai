@@ -99,7 +99,7 @@ function QuestionCard({ q }: { q: ApprovalGrant }) {
       </div>
 
       {/* The ask — markdown, via the shared chat renderer. */}
-      <div className="prose prose-sm max-w-none dark:prose-invert" aria-label="Question">
+      <div className="md-view md-view-compact" aria-label="Question">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={questionMarkdownComponents}>
           {q.question_md || ''}
         </ReactMarkdown>

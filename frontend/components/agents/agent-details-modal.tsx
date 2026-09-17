@@ -63,6 +63,8 @@ interface AgentDetailsModalProps {
   onEdit?: (agentId: number) => void
   onToggleStatus?: (agentId: number, currentStatus: string) => void
   onDelete?: (agentId: number) => void
+  /** PRD-244 review: open on a given tab (e.g. 'reports' from an activity row). */
+  initialTab?: string
 }
 
 interface AgentDetails {
@@ -134,9 +136,10 @@ export function AgentDetailsModal({
   onClose,
   onEdit,
   onToggleStatus,
-  onDelete
+  onDelete,
+  initialTab,
 }: AgentDetailsModalProps) {
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState(initialTab ?? 'overview')
   const [showShareDialog, setShowShareDialog] = useState(false)
 
   // Use real API hooks

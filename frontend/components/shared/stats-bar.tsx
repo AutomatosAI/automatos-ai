@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { PremiumIcon } from '@/components/shared'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import type { LucideIcon } from 'lucide-react'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 
 export interface StatItem {
   label: string
@@ -31,8 +32,34 @@ const iconColors = [
   'text-[hsl(var(--agent))]',
 ]
 
+/** The strip's semantic tone, read off the classic icon colour the caller already chose. */
+export function statTone(iconColor?: string): '' | 'ok' | 'err' | 'warn' | 'info' {
+  if (!iconColor) return ''
+  if (iconColor.includes('--success')) return 'ok'
+  if (iconColor.includes('destructive')) return 'err'
+  if (iconColor.includes('--warning')) return 'warn'
+  if (iconColor.includes('--info') || iconColor.includes('--agent')) return 'info'
+  return ''
+}
+
 export function StatsBar({ stats, loading = false, glow = true, className }: StatsBarProps) {
   const { data: iconMappings = {} } = useSystemIcons()
+  const isStudio = useIsStudio()
+
+  // Studio style (PRD-244 D8): the designed pages' cc-stats strip, in both tones.
+  if (isStudio) {
+    return (
+      <div className={cn('cc-stats', className)} aria-label="Statistics">
+        {stats.map((stat) => (
+          <div key={stat.label} className="cell">
+            <div className="l">{stat.label}</div>
+            <div className={`v ${statTone(stat.iconColor)}`}>{loading ? '—' : stat.value}</div>
+            {stat.change && <span className="delta">{stat.change}</span>}
+          </div>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div className={cn('hidden md:grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6', className)}>

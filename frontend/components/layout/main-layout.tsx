@@ -9,7 +9,6 @@ import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
 import { StudioSidebar } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
-import { StudioPageTabs } from './studio-page-tabs'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
@@ -97,7 +96,6 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
         />
         <div className="sh-main">
           <StudioHeader />
-          {!fullBleed && <StudioPageTabs />}
           {fullBleed ? (
             <main className="sh-fullbleed flex-1 min-h-0 flex flex-col">
               {children}

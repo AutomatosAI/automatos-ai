@@ -1,12 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Download, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
+import { MarkdownView } from '@/components/shared/markdown-view'
 
 interface PandasAIChart {
   filename: string
@@ -121,12 +120,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
 
       {/* Summary markdown (optional) */}
       {content && (
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          className="prose prose-sm max-w-none dark:prose-invert"
-        >
-          {content}
-        </ReactMarkdown>
+        <MarkdownView density="compact">{content}</MarkdownView>
       )}
 
       {/* Controls */}

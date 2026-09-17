@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import DOMPurify from 'dompurify'
-import ReactMarkdown from 'react-markdown'
+import { MarkdownView } from '@/components/shared/markdown-view'
 import { Save, Sparkles, Pencil, Upload, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -475,10 +475,10 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
           {/* Right: Preview */}
           <div className="hidden lg:block">
             <label className="text-xs font-medium text-muted-foreground">Preview</label>
-            <div className="mt-1 glass-card p-4 min-h-[400px] overflow-y-auto prose prose-sm dark:prose-invert max-w-none">
+            <div className="mt-1 glass-card p-4 min-h-[400px] overflow-y-auto">
               {title && <h1 className="text-lg font-bold mb-2">{title}</h1>}
               {tags.length > 0 && (
-                <div className="flex gap-1 mb-3 not-prose">
+                <div className="flex gap-1 mb-3">
                   {tags.map((tag) => (
                     <Badge key={tag} variant="secondary" className="text-[10px]">
                       {tag}
@@ -487,7 +487,7 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
                 </div>
               )}
               {content ? (
-                <ReactMarkdown>{content}</ReactMarkdown>
+                <MarkdownView>{content}</MarkdownView>
               ) : (
                 <p className="text-muted-foreground italic">Start writing to see preview...</p>
               )}

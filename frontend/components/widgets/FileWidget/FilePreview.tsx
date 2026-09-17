@@ -47,8 +47,7 @@ import 'prismjs/components/prism-go'
 import 'prismjs/components/prism-yaml'
 import 'prismjs/components/prism-markdown'
 import 'prismjs/components/prism-docker'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MarkdownView } from '@/components/shared/markdown-view'
 import { apiClient } from '@/lib/api-client'
 
 /**
@@ -428,7 +427,7 @@ function DocxPreview({ url, className }: { url?: string; className?: string }) {
   return (
     <ScrollArea className={cn('h-full', className)}>
       <div
-        className="prose prose-sm dark:prose-invert max-w-none p-6"
+        className="md-view p-6"
         // Safe: mammoth produces sanitized semantic HTML from a docx file,
         // not arbitrary user input. Same trust model as react-markdown.
         dangerouslySetInnerHTML={{ __html: html }}
@@ -654,9 +653,7 @@ export function FilePreview({
         </div>
         {view === 'preview' ? (
           <ScrollArea className="flex-1">
-            <div className="prose prose-sm dark:prose-invert max-w-none p-6">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-            </div>
+            <MarkdownView className="p-6">{content}</MarkdownView>
           </ScrollArea>
         ) : (
           <ScrollArea className="flex-1">
