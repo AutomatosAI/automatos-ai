@@ -56,6 +56,7 @@ import {
   useSchedulerHealth,
   type ScheduleItem,
 } from '@/hooks/use-activity-api'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useToggleHeartbeat } from '@/hooks/use-heartbeats-api'
 import { useUpdateScheduledTaskStatus } from '@/hooks/use-scheduled-tasks-api'
 import { toneFor } from './agent-tones'
@@ -463,7 +464,12 @@ function DueTag({ overdue }: { overdue: boolean }) {
 
 export function CalendarTab() {
   const router = useRouter()
-  const [mode, setMode] = useState<ViewMode>('week')
+  // A week is `60px repeat(7, 1fr)` — 47px per day at 390px, which is not a
+  // calendar. On a phone the choice is Day or Month and Week is not offered
+  // (PRD-246 US-002); a Week preference set on a desktop reads as Day there.
+  const isPhone = useIsMobile()
+  const [preferred, setPreferred] = useState<ViewMode>('week')
+  const mode: ViewMode = isPhone && preferred === 'week' ? 'day' : preferred
   const [anchor, setAnchor] = useState<Date>(() => new Date())
 
   const range = mode === 'month' ? '30d' : '7d'
@@ -597,21 +603,23 @@ export function CalendarTab() {
           <button
             type="button"
             className={mode === 'day' ? 'on' : ''}
-            onClick={() => setMode('day')}
+            onClick={() => setPreferred('day')}
           >
             Day
           </button>
-          <button
-            type="button"
-            className={mode === 'week' ? 'on' : ''}
-            onClick={() => setMode('week')}
-          >
-            Week
-          </button>
+          {!isPhone && (
+            <button
+              type="button"
+              className={mode === 'week' ? 'on' : ''}
+              onClick={() => setPreferred('week')}
+            >
+              Week
+            </button>
+          )}
           <button
             type="button"
             className={mode === 'month' ? 'on' : ''}
-            onClick={() => setMode('month')}
+            onClick={() => setPreferred('month')}
           >
             Month
           </button>

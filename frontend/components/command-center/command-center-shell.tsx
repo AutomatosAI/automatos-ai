@@ -18,6 +18,7 @@ import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { RotateCw } from 'lucide-react'
 
+import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 import { useActivityStats, useActivityFeed } from '@/hooks/use-activity-api'
 import { useBoardTasks } from '@/hooks/use-board-tasks'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
@@ -109,6 +110,9 @@ export function CommandCenterShell() {
   useBoardEventStream(true)
 
   const dateline = useMemo(todayDateline, [])
+  // Seven tabs are wider than a phone, so the active one is scrolled into
+  // view on a compact viewport (PRD-246 US-002).
+  const tabStrip = useTabStripScroll(activeTab)
 
   const tabCounts: Record<TabKey, number> = useMemo(
     () => ({
@@ -197,7 +201,7 @@ export function CommandCenterShell() {
           powerup/completed stages or once dismissed). */}
       <SetupChecklistCard className="my-3" />
 
-      <nav className="cc-tabs" aria-label="Command Centre sections">
+      <nav className="cc-tabs" aria-label="Command Centre sections" ref={tabStrip}>
         {TABS.map((t) => {
           const isActive = t.key === activeTab
           const count = tabCounts[t.key]

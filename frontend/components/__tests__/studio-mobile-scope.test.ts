@@ -55,11 +55,12 @@ describe('PRD-246 · the compact region', () => {
   })
 
   it('holds every compact media query — none is scattered through the file', () => {
-    // The 8 `@media` blocks that predate PRD-246: the Studio desktop steps
-    // (1279 chat rail, 1199/700 stats, 1199 summary, 700 roster, 1199
-    // activity) and Classic's two (reduced motion, mobile paint cost).
+    // The `@media` blocks that predate PRD-246 and are still desktop steps:
+    // 1279 (chat rail), 1199 (stats 6→3), 1199 (summary), 700 (roster), 1199
+    // (activity cards), and Classic's two (reduced motion, mobile paint
+    // cost). US-002 moved the 700px stats step into the region at 768.
     const outside = (css.slice(0, OPENS) + css.slice(CLOSES)).match(/@media/g) ?? []
-    expect(outside, 'a new @media block belongs in the compact region').toHaveLength(8)
+    expect(outside, 'a new @media block belongs in the compact region').toHaveLength(7)
   })
 
   it('uses only the two breakpoints that already exist', () => {
@@ -103,13 +104,43 @@ describe('PRD-246 · safe area and touch targets', () => {
 
 describe('PRD-246 · nothing leaks into Classic', () => {
   it('scopes every Studio family rule in the region to a Studio root', () => {
+    // A root styles itself — `.cc-page`, `.cc-cal-root`, `.sh-chat`,
+    // `.sh-shell` are the Studio roots and exist on no Classic page.
+    const ROOT = /^\s+\.(cc-page|cc-cal-root|sh-chat|sh-shell)\b/
     const offenders = declarations
       .split('\n')
-      .filter((l) => /^\s{4}\.(cc|sh|entry|mis|pb|mkt|status|pg)-/.test(l))
+      .filter((l) => /^\s+\.(cc|sh|entry|mis|pb|mkt|status|pg)-/.test(l) && !ROOT.test(l))
     expect(offenders, 'hang the rule off :is(.studio, <own root>)').toEqual([])
   })
 
   it('never lets a named chrome row shrink', () => {
     expect(declarations).not.toMatch(/flex-shrink:\s*[1-9]/)
+  })
+})
+
+describe('PRD-246 · every surface that renders on a phone has a compact form', () => {
+  const phone = () => band(767)
+
+  it('Command Centre: the gutter, the tab strip, the stats and the board (US-002)', () => {
+    const p = phone()
+    // The strip's bleed matches the page's gutter — a wider bleed is
+    // sideways page scroll, because .cc-page computes overflow-x: auto.
+    expect(p).toContain('.cc-page { padding: 16px 16px 0; gap: 14px; }')
+    expect(p).toContain(':is(.studio, .cc-page) .cc-tabs { margin: 0 -16px; padding: 0 16px; }')
+    expect(p, 'six figures 2-up').toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
+    expect(p, 'one row per status, snapped').toContain('scroll-snap-type: x mandatory')
+    expect(p).toContain('scroll-snap-align: start')
+    expect(p, 'the status head sticks inside its column').toMatch(
+      /\.cc-kb-head \{ position: sticky/,
+    )
+    // The desktop board shape is intact: one row, scrolling sideways.
+    expect(css.slice(0, OPENS)).toContain('grid-auto-flow: column')
+  })
+
+  it('the tab-strip behaviour is one hook, not a copy per surface', () => {
+    const hook = read('hooks/use-tab-strip-scroll.ts')
+    expect(hook).toContain('useIsTabletOrBelow')
+    expect(hook).toContain('.cc-tab.active')
+    expect(read('components/command-center/command-center-shell.tsx')).toContain('useTabStripScroll')
   })
 })

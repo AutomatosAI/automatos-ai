@@ -1622,10 +1622,8 @@
     :is(.studio, .cc-page) .cc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     :is(.studio, .cc-page) .cc-stats .cell:nth-child(3n) { border-right: 0; }
   }
-  @media (max-width: 700px) {
-    :is(.studio, .cc-page) .cc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    :is(.studio, .cc-page) .cc-stats .cell:nth-child(2n) { border-right: 0; }
-  }
+  /* The 2-up step is in the compact region (PRD-246 US-002) — the boundary
+     moved from 700 to 768 so it lands on `useIsMobile`, not beside it. */
 
   /* Stats prose (STATS-B) — editorial sentence when everything's zero */
   :is(.studio, .cc-page) .cc-stats-prose {
@@ -3013,6 +3011,36 @@
     .md-view h1 { font-size: 1.125rem; }
     .md-view h2 { font-size: 1rem; }
     .md-view h3, .md-view h4 { font-size: 0.9375rem; }
+
+    /* ── Command Centre · US-002 ───────────────────────────────────────
+       The page's gutter comes in, and the tab strip's bleed comes in WITH
+       it: `.cc-tabs` pulls itself out to the page edge with a negative
+       margin, and `.cc-page` sets `overflow-y: auto` — which computes
+       `overflow-x` to `auto` too — so a bleed wider than the gutter is
+       12px of sideways page scroll on every tab. */
+    .cc-page { padding: 16px 16px 0; gap: 14px; }
+    :is(.studio, .cc-page) .cc-tabs { margin: 0 -16px; padding: 0 16px; }
+
+    /* Six figures read 2-up. The desktop steps (6→3 at 1199) are above. */
+    :is(.studio, .cc-page) .cc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    :is(.studio, .cc-page) .cc-stats .cell:nth-child(2n) { border-right: 0; }
+
+    /* The board keeps ONE row per status — the shape the PRD-244 review
+       fixed — and snaps column by column, so a swipe lands on a status
+       instead of between two (PRD-246 open question 1, stated default). */
+    :is(.studio, .cc-page) .cc-kb-grid {
+      grid-auto-columns: minmax(84%, 1fr);
+      scroll-snap-type: x mandatory;
+    }
+    :is(.studio, .cc-page) .cc-kb-col {
+      scroll-snap-align: start;
+      /* The column becomes its own scroller so the status head can stick to
+         the top of the list while the cards travel under it; the body then
+         sizes to content rather than scrolling inside a scroller. */
+      overflow: hidden auto;
+    }
+    :is(.studio, .cc-page) .cc-kb-head { position: sticky; top: 0; z-index: 1; }
+    :is(.studio, .cc-page) .cc-kb-body { flex: 0 0 auto; overflow: visible; }
   }
 
   /* ─── end of the compact region · a new surface is appended above ──── */
