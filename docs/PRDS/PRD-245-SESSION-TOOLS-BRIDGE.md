@@ -169,12 +169,32 @@ Maps to `execute_tool("composio_execute", {"action", "params"})`; scope is the e
 
 ## Verify at build (no spend)
 
-- Claude Code on this machine loads an HTTP server with headers from `--mcp-config` under `--strict-mcp-config`, and names the tool `mcp__automatos__<name>` in the PreToolUse payload.
-- The `mcp` SDK mounts under the pinned fastapi/starlette; otherwise the minimal JSON-RPC fallback.
-- The advertised tool list is byte-stable per agent across sessions.
-- A finished ticket's token is refused; a call naming another ticket is forced back to its own.
-- Codex 0.154.0: the HTTP `[mcp_servers.*]` table and bearer-env key; its hook payload's MCP tool naming.
+Settled against Claude Code 2.1.267 and Codex 0.154.0 on this machine, 2026-09-17:
+
+| Assumption | Result |
+|---|---|
+| The config shape the adapter writes is the one Claude Code accepts | **Confirmed.** `claude mcp add <name> <url> --transport http --header "Authorization: Bearer …"` writes `mcpServers.<name>.{type:"http", url, headers.Authorization}` — byte-identical to `build_mcp_config`. |
+| `--strict-mcp-config` with `--mcp-config <file>` loads that file's servers and only those | **Confirmed** (documented): the user's `~/.claude.json`, project `.mcp.json` and managed config are all ignored, and without `--mcp-config` no servers load at all. A file path is accepted, as is `type: "http"` with static headers. |
+| `--settings <hooks-only>` and `--setting-sources user` coexist with `--mcp-config` | **Confirmed** (documented): `--setting-sources` governs settings files only and does not touch `--mcp-config`. |
+| The PreToolUse payload names the tool `mcp__automatos__<name>` | **Confirmed** (documented): `mcp__<server>__<tool>`, two underscores, no normalising or truncation. Matches `MCP_TOOL_PREFIX`. |
+| The token must be written literally, not as `${VAR}` | **Confirmed, and it matters.** Claude Code substitutes `${VAR}` in a remote server's headers, but deliberately substitutes an EMPTY string for any variable whose name reads as a credential. A `${SESSION_TOKEN}` here would arrive as `Bearer ` and every call would 401 with nothing to show why. |
+| The client probes `server/discover` | **Confirmed** (documented in the client's own changelog): it is sent BEFORE `initialize`. The handler answers it. |
+| Protocol versions the client offers | `2025-06-18`, `2025-03-26`, `2024-11-05` are in the client; `SUPPORTED_PROTOCOL_VERSIONS` covers those and two more. No `MCP-Protocol-Version` request header is documented for HTTP; the handler sets it on responses regardless. |
+| The `mcp` SDK mounts under the pinned fastapi/starlette | **No** — it needs `uvicorn>=0.31.1` against our pinned `uvicorn==0.24.0`. Hence the hand-written JSON-RPC handler. |
+| Codex 0.154.0's config shape | **Confirmed** by having `codex mcp add` write it into a throwaway `CODEX_HOME`: an `[mcp_servers.<name>]` table with `url` and `bearer_token_env_var`. |
+
+Left for the live run (needs a real session, so it costs a turn):
+
+- the handshake itself end to end, and the MCP tool naming in **Codex's** hook payload (Claude Code's is documented; Codex's is not);
+- the advertised tool list being byte-stable per agent across sessions;
+- a finished ticket's token being refused, and a call naming another ticket being forced back to its own (both unit-tested, not yet seen over the wire).
 
 ## Merge notes
 
-Waves land as separate PRs in order (W0 → W1 → W2 → W3 → W4); each is CI-green and tested by the owner in the local edition before the next starts. No migration in any wave. Every route addition updates `reports/route-manifest.json` and its count. DCO sign-off on every commit.
+Waves land as separate PRs in order (W0 → W1 → W2 → W3 → W4); each is CI-green and tested by the owner in the local edition before the next starts. No migration in any wave. Every route addition updates `orchestrator/reports/route-manifest.json` and its count. DCO sign-off on every commit.
+
+W1 moves the claim's wire shape, so it also moves `EXPECTED_CLI_HOST_VERSION` and the host's `__version__` to 0.8.0. A host loaded from the repo checkout restarts on the contract fingerprint alone; a host installed as a copy elsewhere does not, and the version mismatch in `host.log` is the only thing that will tell the operator why its sessions have no platform tools.
+
+One more PR sits on top of W4: the PRD-229 escalation ladder was asking nobody. It called `platform_ask_human`'s handler with a `tool_call` subject, which that tool refuses, then parked the task behind an ask that was never filed. It needs W0's shared `stage_question`, which is why it stacks here rather than branching from main. Merge it last.
+
+The stack is based on `main`. The ten PRD-244 PRs of 2026-09-17 merged into the long-running `studio` branch, not `main`, so `main` is unchanged — and the 54 files this stack touches do not overlap the 128 that `studio` touches, so it merges into either without conflict.
