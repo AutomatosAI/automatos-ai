@@ -12,8 +12,10 @@ export default function CommandCenterPage() {
   const isStudio = useIsStudio()
   const isMobileLayout = useIsTabletOrBelow()
 
-  // Studio desktop renders CD's round-4 Command Centre. Mobile and classic
-  // theme still use the existing ActivityPage until CD ships a mobile pass.
+  // PRD-244 (two styles, two tones): the Studio style renders the shell on
+  // desktop; the Classic style renders the ActivityPage, which carries the same
+  // tabs in its own style. Below 1024 px both styles use the ActivityPage
+  // until the mobile pass (PRD-245).
   if (isStudio && !isMobileLayout) {
     return (
       <MainLayout fullBleed>

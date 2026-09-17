@@ -138,7 +138,7 @@ function rowHref(item: ActivityFeedItem): string | null {
   }
 }
 
-export function ActivityTab() {
+export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
   const router = useRouter()
   const [density, setDensity] = useState<Density>('cards')
   const [typeFilter, setTypeFilter] = useState<string>('all')
@@ -147,6 +147,7 @@ export function ActivityTab() {
   const filters = {
     ...(typeFilter !== 'all' ? { types: [typeFilter] } : {}),
     ...(errorsOnly ? { status: 'failed' } : {}),
+    period,
     limit: 100,
   }
   const { data, isLoading } = useActivityFeed(filters)
@@ -154,7 +155,7 @@ export function ActivityTab() {
   const totalShown = items.length
 
   // Unfiltered fetch just to power the filter-pill counts.
-  const { data: allData } = useActivityFeed({ limit: 200 })
+  const { data: allData } = useActivityFeed({ period, limit: 100 }) // backend caps limit at 100
   const counts = useMemo(() => {
     const all = allData?.items ?? items
     const errs = all.filter((i) => i.status === 'failed').length
