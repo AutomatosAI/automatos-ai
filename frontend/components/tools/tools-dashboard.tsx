@@ -115,7 +115,17 @@ interface Tool {
   integration_url?: string
 }
 
-export function ToolsDashboard() {
+interface ToolsDashboardProps {
+  /**
+   * PRD-244 W5c (two styles): the page frame in the mounting page's style —
+   * Classic keeps PageHeader / StatsBar / Tabs; Studio draws the editorial
+   * head, cc-stats and the cc-toolbar. State, handlers, the card grid and the
+   * modals are shared.
+   */
+  variant?: 'classic' | 'studio'
+}
+
+export function ToolsDashboard({ variant = 'classic' }: ToolsDashboardProps = {}) {
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -603,6 +613,127 @@ export function ToolsDashboard() {
 
   const stats = getToolStats()
 
+  // Shared by both frames (PRD-244 W5c).
+  const applicationsGrid = (
+    <div className={viewMode === 'grid'
+      ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
+      : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'
+    }>
+      <AnimatePresence>
+        {enabledTools.map((tool, index) => (
+            <ToolCard
+              key={tool?.id}
+              tool={tool}
+              viewMode={viewMode}
+              index={index}
+              onInstall={() => {
+                if (tool.provider === 'Composio') {
+                  handleToolConnect(tool)
+                }
+              }}
+              onDetails={() => handleToolDetails(tool)}
+              onUninstall={() => handleToolConfigure(tool)}
+              onConfigure={() => handleToolConfigure(tool)}
+              loading={loading}
+              showMenu={true}
+            />
+          ))}
+      </AnimatePresence>
+    </div>
+  )
+
+  const modals = (
+    <>
+      <ToolDetailsModal
+        open={detailsModalOpen}
+        onClose={() => setDetailsModalOpen(false)}
+        tool={selectedTool}
+        onInstall={() => selectedTool && handleToolConnect(selectedTool)}
+        onUninstall={() => selectedTool && handleToolDelete(selectedTool)}
+        onRemoveFromWorkspace={() => selectedTool && handleRemoveFromWorkspace(selectedTool)}
+        onConfigure={() => {
+          setDetailsModalOpen(false)
+          handleToolConfigure(selectedTool)
+        }}
+        loading={loading || connectingTool === selectedTool?.name}
+        initialTab={detailsInitialTab}
+      />
+
+      <ToolConfigModal
+        open={configModalOpen}
+        onClose={() => setConfigModalOpen(false)}
+        tool={selectedTool}
+      />
+
+      <ToolActionsModal
+        open={actionModalOpen}
+        onClose={() => setActionModalOpen(false)}
+        tool={selectedTool}
+      />
+    </>
+  )
+
+  if (variant === 'studio') {
+    const cells = [
+      { label: 'CONNECTED APPS', value: stats.connectedApps, tone: stats.connectedApps > 0 ? 'ok' : '', delta: 'active' },
+      { label: 'IN WORKSPACE', value: stats.workspaceApps, tone: 'info', delta: 'total apps' },
+      { label: 'TOOLS AVAILABLE', value: stats.toolsAvailable, tone: '', delta: 'actions' },
+      { label: 'TRIGGERS', value: stats.triggersAvailable, tone: '', delta: 'available' },
+    ]
+    return (
+      <div className="cc-page">
+        <div className="cc-headrow">
+          <div className="cc-head">
+            <p className="cc-eyebrow">
+              Workforce · what they can reach · {toolsLoading ? '…' : `${paginationData.total || 0} tools`}
+            </p>
+            <h1 className="cc-h1">Tools &amp; Integrations</h1>
+            <p className="cc-sub">
+              The third-party services your agents are authorised to call: GitHub, Slack, Stripe,
+              Shopify, Notion, and the rest. Connect once, scope access, your agents do the work.
+            </p>
+          </div>
+        </div>
+
+        {/* PRD-233 S2: no Composio key ⇒ say so instead of an empty grid */}
+        <IntegrationsDisabledCard status={integrationsStatus} />
+
+        <div className="cc-stats" aria-label="Integration statistics">
+          {cells.map((c) => (
+            <div key={c.label} className="cell">
+              <div className="l">{c.label}</div>
+              <div className={`v ${c.tone}`}>{toolsLoading ? '—' : String(c.value)}</div>
+              <span className="delta">{c.delta}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="cc-toolbar">
+          <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search tools…" loading={toolsFetching} className="flex-1" />
+          <div className="cc-seg" role="group" aria-label="Sort">
+            <button type="button" className={sortBy === 'name' ? 'on' : ''} onClick={() => setSortBy('name')}>Name</button>
+            <button type="button" className={sortBy === 'updated' ? 'on' : ''} onClick={() => setSortBy('updated')}>Updated</button>
+          </div>
+          <div className="cc-seg" role="group" aria-label="View">
+            <button type="button" className={viewMode === 'grid' ? 'on' : ''} onClick={() => setViewMode('grid')} aria-label="Grid view">
+              <Grid3X3 style={{ width: 11, height: 11 }} /> Grid
+            </button>
+            <button type="button" className={viewMode === 'list' ? 'on' : ''} onClick={() => setViewMode('list')} aria-label="List view">
+              <List style={{ width: 11, height: 11 }} /> List
+            </button>
+          </div>
+        </div>
+
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <span className="cc-eyebrow-sm">Applications · {enabledToolsCount}</span>
+          {applicationsGrid}
+        </section>
+
+        {modals}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header Section */}
@@ -728,31 +859,7 @@ export function ToolsDashboard() {
             {/* Enabled Tools Management */}
             <div className="space-y-4">
               <h3 className="text-xl font-semibold">Applications</h3>
-              <div className={viewMode === 'grid'
-                ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
-                : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'
-              }>
-                <AnimatePresence>
-                  {enabledTools.map((tool, index) => (
-                      <ToolCard
-                        key={tool?.id}
-                        tool={tool}
-                        viewMode={viewMode}
-                        index={index}
-                        onInstall={() => {
-                          if (tool.provider === 'Composio') {
-                            handleToolConnect(tool)
-                          }
-                        }}
-                        onDetails={() => handleToolDetails(tool)}
-                        onUninstall={() => handleToolConfigure(tool)}
-                        onConfigure={() => handleToolConfigure(tool)}
-                        loading={loading}
-                        showMenu={true}
-                      />
-                    ))}
-                </AnimatePresence>
-              </div>
+              {applicationsGrid}
             </div>
           </TabsContent>
 
@@ -821,33 +928,7 @@ export function ToolsDashboard() {
         </Tabs>
       </motion.div>
 
-      {/* Modals */}
-      <ToolDetailsModal
-        open={detailsModalOpen}
-        onClose={() => setDetailsModalOpen(false)}
-        tool={selectedTool}
-        onInstall={() => selectedTool && handleToolConnect(selectedTool)}
-        onUninstall={() => selectedTool && handleToolDelete(selectedTool)}
-        onRemoveFromWorkspace={() => selectedTool && handleRemoveFromWorkspace(selectedTool)}
-        onConfigure={() => {
-          setDetailsModalOpen(false)
-          handleToolConfigure(selectedTool)
-        }}
-        loading={loading || connectingTool === selectedTool?.name}
-        initialTab={detailsInitialTab}
-      />
-
-      <ToolConfigModal
-        open={configModalOpen}
-        onClose={() => setConfigModalOpen(false)}
-        tool={selectedTool}
-      />
-
-      <ToolActionsModal
-        open={actionModalOpen}
-        onClose={() => setActionModalOpen(false)}
-        tool={selectedTool}
-      />
+      {modals}
 
       {/* <AgentToolAssignment
         open={assignmentModalOpen}
