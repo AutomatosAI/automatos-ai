@@ -37,6 +37,16 @@ export default function ComposioCallbackPage() {
                 } catch (err) {
                     console.warn('Failed to sync Composio connection to backend:', err)
                 }
+            } else {
+                // The provider dropped our query string: we no longer know which
+                // app this is, but the backend can reconcile every pending
+                // connection against Composio in one call.
+                try {
+                    await apiClient.post('/api/tools/refresh-connections')
+                    console.log('✅ Refreshed pending Composio connections')
+                } catch (err) {
+                    console.warn('Failed to refresh pending Composio connections:', err)
+                }
             }
 
             // NOW close the popup (after the API call completes). The message

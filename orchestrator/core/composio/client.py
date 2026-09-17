@@ -12,6 +12,7 @@ Features:
 """
 
 import logging
+import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 from uuid import UUID
@@ -96,9 +97,15 @@ class ComposioClient:
         self._toolset = None
         self._action_count_cache: Dict[str, Any] = {}
         self._action_count_ttl_seconds = 600
-        # PERFORMANCE: Cache auth_config_id resolution to avoid repeated API calls
-        self._auth_config_cache: Dict[str, Optional[str]] = {}
-        self._auth_config_cache_ttl = 3600  # 1 hour TTL
+        # PERFORMANCE: Cache auth_config_id resolution to avoid repeated API calls.
+        # Entries are (auth_config_id | None, stored_at). A miss is cached only
+        # briefly: on 2026-09-17 a miss cached with no expiry outlived the config
+        # the connect flow created seconds later, so every "pending → active"
+        # check short-circuited without calling Composio and connected apps
+        # stayed on "Connect" until the process restarted.
+        self._auth_config_cache: Dict[str, Tuple[Optional[str], float]] = {}
+        self._auth_config_cache_ttl = 3600  # 1 hour TTL for a resolved id
+        self._auth_config_miss_ttl = 30  # seconds — a miss must not outlive a create
         # PERFORMANCE: Cache all action schemas per app for exact-name lookups.
         # Bypasses SDK semantic search (which returns alphabetical, not semantic).
         self._schema_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {APP: {ACTION_NAME: schema}}
@@ -185,8 +192,12 @@ class ComposioClient:
 
         scheme_norm = (preferred_scheme or "_any").upper()
         cache_key = f"{app_slug.lower()}::{scheme_norm}"
-        if cache_key in self._auth_config_cache:
-            return self._auth_config_cache[cache_key]
+        cached = self._auth_config_cache.get(cache_key)
+        if cached is not None:
+            value, stored_at = cached
+            ttl = self._auth_config_cache_ttl if value else self._auth_config_miss_ttl
+            if time.monotonic() - stored_at < ttl:
+                return value
 
         try:
             logger.debug(f"Fetching auth_configs from Composio API for {app_slug} scheme={scheme_norm}")
@@ -205,14 +216,22 @@ class ComposioClient:
                 if preferred_scheme and c_scheme != scheme_norm:
                     continue
 
-                self._auth_config_cache[cache_key] = c.id
+                self._auth_config_cache[cache_key] = (c.id, time.monotonic())
                 return c.id
 
-            self._auth_config_cache[cache_key] = None
+            self._auth_config_cache[cache_key] = (None, time.monotonic())
             return None
         except Exception as e:
             logger.error(f"Error resolving auth config for {app_slug}: {e}")
             return None
+
+    def _remember_auth_config(self, app_slug: str, auth_config_id: str, *schemes: Optional[str]) -> None:
+        """A config this process just created is the answer for its toolkit from
+        now on — for the scheme it was created with and for "any scheme" — so a
+        lookup a moment later never depends on Composio's list having caught up."""
+        now = time.monotonic()
+        for scheme in ("_any", *[sch for sch in schemes if sch]):
+            self._auth_config_cache[f"{app_slug.lower()}::{scheme.upper()}"] = (auth_config_id, now)
 
     def _get_auth_schemes(self, app_slug: str) -> List[str]:
         """Get auth schemes for an app from Composio's toolkit metadata."""
@@ -279,6 +298,7 @@ class ComposioClient:
                 toolkit=app_slug,
                 options=options
             )
+            self._remember_auth_config(app_slug, config.id, options.get("authScheme"), preferred_scheme)
             return config.id
         except Exception as e:
             if "DefaultAuthConfigNotFound" in str(e) and options.get("type") == "use_composio_managed_auth":
@@ -289,6 +309,7 @@ class ComposioClient:
                         toolkit=app_slug,
                         options=fallback
                     )
+                    self._remember_auth_config(app_slug, config.id, "OAUTH2", preferred_scheme)
                     return config.id
                 except Exception as e2:
                     logger.error(f"Custom auth fallback also failed for {app_slug}: {e2}")
@@ -364,48 +385,67 @@ class ComposioClient:
             logger.error(f"Failed to initiate Composio connection for {app}: {e}")
             raise
     
-    def get_connection_status(self, entity_id: str, app: str) -> Optional[Dict[str, Any]]:
+    def get_connection_status(
+        self,
+        entity_id: str,
+        app: str,
+        auth_config_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Check if an entity has an active connection to an app.
-        
+
         Args:
             entity_id: Entity identifier
             app: App name
-            
+            auth_config_id: The Auth Config the connection was initiated under,
+                when the caller stored it (``connection_metadata.auth_config_id``).
+                It is the exact key: one Composio account serves several
+                editions, each with its own config per toolkit, and a lookup
+                under the wrong config finds nothing.
+
         Returns:
             Connection details or None if not connected
         """
         if not self.composio:
             return None
-        
+
         try:
-            # Resolve Auth Config ID to lookup connections
-            auth_config_id = self._resolve_auth_config_id(app)
-            if not auth_config_id:
-                return None
-                
-            # Use list with filters to find connection
-            response = self.composio.connected_accounts.list(
-                user_ids=[entity_id],
-                auth_config_ids=[auth_config_id]
-            )
-            
-            # Access items/data from response
-            connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
-            
-            for conn in connections:
-                # ACTIVE = fully connected, INITIATED = OAuth completed but
-                # Composio is still provisioning. Treat both as connected.
-                if conn.status in ('ACTIVE', 'INITIATED'):
-                    return {
-                        "id": conn.id,
-                        "status": conn.status,
-                        "created_at": getattr(conn, 'created_at', None),
-                    }
-            return None
+            config_id = self._resolve_auth_config_id(app, preferred_auth_config_id=auth_config_id)
+            found = self._find_connected_account(entity_id, app, config_id) if config_id else None
+            if found is None:
+                # No config resolved, or the account lives under another config
+                # for the same toolkit: match the entity's accounts by toolkit.
+                found = self._find_connected_account(entity_id, app, None)
+            return found
         except Exception as e:
             logger.error(f"Failed to get connection status: {e}")
             return None
+
+    def _find_connected_account(
+        self, entity_id: str, app: str, auth_config_id: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """The entity's first ACTIVE/INITIATED account for ``app`` — under the
+        given config, or under any config when none is given (matched by
+        toolkit slug, case-insensitively)."""
+        kwargs: Dict[str, Any] = {"user_ids": [entity_id]}
+        if auth_config_id:
+            kwargs["auth_config_ids"] = [auth_config_id]
+        response = self.composio.connected_accounts.list(**kwargs)
+        connections = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
+        for conn in connections:
+            if not auth_config_id:
+                slug = getattr(getattr(conn, 'toolkit', None), 'slug', '') or ''
+                if slug.lower() != app.lower():
+                    continue
+            # ACTIVE = fully connected, INITIATED = OAuth completed but
+            # Composio is still provisioning. Treat both as connected.
+            if conn.status in ('ACTIVE', 'INITIATED'):
+                return {
+                    "id": conn.id,
+                    "status": conn.status,
+                    "created_at": getattr(conn, 'created_at', None),
+                }
+        return None
 
     @staticmethod
     def _extract_token_from_connection(conn) -> Optional[str]:
