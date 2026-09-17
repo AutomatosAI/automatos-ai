@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +27,7 @@ import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { useWorkspace } from '@/components/workspace-provider'
+import { AGENT_TAB_VALUES, type AgentTab } from '@/lib/agents/tabs'
 
 // Import all tab components
 import { AgentRoster } from './agent-roster'
@@ -43,7 +45,15 @@ import { apiClient } from '@/lib/api-client'
 
 export function AgentManagement() {
   const { canEdit } = useWorkspace()
-  const [activeTab, setActiveTab] = useState('roster')
+  const [activeTab, setActiveTab] = useState<string>('roster')
+  // PRD-244 W0: the Studio page tabs link here with `?tab=<slug>`; honour it
+  // (the values are the tab list's own — see lib/agents/tabs.ts).
+  const requestedTab = useSearchParams()?.get('tab') ?? null
+  useEffect(() => {
+    if (requestedTab && (AGENT_TAB_VALUES as readonly string[]).includes(requestedTab)) {
+      setActiveTab(requestedTab as AgentTab)
+    }
+  }, [requestedTab])
   const [viewMode, setViewMode] = useViewMode('agents')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
