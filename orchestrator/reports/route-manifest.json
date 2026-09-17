@@ -1,5 +1,5 @@
 {
-  "route_count": 806,
+  "route_count": 808,
   "routes": [
     {
       "method": "GET",
@@ -2432,6 +2432,14 @@
     {
       "method": "PATCH",
       "path": "/api/v1/scheduled-tasks/{task_id}/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/session-tools/manifest"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/session-tools/mcp"
     },
     {
       "method": "GET",

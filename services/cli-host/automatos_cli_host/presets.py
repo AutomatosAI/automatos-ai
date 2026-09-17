@@ -73,6 +73,7 @@ class CliPreset:
     resume_subcommand: Optional[str] = None   # "resume" — Codex resumes by SUBCOMMAND, never a flag
     cwd_flag: Optional[str] = None            # None = spawn with cwd=; "-C" for Codex
     add_dir_flag: Optional[str] = None        # "--add-dir"
+    mcp_config_flag: Optional[str] = None     # "--mcp-config" (PRD-245 W1; None ⇒ this CLI takes MCP elsewhere)
     worktree_args: Tuple[str, ...] = ()       # ("--worktree",) / ("--enable", "worktrees", "--worktree")
     worktree_excludes_resume: bool = False    # Codex: --worktree cannot resume (§6.7)
     worktree_takes_name: bool = False         # Claude: ``--worktree <name>``; Codex names its own
@@ -139,6 +140,10 @@ CLAUDE = CliPreset(
     session_id_flag="--session-id",
     resume_flag="--resume",
     add_dir_flag="--add-dir",
+    # PRD-245 W1: Automatos' own MCP server, passed per session. ``--strict-mcp-config``
+    # (required_args) means this is the ONLY server the session loads — the
+    # operator's own stay out of an unattended ticket.
+    mcp_config_flag="--mcp-config",
     worktree_args=("--worktree",),
     worktree_takes_name=True,
     system_prompt_flag="--append-system-prompt-file",

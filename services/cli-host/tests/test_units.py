@@ -854,3 +854,35 @@ def test_script_guards_cannot_be_made_to_backtrack(tmp_path):
     assert time.monotonic() - started < 2.0
     # …and a program made of those shapes is still judged, not hung.
     assert _decide("Bash", {"command": fill("sed 's/" + "\\a" * 500 + "/x/' <ROOT>/f")}, ctx).behavior == "allow"
+
+
+def test_policy_allows_an_automatos_tool_by_name_and_denies_every_other(tmp_path):
+    """PRD-245 W1: the gate enforces the SURFACE (which names exist for this
+    ticket) and the backend enforces the scope inside each one. A name we never
+    offered is DENIED, never held — the operator has nothing to decide about it."""
+    from automatos_cli_host.adapters.base import ToolClass, ToolIntent
+
+    ctx = policy.PolicyContext(cwd=tmp_path, session_tools=("board_summary", "submit_report"))
+    verdict = lambda name: policy.decide(
+        ToolIntent(tool=f"mcp__automatos__{name}", cls=ToolClass.PLATFORM, command=name), ctx)
+    assert verdict("board_summary").behavior == "allow"
+    assert verdict("submit_report").behavior == "allow"
+    for refused in ("delete_workspace", "composio_execute", ""):
+        decision = verdict(refused)
+        assert decision.behavior == "deny", (refused, decision)
+        assert "board_summary" in decision.reason      # the reason names what IS offered
+    # a ticket without the bridge has no platform tools at all
+    bare = policy.PolicyContext(cwd=tmp_path)
+    assert verdict.__wrapped__ if False else policy.decide(
+        ToolIntent(tool="mcp__automatos__board_summary", cls=ToolClass.PLATFORM, command="board_summary"), bare
+    ).behavior == "deny"
+    # an MCP tool that is not ours never reaches the platform class at all
+    assert policy.decide(ToolIntent(tool="mcp__other__x", cls=ToolClass.UNKNOWN), ctx).behavior == "deny"
+
+
+def test_the_session_token_never_reaches_a_command_line():
+    """PRD-245 W1: argv is world-readable in ``ps`` and lands in the host log."""
+    session.assert_secret_not_in_args(["claude", "--mcp-config", "/x/mcp.json"], "tok-secret")
+    session.assert_secret_not_in_args(["claude"], None)       # nothing offered, nothing to check
+    with pytest.raises(RuntimeError):
+        session.assert_secret_not_in_args(["claude", "--header", "Authorization: Bearer tok-secret"], "tok-secret")

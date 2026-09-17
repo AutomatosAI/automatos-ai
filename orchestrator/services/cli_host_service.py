@@ -26,6 +26,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from config import config
+from services.session_tools import definitions as session_tool_definitions
+from services.session_tools import tool_names as session_tool_names
 from core.cli_runtime import (
     CLI_PRESETS, CONFIG_ALLOWED_TOOLS_KEY, CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, CONFIG_WORKTREE_KEY, PROVIDER_CLAUDE, RUNTIME_CLI, registry_public,
 )
@@ -45,6 +47,14 @@ HOST_TOKEN_BYTES = 32
 MAX_CLAIM_LIMIT = 50
 # No 0/O/1/I — a code is read off a screen and typed once.
 _PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+# PRD-245 S1.1 — the credential a ticket session calls Automatos with. Minted at
+# claim, only its HASH is kept (on the ticket, no migration), handed to the host
+# once in the claim payload, and dead the moment the ticket leaves in_progress.
+# Nothing durable: a token in a session transcript stops working when its ticket
+# ends, which is the whole point of scoping it to one ticket.
+SESSION_TOKEN_BYTES = 32
+SESSION_TOKEN_HASH_KEY = "session_token_sha256"
+SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
 
 
 def _now() -> datetime:
@@ -53,6 +63,58 @@ def _now() -> datetime:
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
+
+
+def mint_session_token(ref: Dict[str, Any]) -> str:
+    """A fresh per-ticket token; the ref keeps only its hash (PRD-245 S1.1)."""
+    token = secrets.token_urlsafe(SESSION_TOKEN_BYTES)
+    ref[SESSION_TOKEN_HASH_KEY] = hash_secret(token)
+    return token
+
+
+def clear_session_token(ref: Dict[str, Any]) -> None:
+    ref.pop(SESSION_TOKEN_HASH_KEY, None)
+
+
+def resolve_session_token(db: Session, token: Optional[str]) -> Optional[Tuple[BoardTask, Optional[Agent]]]:
+    """The ticket and agent a session token belongs to, or ``None``.
+
+    The ticket must still be ``in_progress``: a token from a finished, cancelled
+    or requeued ticket resolves to nothing even if its hash is still on the row,
+    so state — not only cleanup — decides.
+    """
+    if not token or not str(token).strip():
+        return None
+    digest = hash_secret(str(token).strip())
+    try:
+        task = (
+            db.query(BoardTask)
+            .filter(
+                BoardTask.status == "in_progress",
+                BoardTask.runtime_ref[SESSION_TOKEN_HASH_KEY].astext == digest,
+            )
+            .first()
+        )
+    except Exception:  # noqa: BLE001 — a backend without JSONB text indexing, or a test double
+        logger.debug("[cli-host] session-token lookup by JSONB failed; scanning in_progress tickets", exc_info=True)
+        task = _scan_for_session_token(db, digest)
+    if task is None:
+        return None
+    agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
+    return task, agent
+
+
+def _scan_for_session_token(db: Session, digest: str) -> Optional[BoardTask]:
+    """Fallback lookup: the local edition has a handful of running tickets."""
+    try:
+        rows = db.query(BoardTask).filter(BoardTask.status == "in_progress").all()
+    except Exception:  # noqa: BLE001
+        return None
+    for task in rows or []:
+        ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
+        if secrets.compare_digest(str(ref.get(SESSION_TOKEN_HASH_KEY) or ""), digest):
+            return task
+    return None
 
 
 def hash_secret(value: str) -> str:
@@ -324,6 +386,7 @@ def workspace_check(db: Session, workspace_id: Any, path: str) -> Dict[str, Any]
 # in-process fallback for a single-worker local stack without Redis.
 
 TERMINAL_GRANT_TTL_SECONDS = 120
+
 _TERMINAL_GRANTS: Dict[str, List[Dict[str, Any]]] = {}
 
 
@@ -493,6 +556,11 @@ def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
         # The deliverables root on the host (AUTOMATOS_WORKSPACE_DIR as `make up`
         # exported it) — beside the projects folder in Settings → Session mode.
         "workspace_dir": configured_workspace_dir(),
+        # PRD-245 S1.5: what a ticket session of this workspace can call, so the
+        # agent form can say it instead of the operator finding out from a report.
+        "session_tools": [
+            {"name": d["name"], "description": d["description"]} for d in session_tool_definitions()
+        ],
         "host_allowed_roots": host_allow_dirs(db, workspace_id),
     }
 
@@ -737,6 +805,9 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         ref["explorer_root"] = explorer_root_for(
             task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
         )
+        # PRD-245 S1.1: the session's own credential for the Automatos tools.
+        # Handed over ONCE, in this payload; only its hash stays on the ticket.
+        session_token = mint_session_token(ref)
         task.runtime_ref = ref
         out.append(
             {
@@ -763,6 +834,15 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
                 # PRD-239: continue the session a lane asked to resume, on the
                 # host that ran it (``claude --resume``); None starts a fresh one.
                 "resume_session_id": resume_session_id,
+                # PRD-245 W1: the Automatos tools this session may call, and how
+                # to reach them. The host writes them into the session's own MCP
+                # config and allows exactly these names at the gate.
+                "session_tools": list(session_tool_names()),
+                # The PATH, not a URL: the host joins it to the backend address
+                # it was started with. A container cannot know the address the
+                # session on the operator's machine must dial.
+                "session_tools_path": SESSION_TOOLS_PATH,
+                "session_token": session_token,
             }
         )
     db.commit()
@@ -1576,6 +1656,9 @@ async def apply_result(
     )
     if payload.get("transcript_path"):
         ref["transcript_path"] = payload["transcript_path"]
+    # PRD-245 S1.1: the session is over — its credential stops working. (The
+    # lookup also requires ``in_progress``, so this is belt and braces.)
+    clear_session_token(ref)
     # PRD-239: the directory the session really ran in (a git repo gets a
     # --worktree) wins over the configured one — it is where `claude --resume`
     # finds the transcript and where the editor links should open.

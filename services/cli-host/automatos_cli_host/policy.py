@@ -17,6 +17,9 @@ never what the CLI calls the tool — so the rules are the same for every CLI:
   must sit inside the session's roots — outside is a refusal, never a question.
   ``git push`` and friends are always denied (sessions never push — the manager
   integrates); a verb outside the allowlist is HELD for the operator;
+* an Automatos tool over the loopback MCP bridge (PRD-245 W1) — allowed when
+  its name is on the ticket's own list, denied otherwise (the backend enforces
+  the scope inside each one; the gate enforces the surface);
 * web/search tools and benign bookkeeping — allowed;
 * everything else (MCP tools, Task, an unknown tool) — denied by default; the
   operator's own CLI settings are the other half of the surface.
@@ -172,6 +175,11 @@ class PolicyContext:
     allowed_bash: Sequence[str] = field(default_factory=lambda: DEFAULT_BASH_ALLOW)
     ask_bash: Sequence[str] = ()          # prefixes routed to the approvals inbox
     extra_dirs: Sequence[Path] = ()       # e.g. the git worktree the session runs in
+    # PRD-245 W1: the Automatos tools THIS ticket may call, from the claim. A
+    # name on the list is allowed; anything else on our own MCP server is denied
+    # (never held — the operator has nothing to decide about a name we did not
+    # offer). Empty = the bridge is not in this ticket, so no platform tool is.
+    session_tools: Sequence[str] = ()
 
 
 @dataclass
@@ -782,6 +790,12 @@ def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:
         return Decision("allow")
     if intent.cls is ToolClass.SHELL:
         return decide_bash(str(intent.command or ""), ctx)
+    if intent.cls is ToolClass.PLATFORM:
+        name = str(intent.command or "")
+        if name and name in set(ctx.session_tools or ()):
+            return Decision("allow")
+        offered = ", ".join(ctx.session_tools or ()) or "none in this ticket"
+        return Decision("deny", f"Automatos tool {name!r} is not one this ticket may call ({offered})")
     if intent.cls in (ToolClass.WEB, ToolClass.BENIGN):
         return Decision("allow")
     return Decision("deny", f"tool {intent.tool!r} is not enabled for session tickets")

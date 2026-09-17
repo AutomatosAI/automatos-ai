@@ -69,6 +69,60 @@ def write_settings(preset: CliPreset, path: Path, *, python: Optional[str] = Non
     return path
 
 
+MCP_CONFIG_FILENAME = "mcp.json"
+MCP_SERVER_NAME = "automatos"
+# How Claude Code names a tool from that server, in the model's tool list and in
+# every hook payload the gate reads.
+MCP_TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
+
+
+def build_mcp_config(session_tools: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Claude Code's MCP config for THIS ticket's Automatos tools, or ``None``
+    when the claim offered none (an older backend — the session runs as before).
+
+    An HTTP server with a static bearer header: the token is the ticket's own,
+    minted at claim and dead when the ticket ends. Never in argv, never in the
+    environment — a file mode 0600 beside the ticket.
+
+    The token is written LITERALLY. Claude Code reads ``${VAR}`` in a header
+    value from the environment and silently substitutes an EMPTY string for any
+    variable whose name looks like a credential (``TOKEN``, ``SECRET``, ``KEY``,
+    ``AUTH``, …) — a ``${SESSION_TOKEN}`` here would arrive as ``Bearer `` and
+    every call would 401 with nothing to show why."""
+    if not isinstance(session_tools, Mapping):
+        return None
+    url = str(session_tools.get("url") or "").strip()
+    token = str(session_tools.get("token") or "").strip()
+    if not url or not token:
+        return None
+    return {
+        "mcpServers": {
+            MCP_SERVER_NAME: {
+                "type": "http",
+                "url": url,
+                "headers": {"Authorization": f"Bearer {token}"},
+            }
+        }
+    }
+
+
+def write_mcp_config(path: Path, session_tools: Optional[Mapping[str, Any]]) -> Optional[Path]:
+    """Write the config and return its path; ``None`` when there is nothing to
+    write (and any file from an earlier attempt is removed, so a stale token
+    cannot linger beside a ticket)."""
+    document = build_mcp_config(session_tools)
+    if document is None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    os.chmod(path, 0o600)
+    return path
+
+
 def claude_state_path(home: Optional[Path] = None) -> Path:
     return (home or Path.home()) / ".claude.json"
 
@@ -148,14 +202,29 @@ class ClaudeAdapter(PresetAdapter):
         return out
 
     def prepare(self, ctx: LaunchContext) -> Prepared:
-        """A hooks-only settings.json in the session dir (``--settings``), and the
-        folder-trust decision recorded where Claude reads it."""
+        """A hooks-only settings.json in the session dir (``--settings``), the
+        folder-trust decision recorded where Claude reads it, and — when the
+        claim offered Automatos tools — an ``mcp.json`` beside them (PRD-245 W1).
+
+        The settings file stays HOOKS ONLY: the MCP server is a separate file, so
+        ``--strict-mcp-config`` still means "this server and nothing else" and the
+        operator's own servers never reach an unattended ticket."""
         settings_path = write_settings(self.preset, ctx.session_dir / "settings.json")
         record_directory_trust(ctx.cwd)
-        return Prepared(args=["--settings", str(settings_path)])
+        args = ["--settings", str(settings_path)]
+        mcp_path = write_mcp_config(ctx.session_dir / MCP_CONFIG_FILENAME, ctx.session_tools)
+        if mcp_path is not None and self.preset.mcp_config_flag:
+            args += [self.preset.mcp_config_flag, str(mcp_path)]
+        return Prepared(args=args)
 
     def tool_intent(self, tool_name: str, tool_input: Mapping[str, Any]) -> ToolIntent:
         ti = tool_input if isinstance(tool_input, Mapping) else {}
+        if tool_name.startswith(MCP_TOOL_PREFIX):
+            # ``mcp__automatos__board_summary`` → the bare name the policy checks
+            # against this ticket's own list. Every OTHER mcp__* tool falls
+            # through to UNKNOWN below, which the policy denies.
+            return ToolIntent(tool=tool_name, cls=ToolClass.PLATFORM,
+                              command=tool_name[len(MCP_TOOL_PREFIX):])
         if tool_name in FILE_WRITE_TOOLS or tool_name in FILE_READ_TOOLS:
             paths = tuple(str(ti[k]) for k in _PATH_KEYS if ti.get(k))
             cls = ToolClass.FILE_WRITE if tool_name in FILE_WRITE_TOOLS else ToolClass.FILE_READ
@@ -182,7 +251,8 @@ class ClaudeAdapter(PresetAdapter):
 
 
 __all__ = [
-    "BENIGN_TOOLS", "ClaudeAdapter", "FILE_READ_TOOLS", "FILE_WRITE_TOOLS", "SHELL_TOOLS", "WEB_TOOLS",
+    "BENIGN_TOOLS", "ClaudeAdapter", "FILE_READ_TOOLS", "FILE_WRITE_TOOLS", "MCP_CONFIG_FILENAME",
+    "MCP_SERVER_NAME", "MCP_TOOL_PREFIX", "SHELL_TOOLS", "WEB_TOOLS", "build_mcp_config", "write_mcp_config",
     "build_settings", "claude_state_path", "has_completed_onboarding", "is_directory_trusted",
     "read_claude_state", "record_directory_trust", "subject_of_input", "write_settings",
 ]

@@ -86,6 +86,9 @@ MANIFEST_ROUTERS: tuple[RouterSpec, ...] = (
     # PRD-234 S1a -- the CLI host contract (pair / heartbeat / claim / events / result).
     # Every handler 404s unless CLI_RUNTIME_ENABLED (local edition only).
     RouterSpec("api.cli_hosts"),
+    # PRD-245 W1 -- the loopback MCP endpoint a ticket session calls Automatos
+    # through. Same gate as the host routes: 404 unless CLI_RUNTIME_ENABLED.
+    RouterSpec("api.session_tools"),
     # PRD-233 S6 -- the operator's profile (GET both editions, PUT local only).
     RouterSpec("api.profile"),
 )

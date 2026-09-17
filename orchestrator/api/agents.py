@@ -213,6 +213,23 @@ def _normalize_tags(raw_tags) -> List[str]:
     return normalized
 
 
+def _session_tool_gaps(agent: Agent) -> Optional[List[Dict[str, Any]]]:
+    """PRD-245 S1.5: the platform tools this agent's skills name that a ticket
+    session cannot call. ``None`` for an API agent (its skills' tools all work)
+    and whenever the computation is unavailable — a form field is never worth a
+    500."""
+    try:
+        from core.cli_runtime import is_cli_agent
+        from services.cli_session_prompt import SESSION_TOOLS_AVAILABLE, session_tool_gaps
+
+        if not is_cli_agent(getattr(agent, "configuration", None) or {}):
+            return None
+        return session_tool_gaps(agent, SESSION_TOOLS_AVAILABLE) or []
+    except Exception:  # noqa: BLE001
+        logger.debug("session tool gaps unavailable for agent %s", getattr(agent, "id", "?"), exc_info=True)
+        return None
+
+
 def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
     """Build agent response with skills, tools, and plugins"""
     # PRD-15: Debug logging for model_config
@@ -318,6 +335,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         # PRD-67: System agent fields
         is_system_agent=getattr(agent, 'is_system_agent', False) or False,
         slug=getattr(agent, 'slug', None),
+        session_tool_gaps=_session_tool_gaps(agent),
         required_role=getattr(agent, 'required_role', None),
         marketplace_category=getattr(agent, 'marketplace_category', None),
 )
