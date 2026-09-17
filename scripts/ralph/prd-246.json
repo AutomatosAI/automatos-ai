@@ -54,13 +54,13 @@
       "title": "Assignments hub compact",
       "description": "The hub works one-handed. The entry grid (.entry-grid) is 1-up under 768; the flip tabs (.cc-tabs in the hub) scroll like the Command Centre's; mission and playbook cards stack their meta beneath the title instead of truncating; .status-head wraps. CSS only unless a card's structure genuinely cannot respond.",
       "acceptanceCriteria": [
-        "Under 768px .entry-grid is one column and the hub's cards stack their meta; rules live in the compact region.",
-        "The hub's tab strip scrolls horizontally and keeps its active tab visible, matching the Command Centre's behaviour from US-002.",
-        ".status-head wraps rather than truncating under 768px, and remains in the chrome guard.",
-        "cd frontend && npm run test -- components/assignments app/assignments → green."
+        "Under 768px .entry-grid is one column and the hub's cards stack their meta; rules live in the compact region. → DONE — globals.css:3080 (@media max-width: 767px, compact region) :is(.entry-grid, .mis-cards, .pb-grid) → 1fr, and :3083 .mkt-strip 5-up → 2-up (small promo tiles). Cards stack their meta: :3087 .mis-card .row-meta 4 mono columns → 2, :3092 .pb-card .stats wraps. The two card grids had to become CLASSES first — a media query cannot override an inline style — so missions-body.tsx:274 renders `className=\"mis-cards\"` and playbooks-body.tsx:337 `className=\"pb-grid\"`, with the desktop column counts (2-up / 3-up) beside their card families at globals.css:2525 / :2646. Asserted in studio-mobile-scope.test.ts 'Assignments hub: 1-up entries and cards, stacked meta, a wrapping head' + hub-compact.test.tsx 'the card grids are classes'.",
+        "The hub's tab strip scrolls horizontally and keeps its active tab visible, matching the Command Centre's behaviour from US-002. → DONE — assignments-hub.tsx:19/:55/:103 uses the SAME hooks/use-tab-strip-scroll.ts the Command Centre uses (US-002) — one hook, not a copy; the scope gate asserts both files import it. Test components/assignments/__tests__/hub-compact.test.tsx 'scrolls the active tab into view on a compact viewport' (?tab=missions, width mocked) and the desktop counterpart. The strip's bleed/gutter fix from US-002 (globals.css:3021-3022) is shared too — the hub's root is .cc-page.",
+        ".status-head wraps rather than truncating under 768px, and remains in the chrome guard. → DONE — globals.css:3094 .status-head { flex-wrap: wrap } under 767px, so the label, count and right-hand control wrap instead of squeezing. It is untouched in the chrome guard (globals.css:2868, still listing .status-head with flex-shrink: 0) and page-frames.test.ts is green.",
+        "cd frontend && npm run test -- components/assignments app/assignments → green. → DONE — npm run test -- components/assignments app/assignments → 2 files / 11 tests passed. Full suite 154 files / 803 tests green. Beyond the ACs, the story's 'works one-handed' also needed the DEFAULT Missions view: GroupedView renders .mis-row, a 7-column ledger 644px wide at its narrowest, so globals.css:3102-3110 gives it a two-line phone form (pip · id · age, then the goal and sub across the row) and drops the three figures the sub-line already covers; and both 7-column ledger views (missions Table, playbooks List/act-table) are now desktop-only like the Command Centre's activity table (missions-body.tsx:93, playbooks-body.tsx:58) — tested both widths."
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "The hub's root is .cc-page and its rules hang off :is(.studio, .cc-page) — keep that scoping; a bare .entry-grid rule would leak into Classic."
     },
     {

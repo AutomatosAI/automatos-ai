@@ -149,10 +149,34 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
     )
   })
 
+  it('Assignments hub: 1-up entries and cards, stacked meta, a wrapping head (US-004)', () => {
+    const p = phone()
+    expect(p).toContain(':is(.studio, .cc-page) :is(.entry-grid, .mis-cards, .pb-grid)')
+    expect(p, 'the small marketplace tiles read 2-up').toContain('.mkt-strip { grid-template-columns: repeat(2, 1fr); }')
+    expect(p, "a card's meta stacks beneath the title").toContain('.mis-card .row-meta')
+    expect(p).toContain('.pb-card .stats { flex-wrap: wrap')
+    expect(p).toContain('.status-head { flex-wrap: wrap; }')
+    expect(p, 'the 7-column grouped row becomes two lines').toContain('.mis-row {')
+    // The two card grids are classes, not inline styles a media query cannot
+    // reach, and the desktop column counts stay outside the region.
+    for (const [file, cls] of [
+      ['components/assignments/studio/missions-body.tsx', 'mis-cards'],
+      ['components/assignments/studio/playbooks-body.tsx', 'pb-grid'],
+    ] as const) {
+      expect(read(file), file).toContain(`className="${cls}"`)
+      expect(css.slice(0, OPENS), cls).toMatch(new RegExp(`\\.${cls} \\{[^}]*grid-template-columns: repeat\\(`))
+    }
+    // `.status-head` stays a chrome row that refuses to shrink.
+    expect(css.slice(0, OPENS)).toMatch(/flex-shrink: 0/)
+  })
+
   it('the tab-strip behaviour is one hook, not a copy per surface', () => {
     const hook = read('hooks/use-tab-strip-scroll.ts')
     expect(hook).toContain('useIsTabletOrBelow')
     expect(hook).toContain('.cc-tab.active')
-    expect(read('components/command-center/command-center-shell.tsx')).toContain('useTabStripScroll')
+    for (const f of [
+      'components/command-center/command-center-shell.tsx',
+      'components/assignments/studio/assignments-hub.tsx',
+    ]) expect(read(f), f).toContain('useTabStripScroll')
   })
 })

@@ -2520,6 +2520,12 @@
     display: inline-flex; align-items: center; gap: 4px;
   }
 
+  /* Mission cards — the grid is a class so the compact region can answer it
+     (PRD-246 US-004; an inline style cannot be overridden by a media query) */
+  :is(.studio, .cc-page) .mis-cards {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  }
+
   /* Mission card */
   :is(.studio, .cc-page) .mis-card {
     background: var(--paper);
@@ -2634,6 +2640,12 @@
   :is(.studio, .cc-page) .mis-row .age {
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
     color: var(--fg-3);
+  }
+
+  /* Playbook cards — a class for the same reason as `.mis-cards` above */
+  :is(.studio, .cc-page) .pb-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px; padding-bottom: 24px;
   }
 
   /* Playbook card */
@@ -3061,6 +3073,41 @@
     }
     :is(.studio, .cc-page) .cc-kb-head { position: sticky; top: 0; z-index: 1; }
     :is(.studio, .cc-page) .cc-kb-body { flex: 0 0 auto; overflow: visible; }
+
+    /* ── Assignments hub · US-004 ─────────────────────────────────────── */
+    /* Start-something, the mission cards and the playbook cards go 1-up; the
+       small marketplace tiles read 2-up, which is what they are sized for. */
+    :is(.studio, .cc-page) :is(.entry-grid, .mis-cards, .pb-grid) {
+      grid-template-columns: 1fr;
+    }
+    :is(.studio, .cc-page) .mkt-strip { grid-template-columns: repeat(2, 1fr); }
+
+    /* A card's meta stacks beneath its title instead of squeezing four mono
+       columns into 320px. */
+    :is(.studio, .cc-page) .mis-card .row-meta {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    :is(.studio, .cc-page) .pb-card .stats { flex-wrap: wrap; gap: 8px 16px; }
+
+    /* The status head wraps rather than truncating; it stays in the chrome
+       guard, so it still refuses to shrink. */
+    :is(.studio, .cc-page) .status-head { flex-wrap: wrap; }
+
+    /* The grouped view's row is a 7-column ledger — 644px at its narrowest.
+       On a phone it is two lines: the pip, the short id and the age; then the
+       goal and its sub-line across the row. Who ran it, the group count and
+       the token figure DROP: `.sub` already states the groups and the tier,
+       and the figures belong to the desktop ledger (M3 — a compact form
+       states what it drops). The Table view is not offered at all. */
+    :is(.studio, .cc-page) .mis-row {
+      grid-template-columns: 18px auto 1fr;
+      gap: 4px 8px; padding: 12px;
+    }
+    :is(.studio, .cc-page) .mis-row > div { grid-column: 1 / -1; }
+    :is(.studio, .cc-page) .mis-row .age { grid-area: 1 / 3; text-align: right; }
+    :is(.studio, .cc-page) .mis-row > span:not([class]),
+    :is(.studio, .cc-page) .mis-row .num { display: none; }
+    :is(.studio, .cc-page) .mis-row .nm { white-space: normal; }
   }
 
   /* ─── end of the compact region · a new surface is appended above ──── */

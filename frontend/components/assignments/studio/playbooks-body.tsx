@@ -20,6 +20,7 @@ import {
   Hand,
 } from 'lucide-react'
 
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useWorkflowPlaybooks, useExecutePlaybook } from '@/hooks/use-playbook-api'
 import { toast } from 'sonner'
 
@@ -49,7 +50,12 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
   const router = useRouter()
   const { user } = useUser()
 
-  const [view, setView] = useState<View>('grid')
+  // The List view is a seven-column `act-table` — desktop-only, like the
+  // Command Centre's activity table. On a phone it is not offered and a
+  // stored List choice reads as the card grid (PRD-246 US-004).
+  const isPhone = useIsMobile()
+  const [preferred, setPreferred] = useState<View>('grid')
+  const view: View = isPhone && preferred === 'list' ? 'grid' : preferred
   const [scope, setScope] = useState<Scope>('all')
   const [sort, setSort] = useState<Sort>('most_run')
   const [search, setSearch] = useState('')
@@ -189,19 +195,21 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
           <button
             type="button"
             className={view === 'grid' ? 'on' : ''}
-            onClick={() => setView('grid')}
+            onClick={() => setPreferred('grid')}
           >
             <LayoutGrid style={{ width: 11, height: 11 }} />
             Grid
           </button>
-          <button
-            type="button"
-            className={view === 'list' ? 'on' : ''}
-            onClick={() => setView('list')}
-          >
-            <ListIcon style={{ width: 11, height: 11 }} />
-            List
-          </button>
+          {!isPhone && (
+            <button
+              type="button"
+              className={view === 'list' ? 'on' : ''}
+              onClick={() => setPreferred('list')}
+            >
+              <ListIcon style={{ width: 11, height: 11 }} />
+              List
+            </button>
+          )}
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -324,14 +332,9 @@ export function PlaybooksBody({ limit = 100, hideFeatured = false }: PlaybooksBo
             No playbooks match this filter.
           </div>
         ) : view === 'grid' ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-              gap: 12,
-              paddingBottom: 24,
-            }}
-          >
+          /* A class, not an inline grid: a media query cannot override an
+             inline style, and this goes 1-up on a phone (PRD-246 US-004). */
+          <div className="pb-grid">
             {filtered.map((p) => (
               <PlaybookCard
                 key={String(p.template_id || p.id)}
