@@ -97,8 +97,12 @@ export function useIconStyle() {
     queryKey: systemConfigQueryKeys.configKey('active_icon_style'),
     queryFn: async () => {
       try {
-        const data = await apiClient.getSystemConfigKey('active_icon_style');
-        return (data?.config_value as string) || 'default';
+        const data = await apiClient.getSystemConfigKey('active_icon_style') as { config_value?: unknown } | null;
+        // config_value is JSONB — the API has been returning an object on
+        // some installs, which stringified to "[object Object]" in the
+        // icon URL (=> 404 floods). Only trust string values.
+        const value = data?.config_value
+        return typeof value === 'string' && value.length > 0 ? value : 'default'
       } catch {
         return 'default';
       }
