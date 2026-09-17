@@ -3,25 +3,19 @@
 import { useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import {
   Settings2, RotateCcw, GripVertical, Eye, EyeOff,
-  Play, PieChart as PieChartIcon, Calendar, BarChart3,
-  Activity, Layers, FileText, Users,
-  DollarSign, TrendingUp, BookOpen, ShieldCheck, AlertTriangle, Brain,
+  PieChart as PieChartIcon, Calendar, Activity, FileText,
+  DollarSign, TrendingUp, BookOpen, AlertTriangle, Brain,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { ActiveNowWidget } from './active-now-widget'
 import { ScheduleWidget } from './schedule-widget'
+import { NeedsYouWidget } from './needs-you-widget'
+import { ActivityWidget } from './activity-widget'
+import { BoardGlanceWidget } from './board-glance-widget'
 import { AgentReportsWidget } from './agent-reports-widget'
-import { RecentActivityWidget } from './recent-activity-widget'
-import { StatusOverviewWidget } from './status-overview-widget'
-import { PriorityBreakdownWidget } from './priority-breakdown-widget'
-import { TypesOfWorkWidget } from './types-of-work-widget'
-import { TeamWorkloadWidget } from './team-workload-widget'
 import { CostTrackerWidget } from './cost-tracker-widget'
 import { AgentPerformanceWidget } from './agent-performance-widget'
 import { PlaybookMetricsWidget } from './playbook-metrics-widget'
-import { ApprovalGatesWidget } from './approval-gates-widget'
-import { DecisionsNeededWidget } from './decisions-needed-widget'
 import { SelfLearningHealthWidget } from './self-learning-health-widget'
 import { cn } from '@/lib/utils'
 
@@ -50,37 +44,32 @@ interface WidgetDef {
 }
 
 const WIDGET_REGISTRY: WidgetDef[] = [
-  // Wave 5 — surface things only Gerard can resolve (kanban handles tasks).
-  { id: 'decisions-needed',    label: 'Decisions Needed',    icon: <AlertTriangle className="w-3.5 h-3.5" />, defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
-  { id: 'active-now',          label: 'Active Now',          icon: <Play className="w-3.5 h-3.5" />,          defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
-  { id: 'status-overview',     label: 'Status Overview',     icon: <PieChartIcon className="w-3.5 h-3.5" />,  defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
-  { id: 'schedule',            label: 'Schedule',            icon: <Calendar className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
-  { id: 'priority-breakdown',  label: 'Priority Breakdown',  icon: <BarChart3 className="w-3.5 h-3.5" />,     defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
-  // Long task titles get truncated hard at half-width — give them the full row.
-  { id: 'recent-activity',     label: 'Recent Activity',     icon: <Activity className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'full',  height: 'min-h-[280px]' },
-  { id: 'types-of-work',       label: 'Types of Work',       icon: <Layers className="w-3.5 h-3.5" />,        defaultVisible: true,  size: 'half',  height: 'min-h-[280px]' },
-  { id: 'agent-reports',       label: 'Agent Reports',       icon: <FileText className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[280px]' },
-  { id: 'team-workload',       label: 'Team Workload',       icon: <Users className="w-3.5 h-3.5" />,         defaultVisible: true,  size: 'half',  height: 'min-h-[280px]' },
+  // PRD-244 review batch 2 (Gerard, 2026-09-17): six widgets by default, each
+  // the one place for its family; the rest opt-in under Customize.
+  { id: 'needs-you',         label: 'Needs you',          icon: <AlertTriangle className="w-3.5 h-3.5" />, defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
+  { id: 'activity',          label: 'Activity',           icon: <Activity className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
+  { id: 'board-glance',      label: 'Board at a glance',  icon: <PieChartIcon className="w-3.5 h-3.5" />,  defaultVisible: true,  size: 'full',  height: 'min-h-[320px]' },
+  { id: 'schedule',          label: 'Schedule',           icon: <Calendar className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
+  { id: 'agent-reports',     label: 'Agent Reports',      icon: <FileText className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
   // Cost over time benefits from chart width — full row.
-  { id: 'cost-tracker',        label: 'Cost Tracker',        icon: <DollarSign className="w-3.5 h-3.5" />,    defaultVisible: true,  size: 'full',  height: 'min-h-[320px]' },
-  { id: 'agent-performance',   label: 'Agent Performance',   icon: <TrendingUp className="w-3.5 h-3.5" />,    defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
-  { id: 'playbook-metrics',    label: 'Playbook Metrics',    icon: <BookOpen className="w-3.5 h-3.5" />,      defaultVisible: true,  size: 'half',  height: 'min-h-[280px]' },
-  // Pending approval rows often have long mission titles — full row.
-  { id: 'approval-gates',      label: 'Approval Gates',      icon: <ShieldCheck className="w-3.5 h-3.5" />,   defaultVisible: true,  size: 'full',  height: 'min-h-[280px]' },
+  { id: 'cost-tracker',      label: 'Cost Tracker',       icon: <DollarSign className="w-3.5 h-3.5" />,    defaultVisible: true,  size: 'full',  height: 'min-h-[320px]' },
+  // Opt-in: these live on Analytics / Agents / Assignments in full.
+  { id: 'agent-performance', label: 'Agent Performance',  icon: <TrendingUp className="w-3.5 h-3.5" />,    defaultVisible: false, size: 'half',  height: 'min-h-[320px]' },
+  { id: 'playbook-metrics',  label: 'Playbook Metrics',   icon: <BookOpen className="w-3.5 h-3.5" />,      defaultVisible: false, size: 'half',  height: 'min-h-[280px]' },
   // PRD-142 Wave 4 (W4-S16): "is self-learning working right now?" — HARNESS loop, tool-routing signals, prescriptions.
-  { id: 'self-learning',       label: 'Self-Learning',       icon: <Brain className="w-3.5 h-3.5" />,         defaultVisible: true,  size: 'half',  height: 'min-h-[320px]' },
+  { id: 'self-learning',     label: 'Self-Learning',      icon: <Brain className="w-3.5 h-3.5" />,         defaultVisible: false, size: 'half',  height: 'min-h-[320px]' },
 ]
 
 const ALL_IDS = WIDGET_REGISTRY.map((w) => w.id)
 const DEFAULT_ORDER = ALL_IDS
-const DEFAULT_HIDDEN: string[] = []
+const DEFAULT_HIDDEN: string[] = WIDGET_REGISTRY.filter((w) => !w.defaultVisible).map((w) => w.id)
 
 // ── Persistence ─────────────────────────────────────────────
 
-// v4: introduces per-widget size override. v3 entries stay readable —
-// missing `sizes` field falls back to registry defaults.
-const STORAGE_KEY = 'automatos:command-centre-v4'
-const LEGACY_STORAGE_KEY = 'automatos:command-centre-v3'
+// v5 (PRD-244 review batch 2): the widget set changed — eight widgets became
+// three and six are visible by default — so saved v4 layouts are not read;
+// every browser starts from the new defaults once and customises from there.
+const STORAGE_KEY = 'automatos:command-centre-v5'
 
 interface DashboardState {
   order: string[]
@@ -91,7 +80,7 @@ interface DashboardState {
 function loadState(): DashboardState | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as DashboardState
     if (!Array.isArray(parsed.order) || !Array.isArray(parsed.hidden)) return null
@@ -239,32 +228,22 @@ export function CommandCentreDashboard({ period, onViewAllActivity, onViewCalend
   // Render widget by ID
   const renderWidget = (widgetId: string) => {
     switch (widgetId) {
-      case 'active-now':
-        return <ActiveNowWidget period={period} />
-      case 'status-overview':
-        return <StatusOverviewWidget period={period} onViewAll={onViewAllActivity} />
+      case 'needs-you':
+        return <NeedsYouWidget period={period} />
+      case 'activity':
+        return <ActivityWidget period={period} onViewAll={onViewAllActivity} />
+      case 'board-glance':
+        return <BoardGlanceWidget period={period} onViewAll={onViewAllActivity} />
       case 'schedule':
         return <ScheduleWidget onViewAll={onViewCalendar} />
-      case 'priority-breakdown':
-        return <PriorityBreakdownWidget period={period} />
-      case 'recent-activity':
-        return <RecentActivityWidget period={period} onViewAll={onViewAllActivity} />
-      case 'types-of-work':
-        return <TypesOfWorkWidget period={period} />
       case 'agent-reports':
         return <AgentReportsWidget />
-      case 'team-workload':
-        return <TeamWorkloadWidget period={period} />
       case 'cost-tracker':
         return <CostTrackerWidget period={period} />
       case 'agent-performance':
         return <AgentPerformanceWidget period={period} />
       case 'playbook-metrics':
         return <PlaybookMetricsWidget period={period} />
-      case 'approval-gates':
-        return <ApprovalGatesWidget period={period} />
-      case 'decisions-needed':
-        return <DecisionsNeededWidget />
       case 'self-learning':
         return <SelfLearningHealthWidget />
       default:
