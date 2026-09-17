@@ -38,7 +38,7 @@ function SummarySkeleton() {
   )
 }
 
-export function SummaryTab() {
+export function SummaryTab({ period = '1d' }: { period?: string } = {}) {
   const router = useRouter()
   const pathname = usePathname() ?? '/command-center'
   const searchParams = useSearchParams()
@@ -51,9 +51,9 @@ export function SummaryTab() {
 
   return (
     <div className="space-y-4">
-      <AutosRead period="1d" />
+      <AutosRead period={period} />
       <CommandCentreDashboard
-        period="1d"
+        period={period}
         onViewAllActivity={() => goTab('activity')}
         onViewCalendar={() => goTab('calendar')}
       />
