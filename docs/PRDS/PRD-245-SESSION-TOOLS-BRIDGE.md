@@ -143,9 +143,13 @@ Maps to `execute_tool("composio_execute", {"action", "params"})`; scope is the e
 
 ### Wave 4 — Codex
 
-**S4.1 · Codex tickets get the bridge (M)**
-`_config_text` appends `[mcp_servers.automatos]` with the endpoint URL and the SDK's bearer-token-from-environment key; `build_session_env` sets that variable for Codex sessions only; `CodexAdapter.tool_intent` maps Codex's MCP tool naming to `PLATFORM`. **Verify at build** against Codex 0.154.0: the HTTP MCP table shape and key name, and how its PreToolUse payload names MCP tools (alongside the six checks in the adapter design §6.10).
-**Files:** `adapters/codex.py`, `session.py`, `presets.py`; `tests/test_session_fake_codex.py`, `tests/test_adapters.py`.
+**S4.1 · Codex tickets get the bridge (M) — BUILT 2026-09-17**
+`_config_text` appends `[mcp_servers.automatos]`; `prepare` sets the token variable that table names, for Codex sessions only; `CodexAdapter.tool_intent` maps its MCP tool naming to `PLATFORM`.
+**Files:** `adapters/codex.py`; `tests/test_adapters.py`.
+
+**Verified against Codex 0.154.0** — `codex mcp add --url … --bearer-token-env-var …` written into a throwaway `CODEX_HOME` and read back: the table is exactly `url` + `bearer_token_env_var`. Codex takes the bearer token from an ENVIRONMENT VARIABLE named in its config, where Claude Code takes a literal header — and that is the right route here, not merely the available one: a Codex config home is per AGENT (§6.1), so a token in that file would outlive the ticket that minted it and be read by the agent's next one, while an environment variable dies with the session process. ONE guard decides both the table and the variable: a half-offer must never put a token in the environment with no server to use it (a test found that when it was two guards). The operator's own `[mcp_servers]` tables are still stripped (S0.8), and `prepare` rewrites the config each spawn, so no previous ticket's table lingers.
+
+**NOT verified, and the code and tests say so:** how Codex names an MCP tool in its hook payload (§6.10 is a live-run check). Every plausible spelling maps to the same tool — `mcp__automatos__x`, `automatos__x`, `automatos.x`, `automatos/x`, `mcp.automatos.x` — and anything else stays `UNKNOWN`, which the policy denies; widening it later cannot weaken the gate, because the name must still be on the ticket's own list. To settle it: run one Codex ticket and read the tool name out of that session's `terminal.log` or the ticket's `recent_tools`.
 
 ## Not in this PRD (owner decisions)
 
