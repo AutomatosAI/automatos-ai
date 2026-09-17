@@ -1,6 +1,6 @@
 # PRD-244: Studio is the desktop UI — converge the two shells, test every page, and give chat a live view of the floor
 
-> **Status:** APPROVED 2026-09-17 by Gerard with two amendments (D1 split, D6 sequencing — recorded below). Build and test on the **local** edition first; nothing here reaches prod before Wave 4 is signed. Grounded @ the Studio audit of `main` @ `2aad76154` the same day (every file reference below was read, not recalled). PR #397 (`feat/studio-rebrand-phase1`, opened 2026-05-29, 119 commits behind, 9 of 18 files since rewritten on `main`) stays **parked**; §D4 harvests what is still unique and closes it.
+> **Status:** APPROVED 2026-09-17 by Gerard with two amendments (D1 split, D6 sequencing — recorded below). Build and test on the **local** edition first; nothing here reaches prod before Wave 4 is signed. **Mechanism (Gerard, 09-17):** `main` deploys to prod on every push (Railway), so every wave merges into the `studio` integration branch (cut from `main` @ `757814531`, CI gates widened to it); the local stack runs `studio`; one PR takes `studio` → `main` after the pass, and `main` is merged into `studio` whenever it moves so the final PR carries no surprises. Grounded @ the Studio audit of `main` @ `2aad76154` the same day (every file reference below was read, not recalled). PR #397 (`feat/studio-rebrand-phase1`, opened 2026-05-29, 119 commits behind, 9 of 18 files since rewritten on `main`) stays **parked**; §D4 harvests what is still unique and closes it.
 
 ## The review (2026-09-17)
 
