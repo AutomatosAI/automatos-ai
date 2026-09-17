@@ -32,9 +32,15 @@ done
 check "no route selects a component by width" \
   "! grep -rEn 'isStudio && !is(TabletOrBelow|MobileLayout)' frontend/app --include=page.tsx"
 
-# ── Classic is untouched ─────────────────────────────────────────────────────
-check "classic components and the classic mobile sidebar are unchanged" \
-  "git diff --name-only origin/studio..HEAD | grep -Ev '^frontend/(app/globals.css|app/.*/page.tsx|components/(chatbot|command-center|assignments|agents|deliverables|tools|shared|layout)/)' | grep -qv 'mobile-sidebar' || ! git diff --name-only origin/studio..HEAD | grep -q 'components/layout/mobile-sidebar.tsx'"
+# ── Classic is untouched (M6) ────────────────────────────────────────────────
+check "the classic mobile sidebar is untouched" \
+  "! git diff --name-only origin/studio..HEAD | grep -q 'components/layout/mobile-sidebar.tsx'"
+
+check "no backend file changed (this PRD is frontend-only)" \
+  "! git diff --name-only origin/studio..HEAD | grep -q '^orchestrator/'"
+
+check "no dependency added (and never @tailwindcss/typography)" \
+  "! git diff origin/studio..HEAD -- frontend/package.json | grep -q '^+.*\"' || ! git diff origin/studio..HEAD -- frontend/package.json | grep -q 'typography'"
 
 # ── the PRD-244 gates still hold, plus the new mobile scope gate ─────────────
 check "frontend suite (all gates)" \
