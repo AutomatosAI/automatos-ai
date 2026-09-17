@@ -33,6 +33,13 @@ from services import session_tools as st  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
+# Swept before the workspace, child-first. Every one carries ``workspace_id``;
+# any this database does not have is skipped (see the fixture teardown).
+_SWEPT_TABLES = (
+    "llm_usage", "deliverables", "agent_reports", "notifications",
+    "approval_grants", "board_tasks", "cli_hosts", "agents",
+)
+
 
 @pytest.fixture(scope="module")
 def engine():
@@ -93,9 +100,19 @@ def ticket(engine, new_session):
     # teardown dies on a foreign key and takes the suite's exit code with it:
     # ``apply_result`` books usage (llm_usage), registers deliverables and writes
     # the task's report, and an ask leaves a grant + a notification behind.
-    for table in ("llm_usage", "deliverables", "agent_reports", "notifications",
-                  "approval_grants", "board_tasks", "cli_hosts", "agents"):
-        sweep.execute(text(f"DELETE FROM {table} WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
+    #
+    # Only the tables this database actually HAS: the test schema is not the
+    # local one (``agent_reports`` exists in a full local install and not here),
+    # and one missing table would abort the whole sweep transaction.
+    present = {
+        row[0] for row in sweep.execute(text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = ANY(:names)"
+        ), {"names": list(_SWEPT_TABLES)}).fetchall()
+    }
+    for table in _SWEPT_TABLES:
+        if table in present:
+            sweep.execute(text(f"DELETE FROM {table} WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
     sweep.execute(text("DELETE FROM workspaces WHERE id = CAST(:w AS uuid)"), {"w": ws_id})
     sweep.commit()
 
