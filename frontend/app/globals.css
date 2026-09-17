@@ -80,23 +80,6 @@
     --stage-7: 217 91% 60%;
     --stage-8: 330 81% 60%;
     --stage-9: 160 84% 39%;
-
-    /* PRD-244 W2: the Studio design tokens, given Light/Dark equivalents so
-       a Studio-designed surface (the chat shell, the Assignments hub) renders
-       sensibly under the classic themes. `.studio {}` below redefines them. */
-    --fg: hsl(var(--foreground));
-    --fg-2: hsl(var(--muted-foreground));
-    --fg-3: hsl(var(--muted-foreground) / 0.8);
-    --paper: hsl(var(--card));
-    --bg-1: hsl(var(--background));
-    --bg-2: hsl(var(--muted));
-    --border-2: hsl(var(--border));
-    --navy: hsl(var(--info));
-    --accent-2: hsl(var(--primary) / 0.10);
-    --serif: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-    --cc-hover: var(--muted);
-    --cc-hover-border: var(--border);
-    --cc-live-dot: var(--success);
   }
 
   .dark {
@@ -1146,10 +1129,6 @@
   }
 
   /* ── Studio chat layout (CD round 3) ───────────────────────────── */
-  /* PRD-244 W2: the chat shell hangs off `.sh-chat` the way the Command
-     Centre hangs off `.cc-page`. The classic layout's <main> is not a
-     height-bound flex column, so there the shell takes the classic chat's height. */
-  html:not(.studio) .sh-chat { height: calc(100vh - 8rem); }
   .sh-chat {
     display: flex; flex-direction: column;
     flex: 1; min-height: 0; height: 100%;

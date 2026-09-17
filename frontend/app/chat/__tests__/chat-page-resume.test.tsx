@@ -21,9 +21,7 @@ vi.mock('@/components/layout/main-layout', () => ({
   MainLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 vi.mock('@/hooks/use-page-api', () => ({ usePageAPI: () => {} }))
-// PRD-244 W2: the classic tree (ChatTabs, history sheet) renders below 1024 px only —
-// these cases exercise it, so the width mock says tablet.
-vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, useIsTabletOrBelow: () => true }))
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false, useIsTabletOrBelow: () => false }))
 vi.mock('@/hooks/use-studio-theme', () => ({ useIsStudio: () => false }))
 vi.mock('@/components/local/first-run-nudge', () => ({ FirstRunNudge: () => null }))
 vi.mock('@/components/chatbot/sidebar', () => ({ AppSidebar: () => <div data-testid="history" /> }))

@@ -16,6 +16,7 @@ import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { useIsMobile, useIsTabletOrBelow } from '@/hooks/use-mobile'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { useMissionStore } from '@/stores/mission-store'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -51,10 +52,12 @@ function withoutParam(params: URLSearchParams | null, name: string): string {
 export default function ChatPage() {
   usePageAPI('chat')
   const isMobile = useIsMobile()
-  // PRD-244 W2 (D3): the three-column shell is the chat at every desktop width,
-  // whatever the theme (its rules hang off `.sh-chat`); below 1024 px the
-  // classic layout remains until the mobile pass (PRD-245, D6).
+  // PRD-244 (two styles, two tones): the Studio style renders the three-column
+  // shell on desktop; the Classic style keeps its own chat layout. Both fork at
+  // the shared 1024 px breakpoint; below it the classic layout serves both
+  // styles until the mobile pass (PRD-245).
   const isTabletOrBelow = useIsTabletOrBelow()
+  const isStudio = useIsStudio()
   const searchParams = useSearchParams()
   const router = useRouter()
   const setPlanMode = useMissionStore((s) => s.setPlanMode)
@@ -291,8 +294,8 @@ export default function ChatPage() {
     </div>
   )
 
-  // Desktop: the three-column ledger layout, every theme
-  if (!isTabletOrBelow) {
+  // Studio desktop: the three-column ledger layout
+  if (isStudio && !isTabletOrBelow) {
     return (
       <MainLayout fullBleed>
         <StudioChatShell
@@ -314,7 +317,7 @@ export default function ChatPage() {
     )
   }
 
-  // Classic layout — below 1024 px only, until the mobile pass (PRD-245)
+  // Classic layout (the Classic style on desktop, every style below 1024 px)
   return (
     <MainLayout>
       <div className="relative flex h-[calc(100dvh-5rem)] flex-col md:h-[calc(100vh-8rem)]">

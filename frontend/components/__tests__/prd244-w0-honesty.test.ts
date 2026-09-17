@@ -29,10 +29,9 @@ describe('PRD-244 W0 honesty', () => {
     expect(read('app/globals.css')).not.toContain('.matte')
   })
 
-  it('the chat page forks on the shared tablet breakpoint — and, since Wave 2, on width alone', () => {
+  it('the chat page forks on the shared tablet breakpoint', () => {
     const src = read('app/chat/page.tsx')
-    expect(src).toContain('if (!isTabletOrBelow)')
-    expect(src).not.toContain('isStudio')
+    expect(src).toContain('if (isStudio && !isTabletOrBelow)')
     expect(src).not.toContain('if (isStudio && !isMobile)')
   })
 })
