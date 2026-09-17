@@ -723,12 +723,21 @@ class ActivityService:
 
         finding = None
         if isinstance(findings, list):
+            # What the run concluded beats what it merely confirmed: an LLM
+            # analysis or a checklist result is the line worth showing, and
+            # "Agent responsive" is boilerplate — so pick by kind, not by the
+            # order the checks happen to be appended in.
+            details = {}
             for f in findings:
-                if isinstance(f, dict) and f.get("check") in ("llm_analysis", "checklist", "agent_health", "cli_ticket"):
-                    detail = f.get("detail")
-                    if isinstance(detail, str) and detail.strip():
-                        finding = ActivityService._first_line(detail, 140)
-                        break
+                if not isinstance(f, dict):
+                    continue
+                detail = f.get("detail")
+                if isinstance(detail, str) and detail.strip():
+                    details.setdefault(f.get("check"), detail)
+            for check in ("llm_analysis", "checklist", "cli_ticket", "agent_health"):
+                if check in details:
+                    finding = ActivityService._first_line(details[check], 140)
+                    break
             if finding is None:
                 count = len(findings)
                 finding = f"Checked {count} item{'s' if count != 1 else ''}" if count else None
