@@ -41,7 +41,7 @@ describe('Studio page chrome', () => {
   it('the strip that started it still scrolls sideways, and page bodies still grow', () => {
     const tabs = css.slice(css.indexOf(':is(.studio, .cc-page) .cc-tabs {'), css.indexOf('}', css.indexOf(':is(.studio, .cc-page) .cc-tabs {')))
     expect(tabs).toContain('overflow-x: auto')
-    expect(guard, 'bodies grow or size to content — they are not chrome').not.toMatch(/\.(cc-kb-grid|cc-kb-body|cc-panel|entry-grid|sh-chat-grid)\b/)
+    expect(guard, 'bodies grow or size to content — they are not chrome').not.toMatch(/\.(cc-kb-grid|cc-kb-body|cc-panel|entry-grid|sh-chat-grid)(?![-\w])/)
   })
 })
 

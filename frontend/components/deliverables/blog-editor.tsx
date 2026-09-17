@@ -475,7 +475,7 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
           {/* Right: Preview */}
           <div className="hidden lg:block">
             <label className="text-xs font-medium text-muted-foreground">Preview</label>
-            <div className="mt-1 glass-card p-4 min-h-[400px] overflow-y-auto prose prose-sm dark:prose-invert max-w-none">
+            <div className="mt-1 glass-card p-4 min-h-[400px] overflow-y-auto">
               {title && <h1 className="text-lg font-bold mb-2">{title}</h1>}
               {tags.length > 0 && (
                 <div className="flex gap-1 mb-3">
