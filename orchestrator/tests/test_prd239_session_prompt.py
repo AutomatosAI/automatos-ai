@@ -126,22 +126,30 @@ def test_the_tools_block_names_what_a_session_has_and_what_it_has_not():
     assert text.index("## About you") < text.index(TOOLS_HEADER) < text.index(SKILLS_HEADER)
 
 
-def test_the_researchers_skill_header_names_exactly_the_three_tools_it_cannot_call():
+def test_the_researchers_skill_header_names_what_it_asks_for_that_a_session_works_differently_on():
+    """With NO tools offered (the W0 state) all three are simply missing. What the
+    prompt actually renders is the W1 state — ``SESSION_TOOLS_AVAILABLE`` — where
+    two of the three have a session equivalent and only one truly does not."""
     agent = _researcher()
     assert session_tool_gaps(agent, ()) == [
         {"skill": "web-research", "tools": ["composio_execute", "search_knowledge", "platform_submit_report"]},
     ]
     text = session_system_prompt(agent)
-    assert ("### web-research\nResearches the web.\n"
-            + GAP_LINE_PREFIX + "composio_execute, search_knowledge, platform_submit_report\n\nSearch with") in text
+    assert "### web-research\nResearches the web.\n" in text
+    assert "In a session, call `submit_report` instead of `platform_submit_report`." in text
+    assert GAP_LINE_PREFIX + "`composio_execute`." in text        # the one with no equivalent
+    assert "search_knowledge" not in text.split("## Skills")[1].split("Search with")[0]  # it HAS that one
     assert text.count(GAP_LINE_PREFIX) == 1                       # the writing skill names none
     assert "### writing\nWrites briefs.\n\nKeep it short." in text
 
 
 def test_gaps_shrink_with_what_the_session_offers():
-    """Wave 1's bridge adds tools once per deploy; the gap lines follow by themselves."""
+    """The bridge adds tools once per deploy; the gap lines follow by themselves.
+    A name with a session EQUIVALENT moves from "cannot call" to "call this
+    instead" — the work is available, under another name."""
     gaps = session_tool_gaps(_researcher(), ["search_knowledge", "submit_report"])
-    assert gaps == [{"skill": "web-research", "tools": ["composio_execute", "platform_submit_report"]}]
+    assert gaps == [{"skill": "web-research", "tools": ["composio_execute"],
+                     "instead": {"platform_submit_report": "submit_report"}}]
     assert session_tool_gaps(_researcher(), ["composio_execute", "search_knowledge", "platform_submit_report"]) == []
 
 
@@ -174,7 +182,9 @@ def test_an_omitted_skill_keeps_its_gap_line():
     agent = _agent(skills=[_skill(1, "big", "First.", "x" * 500),
                            _skill(2, "second", "Second.", "use platform_board_summary " + "y" * 500)])
     block = skills_block(agent, max_chars=200)
-    assert "### second\nSecond.\n" + GAP_LINE_PREFIX + "platform_board_summary\n" + OMITTED_NOTE in block
+    # ``platform_board_summary`` has a session equivalent, so the line points at it
+    assert ("### second\nSecond.\nIn a session, call `board_summary` instead of "
+            "`platform_board_summary`.\n" + OMITTED_NOTE) in block
 
 
 # ── the claim ────────────────────────────────────────────────────────────────

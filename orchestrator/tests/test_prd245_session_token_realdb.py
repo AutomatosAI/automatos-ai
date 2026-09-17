@@ -48,6 +48,30 @@ def engine():
     eng.dispose()
 
 
+@pytest.fixture(autouse=True)
+def _quiet_side_effects(monkeypatch):
+    """Keep this on the token contract: no approval-policy lookup (it parks a
+    ticket at claim and the claim then returns nothing), no completion fan-out.
+    Same shape as the PRD-234 host suite next door."""
+    import api.board_tasks as bt
+
+    async def _noop(*a, **k):
+        return None
+
+    monkeypatch.setattr(bt, "_board_task_blocked_pending_approval", lambda *a, **k: False, raising=True)
+    monkeypatch.setattr(bt, "_dispatch_task_complete", _noop, raising=True)
+
+
+def _seed_task(session, ws_id, agent_id, title, status="assigned"):
+    task = BoardTask(
+        workspace_id=ws_id, title=title, status=status, priority="medium",
+        assigned_agent_id=agent_id, source_type="user", attempts=0,
+    )
+    session.add(task)
+    session.commit()
+    return task.id
+
+
 @pytest.fixture
 def ticket(engine, new_session):
     """A workspace, a ``runtime: cli`` agent and one assigned ticket."""
@@ -62,13 +86,7 @@ def ticket(engine, new_session):
         {"n": f"TRACKER-{ws_id[:8]}", "w": ws_id,
          "c": json.dumps({"runtime": "cli", "provider": "claude", "model": "opus"})},
     ).fetchone()[0]
-    task_id = s.execute(
-        text("INSERT INTO board_tasks (workspace_id, title, description, status, priority, assigned_agent_id, "
-             "created_by_type, created_by_id) VALUES (CAST(:w AS uuid), :t, :d, 'assigned', 'medium', :a, 'user', 'test') "
-             "RETURNING id"),
-        {"w": ws_id, "t": "TRACKER — snapshot", "d": "make a snapshot", "a": agent_id},
-    ).fetchone()[0]
-    s.commit()
+    task_id = _seed_task(s, ws_id, agent_id, "TRACKER — snapshot")
     yield ws_id, agent_id, task_id
     sweep = new_session.sweep()
     sweep.execute(text("DELETE FROM board_tasks WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
@@ -79,6 +97,8 @@ def ticket(engine, new_session):
 
 
 def _host(session, ws_id):
+    """A paired host. It announces no CLI list, which the claim reads as "serves
+    every CLI" — a host that announced an empty list would claim nothing."""
     _host_row, code, _ = svc.create_pairing_code(session, uuid.UUID(ws_id), "laptop")
     host, _token = svc.pair_host(session, code)
     return host
@@ -159,13 +179,7 @@ def test_a_token_stops_working_when_its_ticket_stops_running(ticket, new_session
 def test_two_tickets_never_share_a_token(ticket, new_session):
     ws_id, agent_id, first_task = ticket
     s = new_session()
-    second = s.execute(
-        text("INSERT INTO board_tasks (workspace_id, title, description, status, priority, assigned_agent_id, "
-             "created_by_type, created_by_id) VALUES (CAST(:w AS uuid), :t, :d, 'assigned', 'medium', :a, 'user', 'test') "
-             "RETURNING id"),
-        {"w": ws_id, "t": "TRACKER — second", "d": "another", "a": agent_id},
-    ).fetchone()[0]
-    s.commit()
+    second = _seed_task(s, ws_id, agent_id, "TRACKER — second")
     host = _host(s, ws_id)
 
     claimed = svc.claim_for_host(s, host, limit=2)["tasks"]
