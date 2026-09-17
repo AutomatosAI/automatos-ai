@@ -10,6 +10,16 @@ from contextlib import contextmanager, asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
+#: Several services call the SYNC client on the event loop (memory L1, the
+#: cache, the rate limiter): an unbounded socket read there freezes every
+#: request in the process. 2026-09-16: a pool pointed at a remote Redis took
+#: 26–153 s per call and the chat lane stalled with it. Bound every socket op.
+REDIS_SOCKET_TIMEOUT_S = 2.0
+REDIS_CONNECT_TIMEOUT_S = 2.0
+#: A pooled connection idle longer than this is pinged before reuse, so a
+#: server-side close surfaces as a reconnect instead of "closed by server".
+REDIS_HEALTH_CHECK_INTERVAL_S = 30
+
 
 class RedisClient:
     """Redis client for publishing workflow execution updates"""
@@ -25,7 +35,11 @@ class RedisClient:
             password=password,
             db=db,
             decode_responses=True,
-            max_connections=50
+            max_connections=50,
+            socket_timeout=REDIS_SOCKET_TIMEOUT_S,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT_S,
+            socket_keepalive=True,
+            health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_S,
         )
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Redis connection pool created for {host}:{port}")
@@ -51,12 +65,16 @@ class RedisClient:
         
         This is used by WebSocket endpoints for non-blocking message delivery
         """
+        # Connect bounded; no read timeout — a subscription idles by design.
         redis_async = aioredis.Redis(
             host=self.host,
             port=self.port,
             password=self.password,
             db=self.db,
-            decode_responses=True
+            decode_responses=True,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT_S,
+            socket_keepalive=True,
+            health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_S,
         )
         pubsub = redis_async.pubsub()
         await pubsub.subscribe(channel)
@@ -169,6 +187,7 @@ def get_redis_client() -> Optional[RedisClient]:
                 
                 if host and port:
                     try:
+                        logger.info("Redis target %s:%s db=%s (from REDIS_URL)", host, port, db)
                         init_redis_client(host=host, port=port, password=password, db=db)
                     except Exception as e:
                         logger.error(f"Failed to initialize Redis client from URL: {e}")
@@ -190,6 +209,7 @@ def get_redis_client() -> Optional[RedisClient]:
                 return None
             
             try:
+                logger.info("Redis target %s:%s (from REDIS_HOST/REDIS_PORT)", host, port)
                 init_redis_client(host=host, port=int(port), password=password)
             except Exception as e:
                 logger.error(f"Failed to initialize Redis client: {e}")

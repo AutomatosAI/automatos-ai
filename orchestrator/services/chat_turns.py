@@ -12,9 +12,10 @@ and DB session; the HTTP response is only a **consumer** reading from a queue.
   reloaded page merges the reply live (PRD-205 S7 lane, zero new transport).
 * An explicit Stop must still stop the model: ``TurnRegistry.request_cancel``
   cancels a turn running in THIS process directly and, because production runs
-  several uvicorn workers, also sets a short-lived Redis marker the producer
-  polls between chunks. Redis is optional — without it, cancel is process-local
-  (the same scope the existing per-process session queue already has).
+  several uvicorn workers, also sets a short-lived Redis marker that a watcher
+  task beside the producer polls. Redis is optional — without it, cancel is
+  process-local (the same scope the existing per-process session queue already
+  has) — and every marker op is bounded, so Redis never delays a chunk.
 * ``TurnRegistry.is_in_flight`` answers ``GET /api/chat/{id}``'s ``turnInFlight``
   so a reloaded page can show "Auto is still replying" honestly.
 
@@ -35,8 +36,14 @@ logger = logging.getLogger(__name__)
 INFLIGHT_TTL_S = 15 * 60
 #: A cancel request that nobody consumed within this window is forgotten.
 CANCEL_TTL_S = 120
-#: How often the producer looks for a cross-process cancel marker.
+#: How often the cancel watcher looks for a cross-process cancel marker.
 CANCEL_POLL_S = 0.5
+#: Hard bound on every Redis marker op. The markers are an optimisation; the
+#: turn's chunks must never wait on Redis. 2026-09-16: a registry pointed at a
+#: remote Redis (the local .env carried the Railway URL) stalled every reply
+#: mid-sentence — the poll ran between chunks, and redis-py's nested retries
+#: turned one 1 s read timeout into minutes.
+REDIS_OP_TIMEOUT_S = 2.0
 
 _INFLIGHT_KEY = "chat:turn:inflight:{chat_id}"
 _CANCEL_KEY = "chat:turn:cancel:{chat_id}"
@@ -79,7 +86,12 @@ class TurnRegistry:
             if base is None:
                 return None
             import redis.asyncio as aioredis
+            from redis.asyncio.retry import Retry
+            from redis.backoff import NoBackoff
 
+            # No retries: a marker read that fails is a marker read that fails.
+            # redis-py's default (10 retries with backoff, at the client AND the
+            # connection level) multiplies one timeout into minutes.
             self._redis = aioredis.Redis(
                 host=base.host,
                 port=base.port,
@@ -88,6 +100,7 @@ class TurnRegistry:
                 decode_responses=True,
                 socket_connect_timeout=1,
                 socket_timeout=1,
+                retry=Retry(NoBackoff(), 0),
             )
         except Exception:  # noqa: BLE001 — optional dependency, degrade to local
             logger.debug("[chat_turns] redis unavailable — process-local registry only", exc_info=True)
@@ -99,7 +112,9 @@ class TurnRegistry:
         if client is None:
             return None
         try:
-            return await getattr(client, method)(*args, **kwargs)
+            return await asyncio.wait_for(
+                getattr(client, method)(*args, **kwargs), REDIS_OP_TIMEOUT_S
+            )
         except Exception:  # noqa: BLE001 — marker ops are an optimisation
             logger.debug("[chat_turns] redis %s failed", method, exc_info=True)
             return None
@@ -175,32 +190,59 @@ async def _produce_into(
     produce: Producer,
     registry: TurnRegistry,
 ) -> dict:
-    """Drain the producer into the queue; report how it ended."""
+    """Drain the producer into the queue; report how it ended.
+
+    Nothing here touches Redis: the cross-process cancel marker is watched by
+    ``_watch_cancel`` beside this coroutine, so a slow Redis can never hold a
+    chunk back.
+    """
     outcome = {"completed": False, "cancelled": False}
-    last_poll = time.monotonic()
+    started = time.monotonic()
+    chunks = 0
     source = produce()
     try:
         async for chunk in source:
+            chunks += 1
             await queue.put(chunk)
-            now = time.monotonic()
-            if now - last_poll >= CANCEL_POLL_S:
-                last_poll = now
-                if await registry.cancel_requested(chat_id):
-                    raise asyncio.CancelledError("cancel requested for chat %s" % chat_id)
         outcome["completed"] = True
+        logger.info(
+            "[chat_turns] turn completed for chat %s (%d chunks, %.1fs)",
+            chat_id, chunks, time.monotonic() - started,
+        )
     except asyncio.CancelledError:
         outcome["cancelled"] = True
-        logger.info("[chat_turns] turn cancelled for chat %s", chat_id)
+        logger.info(
+            "[chat_turns] turn cancelled for chat %s after %d chunks, %.1fs",
+            chat_id, chunks, time.monotonic() - started,
+        )
     except Exception as exc:  # noqa: BLE001 — surface to the client, never lose the loop
         logger.exception("[chat_turns] turn failed for chat %s", chat_id)
         await queue.put(error_frame(str(exc) or exc.__class__.__name__))
+    except BaseException as exc:  # noqa: BLE001 — GeneratorExit / exit signals: say so, then let it go
+        logger.error(
+            "[chat_turns] turn aborted by %s for chat %s after %d chunks",
+            exc.__class__.__name__, chat_id, chunks, exc_info=True,
+        )
+        raise
     finally:
         # Release the producer's resources (its DB session) now, not at GC time.
         try:
             await source.aclose()
-        except Exception:  # noqa: BLE001 — already finished or failed; nothing to hold
-            pass
+        except Exception:  # noqa: BLE001 — a close that fails leaves the DB session open: say so
+            logger.warning("[chat_turns] producer aclose failed for chat %s", chat_id, exc_info=True)
     return outcome
+
+
+async def _watch_cancel(chat_id: str, registry: TurnRegistry, producer: asyncio.Task) -> None:
+    """Poll the cross-process cancel marker OFF the delivery path and cancel
+    the producer when it appears. Each poll is bounded (``_redis_call``); the
+    producer never waits for one."""
+    while True:
+        await asyncio.sleep(CANCEL_POLL_S)
+        if await registry.cancel_requested(chat_id):
+            logger.info("[chat_turns] cancel marker seen for chat %s — cancelling the turn", chat_id)
+            producer.cancel()
+            return
 
 
 async def _run_producer(
@@ -213,13 +255,20 @@ async def _run_producer(
     registry: TurnRegistry,
 ) -> None:
     task = asyncio.current_task()
+    watcher: Optional[asyncio.Task] = None
     if task is not None:
         registry.attach(chat_id, task)
+        if registry._client() is not None:
+            watcher = asyncio.create_task(
+                _watch_cancel(chat_id, registry, task), name=f"chat-turn-cancel-watch:{chat_id}"
+            )
     await registry.mark_inflight(chat_id)
     outcome = {"completed": False, "cancelled": True}
     try:
         outcome = await _produce_into(queue, chat_id=chat_id, produce=produce, registry=registry)
     finally:
+        if watcher is not None:
+            watcher.cancel()
         await queue.put(_DONE)
         if task is not None:
             registry.detach(chat_id, task)
@@ -233,6 +282,22 @@ async def _run_producer(
                 )
             except Exception:  # noqa: BLE001 — the hook is an optimisation
                 logger.debug("[chat_turns] on_complete failed for chat %s", chat_id, exc_info=True)
+
+
+def _log_task_outcome(task: "asyncio.Task") -> None:
+    """The producer task's ending, whatever it was — a turn that vanishes
+    without a line here is the bug, not a quiet success."""
+    if task.cancelled():
+        logger.info("[chat_turns] producer task %s ended cancelled", task.get_name())
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "[chat_turns] producer task %s died with %s: %s",
+            task.get_name(), exc.__class__.__name__, exc, exc_info=exc,
+        )
+    else:
+        logger.debug("[chat_turns] producer task %s finished", task.get_name())
 
 
 async def run_detached_turn(
@@ -252,7 +317,7 @@ async def run_detached_turn(
     reg = registry or get_turn_registry()
     queue: "asyncio.Queue" = asyncio.Queue()
     client_gone = asyncio.Event()
-    asyncio.create_task(
+    task = asyncio.create_task(
         _run_producer(
             queue,
             chat_id=chat_id,
@@ -263,6 +328,8 @@ async def run_detached_turn(
         ),
         name=f"chat-turn:{chat_id}",
     )
+    task.add_done_callback(_log_task_outcome)
+    logger.info("[chat_turns] turn started for chat %s", chat_id)
     finished = False
     try:
         while True:

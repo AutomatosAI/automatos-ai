@@ -83,7 +83,7 @@ Composio, if you add a key).
 | Service | Container | Image / build | Host port (variable) | What it does |
 |---|---|---|---|---|
 | `postgres` | `automatos_postgres` | `pgvector/pgvector:pg16` | 5432 (`POSTGRES_PORT`) | Relational data and the pgvector chunk store the local RAG leg searches (`S3_VECTORS_ENABLED=false`). |
-| `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. |
+| `redis` | `automatos_redis` | `redis:7-alpine` | 6379 (`REDIS_PORT`) | Cache, pub/sub, queues. `FLUSHDB`, `FLUSHALL` and `DEBUG` are disabled; 256 MB `allkeys-lru`. Compose sets the backend's `REDIS_URL` to this service, so a `REDIS_URL` for a hosted Redis in `orchestrator/.env` is not picked up inside the container. |
 | `minio` | `automatos_minio` | `minio/minio` | 9000 API (`MINIO_PORT`), 9001 console (`MINIO_CONSOLE_PORT`) | S3-compatible object store for documents, generated outputs, plugin packages and images. |
 | `minio-init` | `automatos_minio_init` | `minio/mc` | — | One-shot: creates the documents bucket (`S3_DOCUMENTS_BUCKET`, default `automatos-ai`) and exits. |
 | `backend` | `automatos_backend` | built from `./orchestrator` (`development` target) | 8000 (`API_PORT`) | The FastAPI API. Source is bind-mounted and served by `uvicorn --reload`. |
