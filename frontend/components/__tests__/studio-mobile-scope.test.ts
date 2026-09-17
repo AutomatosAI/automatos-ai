@@ -170,6 +170,18 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
     expect(css.slice(0, OPENS)).toMatch(/flex-shrink: 0/)
   })
 
+  it('Agents · Deliverables · Tools: the toolbar wraps, nothing overflows (US-005)', () => {
+    const p = phone()
+    expect(p).toContain('.cc-toolbar .cc-search { flex-basis: 100%; }')
+    expect(p).toContain('.cc-toolbar > *:not(.cc-search)')
+    // The rest of these pages' compact form is US-002's rules on the same
+    // families — the gutter, the matched tab bleed and `.cc-stats` 2-up —
+    // and their card grids are already one column below Tailwind's `md`.
+    expect(p).toContain('.cc-page { padding: 16px 16px 0')
+    expect(read('components/agents/agent-roster.tsx')).toContain('grid-cols-1 md:grid-cols-2')
+    expect(read('components/tools/tools-dashboard.tsx')).toContain('grid-cols-1 md:grid-cols-2')
+  })
+
   it('the tab-strip behaviour is one hook, not a copy per surface', () => {
     const hook = read('hooks/use-tab-strip-scroll.ts')
     expect(hook).toContain('useIsTabletOrBelow')
@@ -177,6 +189,8 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
     for (const f of [
       'components/command-center/command-center-shell.tsx',
       'components/assignments/studio/assignments-hub.tsx',
+      'components/agents/studio/agent-management-studio.tsx',
+      'components/deliverables/studio/deliverables-studio.tsx',
     ]) expect(read(f), f).toContain('useTabStripScroll')
   })
 })

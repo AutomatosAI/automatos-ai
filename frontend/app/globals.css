@@ -3108,6 +3108,18 @@
     :is(.studio, .cc-page) .mis-row > span:not([class]),
     :is(.studio, .cc-page) .mis-row .num { display: none; }
     :is(.studio, .cc-page) .mis-row .nm { white-space: normal; }
+
+    /* ── Agents · Deliverables · Tools · US-005 ────────────────────────
+       The toolbar already wraps; on a phone the search takes the whole
+       first line (`flex-1` gives it a 0% basis, so it would otherwise be
+       squeezed between the clusters) and the pill and segmented groups
+       follow beneath it, each able to grow into the space. The `.cc-stats`
+       strips on these pages are covered by the 2-up rule above, and their
+       card grids are Tailwind `grid-cols-1 md:…` — already one column below
+       768, so nothing is duplicated here. */
+    :is(.studio, .cc-page) .cc-toolbar .cc-search { flex-basis: 100%; }
+    :is(.studio, .cc-page) .cc-toolbar > *:not(.cc-search) { flex-grow: 1; }
+    :is(.studio, .cc-page) .cc-toolbar .cc-seg { justify-content: center; }
   }
 
   /* ─── end of the compact region · a new surface is appended above ──── */

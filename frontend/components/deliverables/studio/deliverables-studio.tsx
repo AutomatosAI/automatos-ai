@@ -16,6 +16,7 @@ import { useWorkspace } from '@/components/workspace-provider'
 import { DEFAULT_FILTERS, FEED_DEFAULT_FILTERS, type FilterState } from '@/hooks/use-deliverables-api'
 import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
 import { DELIVERABLE_TABS, type DeliverableTab } from '@/lib/deliverables/tabs'
+import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 
 const TAB_LABELS: Record<DeliverableTab, string> = {
   outputs: 'Outputs',
@@ -35,6 +36,8 @@ export function DeliverablesStudio() {
   const router = useRouter()
 
   const tab = resolveTab(searchParams?.get('tab') ?? null)
+  // The same strip behaviour as the Command Centre and the hub — one hook.
+  const tabStrip = useTabStripScroll(tab)
   const artifactTypeParam = searchParams?.get('artifact_type') ?? null
 
   const drilldownTitle = useMemo(
@@ -73,7 +76,7 @@ export function DeliverablesStudio() {
         </div>
       </div>
 
-      <nav className="cc-tabs" aria-label="Deliverables sections">
+      <nav className="cc-tabs" aria-label="Deliverables sections" ref={tabStrip}>
         {DELIVERABLE_TABS.map((key) => (
           <button
             key={key}

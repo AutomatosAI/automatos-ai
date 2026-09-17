@@ -709,7 +709,7 @@ export function ToolsDashboard({ variant = 'classic' }: ToolsDashboardProps = {}
         </div>
 
         <div className="cc-toolbar">
-          <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search tools…" loading={toolsFetching} className="flex-1" />
+          <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search tools…" loading={toolsFetching} className="flex-1 cc-search" />
           <div className="cc-seg" role="group" aria-label="Sort">
             <button type="button" className={sortBy === 'name' ? 'on' : ''} onClick={() => setSortBy('name')}>Name</button>
             <button type="button" className={sortBy === 'updated' ? 'on' : ''} onClick={() => setSortBy('updated')}>Updated</button>
