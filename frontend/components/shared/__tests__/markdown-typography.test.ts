@@ -61,7 +61,8 @@ describe('Markdown typography', () => {
       const src = read(rel)
       expect(src, rel).toContain('<MarkdownView')
       expect(src, rel).toContain("from '@/components/shared/markdown-view'")
-      expect(src.match(/className="[^"]*\bprose\b/), rel).toBeNull()
+      // `not-prose` would also match a naive \bprose\b — require a real class start.
+      expect(src.match(/className="[^"]*(?<![-\w])prose[\s"-]/), rel).toBeNull()
     }
   })
 

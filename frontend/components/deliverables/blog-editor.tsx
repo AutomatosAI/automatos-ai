@@ -478,7 +478,7 @@ export function BlogEditor({ postId, onClose }: BlogEditorProps) {
             <div className="mt-1 glass-card p-4 min-h-[400px] overflow-y-auto prose prose-sm dark:prose-invert max-w-none">
               {title && <h1 className="text-lg font-bold mb-2">{title}</h1>}
               {tags.length > 0 && (
-                <div className="flex gap-1 mb-3 not-prose">
+                <div className="flex gap-1 mb-3">
                   {tags.map((tag) => (
                     <Badge key={tag} variant="secondary" className="text-[10px]">
                       {tag}
