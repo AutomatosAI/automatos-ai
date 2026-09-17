@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import path from 'path'
 
 // PRD-154 S10 — honest pilot surfaces (BINDING D10). The studio chrome shipped
@@ -34,8 +34,16 @@ describe('S10 studio chrome — no fabricated metrics', () => {
     expect(readFileSync(path.join(ROOT, 'app/globals.css'), 'utf8')).not.toContain('.sh-tabs')
   })
 
-  it('renders tabs without a count badge', () => {
-    const src = readFileSync(path.join(ROOT, 'components/layout/studio-page-tabs.tsx'), 'utf8')
-    expect(src).not.toContain('sh-tab-ct')
+  it('no Studio component renders the retired sub-nav count badge', () => {
+    // The strip that carried fabricated counts is deleted (W5b); nothing may
+    // resurrect its badge class under another name.
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((f) => {
+        const full = path.join(dir, f)
+        if (statSync(full).isDirectory()) return f === '__tests__' ? [] : walk(full)
+        return f.endsWith('.tsx') ? [full] : []
+      })
+    const offenders = walk(path.join(ROOT, 'components')).filter((f) => readFileSync(f, 'utf8').includes('sh-tab-ct'))
+    expect(offenders).toEqual([])
   })
 })
