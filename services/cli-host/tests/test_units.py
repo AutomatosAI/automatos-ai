@@ -218,8 +218,16 @@ def test_system_prompt_is_stable_per_agent():
     assert a == b and "never push" in a
     # PRD-245 S0.6: the session is told what it can reach and how to ask — in words
     # that never change per ticket.
-    assert "held for the operator" in a and "composio_execute" in a and "platform_*" in a
-    assert "state it in your final message and end the turn" in a
+    assert "held for the operator" in a
+    # The rules POINT at the tool list the backend renders; they must not carry a
+    # competing list of their own. W0 named composio_execute and search_knowledge
+    # as unavailable, and W1/W3 then made them available — leaving the session's
+    # last instruction contradicting the list two paragraphs above it.
+    assert "that list is the truth" in a
+    assert "composio_execute" not in a and "search_knowledge" not in a
+    # Asking: the tool when there is one, the final message when there is not.
+    assert "ask_human" in a and "state the question in your final message" in a
+    assert "never wait for an answer inside the session" in a.lower()
     assert "#1" not in a and "#2" not in a
 
 
@@ -886,3 +894,60 @@ def test_the_session_token_never_reaches_a_command_line():
     session.assert_secret_not_in_args(["claude"], None)       # nothing offered, nothing to check
     with pytest.raises(RuntimeError):
         session.assert_secret_not_in_args(["claude", "--header", "Authorization: Bearer tok-secret"], "tok-secret")
+
+
+# ── PRD-245 W1: the claim's bridge keys, read the way the host really reads them ──
+
+def _bridge_session(tmp_path, ticket, url="http://127.0.0.1:8000"):
+    from automatos_cli_host.session import Session
+
+    cfg = type("Cfg", (), {"ask_timeout": 1.0, "sessions_dir": tmp_path,
+                           "socket_path": tmp_path / "s.sock", "url": url})()
+    return Session({"task_id": 71, "attempt": 1, "session_id": "sid", **ticket},
+                   cfg, [str(tmp_path)], tmp_path / "s.sock", default_root=str(tmp_path))
+
+
+CLAIM_BRIDGE_TICKET = {
+    "session_tools": ["board_summary", "submit_report"],
+    "session_tools_path": "/api/v1/session-tools/mcp",
+    "session_token": "tok-abc",
+}
+
+
+def test_session_tools_reads_the_claim_the_backend_actually_sends(tmp_path):
+    """The one place the host and the backend have to agree on three key names.
+
+    Every other test builds ``LaunchContext(session_tools={...})`` by hand, so a
+    rename on either side of the wire leaves both suites green and every session
+    silently tool-less — no MCP config written, no error logged, the agent simply
+    told it has tools it cannot see. The spelling has already moved once: the PRD
+    said ``session_tools_url``, the build ships ``session_tools_path``.
+    """
+    s = _bridge_session(tmp_path, CLAIM_BRIDGE_TICKET)
+    tools = s._session_tools()
+    assert tools == {
+        "names": ["board_summary", "submit_report"],
+        "url": "http://127.0.0.1:8000/api/v1/session-tools/mcp",
+        "token": "tok-abc",
+    }
+
+
+def test_session_tools_is_none_when_any_piece_is_missing(tmp_path):
+    """An older backend offers none of it; a half-offer is never a bridge."""
+    assert _bridge_session(tmp_path, {})._session_tools() is None
+    for drop in CLAIM_BRIDGE_TICKET:
+        partial = {k: v for k, v in CLAIM_BRIDGE_TICKET.items() if k != drop}
+        assert _bridge_session(tmp_path, partial)._session_tools() is None, f"offered a bridge without {drop}"
+    # an empty tool list is not an offer either
+    assert _bridge_session(tmp_path, {**CLAIM_BRIDGE_TICKET, "session_tools": []})._session_tools() is None
+
+
+def test_session_tools_needs_a_backend_address_this_host_knows(tmp_path):
+    """The claim carries a PATH on purpose — a container cannot know the address
+    the operator's machine must dial. No address here, no bridge."""
+    assert _bridge_session(tmp_path, CLAIM_BRIDGE_TICKET, url="")._session_tools() is None
+
+
+def test_session_tools_url_joins_without_a_double_slash(tmp_path):
+    s = _bridge_session(tmp_path, CLAIM_BRIDGE_TICKET, url="http://127.0.0.1:8000/")
+    assert s._session_tools()["url"] == "http://127.0.0.1:8000/api/v1/session-tools/mcp"

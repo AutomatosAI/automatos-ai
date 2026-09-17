@@ -35,6 +35,7 @@ from services.session_denials import (  # noqa: E402
     HOLD_REASON_MARKERS,
     PROMPT_STAGE,
     READ_OUTSIDE_MARKER,
+    REFUSED_REASON_MARKERS,
     UNKNOWN_TOOL_MARKER,
     classify_denial,
     forces_review,
@@ -177,6 +178,47 @@ def test_classification_reads_the_hosts_wording_in_order():
     assert classify_denial("PreToolUse", "cat outside the session directory — denied by the operator") == "hold"
 
 
+# The exact wordings the gate produces for an outright refusal. Real strings,
+# not paraphrases — this is the join between two packages.
+TRAVERSAL = {"tool": "Bash", "stage": "PreToolUse", "subject": 'echo "see ../docs"',
+             "reason": "path traversal ('..') in a shell command"}
+NEVER_ALLOWED = {"tool": "Bash", "stage": "PreToolUse", "subject": "git push",
+                 "reason": "never allowed in a session: 'git push' (sessions do not push or escalate)"}
+WRONG_TOOL_NAME = {"tool": "mcp__automatos__platform_submit_report", "stage": "PreToolUse", "subject": "",
+                   "reason": "Automatos tool 'platform_submit_report' is not one this ticket may call "
+                             "(board_summary, list_tasks, update_ticket, submit_report)"}
+
+
+def test_an_outright_refusal_is_not_a_hold():
+    """Nobody was asked, so nobody failed to answer.
+
+    Each of these used to fall through to ``other``, which fails closed — so a
+    session that merely wrote ``..`` inside a quoted string, or reached for an
+    Automatos tool under the name its own skill uses, sent the ticket to review
+    with nothing for a human to act on. Sessions start one directory above the
+    repos, so ``..`` is exactly what an agent types.
+    """
+    for denial in (TRAVERSAL, NEVER_ALLOWED, WRONG_TOOL_NAME):
+        assert classify_denial(denial["stage"], denial["reason"]) == "refused", denial["reason"]
+    assert classify_denial("PreToolUse", "sed reads its program from a file the gate cannot judge") == "refused"
+    assert classify_denial("PreToolUse", "awk program runs a command of its own: 'system(\"id\")'") == "refused"
+    assert classify_denial("PreToolUse", "redirection outside the session directory: /etc/x") == "refused"
+
+
+def test_refusals_do_not_send_the_ticket_to_review(monkeypatch):
+    task = _ticket()
+    status, forced = _land(monkeypatch, task, [TRAVERSAL, NEVER_ALLOWED, WRONG_TOOL_NAME])
+    assert forced is False and status == "done"
+    assert [d["kind"] for d in task.runtime_ref["permission_denials"]] == ["refused", "refused", "refused"]
+    assert task.runtime_ref["denials"] == 3     # recorded in the report, not blamed for review
+
+
+def test_a_hold_still_wins_over_a_refusal_in_the_same_run(monkeypatch):
+    task = _ticket()
+    status, forced = _land(monkeypatch, task, [TRAVERSAL, HOLD])
+    assert forced is True and status == "review"
+
+
 def test_the_verdict_and_the_grouping_are_pure():
     assert forces_review([{"kind": "read_outside"}, {"kind": "prompt"}, {"kind": "unknown_tool"}]) is False
     assert forces_review([{"kind": "read_outside"}, {"kind": "hold"}]) is True
@@ -198,3 +240,8 @@ def test_markers_are_still_what_the_host_says():
     assert f'"{PROMPT_STAGE}"' in session_py
     assert READ_OUTSIDE_MARKER in policy_py, "policy.py no longer uses the Read tool's wording for a path outside the roots"
     assert UNKNOWN_TOOL_MARKER in policy_py
+    for marker in REFUSED_REASON_MARKERS:
+        assert marker in policy_py, (
+            f"policy.py no longer says {marker!r} — a refusal it does not match falls through to "
+            "'other', which fails closed and sends the ticket to review with nothing to act on"
+        )

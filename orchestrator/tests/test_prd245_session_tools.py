@@ -284,3 +284,197 @@ def test_the_tool_name_the_model_sees_stays_short_and_plain():
     for name in st.tool_names():
         wire = f"mcp__automatos__{name}"
         assert wire.replace("_", "").isalnum() and len(wire) <= 64, wire
+
+
+# ---------------------------------------------------------------------------
+# The endpoint module itself: the bearer, the 401 shape, the per-ticket cap.
+# Pure — no client, no database, no router mounted.
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+import api.session_tools as api_st  # noqa: E402
+
+
+class _Req:
+    def __init__(self, **headers):
+        self.headers = {k.replace("_", "-"): v for k, v in headers.items()}
+
+
+class _CountingDb:
+    def __init__(self, fail=False):
+        self.commits = 0
+        self.fail = fail
+
+    def commit(self):
+        if self.fail:
+            raise RuntimeError("bookkeeping is down")
+        self.commits += 1
+
+
+def test_the_bearer_is_read_from_either_header_and_trimmed():
+    assert api_st.bearer_token(_Req(Authorization="Bearer tok-1")) == "tok-1"
+    assert api_st.bearer_token(_Req(Authorization="bearer  tok-2 ")) == "tok-2"   # case + padding
+    assert api_st.bearer_token(_Req(**{"X-Session-Token": " tok-3 "})) == "tok-3"
+    assert api_st.bearer_token(_Req()) == ""
+    # a scheme we do not speak is not a token
+    assert api_st.bearer_token(_Req(Authorization="Basic tok-4")) == ""
+
+
+def test_a_refused_token_401s_without_a_challenge(monkeypatch):
+    """No ``WWW-Authenticate``: that header is what starts a client's OAuth
+    discovery, and this endpoint has none. With one, the operator would watch the
+    CLI try a browser flow instead of reporting a dead token."""
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(api_st, "_require_cli_runtime", lambda: None)
+    monkeypatch.setattr(api_st.svc, "resolve_session_token", lambda db, token: None)
+
+    with pytest.raises(HTTPException) as caught:
+        _run(api_st.require_session(_Req(Authorization="Bearer nope"), db=None))
+    assert caught.value.status_code == 401
+    assert not (caught.value.headers or {})
+
+
+def test_require_session_builds_the_identity_from_the_ticket_not_the_call(monkeypatch):
+    task = SimpleNamespace(id=119, assigned_agent_id=268, workspace_id="ws-c1", runtime_ref={})
+    agent = SimpleNamespace(name="TRACKER")
+    monkeypatch.setattr(api_st, "_require_cli_runtime", lambda: None)
+    monkeypatch.setattr(api_st.svc, "resolve_session_token", lambda db, token: (task, agent))
+
+    resolved_task, ctx = _run(api_st.require_session(_Req(Authorization="Bearer t"), db=None))
+    assert resolved_task is task
+    assert (ctx.task_id, ctx.agent_id, ctx.agent_name, ctx.workspace_id) == (119, 268, "TRACKER", "ws-c1")
+
+
+def test_the_allowance_counts_on_the_ticket_and_refuses_in_words(monkeypatch):
+    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 3)
+    task = SimpleNamespace(id=119, runtime_ref={})
+    db = _CountingDb()
+
+    assert api_st.call_allowance(db, task) is None                    # 1
+    assert api_st.call_allowance(db, task) is None                    # 2
+    assert api_st.call_allowance(db, task) is None                    # 3 — the cap itself passes
+    assert task.runtime_ref[api_st.CALLS_KEY] == 3
+    refusal = api_st.call_allowance(db, task)                         # 4 — over
+    assert refusal and "3" in refusal
+    # the model has to be able to act on it: what happened, and what to do now
+    assert "finish your turn" in refusal
+    assert task.runtime_ref[api_st.CALLS_KEY] == 4
+    assert db.commits == 4
+
+
+def test_the_allowance_rebuilds_the_ref_rather_than_mutating_it(monkeypatch):
+    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 10)
+    original = {"runtime": "cli", "session_id": "s-119"}
+    task = SimpleNamespace(id=119, runtime_ref=original)
+    api_st.call_allowance(_CountingDb(), task)
+    assert original == {"runtime": "cli", "session_id": "s-119"}      # untouched
+    assert task.runtime_ref[api_st.CALLS_KEY] == 1
+    assert task.runtime_ref["session_id"] == "s-119"                  # nothing else lost
+
+
+def test_a_broken_counter_never_refuses_the_call(monkeypatch):
+    """Fail-open on purpose: bookkeeping must not be the reason a ticket cannot
+    work. A cap of zero is 'no cap', not 'no calls'."""
+    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 1)
+    assert api_st.call_allowance(_CountingDb(fail=True), SimpleNamespace(id=1, runtime_ref={})) is None
+
+    monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 0)
+    task = SimpleNamespace(id=1, runtime_ref={})
+    for _ in range(50):
+        assert api_st.call_allowance(_CountingDb(), task) is None
+
+
+# ---------------------------------------------------------------------------
+# What a session gets back, and what it cannot get back (review findings)
+# ---------------------------------------------------------------------------
+
+def test_list_tasks_returns_only_the_fields_it_advertises():
+    """The board action hands back every field of every ticket in the workspace,
+    including each one's full description — operator-written text that routinely
+    carries paths, hostnames and pasted credentials. One call would put every
+    other ticket's brief in front of a session an injected page may be steering.
+    """
+    raw = {
+        "success": True,
+        "result": {"total": 2, "tasks": [
+            {"id": 1, "title": "A", "status": "todo", "priority": "high",
+             "assigned_agent_id": 7, "assigned_agent_name": "OPS",
+             "description": "ssh deploy@10.0.0.4 — password hunter2", "error_message": "boom at /srv/app"},
+            {"id": 2, "title": "B", "status": "done", "priority": "low",
+             "assigned_agent_id": None, "assigned_agent_name": None,
+             "description": "internal notes", "error_message": None},
+        ]},
+    }
+    out = st._project_list_tasks(raw)
+    tasks = out["result"]["tasks"]
+    assert out["result"]["total"] == 2                      # the envelope survives
+    assert [t["id"] for t in tasks] == [1, 2]
+    assert [t["title"] for t in tasks] == ["A", "B"]
+    for task in tasks:
+        assert set(task) <= set(st.LIST_TASKS_FIELDS)
+        assert "description" not in task and "error_message" not in task
+    dumped = json.dumps(out)
+    assert "hunter2" not in dumped and "10.0.0.4" not in dumped and "/srv/app" not in dumped
+
+
+def test_a_failure_is_only_projected_when_it_succeeded():
+    failure = {"success": False, "error": "no"}
+    assert st._project_list_tasks(failure) is failure
+
+
+def test_only_the_advertised_progress_status_is_accepted():
+    """A session that set its ticket to blocked or review used to throw away its
+    OWN turn: apply_result returns early for a ticket that is not in_progress, so
+    the deliverables, the report, the result text and the usage were all lost."""
+    assert st.SESSION_TICKET_STATUSES == ("in_progress",)
+    for refused in ("blocked", "review", "done", "failed", "cancelled", "assigned"):
+        with pytest.raises(st.SessionToolRefused) as caught:
+            st.resolve_parameters(st.get_tool("update_ticket"), {"status": refused}, CTX)
+        assert "ask_human" in str(caught.value)              # where a stuck session should go
+
+
+def test_a_ticket_with_no_agent_runs_no_tools():
+    """agent_id 0 is not a harmless placeholder: for composio_execute an agent
+    with no explicit assignments inherits every app the workspace has connected."""
+    orphan = st.SessionContext(task_id=119, agent_id=None, agent_name=None, workspace_id="ws-c1")
+    with pytest.raises(st.SessionToolRefused):
+        _run(st.call_tool(None, st.get_tool("board_summary"), {}, orphan))
+
+
+def test_an_internal_fault_is_not_explained_to_the_session():
+    """A catch-all executor sets ``error`` to ``str(exc)``. A refusal we wrote is
+    for the model to act on; a driver traceback is not."""
+    leaky = rpc.render_result({"success": False, "error":
+        'psycopg2.errors.UndefinedColumn: column board_tasks.foo does not exist\nSQL: SELECT ...'})
+    body = leaky["content"][0]["text"]
+    assert leaky["isError"] is True
+    assert "psycopg2" not in body and "SELECT" not in body
+    assert "carry on with what you can do" in body
+    # a refusal we wrote still reaches the model verbatim
+    ours = rpc.render_result({"success": False, "error": "GOOGLECALENDAR is not connected in this workspace"})
+    assert "GOOGLECALENDAR is not connected in this workspace" in ours["content"][0]["text"]
+
+
+def test_a_batch_is_bounded_and_an_unknown_name_still_costs_a_call():
+    charged = []
+
+    async def _call(tool, params, ctx):
+        return {"success": True, "result": {}}
+
+    over = [{"jsonrpc": "2.0", "id": i, "method": "ping"} for i in range(rpc.MAX_BATCH_MESSAGES + 1)]
+    reply = _run(rpc.handle_payload(over, CTX, server_version="1", call=_call))
+    assert reply["error"]["code"] == rpc.INVALID_REQUEST
+    assert str(rpc.MAX_BATCH_MESSAGES) in reply["error"]["message"]
+
+    # exactly at the cap is fine
+    ok = [{"jsonrpc": "2.0", "id": i, "method": "ping"} for i in range(rpc.MAX_BATCH_MESSAGES)]
+    assert len(_run(rpc.handle_payload(ok, CTX, server_version="1", call=_call))) == rpc.MAX_BATCH_MESSAGES
+
+    # an unknown tool name is charged before it is judged — otherwise the
+    # allowance is avoidable by calling a name that does not exist.
+    _run(rpc.handle_message(
+        {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "nope", "arguments": {}}},
+        CTX, server_version="1", call=_call, on_call=lambda name: charged.append(name) or None))
+    assert charged == ["nope"]

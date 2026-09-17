@@ -112,11 +112,13 @@ SESSION_RULES = (
     "reply with a concise summary of what changed, what you verified, and anything left open.\n"
     "Tools in this session: file tools work only inside the working folder and the ticket "
     "folder; Bash runs an allowlist of read, build and test verbs, and anything else is held "
-    "for the operator; the platform tools named in your skills (composio_execute, platform_*, "
-    "search_knowledge, scratchpad_*, workspace_*) are not available in a session unless the "
-    "ticket says otherwise — do not call them and do not wait for them.\n"
-    "To ask a question: state it in your final message and end the turn; never wait for an "
-    "answer inside the session.\n"
+    "for the operator. The Automatos tools you have are listed earlier in this prompt, under "
+    "\"Tools in this session\" — that list is the truth, and it is the only place to read it. "
+    "A platform tool your skills name that is NOT on that list does not exist here: do not call "
+    "it and do not wait for it.\n"
+    "To ask a question: use the ask_human tool if you have it — your ticket parks when your turn "
+    "ends and picks up again with the answer. Without it, state the question in your final "
+    "message and end the turn. Never wait for an answer inside the session.\n"
 )
 
 
@@ -151,6 +153,10 @@ def build_ticket_file(ticket: Dict[str, Any], default_root: Optional[str] = None
 
 # What the host itself writes into a session folder — never a deliverable.
 HOST_OWNED_SESSION_FILES = frozenset({"ticket.md", "settings.json", "system_prompt.md", TERMINAL_LOG_FILENAME, "mcp.json"})
+# The subset that holds this ticket's own credential in PLAINTEXT. Removed the
+# moment the turn ends — the row's copy is revoked there too, but a file is what
+# gets read later, and every finished ticket used to leave one behind.
+CREDENTIAL_SESSION_FILES = ("mcp.json",)
 # A host-owned file is excluded by CONTENT as well as by name: a session can read
 # one and write it back under another name, and from Wave 1 one of them carries
 # the ticket's own credential. Only small files are compared (the terminal log is
@@ -507,10 +513,23 @@ class Session:
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
 
         session_tools = self._session_tools()
+        # The ticket file NAMES a deliverables folder, so the session has to be
+        # able to write there. For a folder-less ticket that folder IS the cwd,
+        # but a ticket with its own working directory runs somewhere else — and
+        # the instruction would then point at a path the gate refuses, which is
+        # an instruction that cannot be followed. Named and writable, or neither.
+        deliverables = session_deliverables_dir(self.default_root, str(self.task_id))
+        extra_dirs = (session_dir,)
+        if deliverables is not None and deliverables.resolve() != cwd.resolve():
+            try:
+                deliverables.mkdir(parents=True, exist_ok=True, mode=0o755)
+            except OSError as exc:
+                log.warning("deliverables folder %s not created: %s", deliverables, exc)
+            extra_dirs = (*extra_dirs, deliverables)
         self._policy = PolicyContext(
             cwd=cwd,
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
-            extra_dirs=(session_dir,),
+            extra_dirs=extra_dirs,
             session_tools=tuple(session_tools.get("names") or ()) if session_tools else (),
         )
 
@@ -666,8 +685,28 @@ class Session:
             code = self.proc.returncode if self.proc else None
             status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
         files = [*self.files_touched, *self._land_deliverables(cwd)]
+        self._shred_session_credentials()
         return self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
                              files_touched=files)
+
+    def _shred_session_credentials(self) -> None:
+        """The turn is over: delete the files holding this ticket's token.
+
+        The backend kills the credential on the row, but the PLAINTEXT is what
+        an attacker copies, and it sat in the session folder indefinitely —
+        every finished ticket leaving one more readable token behind. Deleting
+        it costs nothing: the config is rewritten from the claim on every spawn,
+        so a resume gets a fresh file with a fresh token.
+        """
+        if self.session_dir is None:
+            return
+        for name in CREDENTIAL_SESSION_FILES:
+            try:
+                (self.session_dir / name).unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                log.warning("could not remove %s for task %s: %s", name, self.task_id, exc)
 
     def _land_deliverables(self, cwd: Path) -> List[str]:
         """PRD-245 S0.7: what the session wrote in its own folder is copied into the

@@ -57,12 +57,23 @@ SESSION_TOKEN_HASH_KEY = "session_token_sha256"
 SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
 # What of an ask we keep ON the ticket (the grant row is the record; this is the
 # fold-in for the next session's prompt, and it rides a JSONB column).
+# How many questions ONE ticket may raise across its whole life. Each one is a
+# card, a bell and a Telegram message addressed to the operator.
+MAX_ASKS_PER_TICKET = 6
 MAX_ASK_QUESTION_KEPT = 1000
 MAX_ASK_ANSWER_KEPT = 2000
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _aware(dt: Optional[datetime]) -> Optional[datetime]:
+    """A stored datetime as UTC-aware. SQLite (and some drivers) hand back naive
+    values for a timezone-aware column; comparing those to ``_now()`` raises."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -80,12 +91,34 @@ def clear_session_token(ref: Dict[str, Any]) -> None:
     ref.pop(SESSION_TOKEN_HASH_KEY, None)
 
 
+def revoke_session_token(db: Session, task: Any) -> bool:
+    """Kill this ticket's session credential on the row, now. True iff one was there.
+
+    Called from EVERY path that ends a ticket's run — the two early returns in
+    ``apply_result``, cancel, and the sweeper's requeue — not only the orderly
+    finish. ``in_progress`` alone is not enough to keep a token safe: a ticket
+    that stops being ``in_progress`` can become ``in_progress`` again without a
+    new claim (a board drag, a status PATCH, a heartbeat re-attach), and the
+    plaintext is still in the session's transcript and its ``mcp.json``. The row
+    is the only place the credential can be destroyed.
+    """
+    ref = dict(getattr(task, "runtime_ref", None) or {})
+    if SESSION_TOKEN_HASH_KEY not in ref:
+        return False
+    clear_session_token(ref)
+    task.runtime_ref = ref
+    return True
+
+
 def resolve_session_token(db: Session, token: Optional[str]) -> Optional[Tuple[BoardTask, Optional[Agent]]]:
     """The ticket and agent a session token belongs to, or ``None``.
 
-    The ticket must still be ``in_progress``: a token from a finished, cancelled
-    or requeued ticket resolves to nothing even if its hash is still on the row,
-    so state — not only cleanup — decides.
+    The ticket must still be ``in_progress`` AND hold a live lease. Status alone
+    is not a session: a ticket can return to ``in_progress`` without a claim — a
+    board drag, a status PATCH, a heartbeat re-attach — and that must not revive
+    a credential whose plaintext is sitting in an old transcript. Only a claim
+    sets a lease, and the host renews it on every event flush, so a running
+    session always has one and nothing else does.
     """
     if not token or not str(token).strip():
         return None
@@ -95,6 +128,8 @@ def resolve_session_token(db: Session, token: Optional[str]) -> Optional[Tuple[B
             db.query(BoardTask)
             .filter(
                 BoardTask.status == "in_progress",
+                BoardTask.lease_until.isnot(None),
+                BoardTask.lease_until > _now(),
                 BoardTask.runtime_ref[SESSION_TOKEN_HASH_KEY].astext == digest,
             )
             .first()
@@ -114,10 +149,17 @@ def _scan_for_session_token(db: Session, digest: str) -> Optional[BoardTask]:
         rows = db.query(BoardTask).filter(BoardTask.status == "in_progress").all()
     except Exception:  # noqa: BLE001
         return None
+    now = _now()
     for task in rows or []:
         ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
-        if secrets.compare_digest(str(ref.get(SESSION_TOKEN_HASH_KEY) or ""), digest):
-            return task
+        if not secrets.compare_digest(str(ref.get(SESSION_TOKEN_HASH_KEY) or ""), digest):
+            continue
+        # The same live-lease rule the indexed query applies — a fallback that
+        # answered where the query would not is a way around the rule.
+        lease = getattr(task, "lease_until", None)
+        if lease is None or _aware(lease) <= now:
+            return None
+        return task
     return None
 
 
@@ -1156,6 +1198,24 @@ async def raise_session_ask(
     )
     if task is None:
         return {"success": False, "error": f"ticket #{task_id} is not in this workspace"}
+
+    # One open question at a time, and a hard ceiling per ticket. Every ask
+    # raises a card in the Questions tab, rings the bell and sends a Telegram
+    # message with text the session chose — so "ask politely once" cannot be a
+    # prompt instruction alone. A session whose prompt has been steered would
+    # otherwise reach the operator as many times as its tool allowance allows.
+    ref = dict(task.runtime_ref or {})
+    still_open = open_session_asks(ref)
+    if still_open:
+        return {"success": False,
+                "error": "you already have a question waiting for an answer on this ticket: "
+                         f"{str(still_open[-1].get('question') or '')[:120]!r}. Finish what you can "
+                         "without it and end your turn — the answer resumes you."}
+    if len(session_asks(ref)) >= MAX_ASKS_PER_TICKET:
+        return {"success": False,
+                "error": f"this ticket has asked its {MAX_ASKS_PER_TICKET} questions. Say what you "
+                         "still need in your final message and end your turn."}
+
     try:
         staged = await stage_question(
             db, workspace_id,
@@ -1802,9 +1862,18 @@ async def apply_result(
     task = _owned_task(db, host, task_id)
     ref = dict(task.runtime_ref or {})
     attempt = payload.get("attempt")
+    # Whatever else is true, this host's run of this ticket is over, so its
+    # credential dies here — BEFORE either early return. A result that arrives
+    # for a stale attempt, or for a ticket someone already moved, used to leave
+    # the hash on the row with the plaintext still in the transcript and in
+    # ``mcp.json``; the next flip back to ``in_progress`` revived it.
     if attempt is not None and ref.get("attempt") is not None and int(attempt) != int(ref["attempt"]):
+        if revoke_session_token(db, task):
+            db.commit()
         return {"applied": False, "reason": "stale attempt", "status": task.status}
     if task.status != "in_progress":
+        if revoke_session_token(db, task):
+            db.commit()
         return {"applied": False, "reason": f"task is {task.status}", "status": task.status}
 
     status = str(payload.get("status") or "success").lower()

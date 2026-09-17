@@ -1035,6 +1035,12 @@ async def cancel_task(
         task.blocked_reason = None
     ref = dict(task.runtime_ref or {})
     ref["cancel_requested_at"] = now.isoformat()
+    # PRD-245: the run is over, so its session credential is destroyed here too.
+    # Nulling the lease above already stops it resolving; removing the hash means
+    # there is nothing left on the row to resolve, however the ticket moves next.
+    from services.cli_host_service import clear_session_token
+
+    clear_session_token(ref)
     task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
     db.commit()
     notify_board_event(

@@ -59,6 +59,10 @@ LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
 # hanging, closing or a 4xx here loses the connection before it starts.
 DISCOVERY_PROBE_METHOD = "server/discover"
 
+# The most messages one request body may carry. Real clients send one message, or
+# a small handful during discovery.
+MAX_BATCH_MESSAGES = 20
+
 # JSON-RPC 2.0
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -93,9 +97,36 @@ def render_result(result: Dict[str, Any]) -> Dict[str, Any]:
         payload = {k: v for k, v in result.items() if k not in ("success", "tool")}
         body = payload.get("result", payload) if isinstance(payload, dict) else payload
         return _text_content(json.dumps(body, indent=2, default=str) if not isinstance(body, str) else body)
-    message = str(result.get("error") or "the tool did not succeed and gave no reason")
+    message = _safe_error(result.get("error"))
     hint = result.get("hint") or result.get("detail")
     return _text_content(f"{message}\n{hint}" if hint else message, is_error=True)
+
+
+# An executor that catches everything sets ``error`` to ``str(exc)``, so a driver
+# fault or a SQL error would arrive as the tool's own explanation — read by a
+# model whose prompt an injected page may be steering, and repeated into a report
+# the operator reads. A refusal we wrote is for the model; an exception is not.
+_INTERNAL_ERROR_SIGNS = (
+    "Traceback", "psycopg", "sqlalchemy", "SQL:", "sqlstate", "asyncpg",
+    "/orchestrator/", "/site-packages/", "Error at 0x", "object at 0x",
+)
+GENERIC_TOOL_FAILURE = (
+    "that did not work on the server side. It is not something you can fix from here — "
+    "say so in your result and carry on with what you can do."
+)
+
+
+def _safe_error(raw: Any) -> str:
+    """The failure text a session may read. Anything that looks like an internal
+    fault becomes one fixed sentence; the detail is already in the backend log."""
+    message = str(raw or "").strip()
+    if not message:
+        return "the tool did not succeed and gave no reason"
+    low = message.lower()
+    if len(message) > 600 or any(sign.lower() in low for sign in _INTERNAL_ERROR_SIGNS):
+        logger.warning("[session-tools] internal failure withheld from a session: %s", message[:400])
+        return GENERIC_TOOL_FAILURE
+    return message
 
 
 def protocol_version(requested: Any) -> str:
@@ -175,14 +206,17 @@ async def _handle_tools_call(
 ) -> Dict[str, Any]:
     name = str(params.get("name") or "")
     tool = session_tools.get_tool(name)
+    # The call is charged BEFORE the name is judged. Charging only known names
+    # left the allowance trivially avoidable: an unknown name cost nothing, so a
+    # session could call the endpoint without limit and never be refused.
+    if on_call is not None:
+        refusal = on_call(tool.name if tool is not None else name)
+        if refusal:
+            return _result(rpc_id, _text_content(refusal, is_error=True))
     if tool is None:
         offered = ", ".join(session_tools.tool_names())
         return _result(rpc_id, _text_content(
             f"{name!r} is not a tool this session has. Available: {offered}.", is_error=True))
-    if on_call is not None:
-        refusal = on_call(tool.name)
-        if refusal:
-            return _result(rpc_id, _text_content(refusal, is_error=True))
     try:
         scoped = session_tools.resolve_parameters(tool, params.get("arguments"), ctx)
         result = await call(tool, scoped, ctx)
@@ -208,6 +242,14 @@ async def handle_payload(
     if isinstance(payload, list):
         if not payload:
             return _error(None, INVALID_REQUEST, "an empty batch is not a request")
+        if len(payload) > MAX_BATCH_MESSAGES:
+            # One body may be megabytes, and every tools/call in it runs a real
+            # tool and a commit. A client sends a handful of messages at a time;
+            # anything beyond that is a way to turn one request into thousands.
+            return _error(
+                None, INVALID_REQUEST,
+                f"a batch may carry at most {MAX_BATCH_MESSAGES} messages; this one has {len(payload)}",
+            )
         replies: List[Dict[str, Any]] = []
         for message in payload:
             reply = await handle_message(message, ctx, server_version=server_version, call=call, on_call=on_call)
