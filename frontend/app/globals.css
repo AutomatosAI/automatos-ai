@@ -3120,6 +3120,23 @@
     :is(.studio, .cc-page) .cc-toolbar .cc-search { flex-basis: 100%; }
     :is(.studio, .cc-page) .cc-toolbar > *:not(.cc-search) { flex-grow: 1; }
     :is(.studio, .cc-page) .cc-toolbar .cc-seg { justify-content: center; }
+
+    /* ── The framed pages, in one move · US-006 ────────────────────────
+       `PageHeader`, `StatsBar` and `FilterTabs` are the primitives that
+       converted 24/11/9 pages to Studio in PRD-244 W5d–g, so these rules
+       reach Team, Analytics, Settings and its sub-pages, Knowledge Base,
+       Marketplace and its sub-pages, mission detail and the three admin
+       surfaces at once — and the bespoke pages' hand-rolled heads with them.
+       Classic's render is a different branch of each primitive and is not
+       touched by any of this.
+
+       The head takes the whole line so its actions stack beneath it rather
+       than squeezing the title; `StatsBar`'s Studio form is `.cc-stats`,
+       already 2-up above; `FilterTabs`' strip is `.cc-tabs`, which already
+       scrolls and now carries the shared scroll-into-view hook. */
+    :is(.studio, .cc-page) .cc-headrow { flex-wrap: wrap; }
+    :is(.studio, .cc-page) .cc-headrow > .cc-head { flex-basis: 100%; }
+    :is(.studio, .cc-page) .cc-actions { flex-wrap: wrap; }
   }
 
   /* ─── end of the compact region · a new surface is appended above ──── */

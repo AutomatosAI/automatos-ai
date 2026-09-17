@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { useIsStudio } from '@/hooks/use-studio-theme'
+import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 import type { LucideIcon } from 'lucide-react'
 
 export interface FilterTab {
@@ -31,6 +32,10 @@ export function FilterTabs({
   className,
 }: FilterTabsProps) {
   const isStudio = useIsStudio()
+  // PRD-246 US-006: the Studio strip keeps its active tab visible on a
+  // compact viewport, from the one hook every Studio strip uses. The Classic
+  // branch below never attaches the ref, so its render is unaffected.
+  const tabStrip = useTabStripScroll(value)
 
   // Studio style (PRD-244 D8): the designed pages' cc-tabs strip. The Radix
   // root stays so the callers' <TabsContent> keeps showing the active panel.
@@ -38,7 +43,7 @@ export function FilterTabs({
     return (
       <Tabs value={value} onValueChange={onValueChange} className={cn('space-y-6', className)}>
         <div className="flex items-center gap-4">
-          <nav className="cc-tabs" aria-label="Sections" style={{ flex: 1, minWidth: 0 }}>
+          <nav className="cc-tabs" aria-label="Sections" style={{ flex: 1, minWidth: 0 }} ref={tabStrip}>
             {tabs.map((tab) => (
               <button
                 key={tab.value}

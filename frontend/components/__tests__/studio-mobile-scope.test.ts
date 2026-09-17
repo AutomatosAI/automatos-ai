@@ -182,6 +182,22 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
     expect(read('components/tools/tools-dashboard.tsx')).toContain('grid-cols-1 md:grid-cols-2')
   })
 
+  it('The framed pages: the head stacks its actions, in one move (US-006)', () => {
+    const p = phone()
+    expect(p).toContain(':is(.studio, .cc-page) .cc-headrow { flex-wrap: wrap; }')
+    expect(p).toContain(':is(.studio, .cc-page) .cc-headrow > .cc-head { flex-basis: 100%; }')
+    expect(p).toContain(':is(.studio, .cc-page) .cc-actions { flex-wrap: wrap; }')
+    // The rules act on the Studio branch of the shared primitives, which is
+    // what converts every framed page at once.
+    expect(read('components/shared/page-header.tsx')).toContain("className={cn('cc-headrow', className)}")
+    expect(read('components/shared/stats-bar.tsx')).toContain("cn('cc-stats', className)")
+    expect(read('components/shared/filter-tabs.tsx')).toContain('useTabStripScroll')
+    // `.cc-headrow` and `.cc-actions` stay chrome rows that refuse to shrink.
+    const guard = css.slice(css.indexOf('/* ── Page chrome never absorbs'), css.indexOf('/* ── Markdown documents'))
+    for (const cls of ['cc-headrow', 'cc-actions']) expect(guard).toContain(`.${cls}`)
+    expect(p, 'a compact rule never re-enables shrinking').not.toMatch(/flex-shrink/)
+  })
+
   it('the tab-strip behaviour is one hook, not a copy per surface', () => {
     const hook = read('hooks/use-tab-strip-scroll.ts')
     expect(hook).toContain('useIsTabletOrBelow')
@@ -191,6 +207,7 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
       'components/assignments/studio/assignments-hub.tsx',
       'components/agents/studio/agent-management-studio.tsx',
       'components/deliverables/studio/deliverables-studio.tsx',
+      'components/shared/filter-tabs.tsx',
     ]) expect(read(f), f).toContain('useTabStripScroll')
   })
 })
