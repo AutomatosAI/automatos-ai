@@ -3,7 +3,7 @@ import type { Config } from 'tailwindcss';
 const config: Config = {
   // Treat both `.dark` and `.matte` as dark-mode triggers so existing
   // `dark:` Tailwind prefixes apply in matte theme too.
-  darkMode: ['variant', ['&:is(.dark *)', '&:is(.matte *)']],
+  darkMode: ['variant', ['&:is(.dark *)']],
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',

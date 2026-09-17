@@ -9,6 +9,8 @@ import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
+import { UiStyleProvider } from '../contexts/ui-style-context'
+import type { UiStyle } from '@/lib/ui-style'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
 import { isSaaS } from '@/lib/auth-edition'
@@ -70,7 +72,13 @@ function AuthBoundary({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+interface ProvidersProps {
+  children: React.ReactNode
+  /** PRD-244 D1: the Style axis, read from its cookie by app/layout.tsx. */
+  initialUiStyle?: UiStyle
+}
+
+export function Providers({ children, initialUiStyle }: ProvidersProps) {
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -87,10 +95,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
           attribute="class"
           defaultTheme="system"
           enableSystem
-          themes={['light', 'dark', 'studio']}
+          themes={['light', 'dark']}
           storageKey="automatos-theme"
           disableTransitionOnChange
         >
+          <UiStyleProvider initialStyle={initialUiStyle}>
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
               {/* PRD-222: a new workspace lands directly in the conversation
@@ -101,6 +110,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
               <Toaster position="top-right" richColors closeButton />
             </WorkspaceProvider>
           </QueryClientProvider>
+          </UiStyleProvider>
         </ThemeProvider>
       </RoleProvider>
     </AuthBoundary>

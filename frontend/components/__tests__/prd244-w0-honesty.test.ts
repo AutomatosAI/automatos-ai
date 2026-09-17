@@ -11,18 +11,21 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), 'utf8')
 
 describe('PRD-244 W0 honesty', () => {
-  it('the picker offers Light / Dark / Studio / System — no Matte, no "preview"', () => {
+  it('the picker offers Style (Classic | Studio) and Tone (Light | Dark | System) — no Matte, no "preview"', () => {
     const src = read('components/ui/theme-toggle.tsx')
     expect(src).not.toMatch(/matte/i)
     expect(src).not.toMatch(/preview/i)
-    expect(src).toContain("setTheme('studio')")
+    expect(src).toContain('value="classic"')
+    expect(src).toContain('value="studio"')
+    expect(src).not.toContain("setTheme('studio')") // W3: Studio is a style, not a tone
   })
 
-  it('providers list light, dark and studio only, and mount no URL flag', () => {
+  it('providers list the two tones only, mount the style provider, and mount no URL flag', () => {
     const src = read('components/providers.tsx')
-    expect(src).toContain("themes={['light', 'dark', 'studio']}")
+    expect(src).toContain("themes={['light', 'dark']}")
+    expect(src).toContain('<UiStyleProvider initialStyle={initialUiStyle}>')
     expect(src).not.toContain('StudioThemeFlag')
-    expect(src).toContain('defaultTheme="system"') // D1b flips this only after the Wave-4 pass
+    expect(src).toContain('defaultTheme="system"')
   })
 
   it('the stylesheet carries no Matte rules', () => {

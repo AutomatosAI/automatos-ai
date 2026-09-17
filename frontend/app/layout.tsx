@@ -1,7 +1,9 @@
 
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono, Newsreader } from 'next/font/google'
+import { cookies } from 'next/headers'
 import { Providers } from '../components/providers'
+import { parseUiStyle, STUDIO_HTML_CLASS, UI_STYLE_COOKIE } from '@/lib/ui-style'
 import './globals.css'
 
 // Force dynamic rendering to prevent build-time Clerk errors
@@ -33,19 +35,30 @@ export const metadata: Metadata = {
   description: 'Enterprise AI automation and agent management platform',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  // PRD-244 D1: the Style axis (Classic | Studio) is read from its cookie here,
+  // so the Studio chrome renders on first paint with no classic flash. The Tone
+  // axis (Light | Dark | System) stays with next-themes in the browser.
+  const uiStyle = parseUiStyle((await cookies()).get(UI_STYLE_COOKIE)?.value)
+  const htmlClass = [
+    geistSans.variable,
+    geistMono.variable,
+    newsreader.variable,
+    uiStyle === 'studio' ? STUDIO_HTML_CLASS : '',
+  ].filter(Boolean).join(' ')
+
   return (
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} ${newsreader.variable}`}
+      className={htmlClass}
     >
       <body>
-        <Providers>
+        <Providers initialUiStyle={uiStyle}>
           {children}
         </Providers>
       </body>
