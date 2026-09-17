@@ -10,7 +10,7 @@ DB / LLM / network:
   * RESUME — once RESUME_KEY is set the held task drops out of the hold and its
     next prompt carries render_resume_block's Q&A + preserved draft.
 
-225's ask_human is stubbed (reuse proof), the event trail is stubbed, and the
+225's shared stage_question is stubbed (reuse proof), the event trail is stubbed, and the
 grant/task are plain namespaces so the JSONB writes are inspected directly.
 """
 from __future__ import annotations
@@ -88,11 +88,15 @@ class _BridgeDB:
 
 
 @pytest.fixture
-def stub_ask_human(monkeypatch):
-    async def _ask(db, workspace_id, params):
+def stub_stage_question(monkeypatch):
+    """Stub 225's SHARED ``stage_question`` — the internals the ladder reaches
+    directly. (It cannot go through the ``platform_ask_human`` tool: that
+    refuses every non-board_task subject, so the park had no question behind
+    it. See test_prd229_escalation_ladder.)"""
+    async def _stage(db, workspace_id, **kwargs):
         return {"success": True, "ask_id": 99, "parked": True}
 
-    monkeypatch.setattr(ha, "ask_human", _ask)
+    monkeypatch.setattr(ha, "stage_question", _stage)
     monkeypatch.setattr(cl, "emit_event", lambda *a, **k: SimpleNamespace(id=uuid4()))
 
 
@@ -157,7 +161,7 @@ async def test_requeue_falls_through_to_resume_tool_call_for_stored_call(monkeyp
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_full_loop_park_answer_resume_via_production_bridge(stub_ask_human):
+async def test_full_loop_park_answer_resume_via_production_bridge(stub_stage_question):
     # 1. escalate → park + draft (RVW-5) on the task's EXISTING JSONB
     task = SimpleNamespace(id="task-9", output="the half-finished section",
                            input_context=None, output_metadata=None)

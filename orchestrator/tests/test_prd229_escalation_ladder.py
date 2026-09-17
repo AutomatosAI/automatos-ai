@@ -40,6 +40,7 @@ from services.clarification_ladder import (  # noqa: E402
     DRAFT_KEY,
     PENDING_KEY,
     RESUME_KEY,
+    ClarificationAskNotPlaced,
     apply_answered_clarification,
     escalate_clarification,
     render_resume_block,
@@ -75,17 +76,30 @@ def spy_events(monkeypatch):
 
 
 @pytest.fixture
-def stub_ask_human(monkeypatch):
-    """Stub 225's ask_human, recording the params it was called with (reuse proof)."""
+def stub_stage_question(monkeypatch):
+    """Stub 225's SHARED ``stage_question``, recording the kwargs it was called
+    with (reuse proof). The ladder reaches this directly, NOT through the
+    ``platform_ask_human`` tool — that tool refuses every non-board_task subject
+    (see test_ask_human_still_refuses_a_tool_call_subject), which is what left a
+    clarification park stranded behind a question nobody was asked."""
     seen = {}
 
-    async def _ask(db, workspace_id, params):
-        seen["params"] = params
+    async def _stage(db, workspace_id, **kwargs):
+        seen.update(kwargs)
         seen["workspace_id"] = workspace_id
         return {"success": True, "ask_id": 99, "parked": True}
 
-    monkeypatch.setattr(ha, "ask_human", _ask)
+    monkeypatch.setattr(ha, "stage_question", _stage)
     return seen
+
+
+@pytest.fixture
+def stub_stage_question_returning_nothing(monkeypatch):
+    """The stager answers without an ask_id — no question row was filed."""
+    async def _stage(db, workspace_id, **kwargs):
+        return {"success": False, "error": "refused"}
+
+    monkeypatch.setattr(ha, "stage_question", _stage)
 
 
 # ---------------------------------------------------------------------------
@@ -93,16 +107,21 @@ def stub_ask_human(monkeypatch):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_escalate_reuses_ask_human_and_parks_with_draft(stub_ask_human, spy_events):
+async def test_escalate_reuses_the_shared_stager_and_parks_with_draft(stub_stage_question, spy_events):
     task = _task()
     subject = _subject(task)
 
     result = await escalate_clarification(MagicMock(), subject, "Which vendor?", agent_name="QUILL")
 
-    # reuse: the SAME 225 handler, subject_type tool_call carrying the task id
-    assert stub_ask_human["params"]["subject_type"] == "tool_call"
-    assert stub_ask_human["params"]["subject_id"] == "task-1"
-    assert stub_ask_human["params"]["question"] == "Which vendor?"
+    # reuse: the SAME 225 internals, subject_type tool_call carrying the task id
+    assert stub_stage_question["subject_type"] == "tool_call"
+    assert stub_stage_question["subject_id"] == "task-1"
+    assert stub_stage_question["question"] == "Which vendor?"
+    assert stub_stage_question["asked_by_agent_id"] == 5
+    assert stub_stage_question["agent_name"] == "QUILL"
+    # park=None: the ladder parks its OWN OrchestrationTask below. ask_human's
+    # park flips a BoardTask status, which this subject is not.
+    assert stub_stage_question["park"] is None
 
     assert result == {"parked": True, "ask_id": 99, "message": result["message"]}
 
@@ -119,13 +138,82 @@ async def test_escalate_reuses_ask_human_and_parks_with_draft(stub_ask_human, sp
 
 
 @pytest.mark.asyncio
-async def test_escalate_passes_partial_output_when_given(stub_ask_human, spy_events):
+async def test_escalate_passes_partial_output_when_given(stub_stage_question, spy_events):
     task = _task(output="")
     subject = _subject(task)
     await escalate_clarification(
         MagicMock(), subject, "Q?", partial_output="the agent's in-progress work",
     )
     assert task.output_metadata[DRAFT_KEY]["partial_output"] == "the agent's in-progress work"
+
+
+# ---------------------------------------------------------------------------
+# the ask has to actually reach a human (the regression these tests missed)
+#
+# The suite above stubs the ask, so for two PRDs it proved the ladder CALLS the
+# ask internals without ever proving the internals ACCEPT what it sends. They
+# did not: platform_ask_human refuses every non-board_task subject, the ladder
+# read ask_id off a refusal dict as None, parked the task anyway and told the
+# agent "asked a human (ask #None)". No grant row, so nothing in the Questions
+# tab, no Telegram message, and no answer could ever resume it. The three tests
+# below pin the contract from both sides.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ask_human_still_refuses_a_tool_call_subject():
+    """The REAL tool, unstubbed: why the ladder must not route through it.
+
+    ``platform_ask_human``'s refusal is deliberate (P225-RVW-11) and stays —
+    ITS answer path re-dispatches a stored call, which a clarification park has
+    none of. The ladder's answer path is different and real
+    (``_resume_clarification_if_parked``), which is why it reaches the shared
+    stager directly instead of asking this tool to relax.
+    """
+    result = await ha.ask_human(MagicMock(), uuid4(), {
+        "subject_type": "tool_call",
+        "subject_id": "task-1",
+        "question": "Which vendor?",
+    })
+    assert result["success"] is False
+    assert result["parked"] is False
+    assert "ask_id" not in result
+
+
+@pytest.mark.asyncio
+async def test_escalate_does_not_park_when_no_question_row_was_filed(
+    stub_stage_question_returning_nothing, spy_events,
+):
+    """No ask id means nobody was asked — raise instead of parking."""
+    task = _task()
+    subject = _subject(task)
+
+    with pytest.raises(ClarificationAskNotPlaced):
+        await escalate_clarification(MagicMock(), subject, "Which vendor?")
+
+    # the task is untouched: no draft, no awaiting-answer marker, no trail entry
+    assert DRAFT_KEY not in (task.output_metadata or {})
+    assert PENDING_KEY not in (task.input_context or {})
+    assert spy_events == []
+
+
+@pytest.mark.asyncio
+async def test_handler_falls_back_when_the_ask_internals_file_nothing(
+    stub_stage_question_returning_nothing, monkeypatch,
+):
+    """End to end through the REAL ladder: a task that cannot be asked about
+    proceeds with an assumption rather than parking behind a phantom ask."""
+    async def _cannot(db, subject, question, *, category=None):
+        return {"cannot_answer": True, "reason": "no_context"}
+
+    monkeypatch.setattr(oa, "answer_clarification", _cannot)
+    task = _task()
+    monkeypatch.setattr(hc, "_load_task", lambda db, run_id, workspace_id, task_id: task)
+
+    out = await hc.ask_orchestrator(MagicMock(), uuid4(), _server_params())
+
+    assert out["proceed_with_assumption"]
+    assert "parked" not in out
+    assert PENDING_KEY not in (task.input_context or {})
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +320,7 @@ class _GrantDB:
 
 
 @pytest.mark.asyncio
-async def test_full_loop_ask_park_answer_resume(stub_ask_human, spy_events):
+async def test_full_loop_ask_park_answer_resume(stub_stage_question, spy_events):
     # 1. escalate → ask created (225 stub) + park + draft
     task = _task(output="the half-finished section")
     subject = _subject(task)
@@ -263,7 +351,7 @@ async def test_full_loop_ask_park_answer_resume(stub_ask_human, spy_events):
 
 
 @pytest.mark.asyncio
-async def test_resume_waits_while_grant_still_pending(stub_ask_human):
+async def test_resume_waits_while_grant_still_pending(stub_stage_question):
     task = _task()
     subject = _subject(task)
     await escalate_clarification(MagicMock(), subject, "Q?")
@@ -318,7 +406,7 @@ class _CommitAwareSession:
 
 
 @pytest.mark.asyncio
-async def test_escalate_commits_draft_survives_sibling_rollback(stub_ask_human, spy_events):
+async def test_escalate_commits_draft_survives_sibling_rollback(stub_stage_question, spy_events):
     # escalate parks + drafts, then a SIBLING task's tool error rolls back the
     # SHARED session (platform_executor.py:1245). The draft must survive because
     # escalate_clarification COMMITTED it (P229-RVW-5) — as durable as the ask.
@@ -334,7 +422,7 @@ async def test_escalate_commits_draft_survives_sibling_rollback(stub_ask_human, 
 
 
 @pytest.mark.asyncio
-async def test_escalate_marks_ask_placed_when_park_fails_after_ask(stub_ask_human, spy_events, monkeypatch):
+async def test_escalate_marks_ask_placed_when_park_fails_after_ask(stub_stage_question, spy_events, monkeypatch):
     # A throw AFTER ask_human has placed the (committed) ask must NOT surface as a
     # failure — the human WAS asked, and a bare failure would make a retrying agent
     # file a DUPLICATE ask. escalate swallows it, discards the half-written park,
