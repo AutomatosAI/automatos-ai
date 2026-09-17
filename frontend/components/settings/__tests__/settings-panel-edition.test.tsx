@@ -2,7 +2,8 @@
  * PRD-233 S6/S7 — the Settings tabs per edition.
  *
  * local → only what exists locally: Profile (S6), Session mode (PRD-234 S4),
- *         System Settings, Orchestrator, API Keys, Credentials, Notifications. Webhooks / Channels / Widget SDK
+ *         System Settings, Orchestrator, API Keys, Credentials, Channels (Telegram polls — no
+ *         public URL needed), Notifications. Webhooks / Widget SDK
  *         (hosted-edition surfaces) are hidden by the explicit allowlist, not by
  *         role — the local operator is super_admin.
  * saas  → the eight tabs exactly as before; no Profile tab (Clerk owns it).
@@ -79,12 +80,15 @@ describe('SettingsPanel edition gating (PRD-233 S6/S7)', () => {
       'Orchestrator',
       'API Keys',
       'Credentials',
+      'Channels',
       'Notifications',
     ])
     expect(screen.getByRole('link', { name: /your profile/i })).toHaveAttribute('href', '/settings/profile')
-    for (const hidden of ['webhooks', 'channels', 'widget-sdk']) {
+    for (const hidden of ['webhooks', 'widget-sdk']) {
       expect(LOCAL_EDITION_SETTINGS_TABS.has(hidden)).toBe(false)
     }
+    // 2026-09-17: Channels is local — Telegram long-polls, so no public URL is needed
+    expect(LOCAL_EDITION_SETTINGS_TABS.has('channels')).toBe(true)
     // PRD-234 S4: session mode is a local-only surface (the CLI host lane)
     expect(LOCAL_EDITION_SETTINGS_TABS.has('session-mode')).toBe(true)
   })

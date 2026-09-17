@@ -19,11 +19,15 @@ import { PageHeader, FilterTabs, TabsContent } from '@/components/shared'
 
 /**
  * PRD-233 S6/S7 — the settings tabs that exist in the local edition. Profile is
- * local-only here (saas profiles live under Clerk's own surface); Webhooks,
- * Channels and Widget SDK are hosted-edition surfaces — inbound webhooks and
- * channel callbacks need a public URL, the widget embed needs the hosted
- * loader — so they are hidden by this explicit list, never by role (the local
- * operator is super_admin by design).
+ * local-only here (saas profiles live under Clerk's own surface); Webhooks and
+ * Widget SDK are hosted-edition surfaces — inbound webhooks need a public URL,
+ * the widget embed needs the hosted loader — so they are hidden by this
+ * explicit list, never by role (the local operator is super_admin by design).
+ *
+ * Channels IS local (2026-09-17): outbound delivery never needed a public URL,
+ * and Telegram's inbound path long-polls from inside the orchestrator, so a
+ * local install can run a Telegram bot — and answer agent questions from it
+ * (PRD-225) — with no tunnel. Webhook-only platforms say so on their card.
  */
 export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'profile',
@@ -31,6 +35,7 @@ export const LOCAL_EDITION_SETTINGS_TABS: ReadonlySet<string> = new Set([
   'orchestrator',
   'api-keys',
   'credentials',
+  'channels',
   'notifications',
   'session-mode',  // PRD-234 S4 — local only: the CLI host lane
 ])
