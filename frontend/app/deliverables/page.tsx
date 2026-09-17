@@ -27,9 +27,9 @@ import {
 } from '@/hooks/use-deliverables-api'
 import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
 
-type DeliverableTab = 'outputs' | 'blogs' | 'templates'
+import { DELIVERABLE_TABS, type DeliverableTab } from '@/lib/deliverables/tabs'
 
-const VALID_TABS: ReadonlyArray<DeliverableTab> = ['outputs', 'blogs', 'templates']
+const VALID_TABS: ReadonlyArray<DeliverableTab> = DELIVERABLE_TABS
 
 function resolveTab(param: string | null): DeliverableTab {
   if (param && VALID_TABS.includes(param as DeliverableTab)) return param as DeliverableTab

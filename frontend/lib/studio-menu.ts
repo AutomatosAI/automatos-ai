@@ -2,7 +2,7 @@
  * Studio sidebar menu — single source of truth.
  *
  * Locked from the round-3 shell delivery (`DUMPING AREA/sidebar-header-shell/
- * menu.jsx`). 13 primary items in 3 groups + 2 footer items. British spelling.
+ * menu.jsx`). 11 primary items in 3 groups + 2 footer items. British spelling.
  * Routes match the live Next app routes. Lucide icon names.
  *
  * PRD §1 / shell rollout reference.
@@ -46,6 +46,11 @@ export interface StudioMenuItem {
    * rail when the tier disables it, but its route still resolves (D5).
    */
   requiredExposure?: 'analytics' | 'team';
+  /**
+   * PRD-244 W0: system-role gate, the same one the classic rail applies
+   * (`components/layout/sidebar.tsx`). Absent ⇒ every member sees it.
+   */
+  requiredRole?: 'admin';
 }
 
 export interface StudioFooterItem {
@@ -56,6 +61,8 @@ export interface StudioFooterItem {
   icon: LucideIcon;
   /** If true, opens in new tab + shows external-link affordance */
   external?: boolean;
+  /** PRD-244 W0: same role gate as the classic footer (Settings is admin-only there). */
+  requiredRole?: 'admin';
 }
 
 export const STUDIO_MENU_PRIMARY: StudioMenuItem[] = [
@@ -74,12 +81,12 @@ export const STUDIO_MENU_PRIMARY: StudioMenuItem[] = [
   // WORKSPACE — admin + decision economics
   { id: 'team',     label: 'Team Management',  desc: 'Manage workspace members',           href: '/team',           icon: Users,             group: 'WORKSPACE', requiredExposure: 'team' },
   { id: 'analytics',label: 'Analytics',        desc: 'Performance, costs & insights',      href: '/analytics',      icon: TrendingUp,        group: 'WORKSPACE', requiredExposure: 'analytics' },
-  { id: 'admin',    label: 'Workspace Admin',  desc: 'Manage all workspaces',              href: '/admin/workspaces', icon: Building2,       group: 'WORKSPACE' },
+  { id: 'admin',    label: 'Workspace Admin',  desc: 'Manage all workspaces',              href: '/admin/workspaces', icon: Building2,       group: 'WORKSPACE', requiredRole: 'admin' },
 ];
 
 export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
   { id: 'docs',     label: 'Docs',     href: 'https://docs.automatos.app', icon: BookOpen, external: true },
-  { id: 'settings', label: 'Settings', desc: 'Profile, API keys, preferences', href: '/settings', icon: Settings },
+  { id: 'settings', label: 'Settings', desc: 'Profile, API keys, preferences', href: '/settings', icon: Settings, requiredRole: 'admin' },
 ];
 
 /**
@@ -93,10 +100,17 @@ export const STUDIO_MENU_FOOTER: StudioFooterItem[] = [
  * Pages with honest counts wire their own dynamic numbers.
  */
 export const STUDIO_PAGE_TABS: Record<string, string[]> = {
-  assign:  ['All', 'Mine', 'Scheduled', 'Drafts'],
-  deliv:   ['Outputs', 'Blogs', 'Templates', 'Explorer'],
-  agents:  ['Roster', 'Skills', 'Lineage', 'Settings'],
+  // PRD-244 W0: every entry here is a real `?tab=` the page reads — the
+  // consistency test pins each list to the page's own tab values. Assignments
+  // composes its own Missions/Playbooks tabs (full-bleed hub) and is absent.
+  deliv:   ['Outputs', 'Blogs', 'Templates'],
+  agents:  ['Roster', 'Fleet', 'Org Chart', 'Configuration', 'Skills'],
 };
+
+/** The `?tab=` slug a page-tab label resolves to — one rule, shared with the pages. */
+export function slugifyTab(label: string): string {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
 
 /**
  * Resolve active menu id from a pathname.
@@ -106,7 +120,7 @@ export function resolveActiveMenuId(pathname: string): string | null {
   // Special case: /chat/[id] → 'chat'
   if (pathname.startsWith('/chat')) return 'chat';
   if (pathname.startsWith('/missions/')) return 'assign'; // mission detail nests under Assignments
-  if (pathname.startsWith('/activity')) return 'cmd';     // activity panels live under Command Centre
+  if (pathname.startsWith('/activity')) return 'cmd';     // /activity/execution/[id] detail pages sit under Command Centre
   if (pathname.startsWith('/marketplace')) return 'market';
   if (pathname.startsWith('/admin')) return 'admin';
   if (pathname.startsWith('/playbooks')) return 'assign';

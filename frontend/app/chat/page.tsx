@@ -15,7 +15,7 @@ import { StudioChatShell } from '@/components/chatbot/studio-chat-shell'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { usePageAPI } from '@/hooks/use-page-api'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { useIsMobile, useIsTabletOrBelow } from '@/hooks/use-mobile'
 import { useIsStudio } from '@/hooks/use-studio-theme'
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { useMissionStore } from '@/stores/mission-store'
@@ -52,6 +52,8 @@ function withoutParam(params: URLSearchParams | null, name: string): string {
 export default function ChatPage() {
   usePageAPI('chat')
   const isMobile = useIsMobile()
+  // PRD-244 W0: the studio shell forks at the same breakpoint as every other page (1024 px)
+  const isTabletOrBelow = useIsTabletOrBelow()
   const isStudio = useIsStudio()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -274,7 +276,7 @@ export default function ChatPage() {
   )
 
   // Studio desktop: CD's three-column ledger layout
-  if (isStudio && !isMobile) {
+  if (isStudio && !isTabletOrBelow) {
     return (
       <MainLayout fullBleed>
         <StudioChatShell

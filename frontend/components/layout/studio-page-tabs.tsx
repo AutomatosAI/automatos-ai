@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import {
   STUDIO_PAGE_TABS,
   resolveActiveMenuId,
+  slugifyTab as slugify,
 } from '@/lib/studio-menu';
 
 /**
@@ -15,9 +16,6 @@ import {
  * Renders nothing when there are no tabs registered for the active route.
  */
 
-function slugify(label: string): string {
-  return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-}
 
 export function StudioPageTabs() {
   const pathname = usePathname() ?? '';
