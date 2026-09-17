@@ -36,6 +36,15 @@ export function useSystemRole() {
     return context
 }
 
+/**
+ * PRD-244 W0: the role when a provider exists, `null` when it does not — for
+ * chrome that can render in isolation (the Studio rail). An unknown role is
+ * not an admin: admin-only items stay hidden until the provider answers.
+ */
+export function useSystemRoleOptional() {
+    return useContext(RoleContext)
+}
+
 export function RoleProvider({ children }: { children: ReactNode }) {
     const { isLoaded, session } = useSession()
 

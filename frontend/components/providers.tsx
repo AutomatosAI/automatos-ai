@@ -3,7 +3,7 @@
 
 import { ClerkProvider } from '@clerk/nextjs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Suspense, useState } from 'react'
+import { useState } from 'react'
 import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
@@ -11,14 +11,11 @@ import { LocalAuthProvider } from './local-auth-provider'
 import { RoleProvider } from '../contexts/role-context'
 import { Toaster } from './ui/sonner'
 import { GlobalSearch } from './shared/global-search'
-import { useStudioThemeFlag } from '../hooks/use-studio-theme'
 import { isSaaS } from '@/lib/auth-edition'
 
-// Inline child so we can read useSearchParams (needs a Suspense boundary in Next).
-function StudioThemeFlag() {
-  useStudioThemeFlag()
-  return null
-}
+// PRD-244 W0: the `?theme=studio-preview` URL flag is gone — Studio is a
+// picker entry like any other theme (D1a); the default stays `system` until
+// the Wave-4 pass is signed (D1b).
 
 // PRD-175 (F008): the auth boundary is edition-conditional and is the ONLY thing
 // that differs between editions — everything below it (RoleProvider, ThemeProvider,
@@ -90,15 +87,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
           attribute="class"
           defaultTheme="system"
           enableSystem
-          themes={['light', 'dark', 'matte', 'studio']}
+          themes={['light', 'dark', 'studio']}
           storageKey="automatos-theme"
           disableTransitionOnChange
         >
           <QueryClientProvider client={queryClient}>
             <WorkspaceProvider>
-              <Suspense fallback={null}>
-                <StudioThemeFlag />
-              </Suspense>
               {/* PRD-222: a new workspace lands directly in the conversation
                   where Auto opens (OnboardingOpener) — no first-login modal or
                   guided tour (both retired in W2·S5). */}
