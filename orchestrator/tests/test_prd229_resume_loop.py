@@ -172,7 +172,7 @@ async def test_full_loop_park_answer_resume_via_production_bridge(stub_ask_human
     assert task.output_metadata[DRAFT_KEY]["partial_output"] == "the half-finished section"
 
     # 2. the human answers → the PRODUCTION bridge (225 answer path → _requeue_subject)
-    await _requeue_subject(db, grant)
+    assert await _requeue_subject(db, grant) is True   # a resumed clarification reports "resumed" (PRD-245)
 
     # 3. RESUME_KEY set, PENDING_KEY cleared → the task drops out of dispatch_ready's hold
     assert PENDING_KEY not in task.input_context

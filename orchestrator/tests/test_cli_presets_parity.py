@@ -57,3 +57,30 @@ def test_runtime_module_still_exports_the_registry_names():
     assert not cli_runtime.is_valid_cli_model("claude", "gpt-5.5") and cli_runtime.is_valid_cli_model("codex", "gpt-5.5")
     assert cli_runtime.is_valid_cli_model("codex", None) and not cli_runtime.is_valid_cli_model("grok", "x")
     assert cli_runtime.validate_runtime_configuration({"runtime": "cli", "provider": "codex", "model": "gpt-5.5"}, cli_enabled=True) == []
+
+
+# ── PRD-245 S0.6: the Bash allowlist the session prompt renders is the host's ──
+
+HOST_POLICY = _ORCH.parent / "services" / "cli-host" / "automatos_cli_host" / "policy.py"
+
+
+def _host_default_bash_allow() -> set:
+    tree = ast.parse(HOST_POLICY.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        targets = [getattr(t, "id", None) for t in getattr(node, "targets", [])]
+        if isinstance(node, ast.Assign) and "DEFAULT_BASH_ALLOW" in targets:
+            return {elt.value for elt in node.value.elts if isinstance(elt, ast.Constant)}
+    return set()
+
+
+def test_session_bash_verbs_mirror_the_hosts_default_allowlist():
+    """The host's policy is the rule; the backend renders a copy into the session
+    prompt so the agent knows what runs without asking. Drift fails here."""
+    host = _host_default_bash_allow()
+    assert host, f"no DEFAULT_BASH_ALLOW tuple found in {HOST_POLICY}"
+    ours = set(cli_presets.SESSION_BASH_VERBS)
+    assert ours == host, (
+        f"backend-only {sorted(ours - host)} / host-only {sorted(host - ours)} — "
+        "mirror the host's DEFAULT_BASH_ALLOW in core/cli_presets.SESSION_BASH_VERBS"
+    )
+    assert len(cli_presets.SESSION_BASH_VERBS) == len(ours)   # no duplicates in the rendered list

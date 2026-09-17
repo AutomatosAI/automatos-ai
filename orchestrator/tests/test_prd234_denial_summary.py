@@ -21,7 +21,24 @@ from services.cli_host_service import MAX_DENIALS_KEPT, _denial_summary  # noqa:
 def test_summary_keeps_reason_and_the_command_only():
     out = _denial_summary({"tool": "Bash", "stage": "PreToolUse", "reason": "outside the allowlist",
                            "input": {"command": "python3 hello.py", "timeout": 5, "description": "x"}})
-    assert out == {"tool": "Bash", "stage": "PreToolUse", "reason": "outside the allowlist", "subject": "python3 hello.py"}
+    assert out == {"tool": "Bash", "stage": "PreToolUse", "reason": "outside the allowlist",
+                   "subject": "python3 hello.py", "kind": "other"}
+
+
+def test_summary_says_what_the_refusal_means():
+    """PRD-245 S0.3 (D6): the host's wording → a kind; only a hold forces review."""
+    hold_expired = _denial_summary({"tool": "Bash", "stage": "PreToolUse",
+                                    "reason": "'pip --version' is outside this ticket's Bash allowlist — no answer from the operator within 120 s"})
+    hold_denied = _denial_summary({"tool": "Bash", "stage": "PreToolUse",
+                                   "reason": "'pip --version' is outside this ticket's Bash allowlist — denied by the operator"})
+    read = _denial_summary({"tool": "Read", "stage": "PreToolUse",
+                            "reason": "Read outside the session directory: /Users/x/.automatos/cli-host/host.json"})
+    tool = _denial_summary({"tool": "ToolSearch", "stage": "PreToolUse", "reason": "tool 'ToolSearch' is not enabled for session tickets"})
+    prompt = _denial_summary({"tool": "AskUserQuestion", "stage": "PermissionRequest",
+                              "reason": "a permission prompt reached the TUI — sessions are policy-gated, not prompted"})
+    assert [d["kind"] for d in (hold_expired, hold_denied, read, tool, prompt)] == \
+        ["hold", "hold", "read_outside", "unknown_tool", "prompt"]
+    assert _denial_summary("weird")["kind"] == "other"   # unplaceable → counts as a hold (fail closed)
 
 
 def test_summary_uses_the_path_for_file_tools_and_tolerates_junk():

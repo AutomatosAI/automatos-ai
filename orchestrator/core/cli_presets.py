@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 PROVIDER_CLAUDE = "claude"
 PROVIDER_CODEX = "codex"
@@ -92,3 +92,23 @@ def is_valid_cli_model(provider: str, model: Optional[str]) -> bool:
         return False
     info = CLI_PRESETS.get(provider)
     return bool(info and info.model_ok(model.strip()))
+
+
+# PRD-245 S0.6 — the Bash commands a ticket session runs without asking, as the
+# host's policy allows them (``services/cli-host/automatos_cli_host/policy.py``
+# ``DEFAULT_BASH_ALLOW``). The session prompt renders this list so the agent
+# knows what runs, what is held for the operator and what never runs. The host
+# owns the rule; this is the backend's rendering copy, kept in step by
+# ``test_cli_presets_parity.py`` the same way ``CLI_PRESETS`` is.
+SESSION_BASH_VERBS: Tuple[str, ...] = (
+    # the host's DEFAULT_BASH_ALLOW, same members, same order (parity test)
+    "git status", "git diff", "git log", "git show", "git branch", "git add", "git commit",
+    "git stash", "git restore", "git checkout -b", "git switch -c", "git ls-files",
+    "git rev-parse", "git blame", "git describe", "git shortlog", "git remote -v",
+    "git worktree list", "git stash list", "ls", "cat", "head", "tail", "wc", "grep", "rg",
+    "find", "pwd", "which", "echo", "sort", "uniq", "cut", "tr", "sed", "awk", "date", "diff",
+    "stat", "basename", "dirname", "printf", "jq", "file", "tree", "du", "true", "test", "[",
+    "[[", "python -m pytest", "python3 -m pytest", "pytest", "npm test", "npm run",
+    "pnpm test", "pnpm run", "yarn test", "make test", "make lint", "cargo test", "go test",
+    "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
+)

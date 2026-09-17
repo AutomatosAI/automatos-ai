@@ -200,13 +200,14 @@ def test_host_claim_preassigns_a_session_and_result_applies_once(seeded, new_ses
 
     # events renew the lease and surface the live tool
     before = row.lease_until
-    out = svc.record_events(s, host, task_id, [{"event": "PreToolUse", "tool_name": "Edit", "transcript_path": "/tmp/t.jsonl"}])
+    out = asyncio.run(svc.record_events(s, host, task_id, [{"event": "PreToolUse", "tool_name": "Edit", "transcript_path": "/tmp/t.jsonl"}]))
     assert out["lease_renewed"] is True and out["control"] == []
     s.refresh(row)
     assert row.runtime_ref["live_tool"] == "Edit" and row.runtime_ref["transcript_path"] == "/tmp/t.jsonl"
     assert row.lease_until is not None and (before is None or row.lease_until >= before)
 
-    # a denial forces review; a duplicate result is a no-op
+    # a refusal the backend cannot place counts as a hold and forces review
+    # (PRD-245 S0.3: fail closed); a duplicate result is a no-op
     first = asyncio.run(svc.apply_result(s, host, task_id, {
         "attempt": ticket["attempt"], "status": "success", "result_text": "changed 2 files",
         "usage": {"input_tokens": 10, "output_tokens": 5},
@@ -225,6 +226,7 @@ def test_host_claim_preassigns_a_session_and_result_applies_once(seeded, new_ses
         "tool": "Bash", "stage": "PreToolUse",
         "reason": "'python3 hello.py' is outside this ticket's Bash allowlist",
         "subject": "python3 hello.py",
+        "kind": "other",
     }]
     s.close()
 
@@ -239,9 +241,9 @@ def test_a_host_cannot_touch_a_ticket_it_did_not_claim(seeded, new_session):
     task_id = _seed_task(s, ws_id, cli_agent, "cli-work")
     assert svc.claim_for_host(s, host_a, limit=1)["tasks"][0]["task_id"] == task_id
     with pytest.raises(PermissionError):
-        svc.record_events(s, host_b, task_id, [])
+        asyncio.run(svc.record_events(s, host_b, task_id, []))
     with pytest.raises(LookupError):
-        svc.record_events(s, host_a, 999999999, [])
+        asyncio.run(svc.record_events(s, host_a, 999999999, []))
     s.close()
 
 

@@ -366,6 +366,8 @@ async def apply_question_answer(
     (the HTTP ``answer_question`` path ignores the tuple entirely and is
     unaffected).
     """
+    from core.services.approval_grants import answer_pending_grant
+
     now = datetime.now(timezone.utc)
 
     # Compare-and-swap the pending→granted flip so two concurrent answers to the
@@ -374,23 +376,10 @@ async def apply_question_answer(
     # answer, and there is no default rate limit — so a reply racing POST /answer,
     # or two '/answer' messages, is reachable. ``UPDATE ... WHERE status='pending'``
     # is atomic in Postgres: the loser's UPDATE matches 0 rows and aborts as a safe
-    # no-op — one human_qa entry, one resume, one confirmation.
-    flipped = (
-        db.query(ApprovalGrant)
-        .filter(
-            ApprovalGrant.id == grant.id,
-            ApprovalGrant.status == GrantStatus.PENDING.value,
-        )
-        .update(
-            {
-                ApprovalGrant.status: GrantStatus.GRANTED.value,
-                ApprovalGrant.answer_text: answer_text,
-                ApprovalGrant.answered_by: answered_by,
-                ApprovalGrant.answered_at: now,
-            },
-            synchronize_session=False,
-        )
-    )
+    # no-op — one human_qa entry, one resume, one confirmation. The statement lives
+    # in the grants lifecycle service; the Canvas path (PRD-245) closes a session
+    # hold's row with the same one.
+    flipped = answer_pending_grant(db, grant.id, answer_text=answer_text, answered_by=answered_by, now=now)
     if not flipped:
         # Lost the race — another answer already won. Record / resume / confirm
         # nothing (no duplicates); return the committed winning state, flagged
@@ -501,6 +490,12 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
       grants -- ``details.watch_action`` discriminates (rerun / replan /
       reassign / spawn_agent); the stored spec launches and the supervising
       watch follows the work. First real wiring of SUBJECT_PLAYBOOK_RUN.
+    - a ``board_task`` question carrying PRD-245's session-hold marker
+      (``details.cli_permission``): the ticket is RUNNING, not parked — the
+      answer is the operator's allow/deny for the held command, recorded on the
+      ticket for the host's next event flush; never a re-queue. True iff the
+      hold was still open (a second answer, from the Canvas card or here, is a
+      no-op that says so).
     - anything else (e.g. a ``channel`` trust-gate hold): no resume path,
       returns False. platform_ask_human refuses tool_call/playbook_run
       questions up front (handlers_asks, P225-RVW-11), so a question only ever
@@ -515,7 +510,7 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
         # PRD-193 stored-call path — this is the missing production caller of
         # apply_answered_clarification (no parallel resume path).
         if _resume_clarification_if_parked(db, grant):
-            return
+            return True
         await _resume_tool_call(db, grant)
         return _executed_result_succeeded(grant)
     if grant.subject_type == SUBJECT_PLAYBOOK_RUN:
@@ -525,6 +520,10 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
         return _executed_result_succeeded(grant)
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return False
+    from services.cli_host_service import answer_session_hold, session_hold_marker
+
+    if session_hold_marker(grant) is not None:
+        return answer_session_hold(db, grant)
     return _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
 
 

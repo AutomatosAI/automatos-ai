@@ -4,6 +4,7 @@ moving it between in_progress and done without ever setting a lease, the host
 the session opens on, and the honest line the chat lane returns. Pure units."""
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -140,14 +141,14 @@ def test_terminal_events_move_an_interactive_ticket_without_ever_setting_a_lease
     events_out = []
     monkeypatch.setattr(svc, "notify_board_event", lambda db, **kw: events_out.append(kw))
     db = _DB()
-    out = svc.record_events(db, host, 93, [{"hook_event_name": "TerminalOpened", "session_id": "sid-1", "cwd": "/Users/me/Development/repo", "resumed": True}])
+    out = asyncio.run(svc.record_events(db, host, 93, [{"hook_event_name": "TerminalOpened", "session_id": "sid-1", "cwd": "/Users/me/Development/repo", "resumed": True}]))
     assert out == {"status": "in_progress", "lease_renewed": False, "control": {}, "decisions": []}
     assert task.status == "in_progress" and task.lease_until is None and task.completed_at is None
     ref = task.runtime_ref
     assert ref["cli_session_id"] == "sid-1" and ref["cwd"] == "/Users/me/Development/repo" and ref["terminal_resumed"] is True
     assert ref["terminal_attached_at"] and "terminal_closed_at" not in ref
     assert events_out[-1]["status"] == "in_progress"
-    svc.record_events(db, host, 93, [{"hook_event_name": "TerminalClosed", "session_id": "sid-1", "exit_code": 0}])
+    asyncio.run(svc.record_events(db, host, 93, [{"hook_event_name": "TerminalClosed", "session_id": "sid-1", "exit_code": 0}]))
     assert task.status == "done" and task.completed_at is not None and task.lease_until is None
     assert task.runtime_ref["terminal_closed_at"] and "terminal_attached_at" not in task.runtime_ref
     assert events_out[-1]["status"] == "done"
@@ -158,7 +159,7 @@ def test_a_host_run_ticket_reopened_in_the_terminal_keeps_its_status(monkeypatch
                            runtime_ref={"runtime": "cli", "session_id": "sid-5", "cwd": "/old"})
     monkeypatch.setattr(svc, "_owned_task", lambda db, h, tid: task)
     monkeypatch.setattr(svc, "notify_board_event", lambda db, **kw: (_ for _ in ()).throw(AssertionError("no status change → no event")))
-    svc.record_events(_DB(), _host(), 5, [{"hook_event_name": "TerminalOpened", "session_id": "sid-5", "cwd": "/old"}])
+    asyncio.run(svc.record_events(_DB(), _host(), 5, [{"hook_event_name": "TerminalOpened", "session_id": "sid-5", "cwd": "/old"}]))
     assert task.status == "done" and task.runtime_ref["terminal_attached_at"]
 
 
@@ -167,7 +168,7 @@ def test_a_mixed_batch_takes_the_ordinary_hook_path(monkeypatch):
     monkeypatch.setattr(svc, "_record_terminal_events", lambda *a: called.append("terminal"))
     monkeypatch.setattr(svc, "_owned_task", lambda db, h, tid: (_ for _ in ()).throw(RuntimeError("ordinary path")))
     try:
-        svc.record_events(_DB(), _host(), 1, [{"hook_event_name": "TerminalOpened"}, {"hook_event_name": "PreToolUse"}])
+        asyncio.run(svc.record_events(_DB(), _host(), 1, [{"hook_event_name": "TerminalOpened"}, {"hook_event_name": "PreToolUse"}]))
     except RuntimeError as exc:
         assert "ordinary path" in str(exc)
     assert called == []

@@ -27,7 +27,11 @@ from core.models.core import Agent, BoardTask
 
 logger = logging.getLogger(__name__)
 
-OPEN_STATUSES: Sequence[str] = ("inbox", "assigned", "in_progress", "blocked", "review")
+# PRD-245 S0.5 (D7): the statuses under which a lane's re-fire lands on the ticket
+# it already filed. ``review`` is NOT one of them — a ticket in review is finished
+# work awaiting sign-off; the next fire files a new ticket (agent 15's #93 absorbed
+# 236 heartbeats while it sat in review).
+REUSABLE_STATUSES: Sequence[str] = ("inbox", "assigned", "in_progress", "blocked")
 QUEUED_LINE = "queued for your Claude Code session as ticket #{task_id}"
 NO_HOST_REASON = (
     "Waiting for a CLI host — none is online. Start it with `make cli-host`; "
@@ -90,7 +94,8 @@ def is_cli_agent(db: Session, agent_id: Optional[int]) -> bool:
 
 
 def open_ticket_for_source(db: Session, workspace_id: Any, source_type: str, source_id: str) -> Optional[BoardTask]:
-    """The still-open ticket a lane already filed for this source, if any."""
+    """The ticket a lane already filed for this source that can still absorb the
+    fire (``REUSABLE_STATUSES``), if any. A ticket in review is not it."""
     try:
         return (
             db.query(BoardTask)
@@ -98,7 +103,7 @@ def open_ticket_for_source(db: Session, workspace_id: Any, source_type: str, sou
                 BoardTask.workspace_id == workspace_id,
                 BoardTask.source_type == source_type,
                 BoardTask.source_id == source_id,
-                BoardTask.status.in_(list(OPEN_STATUSES)),
+                BoardTask.status.in_(list(REUSABLE_STATUSES)),
             )
             .order_by(BoardTask.id.desc())
             .first()

@@ -324,7 +324,7 @@ async def events(
     db: Session = Depends(get_db),
 ):
     try:
-        return svc.record_events(db, host, task_id, body.events)
+        return await svc.record_events(db, host, task_id, body.events)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except PermissionError as exc:

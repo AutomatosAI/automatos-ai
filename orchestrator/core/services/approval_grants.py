@@ -60,11 +60,14 @@ def create_grant(
     options: Optional[list] = None,
     channel_refs: Optional[dict] = None,
     asked_by_agent_id: Optional[int] = None,
+    details: Optional[dict] = None,
 ) -> ApprovalGrant:
     """Stage a new PENDING, expiring grant for a subject. Caller owns the txn.
 
     PRD-225: pass ``kind='question'`` with ``question_md`` to stage a free-text
     ask (``pending`` = open, ``granted`` = answered, ``denied`` = dismissed).
+    PRD-245: ``details`` seeds the row's JSONB (a session hold's marker); left
+    out, the column keeps its default exactly as before.
     """
     ts = _now(now)
     grant = ApprovalGrant(
@@ -85,6 +88,8 @@ def create_grant(
         channel_refs=channel_refs,
         asked_by_agent_id=asked_by_agent_id,
     )
+    if details:
+        grant.details = dict(details)
     db.add(grant)
     try:
         db.flush()
@@ -174,6 +179,66 @@ def revoke_grant(grant: ApprovalGrant, *, revoked_by: str, now: Optional[datetim
     grant.revoked_at = _now(now)
     grant.revoked_by = revoked_by
     return grant
+
+
+def answer_pending_grant(
+    db: Any, grant_id: int, *, answer_text: str, answered_by: str, now: Optional[datetime] = None,
+) -> bool:
+    """PRD-225: flip ONE question ``pending → granted`` with its answer, atomically.
+
+    ``UPDATE … WHERE id = :id AND status = 'pending'`` is the compare-and-swap
+    that lets two concurrent answers apply exactly once (P225-RVW-14): the loser
+    matches 0 rows and this returns ``False``. ``synchronize_session=False`` —
+    the caller syncs its in-memory row when it won. Caller owns the txn.
+    """
+    flipped = (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.id == grant_id,
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+        )
+        .update(
+            {
+                ApprovalGrant.status: GrantStatus.GRANTED.value,
+                ApprovalGrant.answer_text: answer_text,
+                ApprovalGrant.answered_by: answered_by,
+                ApprovalGrant.answered_at: _now(now),
+            },
+            synchronize_session=False,
+        )
+    )
+    return bool(flipped)
+
+
+def expire_pending_grants(
+    db: Any, workspace_id: UUID | str, grant_ids: Any, *, revoked_by: str, now: Optional[datetime] = None,
+) -> int:
+    """PRD-245 S0.4: close PENDING rows nobody can answer any more — the session
+    that held the command has ended (``EXPIRED``, the lazily-set status the
+    model always allowed). One filtered UPDATE guarded on ``pending`` so an
+    answer that won the race a moment earlier is never overwritten. Returns
+    the number of rows closed. Caller owns the txn.
+    """
+    ids = sorted({int(g) for g in (grant_ids or []) if g is not None})
+    if not ids:
+        return 0
+    closed = (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.workspace_id == workspace_id,
+            ApprovalGrant.id.in_(ids),
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+        )
+        .update(
+            {
+                ApprovalGrant.status: GrantStatus.EXPIRED.value,
+                ApprovalGrant.revoked_at: _now(now),
+                ApprovalGrant.revoked_by: revoked_by,
+            },
+            synchronize_session=False,
+        )
+    )
+    return int(closed or 0)
 
 
 def is_authorising(grant: ApprovalGrant, *, now: Optional[datetime] = None) -> bool:
