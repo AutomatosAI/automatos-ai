@@ -80,6 +80,23 @@
     --stage-7: 217 91% 60%;
     --stage-8: 330 81% 60%;
     --stage-9: 160 84% 39%;
+
+    /* PRD-244 W2: the Studio design tokens, given Light/Dark equivalents so
+       a Studio-designed surface (the chat shell, the Assignments hub) renders
+       sensibly under the classic themes. `.studio {}` below redefines them. */
+    --fg: hsl(var(--foreground));
+    --fg-2: hsl(var(--muted-foreground));
+    --fg-3: hsl(var(--muted-foreground) / 0.8);
+    --paper: hsl(var(--card));
+    --bg-1: hsl(var(--background));
+    --bg-2: hsl(var(--muted));
+    --border-2: hsl(var(--border));
+    --navy: hsl(var(--info));
+    --accent-2: hsl(var(--primary) / 0.10);
+    --serif: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    --cc-hover: var(--muted);
+    --cc-hover-border: var(--border);
+    --cc-live-dot: var(--success);
   }
 
   .dark {
@@ -1129,13 +1146,17 @@
   }
 
   /* ── Studio chat layout (CD round 3) ───────────────────────────── */
-  .studio .sh-chat {
+  /* PRD-244 W2: the chat shell hangs off `.sh-chat` the way the Command
+     Centre hangs off `.cc-page`. The classic layout's <main> is not a
+     height-bound flex column, so there the shell takes the classic chat's height. */
+  html:not(.studio) .sh-chat { height: calc(100vh - 8rem); }
+  .sh-chat {
     display: flex; flex-direction: column;
     flex: 1; min-height: 0; height: 100%;
     background: hsl(var(--background));
     overflow: hidden;
   }
-  .studio .sh-chat-bar {
+  :is(.studio, .sh-chat) .sh-chat-bar {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 20px;
     border-bottom: 1px solid hsl(var(--border));
@@ -1143,7 +1164,7 @@
     font-size: 12px;
     flex-shrink: 0;
   }
-  .studio .sh-chat-side-toggle {
+  :is(.studio, .sh-chat) .sh-chat-side-toggle {
     width: 24px; height: 24px; border-radius: 5px;
     display: inline-flex; align-items: center; justify-content: center;
     background: transparent; border: 1px solid transparent;
@@ -1151,43 +1172,43 @@
     transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
     margin-right: 4px;
   }
-  .studio .sh-chat-side-toggle:hover {
+  :is(.studio, .sh-chat) .sh-chat-side-toggle:hover {
     background: hsl(var(--card)); border-color: hsl(var(--border));
     color: hsl(var(--foreground));
   }
-  .studio .sh-chat-eyebrow {
+  :is(.studio, .sh-chat) .sh-chat-eyebrow {
     font-family: var(--font-geist-mono, monospace); font-size: 10px;
     letter-spacing: 0.14em; text-transform: uppercase;
     color: hsl(var(--muted-foreground)); font-weight: 600;
   }
-  .studio .sh-chat-eyebrow-mono {
+  :is(.studio, .sh-chat) .sh-chat-eyebrow-mono {
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
     letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600;
     color: hsl(var(--muted-foreground));
   }
-  .studio .sh-chat-sep { color: hsl(var(--muted-foreground)); }
-  .studio .sh-chat-crumb { color: hsl(var(--muted-foreground)); }
-  .studio .sh-chat-chev {
+  :is(.studio, .sh-chat) .sh-chat-sep { color: hsl(var(--muted-foreground)); }
+  :is(.studio, .sh-chat) .sh-chat-crumb { color: hsl(var(--muted-foreground)); }
+  :is(.studio, .sh-chat) .sh-chat-chev {
     width: 12px; height: 12px; color: hsl(var(--muted-foreground));
     stroke-width: 1.6;
   }
-  .studio .sh-chat-active {
+  :is(.studio, .sh-chat) .sh-chat-active {
     color: hsl(var(--foreground)); font-weight: 500; max-width: 50ch;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .studio .sh-chat-pill {
+  :is(.studio, .sh-chat) .sh-chat-pill {
     display: inline-flex; align-items: center;
     padding: 1px 6px; border-radius: 3px; margin-left: 4px;
     font-family: var(--font-geist-mono, monospace); font-size: 10px;
     background: hsl(var(--secondary)); color: hsl(var(--muted-foreground));
     border: 1px solid hsl(var(--border));
   }
-  .studio .sh-chat-pill.brand {
+  :is(.studio, .sh-chat) .sh-chat-pill.brand {
     color: hsl(var(--accent));
     border-color: hsl(var(--accent) / 0.4);
     background: hsl(var(--accent) / 0.08);
   }
-  .studio .sh-chat-act {
+  :is(.studio, .sh-chat) .sh-chat-act {
     display: inline-flex; align-items: center; gap: 4px;
     height: 26px; padding: 0 10px;
     background: hsl(var(--card)); border: 1px solid hsl(var(--border));
@@ -1195,57 +1216,57 @@
     font-size: 11px; font-weight: 500; cursor: pointer;
     transition: border-color 140ms ease, background 140ms ease;
   }
-  .studio .sh-chat-act:hover {
+  :is(.studio, .sh-chat) .sh-chat-act:hover {
     border-color: hsl(40 30% 70%); background: hsl(38 45% 96%);
   }
 
-  .studio .sh-chat-grid {
+  :is(.studio, .sh-chat) .sh-chat-grid {
     flex: 1; min-height: 0; display: grid;
     grid-template-columns: 220px 1fr 300px;
     grid-template-rows: 1fr;
     overflow: hidden;
   }
-  .studio .sh-chat.threads-collapsed .sh-chat-grid {
+  .sh-chat.threads-collapsed .sh-chat-grid {
     grid-template-columns: 1fr 300px;
   }
-  .studio .sh-chat.rail-collapsed .sh-chat-grid {
+  .sh-chat.rail-collapsed .sh-chat-grid {
     grid-template-columns: 220px 1fr;
   }
-  .studio .sh-chat.threads-collapsed.rail-collapsed .sh-chat-grid {
+  .sh-chat.threads-collapsed.rail-collapsed .sh-chat-grid {
     grid-template-columns: 1fr;
   }
   /* Below 1280px, hide the rail by default so the chat keeps room to read */
   @media (max-width: 1279px) {
-    .studio .sh-chat-grid { grid-template-columns: 220px 1fr; }
-    .studio .sh-chat.threads-collapsed .sh-chat-grid { grid-template-columns: 1fr; }
-    .studio .sh-chat-rail { display: none; }
+    :is(.studio, .sh-chat) .sh-chat-grid { grid-template-columns: 220px 1fr; }
+    .sh-chat.threads-collapsed .sh-chat-grid { grid-template-columns: 1fr; }
+    :is(.studio, .sh-chat) .sh-chat-rail { display: none; }
   }
 
   /* Threads column — minimised editorial list */
-  .studio .sh-chat-threads {
+  :is(.studio, .sh-chat) .sh-chat-threads {
     border-right: 1px solid hsl(var(--border));
     background: hsl(var(--secondary));
     display: flex; flex-direction: column;
     padding: 12px 6px; min-height: 0; overflow: hidden;
   }
-  .studio .sh-chat-threads-head {
+  :is(.studio, .sh-chat) .sh-chat-threads-head {
     display: flex; align-items: center; gap: 8px;
     padding: 4px 8px 8px;
   }
-  .studio .sh-chat-threads-head .sh-chat-act { margin-left: auto; height: 22px; padding: 0 8px; }
-  .studio .sh-chat-thread-list {
+  :is(.studio, .sh-chat) .sh-chat-threads-head .sh-chat-act { margin-left: auto; height: 22px; padding: 0 8px; }
+  :is(.studio, .sh-chat) .sh-chat-thread-list {
     flex: 1; min-height: 0; overflow-y: auto;
     display: flex; flex-direction: column; gap: 0;
   }
-  .studio .sh-chat-thread {
+  :is(.studio, .sh-chat) .sh-chat-thread {
     display: flex; align-items: center; gap: 7px;
     padding: 6px 8px; border-radius: 5px;
     background: transparent; border: 0; cursor: pointer; text-align: left;
     transition: background 140ms ease; min-width: 0;
   }
-  .studio .sh-chat-thread:hover { background: hsl(38 45% 96%); }
+  :is(.studio, .sh-chat) .sh-chat-thread:hover { background: hsl(38 45% 96%); }
   /* PRD-237: close control on an open-tab row */
-  .studio .sh-chat-thread-close {
+  :is(.studio, .sh-chat) .sh-chat-thread-close {
     margin-left: 4px;
     display: inline-flex;
     align-items: center;
@@ -1260,30 +1281,30 @@
     cursor: pointer;
     transition: opacity 120ms ease, background 120ms ease;
   }
-  .studio .sh-chat-thread:hover .sh-chat-thread-close,
-  .studio .sh-chat-thread-close:focus-visible { opacity: 0.85; }
-  .studio .sh-chat-thread-close:hover { background: hsl(38 30% 88%); opacity: 1; }
-  .studio .sh-chat-thread.active {
+  :is(.studio, .sh-chat) .sh-chat-thread:hover .sh-chat-thread-close,
+  :is(.studio, .sh-chat) .sh-chat-thread-close:focus-visible { opacity: 0.85; }
+  :is(.studio, .sh-chat) .sh-chat-thread-close:hover { background: hsl(38 30% 88%); opacity: 1; }
+  :is(.studio, .sh-chat) .sh-chat-thread.active {
     background: hsl(var(--card));
     box-shadow: 0 1px 0 hsla(30 50% 18% / 0.05);
   }
-  .studio .sh-chat-thread-dot {
+  :is(.studio, .sh-chat) .sh-chat-thread-dot {
     width: 5px; height: 5px; border-radius: 50%;
     flex-shrink: 0; background: hsl(var(--muted-foreground));
   }
-  .studio .sh-chat-thread-dot.ok { background: hsl(82 50% 22%); }
-  .studio .sh-chat-thread-dot.warn { background: hsl(var(--accent)); }
-  .studio .sh-chat-thread-title {
+  :is(.studio, .sh-chat) .sh-chat-thread-dot.ok { background: hsl(82 50% 22%); }
+  :is(.studio, .sh-chat) .sh-chat-thread-dot.warn { background: hsl(var(--accent)); }
+  :is(.studio, .sh-chat) .sh-chat-thread-title {
     flex: 1; min-width: 0;
     font-size: 12px; color: hsl(var(--foreground)); font-weight: 400;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .studio .sh-chat-thread.active .sh-chat-thread-title { font-weight: 600; }
-  .studio .sh-chat-thread-ts {
+  :is(.studio, .sh-chat) .sh-chat-thread.active .sh-chat-thread-title { font-weight: 600; }
+  :is(.studio, .sh-chat) .sh-chat-thread-ts {
     font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
     color: hsl(var(--muted-foreground)); flex-shrink: 0;
   }
-  .studio .sh-chat-thread-empty {
+  :is(.studio, .sh-chat) .sh-chat-thread-empty {
     padding: 20px 10px; text-align: center;
     color: hsl(var(--muted-foreground)); font-size: 12px;
   }
@@ -1291,124 +1312,128 @@
   /* Main thread column — host the existing <Chat> component.
      The grid row is `1fr`, this cell is height: 100% so the Chat (which
      uses `height: 100%`) has a concrete dimension to fill. */
-  .studio .sh-chat-main {
+  :is(.studio, .sh-chat) .sh-chat-main {
     display: flex; flex-direction: column;
     min-height: 0; min-width: 0; height: 100%;
     overflow: hidden;
     background: hsl(var(--background));
   }
-  .studio .sh-chat-main > * { flex: 1; min-height: 0; }
+  :is(.studio, .sh-chat) .sh-chat-main > * { flex: 1; min-height: 0; }
+  /* PRD-244 W2: the page wraps the chat body (nudge + conversation) once, so
+     the back-to-Assignments button has a positioning context in both layouts. */
+  :is(.studio, .sh-chat) .sh-chat-body { position: relative; display: flex; flex-direction: column; min-height: 0; }
+  :is(.studio, .sh-chat) .sh-chat-body > * { flex: 1; min-height: 0; }
 
   /* Mission rail */
-  .studio .sh-chat-rail {
+  :is(.studio, .sh-chat) .sh-chat-rail {
     border-left: 1px solid hsl(var(--border));
     background: hsl(var(--secondary));
     padding: 18px; min-height: 0; overflow-y: auto;
     display: flex; flex-direction: column; gap: 18px;
   }
-  .studio .sh-chat-rail-empty {
+  :is(.studio, .sh-chat) .sh-chat-rail-empty {
     display: flex; flex-direction: column; gap: 8px;
   }
-  .studio .sh-chat-rail-empty-body {
+  :is(.studio, .sh-chat) .sh-chat-rail-empty-body {
     font-size: 12px; line-height: 1.5;
     color: hsl(var(--muted-foreground));
     margin: 0;
   }
-  .studio .sh-chat-rail-meta {
+  :is(.studio, .sh-chat) .sh-chat-rail-meta {
     display: flex; align-items: center; gap: 8px; margin-top: 4px;
     flex-wrap: wrap;
   }
-  .studio .sh-chat-rail-state {
+  :is(.studio, .sh-chat) .sh-chat-rail-state {
     font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
     text-transform: uppercase; letter-spacing: 0.08em;
     color: hsl(var(--muted-foreground));
     padding: 1px 6px; border: 1px solid hsl(var(--border));
     border-radius: 3px; background: hsl(var(--card));
   }
-  .studio .sh-chat-rail-more {
+  :is(.studio, .sh-chat) .sh-chat-rail-more {
     font-family: var(--font-geist-mono, monospace); font-size: 10px;
     color: hsl(var(--muted-foreground)); text-align: center;
     padding: 4px 0;
   }
-  .studio .sh-chat-rail-eyebrow {
+  :is(.studio, .sh-chat) .sh-chat-rail-eyebrow {
     font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
     letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600;
     color: hsl(var(--muted-foreground)); margin: 0 0 6px;
   }
-  .studio .sh-chat-rail-title {
+  :is(.studio, .sh-chat) .sh-chat-rail-title {
     font-family: var(--font-newsreader, serif); font-size: 16px; font-weight: 600;
     color: hsl(var(--foreground)); line-height: 1.25;
   }
-  .studio .sh-chat-rail-id {
+  :is(.studio, .sh-chat) .sh-chat-rail-id {
     font-family: var(--font-geist-mono, monospace); font-size: 11px;
     color: hsl(var(--accent)); margin-top: 4px;
   }
-  .studio .sh-chat-rail-mono {
+  :is(.studio, .sh-chat) .sh-chat-rail-mono {
     font-family: var(--font-geist-mono, monospace);
     font-feature-settings: "tnum";
   }
-  .studio .sh-chat-rail-stats {
+  :is(.studio, .sh-chat) .sh-chat-rail-stats {
     display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px;
   }
-  .studio .sh-chat-stat-label {
+  :is(.studio, .sh-chat) .sh-chat-stat-label {
     font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
     color: hsl(var(--muted-foreground)); letter-spacing: 0.08em;
     font-weight: 600;
   }
-  .studio .sh-chat-stat-value {
+  :is(.studio, .sh-chat) .sh-chat-stat-value {
     font-family: var(--font-geist-mono, monospace); font-size: 16px;
     color: hsl(var(--foreground)); font-weight: 600;
     font-feature-settings: "tnum";
   }
-  .studio .sh-chat-stat-value.accent { color: hsl(var(--accent)); }
-  .studio .sh-chat-stat-value.olive { color: hsl(82 50% 22%); }
-  .studio .sh-chat-dag { display: flex; flex-direction: column; gap: 4px; }
-  .studio .sh-chat-dag-step {
+  :is(.studio, .sh-chat) .sh-chat-stat-value.accent { color: hsl(var(--accent)); }
+  :is(.studio, .sh-chat) .sh-chat-stat-value.olive { color: hsl(82 50% 22%); }
+  :is(.studio, .sh-chat) .sh-chat-dag { display: flex; flex-direction: column; gap: 4px; }
+  :is(.studio, .sh-chat) .sh-chat-dag-step {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; border-radius: 5px;
     border: 1px solid hsl(var(--border));
     border-left-width: 3px;
     background: transparent;
   }
-  .studio .sh-chat-dag-step.done {
+  :is(.studio, .sh-chat) .sh-chat-dag-step.done {
     background: hsl(var(--card));
     border-left-color: hsl(82 50% 22%);
   }
-  .studio .sh-chat-dag-step.queued {
+  :is(.studio, .sh-chat) .sh-chat-dag-step.queued {
     background: hsl(220 35% 95%);
     border-color: hsl(220 25% 85%);
     border-left-color: hsl(var(--info));
   }
-  .studio .sh-chat-dag-step.err {
+  :is(.studio, .sh-chat) .sh-chat-dag-step.err {
     background: hsl(18 65% 92%);
     border-color: hsl(18 50% 80%);
     border-left-color: hsl(var(--accent));
   }
-  .studio .sh-chat-dag-pip {
+  :is(.studio, .sh-chat) .sh-chat-dag-pip {
     width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
     color: #fff; font-family: var(--font-geist-mono, monospace);
     font-size: 10px; font-weight: 700;
     background: hsl(var(--muted-foreground));
   }
-  .studio .sh-chat-dag-step.done .sh-chat-dag-pip { background: hsl(82 50% 22%); }
-  .studio .sh-chat-dag-step.queued .sh-chat-dag-pip { background: hsl(var(--info)); }
-  .studio .sh-chat-dag-step.err .sh-chat-dag-pip { background: hsl(var(--accent)); }
-  .studio .sh-chat-dag-agent {
+  :is(.studio, .sh-chat) .sh-chat-dag-step.done .sh-chat-dag-pip { background: hsl(82 50% 22%); }
+  :is(.studio, .sh-chat) .sh-chat-dag-step.queued .sh-chat-dag-pip { background: hsl(var(--info)); }
+  :is(.studio, .sh-chat) .sh-chat-dag-step.err .sh-chat-dag-pip { background: hsl(var(--accent)); }
+  :is(.studio, .sh-chat) .sh-chat-dag-agent {
     font-family: var(--font-newsreader, serif); font-size: 12.5px; font-weight: 600;
   }
-  .studio .sh-chat-dag-tool {
+  :is(.studio, .sh-chat) .sh-chat-dag-tool {
     font-family: var(--font-geist-mono, monospace); font-size: 10px;
     color: hsl(var(--info));
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .studio .sh-chat-dag-dur { font-size: 10px; color: hsl(var(--muted-foreground)); }
-  .studio .sh-chat-deliverable {
+  :is(.studio, .sh-chat) .sh-chat-dag-dur { font-size: 10px; color: hsl(var(--muted-foreground)); }
+  :is(.studio, .sh-chat) .sh-chat-deliverable {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 12px; border: 1px solid hsl(var(--border));
     border-radius: 6px; background: hsl(var(--card));
   }
-  .studio .sh-chat-rail-cta {
+  :is(.studio, .sh-chat) .sh-chat-rail-cta {
     margin-top: auto;
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     height: 34px; padding: 0 16px; border-radius: 6px;
@@ -1417,7 +1442,7 @@
     font-size: 12.5px; font-weight: 500;
     transition: opacity 140ms ease;
   }
-  .studio .sh-chat-rail-cta:hover { opacity: 0.9; }
+  :is(.studio, .sh-chat) .sh-chat-rail-cta:hover { opacity: 0.9; }
 
   /* ═══════════════════════════════════════════════════════════════
      Studio Command Centre (CD round 4)
@@ -2374,13 +2399,13 @@
 
   /* ── Studio · Assignments hub (CD round 4 / HUB-A) ────────── */
 
-  .studio .pg-panel {
+  :is(.studio, .cc-page) .pg-panel {
     background: var(--paper);
     border: 1px solid hsl(var(--border));
     border-radius: 10px;
     overflow: hidden;
   }
-  .studio .pg-panel-head {
+  :is(.studio, .cc-page) .pg-panel-head {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 14px;
     border-bottom: 1px solid hsl(var(--border));
@@ -2389,34 +2414,34 @@
     text-transform: uppercase; color: var(--fg-2);
     font-weight: 600;
   }
-  .studio .pg-panel-head .t { color: var(--fg); }
-  .studio .pg-panel-head .right { margin-left: auto; }
+  :is(.studio, .cc-page) .pg-panel-head .t { color: var(--fg); }
+  :is(.studio, .cc-page) .pg-panel-head .right { margin-left: auto; }
 
   /* Status group header */
-  .studio .status-head {
+  :is(.studio, .cc-page) .status-head {
     display: flex; align-items: center; gap: 10px;
     margin: 18px 0 8px 0;
   }
-  .studio .status-head .pip {
+  :is(.studio, .cc-page) .status-head .pip {
     width: 8px; height: 8px; border-radius: 50%;
   }
-  .studio .status-head .l {
+  :is(.studio, .cc-page) .status-head .l {
     font-family: var(--font-geist-mono, monospace);
     font-size: 10.5px; letter-spacing: 0.12em;
     text-transform: uppercase; color: var(--fg-2);
     font-weight: 600;
   }
-  .studio .status-head .ct {
+  :is(.studio, .cc-page) .status-head .ct {
     font-family: var(--font-geist-mono, monospace);
     font-size: 10.5px; color: var(--fg-3);
   }
-  .studio .status-head .right { margin-left: auto; }
+  :is(.studio, .cc-page) .status-head .right { margin-left: auto; }
 
   /* Entry-type picker (Mission · Playbook · Plan · Task) */
-  .studio .entry-grid {
+  :is(.studio, .cc-page) .entry-grid {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
   }
-  .studio .entry-card {
+  :is(.studio, .cc-page) .entry-card {
     background: var(--paper);
     border: 1px solid hsl(var(--border));
     border-radius: 12px; padding: 18px;
@@ -2425,37 +2450,37 @@
     cursor: pointer; color: var(--fg);
     transition: border-color 140ms ease, box-shadow 140ms ease;
   }
-  .studio .entry-card:hover {
+  :is(.studio, .cc-page) .entry-card:hover {
     border-color: var(--border-2);
     box-shadow: 0 4px 14px rgba(60, 40, 10, 0.06);
   }
-  .studio .entry-card:focus-visible {
+  :is(.studio, .cc-page) .entry-card:focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
   }
-  .studio .entry-card .em {
+  :is(.studio, .cc-page) .entry-card .em {
     width: 36px; height: 36px; border-radius: 8px;
     display: inline-flex; align-items: center; justify-content: center;
     flex-shrink: 0;
   }
-  .studio .entry-card .em.mission  { background: hsl(15 76% 44% / 0.10); color: hsl(var(--accent)); }
-  .studio .entry-card .em.playbook { background: hsl(82 30% 33% / 0.12); color: hsl(82 50% 22%); }
-  .studio .entry-card .em.plan     { background: hsl(213 51% 23% / 0.10); color: var(--navy); }
-  .studio .entry-card .em.task     { background: hsl(30 12% 9% / 0.06);   color: var(--fg); }
-  .studio .entry-card .nm {
+  :is(.studio, .cc-page) .entry-card .em.mission  { background: hsl(15 76% 44% / 0.10); color: hsl(var(--accent)); }
+  :is(.studio, .cc-page) .entry-card .em.playbook { background: hsl(82 30% 33% / 0.12); color: hsl(82 50% 22%); }
+  :is(.studio, .cc-page) .entry-card .em.plan     { background: hsl(213 51% 23% / 0.10); color: var(--navy); }
+  :is(.studio, .cc-page) .entry-card .em.task     { background: hsl(30 12% 9% / 0.06);   color: var(--fg); }
+  :is(.studio, .cc-page) .entry-card .nm {
     font-family: var(--serif); font-size: 18px; font-weight: 500;
     letter-spacing: -0.015em;
   }
-  .studio .entry-card .desc {
+  :is(.studio, .cc-page) .entry-card .desc {
     font-size: 12.5px; color: var(--fg-2); line-height: 1.45; flex: 1;
   }
-  .studio .entry-card .when {
+  :is(.studio, .cc-page) .entry-card .when {
     font-family: var(--font-geist-mono, monospace);
     font-size: 10px; color: var(--fg-3); letter-spacing: 0.04em;
     border-top: 1px dashed hsl(var(--border)); padding-top: 8px;
     display: flex; align-items: center; gap: 6px;
   }
-  .studio .entry-card .new-pill {
+  :is(.studio, .cc-page) .entry-card .new-pill {
     position: absolute; top: 12px; right: 12px;
     font-family: var(--font-geist-mono, monospace);
     font-size: 9.5px; color: var(--fg-3); letter-spacing: 0.06em;
@@ -2463,7 +2488,7 @@
   }
 
   /* Mission card */
-  .studio .mis-card {
+  :is(.studio, .cc-page) .mis-card {
     background: var(--paper);
     border: 1px solid hsl(var(--border));
     border-radius: 10px; padding: 16px;
@@ -2472,15 +2497,15 @@
     /* Constrain to grid cell so long unbreakable goal text wraps. */
     width: 100%; min-width: 0;
   }
-  .studio .mis-card .row1 { display: flex; align-items: center; gap: 10px; }
-  .studio .mis-card .id {
+  :is(.studio, .cc-page) .mis-card .row1 { display: flex; align-items: center; gap: 10px; }
+  :is(.studio, .cc-page) .mis-card .id {
     font-family: var(--font-geist-mono, monospace);
     font-size: 10.5px; color: hsl(var(--accent));
     background: var(--accent-2);
     padding: 2px 6px; border-radius: 3px; font-weight: 700;
     letter-spacing: 0.04em;
   }
-  .studio .mis-card .nm {
+  :is(.studio, .cc-page) .mis-card .nm {
     font-family: var(--serif); font-size: 16px; font-weight: 500;
     letter-spacing: -0.01em; line-height: 1.25;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -2488,98 +2513,98 @@
     /* Force long URLs / no-space goal text to wrap inside the card. */
     overflow-wrap: anywhere; word-break: break-word; min-width: 0;
   }
-  .studio .mis-card .row-actions { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
-  .studio .mis-card .row-meta {
+  :is(.studio, .cc-page) .mis-card .row-actions { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
+  :is(.studio, .cc-page) .mis-card .row-meta {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
   }
-  .studio .mis-card .row-meta .l {
+  :is(.studio, .cc-page) .mis-card .row-meta .l {
     color: var(--fg-3); letter-spacing: 0.08em; text-transform: uppercase;
     font-size: 9px; font-weight: 600;
   }
-  .studio .mis-card .row-meta .v {
+  :is(.studio, .cc-page) .mis-card .row-meta .v {
     color: var(--fg); font-weight: 600; margin-top: 2px;
     font-feature-settings: "tnum";
   }
-  .studio .mis-card .progress {
+  :is(.studio, .cc-page) .mis-card .progress {
     height: 4px; border-radius: 2px; background: var(--bg-2);
     overflow: hidden; position: relative;
   }
-  .studio .mis-card .progress > span { display: block; height: 100%; border-radius: 2px; }
-  .studio .mis-card .progress > span.ok   { background: hsl(82 50% 22%); }
-  .studio .mis-card .progress > span.run  { background: var(--fg); }
-  .studio .mis-card .progress > span.info { background: var(--navy); }
-  .studio .mis-card .progress > span.err  { background: hsl(var(--accent)); }
-  .studio .mis-card .progress > span.warn { background: hsl(38 78% 27%); }
-  .studio .mis-card .last {
+  :is(.studio, .cc-page) .mis-card .progress > span { display: block; height: 100%; border-radius: 2px; }
+  :is(.studio, .cc-page) .mis-card .progress > span.ok   { background: hsl(82 50% 22%); }
+  :is(.studio, .cc-page) .mis-card .progress > span.run  { background: var(--fg); }
+  :is(.studio, .cc-page) .mis-card .progress > span.info { background: var(--navy); }
+  :is(.studio, .cc-page) .mis-card .progress > span.err  { background: hsl(var(--accent)); }
+  :is(.studio, .cc-page) .mis-card .progress > span.warn { background: hsl(38 78% 27%); }
+  :is(.studio, .cc-page) .mis-card .last {
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
     color: var(--fg-2); display: flex; align-items: center; gap: 6px;
     letter-spacing: 0.02em;
   }
-  .studio .mis-card .last .pip {
+  :is(.studio, .cc-page) .mis-card .last .pip {
     width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
   }
-  .studio .mis-card .row-actions-bottom {
+  :is(.studio, .cc-page) .mis-card .row-actions-bottom {
     display: flex; align-items: center; gap: 8px;
     padding-top: 8px; border-top: 1px solid hsl(var(--border));
   }
-  .studio .mis-card .row-actions-bottom .age {
+  :is(.studio, .cc-page) .mis-card .row-actions-bottom .age {
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
     color: var(--fg-3);
   }
-  .studio .mis-card .row-actions-bottom .spacer { flex: 1; }
-  .studio .mis-card.is-needsapproval { border-color: hsl(38 78% 50% / 0.6); }
-  .studio .mis-card.is-failed        { border-color: hsl(var(--accent) / 0.55); }
-  .studio button.mis-card { cursor: pointer; }
-  .studio button.mis-card:hover { box-shadow: 0 4px 14px rgba(60,40,10,.06); }
+  :is(.studio, .cc-page) .mis-card .row-actions-bottom .spacer { flex: 1; }
+  :is(.studio, .cc-page) .mis-card.is-needsapproval { border-color: hsl(38 78% 50% / 0.6); }
+  :is(.studio, .cc-page) .mis-card.is-failed        { border-color: hsl(var(--accent) / 0.55); }
+  :is(.studio, .cc-page) button.mis-card { cursor: pointer; }
+  :is(.studio, .cc-page) button.mis-card:hover { box-shadow: 0 4px 14px rgba(60,40,10,.06); }
 
   /* Mission row */
-  .studio .mis-row {
+  :is(.studio, .cc-page) .mis-row {
     display: grid;
     grid-template-columns: 24px 110px 1fr 110px 96px 84px 110px;
     gap: 14px; align-items: center;
     padding: 12px 14px; border-bottom: 1px solid hsl(var(--border));
     background: var(--paper); text-align: left;
   }
-  .studio button.mis-row { width: 100%; cursor: pointer; }
-  .studio .mis-row:hover { background: var(--bg-2); }
-  .studio .mis-row:last-child { border-bottom: 0; }
-  .studio .mis-row .pip {
+  :is(.studio, .cc-page) button.mis-row { width: 100%; cursor: pointer; }
+  :is(.studio, .cc-page) .mis-row:hover { background: var(--bg-2); }
+  :is(.studio, .cc-page) .mis-row:last-child { border-bottom: 0; }
+  :is(.studio, .cc-page) .mis-row .pip {
     width: 18px; height: 18px; border-radius: 50%; display: inline-flex;
     align-items: center; justify-content: center;
     font-family: var(--serif); color: #fff; font-weight: 600; font-size: 10px;
   }
-  .studio .mis-row .pip.run  { background: var(--fg); }
-  .studio .mis-row .pip.ok   { background: hsl(82 50% 22%); }
-  .studio .mis-row .pip.err  { background: hsl(var(--accent)); }
-  .studio .mis-row .pip.warn { background: hsl(38 78% 50%); color: var(--fg); }
-  .studio .mis-row .pip.info { background: var(--navy); }
-  .studio .mis-row .pip.muted{ background: var(--border-2); }
-  .studio .mis-row .id {
+  :is(.studio, .cc-page) .mis-row .pip.run  { background: var(--fg); }
+  :is(.studio, .cc-page) .mis-row .pip.ok   { background: hsl(82 50% 22%); }
+  :is(.studio, .cc-page) .mis-row .pip.err  { background: hsl(var(--accent)); }
+  :is(.studio, .cc-page) .mis-row .pip.warn { background: hsl(38 78% 50%); color: var(--fg); }
+  :is(.studio, .cc-page) .mis-row .pip.info { background: var(--navy); }
+  :is(.studio, .cc-page) .mis-row .pip.muted{ background: var(--border-2); }
+  :is(.studio, .cc-page) .mis-row .id {
     font-family: var(--font-geist-mono, monospace); font-size: 11px;
     color: hsl(var(--accent)); font-weight: 700; letter-spacing: 0.04em;
   }
-  .studio .mis-row .nm {
+  :is(.studio, .cc-page) .mis-row .nm {
     font-family: var(--serif); font-size: 13.5px; font-weight: 500;
     letter-spacing: -0.005em; line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .studio .mis-row .sub {
+  :is(.studio, .cc-page) .mis-row .sub {
     font-family: var(--font-geist-mono, monospace); font-size: 10px;
     color: var(--fg-3); letter-spacing: 0.02em; margin-top: 2px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .studio .mis-row .num {
+  :is(.studio, .cc-page) .mis-row .num {
     font-family: var(--font-geist-mono, monospace); font-size: 11px;
     text-align: right; font-feature-settings: "tnum";
   }
-  .studio .mis-row .age {
+  :is(.studio, .cc-page) .mis-row .age {
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
     color: var(--fg-3);
   }
 
   /* Playbook card */
-  .studio .pb-card {
+  :is(.studio, .cc-page) .pb-card {
     background: var(--paper);
     border: 1px solid hsl(var(--border));
     border-radius: 10px; padding: 16px;
@@ -2587,50 +2612,50 @@
     position: relative; text-align: left;
     transition: border-color 140ms ease, box-shadow 140ms ease;
   }
-  .studio button.pb-card { width: 100%; cursor: pointer; color: inherit; }
-  .studio .pb-card:hover {
+  :is(.studio, .cc-page) button.pb-card { width: 100%; cursor: pointer; color: inherit; }
+  :is(.studio, .cc-page) .pb-card:hover {
     border-color: var(--border-2);
     box-shadow: 0 4px 14px rgba(60,40,10,.06);
   }
-  .studio .pb-card .head { display: flex; align-items: center; gap: 10px; }
-  .studio .pb-card .ic {
+  :is(.studio, .cc-page) .pb-card .head { display: flex; align-items: center; gap: 10px; }
+  :is(.studio, .cc-page) .pb-card .ic {
     width: 34px; height: 34px; border-radius: 8px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg-2); color: var(--fg);
   }
-  .studio .pb-card .nm {
+  :is(.studio, .cc-page) .pb-card .nm {
     font-family: var(--serif); font-size: 15px; font-weight: 500;
     letter-spacing: -0.01em; line-height: 1.25; flex: 1;
     overflow: hidden;
   }
-  .studio .pb-card .desc {
+  :is(.studio, .cc-page) .pb-card .desc {
     font-size: 12px; color: var(--fg-2); line-height: 1.45;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .studio .pb-card .stats {
+  :is(.studio, .cc-page) .pb-card .stats {
     display: flex; gap: 16px;
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
     border-top: 1px solid hsl(var(--border)); padding-top: 10px;
   }
-  .studio .pb-card .stats .l {
+  :is(.studio, .cc-page) .pb-card .stats .l {
     color: var(--fg-3); letter-spacing: 0.06em; text-transform: uppercase;
     font-size: 9px; font-weight: 600;
   }
-  .studio .pb-card .stats .v {
+  :is(.studio, .cc-page) .pb-card .stats .v {
     color: var(--fg); font-weight: 600; margin-top: 2px;
     font-feature-settings: "tnum";
   }
-  .studio .pb-card .stats > div { display: flex; flex-direction: column; }
-  .studio .pb-card .trigger {
+  :is(.studio, .cc-page) .pb-card .stats > div { display: flex; flex-direction: column; }
+  :is(.studio, .cc-page) .pb-card .trigger {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 2px 7px; border-radius: 3px;
     background: var(--bg-2);
     font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
     color: var(--fg-2); letter-spacing: 0.04em; font-weight: 600;
   }
-  .studio .pb-card.featured { border-color: hsl(82 30% 33% / 0.4); }
-  .studio .pb-card .badge-feat {
+  :is(.studio, .cc-page) .pb-card.featured { border-color: hsl(82 30% 33% / 0.4); }
+  :is(.studio, .cc-page) .pb-card .badge-feat {
     position: absolute; top: 14px; right: 14px;
     font-family: var(--font-geist-mono, monospace); font-size: 8.5px;
     letter-spacing: 0.10em; text-transform: uppercase;
@@ -2638,10 +2663,10 @@
   }
 
   /* Marketplace strip */
-  .studio .mkt-strip {
+  :is(.studio, .cc-page) .mkt-strip {
     display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
   }
-  .studio .mkt-card {
+  :is(.studio, .cc-page) .mkt-card {
     background: var(--paper);
     border: 1px solid hsl(var(--border));
     border-radius: 8px; padding: 12px;
@@ -2649,60 +2674,60 @@
     text-align: left; cursor: pointer;
     transition: border-color 140ms ease, box-shadow 140ms ease;
   }
-  .studio button.mkt-card { width: 100%; }
-  .studio .mkt-card:hover {
+  :is(.studio, .cc-page) button.mkt-card { width: 100%; }
+  :is(.studio, .cc-page) .mkt-card:hover {
     border-color: var(--border-2);
     box-shadow: 0 4px 14px rgba(60,40,10,.05);
   }
-  .studio .mkt-card .top {
+  :is(.studio, .cc-page) .mkt-card .top {
     display: flex; align-items: center; gap: 8px;
   }
-  .studio .mkt-card .ic {
+  :is(.studio, .cc-page) .mkt-card .ic {
     width: 28px; height: 28px; border-radius: 6px;
     background: var(--bg-2); color: var(--fg-2);
     display: inline-flex; align-items: center; justify-content: center;
   }
-  .studio .mkt-card .nm {
+  :is(.studio, .cc-page) .mkt-card .nm {
     font-family: var(--serif); font-size: 13px; font-weight: 500;
     flex: 1; line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .studio .mkt-card .tag {
+  :is(.studio, .cc-page) .mkt-card .tag {
     font-family: var(--font-geist-mono, monospace); font-size: 8.5px;
     letter-spacing: 0.10em; text-transform: uppercase;
     color: hsl(82 50% 22%); font-weight: 700;
   }
-  .studio .mkt-card .desc {
+  :is(.studio, .cc-page) .mkt-card .desc {
     font-size: 11px; color: var(--fg-2); line-height: 1.4;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .studio .mkt-card .foot {
+  :is(.studio, .cc-page) .mkt-card .foot {
     display: flex; align-items: center;
     font-family: var(--font-geist-mono, monospace); font-size: 9.5px;
     color: var(--fg-3); letter-spacing: 0.04em;
     border-top: 1px solid hsl(var(--border)); padding-top: 6px;
   }
-  .studio .mkt-card .foot .dl { margin-left: auto; }
+  :is(.studio, .cc-page) .mkt-card .foot .dl { margin-left: auto; }
 
   /* Mission/Playbook view toggle */
-  .studio .view-toggle {
+  :is(.studio, .cc-page) .view-toggle {
     display: inline-flex; background: var(--bg-2); padding: 2px;
     border-radius: 6px; gap: 2px;
   }
-  .studio .view-toggle button {
+  :is(.studio, .cc-page) .view-toggle button {
     background: transparent; border: 0; padding: 5px 10px;
     border-radius: 4px; font-size: 11.5px; color: var(--fg-2);
     display: inline-flex; align-items: center; gap: 5px; font-weight: 500;
     cursor: pointer;
   }
-  .studio .view-toggle button.on {
+  :is(.studio, .cc-page) .view-toggle button.on {
     background: var(--paper); color: var(--fg);
     box-shadow: 0 1px 0 rgba(60,40,10,.05);
   }
 
   /* Studio l-btn — utility ghost button */
-  .studio .l-btn {
+  :is(.studio, .cc-page) .l-btn {
     display: inline-flex; align-items: center; gap: 5px;
     height: 28px; padding: 0 10px;
     background: var(--paper);
@@ -2712,19 +2737,19 @@
     cursor: pointer;
     transition: border-color 120ms ease, background 120ms ease;
   }
-  .studio .l-btn:hover { border-color: var(--border-2); background: var(--bg-2); }
-  .studio .l-btn--p {
+  :is(.studio, .cc-page) .l-btn:hover { border-color: var(--border-2); background: var(--bg-2); }
+  :is(.studio, .cc-page) .l-btn--p {
     background: var(--fg); color: hsl(var(--background));
     border-color: var(--fg);
   }
-  .studio .l-btn--p:hover { background: hsl(30 12% 9% / 0.88); }
+  :is(.studio, .cc-page) .l-btn--p:hover { background: hsl(30 12% 9% / 0.88); }
 
   /* Assignments table (Missions / Playbooks list views) */
-  .studio .act-table {
+  :is(.studio, .cc-page) .act-table {
     width: 100%; border-collapse: collapse;
     font-size: 12.5px;
   }
-  .studio .act-table thead th {
+  :is(.studio, .cc-page) .act-table thead th {
     text-align: left;
     padding: 10px 14px;
     border-bottom: 1px solid hsl(var(--border));
@@ -2734,25 +2759,25 @@
     font-weight: 700;
     background: hsl(38 45% 96%);
   }
-  .studio .act-table tbody td {
+  :is(.studio, .cc-page) .act-table tbody td {
     padding: 10px 14px;
     border-bottom: 1px solid hsl(var(--border));
     color: var(--fg);
     vertical-align: middle;
   }
-  .studio .act-table tbody td.mono {
+  :is(.studio, .cc-page) .act-table tbody td.mono {
     font-family: var(--font-geist-mono, monospace);
     font-feature-settings: "tnum";
     font-size: 11px;
   }
-  .studio .act-table tbody tr { cursor: pointer; background: var(--paper); }
-  .studio .act-table tbody tr:hover { background: var(--bg-2); }
-  .studio .act-table tbody tr:last-child td { border-bottom: 0; }
-  .studio .act-table .nm {
+  :is(.studio, .cc-page) .act-table tbody tr { cursor: pointer; background: var(--paper); }
+  :is(.studio, .cc-page) .act-table tbody tr:hover { background: var(--bg-2); }
+  :is(.studio, .cc-page) .act-table tbody tr:last-child td { border-bottom: 0; }
+  :is(.studio, .cc-page) .act-table .nm {
     font-family: var(--serif); font-size: 13.5px; font-weight: 500;
     letter-spacing: -0.005em;
   }
-  .studio .act-table .ag {
+  :is(.studio, .cc-page) .act-table .ag {
     font-family: var(--serif); font-size: 13px; font-weight: 500;
   }
 
@@ -2773,22 +2798,22 @@
   .studio .studio-pill.brand{ background: hsl(15 76% 44% / 0.14); color: hsl(var(--accent)); }
 
   /* Scope tabs (Playbooks page: All / Mine / Workspace / Imported) */
-  .studio .scope-tabs {
+  :is(.studio, .cc-page) .scope-tabs {
     display: inline-flex; background: var(--bg-2);
     padding: 3px; border-radius: 6px; gap: 2px;
   }
-  .studio .scope-tabs button {
+  :is(.studio, .cc-page) .scope-tabs button {
     background: transparent; border: 0; padding: 5px 12px;
     border-radius: 4px; font-size: 12px; font-weight: 500;
     color: var(--fg-2); cursor: pointer;
     display: inline-flex; align-items: center; gap: 6px;
     font-family: inherit;
   }
-  .studio .scope-tabs button.on {
+  :is(.studio, .cc-page) .scope-tabs button.on {
     background: var(--paper); color: var(--fg);
     box-shadow: 0 1px 0 rgba(60,40,10,.05);
   }
-  .studio .scope-tabs .ct {
+  :is(.studio, .cc-page) .scope-tabs .ct {
     font-family: var(--font-geist-mono, monospace);
     font-size: 10px; color: var(--fg-3); font-weight: 600;
   }

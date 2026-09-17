@@ -16,7 +16,6 @@ import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { useIsMobile, useIsTabletOrBelow } from '@/hooks/use-mobile'
-import { useIsStudio } from '@/hooks/use-studio-theme'
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { useMissionStore } from '@/stores/mission-store'
 import { useChatSessionStore } from '@/stores/chat-session-store'
@@ -52,9 +51,10 @@ function withoutParam(params: URLSearchParams | null, name: string): string {
 export default function ChatPage() {
   usePageAPI('chat')
   const isMobile = useIsMobile()
-  // PRD-244 W0: the studio shell forks at the same breakpoint as every other page (1024 px)
+  // PRD-244 W2 (D3): the three-column shell is the chat at every desktop width,
+  // whatever the theme (its rules hang off `.sh-chat`); below 1024 px the
+  // classic layout remains until the mobile pass (PRD-245, D6).
   const isTabletOrBelow = useIsTabletOrBelow()
-  const isStudio = useIsStudio()
   const searchParams = useSearchParams()
   const router = useRouter()
   const setPlanMode = useMissionStore((s) => s.setPlanMode)
@@ -275,8 +275,24 @@ export default function ChatPage() {
     />
   )
 
-  // Studio desktop: CD's three-column ledger layout
-  if (isStudio && !isTabletOrBelow) {
+  // The way back to Assignments when a ticket opened this chat — shown in
+  // both layouts (it lived only in the classic one).
+  const backToAssignments = fromParam === 'assignments' && (
+    <div className="absolute top-2 left-3 z-30">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="gap-1.5 text-muted-foreground hover:text-foreground"
+        onClick={() => router.push('/assignments')}
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Assignments
+      </Button>
+    </div>
+  )
+
+  // Desktop: the three-column ledger layout, every theme
+  if (!isTabletOrBelow) {
     return (
       <MainLayout fullBleed>
         <StudioChatShell
@@ -289,31 +305,22 @@ export default function ChatPage() {
           titles={session.titles}
           onCloseTab={closeTab}
         >
-          {chatBody}
+          <div className="sh-chat-body">
+            {backToAssignments}
+            {chatBody}
+          </div>
         </StudioChatShell>
       </MainLayout>
     )
   }
 
-  // Classic layout (mobile + non-studio desktop)
+  // Classic layout — below 1024 px only, until the mobile pass (PRD-245)
   return (
     <MainLayout>
       <div className="relative flex h-[calc(100dvh-5rem)] flex-col md:h-[calc(100vh-8rem)]">
         <ChatTabs tabs={tabs} onSelect={handleTabSelect} onClose={handleTabClose} onNew={handleNewChat} />
         <div className="relative min-h-0 flex-1">
-          {fromParam === 'assignments' && (
-            <div className="absolute top-2 left-3 z-30">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-1.5 text-muted-foreground hover:text-foreground"
-                onClick={() => router.push('/assignments')}
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Assignments
-              </Button>
-            </div>
-          )}
+          {backToAssignments}
           {isMobile ? (
             <Sheet open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
               <SheetContent side="left" className="w-[300px] p-0 bg-background/95 backdrop-blur-lg">
