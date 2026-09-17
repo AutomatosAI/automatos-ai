@@ -21,11 +21,27 @@ const MARKDOWN_SURFACES = [
 ]
 
 describe('Studio page chrome', () => {
-  it('the tab strip never absorbs the page overflow', () => {
-    const block = css.slice(css.indexOf(':is(.studio, .cc-page) .cc-tabs {'), css.indexOf('}', css.indexOf(':is(.studio, .cc-page) .cc-tabs {')))
-    expect(block).toContain('overflow-x: auto')
-    expect(block, 'overflow-x zeroes the automatic minimum size — the strip must not shrink').toContain('flex-shrink: 0')
-    expect(css).toMatch(/\.cc-headrow \{[^}]*flex-shrink: 0/)
+  // A flex item whose overflow is not `visible` can shrink to zero, so in the
+  // `.cc-page` / `.sh-chat` columns a scrollable chrome row absorbs the page's
+  // overflow and collapses. Every chrome row must be in the grouped rule.
+  const CHROME = [
+    'cc-headrow', 'cc-tabs', 'cc-stats', 'cc-stats-prose', 'cc-toolbar', 'cc-actions',
+    'cc-period', 'cc-panel-head', 'cc-kb-head', 'scope-tabs', 'view-toggle', 'status-head',
+    'sh-chat-bar', 'sh-chat-threads-head',
+  ]
+  const guard = css.slice(css.indexOf('/* ── Page chrome never absorbs'), css.indexOf('/* ── Markdown documents'))
+
+  it('every named chrome row opts out of shrinking, in one place', () => {
+    expect(guard).toContain('flex-shrink: 0')
+    for (const cls of CHROME) expect(guard, `${cls} must be in the chrome guard`).toContain(`.${cls}`)
+    expect(guard).toContain(':is(.studio, .cc-page)')
+    expect(guard).toContain(':is(.studio, .sh-chat)')
+  })
+
+  it('the strip that started it still scrolls sideways, and page bodies still grow', () => {
+    const tabs = css.slice(css.indexOf(':is(.studio, .cc-page) .cc-tabs {'), css.indexOf('}', css.indexOf(':is(.studio, .cc-page) .cc-tabs {')))
+    expect(tabs).toContain('overflow-x: auto')
+    expect(guard, 'bodies grow or size to content — they are not chrome').not.toMatch(/\.(cc-kb-grid|cc-kb-body|cc-panel|entry-grid|sh-chat-grid)\b/)
   })
 })
 

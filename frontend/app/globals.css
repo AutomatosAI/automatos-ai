@@ -1491,7 +1491,7 @@
     gap: 18px;
     overflow-y: auto;
   }
-  :is(.studio, .cc-page) .cc-headrow { display: flex; align-items: flex-end; gap: 18px; flex-shrink: 0; }
+  :is(.studio, .cc-page) .cc-headrow { display: flex; align-items: flex-end; gap: 18px; }
   :is(.studio, .cc-page) .cc-headrow > .cc-head { flex: 1; min-width: 0; }
   :is(.studio, .cc-page) .cc-eyebrow {
     font-family: var(--font-geist-mono, monospace);
@@ -1535,11 +1535,6 @@
   /* Tabs strip (bespoke to /command-center) */
   :is(.studio, .cc-page) .cc-tabs {
     display: flex; gap: 0;
-    /* PRD-244 review (Gerard, 09-17): `overflow-x: auto` below zeroes this
-       flex item's automatic minimum size, so on a page taller than the
-       viewport (Deliverables) the column squashed the strip to nothing and
-       the tabs vanished. Never let the page chrome absorb the overflow. */
-    flex-shrink: 0;
     border-bottom: 1px solid hsl(var(--border));
     overflow-x: auto; scrollbar-width: none;
     margin: 0 -28px;
@@ -2856,6 +2851,25 @@
   :is(.studio, .cc-page) .scope-tabs .ct {
     font-family: var(--font-geist-mono, monospace);
     font-size: 10px; color: var(--fg-3); font-weight: 600;
+  }
+
+  /* ── Page chrome never absorbs the page's overflow ────────────────────
+     PRD-244 review (Gerard, 09-17): a flex item whose `overflow` is not
+     `visible` has an automatic minimum size of ZERO. The Studio shells are
+     flex columns (`.cc-page`, `.sh-chat`), and a scrollable chrome row — the
+     in-page tab strip, which sets `overflow-x: auto` so it can scroll
+     sideways — was therefore the only child able to shrink. On any page
+     taller than the viewport it absorbed the entire overflow and rendered at
+     zero height: the tabs "disappeared" on Deliverables and on Agents while
+     the markup was correct all along.
+
+     Every named chrome row opts out of shrinking, so the page scrolls
+     instead. Page BODIES are deliberately absent: they either grow (their own
+     `flex: 1; min-height: 0`, which wins on specificity) or size to content.
+     **A new chrome row belongs in this list.** */
+  :is(.studio, .cc-page) :is(.cc-headrow, .cc-tabs, .cc-stats, .cc-stats-prose, .cc-toolbar, .cc-actions, .cc-period, .cc-panel-head, .cc-kb-head, .scope-tabs, .view-toggle, .status-head),
+  :is(.studio, .sh-chat) :is(.sh-chat-bar, .sh-chat-threads-head) {
+    flex-shrink: 0;
   }
 
   /* ── Markdown documents (file previews, reports, results) ─────────────
