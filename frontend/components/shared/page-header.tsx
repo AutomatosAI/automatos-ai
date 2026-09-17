@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 
 export interface PageHeaderProps {
   /** First word(s) of the title — rendered in foreground */
@@ -28,12 +29,13 @@ export interface PageHeaderProps {
 /**
  * PageHeader — the editorial-first page lede.
  *
- * Classic theme: two-word title with orange gradient on the accent, optional
+ * Classic style: two-word title with orange gradient on the accent, optional
  * subtitle, optional actions. Existing API preserved.
  *
- * Studio theme: serif headline (h1 picks up serif via globals.css `.studio`
- * scope automatically), optional mono uppercase eyebrow above, optional lede
- * paragraph below. The PRD §1 editorial-first principle lives here.
+ * Studio style (PRD-244 D8): the same editorial head the designed pages draw
+ * — `cc-headrow` / `cc-head` / `cc-eyebrow` / `cc-h1` / `cc-sub` / `cc-actions`
+ * — so every page that uses this primitive is a Studio page in both tones.
+ * Nothing crosses between the styles: each branch is its own markup.
  */
 export function PageHeader({
   title,
@@ -44,6 +46,24 @@ export function PageHeader({
   actions,
   className,
 }: PageHeaderProps) {
+  const isStudio = useIsStudio()
+
+  if (isStudio) {
+    const sub = lede ?? subtitle
+    return (
+      <div className={cn('cc-headrow', className)}>
+        <div className="cc-head">
+          {eyebrow && <p className="cc-eyebrow">{eyebrow}</p>}
+          <h1 data-testid="page-title" className="cc-h1">
+            {title} {titleAccent}
+          </h1>
+          {sub && <p className="cc-sub">{sub}</p>}
+        </div>
+        {actions && <div className="cc-actions">{actions}</div>}
+      </div>
+    )
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}

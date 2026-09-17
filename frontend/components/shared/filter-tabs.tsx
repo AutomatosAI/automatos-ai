@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 import type { LucideIcon } from 'lucide-react'
 
 export interface FilterTab {
@@ -29,6 +30,35 @@ export function FilterTabs({
   children,
   className,
 }: FilterTabsProps) {
+  const isStudio = useIsStudio()
+
+  // Studio style (PRD-244 D8): the designed pages' cc-tabs strip. The Radix
+  // root stays so the callers' <TabsContent> keeps showing the active panel.
+  if (isStudio) {
+    return (
+      <Tabs value={value} onValueChange={onValueChange} className={cn('space-y-6', className)}>
+        <div className="flex items-center gap-4">
+          <nav className="cc-tabs" aria-label="Sections" style={{ flex: 1, minWidth: 0 }}>
+            {tabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                className={`cc-tab${tab.value === value ? ' active' : ''}`}
+                aria-current={tab.value === value ? 'page' : undefined}
+                onClick={() => onValueChange(tab.value)}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== undefined && tab.count > 0 && <span className="cc-tab-ct">{tab.count}</span>}
+              </button>
+            ))}
+          </nav>
+          {trailing && <div className="shrink-0">{trailing}</div>}
+        </div>
+        {children}
+      </Tabs>
+    )
+  }
+
   return (
     <Tabs value={value} onValueChange={onValueChange} className={cn('space-y-6', className)}>
       <div className="flex items-center gap-4">
