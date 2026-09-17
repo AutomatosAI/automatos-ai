@@ -1,4 +1,9 @@
-/** PRD-244 W5c (two styles) — Studio desktop renders the Studio frame; Classic keeps the classic one; below 1024 px both use Classic. */
+/**
+ * PRD-246 US-007 — the route forks on the STYLE axis alone: the Studio style
+ * renders the Studio surface at every width (it has a compact form now), the
+ * Classic style renders the classic one. Width informs layout inside a
+ * component, never which component.
+ */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
@@ -24,9 +29,9 @@ describe('Tools route', () => {
     render(<ToolsPage />)
     expect(screen.getByTestId('dash')).toHaveAttribute('data-variant', 'classic')
   })
-  it('below 1024 px → the classic frame in every style', () => {
+  it('the Studio style renders the Studio surface at phone width too (PRD-246 US-007)', () => {
     state.tabletOrBelow = true
     render(<ToolsPage />)
-    expect(screen.getByTestId('dash')).toHaveAttribute('data-variant', 'classic')
+    expect(screen.getByTestId('dash')).toHaveAttribute('data-variant', 'studio')
   })
 })

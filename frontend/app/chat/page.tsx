@@ -18,7 +18,7 @@ import { useAutoNowOpen } from '@/hooks/use-auto-now'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { usePageAPI } from '@/hooks/use-page-api'
-import { useIsMobile, useIsTabletOrBelow } from '@/hooks/use-mobile'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useIsStudio } from '@/hooks/use-studio-theme'
 import { useChatSessionHydration } from '@/hooks/use-chat-session'
 import { useMissionStore } from '@/stores/mission-store'
@@ -59,7 +59,6 @@ export default function ChatPage() {
   // shell on desktop; the Classic style keeps its own chat layout. Both fork at
   // the shared 1024 px breakpoint; below it the classic layout serves both
   // styles until the mobile pass (PRD-245).
-  const isTabletOrBelow = useIsTabletOrBelow()
   const isStudio = useIsStudio()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -301,7 +300,7 @@ export default function ChatPage() {
   )
 
   // Studio desktop: the three-column ledger layout
-  if (isStudio && !isTabletOrBelow) {
+  if (isStudio) {
     return (
       <MainLayout fullBleed>
         <StudioChatShell

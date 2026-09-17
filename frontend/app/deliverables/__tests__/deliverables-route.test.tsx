@@ -1,4 +1,9 @@
-/** PRD-244 W5b (two styles) — Studio desktop renders the Studio page; Classic keeps the classic page; below 1024 px both use Classic. */
+/**
+ * PRD-246 US-007 — the route forks on the STYLE axis alone: the Studio style
+ * renders the Studio surface at every width (it has a compact form now), the
+ * Classic style renders the classic one. Width informs layout inside a
+ * component, never which component.
+ */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
@@ -29,9 +34,9 @@ describe('Deliverables route', () => {
     render(<DeliverablesPage />)
     expect(screen.queryByTestId('studio')).toBeNull()
   })
-  it('below 1024 px → the classic page in every style', () => {
+  it('the Studio style renders the Studio surface at phone width too (PRD-246 US-007)', () => {
     state.tabletOrBelow = true
     render(<DeliverablesPage />)
-    expect(screen.queryByTestId('studio')).toBeNull()
+    expect(screen.getByTestId('studio')).toBeInTheDocument()
   })
 })
