@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { PageHeader, StatsBar, type StatItem } from '@/components/shared'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { apiClient } from '@/lib/api-client'
 import { SaasOnlyNotice } from '@/components/local/saas-only-notice'
@@ -265,57 +266,36 @@ function AdminWorkspacesConsole() {
   return (
     <MainLayout>
       <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Building2 className="h-6 w-6" />
-              Workspace Admin
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Manage all workspaces — enable, disable, delete, inspect usage.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchWorkspaces}
-            disabled={loading}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-        </div>
+        {/* PRD-244: the shared frame — Classic renders as before, Studio gets
+            the editorial head and the stats strip. */}
+        <PageHeader
+          title="Workspace"
+          titleAccent="Admin"
+          eyebrow="Workspace · every tenant"
+          lede="Manage all workspaces — enable, disable, delete, inspect usage."
+          actions={
+            <Button variant="outline" size="sm" onClick={fetchWorkspaces} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          }
+        />
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground">Total workspaces</div>
-              <div className="text-2xl font-bold mt-1">{total}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground">Storage (visible page)</div>
-              <div className="text-2xl font-bold mt-1">{formatBytes(totalStorage)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground">Agents (visible page)</div>
-              <div className="text-2xl font-bold mt-1">{totalAgents}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground">Disabled / Deleted</div>
-              <div className="text-2xl font-bold mt-1">
-                {pausedCount} / {deletedCount}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <StatsBar
+          loading={loading}
+          stats={[
+            { label: 'Total workspaces', value: total, icon: Building2, iconColor: 'text-primary' },
+            { label: 'Storage (visible page)', value: formatBytes(totalStorage), icon: HardDrive, iconColor: 'text-[hsl(var(--info))]' },
+            { label: 'Agents (visible page)', value: totalAgents, icon: Users, iconColor: 'text-[hsl(var(--agent))]' },
+            {
+              label: 'Disabled / Deleted',
+              value: `${pausedCount} / ${deletedCount}`,
+              change: pausedCount + deletedCount > 0 ? 'needs a look' : 'all live',
+              icon: AlertTriangle,
+              iconColor: pausedCount + deletedCount > 0 ? 'text-destructive' : 'text-[hsl(var(--success))]',
+            },
+          ] satisfies StatItem[]}
+        />
 
         {/* Filters */}
         <Card>

@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
+import { PageHeader, StatsBar, type StatItem } from '@/components/shared'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { apiClient } from '@/lib/api-client'
 
@@ -352,75 +353,39 @@ function AdminPluginsPendingConsole() {
   return (
     <MainLayout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">
-              Plugin <span className="gradient-text">Approval Queue</span>
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Review, approve, or reject pending plugin submissions
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fetchPlugins}
-              disabled={loading}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => (window.location.href = '/admin/plugins/upload')}
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Upload Plugin
-            </Button>
-          </div>
-        </div>
+        {/* PRD-244: the shared frame — Classic as before, Studio editorial. */}
+        <PageHeader
+          title="Plugin"
+          titleAccent="Approval Queue"
+          eyebrow="Workspace · marketplace review"
+          lede="Review, approve, or reject pending plugin submissions."
+          actions={
+            <>
+              <Button variant="outline" size="sm" onClick={fetchPlugins} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              <Button size="sm" onClick={() => (window.location.href = '/admin/plugins/upload')}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload Plugin
+              </Button>
+            </>
+          }
+        />
 
-        {/* Stats Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Card className="bg-card border border-border">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-warning/10">
-                <Clock className="h-5 w-5 text-warning" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-white">{total}</p>
-                <p className="text-xs text-muted-foreground">Pending Review</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-card border border-border">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-info/10">
-                <Package className="h-5 w-5 text-info" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-white">{selectedIds.size}</p>
-                <p className="text-xs text-muted-foreground">Selected</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-card border border-border">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Shield className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-white">
-                  {plugins.filter((p) => p.risk_score !== null && p.risk_score >= 20).length}
-                </p>
-                <p className="text-xs text-muted-foreground">Flagged for Review</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
+        <StatsBar
+          loading={loading}
+          stats={[
+            { label: 'Pending Review', value: total, icon: Clock, iconColor: 'text-[hsl(var(--warning))]' },
+            { label: 'Selected', value: selectedIds.size, icon: Package, iconColor: 'text-[hsl(var(--info))]' },
+            {
+              label: 'Flagged for Review',
+              value: plugins.filter((p) => p.risk_score !== null && p.risk_score >= 20).length,
+              icon: Shield,
+              iconColor: 'text-destructive',
+            },
+          ] satisfies StatItem[]}
+        />
         {/* Batch Actions */}
         {selectedIds.size > 0 && (
           <Card className="bg-card border border-border border-primary/30">
@@ -432,7 +397,7 @@ function AdminPluginsPendingConsole() {
                 <div className="flex gap-2">
                   <Button
                     size="sm"
-                    className="bg-success hover:bg-success/80 text-white"
+                    className="bg-success hover:bg-success/80 text-foreground"
                     onClick={handleBatchApprove}
                     disabled={batchActionLoading}
                   >
@@ -493,7 +458,7 @@ function AdminPluginsPendingConsole() {
           <Card className="bg-card border border-border">
             <CardContent className="p-12 text-center">
               <CheckCircle2 className="h-12 w-12 mx-auto text-success mb-4" />
-              <h3 className="text-lg font-medium text-white mb-2">All caught up!</h3>
+              <h3 className="text-lg font-medium text-foreground mb-2">All caught up!</h3>
               <p className="text-muted-foreground">
                 No plugins pending review. Upload a new plugin to get started.
               </p>
@@ -551,7 +516,7 @@ function AdminPluginsPendingConsole() {
                       {/* Plugin Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3 mb-1">
-                          <h3 className="text-lg font-semibold text-white truncate">
+                          <h3 className="text-lg font-semibold text-foreground truncate">
                             {plugin.name}
                           </h3>
                           <Badge variant="outline" className="border-border text-muted-foreground shrink-0">
@@ -624,7 +589,7 @@ function AdminPluginsPendingConsole() {
                       <div className="flex flex-col gap-2 shrink-0">
                         <Button
                           size="sm"
-                          className="bg-success hover:bg-success/80 text-white"
+                          className="bg-success hover:bg-success/80 text-foreground"
                           onClick={() => handleApprove(plugin.id)}
                           disabled={isActionLoading || batchActionLoading}
                         >
