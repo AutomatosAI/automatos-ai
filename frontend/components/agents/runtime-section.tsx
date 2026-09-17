@@ -87,7 +87,7 @@ export function providerOptions(avail: CliAvailability | null, current: string):
 const DEFAULT_MODEL_HINT = "Blank = the CLI's default. The model must be available to your login; it is not one of the API models below."
 
 /** Ask the backend which CLIs exist and which are served now; never throws, null until it answers. */
-function useCliAvailability(enabled: boolean): CliAvailability | null {
+export function useCliAvailability(enabled: boolean): CliAvailability | null {
   const [avail, setAvail] = useState<CliAvailability | null>(null)
   useEffect(() => {
     if (!enabled) return
@@ -134,6 +134,42 @@ export function runtimeFieldsFromConfiguration(configuration: object | null | un
     cli_working_directory: cfg.working_directory,
     cli_worktree: cfg.worktree_per_ticket,
   })
+}
+
+/** What a card shows for the runtime an agent's tickets run on. */
+export interface RuntimeBadge {
+  /** The CLI's label from the registry, or its id title-cased when the registry has not answered. */
+  cli: string
+  /** The model alias pinned on the agent ('' = the CLI's default). */
+  model: string
+  /** `Claude Code · fable`, or just the CLI when no model is pinned. */
+  text: string
+}
+
+function titleCase(id: string): string {
+  return id
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+/**
+ * The runtime line for an agent card. An api agent gets null — its model badge
+ * stands. A cli agent's tickets never touch the API model on its config (the
+ * runtime section says so), so the card names the CLI instead — the registry's
+ * label when it has answered, the id otherwise — and the pinned model alias.
+ */
+export function runtimeBadge(
+  configuration: object | null | undefined,
+  registry?: CliRegistryEntry[] | null,
+): RuntimeBadge | null {
+  const fields = runtimeFieldsFromConfiguration(configuration)
+  if (fields.runtime !== 'cli') return null
+  const entry = registry?.find((e) => e.id === fields.cli_provider)
+  const cli = entry?.label || titleCase(fields.cli_provider)
+  const model = fields.cli_model.trim()
+  return { cli, model, text: model ? `${cli} · ${model}` : cli }
 }
 
 /**

@@ -47,6 +47,7 @@ import {
 import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
 import { usePinnedAgents, MAX_PINNED } from '@/hooks/use-pinned-agents'
 import { useWorkspace } from '@/components/workspace-provider'
+import { runtimeBadge, runtimeFieldsFromConfiguration, useCliAvailability } from '@/components/agents/runtime-section'
 import { useSystemIcons } from '@/hooks/use-system-config-api'
 import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
@@ -154,6 +155,8 @@ interface AgentWithPerformance {
   agent_model_config?: {
     provider?: string
   }
+  /** Runtime fields (runtime / provider / model …) — see runtime-section.tsx */
+  configuration?: Record<string, unknown> | null
   tools?: Array<{
     id: number
     name: string // tool_id like 'slack'
@@ -220,6 +223,10 @@ export function AgentRoster({
 
   // Pinned agents
   const { workspace } = useWorkspace()
+  // CLI adapter: a cli agent's card names the CLI it runs on, so the registry's
+  // labels are fetched once — and only when such an agent is on the roster.
+  const hasCliAgents = agents.some((a) => runtimeFieldsFromConfiguration(a?.configuration).runtime === 'cli')
+  const cliAvail = useCliAvailability(hasCliAgents)
   const { pinnedIds, pin, unpin, isPinned } = usePinnedAgents(workspace?.id?.toString() ?? '')
 
   // System icon mappings
@@ -332,7 +339,7 @@ export function AgentRoster({
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                       <span className="truncate">{getAgentRoleLine(agent)}</span>
                       <span>&middot;</span>
-                      <span>{getModelDisplayName(agent.agent_model_config?.model_id)}</span>
+                      <span>{runtimeBadge(agent.configuration, cliAvail?.registry)?.text ?? getModelDisplayName(agent.agent_model_config?.model_id)}</span>
                       <span>&middot;</span>
                       <span>{agent.performance_metrics?.tasks_completed || 0} tasks</span>
                     </div>
@@ -501,21 +508,34 @@ export function AgentRoster({
                       <StatusIcon className="w-2.5 h-2.5 mr-0.5" />
                       {agent.status || 'active'}
                     </StatusBadge>
-                    {/* PRD-15: Model Badge */}
-                    <StatusBadge size="sm" status={
-                      (() => {
-                        const p = agent.agent_model_config?.provider?.toLowerCase()
-                        if (p === 'anthropic') return 'purple' as const
-                        if (p === 'openai') return 'success' as const
-                        if (p === 'google' || p === 'azure') return 'info' as const
-                        if (p === 'huggingface') return 'warning' as const
-                        if (p === 'aws_bedrock' || p === 'bedrock') return 'primary' as const
-                        return 'info' as const
-                      })()
-                    }>
-                      <Bot className="w-2.5 h-2.5 mr-0.5" />
-                      {getModelDisplayName(agent.agent_model_config?.model_id)}
-                    </StatusBadge>
+                    {/* PRD-15: Model Badge — or, for a cli agent, the CLI its tickets run on */}
+                    {(() => {
+                      const rt = runtimeBadge(agent.configuration, cliAvail?.registry)
+                      if (rt) {
+                        return (
+                          <StatusBadge size="sm" status="primary">
+                            <Terminal className="w-2.5 h-2.5 mr-0.5" />
+                            {rt.text}
+                          </StatusBadge>
+                        )
+                      }
+                      return (
+                        <StatusBadge size="sm" status={
+                          (() => {
+                            const p = agent.agent_model_config?.provider?.toLowerCase()
+                            if (p === 'anthropic') return 'purple' as const
+                            if (p === 'openai') return 'success' as const
+                            if (p === 'google' || p === 'azure') return 'info' as const
+                            if (p === 'huggingface') return 'warning' as const
+                            if (p === 'aws_bedrock' || p === 'bedrock') return 'primary' as const
+                            return 'info' as const
+                          })()
+                        }>
+                          <Bot className="w-2.5 h-2.5 mr-0.5" />
+                          {getModelDisplayName(agent.agent_model_config?.model_id)}
+                        </StatusBadge>
+                      )
+                    })()}
                   </div>
                 </div>
 
