@@ -89,9 +89,13 @@ def ticket(engine, new_session):
     task_id = _seed_task(s, ws_id, agent_id, "TRACKER — snapshot")
     yield ws_id, agent_id, task_id
     sweep = new_session.sweep()
-    sweep.execute(text("DELETE FROM board_tasks WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
-    sweep.execute(text("DELETE FROM cli_hosts WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
-    sweep.execute(text("DELETE FROM agents WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
+    # Every table a RESULT writes has to go before the workspace does, or the
+    # teardown dies on a foreign key and takes the suite's exit code with it:
+    # ``apply_result`` books usage (llm_usage), registers deliverables and writes
+    # the task's report, and an ask leaves a grant + a notification behind.
+    for table in ("llm_usage", "deliverables", "agent_reports", "notifications",
+                  "approval_grants", "board_tasks", "cli_hosts", "agents"):
+        sweep.execute(text(f"DELETE FROM {table} WHERE workspace_id = CAST(:w AS uuid)"), {"w": ws_id})
     sweep.execute(text("DELETE FROM workspaces WHERE id = CAST(:w AS uuid)"), {"w": ws_id})
     sweep.commit()
 
