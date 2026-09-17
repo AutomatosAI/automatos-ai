@@ -1,6 +1,6 @@
 # PRD-244: Studio is the desktop UI — converge the two shells, test every page, and give chat a live view of the floor
 
-> **Status:** DRAFT 2026-09-17 for Gerard's review. Grounded @ the Studio audit of `main` @ `2aad76154` the same day (every file reference below was read, not recalled). PR #397 (`feat/studio-rebrand-phase1`, opened 2026-05-29, 119 commits behind, 9 of 18 files since rewritten on `main`) stays **parked**; §D4 harvests what is still unique and closes it.
+> **Status:** APPROVED 2026-09-17 by Gerard with two amendments (D1 split, D6 sequencing — recorded below). Build and test on the **local** edition first; nothing here reaches prod before Wave 4 is signed. Grounded @ the Studio audit of `main` @ `2aad76154` the same day (every file reference below was read, not recalled). PR #397 (`feat/studio-rebrand-phase1`, opened 2026-05-29, 119 commits behind, 9 of 18 files since rewritten on `main`) stays **parked**; §D4 harvests what is still unique and closes it.
 
 ## The review (2026-09-17)
 
@@ -32,12 +32,12 @@
 
 ## Decisions
 
-- **D1 · Studio is the desktop UI.** Default theme becomes `studio` for viewports ≥ 1024 px. Light and Dark remain as the palette *inside* Studio (tokens, `globals.css:225`), not as separate shells; Matte is retired. The picker offers Light / Dark / System. `?theme=studio-preview` and the "preview" label go. The pre-mount `false` in `useIsStudio()` stops being a fork: the shell renders server-side with no swap.
+- **D1 · Studio is the desktop UI — in two steps (Gerard, 09-17).** **D1a, now:** the default stays `system`; the picker keeps a **Studio** entry with the word "preview" removed; Light and Dark remain the palette *inside* Studio (tokens, `globals.css:225`); Matte and the `?theme=studio-preview` flag go; when Studio is the theme the shell renders server-side with no classic flash. **D1b, only after Wave 4 is signed:** the default becomes `studio` for viewports ≥ 1024 px and the picker offers Light / Dark / System. Until then Studio is opt-in and is tested hard on the local edition.
 - **D2 · One Command Centre.** The shell is the Command Centre at every desktop width. Feed and History move into the shell's Activity tab (one feed, one history, the period selector kept); `ActivityPage`, `BoardView` and the classic activity tree are deleted in the same PR. The bell's deep-links then work for everyone — **this closes the Questions-tab report.**
 - **D3 · One chat, one Assignments.** The Studio chat shell and Assignments hub are the only desktop implementations; the classic `ChatTabs` + history sheet and the classic `AssignmentsPage` are deleted after parity (the `?from=assignments` back button moves into the shell; missions/playbooks redirects keep query params in both).
 - **D4 · #397 is harvested, then closed.** Eight files apply cleanly and untouched by `main` (assignments hub, playbook card, page header, studio page tabs, dialog centring, system-config hook, premium icon, activity tab — ~240 lines); they land as a fresh small PR if still wanted after D3. The mission-detail, deliverables and board-viewer pieces are redone on today's `main`, deliberately, or dropped. The stale branch is never merged.
 - **D5 · Chat gets "Auto now", a live rail, not a dashboard.** One collapsible rail in the chat shell (the existing `sh-chat-rail` pattern, `studio-chat-shell.tsx:55-56,96-101,318-329`) whose sections are the floor's live objects, each a one-line row that deep-links to its Command Centre tab: **Working now** (`useActivityStats('1d')`: working_now · agents_active · tasks_in_queue · needs_attention, `hooks/use-activity-api.ts:192-197`) and the top three fleet rows with their live line (`useFleetState`, 10 s + `automatos:board-changed`, `hooks/use-agent-api.ts:178-207`); **Questions** (`useQuestions`, count + the newest three, answer inline through `useAnswerQuestion`, `hooks/use-approval-grants.ts:43,75`); **Watchlist** (`useWatches`, count + next due, `hooks/use-watches-api.ts:22`); **Decisions** (`useDecisionsNeeded`, count → Governance, `hooks/use-kpi-api.ts:124-128`); **Mission** (today's rail, unchanged). No new endpoint; every read exists with its own cadence. Empty sections say so ("Nothing waiting on you"); the rail never fabricates a count. Collapse state persists as today. Under 1280 px the rail becomes a header pill with the two counts that need a human (questions + decisions).
-- **D6 · Mobile stays classic for now, honestly.** Below 1024 px the classic tree remains until a mobile pass is scoped (open question 1). The breakpoint is the same everywhere (1024), and the chat page moves from 768 to it.
+- **D6 · Mobile stays classic for now, and a mobile pass precedes prod (Gerard, 09-17).** Below 1024 px the classic tree remains through the Studio pass; once Wave 4 is signed on local, a mobile pass (PRD-245) is built and tested on local **before** D1b ships to prod. The breakpoint is the same everywhere (1024), and the chat page moves from 768 to it.
 - **D7 · The audit's dead config is fixed, not documented.** `STUDIO_PAGE_TABS` either drives the pages (agents reads `?tab=`, deliverables gains or drops Explorer, assignments renders tabs) or is deleted; the menu comment matches the list; the `/activity` mapping goes; Workspace Admin and Settings carry the same role gates in both rails.
 
 ## Stories
@@ -50,7 +50,7 @@
 
 **Wave 3 — "Auto now" (D5).** The rail, its sections, the small-width pill, empty states; a vitest per section on fake hook data; no new endpoint. Acceptance: with one open question, one due watch and one running ticket, the rail shows three honest rows and each row lands on the right tab; with nothing, it says so.
 
-**Wave 4 — the test pass (Gerard, both editions).** The checklist below, executed on local and SaaS, at desktop (≥ 1024) and tablet (768–1023), from a fresh browser profile and from an existing one, on each of Light and Dark inside Studio. CI is the only gate for code; this pass is the gate for go-live — Studio is not the default until it is signed.
+**Wave 4 — the test pass (Gerard; local first, then SaaS).** The checklist below, executed on local and SaaS, at desktop (≥ 1024) and tablet (768–1023), from a fresh browser profile and from an existing one, on each of Light and Dark inside Studio. CI is the only gate for code; this pass is the gate for go-live — Studio is not the default until it is signed.
 
 ## Manual test checklist (the pass Wave 4 executes)
 
@@ -74,7 +74,7 @@ Open the app: Studio, no flash. Chat on the left, the conversation in the middle
 
 ## Open questions (Gerard's call)
 
-1. **Mobile.** Keep classic under 1024 px indefinitely, or scope a Studio mobile pass as PRD-245? Until decided, D6 stands and the checklist's tablet column is the classic tree.
-2. **Matte.** Retire it (D1) or keep it as a Studio token set? Nobody has asked for it; the audit found no Matte-specific code beyond the picker.
+1. ~~Mobile~~ — decided: PRD-245 after the Studio pass, before prod (D6).
+2. ~~Matte~~ — decided: retired (D1a).
 3. **"Auto now" cadence.** The rail inherits each hook's polling (10 s fleet, 30 s questions, 60 s watches). Fine for a pilot; a single aggregate read (`/api/command-center/pulse`) would cut chat's request count if it matters on SaaS. Not built unless you say.
 4. **Harvest scope for #397.** Land the eight clean files, or drop them if D3's hub already covers what they added? The mission-detail changes are the only ones I could not map to something already on `main`.
