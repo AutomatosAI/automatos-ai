@@ -1049,3 +1049,15 @@ def test_a_substitution_inside_a_loop_keeps_the_loops_bindings(tmp_path):
     # bindings never launder an outside path, in either substitution form
     assert verdict('for d in a b; do echo "$(cat <OUTSIDE>/host.json)"; done') == "deny"
     assert verdict('for d in a b; do echo `cat <OUTSIDE>/host.json`; done') == "deny"
+
+
+def test_unlisted_bash_allow_runs_unknown_verbs_but_keeps_the_hard_lines(tmp_path):
+    """--unlisted-bash allow: ``comm`` (not on the list) runs; never-allowed still denied; paths still judged."""
+    permissive = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow")
+    strict = policy.PolicyContext(cwd=tmp_path)
+    assert policy.decide_bash("comm -23 a.txt b.txt", strict).behavior == "ask"
+    assert policy.decide_bash("comm -23 a.txt b.txt", permissive).behavior == "allow"
+    assert policy.decide_bash("git push --force origin main", permissive).behavior == "deny"
+    assert policy.decide_bash("comm -23 /etc/passwd b.txt", permissive).behavior != "allow"
+    asks = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow", ask_bash=("docker compose",))
+    assert policy.decide_bash("docker compose up", asks).behavior == "ask"

@@ -54,6 +54,7 @@ class HostConfig:
     event_flush_seconds: float = DEFAULT_EVENT_FLUSH_SECONDS
     session_timeout_seconds: float = DEFAULT_SESSION_TIMEOUT_SECONDS
     ask_timeout: float = 120.0
+    unlisted_bash: str = "ask"  # ask | allow — what a session may run beyond its Bash allowlist
     startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS
     claim_batch: int = DEFAULT_CLAIM_BATCH
     cli_binaries: Dict[str, str] = field(default_factory=dict)  # per-CLI explicit path; default = the user's PATH
@@ -120,6 +121,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
     p.add_argument("--session-timeout", type=float, default=DEFAULT_SESSION_TIMEOUT_SECONDS,
                    help="wall-clock cap per session turn, seconds")
+    p.add_argument("--unlisted-bash", choices=("ask", "allow"), default="ask",
+                   help="a Bash verb outside the ticket's allowlist: 'ask' shows the operator a card (default); "
+                        "'allow' runs it — never-allowed commands are still refused and unresolved paths still ask")
     p.add_argument("--ask-timeout", type=float, default=120.0,
                    help="seconds a session waits for the operator to answer a permission card before denying (default 120)")
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
@@ -172,6 +176,7 @@ def parse_args(argv: Optional[List[str]] = None) -> HostConfig:
         poll_seconds=max(1.0, ns.poll_seconds),
         session_timeout_seconds=max(60.0, ns.session_timeout),
         ask_timeout=max(5.0, ns.ask_timeout),
+        unlisted_bash=ns.unlisted_bash,
         startup_timeout_seconds=max(10.0, ns.startup_timeout),
         cli_binaries=parse_cli_binaries(ns.cli_binary, os.environ.get("AUTOMATOS_CLI_BINARIES")),
         use_worktrees=not ns.no_worktrees,
