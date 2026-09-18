@@ -32,6 +32,7 @@ import { CanvasTerminals } from './CanvasTerminals'
 import { useCanvasSdkAvailable } from './useCanvasSdk'
 import { useCliHostHealth } from '@/hooks/use-cli-host-health'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -64,6 +65,8 @@ export function CodingCanvasWidget({
   const showSdk = !runtime && sdkAvailable !== false
   const { data: hostHealth } = useCliHostHealth()
   const maxTerminals = hostHealth?.online_hosts?.[0]?.capabilities?.max_terminals ?? null
+  // PRD-246: explorer over terminals on a phone; side by side is a desktop shape.
+  const isPhone = useIsMobile()
   // A ticket's Canvas opens on the terminal; the SDK canvas on its session (when it has one).
   const [rightTab, setRightTab] = useState<'terminal' | 'session'>(session.external || sdkAvailable === false ? 'terminal' : 'session')
 
@@ -126,7 +129,7 @@ export function CodingCanvasWidget({
       />
       {/* PRD-239 S7b: explorer + file view | terminals, resizable; the explorer's own
           tree | editor split is resizable too. */}
-      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1" data-testid={runtime ? 'runtime-canvas' : 'code-canvas'}>
+      <ResizablePanelGroup direction={isPhone ? 'vertical' : 'horizontal'} className="min-h-0 flex-1" data-testid={runtime ? 'runtime-canvas' : 'code-canvas'}>
         <ResizablePanel defaultSize={runtime ? 45 : 65} minSize={20}>
           <WorkspaceExplorer
             workspaceId={workspaceId}
@@ -140,7 +143,7 @@ export function CodingCanvasWidget({
         <ResizablePanel defaultSize={runtime ? 55 : 35} minSize={20}>
         {/* The right column: your own terminals (the CLI host, on your machine) and,
             where the worker can run one, the SDK session view — one at a time. */}
-        <div className="flex h-full min-h-0 flex-col border-l border-border">
+        <div className={isPhone ? 'flex h-full min-h-0 flex-col border-t border-border' : 'flex h-full min-h-0 flex-col border-l border-border'}>
           {showSdk && (
           <div className="flex items-center gap-1 border-b border-border px-2 py-1" role="tablist" data-testid="canvas-right-tabs">
             <button
