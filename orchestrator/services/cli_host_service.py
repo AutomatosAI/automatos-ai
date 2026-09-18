@@ -15,6 +15,7 @@ workspace-scoped through the host row; a host never sees another workspace.
 """
 from __future__ import annotations
 
+import json
 import hashlib
 import hmac
 import logging
@@ -57,12 +58,23 @@ SESSION_TOKEN_HASH_KEY = "session_token_sha256"
 SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
 # What of an ask we keep ON the ticket (the grant row is the record; this is the
 # fold-in for the next session's prompt, and it rides a JSONB column).
+# How many questions ONE ticket may raise across its whole life. Each one is a
+# card, a bell and a Telegram message addressed to the operator.
+MAX_ASKS_PER_TICKET = 6
 MAX_ASK_QUESTION_KEPT = 1000
 MAX_ASK_ANSWER_KEPT = 2000
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _aware(dt: Optional[datetime]) -> Optional[datetime]:
+    """A stored datetime as UTC-aware. SQLite (and some drivers) hand back naive
+    values for a timezone-aware column; comparing those to ``_now()`` raises."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -80,12 +92,35 @@ def clear_session_token(ref: Dict[str, Any]) -> None:
     ref.pop(SESSION_TOKEN_HASH_KEY, None)
 
 
+def revoke_session_token(db: Session, task: Any) -> bool:
+    """Kill this ticket's session credential on the row, now. True iff one was there.
+
+    Called from the two early returns in ``apply_result``; cancel does the same
+    thing inline (``clear_session_token``). The sweeper's requeue does NOT — it
+    nulls the lease and leaves the hash, which is safe only because the lookup
+    below requires a LIVE LEASE as well as ``in_progress``. ``in_progress`` alone is not enough to keep a token safe: a ticket
+    that stops being ``in_progress`` can become ``in_progress`` again without a
+    new claim (a board drag, a status PATCH, a heartbeat re-attach), and the
+    plaintext is still in the session's transcript and its ``mcp.json``. The row
+    is the only place the credential can be destroyed.
+    """
+    ref = dict(getattr(task, "runtime_ref", None) or {})
+    if SESSION_TOKEN_HASH_KEY not in ref:
+        return False
+    clear_session_token(ref)
+    task.runtime_ref = ref
+    return True
+
+
 def resolve_session_token(db: Session, token: Optional[str]) -> Optional[Tuple[BoardTask, Optional[Agent]]]:
     """The ticket and agent a session token belongs to, or ``None``.
 
-    The ticket must still be ``in_progress``: a token from a finished, cancelled
-    or requeued ticket resolves to nothing even if its hash is still on the row,
-    so state — not only cleanup — decides.
+    The ticket must still be ``in_progress`` AND hold a live lease. Status alone
+    is not a session: a ticket can return to ``in_progress`` without a claim — a
+    board drag, a status PATCH, a heartbeat re-attach — and that must not revive
+    a credential whose plaintext is sitting in an old transcript. Only a claim
+    sets a lease, and the host renews it on every event flush, so a running
+    session always has one and nothing else does.
     """
     if not token or not str(token).strip():
         return None
@@ -95,6 +130,8 @@ def resolve_session_token(db: Session, token: Optional[str]) -> Optional[Tuple[B
             db.query(BoardTask)
             .filter(
                 BoardTask.status == "in_progress",
+                BoardTask.lease_until.isnot(None),
+                BoardTask.lease_until > _now(),
                 BoardTask.runtime_ref[SESSION_TOKEN_HASH_KEY].astext == digest,
             )
             .first()
@@ -114,10 +151,17 @@ def _scan_for_session_token(db: Session, digest: str) -> Optional[BoardTask]:
         rows = db.query(BoardTask).filter(BoardTask.status == "in_progress").all()
     except Exception:  # noqa: BLE001
         return None
+    now = _now()
     for task in rows or []:
         ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
-        if secrets.compare_digest(str(ref.get(SESSION_TOKEN_HASH_KEY) or ""), digest):
-            return task
+        if not secrets.compare_digest(str(ref.get(SESSION_TOKEN_HASH_KEY) or ""), digest):
+            continue
+        # The same live-lease rule the indexed query applies — a fallback that
+        # answered where the query would not is a way around the rule.
+        lease = getattr(task, "lease_until", None)
+        if lease is None or _aware(lease) <= now:
+            return None
+        return task
     return None
 
 
@@ -735,7 +779,10 @@ def _answers_fold_in(task: BoardTask) -> str:
     prompt of the session that picks the work up. Read on the claim; the asks stay
     on the ticket as its record."""
     ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
-    answered = [a for a in session_asks(ref) if a.get("answered_at") and a.get("answer")]
+    # Not the ones a previous resume already showed (``folded_at``) — a two-turn
+    # ticket must not re-read yesterday's answer as if it were new.
+    answered = [a for a in session_asks(ref)
+                if a.get("answered_at") and a.get("answer") and not a.get("folded_at")]
     if not answered:
         return ""
     lines = ["## Answers to your questions",
@@ -828,10 +875,24 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         ref["explorer_root"] = explorer_root_for(
             task.id, ref["cwd"], task.workspace_id, getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
         )
+        # PRD-245 W2: the asks this ticket already made are its record — the
+        # answer to a resumed session is folded into the prompt from them, and
+        # MAX_ASKS_PER_TICKET counts them across the ticket's life. The claim
+        # builds a fresh ``ref``, so they have to be carried, and the prompt has
+        # to be rendered AFTER they are on the row. Building it before (the bug)
+        # read the new empty ref: no answer ever reached the resumed session and
+        # the ceiling reset to zero every claim.
+        ref[SESSION_ASKS_KEY] = session_asks(prior)
         # PRD-245 S1.1: the session's own credential for the Automatos tools.
         # Handed over ONCE, in this payload; only its hash stays on the ticket.
         session_token = mint_session_token(ref)
         task.runtime_ref = ref
+        prompt = _ticket_prompt(task)                       # reads the carried asks
+        # Mark the answers just folded in, so a LATER resume of the same ticket
+        # does not render them again.
+        if ref.get(SESSION_ASKS_KEY):
+            ref[SESSION_ASKS_KEY] = _mark_answers_folded(ref[SESSION_ASKS_KEY])
+            task.runtime_ref = ref
         out.append(
             {
                 "task_id": task.id,
@@ -839,7 +900,7 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
                 "agent_id": task.assigned_agent_id,
                 "agent_name": getattr(agent, "name", None),
                 "title": task.title,
-                "prompt": _ticket_prompt(task),
+                "prompt": prompt,
                 "review_mode": task.review_mode or "auto",
                 "attachment_ids": task.attachment_ids or [],
                 "provider": ref["provider"],
@@ -1112,6 +1173,19 @@ def record_session_ask(ref: Dict[str, Any], *, grant_id: Any, question: str) -> 
     return {**ref, SESSION_ASKS_KEY: [*session_asks(ref), entry]}
 
 
+def _mark_answers_folded(asks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Stamp ``folded_at`` on every answered ask, so ``_answers_fold_in`` shows
+    it once. Idempotent — an already-folded ask keeps its first stamp."""
+    now = _iso(_now())
+    out = []
+    for ask in asks:
+        if isinstance(ask, dict) and ask.get("answered_at") and ask.get("answer") and not ask.get("folded_at"):
+            out.append({**ask, "folded_at": now})
+        else:
+            out.append(ask)
+    return out
+
+
 def record_session_answer(ref: Dict[str, Any], *, grant_id: Any, answer: str) -> Dict[str, Any]:
     """Write the operator's answer onto the ask it belongs to. Returns the
     rebuilt ref; the same ref when the ask is unknown or already answered."""
@@ -1156,6 +1230,24 @@ async def raise_session_ask(
     )
     if task is None:
         return {"success": False, "error": f"ticket #{task_id} is not in this workspace"}
+
+    # One open question at a time, and a hard ceiling per ticket. Every ask
+    # raises a card in the Questions tab, rings the bell and sends a Telegram
+    # message with text the session chose — so "ask politely once" cannot be a
+    # prompt instruction alone. A session whose prompt has been steered would
+    # otherwise reach the operator as many times as its tool allowance allows.
+    ref = dict(task.runtime_ref or {})
+    still_open = open_session_asks(ref)
+    if still_open:
+        return {"success": False,
+                "error": "you already have a question waiting for an answer on this ticket: "
+                         f"{str(still_open[-1].get('question') or '')[:120]!r}. Finish what you can "
+                         "without it and end your turn — the answer resumes you."}
+    if len(session_asks(ref)) >= MAX_ASKS_PER_TICKET:
+        return {"success": False,
+                "error": f"this ticket has asked its {MAX_ASKS_PER_TICKET} questions. Say what you "
+                         "still need in your final message and end your turn."}
+
     try:
         staged = await stage_question(
             db, workspace_id,
@@ -1288,10 +1380,18 @@ async def _raise_session_holds(
         if grant_id is None:
             grant_id = await _stage_hold_question(db, task, agent_name, entry)
         updated.append({**entry, "grant_id": grant_id} if grant_id is not None else entry)
-    new_ref = {**ref, "pending_permissions": updated}
-    task.runtime_ref = new_ref
+    # Staging a question can spend seconds (bell + Telegram), and Claude Code
+    # issues tool calls in parallel — the session's own ``ask_human`` or the
+    # operator's answer to another hold can commit onto THIS row meanwhile.
+    # ``record_events`` already committed the events, so re-reading loses nothing
+    # of ours and picks up theirs; this write then owns ``pending_permissions``
+    # ONLY, instead of stamping a whole document read before the wait over it.
+    db.refresh(task)
+    fresh = dict(task.runtime_ref or {})
+    fresh["pending_permissions"] = updated
+    task.runtime_ref = fresh
     db.commit()
-    return new_ref
+    return fresh
 
 
 async def _stage_hold_question(
@@ -1802,9 +1902,18 @@ async def apply_result(
     task = _owned_task(db, host, task_id)
     ref = dict(task.runtime_ref or {})
     attempt = payload.get("attempt")
+    # Whatever else is true, this host's run of this ticket is over, so its
+    # credential dies here — BEFORE either early return. A result that arrives
+    # for a stale attempt, or for a ticket someone already moved, used to leave
+    # the hash on the row with the plaintext still in the transcript and in
+    # ``mcp.json``; the next flip back to ``in_progress`` revived it.
     if attempt is not None and ref.get("attempt") is not None and int(attempt) != int(ref["attempt"]):
+        if revoke_session_token(db, task):
+            db.commit()
         return {"applied": False, "reason": "stale attempt", "status": task.status}
     if task.status != "in_progress":
+        if revoke_session_token(db, task):
+            db.commit()
         return {"applied": False, "reason": f"task is {task.status}", "status": task.status}
 
     status = str(payload.get("status") or "success").lower()
@@ -1876,6 +1985,12 @@ async def apply_result(
         "recent_tools": list(ref.get("recent_tools") or []),
         "permission_denials": list(ref.get("permission_denials") or []),
     }
+    # A concurrent ``answer_session_ask`` (the operator answered while the turn
+    # was still running) commits ``session_asks`` between this function's top
+    # read and this write. Fold that answer in before the whole-document write,
+    # or the park below reads a stale ledger and blocks the ticket on a question
+    # already answered — a ticket that then never resumes.
+    ref = _merge_fresh_session_asks(db, task, ref)
     task.runtime_ref = ref
     db.commit()
     book_session_usage(
@@ -1914,6 +2029,81 @@ async def apply_result(
         force_review=forces_review(denial_summaries),
     )
     return {"applied": terminal is not None, "status": terminal or task.status}
+
+
+def _merge_fresh_session_asks(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Dict[str, Any]:
+    """``ref`` with any answer a concurrent request wrote to this row's
+    ``session_asks`` folded in. Read-only re-select; returns ``ref`` unchanged
+    on any error or when nothing new is there."""
+    from sqlalchemy import text as sql_text
+
+    try:
+        row = db.execute(
+            sql_text("SELECT runtime_ref FROM board_tasks WHERE id = :id"), {"id": int(task.id)}
+        ).first()
+    except Exception:  # noqa: BLE001 — a merge must never fail the result
+        return ref
+    fresh = (row[0] if row and isinstance(row[0], dict) else {}) or {}
+    by_grant = {int(a.get("grant_id") or 0): a for a in fresh.get(SESSION_ASKS_KEY, []) if isinstance(a, dict)}
+    if not by_grant:
+        return ref
+    merged: List[Dict[str, Any]] = []
+    changed = False
+    for ask in session_asks(ref):
+        other = by_grant.get(int(ask.get("grant_id") or 0))
+        if other and other.get("answered_at") and not ask.get("answered_at"):
+            merged.append({**ask, "answer": other.get("answer"), "answered_at": other.get("answered_at")})
+            changed = True
+        else:
+            merged.append(ask)
+    return {**ref, SESSION_ASKS_KEY: merged} if changed else ref
+
+
+def record_session_note(db: Session, *, task_id: Any, workspace_id: Any,
+                        agent_name: Optional[str], note: str) -> Dict[str, Any]:
+    """Append a progress note to a running ticket, for the operator to read.
+
+    ONE key, in one statement (``jsonb_set`` append) — never a whole-document
+    write, which would clobber the host's concurrent event flush. The note also
+    goes to the ticket's Code Canvas so the operator sees it live. Returns an
+    executor-shaped result the session reads as ordinary tool output.
+    """
+    from sqlalchemy import text as sql_text
+
+    entry = {"note": str(note)[:MAX_ASK_QUESTION_KEPT], "at": _iso(_now()), "by": agent_name or "the session"}
+    try:
+        db.execute(
+            sql_text(
+                """
+                UPDATE board_tasks
+                   SET runtime_ref = jsonb_set(
+                           COALESCE(runtime_ref, CAST('{}' AS jsonb)),
+                           CAST(:path AS text[]),
+                           COALESCE(runtime_ref -> :key, CAST('[]' AS jsonb)) || CAST(:entry AS jsonb),
+                           true)
+                 WHERE id = :task_id AND workspace_id = :ws
+                """
+            ),
+            {"path": "{session_notes}", "key": "session_notes",
+             "entry": json.dumps([entry]), "task_id": int(task_id), "ws": str(workspace_id)},
+        )
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 — the session reads the reason
+        logger.warning("[cli-host] progress note not recorded for ticket #%s", task_id, exc_info=True)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return {"success": False, "error": f"the note could not be saved ({type(exc).__name__})"}
+    try:
+        publish_canvas_events(workspace_id, [
+            _canvas_envelope(workspace_id, "canvas.session.status", {
+                "source": "cli", "task_id": int(task_id), "status": "running", "note": entry["note"],
+            }),
+        ])
+    except Exception:  # noqa: BLE001 — the note is saved; the live line is best-effort
+        logger.debug("[cli-host] progress note canvas line not published for ticket #%s", task_id, exc_info=True)
+    return {"success": True, "result": {"recorded": True, "note": entry["note"]}}
 
 
 def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optional[str]:

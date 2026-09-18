@@ -118,8 +118,24 @@ def write_mcp_config(path: Path, session_tools: Optional[Mapping[str, Any]]) -> 
             pass
         return None
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    os.chmod(path, 0o600)
+    # Created 0600, not chmod'd to 0600 afterwards. Writing then chmod'ing leaves
+    # the token world-readable for the window between the two calls, and keeps a
+    # previous file's wider mode until the chmod lands.
+    body = json.dumps(document, indent=2) + "\n"
+    try:
+        path.unlink()            # never inherit an existing file's mode
+    except OSError:
+        pass
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(body)
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
     return path
 
 

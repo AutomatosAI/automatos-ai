@@ -9,6 +9,11 @@ ticket into review. They are not the same thing:
   do something it wanted to do: the ticket needs a human look (review).
 * ``read_outside`` — a read of a path outside the session directory was refused.
   The guardrail worked; the work was not blocked by it.
+* ``refused`` — the gate refused a command outright, with no question for anyone:
+  a never-allowed command (``git push``), a path traversal, an unreadable
+  ``sed``/``awk`` program, an Automatos tool this ticket may not call. A refusal
+  IS the answer — nobody was asked and nobody failed to answer — so it belongs
+  with the other guardrails, not with the holds.
 * ``unknown_tool`` — a tool a session never has (MCP, Task, …) was refused.
 * ``prompt`` — a permission prompt reached the TUI and was answered "no" by the
   host (sessions are policy-gated, not prompted).
@@ -26,6 +31,7 @@ from typing import Any, Dict, Mapping, Tuple
 
 DENIAL_KIND_HOLD = "hold"
 DENIAL_KIND_READ_OUTSIDE = "read_outside"
+DENIAL_KIND_REFUSED = "refused"
 DENIAL_KIND_UNKNOWN_TOOL = "unknown_tool"
 DENIAL_KIND_PROMPT = "prompt"
 DENIAL_KIND_OTHER = "other"
@@ -39,6 +45,24 @@ HOLD_REASON_MARKERS: Tuple[str, ...] = ("no answer from the operator", "denied b
 READ_OUTSIDE_MARKER = "outside the session directory"
 # ``policy.py::decide`` — a tool class the session never has.
 UNKNOWN_TOOL_MARKER = "is not enabled for session tickets"
+# ``policy.py`` — the outright refusals. Every one of these is a decision the
+# gate made by itself; no operator was asked, so none of them is a hold.
+#
+# Getting this wrong is not cosmetic. Before these markers existed, every
+# refusal the list below covers fell through to ``other``, which fails closed —
+# so a session that merely WROTE ``..`` inside a quoted string, or reached for
+# an Automatos tool under the wrong name, sent its ticket to review with nothing
+# for a human to act on. Sessions start one directory above the repos, so ``..``
+# is exactly what an agent types.
+REFUSED_REASON_MARKERS: Tuple[str, ...] = (
+    "never allowed in a session",
+    "path traversal",
+    "is not one this ticket may call",
+    "reads its program from a file the gate cannot judge",
+    "program runs a command of its own",
+    # NOT "redirection outside the session directory": it carries the read_outside
+    # wording and is classified there, which is the same verdict by a better name.
+)
 # ``session.py::_reply_for`` — the stage of a TUI permission prompt the host denied.
 PROMPT_STAGE = "PermissionRequest"
 
@@ -48,6 +72,7 @@ DENIAL_KIND_LABELS: Tuple[Tuple[str, str], ...] = (
     (DENIAL_KIND_HOLD, "Held for the operator — no answer in time, or denied"),
     (DENIAL_KIND_OTHER, "Refused (unclassified — treated as a hold)"),
     (DENIAL_KIND_READ_OUTSIDE, "Reads outside the session directory"),
+    (DENIAL_KIND_REFUSED, "Refused by the gate (nobody was asked)"),
     (DENIAL_KIND_UNKNOWN_TOOL, "Tools a session does not have"),
     (DENIAL_KIND_PROMPT, "Permission prompts (sessions are policy-gated, not prompted)"),
 )
@@ -64,6 +89,8 @@ def classify_denial(stage: Any, reason: Any) -> str:
         return DENIAL_KIND_READ_OUTSIDE
     if UNKNOWN_TOOL_MARKER in text:
         return DENIAL_KIND_UNKNOWN_TOOL
+    if any(marker in text for marker in REFUSED_REASON_MARKERS):
+        return DENIAL_KIND_REFUSED
     return DENIAL_KIND_OTHER
 
 

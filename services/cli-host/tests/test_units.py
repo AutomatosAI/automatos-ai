@@ -218,8 +218,16 @@ def test_system_prompt_is_stable_per_agent():
     assert a == b and "never push" in a
     # PRD-245 S0.6: the session is told what it can reach and how to ask — in words
     # that never change per ticket.
-    assert "held for the operator" in a and "composio_execute" in a and "platform_*" in a
-    assert "state it in your final message and end the turn" in a
+    assert "held for the operator" in a
+    # The rules POINT at the tool list the backend renders; they must not carry a
+    # competing list of their own. W0 named composio_execute and search_knowledge
+    # as unavailable, and W1/W3 then made them available — leaving the session's
+    # last instruction contradicting the list two paragraphs above it.
+    assert "that list is the truth" in a
+    assert "composio_execute" not in a and "search_knowledge" not in a
+    # Asking: the tool when there is one, the final message when there is not.
+    assert "ask_human" in a and "state the question in your final message" in a
+    assert "never wait for an answer inside the session" in a.lower()
     assert "#1" not in a and "#2" not in a
 
 
@@ -847,11 +855,20 @@ def test_script_guards_cannot_be_made_to_backtrack(tmp_path):
 
     ctx, fill = _layout(tmp_path)
     probes = ["s" + "\\a" * 2000, "sa" + "\\a" * 2000, "print" + "x" * 20000, "/" + "a1" * 10000]
-    started = time.monotonic()
-    for probe in probes:
-        policy._SED_ESCAPE_RE.search(probe)
-        policy._AWK_ESCAPE_RE.search(probe)
-    assert time.monotonic() - started < 2.0
+
+    def _scan(texts):
+        started = time.monotonic()
+        for probe in texts:
+            policy._SED_ESCAPE_RE.search(probe)
+            policy._AWK_ESCAPE_RE.search(probe)
+        return time.monotonic() - started
+
+    # Measured against THIS runner, not against a wall-clock guess: a loaded CI
+    # box is slow at everything, and the failure being caught is exponential, not
+    # "a bit slow". Half-length probes give the baseline; catastrophic
+    # backtracking would blow past a 50x allowance on the full-length ones.
+    baseline = max(_scan([p[: len(p) // 2] for p in probes]), 1e-4)
+    assert _scan(probes) < baseline * 50
     # …and a program made of those shapes is still judged, not hung.
     assert _decide("Bash", {"command": fill("sed 's/" + "\\a" * 500 + "/x/' <ROOT>/f")}, ctx).behavior == "allow"
 
@@ -886,3 +903,149 @@ def test_the_session_token_never_reaches_a_command_line():
     session.assert_secret_not_in_args(["claude"], None)       # nothing offered, nothing to check
     with pytest.raises(RuntimeError):
         session.assert_secret_not_in_args(["claude", "--header", "Authorization: Bearer tok-secret"], "tok-secret")
+
+
+# ── PRD-245 W1: the claim's bridge keys, read the way the host really reads them ──
+
+def _bridge_session(tmp_path, ticket, url="http://127.0.0.1:8000"):
+    from automatos_cli_host.session import Session
+
+    cfg = type("Cfg", (), {"ask_timeout": 1.0, "sessions_dir": tmp_path,
+                           "socket_path": tmp_path / "s.sock", "url": url})()
+    return Session({"task_id": 71, "attempt": 1, "session_id": "sid", **ticket},
+                   cfg, [str(tmp_path)], tmp_path / "s.sock", default_root=str(tmp_path))
+
+
+CLAIM_BRIDGE_TICKET = {
+    "session_tools": ["board_summary", "submit_report"],
+    "session_tools_path": "/api/v1/session-tools/mcp",
+    "session_token": "tok-abc",
+}
+
+
+def test_session_tools_reads_the_claim_the_backend_actually_sends(tmp_path):
+    """The one place the host and the backend have to agree on three key names.
+
+    Every other test builds ``LaunchContext(session_tools={...})`` by hand, so a
+    rename on either side of the wire leaves both suites green and every session
+    silently tool-less — no MCP config written, no error logged, the agent simply
+    told it has tools it cannot see. The spelling has already moved once: the PRD
+    said ``session_tools_url``, the build ships ``session_tools_path``.
+    """
+    s = _bridge_session(tmp_path, CLAIM_BRIDGE_TICKET)
+    tools = s._session_tools()
+    assert tools == {
+        "names": ["board_summary", "submit_report"],
+        "url": "http://127.0.0.1:8000/api/v1/session-tools/mcp",
+        "token": "tok-abc",
+    }
+
+
+def test_session_tools_is_none_when_any_piece_is_missing(tmp_path):
+    """An older backend offers none of it; a half-offer is never a bridge."""
+    assert _bridge_session(tmp_path, {})._session_tools() is None
+    for drop in CLAIM_BRIDGE_TICKET:
+        partial = {k: v for k, v in CLAIM_BRIDGE_TICKET.items() if k != drop}
+        assert _bridge_session(tmp_path, partial)._session_tools() is None, f"offered a bridge without {drop}"
+    # an empty tool list is not an offer either
+    assert _bridge_session(tmp_path, {**CLAIM_BRIDGE_TICKET, "session_tools": []})._session_tools() is None
+
+
+def test_session_tools_needs_a_backend_address_this_host_knows(tmp_path):
+    """The claim carries a PATH on purpose — a container cannot know the address
+    the operator's machine must dial. No address here, no bridge."""
+    assert _bridge_session(tmp_path, CLAIM_BRIDGE_TICKET, url="")._session_tools() is None
+
+
+def test_session_tools_url_joins_without_a_double_slash(tmp_path):
+    s = _bridge_session(tmp_path, CLAIM_BRIDGE_TICKET, url="http://127.0.0.1:8000/")
+    assert s._session_tools()["url"] == "http://127.0.0.1:8000/api/v1/session-tools/mcp"
+
+
+# ── PRD-245: the four escapes the second gate review reproduced ─────────────
+
+def test_an_unquoted_backtick_body_is_judged_like_a_quoted_one(tmp_path):
+    """`` echo `cat host.json` `` tokenizes to three words, so the path inside
+    the backticks became an argument of ``echo`` — which names no paths — and
+    the host's own credential file was readable in one line. Substitutions are
+    now judged from the RAW line, quoted or not."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict("echo `cat <OUTSIDE>/host.json`") == "deny"
+    assert verdict("echo `cat <OUTSIDE>/host.json` end") == "deny"
+    assert verdict("echo `git push`") == "deny"
+    assert verdict("echo \"`cat <OUTSIDE>/host.json`\"") == "deny"       # the quoted form still
+    assert verdict("echo `ls <ROOT>`") == "allow"                          # an honest body still runs
+    assert verdict("echo 'see `ls` here'") == "allow"
+
+
+def test_ansi_c_quoting_cannot_hide_a_path(tmp_path):
+    """``$'/etc/passwd'`` IS ``/etc/passwd`` to bash; the tokenizer strips the
+    quotes and leaves a ``$``, so it no longer looked like a path at all."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    for cmd in ("cat $'/etc/passwd'", "cat $'\\x2f'etc/passwd", "grep x $'/etc/passwd'", "ls $\"/etc\""):
+        assert verdict(cmd) == "ask", cmd
+
+
+def test_sed_cannot_name_a_file_to_write_or_read(tmp_path):
+    """A program text is exempt from the path check (``/foo/d`` is not a path),
+    so sed's ``w``/``W``/``r``/``R`` commands and the ``w`` flag of ``s`` were a
+    write or read anywhere — the analogous awk forms were already refused."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    for cmd in ("sed 'w /etc/cron.d/x' <ROOT>/repo/f", "sed '1r /etc/passwd' <ROOT>/repo/f",
+                "sed 'R /etc/passwd' <ROOT>/repo/f", "sed 's/a/b/w /etc/x' <ROOT>/repo/f"):
+        assert verdict(cmd) == "deny", cmd
+    for cmd in ("sed -n '1,5p' <ROOT>/repo/f", "sed 's/ error / x/' <ROOT>/repo/f", "sed '/foo/d' <ROOT>/repo/f",
+                "sed -E 's/(a|b)/c/g' <ROOT>/repo/f"):
+        assert verdict(cmd) == "allow", cmd
+
+
+def test_a_never_allowed_command_behind_a_wrapper_is_refused_not_held(tmp_path):
+    """``xargs git push`` is ``git push``. The wrapper is off the allowlist and
+    was HELD — an operator can approve a hold, and approving it runs the push."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    for cmd in ("xargs git push", "env git push", "command git push", "time git push", "timeout 5 git push",
+                "timeout 30s git push", "nice -n 10 git push", "env FOO=1 git push", "nohup git push"):
+        assert verdict(cmd) == "deny", cmd
+    # a second -exec clause after ';' is a simple command of its own — judged as what it runs
+    assert verdict("find <ROOT> -exec echo {} ; -exec git push ;") == "deny"
+    assert verdict("find <ROOT> -exec echo {} ; -exec cat /etc/passwd ;") == "deny"
+    # the wrapper itself is still a question, and prose is still prose
+    assert verdict("xargs git status") == "ask"
+    assert verdict("time make test") == "ask"
+    assert verdict('git commit -m "do not git push"') == "allow"
+
+
+def test_a_backslash_escaped_heredoc_delimiter_is_a_quoted_one(tmp_path):
+    """``<<\\EOF`` is ``<<'EOF'`` to bash: the body is data. It was read as an
+    UNQUOTED delimiter, so an honest note mentioning ``../docs`` or ``$(…)``
+    was refused for what it said."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict("cat > <ROOT>/x.md <<\\EOF\n$(git push)\nEOF") == "allow"
+    assert verdict("cat > <ROOT>/x.md <<\\EOF\nplain ../notes here\nEOF") == "allow"
+    assert verdict("cat > <ROOT>/x.md <<EOF\n$(git push)\nEOF") == "deny"          # unquoted still runs it
+
+
+def test_cd_dash_is_not_a_directory(tmp_path):
+    ctx, fill = _layout(tmp_path)
+    assert _decide("Bash", {"command": "cd -"}, ctx).behavior == "ask"
+    assert _decide("Bash", {"command": fill("cd <ROOT>/repo")}, ctx).behavior == "allow"
+
+
+def test_a_substitution_inside_a_loop_keeps_the_loops_bindings(tmp_path):
+    """RESEARCHER's re-run, 2026-09-18: ``for d in …; do … "$(ls deliverables/$d | wc -l)"; done``
+    was HELD for a ``$d`` the gate could not resolve, and the ticket sat in review
+    on the 120 s that nobody answered. The loop binds ``d``; the segment pass
+    judges the ``$(…)`` with that binding. The raw-line pass that closes the
+    unquoted-backtick hole must not re-judge ``$(…)`` bodies with no bindings."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict('for d in a b; do echo "$(ls <ROOT>/deliverables/$d | wc -l)"; done') == "allow"
+    assert verdict('cd <ROOT> && for d in a b; do printf "%s\n" "$(ls deliverables/$d | wc -l | tr -d \' \')"; done') == "allow"
+    # bindings never launder an outside path, in either substitution form
+    assert verdict('for d in a b; do echo "$(cat <OUTSIDE>/host.json)"; done') == "deny"
+    assert verdict('for d in a b; do echo `cat <OUTSIDE>/host.json`; done') == "deny"

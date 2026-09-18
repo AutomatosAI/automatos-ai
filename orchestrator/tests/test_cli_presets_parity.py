@@ -84,3 +84,97 @@ def test_session_bash_verbs_mirror_the_hosts_default_allowlist():
         "mirror the host's DEFAULT_BASH_ALLOW in core/cli_presets.SESSION_BASH_VERBS"
     )
     assert len(cli_presets.SESSION_BASH_VERBS) == len(ours)   # no duplicates in the rendered list
+
+
+# ── PRD-245 W1: the three claim keys the session bridge rides on ──────────────
+
+HOST_SESSION = _ORCH.parent / "services" / "cli-host" / "automatos_cli_host" / "session.py"
+
+# What the backend puts in the claim payload for the bridge, and what the host's
+# ``Session._session_tools`` reads back out. The spelling has already moved once
+# (the PRD said ``session_tools_url``; the build ships ``session_tools_path``),
+# and a drift here is SILENT: the host reads nothing, writes no MCP config, and
+# every session runs with no platform tools and no error anywhere.
+SESSION_BRIDGE_CLAIM_KEYS = {"session_tools", "session_tools_path", "session_token"}
+
+
+def _host_session_tools_keys() -> set:
+    """The ``self.ticket.get("…")`` keys inside the host's ``_session_tools``."""
+    tree = ast.parse(HOST_SESSION.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_session_tools":
+            return {
+                c.args[0].value
+                for c in ast.walk(node)
+                if isinstance(c, ast.Call)
+                and getattr(c.func, "attr", None) == "get"
+                and c.args and isinstance(c.args[0], ast.Constant)
+                and isinstance(c.args[0].value, str)
+            }
+    return set()
+
+
+def test_the_host_reads_exactly_the_claim_keys_the_backend_writes():
+    host = _host_session_tools_keys()
+    assert host, f"no _session_tools function found in {HOST_SESSION}"
+    assert host == SESSION_BRIDGE_CLAIM_KEYS, (
+        f"host-only {sorted(host - SESSION_BRIDGE_CLAIM_KEYS)} / "
+        f"backend-only {sorted(SESSION_BRIDGE_CLAIM_KEYS - host)} — rename on BOTH sides, "
+        "and move EXPECTED_CLI_HOST_VERSION with it"
+    )
+
+
+def test_the_claim_payload_carries_those_keys_and_the_version_moved_with_them():
+    """The tripwire with teeth.
+
+    ``test_host_contract_version_moved_with_the_claim_shape`` asserts a literal,
+    so it stayed green through the very change it is named for. Binding the
+    version to the claim's own key set means a new field cannot land without
+    editing this line — which is the moment to decide whether the host version
+    moves too.
+    """
+    from services import cli_host_service as svc
+
+    claim_keys = _claim_payload_keys()
+    assert SESSION_BRIDGE_CLAIM_KEYS <= claim_keys, (
+        f"the claim no longer carries {sorted(SESSION_BRIDGE_CLAIM_KEYS - claim_keys)}"
+    )
+    assert (svc.EXPECTED_CLI_HOST_VERSION, sorted(claim_keys)) == (
+        "0.8.0",
+        sorted(_EXPECTED_CLAIM_KEYS),
+    ), (
+        "the claim payload's shape changed — bump EXPECTED_CLI_HOST_VERSION and the host's "
+        "__version__ together, then update this expectation"
+    )
+
+
+# The claim payload as of host contract 0.8.0.
+_EXPECTED_CLAIM_KEYS = {
+    "task_id", "workspace_id", "title", "prompt", "attachment_ids", "review_mode",
+    "agent_id", "agent_name", "provider", "model", "allowed_tools",
+    "cwd", "worktree", "attempt", "session_id", "lease_seconds",
+    "system_prompt", "resume_session_id",
+    # the bridge (0.8.0)
+    "session_tools", "session_tools_path", "session_token",
+}
+
+BACKEND_SERVICE = _ORCH / "services" / "cli_host_service.py"
+
+
+def _claim_payload_keys() -> set:
+    """The literal keys of the dict ``claim_for_host`` appends to its result."""
+    tree = ast.parse(BACKEND_SERVICE.read_text(encoding="utf-8"))
+    best: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "claim_for_host":
+            for call in ast.walk(node):
+                if isinstance(call, ast.Call) and getattr(call.func, "attr", None) == "append":
+                    for arg in call.args:
+                        if isinstance(arg, ast.Dict):
+                            keys = {
+                                k.value for k in arg.keys
+                                if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                            }
+                            if len(keys) > len(best):
+                                best = keys
+    return best

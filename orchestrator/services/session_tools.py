@@ -44,11 +44,30 @@ PLATFORM_DISPATCHER = "platform_execute"
 DISPATCH_PLATFORM_ACTION = "platform_action"
 DISPATCH_TOOL_NAME = "tool_name"
 
-# A session may move its own ticket here — never to a terminal status. "Done" is
-# a fact the host observes when the session ends (PRD-245 D3); a session that
-# could close its own ticket could report success for work it did not do.
-SESSION_TICKET_STATUSES: Tuple[str, ...] = ("in_progress", "blocked", "review")
-REFUSED_TICKET_STATUSES: Tuple[str, ...] = ("done", "failed", "cancelled", "inbox", "assigned")
+# A session may not move its own ticket OUT of ``in_progress`` at all.
+#
+# "Done" was always refused — it is a fact the host observes when the session
+# ends (PRD-245 D3), and a session that could close its own ticket could report
+# success for work it did not do. ``blocked`` and ``review`` turned out to be
+# worse than that, not milder: ``apply_result`` returns early for a ticket that
+# is no longer ``in_progress``, so the moment a session set either one, its own
+# turn-end result was DISCARDED — no deliverables registered, no report written,
+# no result text, no usage booked. The ticket sat on the board looking like
+# finished work with nothing behind it.
+#
+# A session that is genuinely stuck has ``ask_human``: that parks the ticket the
+# supported way, at turn end, keeping everything the session produced.
+SESSION_TICKET_STATUSES: Tuple[str, ...] = ("in_progress",)
+# A progress note is read by a human on a card; keep it to a couple of sentences.
+MAX_NOTE_CHARS = 400
+# What ``platform_submit_report`` accepts besides the forced linkage.
+SUBMIT_REPORT_FIELDS: Tuple[str, ...] = (
+    "title", "content", "summary", "report_type", "status", "metrics",
+    "recommendations", "action_items",
+)
+REFUSED_TICKET_STATUSES: Tuple[str, ...] = (
+    "done", "failed", "cancelled", "inbox", "assigned", "blocked", "review",
+)
 
 MAX_TOOL_RESULT_CHARS = 40000
 # The operator reads a question on a CARD, not in a terminal: past a short
@@ -79,6 +98,9 @@ class SessionTool:
     # result. So it brings a runner that files the question UNPARKED and lets the
     # turn's end do the parking. One exception, named here, not a second path.
     runner: Optional[Callable[[Any, Dict[str, Any], "SessionContext"], Any]] = None
+    # What comes BACK, when the action returns more than this tool advertises.
+    # The scope functions guard the request; this guards the response.
+    project: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
 
 
 @dataclass(frozen=True)
@@ -92,29 +114,58 @@ class SessionContext:
 
 
 def _scope_update_ticket(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
-    """This ticket, and never a terminal status."""
+    """Just the note. A session cannot move its ticket at all.
+
+    ``done`` was always refused — the host records the outcome when the turn
+    ends. ``blocked`` and ``review`` were allowed at first and turned out to be
+    worse than ``done``, not milder: ``apply_result`` returns early for a ticket
+    that is no longer ``in_progress``, so the moment a session set either one its
+    own turn was discarded — no deliverables, no report, no result text, no
+    usage. A session that is genuinely stuck has ``ask_human``, which parks the
+    ticket at turn end and keeps everything.
+    """
     status = str(params.get("status") or "").strip().lower()
-    if status not in SESSION_TICKET_STATUSES:
+    if status and status != "in_progress":
         raise SessionToolRefused(
-            f"a session may set its ticket to {', '.join(SESSION_TICKET_STATUSES)} — not {status!r}. "
-            "Finishing is not yours to record: end your turn and the host closes the ticket with your result."
+            f"a session cannot move its ticket to {status!r}, or anywhere else. Moving it ends the run, "
+            "and your turn's work — your files, your report, your result — is then thrown away. To stop "
+            "for an answer use ask_human, which parks the ticket properly and keeps everything. To "
+            "finish, just end your turn: the host records the outcome. This tool only leaves a note."
         )
-    out: Dict[str, Any] = {"task_id": ctx.task_id, "status": status}
     note = str(params.get("note") or "").strip()
-    if status == "blocked":
-        # The action requires a reason for 'blocked'; say who blocked it when the
-        # session did not.
-        out["blocked_reason"] = note or f"Blocked by {ctx.agent_name or 'the session'} on ticket #{ctx.task_id}"
-    elif note:
-        out["blocked_reason"] = note
-    return out
+    if not note:
+        raise SessionToolRefused(
+            "update_ticket leaves a progress note — say what you are doing, in a sentence."
+        )
+    return {"note": note[:MAX_NOTE_CHARS]}
+
+
+async def _run_update_ticket(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
+    """Write the note where the operator will see it.
+
+    NOT ``platform_update_task_status``, which this tool used to dispatch to. For
+    a ticket that is already ``in_progress`` — which every running session's is —
+    that action takes its atomic-claim branch, whose ``UPDATE … WHERE status <>
+    'in_progress'`` matches no row; it returned ``{"success": True}`` having
+    written nothing at all, and never read ``blocked_reason``. The note vanished
+    and the model was told it had landed.
+    """
+    from services.cli_host_service import record_session_note
+
+    return record_session_note(
+        db, task_id=ctx.task_id, workspace_id=ctx.workspace_id,
+        agent_name=ctx.agent_name, note=params.get("note") or "",
+    )
 
 
 def _scope_submit_report(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
     """This ticket's report, attributed to the calling agent by the executor. A
     session reports on ITS ticket: any other id the call names is dropped."""
-    out = {k: v for k, v in params.items()
-           if k in ("title", "content", "summary", "report_type", "recommendations", "action_items")}
+    # The whitelist is the ACTION's own optional fields (``handlers_reports``),
+    # not a narrower set: WRITER and TRACKER both pass ``status`` and ``metrics``
+    # in their skill bodies, and dropping them silently made the session's report
+    # poorer than the same skill's report from an API agent for no reason.
+    out = {k: v for k, v in params.items() if k in SUBMIT_REPORT_FIELDS}
     out["linked_task_ids"] = [ctx.task_id]
     return out
 
@@ -127,6 +178,37 @@ def _scope_nothing(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any
 
 def _scope_list_tasks(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
     return {k: v for k, v in params.items() if k in ("status", "assigned_agent_name", "limit")}
+
+
+# What ``list_tasks`` says it returns, and therefore all it may return. The board
+# action hands back every field of every ticket in the workspace, including each
+# one's full ``description`` and ``error_message`` — operator-written text that
+# routinely carries paths, hostnames and pasted credentials. One call would put
+# every other ticket's brief in front of a session whose prompt an injected web
+# page or repo file may be steering. The tool promises a few fields; it returns
+# those fields.
+#
+# These are the handler's OWN key names (``handlers_board_tasks``: the list
+# handler builds each row by hand, and names the agent ``assigned_agent``), and
+# the handler's dict comes back from the executor AS IS — ``tasks`` sits at the
+# top level, not under a ``result`` key. The first version of this projection
+# assumed both wrongly, and its test fed it the imagined shape: it narrowed
+# nothing and passed. A parity test now reads the handler's source.
+LIST_TASKS_FIELDS: Tuple[str, ...] = ("id", "title", "status", "priority", "assigned_agent")
+
+
+def _project_list_tasks(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep the envelope, narrow each task to the advertised fields."""
+    if not isinstance(result, dict) or not result.get("success"):
+        return result
+    rows = result.get("tasks")
+    if not isinstance(rows, list):
+        return result
+    narrowed = [
+        {k: row.get(k) for k in LIST_TASKS_FIELDS if k in row}
+        for row in rows if isinstance(row, dict)
+    ]
+    return {**result, "tasks": narrowed}
 
 
 async def _run_ask_human(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -224,26 +306,28 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
             "required": [],
         },
         scope=_scope_list_tasks,
+        project=_project_list_tasks,
         tags=("board",),
     ),
     SessionTool(
         name="update_ticket",
-        action="platform_update_task_status",
+        action="platform_update_task_status",   # the historical name; the runner writes the note
         description=(
-            "Move YOUR OWN ticket to in_progress, blocked or review, with a note. You cannot "
-            "close it: end your turn and the host records the result. Use 'blocked' when you "
-            "genuinely cannot proceed, and say why in the note."
+            "Leave a progress note on YOUR OWN ticket while you work — the operator sees it live on "
+            "the ticket. You cannot move the ticket anywhere: closing it is the host's job when your "
+            "turn ends, and any other status would end the run and throw your work away. If you "
+            "genuinely cannot proceed without an answer, use ask_human instead."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "status": {"type": "string", "enum": list(SESSION_TICKET_STATUSES),
-                           "description": "The status to move this ticket to."},
-                "note": {"type": "string", "description": "Why — required in spirit for 'blocked', kept on the ticket."},
+                "note": {"type": "string",
+                         "description": "What you are doing, or what changed. One or two sentences."},
             },
-            "required": ["status"],
+            "required": ["note"],
         },
         scope=_scope_update_ticket,
+        runner=_run_update_ticket,
         reads_only=False,
         tags=("board",),
     ),
@@ -266,6 +350,13 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
                                 "description": "Category; 'delivery' for completed work, 'research' for a deep dive."},
                 "recommendations": {"type": "array", "items": {"type": "string"}, "description": "What you advise."},
                 "action_items": {"type": "array", "items": {"type": "string"}, "description": "What still needs doing."},
+                # Accepted by the action and passed through by the scope, but not
+                # advertised until RESEARCHER guessed a status on the 09-18 re-run
+                # and was refused — a field the tool takes is a field it must name.
+                "status": {"type": "string", "enum": ["ok", "warning", "critical", "info"],
+                           "description": "How things stand: ok, warning, critical or info."},
+                "metrics": {"type": "object", "description": "Numbers worth keeping, as key: value.",
+                            "additionalProperties": True},
             },
             "required": ["title", "content"],
         },
@@ -403,8 +494,19 @@ async def call_tool(db: Any, tool: SessionTool, params: Dict[str, Any], ctx: Ses
     exception: the caller renders it as tool output the model can read and act
     on, which is what the MCP contract asks for.
     """
+    # Every session tool is called BY an agent's ticket. Without an agent id the
+    # executor is handed 0, and for ``composio_execute`` that is not a harmless
+    # placeholder: an agent with no explicit app assignments inherits every app
+    # the workspace has connected. A ticket with no assigned agent must not be
+    # the widest caller on the platform.
+    if not ctx.agent_id:
+        raise SessionToolRefused(
+            "this ticket has no agent assigned, so there is nothing to run tools as. "
+            "Say so in your result and end your turn."
+        )
+
     if tool.runner is not None:
-        return await tool.runner(db, params, ctx)
+        return _projected(tool, await tool.runner(db, params, ctx))
 
     from modules.tools.execution.unified_executor import UnifiedToolExecutor
 
@@ -421,4 +523,18 @@ async def call_tool(db: Any, tool: SessionTool, params: Dict[str, Any], ctx: Ses
         # workspace agent.
         caller_context=None,
     )
-    return result if isinstance(result, dict) else {"success": False, "error": "the executor returned no result"}
+    if not isinstance(result, dict):
+        return {"success": False, "error": "the executor returned no result"}
+    return _projected(tool, result)
+
+
+def _projected(tool: SessionTool, result: Any) -> Any:
+    """The tool's response narrowed to what it advertises, if it narrows at all.
+    Never raises: a projection fault must not turn a good answer into an error."""
+    if tool.project is None or not isinstance(result, dict):
+        return result
+    try:
+        return tool.project(result)
+    except Exception:  # noqa: BLE001
+        logger.warning("[session-tools] %s: could not narrow the response", tool.name, exc_info=True)
+        return {"success": False, "error": "the result could not be prepared for a session"}

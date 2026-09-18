@@ -90,24 +90,90 @@ async def require_session(
 
 def call_allowance(db: Session, task: Any) -> Optional[str]:
     """Count this call against the ticket's allowance; a string is the refusal
-    the model reads. Fail-open on a bookkeeping error — a counter must never be
-    the reason a ticket cannot work."""
+    the model reads.
+
+    The counter is written with ``jsonb_set`` — ONE key, in one statement —
+    rather than by writing back a whole ``runtime_ref`` read at the start of the
+    request. The host flushes its events onto the same row while the session is
+    calling tools, and a whole-document write would silently drop whatever it
+    had just recorded. One of the things it records is ``pending_permissions``,
+    which is what decides whether a held command sends the ticket to review, so
+    a lost update there would turn "the operator never answered" into a ticket
+    that reads as finished.
+
+    Fail-open on a bookkeeping error, but still COUNT: the cap is the only bound
+    on this endpoint, and a database hiccup must not quietly remove it for the
+    rest of the run.
+    """
     cap = int(getattr(config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 0) or 0)
-    try:
-        ref = dict(task.runtime_ref or {})
-        used = int(ref.get(CALLS_KEY) or 0) + 1
-        ref[CALLS_KEY] = used
-        task.runtime_ref = ref
-        db.commit()
-    except Exception:  # noqa: BLE001
-        logger.debug("[session-tools] call counter not recorded for ticket #%s", getattr(task, "id", "?"), exc_info=True)
-        return None
+    used = _count_call(db, task)
     if cap and used > cap:
         return (
             f"This ticket has used its {cap} Automatos tool calls. Work with what you have and "
             "finish your turn; say in your result that you hit the limit."
         )
     return None
+
+
+# Calls this process has counted for tickets whose row it could not update —
+# so the cap holds while the database is unhappy. Keyed by ticket id; bounded.
+_UNPERSISTED_CALLS: Dict[int, int] = {}
+_UNPERSISTED_CALLS_LIMIT = 512
+
+
+def _count_call(db: Session, task: Any) -> int:
+    """This call's number. Persisted where it can be; counted regardless.
+
+    Nothing here ASSIGNS ``task.runtime_ref``. The first version did, "to keep
+    the in-session object in step" — which marks the ORM row dirty, so the next
+    commit in the same request (the tool's own action commits) flushed the whole
+    document read at request start over whatever the host had written since:
+    the exact clobber the targeted UPDATE exists to prevent, one step later.
+    The attribute is expired instead, so the next read reloads it.
+    """
+    from sqlalchemy import text as sql_text
+
+    task_id = int(task.id)
+    try:
+        row = db.execute(
+            sql_text(
+                """
+                UPDATE board_tasks
+                   SET runtime_ref = jsonb_set(
+                           COALESCE(runtime_ref, CAST('{}' AS jsonb)),
+                           CAST(:path AS text[]),
+                           to_jsonb(COALESCE(CAST(runtime_ref ->> :field AS int), 0) + 1),
+                           true)
+                 WHERE id = :task_id
+             RETURNING CAST(runtime_ref ->> :field AS int)
+                """
+            ),
+            {"path": "{" + CALLS_KEY + "}", "field": CALLS_KEY, "task_id": task_id},
+        ).first()
+        db.commit()
+        if row and row[0] is not None:
+            try:
+                db.expire(task, ["runtime_ref"])
+            except Exception:  # noqa: BLE001 — a test double, or a detached row
+                pass
+            _UNPERSISTED_CALLS.pop(task_id, None)
+            return int(row[0])
+    except Exception:  # noqa: BLE001 — a counter must never be why a ticket cannot work
+        logger.debug("[session-tools] call counter not persisted for ticket #%s", task_id, exc_info=True)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+    # The write failed: count here, so the cap holds for the rest of the run.
+    try:
+        persisted = int((getattr(task, "runtime_ref", None) or {}).get(CALLS_KEY) or 0)
+    except Exception:  # noqa: BLE001 — an expired attribute on a broken session
+        persisted = 0
+    used = max(_UNPERSISTED_CALLS.get(task_id, 0), persisted) + 1
+    if len(_UNPERSISTED_CALLS) >= _UNPERSISTED_CALLS_LIMIT:
+        _UNPERSISTED_CALLS.clear()
+    _UNPERSISTED_CALLS[task_id] = used
+    return used
 
 
 # Only POST is defined on ``/mcp`` ON PURPOSE. A client opens a GET for a

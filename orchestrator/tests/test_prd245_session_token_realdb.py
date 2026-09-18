@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -27,6 +28,7 @@ os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
 from core.database.database import get_database_url  # noqa: E402
+from api.board_tasks import end_session_claim  # noqa: E402
 from core.models.core import BoardTask  # noqa: E402
 from services import cli_host_service as svc  # noqa: E402
 from services import session_tools as st  # noqa: E402
@@ -164,9 +166,18 @@ def test_the_token_resolves_to_its_own_running_ticket_and_nothing_else(ticket, n
 
 
 def test_a_token_stops_working_when_its_ticket_stops_running(ticket, new_session):
-    """The property the design leans on: state decides, not cleanup. A token in a
-    transcript is dead as soon as the ticket is not ``in_progress`` — even if the
-    hash were still on the row."""
+    """The property the design leans on: a token in a transcript is dead as soon
+    as the ticket stops running, and STAYS dead.
+
+    Status alone was not enough. A ticket leaves ``in_progress`` and comes back
+    all the time without a new claim — the operator drags a blocked card back to
+    In Progress, a status PATCH moves it, a session sets its own ticket
+    ``blocked``. None of those mints a new token, so the old plaintext — still in
+    the session transcript, still in that ticket's ``mcp.json`` on disk — started
+    authenticating again, from anywhere that can reach the backend, with no
+    session running. The rule is a LIVE LEASE: only a claim sets one, the host
+    renews it on every event flush, and every path that ends a run nulls it.
+    """
     ws_id, _agent_id, task_id = ticket
     s = new_session()
     host = _host(s, ws_id)
@@ -174,18 +185,36 @@ def test_a_token_stops_working_when_its_ticket_stops_running(ticket, new_session
     token = claimed["session_token"]
     assert svc.resolve_session_token(s, token) is not None
 
-    # put the hash back by hand, then move the ticket out of in_progress
     row = s.query(BoardTask).get(task_id)
-    digest = row.runtime_ref[svc.SESSION_TOKEN_HASH_KEY]
+    assert row.lease_until is not None                     # the claim set one
+
+    # an expired lease is not a running session, whatever the status says
+    kept = row.lease_until
+    row.lease_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    s.commit()
+    assert svc.resolve_session_token(s, token) is None, "an expired claim must not authenticate"
+    row.lease_until = kept
+    s.commit()
+    assert svc.resolve_session_token(s, token) is not None
+
+    # the board gesture: the operator drags the card out of In Progress. The
+    # route ends the claim — lease and credential together.
+    end_session_claim(row, "in_progress", "review")
     row.status = "review"
     s.commit()
+    assert row.lease_until is None
+    assert svc.SESSION_TOKEN_HASH_KEY not in (row.runtime_ref or {})
     assert svc.resolve_session_token(s, token) is None, "a token must not outlive its ticket's run"
 
+    # …and dragging it back does not revive anything: no hash, no lease, no claim
     row.status = "in_progress"
     s.commit()
-    assert svc.resolve_session_token(s, token) is not None      # …and works again while it runs
+    assert svc.resolve_session_token(s, token) is None, (
+        "a ticket moved back to in_progress by hand must NOT revive an old session token"
+    )
 
-    # the result clears the hash as well (belt and braces)
+    # the run still reports its outcome — ending a claim takes the credential,
+    # not the result (the ticket is back at in_progress for the same attempt)
     out = asyncio.run(svc.apply_result(s, host, task_id, {
         "attempt": claimed["attempt"], "status": "success", "result_text": "done",
         "usage": {"input_tokens": 1, "output_tokens": 1},
@@ -194,7 +223,6 @@ def test_a_token_stops_working_when_its_ticket_stops_running(ticket, new_session
     s.refresh(row)
     assert svc.SESSION_TOKEN_HASH_KEY not in (row.runtime_ref or {})
     assert svc.resolve_session_token(s, token) is None
-    assert digest                                               # the hash was real to begin with
 
 
 def test_two_tickets_never_share_a_token(ticket, new_session):

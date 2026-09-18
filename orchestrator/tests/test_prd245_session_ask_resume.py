@@ -231,3 +231,135 @@ def test_the_prompt_still_carries_reviewer_feedback_alongside_an_answer():
     prompt = svc._ticket_prompt(task)
     assert "## Answers to your questions" in prompt and "tighten the second paragraph" in prompt
     assert task.review_feedback is None        # consumed for this attempt, as before
+
+
+# ── the answer has to REACH the resumed session (round-two review) ───────────
+
+def test_the_claim_folds_the_answer_in_and_keeps_the_ask_ledger(monkeypatch):
+    """The bug every other test in this file walked past.
+
+    ``claim_for_host`` built a brand-new ``runtime_ref`` and assigned it to the
+    task BEFORE rendering the prompt, so ``_answers_fold_in`` read the new empty
+    dict: no answer ever reached a resumed session. And because ``session_asks``
+    was dropped on every claim, ``MAX_ASKS_PER_TICKET`` reset to zero each time —
+    a ticket could ask, park, resume and ask again without end. Every other test
+    here calls ``_ticket_prompt`` on a hand-built task and never goes through a
+    claim, which is exactly why it went unseen.
+    """
+    ref = svc.record_session_answer(
+        svc.record_session_ask({"cli_session_id": "claude-1", "host_id": "h1"},
+                               grant_id=42, question="Which notes should I use?"),
+        grant_id=42, answer="deliverables/sessions/116/workspace-testing-brief.md")
+    task = _task(status="assigned", ref=ref)
+    # the columns the claim reads that the file's fixture leaves out
+    task.attempts = 1                      # the claim stamps the attempt it won
+    task.review_mode = "auto"
+    task.attachment_ids = []
+    host = NS(id="h1", workspace_id="ws-c1")
+
+    monkeypatch.setattr(svc, "claim_tasks", lambda db, **kw: [task])
+    monkeypatch.setattr(svc, "_blocked_pending_approval", lambda db, t: False)
+    monkeypatch.setattr(svc, "served_providers_of", lambda h: None)
+    monkeypatch.setattr(svc, "default_session_folder", lambda db, ws: "/tmp/projects")
+    monkeypatch.setattr(svc, "explorer_root_for", lambda *a, **k: None)
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    monkeypatch.setattr(svc, "session_tool_names", lambda: ("board_summary",))
+
+    claimed = svc.claim_for_host(_Db(None), host, limit=1)["tasks"][0]
+
+    assert "## Answers to your questions" in claimed["prompt"]
+    assert "Which notes should I use?" in claimed["prompt"]
+    assert "workspace-testing-brief.md" in claimed["prompt"]
+    # the ledger survives the claim, so the per-ticket ceiling still counts
+    kept = svc.session_asks(task.runtime_ref)
+    assert [a["grant_id"] for a in kept] == [42]
+    # …and the answer is stamped, so a LATER resume does not show it again
+    assert kept[0].get("folded_at")
+    assert svc._answers_fold_in(task) == ""
+
+
+def test_a_mid_turn_answer_is_folded_in_before_the_park_decides():
+    """The operator answers while the turn is still running. ``apply_result``
+    reads the row once at the top and writes it whole at the end, so that answer
+    was overwritten and the ticket parked ``blocked`` on a question already
+    answered — where nothing would ever re-queue it."""
+    ref = svc.record_session_ask({"cli_session_id": "claude-1", "host_id": "h1"},
+                                 grant_id=42, question="Which notes?")
+    task = _task(ref=ref)
+
+    answered = svc.session_asks(svc.record_session_answer(dict(ref), grant_id=42, answer="Use the brief."))
+
+    class _RowDb(_Db):
+        def execute(self, *_a, **_k):        # what a concurrent request committed
+            return NS(first=lambda: ({svc.SESSION_ASKS_KEY: answered},))
+
+    db = _RowDb(task)
+    merged = svc._merge_fresh_session_asks(db, task, dict(ref))
+    assert svc.session_asks(merged)[0]["answer"] == "Use the brief."
+    # so the park sends it back to the queue instead of blocking on it
+    assert svc._park_for_answer(db, task, merged) == "assigned"
+    assert task.blocked_reason is None
+
+
+def test_a_merge_without_a_fresh_answer_changes_nothing():
+    ref = svc.record_session_ask({}, grant_id=42, question="q")
+    task = _task(ref=ref)
+
+    class _EmptyDb(_Db):
+        def execute(self, *_a, **_k):
+            return NS(first=lambda: ({},))
+
+    same = svc._merge_fresh_session_asks(_EmptyDb(task), task, dict(ref))
+    assert svc.session_asks(same)[0].get("answered_at") is None
+
+    class _BrokenDb(_Db):
+        def execute(self, *_a, **_k):
+            raise RuntimeError("the row is not readable right now")
+
+    assert svc._merge_fresh_session_asks(_BrokenDb(task), task, dict(ref)) == dict(ref)
+
+
+# ── update_ticket's note actually lands (the writer's BODY runs here) ────────
+
+def test_a_progress_note_is_written_with_one_targeted_statement(monkeypatch):
+    """The first version raised NameError in production on its first call: the
+    function referenced a ``json`` alias that only existed inside two OTHER
+    functions' local imports, and no test executed its body — the tool's tests
+    stopped at the scope and the schema. This one runs the writer end to end
+    against a session that records the statement it is given."""
+    class _Recording(_Db):
+        def __init__(self):
+            super().__init__(None)
+            self.calls = []
+
+        def execute(self, stmt, params=None):
+            self.calls.append((str(stmt), params))
+            return NS(rowcount=1)
+
+    published = []
+    monkeypatch.setattr(svc, "publish_canvas_events", lambda ws, evs: published.extend(evs))
+    db = _Recording()
+
+    out = svc.record_session_note(db, task_id=116, workspace_id="ws-c1",
+                                  agent_name="RESEARCHER", note="reading the brief")
+
+    assert out == {"success": True, "result": {"recorded": True, "note": "reading the brief"}}
+    stmt, params = db.calls[0]
+    assert "jsonb_set" in stmt and "CAST(:entry AS jsonb)" in stmt          # ONE key, appended
+    import re
+    assert not re.search(r":\w+::", stmt)                                    # this repo's bind trap
+    assert set(params) == {"path", "key", "entry", "task_id", "ws"}
+    import json
+    entry = json.loads(params["entry"])
+    assert entry[0]["note"] == "reading the brief" and entry[0]["by"] == "RESEARCHER"
+    assert db.commits == 1
+    assert published and published[0]["data"]["note"] == "reading the brief"   # the operator sees it live
+
+
+def test_a_failed_note_write_is_told_to_the_session_not_raised():
+    class _Broken(_Db):
+        def execute(self, *_a, **_k):
+            raise RuntimeError("db down")
+
+    out = svc.record_session_note(_Broken(None), task_id=1, workspace_id="w", agent_name=None, note="x")
+    assert out["success"] is False and "RuntimeError" in out["error"]
