@@ -191,3 +191,20 @@ Each file simulates a complete user persona workflow across multiple domains.
 | **After infra change** | 1 (Smoke) + 6 (Performance) | ~3 min |
 | **After new feature** | 2 (Errors) + 3 (CRUD) + 5 (User Journeys) | ~15 min |
 | **Weekly audit** | `run_gap_finder.py` | <1 sec |
+
+---
+
+## Simulation nights (PRD-247, `tests/sim/`)
+
+Not part of the three runners above: the simulation harness drives the **local**
+stack like a customer (tickets, chat with Auto, agent CRUD) in a throwaway
+workspace on a cheap pinned model, and scores the night on usability / cost /
+quality / usefulness. Report-only, purges after itself, stdlib only.
+
+```
+python3 -m tests.sim.night run --pack smoke        # instrument check, under $1
+python3 -m tests.sim.night run --pack auto         # tonight's pack (packs/rotation.toml)
+python3 -m tests.sim.schedule install --hour 1 --minute 30
+```
+
+Scorecards land in `~/.automatos-sim/runs/<run_id>/scorecard.md`. See `tests/sim/README.md`.

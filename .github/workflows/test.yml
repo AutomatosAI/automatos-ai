@@ -804,3 +804,23 @@ jobs:
         run: python -m pip install --upgrade pip pytest
       - name: Run the CLI host suite
         run: pytest -q tests
+
+  # PRD-247: the simulation harness's own unit tests (tests/sim/tests). Pure
+  # standard library, no database, no platform — parsers, pack validation,
+  # scoring, the answerer and the plist builder. --noconftest keeps the root
+  # tests/conftest.py (python-dotenv, Railway .env) out of it.
+  sim-units:
+    name: sim harness units (stdlib)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pytest
+        run: pip install pytest==8.3.4
+      - name: Run sim unit tests
+        run: python -m pytest tests/sim/tests --noconftest --import-mode=importlib -q -p no:cacheprovider
