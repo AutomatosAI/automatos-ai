@@ -1076,7 +1076,7 @@ def test_toolsearch_is_benign_so_deferred_mcp_tools_can_load(tmp_path):
     """Night 1: denying ToolSearch meant no session could load submit_report/update_ticket."""
     from automatos_cli_host.adapters.claude import ClaudeAdapter
     ctx = policy.PolicyContext(cwd=tmp_path, session_tools=("submit_report",))
-    intent = ClaudeAdapter().tool_intent("ToolSearch", {"query": "select:mcp__automatos__submit_report"})
+    intent = ClaudeAdapter(CLAUDE).tool_intent("ToolSearch", {"query": "select:mcp__automatos__submit_report"})
     assert policy.decide(intent, ctx).behavior == "allow"
 
 
