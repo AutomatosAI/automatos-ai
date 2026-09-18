@@ -746,6 +746,92 @@ def seed_system_settings(db: Session):
         },
     ])
 
+    # =========================================================================
+    # DECISION ENGINE (PRD-248 — typed decisions beside the classifier / tool router)
+    # =========================================================================
+    settings_to_create.extend([
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "classifier_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "Auto's complexity classifier and the decision engine. off = "
+                "today's tiers only. shadow = the engine runs beside every "
+                "classified turn and logs agreement to DECISION_SHADOW_LOG_PATH "
+                "without changing the verdict. live = a decision above "
+                "min_confidence replaces the Tier-3 LLM call; below it Tier 3 "
+                "runs as before."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow", "live"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "tool_rerank_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "The tool-surface rerank hook (PRD-248 S4): off / shadow / live."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow", "live"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "provider",
+            "default_value": "openrouter",
+            "value_type": "string",
+            "description": (
+                "Which route answers decisions. openrouter = TypeSafe Jev through "
+                "the platform's OpenRouter key (beta endpoint, nothing new to set). "
+                "typesafe = direct, needs TYPESAFE_API_KEY. llm = the system_llm "
+                "tier through a JSON adapter — the no-cloud-key baseline."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["openrouter", "typesafe", "llm"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "model",
+            "default_value": "",
+            "value_type": "string",
+            "description": (
+                "Model id override for the route. Empty = the pinned default "
+                "(typesafe/jev-1.13 via OpenRouter, jev-1.13.0 direct). Pin a "
+                "version whenever thresholds are tuned against it."
+            ),
+            "is_required": False,
+            "validation_rules": {},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "timeout_seconds",
+            "default_value": "2.5",
+            "value_type": "number",
+            "description": (
+                "Hard wall per decision call: one attempt, then fail-open to "
+                "today's path. Measured from Europe: p50 about 0.35 s, p95 "
+                "above 1 s."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0.2, "max": 30},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "min_confidence",
+            "default_value": "0.7",
+            "value_type": "number",
+            "description": (
+                "Live mode only: the confidence a decision must clear to replace "
+                "the LLM classifier; below it Tier 3 runs. Tune it from the "
+                "shadow scorer's agreement-by-confidence table."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 1},
+        },
+    ])
+
     # PRD-137 Fix #1: removed _STALE_FIXES block.
     # The block was a one-time backfill that never had a termination flag,
     # so on every container restart it overwrote any orchestrator_llm value
