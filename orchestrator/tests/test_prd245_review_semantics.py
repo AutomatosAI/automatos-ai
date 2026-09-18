@@ -231,19 +231,40 @@ def test_the_verdict_and_the_grouping_are_pure():
     assert list(grouped) == ["hold", "other", "prompt"] and len(grouped["hold"]) == 2
 
 
+def _strings_passed_to_calls(path):
+    """Every string literal that is an ARGUMENT to a call in the file — the
+    reasons the code actually emits — including the literal parts of f-strings.
+    Comments and docstrings are not arguments to anything, so a marker that only
+    survives in prose does not count."""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for arg in [*node.args, *(k.value for k in node.keywords)]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                found.append(arg.value)
+            elif isinstance(arg, ast.JoinedStr):
+                found.append("".join(v.value for v in arg.values if isinstance(v, ast.Constant)))
+    return found
+
+
 def test_markers_are_still_what_the_host_says():
-    """The classifier reads the host's sentences. A reworded host must fail HERE,
-    not silently turn every hold into ``other`` (which would put every ticket
-    back into review — safe, but exactly what S0.3 exists to stop)."""
-    session_py = (HOST_PKG / "session.py").read_text(encoding="utf-8")
-    policy_py = (HOST_PKG / "policy.py").read_text(encoding="utf-8")
+    """The classification reads the host's wording; a reworded host must fail
+    HERE, not silently turn every hold into ``other``. Checked against the
+    strings the host's code PASSES TO CALLS (a ``Decision(...)`` reason, a
+    ``Reply.deny(...)``), not against the file text — a phrase that lives on in
+    a comment after the emitted reason was reworded proved nothing."""
+    session_reasons = _strings_passed_to_calls(HOST_PKG / "session.py")
+    policy_reasons = _strings_passed_to_calls(HOST_PKG / "policy.py")
     for marker in HOLD_REASON_MARKERS:
-        assert marker in session_py, f"session.py no longer says {marker!r}"
-    assert f'"{PROMPT_STAGE}"' in session_py
-    assert READ_OUTSIDE_MARKER in policy_py, "policy.py no longer uses the Read tool's wording for a path outside the roots"
-    assert UNKNOWN_TOOL_MARKER in policy_py
+        assert any(marker in s for s in session_reasons), f"session.py no longer emits {marker!r}"
+    assert any(READ_OUTSIDE_MARKER in s for s in policy_reasons), "policy.py no longer emits the Read tool's wording for a path outside the roots"
+    assert any(UNKNOWN_TOOL_MARKER in s for s in policy_reasons)
     for marker in REFUSED_REASON_MARKERS:
-        assert marker in policy_py, (
-            f"policy.py no longer says {marker!r} — a refusal it does not match falls through to "
+        assert any(marker in s for s in policy_reasons), (
+            f"policy.py no longer emits {marker!r} — a refusal it does not match falls through to "
             "'other', which fails closed and sends the ticket to review with nothing to act on"
         )

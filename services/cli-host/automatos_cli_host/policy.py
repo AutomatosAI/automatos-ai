@@ -52,6 +52,32 @@ NEVER_ALLOWED_BASH = (
     re.compile(r"(^|[;&|(]\s*)curl\b.*\|\s*(ba|z)?sh\b"),
 )
 
+# Verbs whose ARGUMENTS are the command that actually runs. None is on the
+# allowlist (each runs a command the gate would not otherwise see), so the
+# wrapper itself is held for the operator — but a never-allowed command must
+# not ride in as its argument and arrive as a question instead of a refusal:
+# ``xargs git push`` is ``git push``. The wrapper is peeled for that check only.
+# ``find``'s exec options are here for the orphan case: a second ``-exec`` after
+# a ``;`` is a simple command of its own whose first word is the option.
+COMMAND_WRAPPERS = frozenset({
+    "xargs", "env", "command", "builtin", "exec", "time", "timeout", "nice", "ionice",
+    "nohup", "stdbuf", "caffeinate", "chronic", "watch", "-exec", "-execdir", "-ok", "-okdir",
+})
+_WRAPPER_VALUE_RE = re.compile(r"^\d+[smhd]?$")      # ``timeout 5``, ``timeout 30s``, ``nice -n 10``
+
+
+def _unwrapped(words: Sequence[str]) -> List[str]:
+    """The command left once every leading wrapper, its options, its
+    assignments (``env A=1``) and its numeric values are peeled."""
+    out = list(words)
+    while out and out[0] in COMMAND_WRAPPERS:
+        out = out[1:]
+        while out and (out[0].startswith("-") or _ASSIGNMENT_RE.match(out[0])
+                       or _WRAPPER_VALUE_RE.match(out[0]) or out[0] in FIND_PLACEHOLDERS):
+            out = out[1:]
+    return out
+
+
 # Read-only git, the verbs that read and shape text, the usual build/test verbs
 # a code ticket needs. Never here: xargs, env, sh, bash, eval, sudo — each runs
 # a command the gate would not see.
@@ -98,9 +124,14 @@ _AWK_ESCAPE_RE = re.compile(r"system\s{0,8}\(|\bgetline\b|\||print(?:f)?[^;}\n]{
 # delimiter that closes it and the command boundary after the flags — matching
 # the two delimited halves instead would need an ambiguous alternation, and an
 # untrusted program must never be able to make this pattern backtrack.
+# …and ``w``/``W`` (write the pattern space to a FILE), ``r``/``R`` (read a
+# file in) and the ``w`` flag of ``s`` — a program text is exempt from the path
+# check, so a filename inside one would otherwise be a write or read anywhere.
+# ``awk``'s ``print > file`` is caught by its own pattern; sed's was not.
 _SED_ESCAPE_RE = re.compile(
     r"(?<![a-zA-Z\\])e(?:[ \t;]|$)"
     r"|[^a-zA-Z0-9\s][a-zA-Z0-9]{0,16}e[a-zA-Z0-9]{0,16}(?:[;\n}]|$)"
+    r"|(?<![a-zA-Z\\])[wWrR][ \t]+\S"
 )
 
 # Global options that may sit between ``git`` and its subcommand. Peeled before
@@ -150,7 +181,7 @@ _REDIRECT_CHARS = frozenset("<>")          # a run holding one of these is a red
 ALWAYS_WRITABLE = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
 _GLOB_CHARS = "*?["
 _LINE_CONTINUATION_RE = re.compile(r"\\\n")
-_HEREDOC_RE = re.compile(r"<<-?\s*(?:'([^']*)'|\"([^\"]*)\"|([A-Za-z_][A-Za-z0-9_]*))")
+_HEREDOC_RE = re.compile(r"<<-?\s*(?:'([^']*)'|\"([^\"]*)\"|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))")
 _FD_TARGET_RE = re.compile(r"^([0-9]+|-)$")            # ``>&1``, ``<&-``
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
@@ -257,7 +288,9 @@ def _heredoc_delimiter(match: Any) -> Tuple[str, bool]:
         return match.group(1), True
     if match.group(2) is not None:
         return match.group(2), True
-    return match.group(3), False
+    if match.group(3) is not None:      # ``<<\EOF`` — bash treats it exactly like ``<<'EOF'``
+        return match.group(3), True
+    return match.group(4), False
 
 
 def _heredocs(command: str) -> Tuple[str, List[str]]:
@@ -569,6 +602,9 @@ def _judge_cd(words: Sequence[str], bindings: Bindings, roots: Sequence[Path]) -
     """``cd`` only to a directory the gate can resolve, inside the roots."""
     if len(words) != 2:
         return Decision("ask", f"{_first_words(' '.join(words))!r} is outside this ticket's Bash allowlist")
+    if not words[1] or words[1].startswith("-"):
+        # ``cd -`` is $OLDPWD, which an earlier cd may have put anywhere
+        return Decision("ask", f"cd to a directory the gate cannot resolve: {words[1] or '(none)'}")
     values = _expand(words[1], bindings)
     if not _resolved(values):
         return Decision("ask", f"cd to a directory the gate cannot resolve: {words[1]}")
@@ -687,6 +723,20 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
     for pattern in NEVER_ALLOWED_BASH:
         if pattern.search(joined):
             return Decision("deny", f"never allowed in a session: {_first_words(joined)!r} (sessions do not push or escalate)")
+    inner = _unwrapped(words)
+    if inner != list(words):
+        # ``xargs git push``, ``timeout 5 git push``, ``env X=1 git push``: the
+        # wrapper is off the allowlist and would be HELD — an operator can
+        # approve a hold, and approving it runs the push. Refuse it here.
+        joined_inner = " ".join(inner)
+        for pattern in NEVER_ALLOWED_BASH:
+            if pattern.search(joined_inner):
+                return Decision("deny", f"never allowed in a session: {_first_words(joined_inner)!r} (sessions do not push or escalate)")
+        if words[0] in FIND_EXEC_OPTIONS:
+            # an orphan ``-exec cmd ;`` (a second exec clause the ``;`` split off)
+            # is judged as the command it runs, like the first clause is
+            return _judge_simple(inner, targets, bindings, ctx, roots, depth + 1) if inner else _worst(
+                [on_targets, Decision("ask", f"'find {words[0]}' with no command — the operator decides")])
     if not (_matches_prefix(joined, ctx.allowed_bash) or _runs_own_code(words)):
         if _matches_prefix(joined, ctx.ask_bash):
             return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} needs the operator's approval")])
@@ -776,7 +826,20 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
             return Decision("deny", f"never allowed in a session: {_first_words(visible)!r} (sessions do not push or escalate)")
     if ".." in visible and re.search(r"(^|[\s'\"=:;|&(/])\.\.([/\\]|[\s'\");|&]|$)", visible):
         return Decision("deny", "path traversal ('..') in a shell command")
-    return _judge_command(command, {}, ctx, [ctx.cwd, *ctx.extra_dirs])
+    if "$'" in visible or '$"' in visible:
+        # ``$'…'`` is ANSI-C quoting: ``$'/etc/passwd'`` IS ``/etc/passwd`` and
+        # ``$'\x2f'`` is ``/``. The tokenizer strips the quotes and leaves the
+        # ``$``, so the path no longer looks like one and escapes the roots.
+        return Decision("ask", "ANSI-C ($'…') or locale ($\"…\") quoting hides a word the gate cannot read")
+    roots = [ctx.cwd, *ctx.extra_dirs]
+    # Every command substitution on the LINE, judged as a command line of its
+    # own — quoted or not. The per-word pass only sees a substitution the
+    # tokenizer kept whole, and an UNQUOTED backtick body splits on its own
+    # spaces (`` echo `cat X` `` becomes three words), so the path inside it
+    # became an argument of ``echo``, which names no paths. That was a silent
+    # read of any file, the host's own credential included.
+    inside = [_judge_command(body, {}, ctx, roots, 1) for body in _substitutions(visible)]
+    return _worst([*inside, _judge_command(command, {}, ctx, roots)])
 
 
 def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:

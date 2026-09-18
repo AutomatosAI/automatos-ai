@@ -960,3 +960,77 @@ def test_session_tools_needs_a_backend_address_this_host_knows(tmp_path):
 def test_session_tools_url_joins_without_a_double_slash(tmp_path):
     s = _bridge_session(tmp_path, CLAIM_BRIDGE_TICKET, url="http://127.0.0.1:8000/")
     assert s._session_tools()["url"] == "http://127.0.0.1:8000/api/v1/session-tools/mcp"
+
+
+# ── PRD-245: the four escapes the second gate review reproduced ─────────────
+
+def test_an_unquoted_backtick_body_is_judged_like_a_quoted_one(tmp_path):
+    """`` echo `cat host.json` `` tokenizes to three words, so the path inside
+    the backticks became an argument of ``echo`` — which names no paths — and
+    the host's own credential file was readable in one line. Substitutions are
+    now judged from the RAW line, quoted or not."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict("echo `cat <OUTSIDE>/host.json`") == "deny"
+    assert verdict("echo `cat <OUTSIDE>/host.json` end") == "deny"
+    assert verdict("echo `git push`") == "deny"
+    assert verdict("echo \"`cat <OUTSIDE>/host.json`\"") == "deny"       # the quoted form still
+    assert verdict("echo `ls <ROOT>`") == "allow"                          # an honest body still runs
+    assert verdict("echo 'see `ls` here'") == "allow"
+
+
+def test_ansi_c_quoting_cannot_hide_a_path(tmp_path):
+    """``$'/etc/passwd'`` IS ``/etc/passwd`` to bash; the tokenizer strips the
+    quotes and leaves a ``$``, so it no longer looked like a path at all."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    for cmd in ("cat $'/etc/passwd'", "cat $'\\x2f'etc/passwd", "grep x $'/etc/passwd'", "ls $\"/etc\""):
+        assert verdict(cmd) == "ask", cmd
+
+
+def test_sed_cannot_name_a_file_to_write_or_read(tmp_path):
+    """A program text is exempt from the path check (``/foo/d`` is not a path),
+    so sed's ``w``/``W``/``r``/``R`` commands and the ``w`` flag of ``s`` were a
+    write or read anywhere — the analogous awk forms were already refused."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    for cmd in ("sed 'w /etc/cron.d/x' <ROOT>/repo/f", "sed '1r /etc/passwd' <ROOT>/repo/f",
+                "sed 'R /etc/passwd' <ROOT>/repo/f", "sed 's/a/b/w /etc/x' <ROOT>/repo/f"):
+        assert verdict(cmd) == "deny", cmd
+    for cmd in ("sed -n '1,5p' <ROOT>/repo/f", "sed 's/ error / x/' <ROOT>/repo/f", "sed '/foo/d' <ROOT>/repo/f",
+                "sed -E 's/(a|b)/c/g' <ROOT>/repo/f"):
+        assert verdict(cmd) == "allow", cmd
+
+
+def test_a_never_allowed_command_behind_a_wrapper_is_refused_not_held(tmp_path):
+    """``xargs git push`` is ``git push``. The wrapper is off the allowlist and
+    was HELD — an operator can approve a hold, and approving it runs the push."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    for cmd in ("xargs git push", "env git push", "command git push", "time git push", "timeout 5 git push",
+                "timeout 30s git push", "nice -n 10 git push", "env FOO=1 git push", "nohup git push"):
+        assert verdict(cmd) == "deny", cmd
+    # a second -exec clause after ';' is a simple command of its own — judged as what it runs
+    assert verdict("find <ROOT> -exec echo {} ; -exec git push ;") == "deny"
+    assert verdict("find <ROOT> -exec echo {} ; -exec cat /etc/passwd ;") == "deny"
+    # the wrapper itself is still a question, and prose is still prose
+    assert verdict("xargs git status") == "ask"
+    assert verdict("time make test") == "ask"
+    assert verdict('git commit -m "do not git push"') == "allow"
+
+
+def test_a_backslash_escaped_heredoc_delimiter_is_a_quoted_one(tmp_path):
+    """``<<\\EOF`` is ``<<'EOF'`` to bash: the body is data. It was read as an
+    UNQUOTED delimiter, so an honest note mentioning ``../docs`` or ``$(…)``
+    was refused for what it said."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict("cat > <ROOT>/x.md <<\\EOF\n$(git push)\nEOF") == "allow"
+    assert verdict("cat > <ROOT>/x.md <<\\EOF\nplain ../notes here\nEOF") == "allow"
+    assert verdict("cat > <ROOT>/x.md <<EOF\n$(git push)\nEOF") == "deny"          # unquoted still runs it
+
+
+def test_cd_dash_is_not_a_directory(tmp_path):
+    ctx, fill = _layout(tmp_path)
+    assert _decide("Bash", {"command": "cd -"}, ctx).behavior == "ask"
+    assert _decide("Bash", {"command": fill("cd <ROOT>/repo")}, ctx).behavior == "allow"
