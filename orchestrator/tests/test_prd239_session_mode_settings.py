@@ -22,7 +22,8 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from services import cli_host_service as svc  # noqa: E402
+from services import cli_host_service as svc
+from services.session_tools import tool_names as session_tool_names  # noqa: E402
 from services import cli_ticket_lane as lane  # noqa: E402
 
 WS = uuid4()
@@ -87,6 +88,9 @@ def test_the_default_is_the_projects_folder_when_one_is_configured(monkeypatch):
     monkeypatch.setattr(svc.config, "LOCAL_PROJECTS_MOUNT", "rw", raising=False)
     monkeypatch.setattr(svc, "host_allow_dirs", lambda db, ws: ["/Users/me/Development"])
     out = svc.session_mode_settings(_DB(workspace=_ws(None)), WS)
+    # PRD-245 W1: the tab now also names the Automatos tools a session gets; the
+    # list itself is pinned in test_prd245_session_tools.py.
+    assert [t["name"] for t in out.pop("session_tools")] == list(session_tool_names())
     assert out == {
         "default_folder": "projects", "default_folder_explicit": False,
         "local_projects_dir": "/Users/me/Development", "projects_mount": "rw",

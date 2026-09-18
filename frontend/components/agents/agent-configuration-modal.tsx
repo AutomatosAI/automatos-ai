@@ -1540,6 +1540,8 @@ export function AgentConfigurationModal({
                       <RuntimeSection
                         value={normalizeRuntimeFields(formData)}
                         onChange={(field, value) => updateFormData(field, value)}
+                        // PRD-245 S1.5: a fact of the saved agent, from the detail fetch — not a form field
+                        sessionToolGaps={(agent as any)?.session_tool_gaps ?? null}
                       />
 
                       {/* Model Selection */}

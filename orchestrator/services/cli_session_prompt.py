@@ -39,11 +39,15 @@ DEFAULT_SKILLS_MAX_CHARS = 24000
 # have (the API agents' platform tools). A name in a skill body that starts with
 # one of these and is not in the session's own list is a gap the prompt names.
 SESSION_UNAVAILABLE_TOOL_PREFIXES = ("composio_execute", "platform_", "search_knowledge", "scratchpad_", "workspace_")
-# The Automatos tools a session DOES have. Wave 0: none — Wave 1's loopback MCP
-# bridge fills this (PRD-245 D2) and the gap lines shrink by themselves.
-SESSION_TOOLS_AVAILABLE: Sequence[str] = ()
+# The Automatos tools a session DOES have — PRD-245 W1's loopback MCP bridge,
+# read from the ONE definition (``services/session_tools.py``), so the prompt,
+# the claim payload, the host's gate and the agent form can never disagree.
+from services.session_tools import tool_names as _session_tool_names
+
+SESSION_TOOLS_AVAILABLE: Sequence[str] = _session_tool_names()
 TOOLS_HEADER = "## Tools in this session"
-GAP_LINE_PREFIX = "In a session you cannot call: "
+GAP_LINE_PREFIX = "Not available in a session: "
+INSTEAD_LINE = "In a session, call {swaps}."
 _TOOL_NAME_RE = re.compile(r"(?<![A-Za-z0-9_])([a-z][a-z0-9_]+)(?![A-Za-z0-9_])")
 
 
@@ -84,23 +88,51 @@ def tool_names_in(body: str) -> List[str]:
 
 
 def session_tool_gaps(agent: Any, available: Sequence[str]) -> List[Dict[str, Any]]:
-    """PRD-245 S0.6/S1.5: per active skill, the platform tools its body calls that
-    the session does not offer — ``[{"skill": name, "tools": [names]}]``, skills
-    without a gap omitted. Pure; the agent form and the session prompt share it."""
+    """PRD-245 S0.6/S1.5: per active skill, the platform tools its body calls
+    that the session cannot call — and, where the session has an equivalent under
+    another name, what to call instead:
+    ``[{"skill": name, "tools": [names], "instead": {mentioned: session_name}}]``.
+    Skills with nothing to say are omitted. Pure; the agent form and the session
+    prompt share it."""
+    from services.session_tools import equivalent_of
+
     offered = set(available or ())
     gaps: List[Dict[str, Any]] = []
     for skill in _active_skills(agent):
-        names = [n for n in tool_names_in(_text(getattr(skill, "prompt_template", None))) if n not in offered]
-        if names:
-            gaps.append({"skill": _text(getattr(skill, "name", None)) or "skill", "tools": names})
+        missing: List[str] = []
+        instead: Dict[str, str] = {}
+        for name in tool_names_in(_text(getattr(skill, "prompt_template", None))):
+            if name in offered:
+                continue
+            replacement = equivalent_of(name)
+            if replacement and replacement in offered:
+                instead[name] = replacement
+            else:
+                missing.append(name)
+        if missing or instead:
+            entry: Dict[str, Any] = {"skill": _text(getattr(skill, "name", None)) or "skill", "tools": missing}
+            if instead:
+                entry["instead"] = instead
+            gaps.append(entry)
     return gaps
 
 
-def _gap_line(gaps: Sequence[str]) -> str:
-    return GAP_LINE_PREFIX + ", ".join(gaps) if gaps else ""
+def _gap_line(gaps: Sequence[str], instead: Optional[Dict[str, str]] = None) -> str:
+    """What to say under a skill whose body calls tools by the API agents' names:
+    the replacement first (the agent CAN do the work, under another name), then
+    the ones a session genuinely does not have."""
+    parts: List[str] = []
+    pairs = sorted((instead or {}).items())
+    if pairs:
+        swaps = ", ".join(f"`{replacement}` instead of `{mentioned}`" for mentioned, replacement in pairs)
+        parts.append(INSTEAD_LINE.format(swaps=swaps))
+    if gaps:
+        parts.append(GAP_LINE_PREFIX + ", ".join(f"`{g}`" for g in gaps) + ".")
+    return " ".join(parts)
 
 
-def skill_entry(skill: Any, budget: int, first: bool, gaps: Sequence[str] = ()) -> Optional[str]:
+def skill_entry(skill: Any, budget: int, first: bool, gaps: Sequence[str] = (),
+                instead: Optional[Dict[str, str]] = None) -> Optional[str]:
     """One skill as a section; ``None`` when it needs more than ``budget`` chars
     and is not the first (the first always renders, truncated if it must).
     ``gaps`` — the tools this skill names that the session cannot call — ride
@@ -108,7 +140,7 @@ def skill_entry(skill: Any, budget: int, first: bool, gaps: Sequence[str] = ()) 
     name = _text(getattr(skill, "name", None)) or "skill"
     desc = _text(getattr(skill, "description", None))
     body = _text(getattr(skill, "prompt_template", None))
-    head = "\n".join(line for line in (f"### {name}", desc, _gap_line(gaps)) if line)
+    head = "\n".join(line for line in (f"### {name}", desc, _gap_line(gaps, instead)) if line)
     text = f"{head}\n\n{body}" if body else head
     if len(text) <= budget:
         return text
@@ -117,10 +149,10 @@ def skill_entry(skill: Any, budget: int, first: bool, gaps: Sequence[str] = ()) 
     return None
 
 
-def _omitted_entry(skill: Any, gaps: Sequence[str]) -> str:
+def _omitted_entry(skill: Any, gaps: Sequence[str], instead: Optional[Dict[str, str]] = None) -> str:
     name = _text(getattr(skill, "name", None)) or "skill"
     desc = _text(getattr(skill, "description", None))
-    return "\n".join(line for line in (f"### {name}", desc, _gap_line(gaps), OMITTED_NOTE) if line)
+    return "\n".join(line for line in (f"### {name}", desc, _gap_line(gaps, instead), OMITTED_NOTE) if line)
 
 
 def skills_block(agent: Any, max_chars: Optional[int] = None) -> str:
@@ -128,14 +160,15 @@ def skills_block(agent: Any, max_chars: Optional[int] = None) -> str:
     skills = _active_skills(agent)
     if not skills:
         return ""
-    gaps_by_skill = {g["skill"]: g["tools"] for g in session_tool_gaps(agent, SESSION_TOOLS_AVAILABLE)}
+    by_skill = {g["skill"]: g for g in session_tool_gaps(agent, SESSION_TOOLS_AVAILABLE)}
     budget = _skills_max_chars() if max_chars is None else max(0, int(max_chars))
     entries: List[str] = []
     for index, skill in enumerate(skills):
-        gaps = gaps_by_skill.get(_text(getattr(skill, "name", None)) or "skill", ())
-        entry = skill_entry(skill, budget, first=(index == 0), gaps=gaps)
+        found = by_skill.get(_text(getattr(skill, "name", None)) or "skill") or {}
+        gaps, instead = found.get("tools") or (), found.get("instead") or {}
+        entry = skill_entry(skill, budget, first=(index == 0), gaps=gaps, instead=instead)
         if entry is None:
-            entries.append(_omitted_entry(skill, gaps))
+            entries.append(_omitted_entry(skill, gaps, instead))
             continue
         entries.append(entry)
         budget = max(0, budget - len(entry))
@@ -152,6 +185,14 @@ def _configured_bash_extras(agent: Any) -> List[str]:
 
 def _family_label(prefix: str) -> str:
     return f"`{prefix}*`" if prefix.endswith("_") else f"`{prefix}`"
+
+
+def _unavailable_families(available: Sequence[str]) -> List[str]:
+    """The families to warn about, minus any whose exact name the session HAS —
+    naming `search_knowledge` as unavailable one line under the list that offers
+    it is how a prompt loses the agent's trust."""
+    offered = set(available or ())
+    return [p for p in SESSION_UNAVAILABLE_TOOL_PREFIXES if p.endswith("_") or p not in offered]
 
 
 def tools_block(agent: Any, available: Sequence[str] = SESSION_TOOLS_AVAILABLE) -> str:
@@ -175,10 +216,10 @@ def tools_block(agent: Any, available: Sequence[str] = SESSION_TOOLS_AVAILABLE) 
     if available:
         lines.append("- Automatos: " + ", ".join(f"`{n}`" for n in available) + ".")
     lines.append(
-        "- NOT available in a session: the platform tools your skills name — "
-        + ", ".join(_family_label(p) for p in SESSION_UNAVAILABLE_TOOL_PREFIXES)
-        + " — unless listed above. Do not call them and do not wait for them: do the work with what is "
-        "listed here and say in your final message what you could not do."
+        "- NOT available in a session: every other platform tool your skills name — "
+        + ", ".join(_family_label(p) for p in _unavailable_families(available))
+        + ". Do not call them and do not wait for them: do the work with what is listed here, "
+        "and say in your final message what you could not do."
     )
     return "\n".join(lines)
 

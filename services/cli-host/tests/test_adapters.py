@@ -316,3 +316,71 @@ def test_codex_seeding_drops_an_mcp_table_whose_name_is_quoted():
     for gone in ("weird", "literal", "arrayed"):
         assert gone not in stripped
     assert stripped == 'model = "gpt-fake"\n\n[model_providers.openai]\nname = "OpenAI"\n'
+
+
+# ── PRD-245 W1: the Automatos tools a ticket may call ───────────────────────
+
+def test_claude_writes_an_mcp_config_only_when_the_claim_offered_tools(tmp_path):
+    """The bridge is per ticket: the config file carries the ticket's own token
+    (0600, never argv), and a ticket that was offered nothing gets no file — so a
+    token from an earlier attempt cannot linger beside it."""
+    import json
+    import stat
+
+    from automatos_cli_host.adapters.claude import (
+        MCP_CONFIG_FILENAME, MCP_SERVER_NAME, build_mcp_config, write_mcp_config,
+    )
+
+    session_dir = tmp_path / "sessions" / "200"
+    session_dir.mkdir(parents=True)
+    offered = {"names": ["board_summary"], "url": "http://127.0.0.1:8000/api/v1/session-tools/mcp", "token": "tok"}
+
+    path = write_mcp_config(session_dir / MCP_CONFIG_FILENAME, offered)
+    assert path is not None and stat.S_IMODE(path.stat().st_mode) == 0o600
+    server = json.loads(path.read_text())["mcpServers"][MCP_SERVER_NAME]
+    assert server == {"type": "http", "url": offered["url"], "headers": {"Authorization": "Bearer tok"}}
+
+    # nothing offered → no file, and a stale one is removed
+    assert write_mcp_config(path, None) is None and not path.exists()
+    # half an offer is no offer
+    assert build_mcp_config({"names": ["x"], "url": "", "token": "t"}) is None
+    assert build_mcp_config({"names": ["x"], "url": "http://x", "token": ""}) is None
+    assert build_mcp_config(None) is None
+
+
+def test_claude_launch_carries_the_mcp_config_under_strict_and_never_the_token(tmp_path):
+    from automatos_cli_host.adapters.base import LaunchContext
+    from automatos_cli_host.adapters.claude import ClaudeAdapter
+    from automatos_cli_host.presets import CLAUDE
+
+    session_dir = tmp_path / "sessions" / "201"
+    session_dir.mkdir(parents=True)
+    adapter = ClaudeAdapter(CLAUDE)
+    ctx = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="201", session_id="sid",
+        session_tools={"names": ["board_summary"], "url": "http://127.0.0.1:8000/x", "token": "tok-secret"},
+    )
+    args = adapter.launch_args(ctx, adapter.prepare(ctx))
+    assert "--strict-mcp-config" in args                      # ours is the ONLY server
+    assert args[args.index("--mcp-config") + 1].endswith(f"/{'mcp.json'}")
+    assert not any("tok-secret" in a for a in args)           # the token rides the file
+    # a ticket with no offer launches exactly as it did before the bridge
+    plain = LaunchContext(
+        cwd=tmp_path, session_dir=session_dir, ticket_path=session_dir / "ticket.md",
+        system_prompt_path=session_dir / "system_prompt.md", task_id="201", session_id="sid",
+    )
+    assert "--mcp-config" not in adapter.launch_args(plain, adapter.prepare(plain))
+
+
+def test_claude_reads_our_mcp_tools_as_platform_and_everyone_elses_as_unknown():
+    from automatos_cli_host.adapters.base import ToolClass
+    from automatos_cli_host.adapters.claude import ClaudeAdapter
+    from automatos_cli_host.presets import CLAUDE
+
+    adapter = ClaudeAdapter(CLAUDE)
+    intent = adapter.tool_intent("mcp__automatos__board_summary", {})
+    assert intent.cls is ToolClass.PLATFORM and intent.command == "board_summary"
+    # someone else's server (the operator's own, were one ever loaded) is not ours
+    assert adapter.tool_intent("mcp__notebooklm__notebook_query", {}).cls is ToolClass.UNKNOWN
+    assert adapter.tool_intent("mcp__automatos__", {}).cls is ToolClass.PLATFORM   # empty name → denied by policy

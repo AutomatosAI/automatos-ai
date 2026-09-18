@@ -684,6 +684,11 @@ class Config:
     # LLM factory. Local edition ONLY: validate_auth_edition() aborts a saas boot
     # that sets this (the SaaS path stays byte-identical). Default off everywhere.
     CLI_RUNTIME_ENABLED: bool = os.getenv("CLI_RUNTIME_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    # PRD-245 W1 (local edition): how many Automatos tool calls ONE ticket's
+    # session may make through the loopback MCP bridge. A bound, not a budget —
+    # the model is on the operator's own plan; this stops a looping session from
+    # hammering the board. 0 = no cap.
+    SESSION_TOOLS_MAX_CALLS_PER_TICKET: int = int(os.getenv("SESSION_TOOLS_MAX_CALLS_PER_TICKET", "200"))
     # PRD-234 S2 (local edition): the owner's projects folder on the HOST machine, as
     # the CLI host sees it. Only used to map a session's file paths onto the
     # worker's "projects/" view (the folder is bind-mounted read-only into the

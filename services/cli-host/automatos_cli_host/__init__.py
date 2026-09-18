@@ -24,4 +24,4 @@ Invariants (PRD-234 §Terms — every one has a source guard in the tests):
 Standard library only, Python 3.9+, so ``make cli-host`` needs no virtualenv.
 """
 
-__version__ = "0.7.0"  # 0.7.0: the CLI is a parameter — presets + adapters, capabilities announce every CLI with served/reason, --cli-binary ID=PATH (CLI adapter design); 0.6.0: a ticket with no folder runs in <root>/sessions/<ticket>; 0.5.0: results and TerminalClosed carry the turn's token usage; 0.3.0: persona + skills in the session prompt (PRD-239)
+__version__ = "0.8.0"  # 0.8.0: a claim carries this ticket's Automatos tools — ``session_tools`` (name/description/schema), ``session_tools_path`` and a per-ticket ``session_token``; the adapter writes them as an MCP server the session can call (PRD-245). 0.7.0: the CLI is a parameter — presets + adapters, capabilities announce every CLI with served/reason, --cli-binary ID=PATH (CLI adapter design); 0.6.0: a ticket with no folder runs in <root>/sessions/<ticket>; 0.5.0: results and TerminalClosed carry the turn's token usage; 0.3.0: persona + skills in the session prompt (PRD-239)

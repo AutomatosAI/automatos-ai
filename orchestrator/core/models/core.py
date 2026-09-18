@@ -765,6 +765,12 @@ class AgentResponse(BaseModel):
     slug: Optional[str] = None
     required_role: Optional[str] = None
     marketplace_category: Optional[str] = None  # UI category for icon mapping
+    # PRD-245 S1.5: for a ``runtime: cli`` agent, the platform tools each of its
+    # skills tells it to call that a ticket session cannot — and what to call
+    # instead where the session has an equivalent. Absent for API agents, whose
+    # skills' tools all work. The agent form says this so the operator learns it
+    # from the form, not from a report that came back thin.
+    session_tool_gaps: Optional[List[Dict[str, Any]]] = None
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

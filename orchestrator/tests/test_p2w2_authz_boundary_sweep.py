@@ -117,6 +117,12 @@ OWN_AUTH_ROUTES = {
     ("POST", "/api/v1/cli-hosts/{host_id}/heartbeat"),
     ("POST", "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/events"),
     ("POST", "/api/v1/cli-hosts/{host_id}/tasks/{task_id}/result"),
+    # PRD-245 W1 — the loopback MCP endpoint a ticket SESSION calls Automatos
+    # through. Its own credential: the per-ticket token minted at claim
+    # (``resolve_session_token``), which resolves one running ticket and nothing
+    # else, never a user. Not the shared hybrid dependency, and 404 unless
+    # CLI_RUNTIME_ENABLED (local edition only).
+    ("POST", "/api/v1/session-tools/mcp"),
 }
 
 # (f) Admin-gated in the handler body — the 8 admin-flavoured routers keep

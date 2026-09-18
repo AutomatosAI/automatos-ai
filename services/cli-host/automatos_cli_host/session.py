@@ -225,6 +225,15 @@ def land_session_deliverables(relatives: Sequence[Path], session_dir: Path, dest
     return landed
 
 
+def assert_secret_not_in_args(args: Sequence[str], secret: Optional[str]) -> None:
+    """PRD-245 W1: the ticket's own credential rides a 0600 file, never argv —
+    argv is world-readable in ``ps`` and lands in the host log."""
+    if not secret:
+        return
+    if any(secret in str(arg) for arg in args):
+        raise RuntimeError("the session token reached the command line")
+
+
 def assert_args_honour_invariant(args: Sequence[str], forbidden: Sequence[str]) -> None:
     """The preset's forbidden arguments never reach a command line (design §9.2)."""
     joined = " ".join(args)
@@ -444,6 +453,22 @@ class Session:
             log.exception("session for task %s crashed", self.task_id)
             return self._outcome("error", error=f"host error: {exc}", exit_reason="host_error")
 
+    def _session_tools(self) -> Optional[Dict[str, Any]]:
+        """The Automatos tools this ticket may call: the names, the URL built from
+        the host's OWN backend address, and the per-ticket token — or ``None``
+        when the claim offered none (an older backend; the session runs as it did
+        before the bridge existed)."""
+        names = self.ticket.get("session_tools")
+        token = str(self.ticket.get("session_token") or "").strip()
+        path = str(self.ticket.get("session_tools_path") or "").strip()
+        if not names or not token or not path:
+            return None
+        base = str(getattr(self.cfg, "url", "") or "").strip().rstrip("/")
+        if not base:
+            log.warning("task %s: Automatos tools offered but this host has no backend URL", self.task_id)
+            return None
+        return {"names": [str(n) for n in names], "url": f"{base}{path}", "token": token}
+
     def _run(self) -> SessionOutcome:
         # 1. where
         try:
@@ -481,10 +506,12 @@ class Session:
         system_prompt_path.write_text(build_system_prompt(self.ticket, preset.label), encoding="utf-8")
         self.terminal_log = BoundedLog(session_dir / TERMINAL_LOG_FILENAME)
 
+        session_tools = self._session_tools()
         self._policy = PolicyContext(
             cwd=cwd,
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
             extra_dirs=(session_dir,),
+            session_tools=tuple(session_tools.get("names") or ()) if session_tools else (),
         )
 
         # PRD-239: a per-agent choice — a single repo gets a worktree per ticket
@@ -497,12 +524,14 @@ class Session:
             task_id=self.task_id, session_id=self.session_id, resume_session_id=self.ticket.get("resume_session_id"),
             model=self.ticket.get("model"), worktree_name=worktree, agent_id=str(self.ticket.get("agent_id") or "") or None,
             state_dir=getattr(self.cfg, "state_dir", None),
+            session_tools=session_tools,
         )
         prepared = self.adapter.prepare(ctx)
 
         # 4. spawn
         args = self.adapter.launch_args(ctx, prepared)
         assert_args_honour_invariant(args, preset.forbidden_args)
+        assert_secret_not_in_args(args, (session_tools or {}).get("token"))
         package_root = str(Path(__file__).resolve().parents[1])
         inherited_pp = os.environ.get("PYTHONPATH", "")
         env = build_session_env(preset, extra={
