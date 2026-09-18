@@ -350,6 +350,13 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
                                 "description": "Category; 'delivery' for completed work, 'research' for a deep dive."},
                 "recommendations": {"type": "array", "items": {"type": "string"}, "description": "What you advise."},
                 "action_items": {"type": "array", "items": {"type": "string"}, "description": "What still needs doing."},
+                # Accepted by the action and passed through by the scope, but not
+                # advertised until RESEARCHER guessed a status on the 09-18 re-run
+                # and was refused — a field the tool takes is a field it must name.
+                "status": {"type": "string", "enum": ["ok", "warning", "critical", "info"],
+                           "description": "How things stand: ok, warning, critical or info."},
+                "metrics": {"type": "object", "description": "Numbers worth keeping, as key: value.",
+                            "additionalProperties": True},
             },
             "required": ["title", "content"],
         },
