@@ -60,6 +60,11 @@ DISPATCH_TOOL_NAME = "tool_name"
 SESSION_TICKET_STATUSES: Tuple[str, ...] = ("in_progress",)
 # A progress note is read by a human on a card; keep it to a couple of sentences.
 MAX_NOTE_CHARS = 400
+# What ``platform_submit_report`` accepts besides the forced linkage.
+SUBMIT_REPORT_FIELDS: Tuple[str, ...] = (
+    "title", "content", "summary", "report_type", "status", "metrics",
+    "recommendations", "action_items",
+)
 REFUSED_TICKET_STATUSES: Tuple[str, ...] = (
     "done", "failed", "cancelled", "inbox", "assigned", "blocked", "review",
 )
@@ -156,8 +161,11 @@ async def _run_update_ticket(db: Any, params: Dict[str, Any], ctx: SessionContex
 def _scope_submit_report(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
     """This ticket's report, attributed to the calling agent by the executor. A
     session reports on ITS ticket: any other id the call names is dropped."""
-    out = {k: v for k, v in params.items()
-           if k in ("title", "content", "summary", "report_type", "recommendations", "action_items")}
+    # The whitelist is the ACTION's own optional fields (``handlers_reports``),
+    # not a narrower set: WRITER and TRACKER both pass ``status`` and ``metrics``
+    # in their skill bodies, and dropping them silently made the session's report
+    # poorer than the same skill's report from an API agent for no reason.
+    out = {k: v for k, v in params.items() if k in SUBMIT_REPORT_FIELDS}
     out["linked_task_ids"] = [ctx.task_id]
     return out
 

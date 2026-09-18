@@ -21,9 +21,10 @@ _ORCH = Path(__file__).resolve().parents[1]
 if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
-from services.cli_session_prompt import (  # noqa: E402
+from services.cli_session_prompt import (
     GAP_LINE_PREFIX,
     OMITTED_NOTE,
+    SESSION_TOOLS_AVAILABLE,
     SESSION_UNAVAILABLE_TOOL_PREFIXES,
     SKILLS_HEADER,
     TOOLS_HEADER,
@@ -120,8 +121,18 @@ def test_the_tools_block_names_what_a_session_has_and_what_it_has_not():
     assert "- Files:" in block and "- Bash:" in block and "- Web:" in block
     assert "`git status`" in block and "`sort`" in block and "`pytest`" in block   # the host's allowlist, rendered
     assert "HELD until the operator" in block and "Questions tab" in block
+    # Only the families the session does NOT have, and only in the unavailable
+    # line — asserting over the whole block let `composio_execute` and
+    # `search_knowledge` match the AVAILABLE line, so a regression that listed
+    # them as unavailable again (the contradiction W1/W3 created) would pass.
+    unavailable_line = next(l for l in block.splitlines() if "NOT available in a session" in l)
+    offered = set(SESSION_TOOLS_AVAILABLE)
     for prefix in SESSION_UNAVAILABLE_TOOL_PREFIXES:
-        assert (f"`{prefix}*`" if prefix.endswith("_") else f"`{prefix}`") in block
+        label = f"`{prefix}*`" if prefix.endswith("_") else f"`{prefix}`"
+        if prefix.endswith("_") or prefix not in offered:
+            assert label in unavailable_line, label
+        else:
+            assert label not in unavailable_line, f"{label} is offered — it must not be called unavailable"
     assert "NOT available in a session" in block and "do not wait for them" in block
     assert text.index("## About you") < text.index(TOOLS_HEADER) < text.index(SKILLS_HEADER)
 

@@ -752,9 +752,13 @@ CI-only, no spend, no live CLI (workspace rule).
   local-upstream only, marked on the ticket. Not needed before Qwen/Crush.
 - **D-8 · Platform tools inside a session — SETTLED** by PRD-245 (2026-09-17), which supersedes
   PRD-239's D-4. A session reaches Automatos through a loopback MCP server handed to the CLI at
-  launch, carrying a per-ticket bearer token minted at claim and dead when the ticket ends. Every
-  call lands on the same `platform_execute` dispatcher an API-runtime agent uses, so the policy gate,
-  the telemetry and the workspace scoping are the existing ones; the session's own gate classifies
+  launch, carrying a per-ticket bearer token minted at claim and dead when the ticket ends. Most calls
+  land on the same `platform_execute` dispatcher an API-runtime agent uses, so the policy gate, the
+  telemetry and the workspace scoping are the existing ones. Two do not, and say so where they are
+  defined: `composio_execute` is a tool name the executor routes to the Composio router itself (the
+  dispatcher's registry has no such action), and `ask_human` and `update_ticket` carry a runner
+  because the platform action for each does the wrong thing to a RUNNING ticket — one would park it
+  mid-turn, the other matches no row and reports success. the session's own gate classifies
   those calls as `ToolClass.PLATFORM` and allows only the advertised names. Composio rides the same
   bridge through a single `composio_execute` tool, so a session never holds a connection secret.
   This is a per-CLI surface — §10 step 6 — not a property of the seam.

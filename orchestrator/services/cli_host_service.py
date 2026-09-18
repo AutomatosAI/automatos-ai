@@ -94,9 +94,10 @@ def clear_session_token(ref: Dict[str, Any]) -> None:
 def revoke_session_token(db: Session, task: Any) -> bool:
     """Kill this ticket's session credential on the row, now. True iff one was there.
 
-    Called from EVERY path that ends a ticket's run — the two early returns in
-    ``apply_result``, cancel, and the sweeper's requeue — not only the orderly
-    finish. ``in_progress`` alone is not enough to keep a token safe: a ticket
+    Called from the two early returns in ``apply_result``; cancel does the same
+    thing inline (``clear_session_token``). The sweeper's requeue does NOT — it
+    nulls the lease and leaves the hash, which is safe only because the lookup
+    below requires a LIVE LEASE as well as ``in_progress``. ``in_progress`` alone is not enough to keep a token safe: a ticket
     that stops being ``in_progress`` can become ``in_progress`` again without a
     new claim (a board drag, a status PATCH, a heartbeat re-attach), and the
     plaintext is still in the session's transcript and its ``mcp.json``. The row

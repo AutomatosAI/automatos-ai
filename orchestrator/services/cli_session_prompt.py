@@ -48,6 +48,14 @@ SESSION_TOOLS_AVAILABLE: Sequence[str] = _session_tool_names()
 TOOLS_HEADER = "## Tools in this session"
 GAP_LINE_PREFIX = "Not available in a session: "
 INSTEAD_LINE = "In a session, call {swaps}."
+# The CLI's OWN tools do these jobs; the bridge has no equivalent and needs none.
+CLI_NATIVE_EQUIVALENTS = {
+    "workspace_read_file": "Read",
+    "workspace_write_file": "Write",
+    "workspace_edit_file": "Edit",
+    "workspace_list_files": "Glob",
+    "workspace_grep": "Grep",
+}
 _TOOL_NAME_RE = re.compile(r"(?<![A-Za-z0-9_])([a-z][a-z0-9_]+)(?![A-Za-z0-9_])")
 
 
@@ -97,6 +105,12 @@ def session_tool_gaps(agent: Any, available: Sequence[str]) -> List[Dict[str, An
     from services.session_tools import equivalent_of
 
     offered = set(available or ())
+    # A skill that says ``workspace_read_file`` is asking to read a file, and the
+    # session has a better tool for it than any bridge: the CLI's own. Naming
+    # these as simply "not available" told WRITER and AUTOMATOS-DEV their file
+    # tools did not exist, one line under the sentence that says they can read
+    # and edit.
+    native = CLI_NATIVE_EQUIVALENTS
     gaps: List[Dict[str, Any]] = []
     for skill in _active_skills(agent):
         missing: List[str] = []
@@ -107,6 +121,8 @@ def session_tool_gaps(agent: Any, available: Sequence[str]) -> List[Dict[str, An
             replacement = equivalent_of(name)
             if replacement and replacement in offered:
                 instead[name] = replacement
+            elif name in native:
+                instead[name] = native[name]
             else:
                 missing.append(name)
         if missing or instead:
@@ -208,13 +224,21 @@ def tools_block(agent: Any, available: Sequence[str] = SESSION_TOOLS_AVAILABLE) 
     )
     lines = [
         TOOLS_HEADER,
-        "- Files: read, search and edit inside the folder you were started in and the ticket's own "
-        "session folder; anything outside is refused.",
+        "- Files: read, search and edit inside the folder you were started in, the ticket's own "
+        "session folder, and the Deliverables folder your ticket names; anything else is refused.",
         bash,
         "- Web: the CLI's own web fetch and web search tools.",
     ]
     if available:
-        lines.append("- Automatos: " + ", ".join(f"`{n}`" for n in available) + ".")
+        # "if they are wired": a host older than the claim that carries them
+        # writes no MCP config, and then every one of these is refused at the
+        # gate. Saying so costs one clause and keeps the prompt honest in the
+        # one case where the backend cannot know.
+        lines.append(
+            "- Automatos: " + ", ".join(f"`{n}`" for n in available)
+            + ". Call one and read what comes back; if they are not wired on this machine the call is "
+            "refused and says so — then carry on without them and say so in your final message."
+        )
     lines.append(
         "- NOT available in a session: every other platform tool your skills name — "
         + ", ".join(_family_label(p) for p in _unavailable_families(available))
