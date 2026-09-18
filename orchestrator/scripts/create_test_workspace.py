@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import Optional
 from uuid import uuid4
 
 # Allow running as `python orchestrator/scripts/create_test_workspace.py`, or
@@ -45,7 +46,9 @@ from uuid import uuid4
 _HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else None
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..")) if _HERE else os.getcwd())
 
+from config import config  # noqa: E402
 from core.database.database import SessionLocal  # noqa: E402
+from core.models.core import User  # noqa: E402
 from core.models.workspaces import Workspace  # noqa: E402
 from core.services.api_key_service import ApiKeyService  # noqa: E402
 
@@ -62,10 +65,41 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--name", default=WORKSPACE_NAME)
     parser.add_argument("--key-name", default=KEY_NAME)
     parser.add_argument("--purpose", default=PURPOSE, help="stored in settings.purpose; the purge script checks it")
+    parser.add_argument("--owner-id", type=int, default=None, help="users.id to own the workspace (default: inferred)")
     parser.add_argument("--no-key", action="store_true",
                         help="create/find the workspace only; mint no API key (the simulation harness runs as the "
                              "anonymous local operator and scopes by X-Workspace-ID)")
     return parser.parse_args(argv)
+
+
+def _infer_owner_id(db, explicit: Optional[int]) -> Optional[int]:
+    """Who owns the test workspace.
+
+    ``--owner-id`` if given; else the owner of the newest owned workspace; else
+    the local operator's ``users`` row (``LOCAL_OPERATOR_EMAIL``); else the only
+    user there is; else NULL. ``workspaces.owner_id`` is nullable — the local
+    edition's own workspace has none — and the purge path tolerates NULL.
+    """
+    if explicit is not None:
+        return explicit
+    template = (
+        db.query(Workspace)
+        .filter(Workspace.is_active.is_(True), Workspace.owner_id.isnot(None))
+        .order_by(Workspace.created_at.desc())
+        .first()
+    )
+    if template is not None:
+        return template.owner_id
+    operator = db.query(User).filter(User.email == config.LOCAL_OPERATOR_EMAIL).first()
+    if operator is not None:
+        print(f"# owner: local operator {operator.email} (users.id={operator.id})", file=sys.stderr)
+        return operator.id
+    anyone = db.query(User).order_by(User.id).first()
+    if anyone is not None:
+        print(f"# owner: first users row (users.id={anyone.id})", file=sys.stderr)
+        return anyone.id
+    print("# owner: no users row — owner_id left NULL", file=sys.stderr)
+    return None
 
 
 def main(argv=None) -> int:
@@ -82,28 +116,12 @@ def main(argv=None) -> int:
             workspace = existing
             print(f"# Found existing workspace: {workspace.id}", file=sys.stderr)
         else:
-            # owner_id is NOT NULL in DB schema (model is out of date).
-            # Reuse the owner of the most recently created active workspace
-            # so the test workspace is owned by a real user.
-            template = (
-                db.query(Workspace)
-                .filter(
-                    Workspace.is_active.is_(True),
-                    Workspace.owner_id.isnot(None),
-                )
-                .order_by(Workspace.created_at.desc())
-                .first()
-            )
-            if template is None:
-                raise RuntimeError(
-                    "No active workspace with owner_id found — cannot infer owner."
-                )
-
+            owner_id = _infer_owner_id(db, args.owner_id)
             workspace = Workspace(
                 id=uuid4(),
                 name=args.name,
                 slug=args.slug,
-                owner_id=template.owner_id,
+                owner_id=owner_id,
                 plan="basic",  # PRD-222 W2·S1: entry tier (renamed from 'starter')
                 is_personal=False,
                 is_active=True,
@@ -120,8 +138,7 @@ def main(argv=None) -> int:
             db.add(workspace)
             db.flush()
             print(
-                f"# Created new workspace: {workspace.id} "
-                f"(owner_id={template.owner_id})",
+                f"# Created new workspace: {workspace.id} (owner_id={owner_id})",
                 file=sys.stderr,
             )
 
