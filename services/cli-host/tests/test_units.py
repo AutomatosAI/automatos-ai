@@ -1070,3 +1070,19 @@ def test_service_argv_carries_the_unlisted_bash_choice(tmp_path):
     permissive = service.service_argv(HostConfig(state_dir=tmp_path, unlisted_bash="allow"))
     assert "--unlisted-bash" not in strict
     assert permissive[permissive.index("--unlisted-bash") + 1] == "allow"
+
+
+def test_toolsearch_is_benign_so_deferred_mcp_tools_can_load(tmp_path):
+    """Night 1: denying ToolSearch meant no session could load submit_report/update_ticket."""
+    from automatos_cli_host.adapters.claude import ClaudeAdapter
+    ctx = policy.PolicyContext(cwd=tmp_path, session_tools=("submit_report",))
+    intent = ClaudeAdapter().tool_intent("ToolSearch", {"query": "select:mcp__automatos__submit_report"})
+    assert policy.decide(intent, ctx).behavior == "allow"
+
+
+def test_ansi_c_check_ignores_a_dollar_that_closes_a_quoted_regex(tmp_path):
+    ctx = policy.PolicyContext(cwd=tmp_path)
+    assert policy.decide_bash("grep -v '^$' notes.md", ctx).behavior == "allow"
+    assert policy.decide_bash("ls | grep -v '^$' | wc -l", ctx).behavior == "allow"
+    assert policy.decide_bash("echo $'a\\tb'", ctx).behavior == "ask"
+    assert policy.decide_bash("cat $'/etc/passwd'", ctx).behavior != "allow"

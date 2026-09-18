@@ -194,6 +194,9 @@ _UNRESOLVED_RE = re.compile(r"\$(?:[{(]|[A-Za-z_0-9@*#?!$])|^\$$")
 _PATH_REF_RE = re.compile(r"/\$(?:[{(]|[A-Za-z_0-9@*])|\$(?:\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*|[0-9])/")
 SUBSTITUTION_MARK = "$_"     # stands in for a ``$(…)`` body once that body is judged on its own
 MAX_EXPANSIONS = 64          # values one word may take across the line's variables
+# ``$'…'`` / ``$"…"`` only where the ``$`` begins a word. Night 1 held every
+# ``grep -v '^$' | …`` on earth because the ``$`` ending a quoted regex sat next to the quote.
+_ANSI_C_RE = re.compile(r"""(?:^|[\s=(|;&])\$['"]""")
 MAX_NESTING = 8              # ``$(…)`` inside ``$(…)`` …
 _SEVERITY = {"allow": 0, "ask": 1, "deny": 2}
 
@@ -838,7 +841,7 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
             return Decision("deny", f"never allowed in a session: {_first_words(visible)!r} (sessions do not push or escalate)")
     if ".." in visible and re.search(r"(^|[\s'\"=:;|&(/])\.\.([/\\]|[\s'\");|&]|$)", visible):
         return Decision("deny", "path traversal ('..') in a shell command")
-    if "$'" in visible or '$"' in visible:
+    if _ANSI_C_RE.search(visible):  # a ``$`` that OPENS a word — ``'^$'`` closing a regex is not quoting
         # ``$'…'`` is ANSI-C quoting: ``$'/etc/passwd'`` IS ``/etc/passwd`` and
         # ``$'\x2f'`` is ``/``. The tokenizer strips the quotes and leaves the
         # ``$``, so the path no longer looks like one and escapes the roots.
