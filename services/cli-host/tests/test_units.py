@@ -1061,3 +1061,12 @@ def test_unlisted_bash_allow_runs_unknown_verbs_but_keeps_the_hard_lines(tmp_pat
     assert policy.decide_bash("comm -23 /etc/passwd b.txt", permissive).behavior != "allow"
     asks = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow", ask_bash=("docker compose",))
     assert policy.decide_bash("docker compose up", asks).behavior == "ask"
+
+
+def test_service_argv_carries_the_unlisted_bash_choice(tmp_path):
+    from automatos_cli_host import service
+    from automatos_cli_host.config import HostConfig
+    strict = service.service_argv(HostConfig(state_dir=tmp_path))
+    permissive = service.service_argv(HostConfig(state_dir=tmp_path, unlisted_bash="allow"))
+    assert "--unlisted-bash" not in strict
+    assert permissive[permissive.index("--unlisted-bash") + 1] == "allow"
