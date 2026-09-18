@@ -1,4 +1,9 @@
-/** PRD-244 (two styles, two tones) — Studio desktop renders the hub; Classic keeps the AssignmentsPage; below 1024 px both use the AssignmentsPage. */
+/**
+ * PRD-246 US-007 — the route forks on the STYLE axis alone: the Studio style
+ * renders the Studio surface at every width (it has a compact form now), the
+ * Classic style renders the classic one. Width informs layout inside a
+ * component, never which component.
+ */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { readFileSync } from 'fs'
@@ -28,16 +33,19 @@ describe('Assignments route', () => {
     expect(screen.getByTestId('classic')).toBeInTheDocument()
     expect(screen.queryByTestId('hub')).toBeNull()
   })
-  it('below 1024 px both styles render the classic page', () => {
+  it('the Studio style renders the Studio surface at phone width too (PRD-246 US-007)', () => {
     state.tabletOrBelow = true
     render(<AssignmentsRoute />)
-    expect(screen.getByTestId('classic')).toBeInTheDocument()
+    expect(screen.getByTestId('hub')).toBeInTheDocument()
+    expect(screen.queryByTestId('classic')).toBeNull()
   })
   it('the Studio-designed pages fork on the style, never on width alone (nothing crosses between styles)', () => {
     for (const rel of ['assignments', 'playbooks', 'chat', 'command-center']) {
       const src = readFileSync(path.resolve(__dirname, '..', '..', rel, 'page.tsx'), 'utf8')
       expect(src, rel).toContain('useIsStudio')
-      expect(src, rel).toMatch(/isStudio && !is(TabletOrBelow|MobileLayout)/)
+      // PRD-246 US-007: the style alone chooses the component — the width term
+      // is gone, because every Studio surface now has a compact form.
+      expect(src, rel).not.toMatch(/isStudio && !is(TabletOrBelow|MobileLayout)/)
     }
   })
 })

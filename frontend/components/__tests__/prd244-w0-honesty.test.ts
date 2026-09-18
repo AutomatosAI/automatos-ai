@@ -32,9 +32,15 @@ describe('PRD-244 W0 honesty', () => {
     expect(read('app/globals.css')).not.toContain('.matte')
   })
 
-  it('the chat page forks on the shared tablet breakpoint', () => {
+  // PRD-244 W0 pinned the chat page to the SHARED tablet breakpoint, because it
+  // alone forked at 768 while every other page used 1024. PRD-246 US-007 removes
+  // the width term entirely — the style decides the component, the width only
+  // informs the layout inside it — which satisfies that intent completely. The
+  // assertion follows the intent rather than the old wording.
+  it('the chat page never forks on a breakpoint of its own', () => {
     const src = read('app/chat/page.tsx')
-    expect(src).toContain('if (isStudio && !isTabletOrBelow)')
     expect(src).not.toContain('if (isStudio && !isMobile)')
+    expect(src).not.toContain('if (isStudio && !isTabletOrBelow)')
+    expect(src).toContain('if (isStudio)')
   })
 })

@@ -16,6 +16,7 @@ import { useCallback, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import dynamic from 'next/dynamic'
 
+import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 import { useMissions } from '@/hooks/use-missions-api'
 import { useWorkflowPlaybooks } from '@/hooks/use-playbook-api'
 
@@ -49,6 +50,9 @@ export function StudioAssignmentsHub() {
   const [missionOpen, setMissionOpen] = useState(false)
   const [playbookOpen, setPlaybookOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
+
+  // The same strip behaviour as the Command Centre — one hook, not a copy.
+  const tabStrip = useTabStripScroll(tab)
 
   const { data: missionData } = useMissions({ limit: 30 })
   const { data: playbookData } = useWorkflowPlaybooks({ limit: 1 })
@@ -96,7 +100,7 @@ export function StudioAssignmentsHub() {
       {/* Flip tabs — moved above Start something so they're the first
           navigation element visible at scroll=0 and stay sticky as the
           user scrolls into the library below. */}
-      <nav className="cc-tabs" aria-label="Assignments sections">
+      <nav className="cc-tabs" aria-label="Assignments sections" ref={tabStrip}>
         <button
           type="button"
           className={`cc-tab${tab === 'playbooks' ? ' active' : ''}`}

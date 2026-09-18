@@ -59,7 +59,7 @@ const DialogContent = React.forwardRef<
       // nothing competes for the `transform` property.
       style={{ transform: 'translate(-50%, -50%)' }}
       className={cn(
-        'fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-2rem)] gap-4 p-4 md:p-6 max-h-[90vh] overflow-y-auto duration-200 glass-card card-glow data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        'fixed left-[50%] top-[50%] z-50 grid [&>*]:min-w-0 w-[calc(100%-2rem)] gap-4 p-4 md:p-6 max-h-[90vh] overflow-y-auto duration-200 glass-card card-glow data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
         dialogSizeClasses[size],
         className
       )}

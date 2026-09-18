@@ -12,6 +12,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useUser } from '@/lib/auth-hooks'
 import { LayoutGrid, LayoutList, Table2, Search } from 'lucide-react'
 
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useMissions } from '@/hooks/use-missions-api'
 import type { MissionResponse, RunState } from '@/types/missions'
 
@@ -83,7 +84,13 @@ export function MissionsBody({ limit = 100, hideEmptyGroups = true }: MissionsBo
 
   const stateParam = (searchParams?.get('state') as RunState | null) ?? null
 
-  const [view, setView] = useState<View>('grouped')
+  // The Table view is a seven-column ledger (`.mis-row` at its desktop
+  // widths) — desktop-only, like the Command Centre's activity table. On a
+  // phone it is not offered and a stored Table choice reads as Grouped,
+  // whose rows have their own two-line compact form (PRD-246 US-004).
+  const isPhone = useIsMobile()
+  const [preferred, setPreferred] = useState<View>('grouped')
+  const view: View = isPhone && preferred === 'table' ? 'grouped' : preferred
   const [chip, setChip] = useState<ChipKey>(stateParam === 'failed' ? 'failed' : 'all')
   const [search, setSearch] = useState('')
 
@@ -138,7 +145,7 @@ export function MissionsBody({ limit = 100, hideEmptyGroups = true }: MissionsBo
           <button
             type="button"
             className={view === 'grouped' ? 'on' : ''}
-            onClick={() => setView('grouped')}
+            onClick={() => setPreferred('grouped')}
           >
             <LayoutList style={{ width: 11, height: 11 }} />
             Grouped
@@ -146,19 +153,21 @@ export function MissionsBody({ limit = 100, hideEmptyGroups = true }: MissionsBo
           <button
             type="button"
             className={view === 'cards' ? 'on' : ''}
-            onClick={() => setView('cards')}
+            onClick={() => setPreferred('cards')}
           >
             <LayoutGrid style={{ width: 11, height: 11 }} />
             Cards
           </button>
-          <button
-            type="button"
-            className={view === 'table' ? 'on' : ''}
-            onClick={() => setView('table')}
-          >
-            <Table2 style={{ width: 11, height: 11 }} />
-            Table
-          </button>
+          {!isPhone && (
+            <button
+              type="button"
+              className={view === 'table' ? 'on' : ''}
+              onClick={() => setPreferred('table')}
+            >
+              <Table2 style={{ width: 11, height: 11 }} />
+              Table
+            </button>
+          )}
         </div>
 
         <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
@@ -260,13 +269,9 @@ export function MissionsBody({ limit = 100, hideEmptyGroups = true }: MissionsBo
             hideEmptyGroups={hideEmptyGroups}
           />
         ) : view === 'cards' ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              gap: 12,
-            }}
-          >
+          /* A class, not an inline grid: a media query cannot override an
+             inline style, and this goes 1-up on a phone (PRD-246 US-004). */
+          <div className="mis-cards">
             {filtered.map((m) => (
               <MissionCard key={m.id} mission={m} onOpen={handleOpen} />
             ))}

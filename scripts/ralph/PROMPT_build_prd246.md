@@ -19,7 +19,9 @@ You are executing **PRD-246**, one story per iteration, unattended. Branch **`ra
 - **Never weaken a PRD-244 gate.** The chrome guard (`flex-shrink: 0` on every named chrome row), `prd244-w0-honesty`, `studio-honest-chrome`, `cc-page-scope`, `studio-surfaces-scope`, `markdown-typography` and `page-frames` all stay green as written. If a mobile requirement genuinely contradicts one, `RALPH_BLOCKED` with the evidence — do not edit the gate to pass.
 - **No new primitives.** Sheets use the existing `Sheet`; the rail is the one `AutoNowRail`; safe-area uses the one `.safe-bottom` helper; markdown is `MarkdownView`. A second drawer, a second rail or a second safe-area helper is an automatic CRITICAL.
 - **Tests are vitest + jsdom.** Width is mocked through `@/hooks/use-mobile`; style through `UiStyleProvider initialStyle=…`. **Nothing runs a server, a browser or a database.** Adding `StatsBar` to a page means that page's test needs `@/hooks/use-system-config-api` stubbed (it reads react-query).
+- **`npm run build` MUST PASS before every commit, not just `npm run test`.** vitest mocks `@/components/layout/main-layout` in most suites, so a syntax error there passes the test run and still breaks the production build — that is exactly what US-001 shipped (a `{/* … */}` JSX comment placed inside `return (` before the root element; fixed in US-003). The Docker image build in CI is the check that catches it. Run `cd frontend && npm run build` before you commit; a red build is a red story.
 - **Green tip:** `cd frontend && npm run test` after every commit; never commit on red. Pre-existing unrelated red is not yours to fix.
+- **SIGN EVERY COMMIT: `git commit -s`.** This repo enforces DCO in CI — an unsigned commit fails the `dco` check.
 - **STAGING DISCIPLINE:** explicit paths only. **NEVER `git add -A` / `.` / `-u`** (node_modules is untracked and NOT gitignored). Never `git stash -u`.
 
 ## Hard NOs
@@ -36,7 +38,7 @@ You are executing **PRD-246**, one story per iteration, unattended. Branch **`ra
 
 1. Pick the first story with un-DONE ACs; re-verify its anchors fresh.
 2. Implement → `cd frontend && npm run test` (story-scoped first, full suite before commit).
-3. Commit `feat(prd-246): <US-id> — <title>` with evidence in the body; mark that story's AC lines `DONE — <evidence>` in `scripts/ralph/prd-246.json` in the same commit; push.
+3. Commit `git commit -s -m 'feat(prd-246): <US-id> — <title>'` with evidence in the body (the `-s` is required — CI enforces DCO); mark that story's AC lines `DONE — <evidence>` in `scripts/ralph/prd-246.json` in the same commit; push.
 
 ## Completion
 

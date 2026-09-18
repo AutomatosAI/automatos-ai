@@ -29,6 +29,7 @@ import { InteractiveTerminal } from '../widgets/TerminalWidget/InteractiveTermin
 import { FilePreview, inferPreviewType } from '../widgets/FileWidget/FilePreview'
 import type { FilePreviewType } from '../widgets/FileWidget/FilePreview'
 import type { OpenFileTab } from '../widgets/types'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 /**
  * Preview-capable types. For all others, the toggle is hidden and only
@@ -82,6 +83,8 @@ export function WorkspaceExplorer({
   } = useWorkspaceFiles(workspaceId, root)
 
   // Editor state
+  // PRD-246: files above the editor on a phone; the side-by-side split is a desktop shape.
+  const isPhone = useIsMobile()
   const [openTabs, setOpenTabs] = useState<OpenFileTab[]>([])
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null)
 
@@ -269,10 +272,10 @@ export function WorkspaceExplorer({
 
   return (
     <div className={className}>
-      <PanelGroup direction="horizontal" className="h-full min-h-[300px]">
+      <PanelGroup direction={isPhone ? 'vertical' : 'horizontal'} className="h-full min-h-[300px]">
         {/* File Explorer Panel */}
-        <Panel defaultSize={25} minSize={15} maxSize={50}>
-          <div className="h-full border-r border-border/30 bg-muted/10 overflow-hidden flex flex-col">
+        <Panel defaultSize={isPhone ? 35 : 25} minSize={15} maxSize={isPhone ? 70 : 50}>
+          <div className={isPhone ? 'h-full border-b border-border/30 bg-muted/10 overflow-hidden flex flex-col' : 'h-full border-r border-border/30 bg-muted/10 overflow-hidden flex flex-col'}>
             <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/20 flex items-center gap-2">
               <span>Explorer</span>
               {root !== '.' && (
@@ -322,7 +325,7 @@ export function WorkspaceExplorer({
         />
 
         {/* Resize Handle */}
-        <PanelResizeHandle className="w-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-col-resize" />
+        <PanelResizeHandle className={isPhone ? 'h-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-row-resize' : 'w-[3px] bg-border/30 hover:bg-primary/40 transition-colors cursor-col-resize'} />
 
         {/* Editor + Terminal Panel */}
         <Panel defaultSize={75} minSize={40}>

@@ -18,6 +18,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Rows, Table2 } from 'lucide-react'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
 import { toneFor, initialFor } from './agent-tones'
 import { formatDistanceToNowStrict } from 'date-fns'
@@ -143,7 +144,12 @@ export function rowHref(item: ActivityFeedItem): string | null {
 
 export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
   const router = useRouter()
-  const [density, setDensity] = useState<Density>('cards')
+  // The table is a four-column ledger, so it is desktop-only (PRD-246
+  // US-002): on a phone the stream is always cards and the toggle is not
+  // offered rather than offering a view that cannot be read at 390px.
+  const isPhone = useIsMobile()
+  const [preferred, setPreferred] = useState<Density>('cards')
+  const density: Density = isPhone ? 'cards' : preferred
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [errorsOnly, setErrorsOnly] = useState(false)
 
@@ -177,22 +183,24 @@ export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
   return (
     <>
       <div className="cc-toolbar">
-        <div className="cc-seg" role="group" aria-label="Density">
-          <button
-            type="button"
-            className={density === 'cards' ? 'on' : ''}
-            onClick={() => setDensity('cards')}
-          >
-            <Rows style={{ width: 11, height: 11 }} /> Cards
-          </button>
-          <button
-            type="button"
-            className={density === 'table' ? 'on' : ''}
-            onClick={() => setDensity('table')}
-          >
-            <Table2 style={{ width: 11, height: 11 }} /> Table
-          </button>
-        </div>
+        {!isPhone && (
+          <div className="cc-seg" role="group" aria-label="Density">
+            <button
+              type="button"
+              className={density === 'cards' ? 'on' : ''}
+              onClick={() => setPreferred('cards')}
+            >
+              <Rows style={{ width: 11, height: 11 }} /> Cards
+            </button>
+            <button
+              type="button"
+              className={density === 'table' ? 'on' : ''}
+              onClick={() => setPreferred('table')}
+            >
+              <Table2 style={{ width: 11, height: 11 }} /> Table
+            </button>
+          </div>
+        )}
 
         <div style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
           {TYPE_FILTERS.map((f) => {

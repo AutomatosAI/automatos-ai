@@ -1,4 +1,9 @@
-/** PRD-244 (two styles) — Studio desktop forwards /playbooks to the hub's Playbooks tab with params kept; Classic (and every style below 1024 px) keeps the standalone panel. */
+/**
+ * PRD-246 US-007 — the route forks on the STYLE axis alone: the Studio style
+ * renders the Studio surface at every width (it has a compact form now), the
+ * Classic style renders the classic one. Width informs layout inside a
+ * component, never which component.
+ */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 
@@ -30,10 +35,10 @@ describe('/playbooks', () => {
     expect(screen.getByTestId('panel')).toBeInTheDocument()
     expect(nav.replace).not.toHaveBeenCalled()
   })
-  it('below 1024 px keeps the panel in every style', () => {
+  it('the Studio style renders the Studio surface at phone width too (PRD-246 US-007)', () => {
     state.tabletOrBelow = true
     render(<PlaybooksPage />)
-    expect(screen.getByTestId('panel')).toBeInTheDocument()
-    expect(nav.replace).not.toHaveBeenCalled()
+    expect(nav.replace).toHaveBeenCalled()
+    expect(screen.queryByTestId('panel')).toBeNull()
   })
 })

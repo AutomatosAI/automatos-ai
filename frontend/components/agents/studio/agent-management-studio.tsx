@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { LayoutGrid, List, Plus, RefreshCw } from 'lucide-react'
 import { SearchInput } from '@/components/shared/search-input'
+import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { useWorkspace } from '@/components/workspace-provider'
 import { useAgents, useAgentStats } from '@/hooks/use-agent-api'
@@ -55,6 +56,8 @@ export function AgentManagementStudio() {
   const deepLinkAgent = searchParams?.get('agent') ?? null
   const deepLinkPanel = searchParams?.get('panel') ?? undefined
   const tab: AgentTab = isAgentTab(requested) ? requested : 'roster'
+  // The same strip behaviour as the Command Centre and the hub — one hook.
+  const tabStrip = useTabStripScroll(tab)
   const selectTab = useCallback(
     (next: AgentTab) => {
       const params = new URLSearchParams(searchParams?.toString() ?? '')
@@ -146,7 +149,7 @@ export function AgentManagementStudio() {
         </div>
       )}
 
-      <nav className="cc-tabs" aria-label="Agent Management sections">
+      <nav className="cc-tabs" aria-label="Agent Management sections" ref={tabStrip}>
         {AGENT_TAB_VALUES.map((key) => (
           <button
             key={key}
@@ -178,7 +181,7 @@ export function AgentManagementStudio() {
               value={searchTerm}
               onChange={setSearchTerm}
               placeholder="Search agents by name, type, or capabilities…"
-              className="flex-1"
+              className="flex-1 cc-search"
             />
             <div style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }} role="group" aria-label="Status">
               {STATUS_FILTERS.map((f) => (

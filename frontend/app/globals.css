@@ -1622,10 +1622,8 @@
     :is(.studio, .cc-page) .cc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     :is(.studio, .cc-page) .cc-stats .cell:nth-child(3n) { border-right: 0; }
   }
-  @media (max-width: 700px) {
-    :is(.studio, .cc-page) .cc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    :is(.studio, .cc-page) .cc-stats .cell:nth-child(2n) { border-right: 0; }
-  }
+  /* The 2-up step is in the compact region (PRD-246 US-002) — the boundary
+     moved from 700 to 768 so it lands on `useIsMobile`, not beside it. */
 
   /* Stats prose (STATS-B) — editorial sentence when everything's zero */
   :is(.studio, .cc-page) .cc-stats-prose {
@@ -2522,6 +2520,12 @@
     display: inline-flex; align-items: center; gap: 4px;
   }
 
+  /* Mission cards — the grid is a class so the compact region can answer it
+     (PRD-246 US-004; an inline style cannot be overridden by a media query) */
+  :is(.studio, .cc-page) .mis-cards {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+  }
+
   /* Mission card */
   :is(.studio, .cc-page) .mis-card {
     background: var(--paper);
@@ -2636,6 +2640,12 @@
   :is(.studio, .cc-page) .mis-row .age {
     font-family: var(--font-geist-mono, monospace); font-size: 10.5px;
     color: var(--fg-3);
+  }
+
+  /* Playbook cards — a class for the same reason as `.mis-cards` above */
+  :is(.studio, .cc-page) .pb-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px; padding-bottom: 24px;
   }
 
   /* Playbook card */
@@ -2958,6 +2968,185 @@
     font-weight: 500; letter-spacing: -0.015em;
   }
   .studio .md-view a { color: var(--navy); }
+
+  /* ── Studio compact (< 1024) ──────────────────────────────────────────
+     PRD-246 (2026-09-17). Below 1024 px the Studio surfaces render their
+     COMPACT form: a designed second form — what stacks, what moves behind a
+     sheet, what scrolls — never a shrunken desktop (M3).
+
+     THIS IS THE ONE HOME FOR COMPACT RULES. A surface responds here, beside
+     its neighbours, inside the band it belongs to; a `@media` block anywhere
+     else in this file is a review finding (M5). Two bands, both already in
+     `hooks/use-mobile.ts` (M2): 1023px is `useIsTabletOrBelow` — "compact",
+     the width where the rail lives in a sheet — and 767px is `useIsMobile` —
+     "phone". There is no third breakpoint.
+
+     Two standing rules for anything added here:
+       · SCOPE IT. Studio rules hang off `:is(.studio, <own root>)` exactly as
+         the desktop rules above do. A bare `.cc-stats` or `.entry-grid` rule
+         reaches Classic, which this PRD does not touch (M6).
+       · NEVER CONTRADICT THE CHROME GUARD. No compact rule may give a named
+         chrome row `flex-shrink: 1`, or let it absorb the page's overflow.
+     ─────────────────────────────────────────────────────────────────── */
+
+  @media (max-width: 1023px) {
+    /* The rail is a sheet at this width (main-layout), so its rows are read
+       and tapped with a thumb rather than pointed at (M4). */
+    .studio .sh-side .sh-item {
+      min-height: 44px; padding: 9px 10px;
+      gap: 12px; font-size: 13.5px;
+    }
+    .studio .sh-side .sh-item .sh-ic { width: 16px; height: 16px; }
+
+    /* ── Chat · US-003 ─────────────────────────────────────────────────
+       One column: the conversation. The threads list and the Auto now rail
+       are the same components, rendered by the shell into the app's one
+       Sheet primitive — nothing is duplicated and no second drawer exists.
+       The rail's own threshold is PRD-244 D5's 1280 (above). */
+    /* The desktop variants `.sh-chat.rail-collapsed .sh-chat-grid` and
+       `.sh-chat.threads-collapsed .sh-chat-grid` are more specific than the
+       shared root selector, so they were still laying a 220px column on a
+       phone and the chat body was 220px wide. Name them here. */
+    :is(.studio, .sh-chat) .sh-chat-grid,
+    .sh-chat.rail-collapsed .sh-chat-grid,
+    .sh-chat.threads-collapsed .sh-chat-grid,
+    .sh-chat.rail-collapsed.threads-collapsed .sh-chat-grid { grid-template-columns: 1fr; }
+
+    /* The breadcrumb collapses to the active thread's title between the two
+       controls that open the sheets. The bar itself keeps `flex-shrink: 0`
+       from the chrome guard; this is its CONTENT, which may truncate. */
+    :is(.studio, .sh-chat) .sh-chat-bar { padding: 8px 12px; gap: 8px; }
+    :is(.studio, .sh-chat) .sh-chat-bar
+      :is(.sh-chat-eyebrow, .sh-chat-sep, .sh-chat-crumb, .sh-chat-chev, .sh-chat-pill) {
+      display: none;
+    }
+    :is(.studio, .sh-chat) .sh-chat-bar .sh-chat-active {
+      flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+  }
+
+  @media (max-width: 767px) {
+    /* Phone: every Studio control that is tapped is a 44px target (M4).
+       Each of these centres its content with flex, so the min-height is the
+       whole change — no padding or type is disturbed. */
+    .studio .sh-side .sh-item,
+    :is(.studio, .cc-page) .cc-tab,
+    :is(.studio, .cc-page) .cc-filter-pill,
+    :is(.studio, .cc-cal-root) .cc-btn,
+    :is(.studio, .cc-cal-root) .cc-seg button {
+      min-height: 44px;
+    }
+
+    /* Phone: a document reads at the compact density by default. These are
+       the metrics of `.md-view-compact` above — which stays the opt-in for
+       dense surfaces at every width — and the desktop rules are untouched.
+       `.md-view` is a cross-style primitive owned by <MarkdownView> and is
+       unscoped throughout, unlike the Studio families. */
+    .md-view { font-size: 12.5px; line-height: 1.55; }
+    .md-view > * + * { margin-top: 0.7em; }
+    .md-view h1, .md-view h2,
+    .md-view h3, .md-view h4 { margin-top: 1.15em; }
+    .md-view h1 { font-size: 1.125rem; }
+    .md-view h2 { font-size: 1rem; }
+    .md-view h3, .md-view h4 { font-size: 0.9375rem; }
+
+    /* ── Command Centre · US-002 ───────────────────────────────────────
+       The page's gutter comes in, and the tab strip's bleed comes in WITH
+       it: `.cc-tabs` pulls itself out to the page edge with a negative
+       margin, and `.cc-page` sets `overflow-y: auto` — which computes
+       `overflow-x` to `auto` too — so a bleed wider than the gutter is
+       12px of sideways page scroll on every tab. */
+    .cc-page { padding: 16px 16px 0; gap: 14px; }
+    :is(.studio, .cc-page) .cc-tabs { margin: 0 -16px; padding: 0 16px; }
+
+    /* Six figures read 2-up. The desktop steps (6→3 at 1199) are above. */
+    :is(.studio, .cc-page) .cc-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    :is(.studio, .cc-page) .cc-stats .cell:nth-child(2n) { border-right: 0; }
+
+    /* The board keeps ONE row per status — the shape the PRD-244 review
+       fixed — and snaps column by column, so a swipe lands on a status
+       instead of between two (PRD-246 open question 1, stated default). */
+    :is(.studio, .cc-page) .cc-kb-grid {
+      grid-auto-columns: minmax(84%, 1fr);
+      scroll-snap-type: x mandatory;
+    }
+    :is(.studio, .cc-page) .cc-kb-col {
+      scroll-snap-align: start;
+      /* The column becomes its own scroller so the status head can stick to
+         the top of the list while the cards travel under it; the body then
+         sizes to content rather than scrolling inside a scroller. */
+      overflow: hidden auto;
+    }
+    :is(.studio, .cc-page) .cc-kb-head { position: sticky; top: 0; z-index: 1; }
+    :is(.studio, .cc-page) .cc-kb-body { flex: 0 0 auto; overflow: visible; }
+
+    /* ── Assignments hub · US-004 ─────────────────────────────────────── */
+    /* Start-something, the mission cards and the playbook cards go 1-up; the
+       small marketplace tiles read 2-up, which is what they are sized for. */
+    :is(.studio, .cc-page) :is(.entry-grid, .mis-cards, .pb-grid) {
+      grid-template-columns: 1fr;
+    }
+    :is(.studio, .cc-page) .mkt-strip { grid-template-columns: repeat(2, 1fr); }
+
+    /* A card's meta stacks beneath its title instead of squeezing four mono
+       columns into 320px. */
+    :is(.studio, .cc-page) .mis-card .row-meta {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    :is(.studio, .cc-page) .pb-card .stats { flex-wrap: wrap; gap: 8px 16px; }
+
+    /* The status head wraps rather than truncating; it stays in the chrome
+       guard, so it still refuses to shrink. */
+    :is(.studio, .cc-page) .status-head { flex-wrap: wrap; }
+
+    /* The grouped view's row is a 7-column ledger — 644px at its narrowest.
+       On a phone it is two lines: the pip, the short id and the age; then the
+       goal and its sub-line across the row. Who ran it, the group count and
+       the token figure DROP: `.sub` already states the groups and the tier,
+       and the figures belong to the desktop ledger (M3 — a compact form
+       states what it drops). The Table view is not offered at all. */
+    :is(.studio, .cc-page) .mis-row {
+      grid-template-columns: 18px auto 1fr;
+      gap: 4px 8px; padding: 12px;
+    }
+    :is(.studio, .cc-page) .mis-row > div { grid-column: 1 / -1; }
+    :is(.studio, .cc-page) .mis-row .age { grid-area: 1 / 3; text-align: right; }
+    :is(.studio, .cc-page) .mis-row > span:not([class]),
+    :is(.studio, .cc-page) .mis-row .num { display: none; }
+    :is(.studio, .cc-page) .mis-row .nm { white-space: normal; }
+
+    /* ── Agents · Deliverables · Tools · US-005 ────────────────────────
+       The toolbar already wraps; on a phone the search takes the whole
+       first line (`flex-1` gives it a 0% basis, so it would otherwise be
+       squeezed between the clusters) and the pill and segmented groups
+       follow beneath it, each able to grow into the space. The `.cc-stats`
+       strips on these pages are covered by the 2-up rule above, and their
+       card grids are Tailwind `grid-cols-1 md:…` — already one column below
+       768, so nothing is duplicated here. */
+    :is(.studio, .cc-page) .cc-toolbar .cc-search { flex-basis: 100%; }
+    :is(.studio, .cc-page) .cc-toolbar > *:not(.cc-search) { flex-grow: 1; }
+    :is(.studio, .cc-page) .cc-toolbar .cc-seg { justify-content: center; }
+
+    /* ── The framed pages, in one move · US-006 ────────────────────────
+       `PageHeader`, `StatsBar` and `FilterTabs` are the primitives that
+       converted 24/11/9 pages to Studio in PRD-244 W5d–g, so these rules
+       reach Team, Analytics, Settings and its sub-pages, Knowledge Base,
+       Marketplace and its sub-pages, mission detail and the three admin
+       surfaces at once — and the bespoke pages' hand-rolled heads with them.
+       Classic's render is a different branch of each primitive and is not
+       touched by any of this.
+
+       The head takes the whole line so its actions stack beneath it rather
+       than squeezing the title; `StatsBar`'s Studio form is `.cc-stats`,
+       already 2-up above; `FilterTabs`' strip is `.cc-tabs`, which already
+       scrolls and now carries the shared scroll-into-view hook. */
+    :is(.studio, .cc-page) .cc-headrow { flex-wrap: wrap; }
+    :is(.studio, .cc-page) .cc-headrow > .cc-head { flex-basis: 100%; }
+    :is(.studio, .cc-page) .cc-actions { flex-wrap: wrap; }
+  }
+
+  /* ─── end of the compact region · a new surface is appended above ──── */
 }
 
 html {

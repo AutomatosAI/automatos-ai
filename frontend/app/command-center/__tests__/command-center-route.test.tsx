@@ -1,8 +1,8 @@
 /**
- * PRD-244 (two styles, two tones) — the Command Centre route renders the shell
- * only in the Studio style on desktop; the Classic style keeps the ActivityPage,
- * which carries the same tabs in its own style. Below 1024 px both styles use
- * the ActivityPage until the mobile pass (PRD-245).
+ * PRD-246 US-007 — the route forks on the STYLE axis alone: the Studio style
+ * renders the Studio surface at every width (it has a compact form now), the
+ * Classic style renders the classic one. Width informs layout inside a
+ * component, never which component.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
@@ -46,10 +46,10 @@ describe('Command Centre route', () => {
     expect(screen.queryByTestId('shell')).toBeNull()
   })
 
-  it('below 1024 px both styles render the classic page until the mobile pass', () => {
+  it('the Studio style renders the Studio surface at phone width too (PRD-246 US-007)', () => {
     state.tabletOrBelow = true
     render(<CommandCenterPage />)
-    expect(screen.getByTestId('classic')).toBeInTheDocument()
-    expect(screen.queryByTestId('shell')).toBeNull()
+    expect(screen.getByTestId('shell')).toBeInTheDocument()
+    expect(screen.queryByTestId('classic')).toBeNull()
   })
 })

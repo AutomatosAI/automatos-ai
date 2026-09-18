@@ -171,7 +171,7 @@ export function MarketplaceItemModal({
           {/* LLM Model Configuration */}
           <div className="bg-secondary/30 border border-border/30 rounded-lg p-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold uppercase">{modelId}</h3>
+              <h3 className="text-xl font-bold uppercase break-all">{modelId}</h3>
               <Badge variant="outline" className="capitalize">
                 {modelProvider}
               </Badge>
@@ -185,7 +185,7 @@ export function MarketplaceItemModal({
                 : 'AI model optimized for agent workflows'}
             </p>
 
-            <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               {contextWindow && (
                 <div>
                   <div className="flex items-center gap-1 text-sm text-muted-foreground mb-1">
