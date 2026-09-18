@@ -66,6 +66,7 @@ import { useInitiateConnection, useDisconnectApp } from '@/hooks/use-composio-ap
 import { Loader2, ExternalLink, Wrench } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { useViewMode } from '@/hooks/use-view-mode'
 
 // Tool Categories are now loaded dynamically from the API
 // See toolCategories useMemo below for the dynamic implementation
@@ -129,7 +130,8 @@ export function ToolsDashboard({ variant = 'classic' }: ToolsDashboardProps = {}
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  // PRD-246 follow-up: the shared hook — list on a phone unless the user chose grid, remembered per page.
+  const [viewMode, setViewMode] = useViewMode('tools')
   const [sortBy, setSortBy] = useState('name')
   const [activeTab, setActiveTab] = useState('enabled')
   const [cachedToolsData, setCachedToolsData] = useState<any | null>(null)
