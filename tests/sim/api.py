@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import socket
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -176,15 +177,23 @@ class Api:
 
     # -- chat ---------------------------------------------------------------------
     def stream_chat(self, text: str, *, chat_id: str | None = None, agent_id: int | None = None,
-                    timeout_s: float = 240.0, label: str | None = None) -> Response:
-        """POST /api/chat the way the nightly suite does; the body is the whole SSE stream."""
-        body: dict[str, Any] = {"message": {"role": "user", "parts": [{"type": "text", "text": text}]}}
-        if chat_id:
-            body["chatId"] = chat_id
-        if agent_id is not None:
-            body["agentId"] = agent_id
-        return self.request("POST", "/api/chat", json_body=body, timeout_s=timeout_s,
-                            accept="text/event-stream", label=label or "chat")
+                    timeout_s: float = 240.0, label: str | None = None) -> tuple[Response, str]:
+        """POST /api/chat; returns the stream and the chat id the conversation continues under."""
+        body, used = chat_body(text, chat_id=chat_id, agent_id=agent_id)
+        response = self.request("POST", "/api/chat", json_body=body, timeout_s=timeout_s,
+                                accept="text/event-stream", label=label or "chat")
+        return response, used
+
+
+def chat_body(text: str, *, chat_id: str | None = None, agent_id: int | None = None) -> tuple[dict[str, Any], str]:
+    """The UI's request shape. The chat id is CLIENT-supplied (``api/chat.py`` reads ``request.id``
+    and never returns one), so a new conversation mints its own; pass it back to continue."""
+    used = chat_id or str(uuid.uuid4())
+    body: dict[str, Any] = {"id": used, "chatId": used,
+                            "message": {"role": "user", "parts": [{"type": "text", "text": text}]}}
+    if agent_id is not None:
+        body["agentId"] = agent_id
+    return body, used
 
 
 def items_of(payload: Any, *keys: str) -> list[Any]:

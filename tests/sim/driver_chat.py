@@ -14,7 +14,7 @@ import json
 from typing import Any, Mapping
 
 from .answerer import answer_pending
-from .api import Api, ApiError, items_of, iter_pages
+from .api import Api, ApiError, chat_body, items_of, iter_pages
 from .packs import Scenario
 from .results import Check, RunContext, ScenarioResult, effect_checks, must_contain_checks, now_iso
 from .sse import ChatTurn, parse_data_stream
@@ -64,17 +64,15 @@ def run_chat(ctx: RunContext, sc: Scenario) -> ScenarioResult:
     errors: list[str] = []
     chat_id: str | None = None
     for index, prompt in enumerate(sc.turns, start=1):
+        body, chat_id = chat_body(prompt, chat_id=chat_id)
         response = api.request("POST", "/api/chat", accept="text/event-stream", timeout_s=settings.chat_timeout_s,
-                               label=f"{sc.id}:turn{index}", json_body={
-                                   "message": {"role": "user", "parts": [{"type": "text", "text": prompt}]},
-                                   **({"chatId": chat_id} if chat_id else {})})
+                               label=f"{sc.id}:turn{index}", json_body=body)
         if response.status >= 400:
             errors.append(f"turn {index}: HTTP {response.status} {response.body[:200]}")
             turns.append(turn_record(index, prompt, parse_data_stream(""), response.status, response.ms,
                                      response.first_byte_ms))
             continue
-        turn = parse_data_stream(response.body, response.headers.get("x-chat-id") or response.headers.get("X-Chat-Id"))
-        chat_id = turn.chat_id or chat_id
+        turn = parse_data_stream(response.body, chat_id)
         turns.append(turn_record(index, prompt, turn, response.status, response.ms, response.first_byte_ms))
         errors.extend(f"turn {index}: {e[:300]}" for e in turn.errors)
         if not turn.text and not turn.tool_calls:

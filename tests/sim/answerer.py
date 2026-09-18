@@ -26,7 +26,7 @@ from .api import Api, ApiError, items_of
 from .config import PERSONAS_FILE
 
 QUESTION_KIND = "question"
-QUESTION_FIELDS = ("question", "prompt", "summary", "reason", "description", "title")
+QUESTION_FIELDS = ("question_md", "question", "reason", "prompt", "summary", "description", "title", "tool_name")
 
 DEFAULT_PERSONA: dict[str, Any] = {
     "name": "default",

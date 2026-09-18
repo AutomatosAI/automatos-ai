@@ -3,7 +3,7 @@
 import pytest
 
 from tests.sim import config, cost, sse
-from tests.sim.api import Api, Trace, items_of
+from tests.sim.api import Api, Trace, chat_body, items_of
 from tests.sim.results import ScenarioResult, effect_checks, must_contain_checks, parse_iso, text_of
 from tests.sim import workspace
 from tests.sim.workspace import (WorkspaceError, apply_llm_settings, assert_scoped, parse_key_values, provision, purge,
@@ -74,6 +74,13 @@ def test_no_key_means_no_key_header_and_the_docker_target_is_checked():
     with pytest.raises(config.ConfigError, match="DOCKER_HOST"):
         config.check_docker_target(config.Settings(), "tcp://prod-host:2376")
     config.check_docker_target(config.Settings(allow_remote=True), "tcp://prod-host:2376")
+
+
+def test_chat_body_mints_a_client_side_id_and_reuses_it():
+    body, used = chat_body("hello")
+    assert body["id"] == used == body["chatId"] and len(used) == 36 and body["message"]["parts"][0]["text"] == "hello"
+    body2, used2 = chat_body("again", chat_id=used, agent_id=7)
+    assert used2 == used and body2["id"] == used and body2["agentId"] == 7
 
 
 def test_seeding_stops_when_the_workspace_header_is_not_honoured():

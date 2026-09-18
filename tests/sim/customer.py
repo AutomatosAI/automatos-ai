@@ -32,7 +32,7 @@ from typing import Any
 
 from .api import Api, ApiError, Trace
 from .config import DEFAULT_WORKSPACE_ID, LOGS_DIR, SIM_HOME, ConfigError, load_settings
-from .customer_ops import cost_table, inventory, purge_tagged, render_inventory, render_prompt
+from .customer_ops import cost_table, inventory, purge_tagged, question_line, render_inventory, render_prompt
 from .judge import judge_output
 from .sse import parse_data_stream
 
@@ -61,8 +61,8 @@ def _append_jsonl(name: str, record: dict[str, Any]) -> None:
 
 def cmd_chat(args: argparse.Namespace) -> int:
     api, settings = _api(args)
-    response = api.stream_chat(args.text, chat_id=args.chat_id, agent_id=args.agent_id, timeout_s=settings.chat_timeout_s)
-    turn = parse_data_stream(response.body, response.headers.get("x-chat-id"))
+    response, chat_id = api.stream_chat(args.text, chat_id=args.chat_id, agent_id=args.agent_id, timeout_s=settings.chat_timeout_s)
+    turn = parse_data_stream(response.body, chat_id)
     record = {"ts": time.time(), "prompt": args.text, "chat_id": turn.chat_id, "status": response.status, "ms": response.ms,
               "text": turn.text, "tool_calls": [{"name": c.get("toolName"), "args": c.get("args")} for c in turn.tool_calls],
               "errors": list(turn.errors), "usage": turn.usage}
@@ -83,8 +83,9 @@ def cmd_questions(args: argparse.Namespace) -> int:
     api, _ = _api(args)
     inv = inventory(api)
     for q in inv["questions"]:
-        text = q.get("question") or q.get("prompt") or q.get("summary") or ""
-        print(f"#{q['id']} [{q.get('kind')}] {text}" + (f"  options: {q['options']}" if q.get("options") else ""))
+        how = "answer <id> \"...\"" if q.get("kind") == "question" else "grant <id>"
+        print(f"#{q['id']} [{q.get('kind')}] {question_line(q)}" + (f"  options: {q['options']}" if q.get("options") else "")
+              + (f"  expires: {q['expires_at']}" if q.get("expires_at") else "") + f"  → {how}")
     if not inv["questions"]:
         print("no pending questions or approvals")
     return 0
