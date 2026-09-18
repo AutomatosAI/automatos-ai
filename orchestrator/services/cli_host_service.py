@@ -30,11 +30,13 @@ from core.cli_runtime import (
     CLI_PRESETS, CONFIG_ALLOWED_TOOLS_KEY, CONFIG_MODEL_KEY, CONFIG_PROVIDER_KEY, CONFIG_WORKING_DIRECTORY_KEY, CONFIG_WORKTREE_KEY, PROVIDER_CLAUDE, RUNTIME_CLI, registry_public,
 )
 from core.llm.usage_context import LANE_BOARD_TASK, LANE_SESSION
+from core.models.approval_grants import SUBJECT_BOARD_TASK
 from core.models.cli_hosts import CliHost, CliHostStatus
 from core.models.core import Agent, BoardTask
 from services.board_dispatcher import claim_tasks, renew_lease
 from services.board_events import notify_board_event
 from services.cli_ticket_lane import SESSION_MODE_TERMINAL
+from services.session_denials import classify_denial, forces_review
 
 logger = logging.getLogger(__name__)
 
@@ -554,7 +556,9 @@ def _terminal_launch_for(db: Session, task: BoardTask, ref: Dict[str, Any], host
         # The grant names the CLI; the host's adapter for it spells the command (design §7).
         "kind": ref.get("provider") or PROVIDER_CLAUDE,
         "session_id": str(session_id),
-        "system_prompt": _session_system_prompt(agent),
+        # The terminal has no hooks (no policy gate): the soul only, never the
+        # ticket session's tools block (PRD-245 S0.6).
+        "system_prompt": _session_system_prompt(agent, ticket_session=False),
         "model": ref.get("model"),
         "agent_name": getattr(agent, "name", None),
     }
@@ -765,15 +769,16 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
     return {"tasks": out, "parked": parked}
 
 
-def _session_system_prompt(agent: Optional[Agent]) -> str:
+def _session_system_prompt(agent: Optional[Agent], *, ticket_session: bool = True) -> str:
     """Never lets a rendering problem block a claim — the host falls back to
-    name + rules when this is empty."""
+    name + rules when this is empty. ``ticket_session=False`` for the Canvas
+    terminal, which runs without the policy gate the tools block describes."""
     if agent is None:
         return ""
     try:
         from services.cli_session_prompt import session_system_prompt
 
-        return session_system_prompt(agent)
+        return session_system_prompt(agent, ticket_session=ticket_session)
     except Exception:  # noqa: BLE001
         logger.warning("[cli-host] session prompt rendering failed for agent %s", getattr(agent, "id", "?"), exc_info=True)
         return ""
@@ -871,14 +876,44 @@ def _record_terminal_events(db: Session, host: CliHost, task_id: int, events: Li
     return {"status": task.status, "lease_renewed": False, "control": {}, "decisions": []}
 
 
-def record_events(
+def _absorb_hook_event(ref: Dict[str, Any], task: BoardTask, ev: Dict[str, Any]) -> None:
+    """One hook event into the ticket's live summary (``ref`` is the caller's
+    working copy of ``runtime_ref``; the caller writes it back once)."""
+    name = ev.get("event") or ev.get("hook_event_name")
+    if name:
+        ref["last_event"] = name
+    if name == "PreToolUse" and ev.get("tool_name"):
+        ref["live_tool"] = ev["tool_name"]
+        # PRD-234 S2: the ticket's live log — tool + what it was about, bounded.
+        entry: Dict[str, Any] = {"at": _iso(_now()), "tool": str(ev["tool_name"])[:60]}
+        if ev.get("subject"):
+            entry["subject"] = str(ev["subject"])[:200]
+        ref["recent_tools"] = (list(ref.get("recent_tools") or []) + [entry])[-RECENT_TOOLS_KEPT:]
+    elif name in ("PostToolUse", "Stop", "SessionEnd"):
+        ref.pop("live_tool", None)
+    if ev.get("session_id"):
+        ref["cli_session_id"] = ev["session_id"]
+    if ev.get("transcript_path"):
+        ref["transcript_path"] = ev["transcript_path"]
+    # PRD-235 W2: the session's effective working directory (SessionStart carries
+    # it) — the absolute host path editor deeplinks need; the explorer root follows.
+    # PRD-239: it always wins over the configured directory — a git repo runs in
+    # a --worktree, and that is where the transcript and the edits live.
+    if name == "SessionStart" and ev.get("cwd"):
+        _record_session_cwd(ref, task, str(ev["cwd"]))
+    if name == "PermissionRequest":
+        note_pending_permission(ref, ev)
+
+
+async def record_events(
     db: Session, host: CliHost, task_id: int, events: Optional[List[Dict[str, Any]]]
 ) -> Dict[str, Any]:
     """Absorb a batch of hook events: renew the lease, keep a compact live summary
-    in ``runtime_ref`` (live tool, transcript path, counts), and hand back control
-    (``cancel``) the host must act on. Events are not persisted individually here
-    — S2 maps them to board events and the fleet."""
-    events = events or []
+    in ``runtime_ref`` (live tool, transcript path, counts), raise a question for
+    every command the host is holding (PRD-245 S0.4), and hand back control
+    (``cancel``) and the operator's answers the host must act on. Events are not
+    persisted individually here — S2 maps them to board events and the fleet."""
+    events = [ev for ev in (events or []) if isinstance(ev, dict)]
     if events and all(_terminal_event_name(ev) for ev in events):
         return _record_terminal_events(db, host, task_id, events)
     task = _owned_task(db, host, task_id)
@@ -887,40 +922,15 @@ def record_events(
     ref["events_seen"] = int(ref.get("events_seen") or 0) + len(events)
     ref["last_event_at"] = _iso(_now())
     for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        name = ev.get("event") or ev.get("hook_event_name")
-        if name:
-            ref["last_event"] = name
-        if name == "PreToolUse" and ev.get("tool_name"):
-            ref["live_tool"] = ev["tool_name"]
-            # PRD-234 S2: the ticket's live log — tool + what it was about, bounded.
-            entry: Dict[str, Any] = {"at": _iso(_now()), "tool": str(ev["tool_name"])[:60]}
-            if ev.get("subject"):
-                entry["subject"] = str(ev["subject"])[:200]
-            ref["recent_tools"] = (list(ref.get("recent_tools") or []) + [entry])[-RECENT_TOOLS_KEPT:]
-        elif name in ("PostToolUse", "Stop", "SessionEnd"):
-            ref.pop("live_tool", None)
-        if ev.get("session_id"):
-            ref["cli_session_id"] = ev["session_id"]
-        if ev.get("transcript_path"):
-            ref["transcript_path"] = ev["transcript_path"]
-        # PRD-235 W2: the session's effective working directory (SessionStart carries
-        # it) — the absolute host path editor deeplinks need; the explorer root follows.
-        # PRD-239: it always wins over the configured directory — a git repo runs in
-        # a --worktree, and that is where the transcript and the edits live.
-        if name == "SessionStart" and ev.get("cwd"):
-            _record_session_cwd(ref, task, str(ev["cwd"]))
-        if name == "PermissionRequest":
-            note_pending_permission(ref, ev)
+        _absorb_hook_event(ref, task, ev)
     task.runtime_ref = ref
     db.commit()
+    ref = await raise_session_holds(db, task, ref)
     # PRD-235 W2 S3: the same events light up the Code Canvas panel.
     projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
     canvas: List[Dict[str, Any]] = []
     for ev in events:
-        if isinstance(ev, dict):
-            canvas.extend(canvas_events_for(task, ref, ev, projects_dir))
+        canvas.extend(canvas_events_for(task, ref, ev, projects_dir))
     publish_canvas_events(task.workspace_id, canvas)
     control: List[str] = []
     if task.status == "cancelled" or ref.get("cancel_requested_at"):
@@ -930,6 +940,211 @@ def record_events(
         task.runtime_ref = dict(ref)
         db.commit()
     return {"status": task.status, "lease_renewed": bool(renewed), "control": control, "decisions": decisions}
+
+
+# ── PRD-245 S0.4: a held command is a question (Questions tab, bell, Telegram) ──
+# The host holds a shell command the policy could not judge and asks. Before
+# this wave the question was a card on the ticket's Canvas over live SSE and
+# nowhere else (nineteen holds, zero answered, 2026-09-17). Now every hold is
+# ONE PRD-225 question row on the ticket — the tab lists it with the ticket's
+# cascade, the bell rings, the Telegram bridge delivers it and correlates the
+# reply — while the ticket keeps RUNNING (the host is waiting, not parked).
+
+SESSION_HOLD_MARKER = "cli_permission"       # ``ApprovalGrant.details[<marker>] = {request_id, task_id}``
+SESSION_HOLD_OPTION_ALLOW = "allow"
+SESSION_HOLD_OPTION_DENY = "deny"
+SESSION_HOLD_OPTIONS = (SESSION_HOLD_OPTION_ALLOW, SESSION_HOLD_OPTION_DENY)
+# The host's default ``--ask-timeout`` (services/cli-host … config.py); the row's
+# ``expires_at`` mirrors it. The row is CLOSED by the session's result in any case
+# (``apply_result``) — the host does not report its actual timeout on the event.
+SESSION_HOLD_TTL_SECONDS = 120
+
+
+def session_hold_question(task_id: Any, entry: Dict[str, Any]) -> str:
+    """The question the operator sees, wherever it reaches them. The answer
+    words are spelled out because a Telegram reply sees no buttons and anything
+    but ``allow`` is read as deny (fail closed)."""
+    subject = entry.get("subject") or entry.get("tool") or "?"
+    lines = [f"**Allow this command in ticket #{task_id}?**", "", f"`{subject}`"]
+    if entry.get("reason"):
+        lines += ["", str(entry["reason"])]
+    lines += ["", f"Answer `{SESSION_HOLD_OPTION_ALLOW}` or `{SESSION_HOLD_OPTION_DENY}`."]
+    return "\n".join(lines)
+
+
+def is_allow_answer(answer: Any) -> bool:
+    """Only an answer that starts with ``allow`` allows; everything else denies."""
+    return str(answer or "").strip().lower().startswith(SESSION_HOLD_OPTION_ALLOW)
+
+
+def session_hold_marker(grant: Any) -> Optional[Dict[str, Any]]:
+    """``{request_id, task_id}`` when this question row is a session hold, else None."""
+    details = getattr(grant, "details", None)
+    marker = details.get(SESSION_HOLD_MARKER) if isinstance(details, dict) else None
+    if not isinstance(marker, dict) or not marker.get("request_id") or marker.get("task_id") is None:
+        return None
+    return marker
+
+
+def pending_permission_entry(ref: Dict[str, Any], request_id: Any) -> Optional[Dict[str, Any]]:
+    for entry in ref.get("pending_permissions") or []:
+        if isinstance(entry, dict) and entry.get("request_id") == str(request_id):
+            return entry
+    return None
+
+
+async def raise_session_holds(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Dict[str, Any]:
+    """Every pending permission without a question row yet gets one; the grant
+    id is kept on the entry, so a re-flushed event creates nothing twice. Returns
+    the (rebuilt) ``runtime_ref`` the caller continues with — the one it came in
+    with when filing fails: the event flush (lease, decisions) must still reach
+    the host, and the Canvas card stands alone until the next flush."""
+    pending = [p for p in (ref.get("pending_permissions") or []) if isinstance(p, dict)]
+    if not any(p.get("grant_id") is None for p in pending):
+        return ref
+    try:
+        return await _raise_session_holds(db, task, ref, pending)
+    except Exception:  # noqa: BLE001 — never break the flush over a question row
+        logger.error("[cli-host] hold questions for ticket #%s not filed this flush", task.id, exc_info=True)
+        db.rollback()
+        return ref
+
+
+async def _raise_session_holds(
+    db: Session, task: BoardTask, ref: Dict[str, Any], pending: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    known = _open_hold_question_ids_by_request(db, task)  # rows an earlier flush committed before failing
+    agent = db.query(Agent).filter(Agent.id == task.assigned_agent_id).first() if task.assigned_agent_id else None
+    agent_name = getattr(agent, "name", None)
+    updated: List[Dict[str, Any]] = []
+    for entry in pending:
+        if entry.get("grant_id") is not None:
+            updated.append(entry)
+            continue
+        grant_id = known.get(str(entry.get("request_id")))
+        if grant_id is None:
+            grant_id = await _stage_hold_question(db, task, agent_name, entry)
+        updated.append({**entry, "grant_id": grant_id} if grant_id is not None else entry)
+    new_ref = {**ref, "pending_permissions": updated}
+    task.runtime_ref = new_ref
+    db.commit()
+    return new_ref
+
+
+async def _stage_hold_question(
+    db: Session, task: BoardTask, agent_name: Optional[str], entry: Dict[str, Any],
+) -> Optional[int]:
+    """One hold → one question row through the shared PRD-225 internals (the
+    function ``platform_ask_human`` dispatches to), unparked. A failure here is
+    logged and leaves the Canvas card as the only surface — the host's event
+    flush (lease, decisions) must still be answered."""
+    from modules.tools.discovery.handlers_asks import stage_question
+
+    request_id = str(entry.get("request_id"))
+    try:
+        res = await stage_question(
+            db, task.workspace_id,
+            subject_type=SUBJECT_BOARD_TASK, subject_id=str(task.id),
+            question=session_hold_question(task.id, entry), options=list(SESSION_HOLD_OPTIONS),
+            ttl_seconds=SESSION_HOLD_TTL_SECONDS,
+            asked_by_agent_id=task.assigned_agent_id, agent_name=agent_name,
+            details={SESSION_HOLD_MARKER: {"request_id": request_id, "task_id": task.id}},
+        )
+    except Exception:  # noqa: BLE001 — the events flush must reach the host regardless
+        logger.error("[cli-host] no question row for hold %s on ticket #%s — the Canvas card stands alone",
+                     request_id, task.id, exc_info=True)
+        db.rollback()
+        return None
+    ask_id = res.get("ask_id") if isinstance(res, dict) else None
+    if ask_id is None:
+        logger.error("[cli-host] hold %s on ticket #%s: the ask internals returned no id (%s)", request_id, task.id, res)
+        return None
+    logger.info("[cli-host] hold %s on ticket #%s is question #%s", request_id, task.id, ask_id)
+    return int(ask_id)
+
+
+def answer_session_hold(db: Session, grant: Any) -> bool:
+    """PRD-225's answer path reached a session hold: the operator's ``allow`` /
+    ``deny`` becomes the ticket's decision for the host's next event flush. The
+    ticket is never re-queued (it is running). False when the hold is no longer
+    open — answered from the Canvas card first, or the session already ended —
+    so the confirmation says nothing resumed."""
+    marker = session_hold_marker(grant)
+    if marker is None:
+        return False
+    task = (
+        db.query(BoardTask)
+        .filter(BoardTask.id == int(marker["task_id"]), BoardTask.workspace_id == grant.workspace_id)
+        .first()
+    )
+    if task is None:
+        logger.warning("[cli-host] question #%s names ticket #%s, which is not in workspace %s",
+                       grant.id, marker["task_id"], grant.workspace_id)
+        return False
+    approved = is_allow_answer(grant.answer_text)
+    try:
+        decide_session_permission(db, task, str(marker["request_id"]), approved, grant.answered_by or "user:unknown")
+    except LookupError as exc:
+        logger.info("[cli-host] question #%s: hold %s on ticket #%s is already decided or gone — %s",
+                    grant.id, marker["request_id"], task.id, exc)
+        return False
+    return True
+
+
+def _close_hold_question(db: Session, grant_id: Any, approved: bool, actor: str) -> bool:
+    """The Canvas card was answered first: the Questions row follows (the same
+    pending→granted statement the answer route uses; a no-op when the row was
+    the one that carried the answer)."""
+    if grant_id is None:
+        return False
+    from core.services.approval_grants import answer_pending_grant
+
+    answer = SESSION_HOLD_OPTION_ALLOW if approved else SESSION_HOLD_OPTION_DENY
+    return answer_pending_grant(db, int(grant_id), answer_text=answer, answered_by=actor)
+
+
+def _open_hold_question_rows(db: Session, task: BoardTask) -> List[Any]:
+    """Every still-pending hold question on this ticket — the marker rows, not
+    the (capped) pending list, so no row outlives its session."""
+    from core.models.approval_grants import ApprovalGrant, GrantStatus, KIND_QUESTION
+
+    rows = (
+        db.query(ApprovalGrant)
+        .filter(
+            ApprovalGrant.workspace_id == task.workspace_id,
+            ApprovalGrant.subject_type == SUBJECT_BOARD_TASK,
+            ApprovalGrant.subject_id == str(task.id),
+            ApprovalGrant.kind == KIND_QUESTION,
+            ApprovalGrant.status == GrantStatus.PENDING.value,
+        )
+        .all()
+    )
+    return [g for g in rows if session_hold_marker(g) is not None]
+
+
+def _open_hold_question_ids(db: Session, task: BoardTask) -> List[int]:
+    return [int(g.id) for g in _open_hold_question_rows(db, task)]
+
+
+def _open_hold_question_ids_by_request(db: Session, task: BoardTask) -> Dict[str, int]:
+    """``request_id`` → question id for the open hold rows of this ticket, so a
+    row committed by a flush that then failed is reused, never duplicated."""
+    return {str(session_hold_marker(g)["request_id"]): int(g.id) for g in _open_hold_question_rows(db, task)}
+
+
+def _expire_hold_questions(db: Session, task: BoardTask, entries: List[Dict[str, Any]], host: CliHost) -> int:
+    """The session ended with holds unanswered: their question rows close as
+    ``expired`` (nobody can answer them any more); an answer that won a moment
+    earlier is left alone."""
+    from core.services.approval_grants import expire_pending_grants
+
+    ids = {int(e["grant_id"]) for e in entries if isinstance(e, dict) and e.get("grant_id") is not None}
+    ids |= set(_open_hold_question_ids(db, task))
+    if not ids:
+        return 0
+    closed = expire_pending_grants(db, task.workspace_id, ids, revoked_by=f"cli-host:{host.id}")
+    logger.info("[cli-host] ticket #%s ended with %s unanswered hold(s); %s question row(s) expired", task.id, len(ids), closed)
+    return closed
 
 
 def _session_duration_ms(ref: Dict[str, Any]) -> Optional[int]:
@@ -1082,10 +1297,16 @@ PENDING_PERMISSIONS_KEPT = 20
 
 def note_pending_permission(ref: Dict[str, Any], ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """A session's permission question (PRD-235 W2 S3) → remembered on the ticket
-    until the operator answers. Returns the stored entry, or None for a malformed event."""
+    until the operator answers. Returns the stored entry, or None for a malformed
+    event or one the operator already answered (the host re-sends a batch its
+    POST lost; an answered question must not come back). A re-sent open question
+    keeps the question row it already has (``grant_id``, PRD-245 S0.4)."""
     request_id = ev.get("request_id")
     if not request_id:
         return None
+    if str(request_id) in (ref.get("permission_decisions") or {}):
+        return None
+    previous = pending_permission_entry(ref, request_id)
     entry = {
         "request_id": str(request_id),
         "tool": str(ev.get("tool_name") or "?")[:60],
@@ -1093,6 +1314,8 @@ def note_pending_permission(ref: Dict[str, Any], ev: Dict[str, Any]) -> Optional
         "reason": str(ev.get("reason") or "")[:300],
         "at": _iso(_now()),
     }
+    if previous is not None and previous.get("grant_id") is not None:
+        entry["grant_id"] = previous["grant_id"]
     pending = [p for p in (ref.get("pending_permissions") or []) if p.get("request_id") != entry["request_id"]]
     pending.append(entry)
     ref["pending_permissions"] = pending[-PENDING_PERMISSIONS_KEPT:]
@@ -1257,16 +1480,18 @@ MAX_DENIALS_KEPT = 20
 
 
 def _denial_summary(denial: Any) -> Dict[str, Any]:
-    """One denial as the ticket shows it: tool, stage, reason, and the command or
-    path it was about (never the whole tool input)."""
+    """One denial as the ticket shows it: tool, stage, reason, the command or
+    path it was about (never the whole tool input) and what it MEANS — its
+    ``kind`` (PRD-245 S0.3, D6): only a hold puts the ticket in review."""
     if not isinstance(denial, dict):
-        return {"tool": "?", "reason": str(denial)[:300]}
+        return {"tool": "?", "reason": str(denial)[:300], "kind": classify_denial(None, denial)}
     raw_input = denial.get("input") if isinstance(denial.get("input"), dict) else {}
     subject = raw_input.get("command") or raw_input.get("file_path") or raw_input.get("path")
     out: Dict[str, Any] = {
         "tool": str(denial.get("tool") or "?")[:60],
         "stage": str(denial.get("stage") or "")[:40],
         "reason": str(denial.get("reason") or "")[:300],
+        "kind": classify_denial(denial.get("stage"), denial.get("reason")),
     }
     if subject:
         out["subject"] = str(subject)[:300]
@@ -1276,13 +1501,17 @@ def _denial_summary(denial: Any) -> Dict[str, Any]:
 def decide_session_permission(db: Session, task: BoardTask, request_id: str, approved: bool, actor: str) -> Dict[str, Any]:
     """PRD-235 W2 S3: the operator's answer to a session's permission question,
     recorded on the ticket and picked up by the host on its next event flush; the
-    Canvas hears the outcome as a status line."""
+    Canvas hears the outcome as a status line. PRD-245 S0.4: the hold's question
+    row (Questions tab / Telegram) closes with the same answer, whichever surface
+    answered first — the second answer finds no pending question and says so."""
     ref = dict(task.runtime_ref or {})
     if ref.get("runtime") != RUNTIME_CLI:
         raise LookupError("this task is not a Claude Code session")
-    if not record_permission_decision(ref, request_id, approved, actor):
+    entry = pending_permission_entry(ref, request_id)
+    if entry is None or not record_permission_decision(ref, request_id, approved, actor):
         raise LookupError(f"no pending permission question {request_id}")
     task.runtime_ref = ref
+    _close_hold_question(db, entry.get("grant_id"), approved, actor)
     db.commit()
     publish_canvas_events(task.workspace_id, [
         _canvas_envelope(task.workspace_id, "canvas.session.status", {
@@ -1300,8 +1529,10 @@ async def apply_result(
 
     Idempotent per ``(task, attempt)``: a duplicate POST, a stale attempt, or a
     task that already left ``in_progress`` (cancelled, requeued, finished) is a
-    no-op that says so. Any permission denial during the turn forces ``review``
-    — "couldn't run the tests" must never read as ``done`` (PRD-234 §C1).
+    no-op that says so. A HELD command the operator did not allow forces
+    ``review`` — "couldn't run the tests" must never read as ``done`` (PRD-234
+    §C1); a refused read outside the directory, a tool a session never has or a
+    denied TUI prompt is recorded and does not (PRD-245 S0.3, D6).
     """
     from api.board_tasks import finalize_board_task_run
 
@@ -1315,6 +1546,7 @@ async def apply_result(
 
     status = str(payload.get("status") or "success").lower()
     denials = payload.get("permission_denials") or []
+    denial_summaries = [_denial_summary(d) for d in denials]
     usage = payload.get("usage") or {}
     files = payload.get("files_touched") or []
     exec_result: Dict[str, Any] = {
@@ -1337,8 +1569,9 @@ async def apply_result(
             "usage": usage,
             "denials": len(denials),
             # The reasons, not just the count: a ticket in review must say WHY
-            # ("'python3 hello.py' is outside this ticket's Bash allowlist").
-            "permission_denials": [_denial_summary(d) for d in denials[:MAX_DENIALS_KEPT]],
+            # ("'python3 hello.py' is outside this ticket's Bash allowlist"), and
+            # each one's kind — only a hold is a reason for review.
+            "permission_denials": denial_summaries[:MAX_DENIALS_KEPT],
         }
     )
     if payload.get("transcript_path"):
@@ -1349,10 +1582,13 @@ async def apply_result(
     if payload.get("effective_cwd"):
         _record_session_cwd(ref, task, str(payload["effective_cwd"]))
     # PRD-235 W2 S3: a question nobody answered before the session ended is stale —
-    # its denial is already on the record (permission_denials); drop it from the queue.
-    if ref.get("pending_permissions"):
-        ref["expired_permissions"] = (ref.get("expired_permissions") or []) + ref["pending_permissions"]
+    # its denial is already on the record (permission_denials); drop it from the
+    # queue. PRD-245 S0.4: its question row (Questions tab / Telegram) expires too.
+    stale = list(ref.get("pending_permissions") or [])
+    if stale:
+        ref["expired_permissions"] = (ref.get("expired_permissions") or []) + stale
         ref["pending_permissions"] = []
+    _expire_hold_questions(db, task, stale, host)
 
     # PRD-234 S2: files under the workspace volume → the ticket's deliverables;
     # the session facts ride exec_result so the task report can show them.
@@ -1399,6 +1635,8 @@ async def apply_result(
         agent_id=task.assigned_agent_id,
         exec_result=exec_result,
         review_mode=task.review_mode or "auto",
-        force_review=bool(denials),
+        # PRD-245 S0.3 (D6): review only when a held command went unanswered or
+        # was denied (an unclassifiable refusal counts as one — fail closed).
+        force_review=forces_review(denial_summaries),
     )
     return {"applied": terminal is not None, "status": terminal or task.status}

@@ -9,6 +9,19 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from core.cli_runtime import RUNTIME_CLI
+from services.session_denials import denial_kind_label, group_denials_by_kind
+
+
+def refused_calls_lines(denials: List[Any]) -> List[str]:
+    """PRD-245 S0.3: the refusals grouped by what they MEAN (D6) — holds first,
+    since they are why a ticket sits in review; a refused read outside the
+    directory or a tool a session never has is listed, not blamed."""
+    lines: List[str] = ["### Refused tool calls"]
+    for kind, rows in group_denials_by_kind(denials).items():
+        lines.append(f"**{denial_kind_label(kind)}**")
+        for d in rows:
+            lines.append(f"- {d.get('tool') or '?'}: {d.get('reason') or d.get('subject') or 'refused'}")
+    return lines
 
 
 def session_report_lines(exec_result: Dict[str, Any]) -> List[str]:
@@ -42,10 +55,7 @@ def session_report_lines(exec_result: Dict[str, Any]) -> List[str]:
     denials = session.get("permission_denials") or exec_result.get("permission_denials") or []
     if denials:
         lines.append("")
-        lines.append("### Refused tool calls")
-        for d in denials[:20]:
-            if isinstance(d, dict):
-                lines.append(f"- {d.get('tool') or '?'}: {d.get('reason') or d.get('subject') or 'refused'}")
+        lines.extend(refused_calls_lines(denials[:20]))
     recent = session.get("recent_tools") or []
     if recent:
         lines.append("")

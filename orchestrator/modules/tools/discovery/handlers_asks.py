@@ -29,9 +29,7 @@ _TERMINAL_STATUSES = ("done", "failed", "cancelled")
 
 async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Raise a human question that parks its subject and returns at once."""
-    from core.models.approval_grants import KIND_QUESTION
-    from core.services.approval_grants import DEFAULT_TTL_SECONDS, create_grant
-    from services.ask_cascade import count_downstream_blocked, is_urgent_cascade
+    from core.services.approval_grants import DEFAULT_TTL_SECONDS
 
     subject_type = (params.get("subject_type") or "").strip()
     subject_id = str(params.get("subject_id") or "").strip()
@@ -106,13 +104,52 @@ async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
                 ),
             }
 
-    # --- stage the ask row ------------------------------------------------
     try:
         ttl_seconds = (
             int(expires_hours) * 3600 if expires_hours else DEFAULT_TTL_SECONDS
         )
     except (TypeError, ValueError):
         ttl_seconds = DEFAULT_TTL_SECONDS
+
+    # Terminal subjects were rejected above, so a found board task always parks.
+    return await stage_question(
+        db, workspace_id,
+        subject_type=subject_type, subject_id=subject_id, question=question, options=options,
+        ttl_seconds=ttl_seconds,
+        asked_by_agent_id=(int(asked_by_agent_id) if asked_by_agent_id else None),
+        agent_name=agent_name, park=board_task,
+    )
+
+
+async def stage_question(
+    db: Session,
+    workspace_id: UUID,
+    *,
+    subject_type: str,
+    subject_id: str,
+    question: str,
+    options: Optional[list] = None,
+    ttl_seconds: Optional[int] = None,
+    asked_by_agent_id: Optional[int] = None,
+    agent_name: Optional[str] = None,
+    park: Any = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """The SHARED ask internals — stage the ``kind='question'`` row, park the
+    subject, ring the bell, send the Telegram message, return at once.
+
+    ``platform_ask_human`` (``ask_human`` above, after validation) and the PRD-229
+    ladder reach this through ``ask_human``; PRD-245's session holds call it
+    directly with ``park=None`` — the ticket keeps RUNNING while the host waits
+    for the answer — and a ``details`` marker the answer path reads. No parallel
+    construction, no HTTP self-call.
+
+    ``park`` — the board-task row to flip to ``blocked`` behind the ask, or
+    ``None`` to leave the subject as it is. The caller has validated the subject.
+    """
+    from core.models.approval_grants import KIND_QUESTION
+    from core.services.approval_grants import DEFAULT_TTL_SECONDS, create_grant
+    from services.ask_cascade import count_downstream_blocked, is_urgent_cascade
 
     grant = create_grant(
         db, workspace_id,
@@ -121,24 +158,27 @@ async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
         kind=KIND_QUESTION,
         question_md=question,
         options=options,
-        asked_by_agent_id=(int(asked_by_agent_id) if asked_by_agent_id else None),
-        agent_id=(int(asked_by_agent_id) if asked_by_agent_id else None),
+        asked_by_agent_id=asked_by_agent_id,
+        agent_id=asked_by_agent_id,
         reason="Awaiting human answer",
-        ttl_seconds=ttl_seconds,
+        ttl_seconds=int(ttl_seconds) if ttl_seconds else DEFAULT_TTL_SECONDS,
+        details=details,
     )
 
-    # --- park the subject -------------------------------------------------
-    # Terminal subjects were rejected above, so a found board task always parks.
-    if board_task is not None:
-        board_task.status = "blocked"
-        board_task.blocked_at = datetime.now(timezone.utc)
-        board_task.blocked_reason = f"Awaiting human answer (ask #{grant.id})"
+    if park is not None:
+        park.status = "blocked"
+        park.blocked_at = datetime.now(timezone.utc)
+        park.blocked_reason = f"Awaiting human answer (ask #{grant.id})"
 
     # Durably park first, then notify — a notification fault leaves a working
     # in-app ask (the tab reads grants, not notifications).
     db.commit()
 
-    downstream = count_downstream_blocked(db, workspace_id, subject_type, subject_id)
+    try:
+        downstream = count_downstream_blocked(db, workspace_id, subject_type, subject_id)
+    except Exception:  # noqa: BLE001 — the row is committed; a cascade count must not unfile the ask
+        logger.warning("[asks] downstream count failed for %s %s (ask #%s)", subject_type, subject_id, grant.id, exc_info=True)
+        downstream = 0
     await _dispatch_question_pending(
         db, workspace_id, grant_id=grant.id, question=question,
         agent_id=grant.asked_by_agent_id, agent_name=agent_name,
@@ -151,16 +191,19 @@ async def ask_human(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> 
     )
     db.commit()
 
+    parked = park is not None
     return {
         "success": True,
         "ask_id": grant.id,
-        "parked": True,
+        "parked": parked,
         "subject_type": subject_type,
         "subject_id": subject_id,
         "downstream_blocked": downstream,
         "message": (
             f"Parked {subject_type} {subject_id} and asked the human (ask #{grant.id}). "
             "Move on to other work — the answer will resume it."
+            if parked else
+            f"Asked the human about {subject_type} {subject_id} (ask #{grant.id}); the work carries on meanwhile."
         ),
     }
 

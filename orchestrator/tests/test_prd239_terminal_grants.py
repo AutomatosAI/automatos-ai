@@ -161,7 +161,7 @@ def _cli_ticket(**ref):
 
 
 def test_a_cli_tickets_grant_carries_the_launch_and_the_browser_only_its_summary(monkeypatch):
-    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "SOUL")
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent, **kw: "SOUL")
     task = _cli_ticket(model="opus")
     db = _DB(task=task)
     db.agent = SimpleNamespace(id=7, name="Bob")
@@ -175,7 +175,7 @@ def test_a_cli_tickets_grant_carries_the_launch_and_the_browser_only_its_summary
 
 
 def test_the_hooks_reported_session_id_wins_and_a_ticket_without_a_session_gets_a_plain_shell(monkeypatch):
-    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent, **kw: "")
     db = _DB(task=_cli_ticket(cli_session_id="real-1"))
     assert svc.mint_terminal_grant(db, _host(), task_id=93)["launch"]["session_id"] == "real-1"
     plain = SimpleNamespace(id=5, workspace_id=WS, assigned_agent_id=None, title="x", runtime_ref={"cwd": "/Users/me/Development/repo"})
@@ -183,7 +183,7 @@ def test_the_hooks_reported_session_id_wins_and_a_ticket_without_a_session_gets_
 
 
 def test_a_launch_needs_a_host_that_can_run_it(monkeypatch):
-    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent, **kw: "")
     with pytest.raises(LookupError, match="0.4.0"):
         svc.mint_terminal_grant(_DB(task=_cli_ticket()), _host(version="0.3.0"), task_id=93)
     with pytest.raises(LookupError):
@@ -191,7 +191,7 @@ def test_a_launch_needs_a_host_that_can_run_it(monkeypatch):
 
 
 def test_an_interactive_session_ticket_follows_the_host_that_opens_it(monkeypatch):
-    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "")
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent, **kw: "")
     task = _cli_ticket(mode="terminal", host_id="some-old-host")
     host = _host()
     svc.mint_terminal_grant(_DB(task=task), host, task_id=93)
@@ -200,7 +200,7 @@ def test_an_interactive_session_ticket_follows_the_host_that_opens_it(monkeypatc
 
 
 def test_a_shell_grant_for_a_cli_ticket_opens_a_plain_shell_in_its_folder(monkeypatch):
-    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent: "SOUL")
+    monkeypatch.setattr(svc, "_session_system_prompt", lambda agent, **kw: "SOUL")
     host = _host()
     out = svc.mint_terminal_grant(_DB(task=_cli_ticket()), host, task_id=93, shell=True)
     assert out["launch"] is None and out["cwd"] == "/Users/me/Development/repo"

@@ -22,11 +22,16 @@ if str(_ORCH) not in sys.path:
     sys.path.insert(0, str(_ORCH))
 
 from services.cli_session_prompt import (  # noqa: E402
+    GAP_LINE_PREFIX,
     OMITTED_NOTE,
+    SESSION_UNAVAILABLE_TOOL_PREFIXES,
     SKILLS_HEADER,
+    TOOLS_HEADER,
     TRUNCATED_NOTE,
     session_system_prompt,
+    session_tool_gaps,
     skills_block,
+    tools_block,
 )
 
 WS = uuid4()
@@ -84,11 +89,92 @@ def test_inactive_and_duplicate_skills_are_skipped():
     assert skills_block(agent).count("### ") == 1
 
 
-def test_an_agent_with_nothing_to_say_renders_nothing():
+def test_an_agent_with_nothing_to_say_still_learns_the_ticket_sessions_tools():
     bare = SimpleNamespace(id=1, name="X", description=None, use_custom_persona=False,
                            custom_persona_prompt=None, persona=None, skills=[])
-    assert session_system_prompt(bare) == ""
+    # PRD-245 S0.6: a ticket session is policy-gated — the gate is worth knowing even without a soul…
+    assert session_system_prompt(bare) == tools_block(bare)
+    # …the Canvas terminal has no gate (PRD-239 S7 v2): soul only, and nothing when there is none.
+    assert session_system_prompt(bare, ticket_session=False) == ""
     assert session_system_prompt(None) == ""
+
+
+# ── PRD-245 S0.6: the prompt tells the truth about tools ─────────────────────
+
+RESEARCH_BODY = (
+    "Search with `composio_execute` (COMPOSIO_SEARCH), check `search_knowledge` for what we already "
+    "know, then file the brief with `platform_submit_report`. Retry platform_submit_report once on failure. "
+    "Never touch platform_ tools you were not given; scratchpads are for drafts."
+)
+
+
+def _researcher():
+    return _agent(id=57, name="RESEARCHER", description="Finds things out.",
+                  skills=[_skill(9, "web-research", "Researches the web.", RESEARCH_BODY),
+                          _skill(10, "writing", "Writes briefs.", "Keep it short.")])
+
+
+def test_the_tools_block_names_what_a_session_has_and_what_it_has_not():
+    text = session_system_prompt(_researcher())
+    block = text[text.index(TOOLS_HEADER):text.index(SKILLS_HEADER)]
+    assert "- Files:" in block and "- Bash:" in block and "- Web:" in block
+    assert "`git status`" in block and "`sort`" in block and "`pytest`" in block   # the host's allowlist, rendered
+    assert "HELD until the operator" in block and "Questions tab" in block
+    for prefix in SESSION_UNAVAILABLE_TOOL_PREFIXES:
+        assert (f"`{prefix}*`" if prefix.endswith("_") else f"`{prefix}`") in block
+    assert "NOT available in a session" in block and "do not wait for them" in block
+    assert text.index("## About you") < text.index(TOOLS_HEADER) < text.index(SKILLS_HEADER)
+
+
+def test_the_researchers_skill_header_names_exactly_the_three_tools_it_cannot_call():
+    agent = _researcher()
+    assert session_tool_gaps(agent, ()) == [
+        {"skill": "web-research", "tools": ["composio_execute", "search_knowledge", "platform_submit_report"]},
+    ]
+    text = session_system_prompt(agent)
+    assert ("### web-research\nResearches the web.\n"
+            + GAP_LINE_PREFIX + "composio_execute, search_knowledge, platform_submit_report\n\nSearch with") in text
+    assert text.count(GAP_LINE_PREFIX) == 1                       # the writing skill names none
+    assert "### writing\nWrites briefs.\n\nKeep it short." in text
+
+
+def test_gaps_shrink_with_what_the_session_offers():
+    """Wave 1's bridge adds tools once per deploy; the gap lines follow by themselves."""
+    gaps = session_tool_gaps(_researcher(), ["search_knowledge", "submit_report"])
+    assert gaps == [{"skill": "web-research", "tools": ["composio_execute", "platform_submit_report"]}]
+    assert session_tool_gaps(_researcher(), ["composio_execute", "search_knowledge", "platform_submit_report"]) == []
+
+
+def test_a_skill_with_no_platform_names_has_no_gap():
+    assert session_tool_gaps(_agent(), ()) == []                  # bodies "Body A" / "Body B"
+    assert GAP_LINE_PREFIX not in session_system_prompt(_agent())
+    inactive = _agent(skills=[_skill(1, "a", "d", "call platform_x", active=False)])
+    assert session_tool_gaps(inactive, ()) == []
+
+
+def test_two_renders_are_byte_identical_and_carry_no_ticket_id():
+    import re
+
+    agent = _researcher()
+    first, second = session_system_prompt(agent), session_system_prompt(agent)
+    assert first == second
+    assert re.search(r"#\d", first) is None and "ticket #" not in first.lower()
+    assert "57" not in first.replace("RESEARCHER", "")           # no agent id either
+
+
+def test_the_agents_own_bash_allowlist_is_named():
+    agent = _researcher()
+    agent.configuration = {"runtime": "cli", "allowed_tools": ["pip --version", " poetry run "]}
+    text = session_system_prompt(agent)
+    assert "This agent's own allowlist adds `pip --version`, `poetry run`." in text
+    assert "own allowlist" not in session_system_prompt(_researcher())
+
+
+def test_an_omitted_skill_keeps_its_gap_line():
+    agent = _agent(skills=[_skill(1, "big", "First.", "x" * 500),
+                           _skill(2, "second", "Second.", "use platform_board_summary " + "y" * 500)])
+    block = skills_block(agent, max_chars=200)
+    assert "### second\nSecond.\n" + GAP_LINE_PREFIX + "platform_board_summary\n" + OMITTED_NOTE in block
 
 
 # ── the claim ────────────────────────────────────────────────────────────────

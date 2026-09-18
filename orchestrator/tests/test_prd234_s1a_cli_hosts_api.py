@@ -164,7 +164,7 @@ def test_heartbeat_forwards_capabilities_and_running_sessions(monkeypatch):
 def test_events_and_result_map_service_errors_to_http(monkeypatch):
     c = _client(monkeypatch)
 
-    def _events(db, host, task_id, events):
+    async def _events(db, host, task_id, events):
         if task_id == 404:
             raise LookupError("no such task")
         if task_id == 403:
