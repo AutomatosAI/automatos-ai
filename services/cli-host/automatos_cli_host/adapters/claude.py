@@ -31,7 +31,10 @@ FILE_READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS"})
 FILE_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
 SHELL_TOOLS = frozenset({"Bash"})
 WEB_TOOLS = frozenset({"WebFetch", "WebSearch"})
-BENIGN_TOOLS = frozenset({"TodoWrite", "TodoRead", "AskUserQuestion"})
+# ToolSearch only fetches a deferred tool's schema; the tool it loads is still judged
+# per call. Denying it (night 1, 2026-09-18) meant the bridge's own mcp__automatos__*
+# tools could never be loaded — sessions could not submit_report or update_ticket.
+BENIGN_TOOLS = frozenset({"TodoWrite", "TodoRead", "AskUserQuestion", "ToolSearch"})
 _PATH_KEYS = ("file_path", "notebook_path", "path")
 
 
