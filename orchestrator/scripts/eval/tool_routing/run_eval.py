@@ -358,7 +358,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=["full", "filtered", "filtered_schema", "graph", "all"],
+        choices=["full", "filtered", "filtered_schema", "graph", "jev_rerank", "all"],
         default="all",
         help=(
             "Which prompt mode(s) to run. "
@@ -366,7 +366,10 @@ def main() -> int:
             "'filtered' = prompt-only narrowing (Phase 1 baseline). "
             "'filtered_schema' = prompt + schema enum narrowing (Phase 1b). "
             "'graph' = graph-based chain ranking (PRD-139). "
-            "'all' = run all four. Default: all."
+            "'jev_rerank' = embedding top-N judged by the decision engine "
+            "(PRD-248 S4; opt-in, not part of 'all'; needs OPENROUTER_API_KEY "
+            "or TYPESAFE_API_KEY per DECISION_PROVIDER). "
+            "'all' = run the four baseline modes. Default: all."
         ),
     )
     parser.add_argument(
@@ -433,7 +436,7 @@ def main() -> int:
     actions = registry.get_all()
     logger.info(f"Loaded {len(actions)} actions from live registry")
 
-    needs_embedding = any(m in {"filtered", "filtered_schema", "graph"} for m in modes)
+    needs_embedding = any(m in {"filtered", "filtered_schema", "graph", "jev_rerank"} for m in modes)
     if needs_embedding and not api_key and not args.dry_run:
         # The production ActionSemanticIndex routes embeddings through
         # EmbeddingManager, which (per .env: EMBEDDING_PROVIDER=openrouter)

@@ -772,10 +772,51 @@ def seed_system_settings(db: Session):
             "default_value": "off",
             "value_type": "string",
             "description": (
-                "The tool-surface rerank hook (PRD-248 S4): off / shadow / live."
+                "The tool-surface rerank (PRD-248 S4). off = the embedding top-K "
+                "as today. shadow = the engine judges a wider candidate list beside "
+                "every narrowed turn and logs its cut (DECISION_SHADOW_LOG_PATH) "
+                "without changing the surface. live = the reranked cut replaces the "
+                "embedding top-K; any miss keeps the embedding cut."
             ),
             "is_required": False,
             "validation_rules": {"options": ["off", "shadow", "live"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "rerank_candidates",
+            "default_value": "30",
+            "value_type": "number",
+            "description": (
+                "How many embedding candidates the rerank judges per turn (one "
+                "yes/no question each, one call). Wider finds more, costs tokens."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 5, "max": 120},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "rerank_min_probability",
+            "default_value": "0.5",
+            "value_type": "number",
+            "description": (
+                "An action stays in the surface when the engine's probability that "
+                "it helps is at least this. Below it for every candidate = the "
+                "'nothing fits' signal in the shadow log."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 1},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "rerank_min_keep",
+            "default_value": "5",
+            "value_type": "number",
+            "description": (
+                "The minimum number of actions the rerank keeps (topped up by "
+                "probability) so an unsure turn never strips the surface."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 40},
         },
         {
             "category": SettingCategory.DECISION_ENGINE.value,

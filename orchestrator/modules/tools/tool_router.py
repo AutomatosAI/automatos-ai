@@ -475,7 +475,69 @@ async def _narrow_dispatcher_actions_async(
     )
     if allowed is None:
         return _fallback_narrowing("rank_actions returned empty or raised")
+    # PRD-248 S4: the decision engine may rerank the ranked allow-list — shadow
+    # logs its cut beside this one and changes nothing; live replaces it above
+    # the floor and falls open to it on any miss. Off is byte-identical.
+    allowed = await _apply_decision_rerank(query, allowed, is_admin, is_super_admin, workspace_id)
     return allowed, None, False
+
+
+async def _apply_decision_rerank(
+    query: Optional[str],
+    allowed: Optional[List[str]],
+    is_admin: bool,
+    is_super_admin: bool,
+    workspace_id: Optional[str],
+) -> Optional[List[str]]:
+    """PRD-248 S4: run ``decision_rerank.narrow_with_decisions`` over the
+    production index, registry and engine. Lazy and fail-open — any error
+    returns ``allowed`` unchanged, and a dial that reads as off costs one
+    cached settings read."""
+    try:
+        from core.llm.decisions import MODE_OFF, get_decision_engine
+        from modules.tools.discovery import decision_rerank
+
+        engine = get_decision_engine()
+        dials = engine.dials()
+        if dials.tool_rerank_mode == MODE_OFF or not query or not allowed:
+            return allowed
+        from modules.tools.discovery import get_action_registry
+        from modules.tools.discovery.action_semantic_index import get_action_semantic_index
+
+        index = get_action_semantic_index()
+        registry = get_action_registry()
+
+        async def rank_wide(n: int):
+            return await index.rank_actions(
+                query,
+                top_k=n,
+                exclude_admin=not is_admin,
+                exclude_promoted=False,
+                include_super_admin=is_super_admin,
+                workspace_id=workspace_id,
+            )
+
+        def describe(name: str) -> str:
+            action = registry.get(name)
+            return (getattr(action, "description", "") or "") if action is not None else ""
+
+        return await decision_rerank.narrow_with_decisions(
+            query=query,
+            allowed=allowed,
+            mode=dials.tool_rerank_mode,
+            rank_wide=rank_wide,
+            describe=describe,
+            decide=engine.decide,
+            record_shadow=engine.record_shadow,
+            top_k=_semantic_routing_top_k(),
+            candidates_n=dials.rerank_candidates,
+            min_probability=dials.rerank_min_probability,
+            min_keep=dials.rerank_min_keep,
+            workspace_id=workspace_id,
+        )
+    except Exception as exc:  # noqa: BLE001 — the seam never narrows a turn by accident
+        logger.debug("[tool-rerank] unavailable — embedding cut kept: %s", exc, exc_info=True)
+        return allowed
 
 
 def _page_action_passes_gate(

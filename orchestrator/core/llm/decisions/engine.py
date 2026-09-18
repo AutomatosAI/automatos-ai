@@ -62,6 +62,11 @@ class Dials:
     min_confidence: float = 0.7
     classifier_mode: str = MODE_OFF
     tool_rerank_mode: str = MODE_OFF
+    # S4: how wide the embedding candidate list is before the rerank, the
+    # per-action probability floor, and the minimum kept when nothing clears it.
+    rerank_candidates: int = 30
+    rerank_min_probability: float = 0.5
+    rerank_min_keep: int = 5
 
     @property
     def any_on(self) -> bool:
@@ -153,6 +158,16 @@ class DecisionEngine:
             ),
             classifier_mode=_as_mode(self._setting("classifier_mode", d.classifier_mode), d.classifier_mode),
             tool_rerank_mode=_as_mode(self._setting("tool_rerank_mode", d.tool_rerank_mode), d.tool_rerank_mode),
+            rerank_candidates=int(_as_float(
+                self._setting("rerank_candidates", str(d.rerank_candidates)), d.rerank_candidates, 5, 120
+            )),
+            rerank_min_probability=_as_float(
+                self._setting("rerank_min_probability", str(d.rerank_min_probability)),
+                d.rerank_min_probability, 0.0, 1.0,
+            ),
+            rerank_min_keep=int(_as_float(
+                self._setting("rerank_min_keep", str(d.rerank_min_keep)), d.rerank_min_keep, 0, 40
+            )),
         )
 
     # -- backend ------------------------------------------------------------

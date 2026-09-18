@@ -351,7 +351,8 @@ def test_build_questions_adds_the_roster_choice_only_when_agents_exist():
     q = auto_decisions.build_questions(["Jim", "jim", "Atlas", "none", ""])
     assert q["target_agent"].options == ["Jim", "Atlas", "none"]
     assert set(q["complexity"].options) == {c.value for c in Complexity}
-    assert set(q["action"].options) == {a.value for a in Action}
+    # The deprecated "workflow" alias is normalised on read, never offered.
+    assert set(q["action"].options) == {a.value for a in Action if a is not Action.WORKFLOW}
 
 
 def test_verdict_respects_the_confidence_floor_and_maps_fields():
