@@ -69,8 +69,8 @@ def run_crud(ctx: RunContext, sc: Scenario) -> ScenarioResult:
                 lambda v: (isinstance(v, dict) and "id" in v, "created with an id" if isinstance(v, dict) and "id" in v else "no id in response"))
             agent_id = created.get("id") if isinstance(created, dict) else None
         elif name_of_step == "update" and agent_id is not None:
-            step("update", lambda: api.patch(f"/api/agents/{agent_id}", {"description": "updated by the simulation"},
-                                             label=f"{sc.id}:update"),
+            step("update", lambda: api.put(f"/api/agents/{agent_id}", {"description": "updated by the simulation"},
+                                           label=f"{sc.id}:update"),  # the agents router updates with PUT (api/agents.py)
                  lambda v: (isinstance(v, dict) and v.get("description") == "updated by the simulation",
                             "description echoed back" if isinstance(v, dict) and v.get("description") == "updated by the simulation" else f"description not echoed: {str(v)[:120]}"))
         elif name_of_step == "get" and agent_id is not None:
