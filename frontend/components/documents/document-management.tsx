@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { TabsContent } from '@/components/ui/tabs'
 import { FilterTabs, type FilterTab } from '@/components/shared/filter-tabs'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { DeleteConfirmation } from '@/components/shared/delete-confirmation'
@@ -354,6 +355,7 @@ const DATABASE_TABS: FilterTab[] = [
 ]
 
 export function DocumentManagement() {
+  const isStudio = useIsStudio()
   const [section, setSection] = useState('documents')
   const [documentTab, setDocumentTab] = useState('library')
   const [databaseTab, setDatabaseTab] = useState('explorer')
@@ -665,6 +667,47 @@ export function DocumentManagement() {
     (doc.file_type || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
+  // The stats and the team filter describe the DOCUMENTS (the filter feeds
+  // useDocuments); each style places them where its convention says.
+  const documentsOverview = (
+    <>
+      {/* Stats Overview */}
+      <StatsBar stats={stats} />
+
+      {/* PRD-158 S3: page-level team filter + per-team counts + agent-eye-view */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          <Select
+            value={teamFilter ?? 'all'}
+            onValueChange={(v) => setTeamFilter(v === 'all' ? null : v)}
+          >
+            <SelectTrigger className="w-[240px]">
+              <SelectValue placeholder="All teams" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                All teams ({teamCounts?.total ?? documents.length})
+              </SelectItem>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.normalized_name}>
+                  {t.name} ({teamCounts?.counts?.[t.normalized_name] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {teamFilter && (
+          <Badge variant="secondary" className="gap-1.5">
+            <Eye className="w-3 h-3" />
+            Agent-eye view: “{teams.find((t) => t.normalized_name === teamFilter)?.name ?? teamFilter}”
+            sees public + its own documents
+          </Badge>
+        )}
+      </div>
+    </>
+  )
+
   return (
     <div className="space-y-8">
       {/* Hidden file input */}
@@ -708,40 +751,8 @@ export function DocumentManagement() {
         />
       </div>
 
-      {/* Stats Overview */}
-      <StatsBar stats={stats} />
-
-      {/* PRD-158 S3: page-level team filter + per-team counts + agent-eye-view */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <Select
-            value={teamFilter ?? 'all'}
-            onValueChange={(v) => setTeamFilter(v === 'all' ? null : v)}
-          >
-            <SelectTrigger className="w-[240px]">
-              <SelectValue placeholder="All teams" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">
-                All teams ({teamCounts?.total ?? documents.length})
-              </SelectItem>
-              {teams.map((t) => (
-                <SelectItem key={t.id} value={t.normalized_name}>
-                  {t.name} ({teamCounts?.counts?.[t.normalized_name] ?? 0})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {teamFilter && (
-          <Badge variant="secondary" className="gap-1.5">
-            <Eye className="w-3 h-3" />
-            Agent-eye view: “{teams.find((t) => t.normalized_name === teamFilter)?.name ?? teamFilter}”
-            sees public + its own documents
-          </Badge>
-        )}
-      </div>
+      {/* Classic keeps its order: the page's stats and the team filter above the strip. */}
+      {!isStudio && documentsOverview}
 
       {/* Document Management Tabs */}
       <motion.div
@@ -752,6 +763,9 @@ export function DocumentManagement() {
         <FilterTabs tabs={KB_SECTIONS} value={section} onValueChange={setSection}>
 
           <TabsContent value="documents" className="space-y-6">
+            {/* Studio (PRD-244): the section strip follows the header, as on every other Studio
+                page, and the Documents section owns the stats and the team filter that describe it. */}
+            {isStudio && documentsOverview}
             {/* Provider Browser Views */}
             {showProviderBrowser && (selectedProvider?.type === 'manual' || selectedProvider?.type === 'manual-old') ? (
               <LocalStorageBrowser
