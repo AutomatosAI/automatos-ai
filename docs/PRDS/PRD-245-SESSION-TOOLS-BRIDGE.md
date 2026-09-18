@@ -64,7 +64,7 @@ Every absolute or `~` path argument of an allowed segment must resolve inside `c
 **Editions:** local only.
 
 **S0.4 · Held commands reach the Questions tab, the bell and Telegram (M)**
-A session `PermissionRequest` event (policy `ask`) creates a PRD-225 question row through the shared `ask_human` internals: `subject_type='cli_permission'`, `subject_id='<task_id>:<request_id>'`, question = "Allow this command in ticket #N?" with the command in backticks, options `allow` / `deny`, expires with the host's ask timeout. The Questions tab, the bell and the Telegram poll bridge need nothing new. On answer, `_requeue_subject`'s new `cli_permission` branch calls `cli_host_service.decide_session_permission(task, request_id, approved)` and does NOT requeue the ticket. When the session ends with the hold unanswered, the row is expired (as `expired_permissions` already records it). The Canvas card keeps working; both paths resolve the same `request_id`.
+A session `PermissionRequest` event (policy `ask`) creates a PRD-225 question row through the shared ask internals — **as built**, `stage_question` extracted from `ask_human` for the purpose, with `park=None` because the ticket keeps RUNNING while the operator answers. **Subject as built: `board_task` carrying the ticket id**, with the hold identified by a `details.cli_permission` marker (`{request_id, task_id}`), not a new `cli_permission` subject_type: a new subject type would need its own branch in every consumer of `subject_type` (the cascade, the answer route, the Telegram bridge), while the marker rides the board subject every one of them already handles, question = "Allow this command in ticket #N?" with the command in backticks, options `allow` / `deny`, expires with the host's ask timeout. The Questions tab, the bell and the Telegram poll bridge need nothing new. On answer, `_requeue_subject` branches on that marker to `cli_host_service.answer_session_hold(db, grant)` and does NOT requeue the ticket. When the session ends with the hold unanswered, the row is expired (as `expired_permissions` already records it). The Canvas card keeps working; both paths resolve the same `request_id`.
 **Files:** `services/cli_host_service.py` (`record_events` → ask row; `apply_result` → expire), `api/approval_grants.py` (`_requeue_subject` branch), `modules/tools/discovery/platform_executor.py` only if `ask_human` needs the new subject type whitelisted; `orchestrator/tests/test_prd245_session_asks.py`.
 **Test:** a PermissionRequest event creates one row per `request_id` (idempotent on re-flush); answering `allow` marks the ticket's decision approved and the next event flush carries it to the host; answering `deny` records "denied by the operator"; the row expires on result; no requeue happens; the list route with `kind=question` returns it with the ticket as cascade.
 **Editions:** local only.
@@ -94,7 +94,7 @@ On turn end the host copies files the session wrote under its own session folder
 **Editions:** local only.
 
 **S0.9 · Docs (S)**
-`services/cli-host/README.md`: the allowlist rules as built (S0.1/S0.2), the review rule (S0.3), where held commands appear (S0.4), the deliverables folder (S0.7). `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md` §12 records D-4 as settled by this PRD.
+`services/cli-host/README.md`: the allowlist rules as built (S0.1/S0.2), the review rule (S0.3), where held commands appear (S0.4), the deliverables folder (S0.7). `docs/architecture/CLI-RUNTIME-ADAPTER-DESIGN.md`: §12 records this as settled — as **D-8**, not D-4; that document's D-4 is where `--worktree` truth lives, and the decision this PRD settles is **PRD-239's** D-4, which W0 annotates in place. §10's add-a-CLI checklist gains the two steps a new CLI now has: classify the platform tools its MCP prefix produces, and write its MCP server entry — with the note that a CLI which cannot express an HTTP server with a static credential has no platform tools and should say so on its preset row.
 
 ### Wave 1 — the bridge and the read tools
 
@@ -104,7 +104,7 @@ On turn end the host copies files the session wrote under its own session folder
 **Test:** mint → resolve; a token of a finished ticket resolves to nothing; a garbage token resolves to nothing; the hash, never the token, is on the ticket; the claim response carries the token once.
 
 **S1.2 · The MCP endpoint (M)**
-New `orchestrator/api/session_tools.py`: a `FastMCP` server (official `mcp` SDK, streamable HTTP, stateless) mounted at `/api/v1/session-tools/mcp`, bearer auth resolving the identity of S1.1 on every request. `tools/list` advertises the wave's tools with stable descriptions; `tools/call` maps `<name>` → the backend action (`board_summary→platform_board_summary`, `list_tasks→platform_list_tasks`, `update_ticket→platform_update_task_status` with `task_id` forced to the ticket and `done` refused, `submit_report→platform_submit_report` with the agent name forced, `search_knowledge→search_knowledge`) and calls `UnifiedExecutor.execute_tool` with the ticket's `agent_id`/`workspace_id`, `trace_id=f"session:{task_id}"`, `caller_context=None`. A per-ticket cap `SESSION_TOOLS_MAX_CALLS_PER_TICKET` (config, default 200, in the config-surface report) counts on `runtime_ref.platform_calls`. Route-manifest entry + count bump. Dependency `mcp` pinned in `orchestrator/requirements.txt`. **Verify at build:** the SDK's Starlette app mounts under fastapi 0.115 / starlette 0.41 without pulling incompatible pins; if it does not, the fallback is a minimal JSON-RPC handler for `initialize`, `tools/list`, `tools/call` (the only methods Claude Code needs) — decided at build, recorded in the PR.
+New `orchestrator/api/session_tools.py`: a `FastMCP` server (official `mcp` SDK, streamable HTTP, stateless) mounted at `/api/v1/session-tools/mcp`, bearer auth resolving the identity of S1.1 on every request. `tools/list` advertises the wave's tools with stable descriptions; `tools/call` maps `<name>` → the backend action (`board_summary→platform_board_summary`, `list_tasks→platform_list_tasks`, `update_ticket→platform_update_task_status` with `task_id` forced to the ticket and `done` refused, `submit_report→platform_submit_report` with the agent name forced, `search_knowledge→platform_search_memory` — **as built**: `search_knowledge` is not a registered platform action, `platform_search_memory` is the one that exists) and calls `UnifiedExecutor.execute_tool` with the ticket's `agent_id`/`workspace_id`, `trace_id=f"session:{task_id}"`, `caller_context=None`. A per-ticket cap `SESSION_TOOLS_MAX_CALLS_PER_TICKET` (config, default 200, in the config-surface report) counts on `runtime_ref.platform_calls`. Route-manifest entry + count bump. Dependency `mcp` pinned in `orchestrator/requirements.txt`. **Verify at build:** the SDK's Starlette app mounts under fastapi 0.115 / starlette 0.41 without pulling incompatible pins; if it does not, the fallback is a minimal JSON-RPC handler for `initialize`, `tools/list`, `tools/call` (the only methods Claude Code needs) — decided at build, recorded in the PR.
 **Files:** `api/session_tools.py` (new — transport + auth + the allowance), `services/session_tools_rpc.py` (new — the protocol, pure), `services/session_tools.py` (new — the tool table and the forced scope), `router_manifest.py`, `config.py`, `reports/route-manifest.json` (806 → 808), the config-surface report; `tests/test_prd245_session_tools.py`.
 **Test:** the list is byte-stable and every schema is one the client accepts; scope forced (own ticket, `done` refused, undeclared fields dropped); the wire answers what the client really sends; a refusal, a failure and a crash all return as `isError` output, never a dead session; the allowance refuses in words the model can act on.
 **Editions:** local only (router mounted only when `CLI_RUNTIME_ENABLED`).
@@ -143,9 +143,13 @@ Maps to `execute_tool("composio_execute", {"action", "params"})`; scope is the e
 
 ### Wave 4 — Codex
 
-**S4.1 · Codex tickets get the bridge (M)**
-`_config_text` appends `[mcp_servers.automatos]` with the endpoint URL and the SDK's bearer-token-from-environment key; `build_session_env` sets that variable for Codex sessions only; `CodexAdapter.tool_intent` maps Codex's MCP tool naming to `PLATFORM`. **Verify at build** against Codex 0.154.0: the HTTP MCP table shape and key name, and how its PreToolUse payload names MCP tools (alongside the six checks in the adapter design §6.10).
-**Files:** `adapters/codex.py`, `session.py`, `presets.py`; `tests/test_session_fake_codex.py`, `tests/test_adapters.py`.
+**S4.1 · Codex tickets get the bridge (M) — BUILT 2026-09-17**
+`_config_text` appends `[mcp_servers.automatos]`; `prepare` sets the token variable that table names, for Codex sessions only; `CodexAdapter.tool_intent` maps its MCP tool naming to `PLATFORM`.
+**Files:** `adapters/codex.py`; `tests/test_adapters.py`.
+
+**Verified against Codex 0.154.0** — `codex mcp add --url … --bearer-token-env-var …` written into a throwaway `CODEX_HOME` and read back: the table is exactly `url` + `bearer_token_env_var`. Codex takes the bearer token from an ENVIRONMENT VARIABLE named in its config, where Claude Code takes a literal header — and that is the right route here, not merely the available one: a Codex config home is per AGENT (§6.1), so a token in that file would outlive the ticket that minted it and be read by the agent's next one, while an environment variable dies with the session process. ONE guard decides both the table and the variable: a half-offer must never put a token in the environment with no server to use it (a test found that when it was two guards). The operator's own `[mcp_servers]` tables are still stripped (S0.8), and `prepare` rewrites the config each spawn, so no previous ticket's table lingers.
+
+**NOT verified, and the code and tests say so:** how Codex names an MCP tool in its hook payload (§6.10 is a live-run check). Every plausible spelling maps to the same tool — `mcp__automatos__x`, `automatos__x`, `automatos.x`, `automatos/x`, `mcp.automatos.x` — and anything else stays `UNKNOWN`, which the policy denies; widening it later cannot weaken the gate, because the name must still be on the ticket's own list. To settle it: run one Codex ticket and read the tool name out of that session's `terminal.log` or the ticket's `recent_tools`.
 
 ## Not in this PRD (owner decisions)
 
@@ -165,12 +169,32 @@ Maps to `execute_tool("composio_execute", {"action", "params"})`; scope is the e
 
 ## Verify at build (no spend)
 
-- Claude Code on this machine loads an HTTP server with headers from `--mcp-config` under `--strict-mcp-config`, and names the tool `mcp__automatos__<name>` in the PreToolUse payload.
-- The `mcp` SDK mounts under the pinned fastapi/starlette; otherwise the minimal JSON-RPC fallback.
-- The advertised tool list is byte-stable per agent across sessions.
-- A finished ticket's token is refused; a call naming another ticket is forced back to its own.
-- Codex 0.154.0: the HTTP `[mcp_servers.*]` table and bearer-env key; its hook payload's MCP tool naming.
+Settled against Claude Code 2.1.267 and Codex 0.154.0 on this machine, 2026-09-17:
+
+| Assumption | Result |
+|---|---|
+| The config shape the adapter writes is the one Claude Code accepts | **Confirmed.** `claude mcp add <name> <url> --transport http --header "Authorization: Bearer …"` writes `mcpServers.<name>.{type:"http", url, headers.Authorization}` — byte-identical to `build_mcp_config`. |
+| `--strict-mcp-config` with `--mcp-config <file>` loads that file's servers and only those | **Confirmed** (documented): the user's `~/.claude.json`, project `.mcp.json` and managed config are all ignored, and without `--mcp-config` no servers load at all. A file path is accepted, as is `type: "http"` with static headers. |
+| `--settings <hooks-only>` and `--setting-sources user` coexist with `--mcp-config` | **Confirmed** (documented): `--setting-sources` governs settings files only and does not touch `--mcp-config`. |
+| The PreToolUse payload names the tool `mcp__automatos__<name>` | **Confirmed** (documented): `mcp__<server>__<tool>`, two underscores, no normalising or truncation. Matches `MCP_TOOL_PREFIX`. |
+| The token must be written literally, not as `${VAR}` | **Confirmed, and it matters.** Claude Code substitutes `${VAR}` in a remote server's headers, but deliberately substitutes an EMPTY string for any variable whose name reads as a credential. A `${SESSION_TOKEN}` here would arrive as `Bearer ` and every call would 401 with nothing to show why. |
+| The client probes `server/discover` | **Confirmed** (documented in the client's own changelog): it is sent BEFORE `initialize`. The handler answers it. |
+| Protocol versions the client offers | `2025-06-18`, `2025-03-26`, `2024-11-05` are in the client; `SUPPORTED_PROTOCOL_VERSIONS` covers those and two more. No `MCP-Protocol-Version` request header is documented for HTTP; the handler sets it on responses regardless. |
+| The `mcp` SDK mounts under the pinned fastapi/starlette | **No** — it needs `uvicorn>=0.31.1` against our pinned `uvicorn==0.24.0`. Hence the hand-written JSON-RPC handler. |
+| Codex 0.154.0's config shape | **Confirmed** by having `codex mcp add` write it into a throwaway `CODEX_HOME`: an `[mcp_servers.<name>]` table with `url` and `bearer_token_env_var`. |
+
+Left for the live run (needs a real session, so it costs a turn):
+
+- the handshake itself end to end, and the MCP tool naming in **Codex's** hook payload (Claude Code's is documented; Codex's is not);
+- the advertised tool list being byte-stable per agent across sessions;
+- a finished ticket's token being refused, and a call naming another ticket being forced back to its own (both unit-tested, not yet seen over the wire).
 
 ## Merge notes
 
-Waves land as separate PRs in order (W0 → W1 → W2 → W3 → W4); each is CI-green and tested by the owner in the local edition before the next starts. No migration in any wave. Every route addition updates `reports/route-manifest.json` and its count. DCO sign-off on every commit.
+Waves land as separate PRs in order (W0 → W1 → W2 → W3 → W4); each is CI-green and tested by the owner in the local edition before the next starts. No migration in any wave. Every route addition updates `orchestrator/reports/route-manifest.json` and its count. DCO sign-off on every commit.
+
+W1 moves the claim's wire shape, so it also moves `EXPECTED_CLI_HOST_VERSION` and the host's `__version__` to 0.8.0. A host loaded from the repo checkout restarts on the contract fingerprint alone; a host installed as a copy elsewhere does not, and the version mismatch in `host.log` is the only thing that will tell the operator why its sessions have no platform tools.
+
+One more PR sits on top of W4: the PRD-229 escalation ladder was asking nobody. It called `platform_ask_human`'s handler with a `tool_call` subject, which that tool refuses, then parked the task behind an ask that was never filed. It needs W0's shared `stage_question`, which is why it stacks here rather than branching from main. Merge it last.
+
+The stack is based on `main`. The ten PRD-244 PRs of 2026-09-17 merged into the long-running `studio` branch, not `main`, so `main` is unchanged — and the 54 files this stack touches do not overlap the 128 that `studio` touches, so it merges into either without conflict.
