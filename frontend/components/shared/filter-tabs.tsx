@@ -66,7 +66,8 @@ export function FilterTabs({
           {tabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0">
               {tab.icon && <tab.icon className="w-4 h-4" />}
-              <span className="hidden sm:inline">{tab.label}</span>
+              {/* an icon can stand in for the label on a phone; a tab without one must keep it */}
+              <span className={tab.icon ? 'hidden sm:inline' : undefined}>{tab.label}</span>
               {tab.count !== undefined && (
                 <span className="text-[10px] opacity-60">({tab.count})</span>
               )}

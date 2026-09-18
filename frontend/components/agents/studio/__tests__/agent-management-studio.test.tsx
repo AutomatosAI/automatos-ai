@@ -16,7 +16,6 @@ vi.mock('@/components/workspace-provider', () => ({ useWorkspace: () => ({ canEd
 vi.mock('@/hooks/use-view-mode', () => ({ useViewMode: () => ['grid', vi.fn()] }))
 vi.mock('@/components/shared/search-input', () => ({ SearchInput: () => <input aria-label="Search" /> }))
 vi.mock('@/components/agents/agent-roster', () => ({ AgentRoster: () => <div data-testid="body-roster" /> }))
-vi.mock('@/components/agents/fleet-tab', () => ({ FleetTab: () => <div data-testid="body-fleet" /> }))
 vi.mock('@/components/agents/org-chart-tab', () => ({ OrgChartTab: () => <div data-testid="body-org-chart" /> }))
 vi.mock('@/components/agents/agent-configuration', () => ({ AgentConfiguration: () => <div data-testid="body-configuration" /> }))
 vi.mock('@/components/agents/skills/workspace-skills-tab', () => ({ WorkspaceSkillsTab: () => <div data-testid="body-skills" /> }))
@@ -29,20 +28,20 @@ beforeEach(() => { nav.replace.mockClear(); nav.search = ''; data.agents = []; d
 afterEach(cleanup)
 
 describe('AgentManagementStudio', () => {
-  it('renders the editorial head, five in-page tabs and the roster by default, with honest zero stats', () => {
+  it('renders the editorial head, four in-page tabs and the roster by default, with honest zero stats', () => {
     const { container } = render(<AgentManagementStudio />)
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Agent Management')
     expect(screen.getByText('Workforce · Roster · 0 agents')).toBeInTheDocument()
-    expect(container.querySelectorAll('nav.cc-tabs button.cc-tab')).toHaveLength(5)
+    expect(container.querySelectorAll('nav.cc-tabs button.cc-tab')).toHaveLength(4)
     expect(screen.getByTestId('body-roster')).toBeInTheDocument()
     expect(screen.getByText('—')).toBeInTheDocument() // no success rate fabricated
     expect(screen.getByText('no data yet')).toBeInTheDocument()
   })
 
   it('reads ?tab= for the body and writes it back on click', () => {
-    nav.search = 'tab=fleet'
+    nav.search = 'tab=org-chart'
     render(<AgentManagementStudio />)
-    expect(screen.getByTestId('body-fleet')).toBeInTheDocument()
+    expect(screen.getByTestId('body-org-chart')).toBeInTheDocument()
     expect(screen.queryByTestId('body-roster')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Skills' }))
     expect(nav.replace).toHaveBeenCalledWith('/agents?tab=skills')
