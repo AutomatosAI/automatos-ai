@@ -3,6 +3,8 @@
 import type { ReactNode } from 'react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
+import { useIsStudio } from '@/hooks/use-studio-theme'
+import { useTabStripScroll } from '@/hooks/use-tab-strip-scroll'
 import type { LucideIcon } from 'lucide-react'
 
 export interface FilterTab {
@@ -29,6 +31,39 @@ export function FilterTabs({
   children,
   className,
 }: FilterTabsProps) {
+  const isStudio = useIsStudio()
+  // PRD-246 US-006: the Studio strip keeps its active tab visible on a
+  // compact viewport, from the one hook every Studio strip uses. The Classic
+  // branch below never attaches the ref, so its render is unaffected.
+  const tabStrip = useTabStripScroll(value)
+
+  // Studio style (PRD-244 D8): the designed pages' cc-tabs strip. The Radix
+  // root stays so the callers' <TabsContent> keeps showing the active panel.
+  if (isStudio) {
+    return (
+      <Tabs value={value} onValueChange={onValueChange} className={cn('space-y-6', className)}>
+        <div className="flex items-center gap-4">
+          <nav className="cc-tabs" aria-label="Sections" style={{ flex: 1, minWidth: 0 }} ref={tabStrip}>
+            {tabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                className={`cc-tab${tab.value === value ? ' active' : ''}`}
+                aria-current={tab.value === value ? 'page' : undefined}
+                onClick={() => onValueChange(tab.value)}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== undefined && tab.count > 0 && <span className="cc-tab-ct">{tab.count}</span>}
+              </button>
+            ))}
+          </nav>
+          {trailing && <div className="shrink-0">{trailing}</div>}
+        </div>
+        {children}
+      </Tabs>
+    )
+  }
+
   return (
     <Tabs value={value} onValueChange={onValueChange} className={cn('space-y-6', className)}>
       <div className="flex items-center gap-4">
@@ -36,7 +71,8 @@ export function FilterTabs({
           {tabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0">
               {tab.icon && <tab.icon className="w-4 h-4" />}
-              <span className="hidden sm:inline">{tab.label}</span>
+              {/* an icon can stand in for the label on a phone; a tab without one must keep it */}
+              <span className={tab.icon ? 'hidden sm:inline' : undefined}>{tab.label}</span>
               {tab.count !== undefined && (
                 <span className="text-[10px] opacity-60">({tab.count})</span>
               )}

@@ -264,7 +264,11 @@ class ActivityService:
                 text("""
                     SELECT hr.id, hr.source_id, hr.source_type, hr.status, hr.findings,
                            hr.tokens_used, hr.created_at,
-                           a.name AS agent_name, a.marketplace_icon AS agent_icon
+                           a.name AS agent_name, a.marketplace_icon AS agent_icon,
+                           a.configuration->'heartbeat'->>'prompt' AS hb_prompt,
+                           (SELECT ar.file_path FROM agent_reports ar
+                             WHERE ar.heartbeat_result_id = hr.id
+                             ORDER BY ar.created_at DESC LIMIT 1) AS report_path
                     FROM heartbeat_results hr
                     LEFT JOIN agents a ON hr.source_type = 'agent'
                         AND hr.source_id ~ '^\d+$'
@@ -284,17 +288,26 @@ class ActivityService:
             for r in rows:
                 # Map heartbeat status → feed status
                 feed_status = "completed" if r.status == "success" else "failed"
-                summary = self._routine_summary(r.findings)
+                is_orchestrator = r.source_type == "orchestrator"
+                # PRD-244 review (Gerard, 09-17): a routine row must say what
+                # the heartbeat is FOR and what it FOUND, not "checked 3 items".
+                purpose = "Workspace watch" if is_orchestrator else r.hb_prompt
+                summary = self._routine_summary(r.findings, purpose)
                 error_msg = self._routine_error(r.status, r.findings)
 
-                agent_name = r.agent_name or ("Orchestrator" if r.source_type == "orchestrator" else "Unknown Agent")
-                is_orchestrator = r.source_type == "orchestrator"
+                agent_name = r.agent_name or ("Orchestrator" if is_orchestrator else "Unknown Agent")
                 agent_info = None if is_orchestrator else {
                     "id": int(r.source_id) if r.source_id else None,
                     "name": r.agent_name or "Unknown Agent",
                     "avatar_url": r.agent_icon,
                 }
-                source_url = None if is_orchestrator else f"/agents/{r.source_id}"
+                # The report this run produced (agent_reports.heartbeat_result_id)
+                # opens in the file explorer, like the Agent Reports widget.
+                source_url = (
+                    f"/deliverables/explorer?path={r.report_path}" if r.report_path
+                    else None if is_orchestrator
+                    else f"/agents/{r.source_id}"
+                )
 
                 items.append(
                     self._build_feed_item(
@@ -694,19 +707,50 @@ class ActivityService:
         return None
 
     @staticmethod
-    def _routine_summary(findings) -> str:
-        """Build a one-line summary from heartbeat findings JSONB."""
-        if not findings:
-            return "Routine check completed"
+    def _routine_summary(findings, purpose: Optional[str] = None) -> str:
+        """One line for the feed: what the heartbeat is for, and what it found.
+
+        `purpose` is the heartbeat prompt (first line, trimmed). The finding is
+        the first informative check's detail (llm_analysis, checklist,
+        agent_health, cli_ticket), first line, trimmed. Falls back to the
+        finding count, then to the old fixed line — never fabricates.
+        """
         if isinstance(findings, str):
             try:
                 findings = json.loads(findings)
             except (json.JSONDecodeError, TypeError):
-                return "Routine check completed"
+                findings = None
+
+        finding = None
         if isinstance(findings, list):
-            count = len(findings)
-            return f"Checked {count} item{'s' if count != 1 else ''}"
-        return "Routine check completed"
+            # What the run concluded beats what it merely confirmed: an LLM
+            # analysis or a checklist result is the line worth showing, and
+            # "Agent responsive" is boilerplate — so pick by kind, not by the
+            # order the checks happen to be appended in.
+            details = {}
+            for f in findings:
+                if not isinstance(f, dict):
+                    continue
+                detail = f.get("detail")
+                if isinstance(detail, str) and detail.strip():
+                    details.setdefault(f.get("check"), detail)
+            for check in ("llm_analysis", "checklist", "cli_ticket", "agent_health"):
+                if check in details:
+                    finding = ActivityService._first_line(details[check], 140)
+                    break
+            if finding is None:
+                count = len(findings)
+                finding = f"Checked {count} item{'s' if count != 1 else ''}" if count else None
+
+        head = ActivityService._first_line(purpose, 60) if isinstance(purpose, str) and purpose.strip() else None
+        if head and finding:
+            return f"{head} — {finding}"
+        return head or finding or "Routine check completed"
+
+    @staticmethod
+    def _first_line(text: str, limit: int) -> str:
+        line = next((l.strip() for l in text.splitlines() if l.strip()), "").rstrip(".")
+        return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
 
     @staticmethod
     def _routine_error(status: str, findings) -> Optional[str]:

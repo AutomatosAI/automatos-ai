@@ -4,25 +4,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { getDefaultModelConfig, LLM_DEFAULTS } from '@/lib/llm-defaults'
-import {
-  Settings,
-  Save,
-  RotateCcw,
-  AlertTriangle,
-  CheckCircle,
-  Info,
-  Cpu,
-  Clock,
-  Zap,
-  Shield,
-  Database,
-  Bot,
-  Wrench,
-  Sparkles,
-  Terminal,
-  Coins
-} from 'lucide-react'
+import { Settings, Save, RotateCcw, AlertTriangle, Info, Zap, Bot, Wrench, Sparkles, Terminal, Coins } from 'lucide-react'
 import { InlineHelp } from '@/components/ui/help-tooltip'
+import { runtimeBadge, runtimeFieldsFromConfiguration, useCliAvailability } from './runtime-section'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -84,6 +68,12 @@ export function AgentConfiguration({
 
   // Fetch agent and configuration data
   const { data: agent, isLoading: agentLoading, refetch: refetchAgent } = useAgent(selectedAgentId)
+  // PRD-234: a CLI-session agent's tickets never touch the API model on its
+  // config (runtime-section.tsx says so), so the Model Configuration card names
+  // which kind of agent this is before it shows the dials.
+  const isCliAgent = runtimeFieldsFromConfiguration((agent as any)?.configuration).runtime === 'cli'
+  const cliAvail = useCliAvailability(isCliAgent)
+  const runtime = runtimeBadge((agent as any)?.configuration, cliAvail?.registry)
   const { data: agentConfig, isLoading: configLoading, refetch: refetchConfig } = useAgentConfig(selectedAgentId)
   const updateConfigMutation = useUpdateAgentConfig()
 
@@ -586,210 +576,6 @@ export function AgentConfiguration({
           </CardContent>
         </Card>
 
-        {/* Performance Settings */}
-        <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="w-5 h-5" />
-              Performance Settings
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Max Concurrent Tasks</Label>
-              <div className="px-3">
-                <Slider
-                  value={[configData.max_concurrent_tasks || (agent as any)?.max_concurrent_tasks || 5]}
-                  onValueChange={(value) => handleConfigChange('max_concurrent_tasks', value[0])}
-                  max={20}
-                  min={1}
-                  step={1}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-sm text-muted-foreground mt-1">
-                  <span>1</span>
-                  <span>Current: {configData.max_concurrent_tasks || (agent as any)?.max_concurrent_tasks || 5}</span>
-                  <span>20</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Task Timeout (seconds)</Label>
-              <Input
-                type="number"
-                value={configData.task_timeout || '300'}
-                onChange={(e) => handleConfigChange('task_timeout', parseInt(e.target.value) || 300)}
-                min="10"
-                max="3600"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Retry Attempts</Label>
-              <Input
-                type="number"
-                value={configData.retry_attempts || '3'}
-                onChange={(e) => handleConfigChange('retry_attempts', parseInt(e.target.value) || 3)}
-                min="0"
-                max="10"
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Enable Caching</Label>
-                <p className="text-sm text-muted-foreground">
-                  Cache responses to improve performance
-                </p>
-              </div>
-              <Switch
-                checked={configData.enable_caching || false}
-                onCheckedChange={(checked) => handleConfigChange('enable_caching', checked)}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Security Settings */}
-        <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="w-5 h-5" />
-              Security & Access
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Access Level</Label>
-              <Select
-                value={configData.access_level || 'standard'}
-                onValueChange={(value) => handleConfigChange('access_level', value)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="restricted">Restricted</SelectItem>
-                  <SelectItem value="standard">Standard</SelectItem>
-                  <SelectItem value="elevated">Elevated</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Enable Logging</Label>
-                <p className="text-sm text-muted-foreground">
-                  Log all agent activities
-                </p>
-              </div>
-              <Switch
-                checked={configData.enable_logging !== false}
-                onCheckedChange={(checked) => handleConfigChange('enable_logging', checked)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Rate Limiting</Label>
-                <p className="text-sm text-muted-foreground">
-                  Apply rate limits to API calls
-                </p>
-              </div>
-              <Switch
-                checked={configData.enable_rate_limiting || true}
-                onCheckedChange={(checked) => handleConfigChange('enable_rate_limiting', checked)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>API Rate Limit (calls/minute)</Label>
-              <Input
-                type="number"
-                value={configData.api_rate_limit || '100'}
-                onChange={(e) => handleConfigChange('api_rate_limit', parseInt(e.target.value) || 100)}
-                min="1"
-                max="1000"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Memory & Storage */}
-        <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Database className="w-5 h-5" />
-              Memory & Storage
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Memory Limit (MB)</Label>
-              <div className="px-3">
-                <Slider
-                  value={[configData.memory_limit || 512]}
-                  onValueChange={(value) => handleConfigChange('memory_limit', value[0])}
-                  max={4096}
-                  min={128}
-                  step={128}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-sm text-muted-foreground mt-1">
-                  <span>128MB</span>
-                  <span>Current: {configData.memory_limit || 512}MB</span>
-                  <span>4GB</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Context Window Size</Label>
-              <Select
-                value={configData.context_window_size?.toString() || '8192'}
-                onValueChange={(value) => handleConfigChange('context_window_size', parseInt(value))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="2048">2K Tokens</SelectItem>
-                  <SelectItem value="4096">4K Tokens</SelectItem>
-                  <SelectItem value="8192">8K Tokens</SelectItem>
-                  <SelectItem value="16384">16K Tokens</SelectItem>
-                  <SelectItem value="32768">32K Tokens</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Persistent Memory</Label>
-                <p className="text-sm text-muted-foreground">
-                  Retain memory between sessions
-                </p>
-              </div>
-              <Switch
-                checked={configData.persistent_memory || true}
-                onCheckedChange={(checked) => handleConfigChange('persistent_memory', checked)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Memory Cleanup Interval (hours)</Label>
-              <Input
-                type="number"
-                value={configData.memory_cleanup_interval || '24'}
-                onChange={(e) => handleConfigChange('memory_cleanup_interval', parseInt(e.target.value) || 24)}
-                min="1"
-                max="168"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
         {/* Plugin Assignment */}
         <Card className="glass-card">
           <CardHeader>
@@ -1055,9 +841,24 @@ export function AgentConfiguration({
             <Bot className="w-5 h-5 text-[hsl(var(--agent))]" />
             Model Configuration
           </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Select and configure the LLM model for this agent
-          </p>
+          {runtime ? (
+            <p className="text-sm text-muted-foreground" data-testid="model-config-scope">
+              This agent runs as a {runtime.cli} session on your machine
+              {runtime.model ? (
+                <>, pinned to <code className="text-foreground">{runtime.model}</code></>
+              ) : (
+                <> on the CLI&apos;s default model</>
+              )}
+              . That is set in its Runtime section. Its sessions never touch the API model
+              below: these controls apply to API agents only.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-testid="model-config-scope">
+              For API agents: the model route and sampling controls below shape every call
+              this agent makes. CLI-session agents (Claude Code, Codex) take their model from
+              their Runtime section instead and ignore these.
+            </p>
+          )}
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Model Selection */}
@@ -1176,39 +977,6 @@ export function AgentConfiguration({
                 className="w-full"
               />
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Advanced Configuration */}
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle>Advanced Configuration</CardTitle>
-          <Alert>
-            <Info className="h-4 w-4" />
-            <AlertDescription>
-              Advanced settings should only be modified by experienced users. Changes may affect agent performance.
-            </AlertDescription>
-          </Alert>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="custom-config">Custom Configuration (JSON)</Label>
-            <Textarea
-              id="custom-config"
-              value={JSON.stringify(configData.custom_config || {}, null, 2)}
-              onChange={(e) => {
-                try {
-                  const parsed = JSON.parse(e.target.value)
-                  handleConfigChange('custom_config', parsed)
-                } catch (error) {
-                  // Invalid JSON, don't update
-                }
-              }}
-              placeholder='{"key": "value"}'
-              rows={6}
-              className="font-mono text-sm"
-            />
           </div>
         </CardContent>
       </Card>

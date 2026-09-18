@@ -66,6 +66,7 @@ import type { OrbState } from '@/lib/voice/orb-state'
 import type { MutableRefObject } from 'react'
 import { useBoardEventStream } from '@/hooks/use-board-event-stream'
 import { useChatSessionStore } from '@/stores/chat-session-store'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 export interface ChatProps {
   id: string
@@ -104,6 +105,14 @@ export function Chat({
   const addWidget = useWorkspaceStore((s) => s.addWidget)
   const clearWidgets = useWorkspaceStore((s) => s.clearWidgets)
   const hasWidgets = widgetIds.length > 0
+  // PRD-246: a 35/65 split of a phone is neither a chat nor a canvas. Below 768
+  // the canvas takes the whole screen and the chat waits behind a "Chat" control;
+  // a "Canvas" pill brings it back. Widgets are untouched either way.
+  const isPhone = useIsMobile()
+  const [phoneCanvasOpen, setPhoneCanvasOpen] = useState(true)
+  useEffect(() => {
+    if (hasWidgets) setPhoneCanvasOpen(true)
+  }, [hasWidgets])
 
   // US-015: SSE event dispatchers for memory & workflow widgets
   const dispatchMemoryInjected = useWorkspaceStore((s) => s.dispatchMemoryInjected)
@@ -1076,8 +1085,33 @@ export function Chat({
         <SetupChecklistCard className="fixed bottom-28 left-1/2 z-50 -translate-x-1/2 px-4" />
       )}
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
-      {hasWidgets && (
+      {hasWidgets && isPhone && !phoneCanvasOpen && (
+        <button
+          type="button"
+          onClick={() => setPhoneCanvasOpen(true)}
+          className="fixed bottom-24 right-4 z-40 rounded-full border border-border bg-secondary px-3 py-2 text-xs font-medium text-foreground shadow-md"
+        >
+          Canvas
+        </button>
+      )}
+      {hasWidgets && (!isPhone || phoneCanvasOpen) && (
         <div className="fixed top-0 left-0 z-50 h-screen w-screen bg-background">
+          {isPhone ? (
+            <div className="flex h-full flex-col">
+              <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPhoneCanvasOpen(false)}
+                  className="rounded px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  ← Chat
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
+              </div>
+            </div>
+          ) : (
           <ResizablePanelGroup direction="horizontal" className="h-full">
             {/* Chat Column - LEFT (resizable, default 35%, min 20%) */}
             <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
@@ -1203,6 +1237,7 @@ export function Chat({
               </div>
             </ResizablePanel>
           </ResizablePanelGroup>
+          )}
         </div>
       )}
 
@@ -1309,7 +1344,7 @@ export function Chat({
       </AnimatePresence>
 
       {/* Normal chat view - NO widgets */}
-      {!hasWidgets && !isArtifactViewerVisible && (
+      {(!hasWidgets || (isPhone && !phoneCanvasOpen)) && !isArtifactViewerVisible && (
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
           {/* PRD-207/208: the room itself — the wave is the chat's living
               full-bleed background (Gerard's reference set, brand gold).

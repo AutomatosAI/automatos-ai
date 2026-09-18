@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
+import { PageHeader } from '@/components/shared'
 import { usePageAPI } from '@/hooks/use-page-api'
 import { apiClient } from '@/lib/api-client'
 
@@ -360,14 +361,13 @@ export default function AdminPluginUploadPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div>
-            <h1 className="text-3xl font-bold">
-              Plugin <span className="gradient-text">Upload</span>
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Upload, scan, and approve plugins for the marketplace
-            </p>
-          </div>
+          <PageHeader
+            className="flex-1"
+            title="Plugin"
+            titleAccent="Upload"
+            eyebrow="Workspace · marketplace review"
+            lede="Upload, scan, and approve plugins for the marketplace."
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

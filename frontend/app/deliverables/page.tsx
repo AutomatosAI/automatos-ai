@@ -20,6 +20,8 @@ import { TemplateStudio } from '@/components/documents/blocks/TemplateStudio'
 import { GalleryView } from '@/components/workspace/gallery-view'
 import { useWorkspace } from '@/components/workspace-provider'
 import { usePageAPI } from '@/hooks/use-page-api'
+import { useIsStudio } from '@/hooks/use-studio-theme'
+import { DeliverablesStudio } from '@/components/deliverables/studio/deliverables-studio'
 import {
   DEFAULT_FILTERS,
   FEED_DEFAULT_FILTERS,
@@ -27,9 +29,9 @@ import {
 } from '@/hooks/use-deliverables-api'
 import { deliverableLabel, isDeliverableType } from '@/components/icons/deliverable-icon'
 
-type DeliverableTab = 'outputs' | 'blogs' | 'templates'
+import { DELIVERABLE_TABS, type DeliverableTab } from '@/lib/deliverables/tabs'
 
-const VALID_TABS: ReadonlyArray<DeliverableTab> = ['outputs', 'blogs', 'templates']
+const VALID_TABS: ReadonlyArray<DeliverableTab> = DELIVERABLE_TABS
 
 function resolveTab(param: string | null): DeliverableTab {
   if (param && VALID_TABS.includes(param as DeliverableTab)) return param as DeliverableTab
@@ -38,6 +40,7 @@ function resolveTab(param: string | null): DeliverableTab {
 
 export default function DeliverablesPage() {
   usePageAPI('workspace')
+  const isStudio = useIsStudio()
   const { workspace, isLoading } = useWorkspace()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -74,6 +77,17 @@ export default function DeliverablesPage() {
   const handleBackToFeed = useCallback(() => {
     router.replace('/deliverables?tab=outputs')
   }, [router])
+
+  // PRD-244 W5b (two styles): the Studio style renders the Studio page on
+  // desktop; the Classic style keeps this page. Below 1024 px both styles use
+  // Classic until the mobile pass (PRD-245).
+  if (isStudio) {
+    return (
+      <MainLayout fullBleed>
+        <DeliverablesStudio />
+      </MainLayout>
+    )
+  }
 
   return (
     <MainLayout>

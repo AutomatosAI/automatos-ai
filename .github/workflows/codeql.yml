@@ -18,9 +18,11 @@ on:
   push:
     branches:
       - main
+      - studio
   pull_request:
     branches:
       - main
+      - studio
   schedule:
     # Mondays 03:17 UTC — off the hour to avoid the scheduling stampede.
     - cron: "17 3 * * 1"

@@ -40,6 +40,7 @@ import { useSystemIcons } from '@/hooks/use-system-config-api';
 import { PremiumIcon } from '@/components/shared';
 import { Skill } from '@/types/skills';
 import { SkillDetailModal } from './skill-detail-modal';
+import { useViewMode } from '@/hooks/use-view-mode'
 
 interface SkillBrowserProps {
   onSkillSelect?: (skill: Skill) => void;
@@ -61,7 +62,8 @@ export function SkillBrowser({
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  // PRD-246 follow-up: the shared hook — list on a phone unless the user chose grid, remembered per page.
+  const [viewMode, setViewMode] = useViewMode('skills');
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
 
   const { data: iconMappings = {} } = useSystemIcons();

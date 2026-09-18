@@ -19,9 +19,11 @@ on:
   push:
     branches:
       - main
+      - studio
   pull_request:
     branches:
       - main
+      - studio
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

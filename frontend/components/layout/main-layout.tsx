@@ -9,7 +9,6 @@ import { MobileSidebar } from './mobile-sidebar'
 import { Header } from './header'
 import { StudioSidebar } from './studio-sidebar'
 import { StudioHeader } from './studio-header'
-import { StudioPageTabs } from './studio-page-tabs'
 import { AutoWidget } from '../chatbot/chat-widget'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useIsTabletOrBelow } from '@/hooks/use-mobile'
@@ -89,15 +88,18 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   // sheet pattern for now. Falls through to classic layout below.
   // ────────────────────────────────────────────────────────────────────
   if (isStudio && !isMobileLayout) {
+    // `safe-bottom` (the one safe-area helper, globals.css) keeps the shell's
+    // bottom edge — the scrolling main and the rail alike — clear of a
+    // notched phone's home bar. The shell is 100dvh with border-box sizing,
+    // so the inset comes out of its height.
     return (
-      <div className="sh-shell">
+      <div className="sh-shell safe-bottom">
         <StudioSidebar
           collapsed={studioSidebarCollapsed}
           onToggle={toggleStudioSidebar}
         />
         <div className="sh-main">
           <StudioHeader />
-          {!fullBleed && <StudioPageTabs />}
           {fullBleed ? (
             <main className="sh-fullbleed flex-1 min-h-0 flex flex-col">
               {children}
@@ -124,8 +126,16 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
     )
   }
 
+  // PRD-246: below 1024 the Studio pages render inside this chrome, and they are
+  // built for the Studio shell's contract — a definite-height column they fill
+  // and scroll inside (`.cc-page` is `height: 100%; overflow-y: auto`, the chat
+  // shell `height: 100%; overflow: hidden`). A padded, auto-height <main> gave
+  // the chat a 65px shell with nothing scrollable. `fullBleed` now means the
+  // same thing here that it means in the shell.
+  const bleed = fullBleed && isMobileLayout
+
   return (
-    <div className="min-h-screen gradient-bg overflow-x-hidden">
+    <div className={bleed ? 'h-[100dvh] flex flex-col overflow-hidden gradient-bg' : 'min-h-screen gradient-bg overflow-x-hidden'}>
       {/* Desktop Sidebar — hidden below lg */}
       {!isMobileLayout && (
         <>
@@ -149,7 +159,7 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
             side="left"
             className={
               isStudio
-                ? 'w-[260px] p-0 bg-secondary border-r border-border'
+                ? 'w-[260px] p-0 bg-secondary border-r border-border safe-bottom'
                 : 'w-[280px] p-0 glass-card border-r border-primary/15 bg-background/95 backdrop-blur-lg'
             }
           >
@@ -164,18 +174,23 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
 
       {/* Main Content */}
       <div className={
-        isMobileLayout
-          ? 'transition-all duration-300'
-          : 'transition-all duration-300 ml-16'
+        bleed
+          ? 'flex-1 min-h-0 flex flex-col transition-all duration-300'
+          : isMobileLayout
+            ? 'transition-all duration-300'
+            : 'transition-all duration-300 ml-16'
       }>
         <Header onMenuClick={handleMenuClick} />
 
-        <main className="px-4 py-4 md:px-6 md:py-6 lg:px-14 lg:py-8 2xl:px-16">
+        <main
+          data-bleed={bleed ? 'phone' : undefined}
+          className={bleed ? 'flex-1 min-h-0 flex flex-col' : 'px-4 py-4 md:px-6 md:py-6 lg:px-14 lg:py-8 2xl:px-16'}
+        >
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: isMobileLayout ? 0.2 : 0.5 }}
-            className="max-w-[1720px] mx-auto"
+            className={bleed ? 'flex-1 min-h-0 flex flex-col' : 'max-w-[1720px] mx-auto'}
           >
             {children}
           </motion.div>

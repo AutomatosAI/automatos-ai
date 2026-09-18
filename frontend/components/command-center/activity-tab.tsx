@@ -18,6 +18,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Rows, Table2 } from 'lucide-react'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useActivityFeed, type ActivityFeedItem } from '@/hooks/use-activity-api'
 import { toneFor, initialFor } from './agent-tones'
 import { formatDistanceToNowStrict } from 'date-fns'
@@ -106,7 +107,7 @@ function fmtTokens(tokens: number | null | undefined): string {
   return `${tokens} tok`
 }
 
-function rowHref(item: ActivityFeedItem): string | null {
+export function rowHref(item: ActivityFeedItem): string | null {
   // Mirror the classic ActivityFeed's deep-link behaviour. Only playbooks
   // (recipes) belong in the ExecutionKitchen viewer. Routines are
   // heartbeats — they should go to the agent that owns them, not the
@@ -127,26 +128,35 @@ function rowHref(item: ActivityFeedItem): string | null {
         item.id.replace(/^recipe-/, ''),
       )}&recipeId=${encodeURIComponent(item.source_id)}`
     case 'task':
+      // The board opens the ticket for ?task_id= (its deep-link contract).
       return item.source_id
-        ? `/command-center?tab=board&task=${encodeURIComponent(item.source_id)}`
+        ? `/command-center?tab=board&task_id=${encodeURIComponent(item.source_id)}`
         : null
     case 'routine':
-      // Heartbeat — open the owning agent so the user can pause/tune it
-      return item.agent?.id ? `/agents?agent=${item.agent.id}` : null
+      // Heartbeat — the report it produced (file explorer, like the Agent
+      // Reports widget) when there is one; else the agent's Reports panel.
+      if (item.source_url?.startsWith('/deliverables/explorer')) return item.source_url
+      return item.agent?.id ? `/agents?agent=${item.agent.id}&panel=reports` : null
     default:
       return null
   }
 }
 
-export function ActivityTab() {
+export function ActivityTab({ period = '1d' }: { period?: string } = {}) {
   const router = useRouter()
-  const [density, setDensity] = useState<Density>('cards')
+  // The table is a four-column ledger, so it is desktop-only (PRD-246
+  // US-002): on a phone the stream is always cards and the toggle is not
+  // offered rather than offering a view that cannot be read at 390px.
+  const isPhone = useIsMobile()
+  const [preferred, setPreferred] = useState<Density>('cards')
+  const density: Density = isPhone ? 'cards' : preferred
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [errorsOnly, setErrorsOnly] = useState(false)
 
   const filters = {
     ...(typeFilter !== 'all' ? { types: [typeFilter] } : {}),
     ...(errorsOnly ? { status: 'failed' } : {}),
+    period,
     limit: 100,
   }
   const { data, isLoading } = useActivityFeed(filters)
@@ -154,7 +164,7 @@ export function ActivityTab() {
   const totalShown = items.length
 
   // Unfiltered fetch just to power the filter-pill counts.
-  const { data: allData } = useActivityFeed({ limit: 200 })
+  const { data: allData } = useActivityFeed({ period, limit: 100 }) // backend caps limit at 100
   const counts = useMemo(() => {
     const all = allData?.items ?? items
     const errs = all.filter((i) => i.status === 'failed').length
@@ -173,22 +183,24 @@ export function ActivityTab() {
   return (
     <>
       <div className="cc-toolbar">
-        <div className="cc-seg" role="group" aria-label="Density">
-          <button
-            type="button"
-            className={density === 'cards' ? 'on' : ''}
-            onClick={() => setDensity('cards')}
-          >
-            <Rows style={{ width: 11, height: 11 }} /> Cards
-          </button>
-          <button
-            type="button"
-            className={density === 'table' ? 'on' : ''}
-            onClick={() => setDensity('table')}
-          >
-            <Table2 style={{ width: 11, height: 11 }} /> Table
-          </button>
-        </div>
+        {!isPhone && (
+          <div className="cc-seg" role="group" aria-label="Density">
+            <button
+              type="button"
+              className={density === 'cards' ? 'on' : ''}
+              onClick={() => setPreferred('cards')}
+            >
+              <Rows style={{ width: 11, height: 11 }} /> Cards
+            </button>
+            <button
+              type="button"
+              className={density === 'table' ? 'on' : ''}
+              onClick={() => setPreferred('table')}
+            >
+              <Table2 style={{ width: 11, height: 11 }} /> Table
+            </button>
+          </div>
+        )}
 
         <div style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>
           {TYPE_FILTERS.map((f) => {

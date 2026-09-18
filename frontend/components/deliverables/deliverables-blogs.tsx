@@ -247,7 +247,23 @@ function BlogPostCard({
 
 // ─── Main Component ─────────────────────────────────────
 
-export function DeliverablesBlog() {
+interface DeliverablesBlogProps {
+  /**
+   * PRD-244 W5b: the page that mounts the tab picks the head in its own
+   * style — Classic keeps PageHeader + FilterTabs, Studio draws a toolbar of
+   * cc-filter-pills with the Create action as a cc-btn. The list is shared.
+   */
+  variant?: 'classic' | 'studio'
+}
+
+const STATUS_TABS = [
+  { value: 'all', label: 'All', icon: LayoutGrid },
+  { value: 'draft', label: 'Draft', icon: FileText },
+  { value: 'published', label: 'Published', icon: CheckCircle },
+  { value: 'archived', label: 'Archived', icon: Archive },
+] as const
+
+export function DeliverablesBlog({ variant = 'classic' }: DeliverablesBlogProps = {}) {
   const [filters, setFilters] = useState<BlogFilters>({ per_page: 20 })
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [editingPostId, setEditingPostId] = useState<string | null>(null)
@@ -300,6 +316,74 @@ export function DeliverablesBlog() {
     handleFilterChange('status', value === 'all' ? undefined : value)
   }, [handleFilterChange])
 
+  const list = (
+    <>
+      {/* Post list */}
+      {isLoading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <BlogCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : posts.length === 0 ? (
+        <BlogEmptyState onCreatePost={handleCreatePost} />
+      ) : (
+        <div className="space-y-3">
+          {posts.map((post) => (
+            <BlogPostCard
+              key={post.id}
+              post={post}
+              onEdit={handleEdit}
+              onPublish={(p) => publishMutation.mutate(p.id)}
+              onUnpublish={(p) => unpublishMutation.mutate(p.id)}
+              onDelete={(p) => deleteMutation.mutate(p.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Load more */}
+      {posts.length < total && (
+        <div className="text-center mt-4">
+          <Button variant="outline" size="sm" onClick={handleLoadMore}>
+            Load More ({total - posts.length} remaining)
+          </Button>
+        </div>
+      )}
+    </>
+  )
+
+  // Blog editor — single entry point, has Write Manually / Have Agents Write It modes
+  const editor = isEditorOpen && <BlogEditor postId={editingPostId} onClose={handleEditorClose} />
+
+  if (variant === 'studio') {
+    return (
+      <div className="space-y-4">
+        <div className="cc-toolbar">
+          <span className="cc-eyebrow-sm">Blog posts · {total}</span>
+          <div style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }} role="group" aria-label="Status">
+            {STATUS_TABS.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                className={`cc-filter-pill${activeStatusTab === t.value ? ' on' : ''}`}
+                onClick={() => handleStatusTabChange(t.value)}
+              >
+                {t.label}
+                {t.value === 'all' && <span className="ct">{total}</span>}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="cc-btn" onClick={handleCreatePost} style={{ marginLeft: 'auto' }}>
+            <Plus style={{ width: 12, height: 12 }} /> Create post
+          </button>
+        </div>
+        {list}
+        {editor}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -315,58 +399,13 @@ export function DeliverablesBlog() {
       />
 
       <FilterTabs
-        tabs={[
-          { value: 'all', label: 'All', icon: LayoutGrid, count: total },
-          { value: 'draft', label: 'Draft', icon: FileText },
-          { value: 'published', label: 'Published', icon: CheckCircle },
-          { value: 'archived', label: 'Archived', icon: Archive },
-        ]}
+        tabs={STATUS_TABS.map((t) => (t.value === 'all' ? { ...t, count: total } : { ...t }))}
         value={activeStatusTab}
         onValueChange={handleStatusTabChange}
       >
-        <TabsContent value={activeStatusTab}>
-          {/* Post list */}
-          {isLoading ? (
-            <div className="space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <BlogCardSkeleton key={i} />
-              ))}
-            </div>
-          ) : posts.length === 0 ? (
-            <BlogEmptyState onCreatePost={handleCreatePost} />
-          ) : (
-            <div className="space-y-3">
-              {posts.map((post) => (
-                <BlogPostCard
-                  key={post.id}
-                  post={post}
-                  onEdit={handleEdit}
-                  onPublish={(p) => publishMutation.mutate(p.id)}
-                  onUnpublish={(p) => unpublishMutation.mutate(p.id)}
-                  onDelete={(p) => deleteMutation.mutate(p.id)}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Load more */}
-          {posts.length < total && (
-            <div className="text-center mt-4">
-              <Button variant="outline" size="sm" onClick={handleLoadMore}>
-                Load More ({total - posts.length} remaining)
-              </Button>
-            </div>
-          )}
-        </TabsContent>
+        <TabsContent value={activeStatusTab}>{list}</TabsContent>
       </FilterTabs>
-
-      {/* Blog editor — single entry point, has Write Manually / Have Agents Write It modes */}
-      {isEditorOpen && (
-        <BlogEditor
-          postId={editingPostId}
-          onClose={handleEditorClose}
-        />
-      )}
+      {editor}
     </div>
   )
 }

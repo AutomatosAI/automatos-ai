@@ -183,7 +183,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # activity index); the guard follows it.
     idx = (versions / "tool_execution_logs_workspace_user_idx.py").read_text()
     assert 'down_revision = "users_last_sign_in_column"' in idx
-    assert 'EXPECTED_HEAD = "tool_execution_logs_workspace_user_idx"' in guard
+    # 2026-09-18: kb_multimodal_tables chains onto that (the multimodal knowledge
+    # tables the fresh path lost); the guard follows it.
+    kb = (versions / "kb_multimodal_tables.py").read_text()
+    assert 'down_revision = "tool_execution_logs_workspace_user_idx"' in kb
+    assert 'EXPECTED_HEAD = "kb_multimodal_tables"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

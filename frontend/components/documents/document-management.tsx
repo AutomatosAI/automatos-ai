@@ -36,7 +36,9 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TabsContent } from '@/components/ui/tabs'
+import { FilterTabs, type FilterTab } from '@/components/shared/filter-tabs'
+import { useIsStudio } from '@/hooks/use-studio-theme'
 import { PageHeader } from '@/components/shared/page-header'
 import { StatsBar } from '@/components/shared/stats-bar'
 import { DeleteConfirmation } from '@/components/shared/delete-confirmation'
@@ -325,7 +327,38 @@ function AuditHistory({ sourceId }: { sourceId?: number }) {
   )
 }
 
+// The page's three tab strips (PRD-244): one shared, style-aware component
+// draws them — the Studio underline strip or the classic pill list — so this
+// page stops carrying its own copy of the classic markup.
+const KB_SECTIONS: FilterTab[] = [
+  { value: 'documents', label: 'Documents', icon: FileText },
+  { value: 'database', label: 'Database', icon: Database },
+  { value: 'codegraph', label: 'CodeGraph', icon: Database },
+  { value: 'businessgraph', label: 'Knowledge Graph', icon: Network },
+  { value: 'memory', label: 'Memory', icon: Brain },
+]
+const DOCUMENT_TABS: FilterTab[] = [
+  { value: 'library', label: 'Library', icon: FileText },
+  { value: 'processing', label: 'Processing', icon: Database },
+  { value: 'multimodal', label: 'Multimodal', icon: Image },
+  { value: 'search', label: 'Search', icon: Search },
+  { value: 'rag', label: 'RAG Test', icon: Brain },
+  { value: 'upload', label: 'Upload', icon: Upload },
+]
+const DATABASE_TABS: FilterTab[] = [
+  { value: 'explorer', label: 'SQL Explorer' },
+  { value: 'semantic', label: 'Semantic Layer' },
+  { value: 'templates', label: 'Query Templates' },
+  { value: 'training', label: 'Training' },
+  { value: 'schema', label: 'Schema Browser' },
+  { value: 'audit', label: 'Audit History' },
+]
+
 export function DocumentManagement() {
+  const isStudio = useIsStudio()
+  const [section, setSection] = useState('documents')
+  const [documentTab, setDocumentTab] = useState('library')
+  const [databaseTab, setDatabaseTab] = useState('explorer')
   const { canEdit } = useWorkspace()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
@@ -634,11 +667,53 @@ export function DocumentManagement() {
     (doc.file_type || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
+  // The stats and the team filter describe the DOCUMENTS (the filter feeds
+  // useDocuments); each style places them where its convention says.
+  const documentsOverview = (
+    <>
+      {/* Stats Overview */}
+      <StatsBar stats={stats} />
+
+      {/* PRD-158 S3: page-level team filter + per-team counts + agent-eye-view */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-muted-foreground" />
+          <Select
+            value={teamFilter ?? 'all'}
+            onValueChange={(v) => setTeamFilter(v === 'all' ? null : v)}
+          >
+            <SelectTrigger className="w-[240px]">
+              <SelectValue placeholder="All teams" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                All teams ({teamCounts?.total ?? documents.length})
+              </SelectItem>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.normalized_name}>
+                  {t.name} ({teamCounts?.counts?.[t.normalized_name] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {teamFilter && (
+          <Badge variant="secondary" className="gap-1.5">
+            <Eye className="w-3 h-3" />
+            Agent-eye view: “{teams.find((t) => t.normalized_name === teamFilter)?.name ?? teamFilter}”
+            sees public + its own documents
+          </Badge>
+        )}
+      </div>
+    </>
+  )
+
   return (
     <div className="space-y-8">
       {/* Hidden file input */}
       <input
         ref={fileInputRef} data-testid="file-input"
+        hidden
         type="file"
         multiple
         accept=".pdf,.docx,.txt,.md,.xlsx,.csv,.json,.xml"
@@ -676,40 +751,8 @@ export function DocumentManagement() {
         />
       </div>
 
-      {/* Stats Overview */}
-      <StatsBar stats={stats} />
-
-      {/* PRD-158 S3: page-level team filter + per-team counts + agent-eye-view */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <Select
-            value={teamFilter ?? 'all'}
-            onValueChange={(v) => setTeamFilter(v === 'all' ? null : v)}
-          >
-            <SelectTrigger className="w-[240px]">
-              <SelectValue placeholder="All teams" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">
-                All teams ({teamCounts?.total ?? documents.length})
-              </SelectItem>
-              {teams.map((t) => (
-                <SelectItem key={t.id} value={t.normalized_name}>
-                  {t.name} ({teamCounts?.counts?.[t.normalized_name] ?? 0})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {teamFilter && (
-          <Badge variant="secondary" className="gap-1.5">
-            <Eye className="w-3 h-3" />
-            Agent-eye view: “{teams.find((t) => t.normalized_name === teamFilter)?.name ?? teamFilter}”
-            sees public + its own documents
-          </Badge>
-        )}
-      </div>
+      {/* Classic keeps its order: the page's stats and the team filter above the strip. */}
+      {!isStudio && documentsOverview}
 
       {/* Document Management Tabs */}
       <motion.div
@@ -717,32 +760,12 @@ export function DocumentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.4 }}
       >
-        <Tabs defaultValue="documents" className="space-y-6">
-          <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
-            <TabsTrigger value="documents" className="flex items-center space-x-2">
-              <FileText className="w-4 h-4" />
-              <span>Documents</span>
-            </TabsTrigger>
-            <TabsTrigger value="database" className="flex items-center space-x-2">
-              <Database className="w-4 h-4" />
-              <span>Database</span>
-            </TabsTrigger>
-            <TabsTrigger value="codegraph" className="flex items-center space-x-2">
-              <Database className="w-4 h-4" />
-              <span>CodeGraph</span>
-            </TabsTrigger>
-            <TabsTrigger value="businessgraph" className="flex items-center space-x-2">
-              <Network className="w-4 h-4" />
-              <span>Knowledge Graph</span>
-            </TabsTrigger>
-            <TabsTrigger value="memory" className="flex items-center space-x-2">
-              <Brain className="w-4 h-4" />
-              <span>Memory</span>
-            </TabsTrigger>
-            {/* Analytics tab removed — see /analytics */}
-          </TabsList>
+        <FilterTabs tabs={KB_SECTIONS} value={section} onValueChange={setSection}>
 
           <TabsContent value="documents" className="space-y-6">
+            {/* Studio (PRD-244): the section strip follows the header, as on every other Studio
+                page, and the Documents section owns the stats and the team filter that describe it. */}
+            {isStudio && documentsOverview}
             {/* Provider Browser Views */}
             {showProviderBrowser && (selectedProvider?.type === 'manual' || selectedProvider?.type === 'manual-old') ? (
               <LocalStorageBrowser
@@ -783,33 +806,7 @@ export function DocumentManagement() {
               />
             ) : (
               /* Document sub-tabs */
-              <Tabs defaultValue="library" className="space-y-6">
-                <TabsList className="bg-secondary/30">
-                  <TabsTrigger value="library" className="flex items-center space-x-2">
-                    <FileText className="w-4 h-4" />
-                    <span>Library</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="processing" className="flex items-center space-x-2">
-                    <Database className="w-4 h-4" />
-                    <span>Processing</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="multimodal" className="flex items-center space-x-2">
-                    <Image className="w-4 h-4" />
-                    <span>Multimodal</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="search" className="flex items-center space-x-2">
-                    <Search className="w-4 h-4" />
-                    <span>Search</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="rag" className="flex items-center space-x-2">
-                    <Brain className="w-4 h-4" />
-                    <span>RAG Test</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="upload" className="flex items-center space-x-2">
-                    <Upload className="w-4 h-4" />
-                    <span>Upload</span>
-                  </TabsTrigger>
-                </TabsList>
+              <FilterTabs tabs={DOCUMENT_TABS} value={documentTab} onValueChange={setDocumentTab}>
 
                 <TabsContent value="library" className="space-y-6">
                   {/* Loading / Error States */}
@@ -1030,7 +1027,7 @@ export function DocumentManagement() {
                     </CardContent>
                   </Card>
                 </TabsContent>
-              </Tabs>
+              </FilterTabs>
             )}
           </TabsContent>
 
@@ -1119,15 +1116,7 @@ export function DocumentManagement() {
             </Card>
 
             {/* Sub-tabs for Database Features */}
-            <Tabs defaultValue="explorer" className="space-y-6">
-              <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/30">
-                <TabsTrigger value="explorer">SQL Explorer</TabsTrigger>
-                <TabsTrigger value="semantic">Semantic Layer</TabsTrigger>
-                <TabsTrigger value="templates">Query Templates</TabsTrigger>
-                <TabsTrigger value="training">Training</TabsTrigger>
-                <TabsTrigger value="schema">Schema Browser</TabsTrigger>
-                <TabsTrigger value="audit">Audit History</TabsTrigger>
-              </TabsList>
+            <FilterTabs tabs={DATABASE_TABS} value={databaseTab} onValueChange={setDatabaseTab}>
               
               <TabsContent value="explorer" className="space-y-6">
                 <DatabaseQueryExplorer
@@ -1184,7 +1173,7 @@ export function DocumentManagement() {
               <TabsContent value="audit" className="space-y-6">
                 <AuditHistory sourceId={activeDbSource?.id} />
               </TabsContent>
-            </Tabs>
+            </FilterTabs>
           </TabsContent>
 
           {/* Analytics tab removed — see /analytics */}
@@ -1201,7 +1190,7 @@ export function DocumentManagement() {
           <TabsContent value="memory" className="space-y-6">
             <MemoryTab />
           </TabsContent>
-        </Tabs>
+        </FilterTabs>
       </motion.div>
 
       {/* Document Details Modal */}

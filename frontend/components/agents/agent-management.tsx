@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +27,7 @@ import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 import { ViewToggle } from '@/components/shared/view-toggle'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { useWorkspace } from '@/components/workspace-provider'
+import { AGENT_TAB_VALUES, type AgentTab } from '@/lib/agents/tabs'
 
 // Import all tab components
 import { AgentRoster } from './agent-roster'
@@ -35,7 +37,6 @@ import { WorkspaceSkillsTab } from './skills/workspace-skills-tab'
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
 import { OrgChartTab } from './org-chart-tab'
-import { FleetTab } from './fleet-tab'
 
 // API hooks for real data
 import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
@@ -43,7 +44,15 @@ import { apiClient } from '@/lib/api-client'
 
 export function AgentManagement() {
   const { canEdit } = useWorkspace()
-  const [activeTab, setActiveTab] = useState('roster')
+  const [activeTab, setActiveTab] = useState<string>('roster')
+  // PRD-244 W0: the Studio page tabs link here with `?tab=<slug>`; honour it
+  // (the values are the tab list's own — see lib/agents/tabs.ts).
+  const requestedTab = useSearchParams()?.get('tab') ?? null
+  useEffect(() => {
+    if (requestedTab && (AGENT_TAB_VALUES as readonly string[]).includes(requestedTab)) {
+      setActiveTab(requestedTab as AgentTab)
+    }
+  }, [requestedTab])
   const [viewMode, setViewMode] = useViewMode('agents')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
@@ -72,6 +81,13 @@ export function AgentManagement() {
     setViewDetailsAgentId(null)
     apiClient.setCurrentPage('agents')
   }, [])
+  // PRD-244 review: /agents?agent=<id>&panel=<tab> opens that agent's details
+  // (an activity routine row lands on its Reports panel).
+  const deepLinkAgent = useSearchParams()?.get('agent') ?? null
+  const deepLinkPanel = useSearchParams()?.get('panel') ?? undefined
+  useEffect(() => {
+    if (deepLinkAgent) setViewDetailsAgentId(deepLinkAgent)
+  }, [deepLinkAgent])
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [ref, inView] = useInView({
@@ -132,7 +148,6 @@ export function AgentManagement() {
 
   const tabDefs = [
     { value: 'roster', label: 'Agent Roster', icon: Users },
-    { value: 'fleet', label: 'Fleet', icon: Activity },
     { value: 'org-chart', label: 'Org Chart', icon: Network },
     { value: 'configuration', label: 'Configuration', icon: Settings },
     { value: 'skills', label: 'Skills', icon: Brain },
@@ -260,10 +275,6 @@ export function AgentManagement() {
             </div>
           </TabsContent>
 
-          <TabsContent value="fleet" className="space-y-6">
-            <FleetTab onViewDetails={handleViewDetails} />
-          </TabsContent>
-
           <TabsContent value="org-chart" className="space-y-6">
             <OrgChartTab />
           </TabsContent>
@@ -288,6 +299,7 @@ export function AgentManagement() {
           agentId={Number(viewDetailsAgentId)}
           open={!!viewDetailsAgentId}
           onClose={() => setViewDetailsAgentId(null)}
+          initialTab={deepLinkPanel}
         />
       )}
 
