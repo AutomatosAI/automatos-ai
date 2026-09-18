@@ -69,9 +69,14 @@ def inventory(api: Api, tag: str | None = None) -> dict[str, Any]:
         "tasks": [_slim(t, SLIM_TASK) for t in keep(tasks)],
         "deliverables": [_slim(d, ("id", "title", "artifact_type", "source_type", "source_id", "agent_id", "file_path", "created_at")) for d in keep(deliverables)],
         "reports": [_slim(r, ("id", "title", "report_type", "agent_id", "status", "created_at")) for r in reports if isinstance(r, Mapping)],
-        "questions": [_slim(g, ("id", "kind", "question", "prompt", "summary", "options", "subject_type", "subject_id")) for g in grants if isinstance(g, Mapping)],
+        "questions": [_slim(g, ("id", "kind", "question_md", "reason", "tool_name", "options", "subject_type", "subject_id", "expires_at", "requested_at")) for g in grants if isinstance(g, Mapping)],
         "errors": [e for e in (e1, e2, e3, e4, e5) if e],
     }
+
+
+def question_line(q: Mapping[str, Any]) -> str:
+    """The text of an ask (``question_md``) or of a permission hold (``reason``/``tool_name``)."""
+    return str(q.get("question_md") or q.get("question") or q.get("reason") or q.get("tool_name") or "").strip()
 
 
 def render_inventory(inv: Mapping[str, Any]) -> str:
@@ -89,7 +94,7 @@ def render_inventory(inv: Mapping[str, Any]) -> str:
     lines.append(f"**Deliverables ({len(inv.get('deliverables') or [])})**: " + ", ".join(f"#{d.get('id')} {d.get('title')}" for d in (inv.get("deliverables") or [])[:12]))
     lines.append(f"**Reports today ({len(inv.get('reports') or [])})**: " + ", ".join(f"#{r.get('id')} {r.get('title')}" for r in (inv.get("reports") or [])[:12]))
     qs = inv.get("questions") or []
-    lines.append(f"**Pending questions/approvals ({len(qs)})**: " + ("; ".join(f"#{q.get('id')} {q.get('kind')}: {(q.get('question') or q.get('prompt') or q.get('summary') or '')[:100]}" for q in qs[:8]) or "none"))
+    lines.append(f"**Pending questions/approvals ({len(qs)})**: " + ("; ".join(f"#{q.get('id')} {q.get('kind')}: {question_line(q)[:100]}" for q in qs[:8]) or "none"))
     for err in inv.get("errors") or []:
         lines.append(f"  ! {err}")
     return "\n".join(lines)
