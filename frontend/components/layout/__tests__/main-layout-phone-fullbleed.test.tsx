@@ -39,7 +39,7 @@ describe('MainLayout on a phone (Studio style, classic chrome)', () => {
     expect(main!.className).toContain('flex-1')
     expect(main!.className).toContain('min-h-0')
     expect(main!.className).not.toContain('px-4')
-    expect(container.firstElementChild!.className).toContain('h-dvh')
+    expect(container.firstElementChild!.className).toContain('h-[100dvh]')
   })
 
   it('a framed page keeps the padded, document-scrolling main', () => {

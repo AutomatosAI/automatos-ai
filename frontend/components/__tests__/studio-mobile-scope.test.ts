@@ -139,7 +139,13 @@ describe('PRD-246 · every surface that renders on a phone has a compact form', 
 
   it('Chat: one column, the sides behind the one Sheet (US-003)', () => {
     const c = band(1023)
-    expect(c).toContain(':is(.studio, .sh-chat) .sh-chat-grid { grid-template-columns: 1fr; }')
+    // One column on a phone, and it must outrank the desktop collapsed-rail /
+    // collapsed-threads variants (more specific selectors) or the chat body is 220px wide.
+    const oneColumn = c.match(/([^{}]*\.sh-chat-grid[^{}]*)\{ grid-template-columns: 1fr; \}/)
+    expect(oneColumn, 'a one-column rule for .sh-chat-grid').not.toBeNull()
+    for (const variant of ['.sh-chat.rail-collapsed .sh-chat-grid', '.sh-chat.threads-collapsed .sh-chat-grid']) {
+      expect(oneColumn![1], `${variant} is named by the one-column rule`).toContain(variant)
+    }
     expect(c, 'the breadcrumb collapses to the title and the two controls').toContain('.sh-chat-crumb')
     expect(c).toContain('.sh-chat-bar .sh-chat-active')
     const shell = read('components/chatbot/studio-chat-shell.tsx')

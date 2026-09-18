@@ -135,7 +135,7 @@ export function MainLayout({ children, fullBleed = false }: MainLayoutProps) {
   const bleed = fullBleed && isMobileLayout
 
   return (
-    <div className={bleed ? 'h-dvh flex flex-col overflow-hidden gradient-bg' : 'min-h-screen gradient-bg overflow-x-hidden'}>
+    <div className={bleed ? 'h-[100dvh] flex flex-col overflow-hidden gradient-bg' : 'min-h-screen gradient-bg overflow-x-hidden'}>
       {/* Desktop Sidebar — hidden below lg */}
       {!isMobileLayout && (
         <>

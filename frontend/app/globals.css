@@ -3003,7 +3003,14 @@
        are the same components, rendered by the shell into the app's one
        Sheet primitive — nothing is duplicated and no second drawer exists.
        The rail's own threshold is PRD-244 D5's 1280 (above). */
-    :is(.studio, .sh-chat) .sh-chat-grid { grid-template-columns: 1fr; }
+    /* The desktop variants `.sh-chat.rail-collapsed .sh-chat-grid` and
+       `.sh-chat.threads-collapsed .sh-chat-grid` are more specific than the
+       shared root selector, so they were still laying a 220px column on a
+       phone and the chat body was 220px wide. Name them here. */
+    :is(.studio, .sh-chat) .sh-chat-grid,
+    .sh-chat.rail-collapsed .sh-chat-grid,
+    .sh-chat.threads-collapsed .sh-chat-grid,
+    .sh-chat.rail-collapsed.threads-collapsed .sh-chat-grid { grid-template-columns: 1fr; }
 
     /* The breadcrumb collapses to the active thread's title between the two
        controls that open the sheets. The bar itself keeps `flex-shrink: 0`
