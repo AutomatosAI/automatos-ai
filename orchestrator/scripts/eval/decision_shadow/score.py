@@ -156,11 +156,116 @@ def percentile(values: List[float], pct: float) -> Optional[float]:
     return s[lo] + (s[hi] - s[lo]) * (rank - lo)
 
 
-def _rate(flags: Iterable[Optional[bool]]) -> str:
+def _rate_value(flags: Iterable[Optional[bool]]) -> Dict[str, Any]:
+    """{'rate': share of True among the known flags or None, 'n': known flags}."""
     known = [f for f in flags if f is not None]
     if not known:
+        return {"rate": None, "n": 0}
+    return {"rate": round(sum(1 for f in known if f) / len(known), 4), "n": len(known)}
+
+
+def _rate(flags: Iterable[Optional[bool]]) -> str:
+    value = _rate_value(flags)
+    if value["rate"] is None:
         return "n/a"
-    return f"{sum(1 for f in known if f) / len(known):.0%} ({len(known)})"
+    return f"{value['rate']:.0%} ({value['n']})"
+
+
+def _latency(values: List[float]) -> Optional[Dict[str, float]]:
+    if not values:
+        return None
+    return {
+        "p50": round(percentile(values, 50) or 0.0, 1),
+        "p95": round(percentile(values, 95) or 0.0, 1),
+        "max": round(max(values), 1),
+        "n": len(values),
+    }
+
+
+def classifier_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The classifier rows as numbers: coverage, routes, latency, tokens,
+    agreement per field / per tier / per engine-confidence band, would-decide."""
+    scored = [r for r in rows if not r.get("error") and r.get("agree")]
+    errors = Counter(str(r.get("error")) for r in rows if r.get("error"))
+    out: Dict[str, Any] = {"rows": len(rows), "scored": len(scored), "errors": dict(errors)}
+    if not scored:
+        return out
+    out["routes"] = dict(Counter(f"{r.get('provider')}/{r.get('model')}" for r in scored))
+    out["latency_ms"] = _latency([float(r["latency_ms"]) for r in scored if r.get("latency_ms") is not None])
+    tokens = [int(r.get("input_tokens") or 0) for r in scored]
+    out["input_tokens"] = {"mean": round(sum(tokens) / len(tokens), 1), "max": max(tokens)}
+    out["agreement"] = {field: _rate_value(r["agree"].get(field) for r in scored) for field in FIELDS}
+    by_tier: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+    for r in scored:
+        by_tier[r.get("tier")].append(r)
+    out["by_tier"] = {
+        str(tier): {
+            "n": len(group),
+            "complexity": _rate_value(r["agree"].get("complexity") for r in group),
+            "action": _rate_value(r["agree"].get("action") for r in group),
+        }
+        for tier, group in sorted(by_tier.items(), key=lambda kv: float(kv[0]) if kv[0] is not None else 99)
+    }
+    bands = []
+    for lo, hi in BANDS:
+        group = [r for r in scored if (c := _confidence_of(r)) is not None and lo <= c < hi]
+        bands.append({
+            "band": f"[{lo:.1f}, {min(hi, 1.0):.1f}{')' if hi <= 1.0 else ']'}",
+            "n": len(group),
+            "complexity": _rate_value(r["agree"].get("complexity") for r in group),
+        })
+    out["by_confidence_band"] = bands
+    decided = sum(1 for r in scored if r.get("engine_verdict"))
+    out["would_decide"] = {"n": decided, "share": round(decided / len(scored), 4)}
+    return out
+
+
+def rerank_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The tool-rerank rows as numbers: coverage, latency, surface sizes, overlap,
+    same-top and nothing-fits shares, the most dropped and added actions."""
+    scored = [r for r in rows if not r.get("error") and isinstance(r.get("compare"), dict)]
+    errors = Counter(str(r.get("error")) for r in rows if r.get("error"))
+    out: Dict[str, Any] = {"rows": len(rows), "scored": len(scored), "errors": dict(errors)}
+    if not scored:
+        return out
+    out["routes"] = dict(Counter(f"{r.get('provider')}/{r.get('model')}" for r in scored))
+    out["latency_ms"] = _latency([float(r["latency_ms"]) for r in scored if r.get("latency_ms") is not None])
+    emb = [r["compare"]["embedding_size"] for r in scored]
+    kept = [r["compare"]["rerank_size"] for r in scored]
+    overlap = [r["compare"]["overlap"] for r in scored]
+    out["surface"] = {
+        "embedding_mean": round(sum(emb) / len(emb), 2),
+        "judged_mean": round(sum(kept) / len(kept), 2),
+        "overlap_mean": round(sum(overlap) / len(overlap), 2),
+    }
+    out["same_top_share"] = round(sum(1 for r in scored if r["compare"].get("same_top")) / len(scored), 4)
+    out["nothing_fits_share"] = round(sum(1 for r in scored if r.get("nothing_fits")) / len(scored), 4)
+    out["most_dropped"] = Counter(n for r in scored for n in r["compare"].get("dropped", [])).most_common(5)
+    out["most_added"] = Counter(n for r in scored for n in r["compare"].get("added", [])).most_common(5)
+    return out
+
+
+def summary_dict(
+    rows: List[Dict[str, Any]],
+    *,
+    only: Optional[str] = None,
+    since: Optional[float] = None,
+    until: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Everything the night ledger needs from the shadow log, JSON-serialisable."""
+    rows = split_traffic(rows, only)
+    if since is not None or until is not None:
+        rows = filter_window(rows, since, until)
+    simulated = sum(1 for r in rows if is_simulated(r))
+    return {
+        "only": only,
+        "window": {"since": since, "until": until},
+        "rows": len(rows),
+        "simulated": simulated,
+        "real": len(rows) - simulated,
+        "classifier": classifier_summary([r for r in rows if r.get("purpose", "classifier") == "classifier"]),
+        "tool_rerank": rerank_summary([r for r in rows if r.get("purpose") == "tool_rerank"]),
+    }
 
 
 def _confidence_of(row: Dict[str, Any]) -> Optional[float]:
@@ -232,14 +337,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--purpose", choices=["classifier", "tool_rerank", "all"], default="all")
     parser.add_argument("--since", default=None, help="ISO-8601 or epoch seconds; rows at or after this (a customer night's start)")
     parser.add_argument("--until", default=None, help="ISO-8601 or epoch seconds; rows at or before this (the night's end)")
+    parser.add_argument("--json", action="store_true", help="print summary_dict() as JSON and nothing else (for the night ledger)")
     return parser
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     path = Path(args.path) if args.path else _default_path()
-    rows = split_traffic(load_rows(path), args.only)
     since, until = parse_when(args.since), parse_when(args.until)
+    if args.json:
+        print(json.dumps(summary_dict(load_rows(path), only=args.only, since=since, until=until), indent=2))
+        return 0
+    rows = split_traffic(load_rows(path), args.only)
     if since is not None or until is not None:
         rows = filter_window(rows, since, until)
     simulated = sum(1 for r in rows if is_simulated(r))

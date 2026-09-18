@@ -222,6 +222,47 @@ async def test_live_replaces_the_cut_and_falls_open_on_every_miss():
     assert rec.rows == []  # live mode writes no shadow rows
 
 
+@pytest.mark.asyncio
+async def test_router_call_site_is_byte_identical_when_off(monkeypatch):
+    """The claim nights 3–8 rest on, at the production call site: with the dial
+    off (or unreadable) the router returns the very list it was given and never
+    consults the index, the registry or the engine's backend."""
+    import core.llm.decisions as decisions_pkg
+    from modules.tools import tool_router
+
+    def never():
+        raise AssertionError("the index must not be consulted while the dial is off")
+
+    fake_index_mod = types.ModuleType("modules.tools.discovery.action_semantic_index")
+    fake_index_mod.get_action_semantic_index = never
+    monkeypatch.setitem(sys.modules, "modules.tools.discovery.action_semantic_index", fake_index_mod)
+
+    allowed = ["platform_list_agents", "platform_create_agent"]
+    off = DecisionEngine(settings_reader=lambda c, k, d: "off" if k == "tool_rerank_mode" else None,
+                         backend_factory=lambda d: never())
+    monkeypatch.setattr(decisions_pkg, "get_decision_engine", lambda: off)
+    assert await tool_router._apply_decision_rerank("list my agents", allowed, True, False, "ws") is allowed
+
+    def broken(category, key, default):
+        raise RuntimeError("db down")
+
+    unreadable = DecisionEngine(settings_reader=broken, backend_factory=lambda d: never())
+    monkeypatch.setattr(decisions_pkg, "get_decision_engine", lambda: unreadable)
+    assert await tool_router._apply_decision_rerank("list my agents", allowed, True, False, "ws") is allowed
+    assert await tool_router._apply_decision_rerank("list my agents", None, True, False, "ws") is None
+    assert await tool_router._apply_decision_rerank("", allowed, True, False, "ws") is allowed
+
+
+def test_night_briefs_are_the_same_evening_word_for_word():
+    """PRD-247 nights 8 and 9 must be the same evening; only the supervisor's
+    dials differ. A drift between the two briefs would silently confound the comparison."""
+    nights = _ORCH.parent / "scripts" / "ralph" / "customer-night" / "nights"
+    baseline = (nights / "auto-brain.md").read_bytes()
+    jev = (nights / "auto-brain-jev.md").read_bytes()
+    assert baseline == jev and baseline.startswith(b"## The evening you have in mind")
+    assert (nights / "auto-brain-jev.SUPERVISOR.md").exists()
+
+
 def test_engine_dials_parse_and_clamp_the_rerank_knobs():
     values = {"tool_rerank_mode": "shadow", "rerank_candidates": "500", "rerank_min_probability": "0.6", "rerank_min_keep": "abc"}
     d = DecisionEngine(settings_reader=lambda c, k, default: values.get(k)).dials()

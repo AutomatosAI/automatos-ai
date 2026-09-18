@@ -353,6 +353,124 @@ def test_record_shadow_appends_json_lines(monkeypatch, tmp_path):
     assert scorer.parse_when("1758218385") == 1758218385.0 and scorer.parse_when(None) is None
     args = scorer._build_parser().parse_args(["--since", "2026-09-18T17:59:45Z", "--until", "1758300000"])
     assert scorer.parse_when(args.since) < scorer.parse_when(args.until)
+    # the ledger's view: one JSON document, serialisable, windowed, split by traffic
+    summary = scorer.summary_dict(rows, only=None, since=first_ts, until=None)
+    assert summary["rows"] == 3 and summary["simulated"] == 1 and summary["real"] == 2
+    assert summary["classifier"]["rows"] == 2 and summary["tool_rerank"]["rows"] == 1
+    assert summary["classifier"]["scored"] == 0  # rows without answers are counted, never scored
+    json.dumps(summary)
+    assert scorer.summary_dict(rows, only="sim")["rows"] == 1
+    assert scorer._build_parser().parse_args(["--json"]).json is True
+
+
+DECISION_ENGINE_KEYS = {
+    "classifier_mode", "tool_rerank_mode", "provider", "model", "timeout_seconds",
+    "min_confidence", "rerank_candidates", "rerank_min_probability", "rerank_min_keep",
+}
+
+
+def test_seed_adds_only_the_decision_engine_rows_and_never_overwrites_a_value():
+    """The condition the test checkout merges under: the seed creates the nine
+    decision_engine rows and touches no stored value — a row an operator has
+    already set keeps its value (the seeder's own rule), and every new row starts
+    at its default, none sensitive. Seeded through a fake session, no database."""
+    from core.models.system_settings import SystemSetting
+    from core.seeds.seed_system_settings import seed_system_settings
+
+    existing = SystemSetting(
+        category="decision_engine", key="classifier_mode", value="live", default_value="off",
+        value_type="string", description="old", is_required=False, is_sensitive=False, validation_rules={},
+    )
+
+    def _compared(clause):
+        return getattr(getattr(clause, "right", None), "value", None)
+
+    class _Query:
+        def __init__(self, session):
+            self._session = session
+            self._pair = (None, None)
+
+        def filter(self, *clauses):
+            values = [_compared(c) for c in clauses]
+            self._pair = (values[0] if values else None, values[1] if len(values) > 1 else None)
+            return self
+
+        def first(self):
+            return existing if self._pair == ("decision_engine", "classifier_mode") else None
+
+        def all(self):
+            return []
+
+        def delete(self, *a, **k):
+            return 0
+
+        def update(self, *a, **k):
+            return 0
+
+    class _Session:
+        def __init__(self):
+            self.added = []
+
+        def query(self, model):
+            return _Query(self)
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    db = _Session()
+    created, _updated = seed_system_settings(db)
+
+    mine = [s for s in db.added if s.category == "decision_engine"]
+    assert {s.key for s in mine} == DECISION_ENGINE_KEYS - {"classifier_mode"}
+    assert len(mine) == 8 and created >= 8
+    for row in mine:
+        assert row.value == row.default_value and row.is_sensitive is False
+        assert row.created_by == "system"
+    assert existing.value == "live"  # the operator's setting survives every restart
+    defaults = {s.key: s.value for s in mine}
+    assert defaults["tool_rerank_mode"] == "off" and defaults["provider"] == "openrouter"
+    assert defaults["timeout_seconds"] == "2.5" and defaults["min_confidence"] == "0.7"
+    assert defaults["rerank_candidates"] == "30" and defaults["rerank_min_keep"] == "5"
+
+
+def test_scorer_numbers_match_the_rows():
+    from scripts.eval.decision_shadow import score as scorer
+
+    rows = [
+        {"ts": 1.0, "purpose": "classifier", "tier": 3, "provider": "fake", "model": "m", "latency_ms": 300,
+         "input_tokens": 900, "agree": {"complexity": True, "action": False}, "engine_verdict": {"complexity": "atom"},
+         "answers": {"complexity": {"confidence": 0.95}, "action": {"confidence": 0.92}}},
+        {"ts": 2.0, "purpose": "classifier", "tier": 2, "provider": "fake", "model": "m", "latency_ms": 500,
+         "input_tokens": 1100, "agree": {"complexity": False, "action": None}, "engine_verdict": None,
+         "answers": {"complexity": {"confidence": 0.6}, "action": {"confidence": 0.7}}},
+        {"ts": 3.0, "purpose": "classifier", "error": "no_result"},
+        {"ts": 4.0, "purpose": "tool_rerank", "provider": "fake", "model": "m", "latency_ms": 280, "nothing_fits": False,
+         "compare": {"embedding_size": 3, "rerank_size": 3, "overlap": 2, "dropped": ["a1"], "added": ["a3"], "same_top": True}},
+        {"ts": 5.0, "purpose": "tool_rerank", "error": "too_few_answers"},
+    ]
+    c = scorer.classifier_summary([r for r in rows if r.get("purpose") == "classifier"])
+    assert c["rows"] == 3 and c["scored"] == 2 and c["errors"] == {"no_result": 1}
+    assert c["agreement"]["complexity"] == {"rate": 0.5, "n": 2}
+    assert c["agreement"]["action"] == {"rate": 0.0, "n": 1}
+    assert c["by_tier"]["3"]["complexity"]["rate"] == 1.0 and c["by_tier"]["2"]["n"] == 1
+    assert c["latency_ms"]["p50"] == 400.0 and c["input_tokens"]["mean"] == 1000.0
+    assert c["would_decide"] == {"n": 1, "share": 0.5}
+    bands = {b["band"]: b for b in c["by_confidence_band"]}
+    assert bands["[0.9, 1.0]"]["n"] == 1 and bands["[0.5, 0.7)"]["n"] == 1
+    r = scorer.rerank_summary([x for x in rows if x.get("purpose") == "tool_rerank"])
+    assert r["rows"] == 2 and r["scored"] == 1 and r["errors"] == {"too_few_answers": 1}
+    assert r["surface"] == {"embedding_mean": 3.0, "judged_mean": 3.0, "overlap_mean": 2.0}
+    assert r["same_top_share"] == 1.0 and r["nothing_fits_share"] == 0.0
+    assert r["most_dropped"] == [("a1", 1)] and r["most_added"] == [("a3", 1)]
+    text = scorer.summarize([x for x in rows if x.get("purpose") == "classifier"])
+    assert "rows=3 scored=2 errors=1" in text and "complexity" in text
+    assert "surface size" in scorer.summarize_rerank([x for x in rows if x.get("purpose") == "tool_rerank"])
 
 
 # --------------------------------------------------------------------------- #
@@ -512,7 +630,25 @@ async def test_mode_off_leaves_the_tiers_untouched(brain, monkeypatch, tmp_path)
     verdict = await brain.assess("please draft the board pack for thursday", 3)
     await _drain_shadow()
     assert verdict is TIER3 and brain._test_tier3 == ["please draft the board pack for thursday"]
-    assert backend.calls == [] and _shadow_rows(tmp_path) == []
+    assert backend.calls == [] and _shadow_rows(tmp_path) == [] and auto_mod._SHADOW_TASKS == set()
+
+
+@pytest.mark.asyncio
+async def test_a_broken_settings_read_means_off_not_a_changed_turn(brain, monkeypatch, tmp_path):
+    """The claim nights 3–8 rest on: with the dial unreadable, the turn is
+    classified exactly as before — no engine call, no task, no row."""
+    monkeypatch.setattr(config, "DECISION_SHADOW_LOG_PATH", str(tmp_path / "shadow.jsonl"))
+
+    def broken(category, key, default):
+        raise RuntimeError("db down")
+
+    backend = _Backend(result=DECIDED_ATOM)
+    engine = DecisionEngine(settings_reader=broken, backend_factory=lambda d: backend)
+    monkeypatch.setattr(auto_mod, "get_decision_engine", lambda: engine)
+    verdict = await brain.assess("please draft the board pack for thursday", 3)
+    await _drain_shadow()
+    assert verdict is TIER3 and brain._test_tier3 == ["please draft the board pack for thursday"]
+    assert backend.calls == [] and _shadow_rows(tmp_path) == [] and auto_mod._SHADOW_TASKS == set()
 
 
 @pytest.mark.asyncio
