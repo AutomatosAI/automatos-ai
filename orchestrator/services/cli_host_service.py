@@ -21,7 +21,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -55,6 +55,10 @@ _PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 SESSION_TOKEN_BYTES = 32
 SESSION_TOKEN_HASH_KEY = "session_token_sha256"
 SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
+# What of an ask we keep ON the ticket (the grant row is the record; this is the
+# fold-in for the next session's prompt, and it rides a JSONB column).
+MAX_ASK_QUESTION_KEPT = 1000
+MAX_ASK_ANSWER_KEPT = 2000
 
 
 def _now() -> datetime:
@@ -726,8 +730,27 @@ def _blocked_pending_approval(db: Session, task: BoardTask) -> bool:
     )
 
 
+def _answers_fold_in(task: BoardTask) -> str:
+    """PRD-245 W2 — the questions this ticket asked and what came back, for the
+    prompt of the session that picks the work up. Read on the claim; the asks stay
+    on the ticket as its record."""
+    ref = task.runtime_ref if isinstance(task.runtime_ref, dict) else {}
+    answered = [a for a in session_asks(ref) if a.get("answered_at") and a.get("answer")]
+    if not answered:
+        return ""
+    lines = ["## Answers to your questions",
+             "You asked, and the operator answered. Carry on from where you stopped."]
+    for ask in answered:
+        lines += ["", f"**You asked:** {ask.get('question') or '(the question is on the ticket)'}",
+                  f"**Answer:** {ask['answer']}"]
+    return "\n".join(lines)
+
+
 def _ticket_prompt(task: BoardTask) -> str:
     prompt = task.raw_prompt or task.description or task.title or ""
+    answers = _answers_fold_in(task)
+    if answers:
+        prompt = f"{prompt}\n\n{answers}"
     if task.review_feedback:
         # Same redo fold-in as the dispatcher (Q44); consumed for this attempt only.
         prompt = (
@@ -1031,6 +1054,13 @@ async def record_events(
 # reply — while the ticket keeps RUNNING (the host is waiting, not parked).
 
 SESSION_HOLD_MARKER = "cli_permission"       # ``ApprovalGrant.details[<marker>] = {request_id, task_id}``
+# PRD-245 W2 — a question the SESSION asked through ``ask_human`` (not a held
+# command). The ticket keeps its asks so the turn's end knows to park instead of
+# finishing, and so the answer can be folded into the prompt of the session that
+# picks the work back up.
+SESSION_ASK_MARKER = "cli_ask"               # ``ApprovalGrant.details[<marker>] = {task_id}``
+SESSION_ASKS_KEY = "session_asks"            # ``runtime_ref[<key>] = [{grant_id, question, answer?, …}]``
+PARKED_FOR_ANSWER_REASON = "Waiting on your answer to the agent's question (ask #{grant_id})"
 SESSION_HOLD_OPTION_ALLOW = "allow"
 SESSION_HOLD_OPTION_DENY = "deny"
 SESSION_HOLD_OPTIONS = (SESSION_HOLD_OPTION_ALLOW, SESSION_HOLD_OPTION_DENY)
@@ -1055,6 +1085,159 @@ def session_hold_question(task_id: Any, entry: Dict[str, Any]) -> str:
 def is_allow_answer(answer: Any) -> bool:
     """Only an answer that starts with ``allow`` allows; everything else denies."""
     return str(answer or "").strip().lower().startswith(SESSION_HOLD_OPTION_ALLOW)
+
+
+def session_ask_marker(grant: Any) -> Optional[Dict[str, Any]]:
+    """``{task_id}`` when this question row is a session's own ask, else None."""
+    details = getattr(grant, "details", None)
+    marker = details.get(SESSION_ASK_MARKER) if isinstance(details, dict) else None
+    if not isinstance(marker, dict) or marker.get("task_id") is None:
+        return None
+    return marker
+
+
+def session_asks(ref: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [a for a in (ref.get(SESSION_ASKS_KEY) or []) if isinstance(a, dict)]
+
+
+def open_session_asks(ref: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The asks nobody has answered yet — why a finished turn parks."""
+    return [a for a in session_asks(ref) if not a.get("answered_at")]
+
+
+def record_session_ask(ref: Dict[str, Any], *, grant_id: Any, question: str) -> Dict[str, Any]:
+    """Remember an ask the session just made. Returns the rebuilt ref."""
+    entry = {"grant_id": int(grant_id), "question": str(question)[:MAX_ASK_QUESTION_KEPT],
+             "asked_at": _iso(_now())}
+    return {**ref, SESSION_ASKS_KEY: [*session_asks(ref), entry]}
+
+
+def record_session_answer(ref: Dict[str, Any], *, grant_id: Any, answer: str) -> Dict[str, Any]:
+    """Write the operator's answer onto the ask it belongs to. Returns the
+    rebuilt ref; the same ref when the ask is unknown or already answered."""
+    updated: List[Dict[str, Any]] = []
+    touched = False
+    for ask in session_asks(ref):
+        if not touched and int(ask.get("grant_id") or 0) == int(grant_id) and not ask.get("answered_at"):
+            updated.append({**ask, "answer": str(answer)[:MAX_ASK_ANSWER_KEPT], "answered_at": _iso(_now())})
+            touched = True
+            continue
+        updated.append(ask)
+    return {**ref, SESSION_ASKS_KEY: updated} if touched else ref
+
+
+async def raise_session_ask(
+    db: Session,
+    *,
+    task_id: Any,
+    workspace_id: Any,
+    agent_id: Optional[int],
+    agent_name: Optional[str],
+    question: str,
+    options: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """PRD-245 W2 — one question from a session.
+
+    Filed through PRD-225's SHARED internals (the same function
+    ``platform_ask_human`` dispatches to), so it reaches the Questions tab, the
+    bell and Telegram with nothing new — but UNPARKED: parking a ticket whose
+    session is still mid-turn would make its own result undeliverable
+    (``apply_result`` writes only a run that is still ``in_progress``). The
+    turn's end parks it (``_park_for_answer``).
+
+    Returns an executor-shaped result, so the session reads it as ordinary tool
+    output."""
+    from modules.tools.discovery.handlers_asks import stage_question
+
+    task = (
+        db.query(BoardTask)
+        .filter(BoardTask.id == int(task_id), BoardTask.workspace_id == workspace_id)
+        .first()
+    )
+    if task is None:
+        return {"success": False, "error": f"ticket #{task_id} is not in this workspace"}
+    try:
+        staged = await stage_question(
+            db, workspace_id,
+            subject_type=SUBJECT_BOARD_TASK, subject_id=str(int(task_id)),
+            question=question,
+            options=list(options or []) or None,
+            asked_by_agent_id=agent_id, agent_name=agent_name,
+            park=None,                                   # the turn's end parks it
+            details={SESSION_ASK_MARKER: {"task_id": int(task_id)}},
+        )
+    except Exception as exc:  # noqa: BLE001 — the session reads the reason and carries on
+        logger.error("[cli-host] ticket #%s could not file its question", task_id, exc_info=True)
+        return {"success": False,
+                "error": f"the question could not be filed ({type(exc).__name__}); "
+                         "put it in your final message instead"}
+    ask_id = staged.get("ask_id") if isinstance(staged, dict) else None
+    if ask_id is None:
+        return {"success": False,
+                "error": "the question could not be filed; put it in your final message instead"}
+    task.runtime_ref = record_session_ask(dict(task.runtime_ref or {}), grant_id=ask_id, question=question)
+    db.commit()
+    logger.info("[cli-host] ticket #%s asked the operator (ask #%s)", task_id, ask_id)
+    return {
+        "success": True,
+        "result": {
+            "ask_id": int(ask_id),
+            "message": (
+                f"Asked the operator (question #{ask_id}). It is on their Questions tab and their phone. "
+                "Your ticket parks on it when your turn ends and picks up here — with the answer — once "
+                "they reply. Finish everything that does not depend on the answer now, then end your "
+                "turn. Do not wait and do not ask again."
+            ),
+        },
+    }
+
+
+def answer_session_ask(db: Session, grant: Any) -> bool:
+    """PRD-245 W2 — PRD-225's answer path reached a session's own question.
+
+    The answer is written onto the ticket (so the session that picks the work up
+    reads it in its prompt) and the ticket is re-queued: ``blocked`` →
+    ``assigned`` for the host to claim and RESUME the same Claude Code session.
+    True when the work actually moves.
+
+    A ticket still ``in_progress`` (the operator answered mid-turn) is only
+    recorded here: its own turn end does the re-queue, because a running session
+    must never be claimed twice."""
+    marker = session_ask_marker(grant)
+    if marker is None:
+        return False
+    task = (
+        db.query(BoardTask)
+        .filter(BoardTask.id == int(marker["task_id"]), BoardTask.workspace_id == grant.workspace_id)
+        .first()
+    )
+    if task is None:
+        logger.warning("[cli-host] ask #%s names ticket #%s, which is not in workspace %s",
+                       grant.id, marker["task_id"], grant.workspace_id)
+        return False
+    ref = record_session_answer(dict(task.runtime_ref or {}), grant_id=grant.id,
+                                answer=str(getattr(grant, "answer_text", "") or ""))
+    if task.status == "in_progress":
+        task.runtime_ref = ref
+        db.commit()
+        logger.info("[cli-host] ask #%s answered while ticket #%s still runs — its turn end picks it up",
+                    grant.id, task.id)
+        return False
+    if task.status != "blocked":
+        task.runtime_ref = ref
+        db.commit()
+        logger.info("[cli-host] ask #%s answered, but ticket #%s is %s — nothing to resume",
+                    grant.id, task.id, task.status)
+        return False
+    task.runtime_ref = _mark_resumable(ref)
+    task.status = "assigned"
+    task.blocked_at = None
+    task.blocked_reason = None
+    db.commit()
+    _notify_status(db, task)
+    _notify_available(db, task)
+    logger.info("[cli-host] ticket #%s resumes on the answer to ask #%s", task.id, grant.id)
+    return True
 
 
 def session_hold_marker(grant: Any) -> Optional[Dict[str, Any]]:
@@ -1711,6 +1894,14 @@ async def apply_result(
         _canvas_envelope(task.workspace_id, "canvas.session.status", {**base, "status": "stopped" if status != "error" else "failed"}),
     ])
 
+    # PRD-245 W2: the session asked the operator something. Its turn is over, but
+    # its WORK is not: the ticket parks on the question instead of finishing, and
+    # the answer re-queues it to resume this same Claude session. The result text,
+    # the usage and the deliverables of this turn are already recorded above.
+    parked = _park_for_answer(db, task, ref)
+    if parked is not None:
+        return {"applied": True, "status": parked}
+
     terminal = await finalize_board_task_run(
         db,
         task_id=task.id,
@@ -1723,3 +1914,67 @@ async def apply_result(
         force_review=forces_review(denial_summaries),
     )
     return {"applied": terminal is not None, "status": terminal or task.status}
+
+
+def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optional[str]:
+    """PRD-245 W2 — the turn ended with a question open, or with one answered
+    while it ran.
+
+    Returns the status written (``blocked`` or ``assigned``), or ``None`` when the
+    session asked nothing and the normal completion writer should run.
+
+    * an OPEN ask → ``blocked`` on the question; the answer re-queues it;
+    * an ANSWERED ask (the operator was quick) → back to ``assigned``, because
+      the work can carry on now.
+
+    Either way the ticket keeps its session id, so the host RESUMES the same
+    Claude Code session instead of starting a fresh one with no memory of the
+    work so far."""
+    asks = session_asks(ref)
+    if not asks:
+        return None
+    open_asks = [a for a in asks if not a.get("answered_at")]
+    ref = _mark_resumable(ref)
+    if open_asks:
+        task.status = "blocked"
+        task.blocked_at = _now()
+        task.blocked_reason = PARKED_FOR_ANSWER_REASON.format(grant_id=open_asks[0].get("grant_id"))
+    else:
+        task.status = "assigned"
+        task.blocked_at = None
+        task.blocked_reason = None
+    task.lease_until = None            # not a running session any more
+    task.runtime_ref = ref
+    db.commit()
+    _notify_status(db, task)
+    if not open_asks:
+        _notify_available(db, task)
+    logger.info("[cli-host] ticket #%s parks on %s ask(s) → %s",
+                task.id, len(open_asks) or "answered", task.status)
+    return task.status
+
+
+def _mark_resumable(ref: Dict[str, Any]) -> Dict[str, Any]:
+    """Ask the next claim to CONTINUE this Claude Code session (``claude --resume``)
+    on the host that ran it — a transcript lives on one machine."""
+    session_id = ref.get("cli_session_id") or ref.get("session_id")
+    if not session_id:
+        return ref
+    return {**ref, "resume_session_id": str(session_id), "resume_host_id": ref.get("host_id")}
+
+
+def _notify_status(db: Session, task: BoardTask) -> None:
+    try:
+        notify_board_event(db, workspace_id=str(task.workspace_id), task_id=task.id,
+                           status=task.status, event="task_updated")
+    except Exception:  # noqa: BLE001
+        logger.debug("[cli-host] board notify skipped for ticket #%s", task.id, exc_info=True)
+
+
+def _notify_available(db: Session, task: BoardTask) -> None:
+    try:
+        from services.board_dispatcher import notify_task_available
+
+        notify_task_available(db, workspace_id=str(task.workspace_id), task_id=task.id)
+    except Exception:  # noqa: BLE001
+        logger.debug("[cli-host] dispatch notify skipped for ticket #%s", task.id, exc_info=True)

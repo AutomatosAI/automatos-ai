@@ -46,7 +46,8 @@ def _recorder():
 
 def test_the_tool_list_is_the_one_definition_and_is_stable():
     names = st.tool_names()
-    assert names == ("board_summary", "list_tasks", "update_ticket", "submit_report", "search_knowledge")
+    assert names == ("board_summary", "list_tasks", "update_ticket", "submit_report",
+                     "ask_human", "search_knowledge")
     assert st.tool_names() == names                      # stable per process
     first = json.dumps(st.definitions(), sort_keys=True)
     assert json.dumps(st.definitions(), sort_keys=True) == first   # byte-stable (prompt cache)

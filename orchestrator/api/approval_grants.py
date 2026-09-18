@@ -490,6 +490,11 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
       grants -- ``details.watch_action`` discriminates (rerun / replan /
       reassign / spawn_agent); the stored spec launches and the supervising
       watch follows the work. First real wiring of SUBJECT_PLAYBOOK_RUN.
+    - a ``board_task`` question carrying PRD-245's session-ASK marker
+      (``details.cli_ask``): a question the session itself asked. The answer is
+      written onto the ticket and the ticket goes ``blocked`` → ``assigned``, so
+      the host claims it and RESUMES the same session with the answer in its
+      prompt. True iff the work actually moved.
     - a ``board_task`` question carrying PRD-245's session-hold marker
       (``details.cli_permission``): the ticket is RUNNING, not parked — the
       answer is the operator's allow/deny for the held command, recorded on the
@@ -520,10 +525,16 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
         return _executed_result_succeeded(grant)
     if grant.subject_type != SUBJECT_BOARD_TASK:
         return False
-    from services.cli_host_service import answer_session_hold, session_hold_marker
+    from services.cli_host_service import (
+        answer_session_ask, answer_session_hold, session_ask_marker, session_hold_marker,
+    )
 
     if session_hold_marker(grant) is not None:
         return answer_session_hold(db, grant)
+    # PRD-245 W2: a question the SESSION asked. The answer goes onto the ticket
+    # and re-queues it, so the host resumes that same Claude Code session.
+    if session_ask_marker(grant) is not None:
+        return answer_session_ask(db, grant)
     return _requeue_blocked_task(db, grant.workspace_id, grant.subject_id)
 
 
