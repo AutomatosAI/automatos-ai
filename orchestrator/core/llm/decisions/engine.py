@@ -22,7 +22,7 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 from config import config
 
@@ -82,6 +82,17 @@ def _default_reader(category: str, key: str, default: Optional[str]) -> Optional
     from core.llm.manager import get_system_setting
 
     return get_system_setting(category, key, default)
+
+
+def _scope_execution_id() -> Optional[str]:
+    """The usage scope's execution id for this task, or None. Never raises."""
+    try:
+        from core.llm.usage_context import current_usage_scope
+
+        value = current_usage_scope().get("execution_id")
+        return str(value) if value else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _as_mode(raw: str, default: str) -> str:
@@ -240,11 +251,19 @@ class DecisionEngine:
     # -- shadow log ---------------------------------------------------------
 
     def record_shadow(self, row: Mapping[str, Any]) -> None:
-        """Append one JSON line; a write failure is logged at debug and dropped."""
+        """Append one JSON line; a write failure is logged at debug and dropped.
+
+        The usage scope's ``execution_id`` rides along when one is set, so a
+        PRD-247 simulation night (``sim:<campaign>:<scenario>:<run>``) can be
+        told apart from the operator's own turns when the log is scored."""
         try:
             path = Path(config.DECISION_SHADOW_LOG_PATH)
             path.parent.mkdir(parents=True, exist_ok=True)
-            line = json.dumps({"ts": round(time.time(), 3), **dict(row)}, ensure_ascii=False, default=str)
+            full: Dict[str, Any] = {"ts": round(time.time(), 3), **dict(row)}
+            execution_id = _scope_execution_id()
+            if execution_id and not full.get("execution_id"):
+                full["execution_id"] = execution_id
+            line = json.dumps(full, ensure_ascii=False, default=str)
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
         except Exception:  # noqa: BLE001

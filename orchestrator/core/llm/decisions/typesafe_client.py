@@ -211,19 +211,25 @@ class TypeSafeDecisionClient:
         """One ``llm_usage`` row per call. Input tokens at the configured rate,
         output free — the seam's whole economic point, booked honestly."""
         try:
-            from core.llm.usage_context import LANE_DECISION
+            from core.llm.usage_context import LANE_DECISION, current_usage_scope
             from core.llm.usage_tracker import STATUS_ERROR, STATUS_SUCCESS, UsageTracker
 
+            # The attribution in force for this task: a simulation campaign
+            # (PRD-247 encodes ``sim:<campaign>:<scenario>:<run>`` in
+            # execution_id), a watch, a board task — so a decision's cost sits
+            # on the same row family as the turn it served.
+            scope = current_usage_scope()
             input_tokens = result.input_tokens if result else 0
             output_tokens = result.output_tokens if result else 0
             usd_in = input_tokens / 1_000_000.0 * float(config.DECISION_ENGINE_USD_PER_MTOK_IN)
             UsageTracker.track(
-                workspace_id=workspace_id,
+                workspace_id=workspace_id if workspace_id is not None else scope.get("workspace_id"),
                 model_id=result.model if result else self.model,
                 provider=self.provider,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                agent_id=agent_id,
+                agent_id=agent_id if agent_id is not None else scope.get("agent_id"),
+                execution_id=scope.get("execution_id"),
                 request_type=LANE_DECISION,
                 latency_ms=latency_ms,
                 status=STATUS_ERROR if error else STATUS_SUCCESS,

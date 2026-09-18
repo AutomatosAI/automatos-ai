@@ -59,6 +59,17 @@ This PRD builds the **seam**, not the vendor: one `decide()` contract with three
 4. `docker exec automatos_backend python -m scripts.eval.decision_shadow.score`; `llm_usage` rows with `request_type='decision'` carry latency and cost.
 5. Flip `provider` to `llm` for the same week to get the baseline in the same log.
 
+## Benchmarking through PRD-247 (the simulation program)
+
+PRD-247's **P7 "Auto's brain pack"** is this PoC's benchmark lane. Its chat-mode driver produces the classified turns the shadow needs in one night instead of a week of the operator's own traffic; its four-row scorecard (usability, cost, quality, usefulness) answers the question the shadow's agreement rate cannot — whether a *different* decision is a *better* outcome; and its nightly offline gates are the two harnesses this PRD extended (`--mode jev_rerank`, `--ranker jev`). How the two connect:
+
+- **Campaign attribution.** The sim encodes `sim:<campaign>:<scenario>:<run>` in the usage scope's `execution_id`. Every decision receipt in `llm_usage` and every shadow row carries that id, so `scripts.eval.decision_shadow.score --only sim` and `--only real` never mix a simulated night with the operator's turns, and a decision's cost lands on the same row family as the turn it served. One dependency on PRD-247's own plumbing: the chat lane opens its scope inside the streaming service (`chat:<id>`), after `AutoBrain.assess` has run, so the classifier's receipts see the campaign id only when the driver's id is set at the route — which is where a campaign id arriving over HTTP has to be set anyway.
+- **Shadow is inert, provably.** Run one pack with both dials off, then again in shadow: the four rows must be identical within noise. That invariant is the first thing the sim should assert about this PRD.
+- **Live is a delta.** Off versus live on the same pack: usability (turns, steps, questions), cost per successful outcome (including the decision rows), quality (the rubric), usefulness (expected effects). Prompt tokens per turn and the `context_trace` versus `llm_usage` divergence that P7 already trends will show the rerank's effect on the tool block directly.
+- **What stays separate.** The uplift gate reads production rows only (`telemetry_source` production or null); the driver tags its rows `eval`, so a simulated night fills the shadow log and the scorecard but never the flip gate. That is by design — eval rows never grade themselves.
+- **Trend lines P7 can add from this PRD:** classifier agreement per tier and per engine-confidence band; rerank overlap, dropped and added actions, `nothing_fits` rate; decision latency p50/p95 and cost per turn. All from the shadow log; no product change.
+- **A possible give-back, the owner's call:** the sim's standalone judge (`sim/judge.py`, brief + output + rubric → 1–5) is a Score question per rubric dimension in this seam's terms — cheap enough to grade every deliverable every night, with the operator's hand grades (P12's test plan step 4) as the calibration check.
+
 ## Traps (pre-verified)
 
 - **Never register Jev as an LLM provider.** It generates no text; PRD-236's registry has no `decision` kind, and the seam stays beside it.

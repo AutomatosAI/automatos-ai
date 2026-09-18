@@ -9,15 +9,21 @@ would have decided on its own at the configured floor.
 
 Run from ``orchestrator/``::
 
-    python -m scripts.eval.decision_shadow.score            # DECISION_SHADOW_LOG_PATH
-    python -m scripts.eval.decision_shadow.score path.jsonl # an explicit file
+    python -m scripts.eval.decision_shadow.score                 # DECISION_SHADOW_LOG_PATH
+    python -m scripts.eval.decision_shadow.score path.jsonl      # an explicit file
+    python -m scripts.eval.decision_shadow.score --only sim      # PRD-247 simulation turns only
+    python -m scripts.eval.decision_shadow.score --only real     # the operator's own turns only
+    python -m scripts.eval.decision_shadow.score --purpose tool_rerank
 
-Stdlib only, so it also runs inside the backend container::
+Rows written under a PRD-247 campaign carry ``execution_id`` starting with
+``sim:``; everything else is real traffic. Stdlib only, so it also runs inside
+the backend container::
 
     docker exec automatos_backend python -m scripts.eval.decision_shadow.score
 """
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import sys
@@ -27,6 +33,55 @@ from typing import Any, Dict, Iterable, List, Optional
 
 FIELDS = ("complexity", "action", "needs_memory", "needs_multi_agent", "tool_domain", "target_agent")
 BANDS = ((0.0, 0.5), (0.5, 0.7), (0.7, 0.9), (0.9, 1.01))
+SIM_PREFIX = "sim:"
+
+
+def is_simulated(row: Dict[str, Any]) -> bool:
+    return str(row.get("execution_id") or "").startswith(SIM_PREFIX)
+
+
+def split_traffic(rows: List[Dict[str, Any]], only: Optional[str]) -> List[Dict[str, Any]]:
+    """``only``: 'sim' keeps PRD-247 campaign rows, 'real' keeps the rest, None keeps all."""
+    if only == "sim":
+        return [r for r in rows if is_simulated(r)]
+    if only == "real":
+        return [r for r in rows if not is_simulated(r)]
+    return rows
+
+
+def summarize_rerank(rows: List[Dict[str, Any]]) -> str:
+    """The tool-rerank rows: how the judged cut compares with the embedding cut."""
+    out: List[str] = []
+    scored = [r for r in rows if not r.get("error") and isinstance(r.get("compare"), dict)]
+    errors = Counter(str(r.get("error")) for r in rows if r.get("error"))
+    out.append(f"tool_rerank rows={len(rows)} scored={len(scored)} errors={sum(errors.values())}")
+    if errors:
+        out.append("  errors: " + ", ".join(f"{k}×{v}" for k, v in errors.most_common(6)))
+    if not scored:
+        return "\n".join(out)
+    latencies = [float(r["latency_ms"]) for r in scored if r.get("latency_ms") is not None]
+    if latencies:
+        out.append(
+            f"  engine latency ms: p50={percentile(latencies, 50):.0f} "
+            f"p95={percentile(latencies, 95):.0f} max={max(latencies):.0f}"
+        )
+    emb = [r["compare"]["embedding_size"] for r in scored]
+    kept = [r["compare"]["rerank_size"] for r in scored]
+    overlap = [r["compare"]["overlap"] for r in scored]
+    out.append(
+        f"  surface size: embedding mean={sum(emb) / len(emb):.1f} → judged mean={sum(kept) / len(kept):.1f}; "
+        f"mean overlap={sum(overlap) / len(overlap):.1f}"
+    )
+    same_top = sum(1 for r in scored if r["compare"].get("same_top"))
+    nothing = sum(1 for r in scored if r.get("nothing_fits"))
+    out.append(f"  same top action: {same_top / len(scored):.0%}; nothing fits: {nothing / len(scored):.0%}")
+    dropped = Counter(n for r in scored for n in r["compare"].get("dropped", []))
+    added = Counter(n for r in scored for n in r["compare"].get("added", []))
+    if dropped:
+        out.append("  most dropped: " + ", ".join(f"{k}×{v}" for k, v in dropped.most_common(5)))
+    if added:
+        out.append("  most added: " + ", ".join(f"{k}×{v}" for k, v in added.most_common(5)))
+    return "\n".join(out)
 
 
 def _default_path() -> Path:
@@ -133,12 +188,27 @@ def summarize(rows: List[Dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Score the PRD-248 shadow log")
+    parser.add_argument("path", nargs="?", default=None, help="the JSON-lines file (default: DECISION_SHADOW_LOG_PATH)")
+    parser.add_argument("--only", choices=["sim", "real"], default=None, help="PRD-247 campaign rows only, or the operator's own turns only")
+    parser.add_argument("--purpose", choices=["classifier", "tool_rerank", "all"], default="all")
+    return parser
+
+
 def main(argv: Optional[List[str]] = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    path = Path(args[0]) if args else _default_path()
-    rows = load_rows(path)
+    args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    path = Path(args.path) if args.path else _default_path()
+    rows = split_traffic(load_rows(path), args.only)
+    simulated = sum(1 for r in rows if is_simulated(r))
     print(f"shadow log: {path}")
-    print(summarize(rows))
+    print(f"rows={len(rows)} simulated={simulated} real={len(rows) - simulated}" + (f" (only={args.only})" if args.only else ""))
+    if args.purpose in ("classifier", "all"):
+        print("== classifier ==")
+        print(summarize([r for r in rows if r.get("purpose", "classifier") == "classifier"]))
+    if args.purpose in ("tool_rerank", "all"):
+        print("== tool_rerank ==")
+        print(summarize_rerank([r for r in rows if r.get("purpose") == "tool_rerank"]))
     return 0
 
 

@@ -148,7 +148,11 @@ async def test_client_posts_the_native_body_and_books_the_receipt(monkeypatch, u
         return httpx.Response(200, json=CANNED)
 
     client = _client(monkeypatch, handler)
-    result = await client.decide(state={"message": "hi"}, questions=QUESTIONS, workspace_id=WS, purpose="t")
+    from core.llm.usage_context import usage_scope
+
+    # A PRD-247 campaign sets the scope; the receipt must join that campaign.
+    with usage_scope(execution_id="sim:night1:s07:2", agent_id=9):
+        result = await client.decide(state={"message": "hi"}, questions=QUESTIONS, workspace_id=WS, purpose="t")
 
     assert seen["url"] == config.TYPESAFE_API_URL
     assert seen["auth"] == "Bearer jev_test"
@@ -163,6 +167,8 @@ async def test_client_posts_the_native_body_and_books_the_receipt(monkeypatch, u
     assert receipt["request_type"] == "decision" and receipt["provider"] == "typesafe"
     assert receipt["input_tokens"] == 283 and receipt["status"] == "success"
     assert receipt["cost_override"] == (pytest.approx(283 / 1e6 * config.DECISION_ENGINE_USD_PER_MTOK_IN), 0.0)
+    assert receipt["execution_id"] == "sim:night1:s07:2" and receipt["agent_id"] == 9
+    assert receipt["workspace_id"] == WS  # an explicit workspace wins over the scope
 
 
 @pytest.mark.asyncio
@@ -325,8 +331,20 @@ def test_record_shadow_appends_json_lines(monkeypatch, tmp_path):
     engine = _engine()
     engine.record_shadow({"purpose": "classifier", "tier": 3})
     engine.record_shadow({"purpose": "classifier", "tier": 2})
+    from core.llm.usage_context import usage_scope
+
+    with usage_scope(execution_id="sim:night1:s07:2"):
+        engine.record_shadow({"purpose": "tool_rerank"})
     rows = [json.loads(line) for line in path.read_text().splitlines()]
-    assert [r["tier"] for r in rows] == [3, 2] and all("ts" in r for r in rows)
+    assert [r["tier"] for r in rows[:2]] == [3, 2] and all("ts" in r for r in rows)
+    assert "execution_id" not in rows[0] and rows[2]["execution_id"] == "sim:night1:s07:2"
+
+    from scripts.eval.decision_shadow import score as scorer
+
+    assert [r["purpose"] for r in scorer.split_traffic(rows, "sim")] == ["tool_rerank"]
+    assert len(scorer.split_traffic(rows, "real")) == 2 and len(scorer.split_traffic(rows, None)) == 3
+    assert "tool_rerank rows=1" in scorer.summarize_rerank(scorer.split_traffic(rows, "sim"))
+    assert scorer._build_parser().parse_args(["--only", "sim", "--purpose", "tool_rerank"]).only == "sim"
 
 
 # --------------------------------------------------------------------------- #
