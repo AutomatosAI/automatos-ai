@@ -57,7 +57,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # 2026-09-11 (team page activity): tool_execution_logs_workspace_user_idx chains onto it — the composite
 # index behind api/team._activity_by_user, declared on the model too for
 # create_all-first installs.
-EXPECTED_HEAD = "tool_execution_logs_workspace_user_idx"
+# 2026-09-18: kb_multimodal_tables chains onto it — the three multimodal knowledge
+# tables PRD-209's schema retirement dropped from every fresh install.
+EXPECTED_HEAD = "kb_multimodal_tables"
 
 
 def _literal(node: ast.AST):

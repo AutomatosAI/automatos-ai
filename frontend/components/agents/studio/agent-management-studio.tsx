@@ -21,11 +21,9 @@ import { WorkspaceSkillsTab } from '../skills/workspace-skills-tab'
 import { CreateAgentModal } from '../create-agent-modal'
 import { AgentDetailsModal } from '../agent-details-modal'
 import { OrgChartTab } from '../org-chart-tab'
-import { FleetTab } from '../fleet-tab'
 
 const TAB_LABELS: Record<AgentTab, string> = {
   roster: 'Roster',
-  fleet: 'Fleet',
   'org-chart': 'Org Chart',
   configuration: 'Configuration',
   skills: 'Skills',
@@ -220,7 +218,6 @@ export function AgentManagementStudio() {
         </>
       )}
 
-      {tab === 'fleet' && <FleetTab onViewDetails={viewDetails} />}
       {tab === 'org-chart' && <OrgChartTab />}
       {tab === 'configuration' && (
         <AgentConfiguration agents={agents as any[]} selectedAgentId={selectedAgentId} onAgentSelect={setSelectedAgentId} />
