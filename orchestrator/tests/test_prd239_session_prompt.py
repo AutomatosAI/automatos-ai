@@ -134,13 +134,26 @@ def test_the_researchers_skill_header_names_what_it_asks_for_that_a_session_work
     assert session_tool_gaps(agent, ()) == [
         {"skill": "web-research", "tools": ["composio_execute", "search_knowledge", "platform_submit_report"]},
     ]
-    text = session_system_prompt(agent)
-    assert "### web-research\nResearches the web.\n" in text
-    assert "In a session, call `submit_report` instead of `platform_submit_report`." in text
-    assert GAP_LINE_PREFIX + "`composio_execute`." in text        # the one with no equivalent
-    assert "search_knowledge" not in text.split("## Skills")[1].split("Search with")[0]  # it HAS that one
-    assert text.count(GAP_LINE_PREFIX) == 1                       # the writing skill names none
-    assert "### writing\nWrites briefs.\n\nKeep it short." in text
+    # What the prompt renders follows the bridge's CURRENT tool list, so derive
+    # the expectation from it rather than freezing one wave's snapshot: each name
+    # with an equivalent is pointed at it, each name without one is named as
+    # absent, and a skill with nothing to say gets no line at all.
+    from services.cli_session_prompt import SESSION_TOOLS_AVAILABLE
+
+    rendered = session_system_prompt(agent)
+    assert "### web-research\nResearches the web.\n" in rendered
+    assert "### writing\nWrites briefs.\n\nKeep it short." in rendered
+    live = session_tool_gaps(agent, SESSION_TOOLS_AVAILABLE)
+    assert [g["skill"] for g in live] == ["web-research"]          # the writing skill names none
+    entry = live[0]
+    for mentioned, replacement in (entry.get("instead") or {}).items():
+        assert f"`{replacement}` instead of `{mentioned}`" in rendered
+    if entry.get("tools"):
+        assert GAP_LINE_PREFIX in rendered
+        for missing in entry["tools"]:
+            assert f"`{missing}`" in rendered
+    else:
+        assert GAP_LINE_PREFIX not in rendered                    # nothing it names is missing
 
 
 def test_gaps_shrink_with_what_the_session_offers():

@@ -47,7 +47,7 @@ def _recorder():
 def test_the_tool_list_is_the_one_definition_and_is_stable():
     names = st.tool_names()
     assert names == ("board_summary", "list_tasks", "update_ticket", "submit_report",
-                     "ask_human", "search_knowledge")
+                     "ask_human", "composio_execute", "search_knowledge")
     assert st.tool_names() == names                      # stable per process
     first = json.dumps(st.definitions(), sort_keys=True)
     assert json.dumps(st.definitions(), sort_keys=True) == first   # byte-stable (prompt cache)
@@ -57,19 +57,28 @@ def test_the_tool_list_is_the_one_definition_and_is_stable():
         assert isinstance(definition["inputSchema"].get("properties"), dict)
 
 
-def test_every_tool_runs_a_platform_action_that_exists():
+def test_every_platform_tool_runs_an_action_that_exists():
+    """A tool dispatched through ``platform_execute`` must name an action the
+    registry knows, or the dispatcher refuses it at run time with "Unknown
+    platform action". A tool dispatched by NAME (``composio_execute``) is routed
+    by the executor itself and is deliberately not in that registry."""
     from modules.tools.discovery import get_action_registry
 
     registry = get_action_registry()
     for tool in st.SESSION_TOOLS:
+        if tool.dispatch != st.DISPATCH_PLATFORM_ACTION:
+            continue
         assert registry.get(tool.action) is not None, f"{tool.name} → unknown action {tool.action}"
+    # …and the ones dispatched by name are names the executor really handles
+    by_name = [t.action for t in st.SESSION_TOOLS if t.dispatch == st.DISPATCH_TOOL_NAME]
+    assert by_name == ["composio_execute"], by_name
 
 
 def test_a_skill_that_names_the_api_spelling_is_pointed_at_the_session_one():
     assert st.equivalent_of("platform_submit_report") == "submit_report"
     assert st.equivalent_of("platform_search_memory") == "search_knowledge"
     assert st.equivalent_of("submit_report") == "submit_report"
-    assert st.equivalent_of("composio_execute") is None          # W3
+    assert st.equivalent_of("composio_execute") == "composio_execute"   # W3: the skills' own name
     assert st.equivalent_of("") is None and st.equivalent_of(None) is None
 
 
