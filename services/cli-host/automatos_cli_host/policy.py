@@ -211,6 +211,7 @@ class PolicyContext:
     # (never held — the operator has nothing to decide about a name we did not
     # offer). Empty = the bridge is not in this ticket, so no platform tool is.
     session_tools: Sequence[str] = ()
+    unlisted_bash: str = "ask"           # "allow": verbs the allowlist does not name run without a card
 
 
 @dataclass
@@ -749,6 +750,11 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
         # PRD-235 W2 S3: outside the allowlist is a QUESTION for the operator, not a
         # refusal — the session holds the call while a card is shown on the ticket's
         # Canvas; no answer in time is a deny (the ticket lands in review).
+        if ctx.unlisted_bash == "allow":
+            # ``--unlisted-bash allow`` (2026-09-18): the operator chose to run what the
+            # list does not name. NEVER_ALLOWED_BASH was refused above, the explicit
+            # ask-list still asks, and a path the gate cannot place still asks.
+            return on_targets
         return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} is outside this ticket's Bash allowlist")])
     head = Path(words[0]).name
     outer, inner, exec_option = _exec_split(words) if head == "find" else (list(words), [], None)

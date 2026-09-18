@@ -527,6 +527,7 @@ class Session:
                 log.warning("deliverables folder %s not created: %s", deliverables, exc)
             extra_dirs = (*extra_dirs, deliverables)
         self._policy = PolicyContext(
+            unlisted_bash=getattr(self.cfg, "unlisted_bash", "ask"),
             cwd=cwd,
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
             extra_dirs=extra_dirs,
