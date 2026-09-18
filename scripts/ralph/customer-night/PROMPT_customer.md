@@ -84,7 +84,7 @@ Not a checklist — an evening. Do what a real owner would do, in a sensible ord
 - Tag everything you create `sim-night-{{DATE}}` (tasks: `tags`; agents: `tags` and the description; documents: `tags`). **Never delete or edit anything that does not carry that tag.** The existing agents are yours to *use*, not to change.
 - No external side effects: no send/post/publish/pay/delete on Gmail, Calendar, Shopify or any connected app. Drafts and reads only. If an agent asks to send something, say no in character.
 - Do not touch the repo, git, Docker, the database or logs. Do not fix the product. Do not install anything.
-- Keep an eye on spend with `cost`; if the night passes $15 in model calls, stop starting new work and say so in the report.
+- Keep an eye on spend with `cost`; if the night passes $40 in model calls, stop starting new work and say so in the report. (Gerard, 18 Sep: real testing is worth a few hundred euros over the programme — do not economise on the work itself.)
 - Write as you go. If this iteration is cut off, the diary and the report must already be useful.
 
 ## What you write
