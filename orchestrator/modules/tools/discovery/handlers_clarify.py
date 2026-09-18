@@ -114,11 +114,13 @@ async def ask_orchestrator(db: Session, workspace_id: UUID, params: Dict[str, An
     from services.clarification_ladder import escalate_clarification
 
     # escalate_clarification is exception-safe ONCE the ask is placed (P229-RVW-5:
-    # it swallows every post-ask_human failure and still returns {parked, ask_id}).
-    # It only RAISES when ask_human itself failed — i.e. NO human ask was placed —
-    # so falling back to proceed-with-assumption here is safe: there is nothing to
-    # orphan, and a retry re-attempts a fresh ask rather than double-asking a
-    # placed one.
+    # it swallows every post-ask failure and still returns {parked, ask_id}).
+    # It only RAISES when the ask itself failed — a staging error, or
+    # ClarificationAskNotPlaced when the ask internals returned no question row —
+    # i.e. NO human ask was placed. Falling back to proceed-with-assumption here
+    # is safe: there is nothing to orphan, and a retry re-attempts a fresh ask
+    # rather than double-asking a placed one. It is also the only honest answer —
+    # parking behind a question nobody was asked strands the task forever.
     try:
         escalation = await escalate_clarification(
             db, subject, question,

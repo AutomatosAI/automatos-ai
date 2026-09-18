@@ -502,9 +502,13 @@ async def _requeue_subject(db: Session, grant: ApprovalGrant) -> bool:
       hold was still open (a second answer, from the Canvas card or here, is a
       no-op that says so).
     - anything else (e.g. a ``channel`` trust-gate hold): no resume path,
-      returns False. platform_ask_human refuses tool_call/playbook_run
-      questions up front (handlers_asks, P225-RVW-11), so a question only ever
-      reaches here as a board_task (resumable) or a channel hold (not).
+      returns False. ``platform_ask_human`` refuses tool_call/playbook_run
+      questions up front (handlers_asks, P225-RVW-11) because ITS answer path
+      no-ops for them, so a question reaches here as a board_task (resumable),
+      a PRD-229 clarification park (resumable through the bridge above — filed
+      by the ladder through the shared ``stage_question``, not the tool), a
+      PRD-245 session hold (answered without resuming; the ticket is running),
+      or a channel hold (not resumable).
     """
     from core.models.approval_grants import SUBJECT_PLAYBOOK_RUN, SUBJECT_TOOL_CALL
 
