@@ -1,0 +1,129 @@
+# PRD-247 P3 — the Agents pack: create, edit, assign work, watch it land, delete.
+# Three seeded agents, four tickets, three conversations with Auto.
+
+[pack]
+name = "agents"
+description = "agents created and worked like a customer would: four briefs to done, Auto asked to delegate"
+budget_usd = 3.0
+persona = "default"
+
+[[agents]]
+key = "researcher"
+name = "SIM Researcher"
+agent_type = "custom"
+job_title = "Research Analyst"
+description = "Answers short research briefs for a small business with a concise written note. Works from general knowledge; says so when a fact would need checking."
+
+[[agents]]
+key = "writer"
+name = "SIM Writer"
+agent_type = "custom"
+job_title = "Content Writer"
+description = "Writes short customer-facing copy: emails, product descriptions, social posts. Plain English, no hype, British spelling."
+
+[[agents]]
+key = "ops"
+name = "SIM Ops Analyst"
+agent_type = "custom"
+job_title = "Operations Analyst"
+description = "Turns a messy description of a process into a checklist or a short table. Precise and brief."
+
+# --- the API surface a customer's own tooling would hit ---------------------
+
+[[scenarios]]
+id = "agents-crud"
+kind = "crud"
+steps = ["create", "update", "get", "list", "delete"]
+description = "an agent created, edited, read back, listed and deleted through the API"
+
+# --- tickets ---------------------------------------------------------------
+
+[[scenarios]]
+id = "brief-competitors"
+kind = "task"
+agent = "researcher"
+title = "Who else sells specialty coffee subscriptions online in the UK?"
+description = "List five UK online specialty coffee subscription businesses. For each: name, what makes their offer different, and a rough price point if you know it (say 'unknown' if not). Under 250 words. Save the note as a deliverable."
+priority = "medium"
+timeout_s = 900
+expect = "Five named UK businesses, one differentiator each, honest about unknown prices, under 250 words, saved as a deliverable"
+must_contain = ["subscription"]
+[scenarios.expect_effects]
+status = "done"
+deliverables_min = 1
+
+[[scenarios]]
+id = "copy-welcome-email"
+kind = "task"
+agent = "writer"
+title = "Welcome email for new subscription customers"
+description = "Write a welcome email for someone who has just started a monthly coffee subscription with Harbourline Coffee Roasters in Bristol. Subject line plus 120 to 180 words. Warm, plain, no exclamation marks, British spelling. Save it as a deliverable."
+priority = "medium"
+timeout_s = 900
+expect = "A subject line and a 120–180 word email body in plain British English, no exclamation marks, saved as a deliverable"
+must_contain = ["subject"]
+[scenarios.expect_effects]
+status = "done"
+deliverables_min = 1
+
+[[scenarios]]
+id = "checklist-dispatch"
+kind = "task"
+agent = "ops"
+title = "Monday dispatch checklist"
+description = "Every Monday we roast, bag, label and post the subscription orders. Turn that into a checklist of no more than ten steps a new member of staff could follow, with the one thing most likely to go wrong at each step. Save it as a deliverable."
+priority = "high"
+timeout_s = 900
+expect = "At most ten ordered steps, each with a likely failure point, usable by a new starter, saved as a deliverable"
+must_contain = ["label"]
+[scenarios.expect_effects]
+status = "done"
+deliverables_min = 1
+
+[[scenarios]]
+id = "brief-ambiguous"
+kind = "task"
+agent = "researcher"
+title = "Look into the packaging thing"
+description = "Can you look into the packaging thing we talked about and give me a recommendation?"
+priority = "low"
+timeout_s = 900
+expect = "Either a clarifying question to the customer or a clearly-scoped recommendation that states its assumptions; not a confident answer to an unstated question"
+[scenarios.expect_effects]
+status = "done"
+
+# --- Auto ------------------------------------------------------------------
+
+[[scenarios]]
+id = "auto-roster"
+kind = "chat"
+turns = [
+  "Which agents do I have in this workspace, and what is each one for? Keep it short.",
+]
+expect = "Names and one-line purposes of SIM Researcher, SIM Writer and SIM Ops Analyst"
+must_contain = ["researcher", "writer"]
+[scenarios.expect_effects]
+no_errors = true
+
+[[scenarios]]
+id = "auto-delegate"
+kind = "chat"
+turns = [
+  "Please create a task for SIM Researcher: 'Three ways to reduce packaging cost for mailed coffee bags', medium priority, and assign it to them.",
+  "Yes, go ahead and create it.",
+]
+expect = "A task exists on the board assigned to SIM Researcher with that title (or Auto explains exactly why it could not create one)"
+[scenarios.expect_effects]
+tasks_created = 1
+no_errors = true
+
+[[scenarios]]
+id = "auto-board-status"
+kind = "chat"
+turns = [
+  "What is on the board right now? Give me each task with its status and who it is assigned to.",
+]
+expect = "A list of the workspace's tasks with status and assignee, matching the board"
+must_contain = ["researcher"]
+[scenarios.expect_effects]
+no_errors = true

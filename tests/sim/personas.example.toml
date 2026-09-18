@@ -1,0 +1,30 @@
+# Copy to ~/.automatos-sim/personas.toml and edit. Never commit the real file:
+# personas built from real customers are gold data and stay local.
+#
+# A persona is how the answerer replies when an agent asks the customer a
+# question (PRD-225 asks). `match` is a list of lowercase substrings; the first
+# line whose substring appears in the question wins; `default_answer` covers
+# the rest. A pack picks a persona with `[pack] persona = "<name>"`.
+
+[personas.harbourline]
+default_answer = "Use your judgement and carry on — I trust you on the small stuff. Don't spend money or contact anyone outside the company."
+
+[[personas.harbourline.answers]]
+match = ["budget", "spend", "cost", "price"]
+answer = "Keep it under 50 pounds and check with me before spending anything."
+
+[[personas.harbourline.answers]]
+match = ["deadline", "by when", "due"]
+answer = "End of this week is fine."
+
+[[personas.harbourline.answers]]
+match = ["format", "document", "deliver"]
+answer = "A short markdown document is fine. Save it as a deliverable."
+
+[[personas.harbourline.answers]]
+match = ["email", "send", "contact", "publish"]
+answer = "Don't send or publish anything. Draft it and I'll review it first."
+
+[[personas.harbourline.answers]]
+match = ["packaging"]
+answer = "I mean the compostable bags — whether they are worth the extra cost for the subscription orders."
