@@ -451,6 +451,12 @@ def _substitutions(word: str) -> List[str]:
     return [body for _, _, body in _substitution_spans(word)]
 
 
+def _backtick_bodies(line: str) -> List[str]:
+    """The bodies of the backtick substitutions only — the ones the tokenizer
+    cannot keep whole when unquoted."""
+    return [body for start, _, body in _substitution_spans(line) if line[start] == "`"]
+
+
 def _without_substitutions(word: str) -> str:
     """The word with each substitution replaced by ``SUBSTITUTION_MARK`` — an
     unresolved reference wherever the body's output would land."""
@@ -832,13 +838,17 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
         # ``$``, so the path no longer looks like one and escapes the roots.
         return Decision("ask", "ANSI-C ($'…') or locale ($\"…\") quoting hides a word the gate cannot read")
     roots = [ctx.cwd, *ctx.extra_dirs]
-    # Every command substitution on the LINE, judged as a command line of its
-    # own — quoted or not. The per-word pass only sees a substitution the
-    # tokenizer kept whole, and an UNQUOTED backtick body splits on its own
-    # spaces (`` echo `cat X` `` becomes three words), so the path inside it
-    # became an argument of ``echo``, which names no paths. That was a silent
-    # read of any file, the host's own credential included.
-    inside = [_judge_command(body, {}, ctx, roots, 1) for body in _substitutions(visible)]
+    # The BACKTICK substitutions on the line, judged as command lines of their
+    # own — quoted or not. An UNQUOTED backtick body splits on its own spaces
+    # when tokenized (`` echo `cat X` `` becomes three words), so the path inside
+    # it became an argument of ``echo``, which names no paths: a silent read of
+    # any file, the host's own credential included. Only backticks, though. A
+    # ``$(…)`` is kept whole when quoted and becomes its own depth-1 segment when
+    # not, and the segment pass judges it WITH the bindings in scope — ``for d in
+    # …`` binds ``$d`` — which a raw-line pass cannot know. Judging those here too
+    # held ``for d in a b; do echo "$(ls x/$d)"; done`` for a ``$d`` it could not
+    # resolve, and a real ticket sat in review on it.
+    inside = [_judge_command(body, {}, ctx, roots, 1) for body in _backtick_bodies(visible)]
     return _worst([*inside, _judge_command(command, {}, ctx, roots)])
 
 

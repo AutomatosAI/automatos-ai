@@ -15,6 +15,7 @@ workspace-scoped through the host row; a host never sees another workspace.
 """
 from __future__ import annotations
 
+import json
 import hashlib
 import hmac
 import logging
@@ -2084,7 +2085,7 @@ def record_session_note(db: Session, *, task_id: Any, workspace_id: Any,
                 """
             ),
             {"path": "{session_notes}", "key": "session_notes",
-             "entry": _json.dumps([entry]), "task_id": int(task_id), "ws": str(workspace_id)},
+             "entry": json.dumps([entry]), "task_id": int(task_id), "ws": str(workspace_id)},
         )
         db.commit()
     except Exception as exc:  # noqa: BLE001 — the session reads the reason

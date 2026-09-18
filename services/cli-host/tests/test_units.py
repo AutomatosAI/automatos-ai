@@ -1034,3 +1034,18 @@ def test_cd_dash_is_not_a_directory(tmp_path):
     ctx, fill = _layout(tmp_path)
     assert _decide("Bash", {"command": "cd -"}, ctx).behavior == "ask"
     assert _decide("Bash", {"command": fill("cd <ROOT>/repo")}, ctx).behavior == "allow"
+
+
+def test_a_substitution_inside_a_loop_keeps_the_loops_bindings(tmp_path):
+    """RESEARCHER's re-run, 2026-09-18: ``for d in …; do … "$(ls deliverables/$d | wc -l)"; done``
+    was HELD for a ``$d`` the gate could not resolve, and the ticket sat in review
+    on the 120 s that nobody answered. The loop binds ``d``; the segment pass
+    judges the ``$(…)`` with that binding. The raw-line pass that closes the
+    unquoted-backtick hole must not re-judge ``$(…)`` bodies with no bindings."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict('for d in a b; do echo "$(ls <ROOT>/deliverables/$d | wc -l)"; done') == "allow"
+    assert verdict('cd <ROOT> && for d in a b; do printf "%s\n" "$(ls deliverables/$d | wc -l | tr -d \' \')"; done') == "allow"
+    # bindings never launder an outside path, in either substitution form
+    assert verdict('for d in a b; do echo "$(cat <OUTSIDE>/host.json)"; done') == "deny"
+    assert verdict('for d in a b; do echo `cat <OUTSIDE>/host.json`; done') == "deny"

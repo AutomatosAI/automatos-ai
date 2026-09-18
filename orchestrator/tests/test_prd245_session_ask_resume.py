@@ -317,3 +317,49 @@ def test_a_merge_without_a_fresh_answer_changes_nothing():
             raise RuntimeError("the row is not readable right now")
 
     assert svc._merge_fresh_session_asks(_BrokenDb(task), task, dict(ref)) == dict(ref)
+
+
+# ── update_ticket's note actually lands (the writer's BODY runs here) ────────
+
+def test_a_progress_note_is_written_with_one_targeted_statement(monkeypatch):
+    """The first version raised NameError in production on its first call: the
+    function referenced a ``json`` alias that only existed inside two OTHER
+    functions' local imports, and no test executed its body — the tool's tests
+    stopped at the scope and the schema. This one runs the writer end to end
+    against a session that records the statement it is given."""
+    class _Recording(_Db):
+        def __init__(self):
+            super().__init__(None)
+            self.calls = []
+
+        def execute(self, stmt, params=None):
+            self.calls.append((str(stmt), params))
+            return NS(rowcount=1)
+
+    published = []
+    monkeypatch.setattr(svc, "publish_canvas_events", lambda ws, evs: published.extend(evs))
+    db = _Recording()
+
+    out = svc.record_session_note(db, task_id=116, workspace_id="ws-c1",
+                                  agent_name="RESEARCHER", note="reading the brief")
+
+    assert out == {"success": True, "result": {"recorded": True, "note": "reading the brief"}}
+    stmt, params = db.calls[0]
+    assert "jsonb_set" in stmt and "CAST(:entry AS jsonb)" in stmt          # ONE key, appended
+    import re
+    assert not re.search(r":\w+::", stmt)                                    # this repo's bind trap
+    assert set(params) == {"path", "key", "entry", "task_id", "ws"}
+    import json
+    entry = json.loads(params["entry"])
+    assert entry[0]["note"] == "reading the brief" and entry[0]["by"] == "RESEARCHER"
+    assert db.commits == 1
+    assert published and published[0]["data"]["note"] == "reading the brief"   # the operator sees it live
+
+
+def test_a_failed_note_write_is_told_to_the_session_not_raised():
+    class _Broken(_Db):
+        def execute(self, *_a, **_k):
+            raise RuntimeError("db down")
+
+    out = svc.record_session_note(_Broken(None), task_id=1, workspace_id="w", agent_name=None, note="x")
+    assert out["success"] is False and "RuntimeError" in out["error"]
