@@ -58,6 +58,8 @@ DISPATCH_TOOL_NAME = "tool_name"
 # A session that is genuinely stuck has ``ask_human``: that parks the ticket the
 # supported way, at turn end, keeping everything the session produced.
 SESSION_TICKET_STATUSES: Tuple[str, ...] = ("in_progress",)
+# A progress note is read by a human on a card; keep it to a couple of sentences.
+MAX_NOTE_CHARS = 400
 REFUSED_TICKET_STATUSES: Tuple[str, ...] = (
     "done", "failed", "cancelled", "inbox", "assigned", "blocked", "review",
 )
@@ -107,21 +109,48 @@ class SessionContext:
 
 
 def _scope_update_ticket(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
-    """This ticket, and never a status that ends its run."""
+    """Just the note. A session cannot move its ticket at all.
+
+    ``done`` was always refused — the host records the outcome when the turn
+    ends. ``blocked`` and ``review`` were allowed at first and turned out to be
+    worse than ``done``, not milder: ``apply_result`` returns early for a ticket
+    that is no longer ``in_progress``, so the moment a session set either one its
+    own turn was discarded — no deliverables, no report, no result text, no
+    usage. A session that is genuinely stuck has ``ask_human``, which parks the
+    ticket at turn end and keeps everything.
+    """
     status = str(params.get("status") or "").strip().lower()
-    if status not in SESSION_TICKET_STATUSES:
+    if status and status != "in_progress":
         raise SessionToolRefused(
-            f"a session may only set its ticket to {SESSION_TICKET_STATUSES[0]!r}, not {status!r}. "
-            "Moving it anywhere else ends the run, and your turn's work — your files, your report, "
-            "your result — is then thrown away. To stop for an answer use ask_human, which parks the "
-            "ticket properly and keeps everything. To finish, just end your turn: the host records "
-            "the outcome."
+            f"a session cannot move its ticket to {status!r}, or anywhere else. Moving it ends the run, "
+            "and your turn's work — your files, your report, your result — is then thrown away. To stop "
+            "for an answer use ask_human, which parks the ticket properly and keeps everything. To "
+            "finish, just end your turn: the host records the outcome. This tool only leaves a note."
         )
-    out: Dict[str, Any] = {"task_id": ctx.task_id, "status": status}
     note = str(params.get("note") or "").strip()
-    if note:
-        out["blocked_reason"] = note
-    return out
+    if not note:
+        raise SessionToolRefused(
+            "update_ticket leaves a progress note — say what you are doing, in a sentence."
+        )
+    return {"note": note[:MAX_NOTE_CHARS]}
+
+
+async def _run_update_ticket(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
+    """Write the note where the operator will see it.
+
+    NOT ``platform_update_task_status``, which this tool used to dispatch to. For
+    a ticket that is already ``in_progress`` — which every running session's is —
+    that action takes its atomic-claim branch, whose ``UPDATE … WHERE status <>
+    'in_progress'`` matches no row; it returned ``{"success": True}`` having
+    written nothing at all, and never read ``blocked_reason``. The note vanished
+    and the model was told it had landed.
+    """
+    from services.cli_host_service import record_session_note
+
+    return record_session_note(
+        db, task_id=ctx.task_id, workspace_id=ctx.workspace_id,
+        agent_name=ctx.agent_name, note=params.get("note") or "",
+    )
 
 
 def _scope_submit_report(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -274,23 +303,23 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
     ),
     SessionTool(
         name="update_ticket",
-        action="platform_update_task_status",
+        action="platform_update_task_status",   # the historical name; the runner writes the note
         description=(
-            "Leave a progress note on YOUR OWN ticket while you work. You cannot move it "
-            "anywhere: closing it is the host's job when your turn ends, and any other status "
-            "would end the run and throw your work away. If you genuinely cannot proceed "
-            "without an answer, use ask_human instead."
+            "Leave a progress note on YOUR OWN ticket while you work — the operator sees it live on "
+            "the ticket. You cannot move the ticket anywhere: closing it is the host's job when your "
+            "turn ends, and any other status would end the run and throw your work away. If you "
+            "genuinely cannot proceed without an answer, use ask_human instead."
         ),
         input_schema={
             "type": "object",
             "properties": {
-                "status": {"type": "string", "enum": list(SESSION_TICKET_STATUSES),
-                           "description": "The status to move this ticket to."},
-                "note": {"type": "string", "description": "What you are doing or what changed. Kept on the ticket."},
+                "note": {"type": "string",
+                         "description": "What you are doing, or what changed. One or two sentences."},
             },
-            "required": ["status"],
+            "required": ["note"],
         },
         scope=_scope_update_ticket,
+        runner=_run_update_ticket,
         reads_only=False,
         tags=("board",),
     ),

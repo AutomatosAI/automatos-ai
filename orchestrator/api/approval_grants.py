@@ -580,9 +580,23 @@ def _resume_clarification_if_parked(db: Session, grant: ApprovalGrant) -> bool:
     so the held task drops out of dispatch_ready's hold and the next 5s coordinator
     tick re-dispatches it — its prompt then carries render_resume_block's Q&A +
     preserved draft. This is the ONLY production caller; no parallel resume path."""
+    import uuid as _uuid
+
     from core.models.orchestration import OrchestrationTask
     from services.clarification_ladder import apply_answered_clarification, pending_ask_id
 
+    # ``OrchestrationTask.id`` is a native ``uuid`` column, so Postgres receives
+    # ``= %(id)s::UUID``. A PRD-193 stored-call grant's subject_id is
+    # ``"<action>:<32 hex>"``, which raises ``InvalidTextRepresentation`` — and
+    # the except below cannot undo that: the transaction is ABORTED, so
+    # ``_resume_tool_call``'s own queries then fail with InFailedSqlTransaction
+    # and the commit at the end of the answer route raises, returning a 500 to
+    # the approver for a grant that was already committed GRANTED. Ask the
+    # question before the database does.
+    try:
+        _uuid.UUID(str(grant.subject_id))
+    except (TypeError, ValueError, AttributeError):
+        return False
     try:
         task = (
             db.query(OrchestrationTask)
@@ -594,6 +608,12 @@ def _resume_clarification_if_parked(db: Session, grant: ApprovalGrant) -> bool:
             "[approval_grants.api] clarification bridge: subject_id %s is not an orchestration task",
             grant.subject_id,
         )
+        # A failed statement leaves the transaction unusable for everything that
+        # follows — the caller's own resume, and its commit.
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
         return False
     if task is None or str(pending_ask_id(task)) != str(grant.id):
         return False

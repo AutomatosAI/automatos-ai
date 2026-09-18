@@ -100,13 +100,28 @@ def test_a_session_notes_progress_on_its_own_ticket_and_moves_it_nowhere():
     turn was discarded — no deliverables, no report, no result text, no usage.
     """
     tool = st.get_tool("update_ticket")
-    noted = st.resolve_parameters(tool, {"status": "in_progress", "note": "reading the brief"}, CTX)
-    assert noted == {"task_id": 119, "status": "in_progress", "blocked_reason": "reading the brief"}
+    # The note goes through a RUNNER. Dispatching it to platform_update_task_status
+    # was a no-op that reported success: for a ticket already ``in_progress`` —
+    # which every running session's is — that action takes its atomic-claim
+    # branch, whose ``UPDATE … WHERE status <> 'in_progress'`` matches no row,
+    # and it never reads ``blocked_reason`` at all. The note vanished and the
+    # model was told it had landed.
+    assert tool.runner is not None
+    assert sorted(tool.input_schema["properties"]) == ["note"]
+    assert tool.input_schema["required"] == ["note"]
+
+    assert st.resolve_parameters(tool, {"note": "reading the brief"}, CTX) == {"note": "reading the brief"}
+    assert st.resolve_parameters(tool, {"note": "x", "status": "in_progress"}, CTX) == {"note": "x"}
     # the ticket is always ITS ticket, whatever the call says
-    assert st.resolve_parameters(tool, {"status": "in_progress", "task_id": 7}, CTX)["task_id"] == 119
-    for refused in ("blocked", "review", "done", "failed", "cancelled", "assigned", "", "DONE "):
-        with pytest.raises(st.SessionToolRefused):
-            st.resolve_parameters(tool, {"status": refused}, CTX)
+    assert st.resolve_parameters(tool, {"note": "y", "task_id": 7}, CTX) == {"note": "y"}
+    assert len(st.resolve_parameters(tool, {"note": "z" * 900}, CTX)["note"]) == st.MAX_NOTE_CHARS
+
+    for refused in ("blocked", "review", "done", "failed", "cancelled", "assigned", "DONE "):
+        with pytest.raises(st.SessionToolRefused) as caught:
+            st.resolve_parameters(tool, {"status": refused, "note": "x"}, CTX)
+        assert "ask_human" in str(caught.value)          # where a stuck session should go
+    with pytest.raises(st.SessionToolRefused):
+        st.resolve_parameters(tool, {}, CTX)             # a note is the whole point
 
 
 def test_a_filter_tool_passes_only_the_fields_it_documents():
@@ -166,7 +181,12 @@ def test_a_refusal_a_failure_and_a_crash_all_come_back_as_readable_output():
                                        "params": {"name": "update_ticket", "arguments": {"status": "done"}}},
                                       CTX, server_version="1.0", call=_ok))
     assert "error" not in refused and refused["result"]["isError"] is True
-    assert "just end your turn" in refused["result"]["content"][0]["text"]
+    assert "cannot move its ticket" in refused["result"]["content"][0]["text"]
+    # a scope refusal reaches the model as tool output whatever the tool
+    empty = _run(rpc.handle_message({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                                     "params": {"name": "ask_human", "arguments": {"question": "  "}}},
+                                    CTX, server_version="1.0", call=_ok))
+    assert empty["result"]["isError"] is True and "one decision" in empty["result"]["content"][0]["text"]
 
     async def failing(tool, arguments, ctx):
         return {"success": False, "error": "the board is unavailable"}
