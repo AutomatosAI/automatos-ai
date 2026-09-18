@@ -351,8 +351,9 @@ def test_record_shadow_appends_json_lines(monkeypatch, tmp_path):
     assert scorer.filter_window(rows, since=None, until=first_ts - 1) == []
     assert scorer.parse_when("2026-09-18T17:59:45Z") == scorer.parse_when("2026-09-18T18:59:45+01:00")
     assert scorer.parse_when("1758218385") == 1758218385.0 and scorer.parse_when(None) is None
-    args = scorer._build_parser().parse_args(["--since", "2026-09-18T17:59:45Z", "--until", "1758300000"])
+    args = scorer._build_parser().parse_args(["--since", "2026-09-18T17:59:45Z", "--until", "2026-09-19T06:30:00+00:00"])
     assert scorer.parse_when(args.since) < scorer.parse_when(args.until)
+    assert scorer.parse_when(str(scorer.parse_when(args.until))) == scorer.parse_when(args.until)  # epoch round-trips
     # the ledger's view: one JSON document, serialisable, windowed, split by traffic
     summary = scorer.summary_dict(rows, only=None, since=first_ts, until=None)
     assert summary["rows"] == 3 and summary["simulated"] == 1 and summary["real"] == 2
