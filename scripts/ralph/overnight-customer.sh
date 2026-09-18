@@ -104,8 +104,10 @@ cd "$REPO_ROOT"
 if ! python3 -m tests.sim.customer preflight | tee -a "$LOG_DIR/runner.log"; then
   say "${RED}preflight failed — fix the stack (backend, PRD-245 bridge, host) and relaunch${NC}"; exit 2
 fi
-NIGHT_START="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
-[[ -f "$STATUS" ]] || set_status STARTED "$NIGHT_START"
+# A relaunch on the same night keeps the original start: the cost window and the
+# persona's NIGHT_START must cover the whole night, not the last runner process.
+NIGHT_START="$(grep '^STARTED=' "$STATUS" 2>/dev/null | head -1 | cut -d= -f2)"
+[[ -n "$NIGHT_START" ]] || { NIGHT_START="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"; set_status STARTED "$NIGHT_START"; }
 [[ -f "$NIGHT_DIR/DIARY.md" ]] || printf '# Customer night %s — diary\n\nNight started %s (UTC). Workspace %s.\n\n' "$DATE" "$NIGHT_START" "$SIM_WORKSPACE_ID" > "$NIGHT_DIR/DIARY.md"
 
 # --- the night ----------------------------------------------------------------------
@@ -122,6 +124,13 @@ for ((iter = 1; iter <= MAX_ITERS; iter++)); do
   if is_usage_limit_error "$CLAUDE_OUTPUT" "$CLAUDE_EXIT"; then
     set_status "ITER$iter" LIMIT
     say "${YELLOW}usage limit — waiting${NC}"; countdown "$(get_sleep_duration "$CLAUDE_OUTPUT")" "Limit wait..."; iter=$((iter - 1)); continue
+  fi
+  if [[ $CLAUDE_EXIT -eq 124 || $CLAUDE_EXIT -eq 137 ]]; then
+    # the iteration used its whole window — that is a full iteration, not a failure
+    consecutive_failures=0; set_status "ITER$iter" TIMEOUT
+    say "${YELLOW}iteration $iter ran to the ${ITER_TIMEOUT} limit; continuing from the diary${NC}"
+    if echo "$CLAUDE_OUTPUT" | grep -q "NIGHT_COMPLETE"; then say "${GREEN}NIGHT_COMPLETE${NC}"; break; fi
+    continue
   fi
   if [[ $CLAUDE_EXIT -ne 0 ]]; then
     consecutive_failures=$((consecutive_failures + 1)); set_status "ITER$iter" "EXIT$CLAUDE_EXIT"
