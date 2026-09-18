@@ -251,7 +251,10 @@ def test_the_claim_folds_the_answer_in_and_keeps_the_ask_ledger(monkeypatch):
                                grant_id=42, question="Which notes should I use?"),
         grant_id=42, answer="deliverables/sessions/116/workspace-testing-brief.md")
     task = _task(status="assigned", ref=ref)
+    # the columns the claim reads that the file's fixture leaves out
     task.attempts = 1                      # the claim stamps the attempt it won
+    task.review_mode = "auto"
+    task.attachment_ids = []
     host = NS(id="h1", workspace_id="ws-c1")
 
     monkeypatch.setattr(svc, "claim_tasks", lambda db, **kw: [task])
