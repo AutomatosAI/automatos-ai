@@ -15,6 +15,7 @@ action to put through the PRD-64 dispatcher, which would fail the registry looku
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -120,3 +121,97 @@ def test_a_platform_tool_still_goes_through_the_dispatcher(monkeypatch):
     asyncio.run(st.call_tool(object(), tool, {}, CTX))
     assert seen["tool_name"] == st.PLATFORM_DISPATCHER
     assert seen["parameters"] == {"action": "platform_board_summary", "params": {}}
+
+
+# ---------------------------------------------------------------------------
+# The two clauses of this story's test plan that had no test — and the fake that
+# was hiding a signature drift.
+# ---------------------------------------------------------------------------
+
+def _record(monkeypatch):
+    """A fake executor that records the call and answers whatever it is told to."""
+    seen: dict = {}
+
+    def _make(answer):
+        class _Executor:
+            def __init__(self, db):
+                pass
+
+            async def execute_tool(self, **kwargs):
+                seen.update(kwargs)
+                return answer
+
+        import modules.tools.execution.unified_executor as ue
+        monkeypatch.setattr(ue, "UnifiedToolExecutor", _Executor)
+        return seen
+
+    return _make
+
+
+def test_the_recorded_call_binds_to_the_REAL_executor_signature(monkeypatch):
+    """The fakes in this file take ``**kwargs``, so they accept a call the real
+    executor would reject — a renamed or newly-required parameter passes every
+    test here and raises TypeError in production. Bind the recorded call against
+    the real signature so drift fails in CI instead.
+    """
+    import inspect
+
+    from modules.tools.execution.unified_executor import UnifiedToolExecutor
+
+    seen = _record(monkeypatch)({"success": True, "result": {}})
+    tool = st.get_tool("composio_execute")
+    params = st.resolve_parameters(tool, {"action": "GMAIL_FETCH_EMAILS"}, CTX)
+    asyncio.run(st.call_tool(object(), tool, params, CTX))
+
+    signature = inspect.signature(UnifiedToolExecutor.execute_tool)
+    signature.bind(UnifiedToolExecutor, **seen)          # raises if a name moved
+
+
+def test_an_action_for_an_unconnected_app_is_refused_and_said_plainly(monkeypatch):
+    """OPS's case if the calendar were not linked. The router refuses by name;
+    the session must read WHY and be able to act on it, not see a dead tool."""
+    from services import session_tools_rpc as rpc
+
+    refusal = {"success": False,
+               "error": "GOOGLECALENDAR is not connected in this workspace. "
+                        "Connect it on the Tools page, then retry."}
+    _record(monkeypatch)(refusal)
+
+    tool = st.get_tool("composio_execute")
+    params = st.resolve_parameters(tool, {"action": "GOOGLECALENDAR_FIND_EVENT"}, CTX)
+    out = asyncio.run(st.call_tool(object(), tool, params, CTX))
+    assert out["success"] is False
+
+    rendered = rpc.render_result(out)
+    assert rendered["isError"] is True
+    body = rendered["content"][0]["text"]
+    assert "GOOGLECALENDAR is not connected" in body and "Tools page" in body
+
+
+def test_the_key_is_never_in_the_request_or_the_response(monkeypatch):
+    """The whole point of routing Composio through the backend: the session says
+    WHICH action, Automatos holds the credential. Nothing the session sends can
+    carry one, and nothing it gets back may either."""
+    from services import session_tools_rpc as rpc
+
+    secret = "ak_live_0123456789abcdef"
+    answer = {"success": True, "result": {"events": [{"summary": "Standup"}]},
+              # a router that leaked one would look like this
+              "connection": {"toolkit": "GOOGLECALENDAR", "status": "ACTIVE"}}
+    seen = _record(monkeypatch)(answer)
+
+    tool = st.get_tool("composio_execute")
+    params = st.resolve_parameters(
+        tool, {"action": "GOOGLECALENDAR_FIND_EVENT", "calendar_id": "primary"}, CTX)
+    out = asyncio.run(st.call_tool(object(), tool, params, CTX))
+
+    # the request carries an action and its parameters, and no credential field
+    sent = seen["parameters"]
+    assert set(sent) == {"action", "params"}
+    assert secret not in json.dumps(sent)
+    for forbidden in ("api_key", "apiKey", "auth_config", "connected_account_id", "bearer", "token"):
+        assert forbidden not in json.dumps(sent).lower(), forbidden
+
+    # and neither the tool's schema nor what comes back invites one
+    assert set(tool.input_schema["properties"]) == {"action", "params"}
+    assert secret not in json.dumps(rpc.render_result(out))

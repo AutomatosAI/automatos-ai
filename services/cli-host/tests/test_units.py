@@ -855,11 +855,20 @@ def test_script_guards_cannot_be_made_to_backtrack(tmp_path):
 
     ctx, fill = _layout(tmp_path)
     probes = ["s" + "\\a" * 2000, "sa" + "\\a" * 2000, "print" + "x" * 20000, "/" + "a1" * 10000]
-    started = time.monotonic()
-    for probe in probes:
-        policy._SED_ESCAPE_RE.search(probe)
-        policy._AWK_ESCAPE_RE.search(probe)
-    assert time.monotonic() - started < 2.0
+
+    def _scan(texts):
+        started = time.monotonic()
+        for probe in texts:
+            policy._SED_ESCAPE_RE.search(probe)
+            policy._AWK_ESCAPE_RE.search(probe)
+        return time.monotonic() - started
+
+    # Measured against THIS runner, not against a wall-clock guess: a loaded CI
+    # box is slow at everything, and the failure being caught is exponential, not
+    # "a bit slow". Half-length probes give the baseline; catastrophic
+    # backtracking would blow past a 50x allowance on the full-length ones.
+    baseline = max(_scan([p[: len(p) // 2] for p in probes]), 1e-4)
+    assert _scan(probes) < baseline * 50
     # …and a program made of those shapes is still judged, not hung.
     assert _decide("Bash", {"command": fill("sed 's/" + "\\a" * 500 + "/x/' <ROOT>/f")}, ctx).behavior == "allow"
 
