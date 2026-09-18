@@ -331,6 +331,9 @@ class _CountingDb:
     def rollback(self):
         pass
 
+    def expire(self, obj, attrs=None):
+        self.expired = list(attrs or [])
+
 
 def test_the_bearer_is_read_from_either_header_and_trimmed():
     assert api_st.bearer_token(_Req(Authorization="Bearer tok-1")) == "tok-1"
@@ -369,19 +372,24 @@ def test_require_session_builds_the_identity_from_the_ticket_not_the_call(monkey
 
 def test_the_allowance_counts_on_the_ticket_and_refuses_in_words(monkeypatch):
     monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 3)
+    api_st._UNPERSISTED_CALLS.clear()
     task = SimpleNamespace(id=119, runtime_ref={})
     db = _CountingDb()
 
     assert api_st.call_allowance(db, task) is None                    # 1
     assert api_st.call_allowance(db, task) is None                    # 2
     assert api_st.call_allowance(db, task) is None                    # 3 — the cap itself passes
-    assert task.runtime_ref[api_st.CALLS_KEY] == 3
+    assert db.value == 3                                              # counted on the ROW
     refusal = api_st.call_allowance(db, task)                         # 4 — over
     assert refusal and "3" in refusal
     # the model has to be able to act on it: what happened, and what to do now
     assert "finish your turn" in refusal
-    assert task.runtime_ref[api_st.CALLS_KEY] == 4
-    assert db.commits == 4
+    assert db.value == 4 and db.commits == 4
+    # the ORM attribute is expired for a reload, never assigned — an assignment
+    # marks the row dirty and the tool's own commit would flush the whole
+    # document over what the host wrote since
+    assert db.expired == ["runtime_ref"]
+    assert task.runtime_ref == {}
     # ONE key, not the whole document: the host writes pending_permissions onto
     # this same row while the session runs, and that list decides whether a held
     # command sends the ticket to review.
@@ -391,22 +399,31 @@ def test_the_allowance_counts_on_the_ticket_and_refuses_in_words(monkeypatch):
 
 def test_the_counter_does_not_write_back_the_whole_ref(monkeypatch):
     monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 10)
-    task = SimpleNamespace(id=119, runtime_ref={"runtime": "cli", "pending_permissions": [{"request_id": "r1"}]})
-    api_st.call_allowance(_CountingDb(), task)
-    # what the host recorded is still there, and untouched
-    assert task.runtime_ref["pending_permissions"] == [{"request_id": "r1"}]
-    assert task.runtime_ref["runtime"] == "cli"
-    assert task.runtime_ref[api_st.CALLS_KEY] == 1
+    api_st._UNPERSISTED_CALLS.clear()
+    before = {"runtime": "cli", "pending_permissions": [{"request_id": "r1"}]}
+    task = SimpleNamespace(id=119, runtime_ref=dict(before))
+    db = _CountingDb()
+    api_st.call_allowance(db, task)
+    # ONE key in ONE statement, and the in-memory document is not touched at all
+    assert db.statements and all("jsonb_set" in stmt for stmt in db.statements)
+    assert task.runtime_ref == before
 
 
-def test_the_allowance_rebuilds_the_ref_rather_than_mutating_it(monkeypatch):
+def test_the_sql_uses_the_casts_this_repo_can_bind(monkeypatch):
+    """SQLAlchemy ``text()`` mis-parses ``:param::type`` (a known trap here), so
+    every cast in the statement is ``CAST(… AS …)`` and no bind is followed by
+    ``::``. The statement has never run in CI against Postgres — the tests use a
+    fake — so its text is checked for the shapes that would fail there."""
     monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 10)
-    original = {"runtime": "cli", "session_id": "s-119"}
-    task = SimpleNamespace(id=119, runtime_ref=original)
-    api_st.call_allowance(_CountingDb(), task)
-    assert original == {"runtime": "cli", "session_id": "s-119"}      # untouched
-    assert task.runtime_ref[api_st.CALLS_KEY] == 1
-    assert task.runtime_ref["session_id"] == "s-119"                  # nothing else lost
+    api_st._UNPERSISTED_CALLS.clear()
+    db = _CountingDb()
+    api_st.call_allowance(db, SimpleNamespace(id=119, runtime_ref={}))
+    stmt = db.statements[0]
+    import re
+    assert not re.search(r":\w+::", stmt), "a bind followed by :: — SQLAlchemy text() will not parse it"
+    assert "CAST(:path AS text[])" in stmt                  # jsonb_set wants text[], not text
+    assert "CAST(runtime_ref ->> :field AS int)" in stmt
+    assert "RETURNING" in stmt
 
 
 def test_a_broken_counter_still_counts(monkeypatch):
@@ -418,12 +435,19 @@ def test_a_broken_counter_still_counts(monkeypatch):
     exactly when things were going wrong. The count now lives in the request too.
     """
     monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 2)
+    api_st._UNPERSISTED_CALLS.clear()
     task = SimpleNamespace(id=1, runtime_ref={})
     broken = _CountingDb(fail=True)
     assert api_st.call_allowance(broken, task) is None                # 1
     assert api_st.call_allowance(broken, task) is None                # 2
     assert api_st.call_allowance(broken, task) is not None            # 3 — still refused
-    assert task.runtime_ref[api_st.CALLS_KEY] == 3
+    assert api_st._UNPERSISTED_CALLS[1] == 3                          # counted in-process
+    assert task.runtime_ref == {}                                     # and never assigned
+
+    # a persisted count that is higher wins, so a recovering database cannot
+    # reset the count below what the row already says
+    recovering = SimpleNamespace(id=3, runtime_ref={api_st.CALLS_KEY: 5})
+    assert api_st.call_allowance(_CountingDb(fail=True), recovering) is not None   # 6 > 2
 
     # a cap of zero is "no cap", not "no calls"
     monkeypatch.setattr(api_st.config, "SESSION_TOOLS_MAX_CALLS_PER_TICKET", 0)
@@ -437,33 +461,69 @@ def test_a_broken_counter_still_counts(monkeypatch):
 # What a session gets back, and what it cannot get back (review findings)
 # ---------------------------------------------------------------------------
 
+def _list_handler_row_keys():
+    """The keys the REAL list handler puts on each task — read from its source,
+    so this test cannot pass on a shape the handler does not produce."""
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "modules" / "tools" / "discovery" / "handlers_board_tasks.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    # By NAME: ``list_board_tasks`` is what ``platform_list_tasks`` runs. A looser
+    # match (any dict carrying description + error_message) found a DIFFERENT
+    # handler's row first, one with raw_prompt and review_mode on it.
+    handler = next((n for n in ast.walk(tree)
+                    if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == "list_board_tasks"), None)
+    assert handler is not None, "list_board_tasks was renamed — re-verify what list_tasks returns"
+    for node in ast.walk(handler):
+        if isinstance(node, ast.Dict):
+            keys = {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+            if "assigned_agent" in keys and "title" in keys:
+                return keys
+    raise AssertionError("the list handler's row literal was not found")
+
+
 def test_list_tasks_returns_only_the_fields_it_advertises():
     """The board action hands back every field of every ticket in the workspace,
     including each one's full description — operator-written text that routinely
     carries paths, hostnames and pasted credentials. One call would put every
     other ticket's brief in front of a session an injected page may be steering.
+
+    The shape below is the handler's own: ``tasks`` at the TOP level (the
+    executor returns the handler's dict as is — there is no ``result`` key) and
+    the agent under ``assigned_agent``. The first version of this test fed the
+    projection an imagined shape and passed while the projection did nothing.
     """
+    handler_keys = _list_handler_row_keys()
+    assert set(st.LIST_TASKS_FIELDS) <= handler_keys, "the projection names a key the handler never emits"
+    assert {"description", "error_message"} <= handler_keys       # i.e. there is something to strip
+
     raw = {
-        "success": True,
-        "result": {"total": 2, "tasks": [
-            {"id": 1, "title": "A", "status": "todo", "priority": "high",
-             "assigned_agent_id": 7, "assigned_agent_name": "OPS",
-             "description": "ssh deploy@10.0.0.4 — password hunter2", "error_message": "boom at /srv/app"},
-            {"id": 2, "title": "B", "status": "done", "priority": "low",
-             "assigned_agent_id": None, "assigned_agent_name": None,
-             "description": "internal notes", "error_message": None},
-        ]},
+        "success": True, "total": 2,
+        "tasks": [
+            {"id": 1, "title": "A", "description": "ssh deploy@10.0.0.4 — password hunter2",
+             "status": "todo", "priority": "high", "tags": ["ops"], "assigned_agent": "OPS",
+             "created_at": "2026-09-18", "started_at": None, "completed_at": None,
+             "error_message": "boom at /srv/app"},
+            {"id": 2, "title": "B", "description": "internal notes", "status": "done",
+             "priority": "low", "tags": [], "assigned_agent": "unassigned",
+             "created_at": "2026-09-18", "started_at": None, "completed_at": None,
+             "error_message": None},
+        ],
     }
+    assert set(raw["tasks"][0]) == handler_keys                      # this IS the handler's row
     out = st._project_list_tasks(raw)
-    tasks = out["result"]["tasks"]
-    assert out["result"]["total"] == 2                      # the envelope survives
+    tasks = out["tasks"]
+    assert out["total"] == 2                                          # the envelope survives
     assert [t["id"] for t in tasks] == [1, 2]
-    assert [t["title"] for t in tasks] == ["A", "B"]
+    assert [t["assigned_agent"] for t in tasks] == ["OPS", "unassigned"]
     for task in tasks:
-        assert set(task) <= set(st.LIST_TASKS_FIELDS)
-        assert "description" not in task and "error_message" not in task
+        assert set(task) == set(st.LIST_TASKS_FIELDS)
     dumped = json.dumps(out)
     assert "hunter2" not in dumped and "10.0.0.4" not in dumped and "/srv/app" not in dumped
+    # and what the session reads is the narrowed set, end to end through the wire
+    body = rpc.render_result(out)["content"][0]["text"]
+    assert "hunter2" not in body and "OPS" in body
 
 
 def test_a_failure_is_only_projected_when_it_succeeded():

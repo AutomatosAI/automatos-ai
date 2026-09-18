@@ -150,26 +150,28 @@ def _scope_list_tasks(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, 
 # every other ticket's brief in front of a session whose prompt an injected web
 # page or repo file may be steering. The tool promises a few fields; it returns
 # those fields.
-LIST_TASKS_FIELDS: Tuple[str, ...] = (
-    "id", "title", "status", "priority", "assigned_agent_id", "assigned_agent_name",
-)
+#
+# These are the handler's OWN key names (``handlers_board_tasks``: the list
+# handler builds each row by hand, and names the agent ``assigned_agent``), and
+# the handler's dict comes back from the executor AS IS — ``tasks`` sits at the
+# top level, not under a ``result`` key. The first version of this projection
+# assumed both wrongly, and its test fed it the imagined shape: it narrowed
+# nothing and passed. A parity test now reads the handler's source.
+LIST_TASKS_FIELDS: Tuple[str, ...] = ("id", "title", "status", "priority", "assigned_agent")
 
 
 def _project_list_tasks(result: Dict[str, Any]) -> Dict[str, Any]:
     """Keep the envelope, narrow each task to the advertised fields."""
     if not isinstance(result, dict) or not result.get("success"):
         return result
-    payload = result.get("result")
-    if not isinstance(payload, dict):
-        return result
-    rows = payload.get("tasks")
+    rows = result.get("tasks")
     if not isinstance(rows, list):
         return result
     narrowed = [
         {k: row.get(k) for k in LIST_TASKS_FIELDS if k in row}
         for row in rows if isinstance(row, dict)
     ]
-    return {**result, "result": {**payload, "tasks": narrowed}}
+    return {**result, "tasks": narrowed}
 
 
 async def _run_ask_human(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
