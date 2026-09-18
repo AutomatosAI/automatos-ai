@@ -202,7 +202,9 @@ def test_an_outright_refusal_is_not_a_hold():
         assert classify_denial(denial["stage"], denial["reason"]) == "refused", denial["reason"]
     assert classify_denial("PreToolUse", "sed reads its program from a file the gate cannot judge") == "refused"
     assert classify_denial("PreToolUse", "awk program runs a command of its own: 'system(\"id\")'") == "refused"
-    assert classify_denial("PreToolUse", "redirection outside the session directory: /etc/x") == "refused"
+    # a redirection outside the roots carries the read_outside wording and is
+    # classified there — the same verdict under the better name
+    assert classify_denial("PreToolUse", "redirection outside the session directory: /etc/x") == "read_outside"
 
 
 def test_refusals_do_not_send_the_ticket_to_review(monkeypatch):

@@ -91,14 +91,20 @@ def test_a_session_reports_on_its_own_ticket_only():
     assert set(params) <= {"title", "content", "summary", "report_type", "recommendations", "action_items", "linked_task_ids"}
 
 
-def test_a_session_moves_its_own_ticket_and_cannot_close_it():
+def test_a_session_notes_progress_on_its_own_ticket_and_moves_it_nowhere():
+    """A session may not move its ticket out of ``in_progress`` at all.
+
+    ``blocked`` and ``review`` were allowed at first and turned out to be worse
+    than ``done``, not milder: ``apply_result`` returns early for a ticket that
+    is no longer ``in_progress``, so the moment a session set either one its own
+    turn was discarded — no deliverables, no report, no result text, no usage.
+    """
     tool = st.get_tool("update_ticket")
-    assert st.resolve_parameters(tool, {"status": "review"}, CTX) == {"task_id": 119, "status": "review"}
-    blocked = st.resolve_parameters(tool, {"status": "blocked", "note": "no notes to write from"}, CTX)
-    assert blocked == {"task_id": 119, "status": "blocked", "blocked_reason": "no notes to write from"}
-    # 'blocked' without a reason still carries one — the action requires it
-    assert st.resolve_parameters(tool, {"status": "blocked"}, CTX)["blocked_reason"]
-    for refused in ("done", "failed", "cancelled", "assigned", "", "DONE "):
+    noted = st.resolve_parameters(tool, {"status": "in_progress", "note": "reading the brief"}, CTX)
+    assert noted == {"task_id": 119, "status": "in_progress", "blocked_reason": "reading the brief"}
+    # the ticket is always ITS ticket, whatever the call says
+    assert st.resolve_parameters(tool, {"status": "in_progress", "task_id": 7}, CTX)["task_id"] == 119
+    for refused in ("blocked", "review", "done", "failed", "cancelled", "assigned", "", "DONE "):
         with pytest.raises(st.SessionToolRefused):
             st.resolve_parameters(tool, {"status": refused}, CTX)
 
@@ -160,7 +166,7 @@ def test_a_refusal_a_failure_and_a_crash_all_come_back_as_readable_output():
                                        "params": {"name": "update_ticket", "arguments": {"status": "done"}}},
                                       CTX, server_version="1.0", call=_ok))
     assert "error" not in refused and refused["result"]["isError"] is True
-    assert "not yours to record" in refused["result"]["content"][0]["text"]
+    assert "just end your turn" in refused["result"]["content"][0]["text"]
 
     async def failing(tool, arguments, ctx):
         return {"success": False, "error": "the board is unavailable"}
@@ -379,7 +385,8 @@ def test_the_allowance_counts_on_the_ticket_and_refuses_in_words(monkeypatch):
     # ONE key, not the whole document: the host writes pending_permissions onto
     # this same row while the session runs, and that list decides whether a held
     # command sends the ticket to review.
-    assert all("jsonb_set" in stmt and api_st.CALLS_KEY in stmt for stmt in db.statements)
+    assert db.statements and all("jsonb_set" in stmt for stmt in db.statements)
+    assert all("runtime_ref = jsonb_set" in stmt for stmt in db.statements)
 
 
 def test_the_counter_does_not_write_back_the_whole_ref(monkeypatch):

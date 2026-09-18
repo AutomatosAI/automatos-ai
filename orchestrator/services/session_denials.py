@@ -60,7 +60,8 @@ REFUSED_REASON_MARKERS: Tuple[str, ...] = (
     "is not one this ticket may call",
     "reads its program from a file the gate cannot judge",
     "program runs a command of its own",
-    "redirection outside the session directory",
+    # NOT "redirection outside the session directory": it carries the read_outside
+    # wording and is classified there, which is the same verdict by a better name.
 )
 # ``session.py::_reply_for`` — the stage of a TUI permission prompt the host denied.
 PROMPT_STAGE = "PermissionRequest"

@@ -558,6 +558,7 @@ async def update_task(
             raise HTTPException(status_code=422, detail=f"Invalid status: {new_status}")
         old_status = task.status
         task.status = new_status
+        end_session_claim(task, old_status, new_status)
         if new_status == "in_progress" and not task.started_at:
             task.started_at = datetime.now(timezone.utc)
         if new_status in ("done", "review"):
@@ -902,6 +903,26 @@ async def run_task_now(
     return {"success": True, "task_id": task.id, "status": task.status}
 
 
+def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
+    """A ticket leaving ``in_progress`` by hand ends the run that was claimed on it.
+
+    Drop the lease and the session credential together (PRD-245). Without this a
+    board gesture — drag to Blocked, drag back to In Progress — left the claim's
+    lease live and the token hash on the row, so a credential whose plaintext is
+    still in that session's transcript and config file kept working with no
+    session running. Nothing here touches a ticket that was not running.
+    """
+    from services.cli_host_service import SESSION_TOKEN_HASH_KEY
+
+    if str(old_status) != "in_progress" or str(new_status) == "in_progress":
+        return
+    task.lease_until = None
+    ref = dict(task.runtime_ref or {})
+    if SESSION_TOKEN_HASH_KEY in ref:
+        ref.pop(SESSION_TOKEN_HASH_KEY, None)
+        task.runtime_ref = ref   # rebuild, never mutate in place (JSONB)
+
+
 @router.patch("/{task_id}/status", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def update_task_status(
     task_id: int,
@@ -924,6 +945,7 @@ async def update_task_status(
 
     old_status = task.status
     task.status = new_status
+    end_session_claim(task, old_status, new_status)
     if new_status == "in_progress":
         task.started_at = datetime.now(timezone.utc)
         task.completed_at = None

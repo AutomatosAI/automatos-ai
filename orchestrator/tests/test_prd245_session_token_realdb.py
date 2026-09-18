@@ -28,6 +28,7 @@ os.environ.setdefault("POSTGRES_PORT", "59432")
 os.environ.setdefault("POSTGRES_DB", "test")
 
 from core.database.database import get_database_url  # noqa: E402
+from api.board_tasks import end_session_claim  # noqa: E402
 from core.models.core import BoardTask  # noqa: E402
 from services import cli_host_service as svc  # noqa: E402
 from services import session_tools as st  # noqa: E402
@@ -185,28 +186,35 @@ def test_a_token_stops_working_when_its_ticket_stops_running(ticket, new_session
     assert svc.resolve_session_token(s, token) is not None
 
     row = s.query(BoardTask).get(task_id)
+    assert row.lease_until is not None                     # the claim set one
+
+    # an expired lease is not a running session, whatever the status says
+    kept = row.lease_until
+    row.lease_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    s.commit()
+    assert svc.resolve_session_token(s, token) is None, "an expired claim must not authenticate"
+    row.lease_until = kept
+    s.commit()
+    assert svc.resolve_session_token(s, token) is not None
+
+    # the board gesture: the operator drags the card out of In Progress. The
+    # route ends the claim — lease and credential together.
+    end_session_claim(row, "in_progress", "review")
     row.status = "review"
     s.commit()
+    assert row.lease_until is None
+    assert svc.SESSION_TOKEN_HASH_KEY not in (row.runtime_ref or {})
     assert svc.resolve_session_token(s, token) is None, "a token must not outlive its ticket's run"
 
-    # the board gesture: back to In Progress, no claim, no new token
+    # …and dragging it back does not revive anything: no hash, no lease, no claim
     row.status = "in_progress"
     s.commit()
     assert svc.resolve_session_token(s, token) is None, (
         "a ticket moved back to in_progress by hand must NOT revive an old session token"
     )
 
-    # an expired lease is not a running session either
-    row.lease_until = datetime.now(timezone.utc) - timedelta(seconds=1)
-    s.commit()
-    assert svc.resolve_session_token(s, token) is None
-
-    # only a live lease — what a claim and the host's heartbeat give it — resolves
-    row.lease_until = datetime.now(timezone.utc) + timedelta(seconds=60)
-    s.commit()
-    assert svc.resolve_session_token(s, token) is not None
-
-    # the result clears the hash as well (belt and braces)
+    # the run still reports its outcome — ending a claim takes the credential,
+    # not the result (the ticket is back at in_progress for the same attempt)
     out = asyncio.run(svc.apply_result(s, host, task_id, {
         "attempt": claimed["attempt"], "status": "success", "result_text": "done",
         "usage": {"input_tokens": 1, "output_tokens": 1},
@@ -215,7 +223,6 @@ def test_a_token_stops_working_when_its_ticket_stops_running(ticket, new_session
     s.refresh(row)
     assert svc.SESSION_TOKEN_HASH_KEY not in (row.runtime_ref or {})
     assert svc.resolve_session_token(s, token) is None
-    assert digest                                               # the hash was real to begin with
 
 
 def test_two_tickets_never_share_a_token(ticket, new_session):
