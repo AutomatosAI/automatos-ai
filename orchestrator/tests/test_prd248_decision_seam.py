@@ -345,6 +345,14 @@ def test_record_shadow_appends_json_lines(monkeypatch, tmp_path):
     assert len(scorer.split_traffic(rows, "real")) == 2 and len(scorer.split_traffic(rows, None)) == 3
     assert "tool_rerank rows=1" in scorer.summarize_rerank(scorer.split_traffic(rows, "sim"))
     assert scorer._build_parser().parse_args(["--only", "sim", "--purpose", "tool_rerank"]).only == "sim"
+    # the customer-night window: cut by ts the way the night ledger does
+    first_ts = rows[0]["ts"]
+    assert len(scorer.filter_window(rows, since=first_ts, until=None)) == 3
+    assert scorer.filter_window(rows, since=None, until=first_ts - 1) == []
+    assert scorer.parse_when("2026-09-18T17:59:45Z") == scorer.parse_when("2026-09-18T18:59:45+01:00")
+    assert scorer.parse_when("1758218385") == 1758218385.0 and scorer.parse_when(None) is None
+    args = scorer._build_parser().parse_args(["--since", "2026-09-18T17:59:45Z", "--until", "1758300000"])
+    assert scorer.parse_when(args.since) < scorer.parse_when(args.until)
 
 
 # --------------------------------------------------------------------------- #

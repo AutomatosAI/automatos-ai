@@ -49,6 +49,43 @@ def split_traffic(rows: List[Dict[str, Any]], only: Optional[str]) -> List[Dict[
     return rows
 
 
+def parse_when(value: Optional[str]) -> Optional[float]:
+    """An ISO-8601 timestamp (naive = UTC, 'Z' accepted) or epoch seconds → epoch
+    seconds; None stays None. The customer-night ledger cuts by the same window."""
+    if value is None or str(value).strip() == "":
+        return None
+    text = str(value).strip()
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    from datetime import datetime, timezone
+
+    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def filter_window(
+    rows: List[Dict[str, Any]], since: Optional[float] = None, until: Optional[float] = None
+) -> List[Dict[str, Any]]:
+    """Rows whose ``ts`` (epoch seconds) falls in [since, until]; an unbounded
+    side keeps everything on that side."""
+    out = []
+    for r in rows:
+        try:
+            ts = float(r.get("ts"))
+        except (TypeError, ValueError):
+            continue
+        if since is not None and ts < since:
+            continue
+        if until is not None and ts > until:
+            continue
+        out.append(r)
+    return out
+
+
 def summarize_rerank(rows: List[Dict[str, Any]]) -> str:
     """The tool-rerank rows: how the judged cut compares with the embedding cut."""
     out: List[str] = []
@@ -193,6 +230,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("path", nargs="?", default=None, help="the JSON-lines file (default: DECISION_SHADOW_LOG_PATH)")
     parser.add_argument("--only", choices=["sim", "real"], default=None, help="PRD-247 campaign rows only, or the operator's own turns only")
     parser.add_argument("--purpose", choices=["classifier", "tool_rerank", "all"], default="all")
+    parser.add_argument("--since", default=None, help="ISO-8601 or epoch seconds; rows at or after this (a customer night's start)")
+    parser.add_argument("--until", default=None, help="ISO-8601 or epoch seconds; rows at or before this (the night's end)")
     return parser
 
 
@@ -200,9 +239,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = _build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     path = Path(args.path) if args.path else _default_path()
     rows = split_traffic(load_rows(path), args.only)
+    since, until = parse_when(args.since), parse_when(args.until)
+    if since is not None or until is not None:
+        rows = filter_window(rows, since, until)
     simulated = sum(1 for r in rows if is_simulated(r))
+    window = f" window=[{args.since or '…'}, {args.until or '…'}]" if (since is not None or until is not None) else ""
     print(f"shadow log: {path}")
-    print(f"rows={len(rows)} simulated={simulated} real={len(rows) - simulated}" + (f" (only={args.only})" if args.only else ""))
+    print(f"rows={len(rows)} simulated={simulated} real={len(rows) - simulated}" + (f" (only={args.only})" if args.only else "") + window)
     if args.purpose in ("classifier", "all"):
         print("== classifier ==")
         print(summarize([r for r in rows if r.get("purpose", "classifier") == "classifier"]))
