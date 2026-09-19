@@ -1131,7 +1131,13 @@ class RAGService:
             logger.info(f"📁 Candidate sources: {source_file_counts}")
             if similarity_scores:
                 logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
-            logger.info(f"✅ Retrieved {len(candidates)} candidates from S3 Vectors")
+            # Name the backend that actually served it — this line said
+            # "S3 Vectors" on every local retrieval, which is the opposite of
+            # what a local-edition log should tell you (2026-09-19).
+            logger.info(
+                "✅ Retrieved %d candidates from %s",
+                len(candidates), type(vector_store).__name__,
+            )
 
             record_substrate_search_nowait(
                 seam=SEAM_DOCUMENTS,

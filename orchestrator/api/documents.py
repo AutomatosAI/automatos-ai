@@ -901,6 +901,14 @@ async def delete_document(
         logger.error(f"Error deleting document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+def _embedding_is_vector(db: Session) -> bool:
+    """True when ``document_chunks.embedding`` is a real pgvector column."""
+    from modules.search.vector_store.backends.pgvector_local_backend import _column_types
+
+    embedding_type, _ = _column_types(db)
+    return embedding_type not in ("text", "character varying")
+
+
 async def _reembed_document_from_chunks(db: Session, document, workspace_id: str) -> int:
     """Regenerate embeddings in place from the chunk text already in Postgres.
 
@@ -910,7 +918,7 @@ async def _reembed_document_from_chunks(db: Session, document, workspace_id: str
     rows = db.execute(text("""
         SELECT id, content
         FROM document_chunks
-        WHERE document_id = :document_id AND workspace_id = CAST(:workspace_id AS uuid)
+        WHERE document_id = :document_id AND CAST(workspace_id AS text) = :workspace_id
         ORDER BY chunk_index
     """), {"document_id": document.id, "workspace_id": workspace_id}).fetchall()
 
@@ -926,9 +934,12 @@ async def _reembed_document_from_chunks(db: Session, document, workspace_id: str
         vector = await embedding_manager.generate_embedding(content)
         values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
         literal = "[" + ",".join(f"{float(x):.8f}" for x in values) + "]"
-        db.execute(text("""
+        # document_chunks.embedding is TEXT on the local stack and vector on a
+        # migrated one; the read path (pgvector_local_backend) accepts either
+        # literal form, so write the bare literal and let the column take it.
+        db.execute(text(f"""
             UPDATE document_chunks
-            SET embedding = CAST(:emb AS vector)
+            SET embedding = {"CAST(:emb AS vector)" if _embedding_is_vector(db) else ":emb"}
             WHERE id = :chunk_id
         """), {"emb": literal, "chunk_id": chunk_id})
         embedded += 1

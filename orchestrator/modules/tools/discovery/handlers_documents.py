@@ -542,14 +542,26 @@ async def search_documents(db: Session, workspace_id: UUID, params: Dict[str, An
         logger.error("[documents] semantic search failed: %s", e, exc_info=True)
         return {"success": False, "error": f"document search failed: {e}"}
 
+    # RAGService chunks carry `source_file` and `document_id`; the retrieval
+    # SCORE lives in sources_map (a chunk's own `similarity` is the
+    # post-optimisation value and reads 1.0 for everything).
+    scores = {
+        str(entry.get("document_id")): entry.get("score")
+        for entry in (result.sources_map or [])
+        if entry.get("document_id") is not None
+    }
     passages = []
     for chunk in (result.chunks or [])[:limit]:
         metadata = chunk.get("metadata") or {}
+        document_id = chunk.get("document_id") or metadata.get("document_id")
+        score = scores.get(str(document_id))
+        if score is None:
+            score = chunk.get("similarity") or 0.0
         passages.append({
-            "document_id": metadata.get("document_id") or chunk.get("document_id"),
-            "file_name": chunk.get("file_name") or metadata.get("file_name") or "",
+            "document_id": document_id,
+            "file_name": chunk.get("source_file") or metadata.get("file_name") or "",
             "chunk_index": chunk.get("chunk_index") or metadata.get("chunk_index"),
-            "score": round(float(chunk.get("score") or chunk.get("similarity") or 0.0), 4),
+            "score": round(float(score), 4),
             "content": (chunk.get("content") or "")[:SEARCH_DOCUMENTS_MAX_PASSAGE_CHARS],
         })
 
