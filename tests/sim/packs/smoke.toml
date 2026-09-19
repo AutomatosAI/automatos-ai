@@ -1,0 +1,48 @@
+# The first pack to run: proves the instrument end to end in a few minutes.
+# One agent, one of each scenario kind, a one-dollar ceiling.
+
+[pack]
+name = "smoke"
+description = "instrument check: agent CRUD, one ticket to done, two turns with Auto"
+budget_usd = 1.0
+persona = "default"
+
+[[agents]]
+key = "researcher"
+name = "SIM Researcher"
+agent_type = "custom"
+job_title = "Research Analyst"
+description = "Answers short research briefs for a small business with a concise written note. Works from general knowledge; says so when a fact would need checking."
+
+[[scenarios]]
+id = "agents-crud"
+kind = "crud"
+steps = ["create", "update", "get", "list", "delete"]
+description = "an agent created, edited, read back, listed and deleted through the API"
+
+[[scenarios]]
+id = "brief-coffee-subscriptions"
+kind = "task"
+agent = "researcher"
+title = "Three ways small coffee roasters run subscriptions"
+description = "I run a small coffee roastery. In under 300 words, describe three subscription models small roasters use (for example fixed monthly bags, pick-your-own, prepaid), with one pro and one con of each. Save the note as a deliverable."
+priority = "medium"
+review_mode = "auto"
+timeout_s = 900
+expect = "Three clearly named subscription models, each with one pro and one con, under about 300 words, saved as a deliverable"
+must_contain = ["subscription"]
+[scenarios.expect_effects]
+status = "done"
+deliverables_min = 1
+
+[[scenarios]]
+id = "auto-hello"
+kind = "chat"
+turns = [
+  "Hi — what can you do for me, in three short bullet points?",
+  "Which agents do I have in this workspace right now? Just list their names.",
+]
+expect = "A short capability summary, then the names of the agents in the workspace (at least 'SIM Researcher')"
+must_contain = ["researcher"]
+[scenarios.expect_effects]
+no_errors = true

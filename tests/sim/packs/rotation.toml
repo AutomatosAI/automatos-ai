@@ -1,0 +1,12 @@
+# Which pack `night run --pack auto` picks, by weekday (PRD-247 P13).
+# A day that names a pack which does not exist yet falls back to `smoke`,
+# and the run's notes say so — add the pack file and the day picks it up.
+
+[rotation]
+mon = "agents"
+tue = "command-center"
+wed = "knowledge"
+thu = "playbooks"
+fri = "collective"
+sat = "agents"
+sun = "smoke"
