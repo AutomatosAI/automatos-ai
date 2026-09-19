@@ -64,6 +64,20 @@ lane's own count, latency p50/p95 and cost; the judge's grades. From the shadow 
 agreement per field, per tier and per engine-confidence band, rerank overlap and the
 nothing-fits rate. Label every finding trace-backed or inferred, as every night.
 
+## The cache assertion for 9c (from night 1's data)
+
+The tool block sits at the head of Auto's cached prefix and today changes per
+query, so first calls cached only 2.4–3.5k of a ~34k prefix across night 1's 77
+turns. A live rerank that changes the tool bytes every turn would buy a smaller
+surface and pay it back in cache misses. So on 9c, from `llm_usage` on the
+night's first call of each chat turn: `cache_read_tokens` must not fall against
+night 8, and cost per turn must not rise. The live cut is returned in canonical
+order for exactly this reason (the same set of actions is always the same bytes);
+if the assertion still fails, the fix is a byte-stable tool prefix, not the
+rerank. Night 1 also measured the headroom the rerank is aiming at: 19.9 tools
+shown per turn, 136 distinct across the night, 81 never called once, six pinned
+on every turn by a stale onboarding prior.
+
 ## What goes in the findings ledger
 
 One row per sub-night: the setting, the persona's tally, the deltas against 8, and the

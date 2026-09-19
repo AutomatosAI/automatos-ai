@@ -90,6 +90,8 @@ PRD-247's **P7 "Auto's brain pack"** is this PoC's benchmark lane. Its chat-mode
 - **Question shape decides accuracy.** Keep instructions terse; a wide single Choice underperforms decomposition on confusable classes; evaluate per hook, never assume.
 - **Data egress.** The message text and roster names leave the platform on every shadow/live call. Local edition = the operator's own data; SaaS = a sub-processor decision, which this PRD does not make (default off in both editions).
 - **OpenRouter's decisions endpoint is on an alpha path** (`/api/alpha/decisions`) and may move; `OPENROUTER_DECISIONS_URL` is the one knob.
+- **The tool block is the head of Auto's cached prefix.** Night 1 (2026-09-18): first calls cached only 2.4–3.5k of a ~34k prefix because the block changes per query; calls 2+ within a turn read 85–92% from cache. A live rerank must be cache-neutral: the cut is returned in canonical order so the same set is the same bytes, and night 9c asserts first-call `cache_read_tokens` does not fall against night 8. The larger lever is a byte-stable tool prefix (about $5 a night on gpt-5.4), which is not this PRD's work.
+- **Per-turn model routing is the wrong shape.** A mid-conversation model switch turns every call into the cache-cold first call ($0.082 on night 1). If routing is ever built on this seam it is per run or per ticket, one decision at the start inside PRD-223's approved set, never inside the loop.
 - Per-turn model switching is out of scope: no runtime seam, PRD-223 governance, and prompt caching (#745) would be defeated.
 
 ## Open questions for the owner

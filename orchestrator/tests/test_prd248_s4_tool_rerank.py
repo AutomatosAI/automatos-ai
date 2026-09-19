@@ -205,6 +205,17 @@ async def test_shadow_records_a_miss_and_an_error_without_raising():
 
 
 @pytest.mark.asyncio
+async def test_live_returns_the_cut_in_canonical_order_for_the_prompt_cache():
+    """The same set of kept actions must be the same bytes every turn: the tool
+    block heads Auto's cached prefix, so probability order would turn every
+    turn into a cache miss."""
+    rec = _Recorder()
+    probs = {"a0": 0.6, "a1": 0.9, "a2": 0.2, "a3": 0.8, "a4": 0.1, "a5": 0.05, "a6": 0.7, "a7": 0.3}
+    out = await runner.narrow_with_decisions(**_kwargs("live", _decider(probs), rec, top_k=4))
+    assert out == ["a0", "a1", "a3", "a6"]  # by probability it would be a1, a3, a6, a0
+
+
+@pytest.mark.asyncio
 async def test_live_replaces_the_cut_and_falls_open_on_every_miss():
     rec = _Recorder()
     assert await runner.narrow_with_decisions(**_kwargs("live", _decider(PROBS), rec)) == ["a0", "a2", "a3"]

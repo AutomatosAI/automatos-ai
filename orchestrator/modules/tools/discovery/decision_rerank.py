@@ -187,5 +187,10 @@ async def narrow_with_decisions(
             len(cut.kept), cut.answered, cut.nothing_fits,
             extra={"workspace_id": workspace_id},
         )
-        return list(cut.kept)
+        # Canonical order, not probability order: the tool block sits at the head
+        # of Auto's cached prefix, so the same SET of actions must produce the
+        # same bytes turn after turn or a live rerank pays for its smaller
+        # surface in prompt-cache misses (night-1 data: first calls cached only
+        # 2.4–3.5k of a ~34k prefix because the block changed per query).
+        return sorted(cut.kept)
     return allowed
