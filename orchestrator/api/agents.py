@@ -1080,11 +1080,46 @@ async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_
                     logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
                     # Continue for optional tables
         
+        # The agent's live tickets. board_tasks.assigned_agent_id is ON DELETE
+        # SET NULL, so deleting an agent used to leave its work sitting on the
+        # board with no owner and nothing said about it (night 1, 2026-09-18 —
+        # the rescue was a PATCH the operator had to know to make). Send them
+        # back to the inbox, where an unowned ticket belongs, and NAME them in
+        # the response so the deletion is not silent.
+        orphaned = db.execute(
+            text(
+                "SELECT id, title, status FROM board_tasks "
+                "WHERE assigned_agent_id = :agent_id AND workspace_id = :workspace_id "
+                "  AND status NOT IN ('done', 'failed', 'cancelled', 'closed')"
+            ),
+            {"agent_id": agent_id, "workspace_id": ctx.workspace_id},
+        ).fetchall()
+        if orphaned:
+            db.execute(
+                text(
+                    "UPDATE board_tasks "
+                    "SET status = 'inbox', assigned_agent_id = NULL, lease_until = NULL "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": [r.id for r in orphaned]},
+            )
+
         # Now delete the agent (other relationships have CASCADE)
         db.delete(agent)
         db.commit()
-        
-        return {"message": f"Agent {agent_id} deleted successfully"}
+
+        message = f"Agent {agent_id} deleted successfully"
+        if orphaned:
+            message += (
+                f" — {len(orphaned)} unfinished ticket(s) went back to the inbox "
+                "and need a new owner"
+            )
+        return {
+            "message": message,
+            "returned_to_inbox": [
+                {"id": r.id, "title": r.title, "was": r.status} for r in orphaned
+            ],
+        }
     except HTTPException:
         raise
     except Exception as e:

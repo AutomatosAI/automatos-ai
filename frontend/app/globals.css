@@ -1136,19 +1136,35 @@
     color: hsl(var(--on-strong)); display: inline-flex; align-items: center; justify-content: center;
     font-family: var(--font-newsreader, serif); font-weight: 600; font-size: 11px;
   }
-  .studio .sh-utils .sh-cmdk {
+  /* The search button sits in the headbar itself, NOT in .sh-utils — scoping
+     these rules under .sh-utils meant it matched nothing, so the button had no
+     display, no height and no border: the icon and "Search⌘K" stacked on two
+     lines at the inherited body size, on every page with the Studio header
+     (Gerard's screenshot, 2026-09-19). Scope to the class, wherever it sits. */
+  .studio .sh-cmdk {
     display: inline-flex; align-items: center; gap: 8px;
     height: 30px; padding: 0 10px 0 8px; min-width: 240px;
     border: 1px solid hsl(var(--border)); border-radius: 6px;
     background: hsl(var(--card)); color: hsl(var(--muted-foreground)); font-size: 12px;
-    white-space: nowrap; cursor: pointer;
+    line-height: 1; white-space: nowrap; cursor: pointer;
     transition: border-color 140ms ease;
   }
-  .studio .sh-utils .sh-cmdk:hover { border-color: var(--border-2); }
-  .studio .sh-utils .sh-cmdk .sh-kbd {
+  .studio .sh-cmdk:hover { border-color: var(--border-2); }
+  .studio .sh-cmdk > svg { flex-shrink: 0; }
+  .studio .sh-cmdk .sh-kbd {
     margin-left: auto; font-family: var(--font-geist-mono, monospace); font-size: 10px;
+    line-height: 1.4;
     padding: 1px 5px; border: 1px solid hsl(var(--border)); border-radius: 3px;
     background: hsl(var(--secondary)); color: hsl(var(--muted-foreground));
+  }
+  /* A phone has no ⌘K and no room for a 240px box beside the utilities cluster
+     — the headbar is nowrap with non-shrinking children, so it would push the
+     profile off the edge. Below 768px the search is the icon alone. */
+  @media (max-width: 767px) {
+    .studio .sh-cmdk {
+      min-width: 0; width: 30px; padding: 0; justify-content: center;
+    }
+    .studio .sh-cmdk > span { display: none; }
   }
 
   /* ── Studio shell layout container ─────────────────────────────── */

@@ -55,9 +55,11 @@ const COLUMN_META: Record<BoardStatus, { label: string; color: string }> = {
   done:        { label: 'Done',        color: 'hsl(82 30% 33%)' },
   failed:      { label: 'Failed',      color: 'hsl(0 62% 38%)' },
   cancelled:   { label: 'Cancelled',   color: 'hsl(30 6% 40%)' }, // PRD-234 S1a
+  // Tidied away without a claim about the work (night 1, 2026-09-18).
+  closed:      { label: 'Closed',      color: 'hsl(30 8% 30%)' },
 }
 const COLUMNS_ORDER: BoardStatus[] = [
-  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled',
+  'inbox', 'assigned', 'in_progress', 'review', 'blocked', 'done', 'failed', 'cancelled', 'closed',
 ]
 const LANE_COLUMNS = COLUMNS_ORDER.filter((c) => c !== 'done')
 

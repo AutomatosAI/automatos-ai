@@ -246,7 +246,7 @@ def source_id_for(prefix: str, key: Any, at: Optional[datetime] = None) -> str:
 CHAT_SOURCE_TYPE = "chat"
 RECIPE_SOURCE_TYPE = "recipe"
 MISSION_SOURCE_TYPE = "mission"
-TERMINAL_STATUSES: Sequence[str] = ("done", "review", "failed", "cancelled")
+TERMINAL_STATUSES: Sequence[str] = ("done", "review", "failed", "cancelled", "closed")
 RUNNING_STATUSES: Sequence[str] = ("assigned", "in_progress", "blocked")
 DEFAULT_LANE_POLL_SECONDS = 5
 

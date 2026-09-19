@@ -41,7 +41,13 @@ from services.board_events import board_event_stream, notify_board_event
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 
-VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled"}  # PRD-234 S1a: cancelled
+# "closed" (night 1, 2026-09-18): tidying a board meant marking work "done" or
+# "cancelled" when neither was true — a ticket superseded by another, or simply
+# no longer wanted. Closed is terminal, claims nothing about the work, and keeps
+# the board honest.
+VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled", "closed"}
+# An operator note is read on a card, not in a document.
+MAX_TASK_NOTE_CHARS = 1000
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
 
@@ -561,7 +567,7 @@ async def update_task(
         end_session_claim(task, old_status, new_status)
         if new_status == "in_progress" and not task.started_at:
             task.started_at = datetime.now(timezone.utc)
-        if new_status in ("done", "review"):
+        if new_status in ("done", "review", "closed"):
             task.completed_at = datetime.now(timezone.utc)
         if new_status == "blocked" and task.blocked_at is None:
             task.blocked_at = datetime.now(timezone.utc)
@@ -606,6 +612,22 @@ async def update_task(
 
     if "planning_data" in body:
         task.planning_data = body["planning_data"]
+
+    # An operator note — a remark on the ticket that is NOT a rejection.
+    # Night 1 (2026-09-18): the only way to say anything to a ticket was to
+    # reject it into a redo, so a correction and a comment were the same gesture.
+    # Notes land beside the session's own progress notes, in the same list the
+    # card already renders.
+    if body.get("note"):
+        note_text = str(body["note"]).strip()[:MAX_TASK_NOTE_CHARS]
+        if note_text:
+            ref = dict(task.runtime_ref or {})
+            ref["session_notes"] = (ref.get("session_notes") or []) + [{
+                "note": note_text,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "by": "you",
+            }]
+            task.runtime_ref = ref   # rebuilt, never mutated in place (JSONB)
 
     # Check if we need to trigger execution
     # PRD-171 F025: only user-owned board tasks self-execute on a status flip.
@@ -1044,7 +1066,7 @@ async def cancel_task(
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status in ("done", "failed", "cancelled"):
+    if task.status in ("done", "failed", "cancelled", "closed"):
         return {"id": task.id, "status": task.status, "applied": False}
 
     previous = task.status

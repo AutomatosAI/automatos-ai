@@ -10,7 +10,7 @@ All queries are workspace-scoped for multi-tenant isolation.
 
 import json
 import logging
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -433,6 +433,28 @@ def _bind_ask_orchestrator_context(
         if val is not None:
             bound[dst] = val
     return bound
+
+
+# Params that identify WHAT an action will act on, in the order a person reads
+# them. An approval card that says only "cancel a scheduled task" gives the
+# operator nothing to decide on (night 1, 2026-09-18: the card named neither the
+# id nor the title of the schedule it would cancel).
+_SUBJECT_PARAMS: Tuple[str, ...] = (
+    "title", "name", "task_id", "agent_id", "document_id", "mission_id",
+    "report_id", "id", "app_name", "query",
+)
+
+
+def _subject_line(params: Dict[str, Any]) -> str:
+    """" on <what this will act on>", or "" when nothing identifies it."""
+    if not isinstance(params, dict):
+        return ""
+    named = [
+        f"{key}={params[key]!r}"
+        for key in _SUBJECT_PARAMS
+        if params.get(key) not in (None, "", [], {})
+    ]
+    return f" on {', '.join(named[:3])}" if named else ""
 
 
 class PlatformActionExecutor:
@@ -939,7 +961,8 @@ class PlatformActionExecutor:
                         "permission_level": action_def.permission_level,
                         "message": (
                             f"This action ({action_def.permission_level}) requires confirmation. "
-                            f"Action: {action_name} — {action_def.description[:100]}"
+                            f"Action: {action_name}{_subject_line(params)} — "
+                            f"{action_def.description[:100]}"
                         ),
                         "params": params,
                     }

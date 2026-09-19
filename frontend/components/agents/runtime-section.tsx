@@ -426,6 +426,35 @@ export function RuntimeSection({ value, onChange, sessionToolGaps }: RuntimeSect
           <SelectItem value="cli">CLI session (your own login, on your machine — Claude Code, Codex, …)</SelectItem>
         </SelectContent>
       </Select>
+
+      {/* The difference that actually decides the choice. Night 1 (2026-09-18):
+          every piece of work the owner graded 5/5 came from a cli agent and none
+          from an api agent — because api agents cannot read the owner's files or
+          other tickets, and nothing on this form said so. */}
+      <div className="rounded-md border border-border/40 bg-muted/30 p-3 text-xs" data-testid="runtime-explainer">
+        <p className="mb-2 font-medium text-foreground">What the choice changes</p>
+        <dl className="space-y-2 text-muted-foreground">
+          <div>
+            <dt className="inline font-medium text-foreground">API model — </dt>
+            <dd className="inline">
+              runs here on the platform&apos;s keys, billed per token. It sees this workspace&apos;s
+              documents, memory and its own ticket, and <strong>cannot read files on your machine
+              or look at other tickets</strong>. Best for work the platform already holds the
+              inputs for: writing, summarising, answering from the knowledge base.
+            </dd>
+          </div>
+          <div>
+            <dt className="inline font-medium text-foreground">CLI session — </dt>
+            <dd className="inline">
+              runs on your own machine under your own CLI login, so it costs no API tokens and
+              <strong> can read your files, run commands and follow work across tickets</strong>.
+              Needs a paired host to be online. Best for building, investigating and anything
+              that has to touch a repository.
+            </dd>
+          </div>
+        </dl>
+      </div>
+
       {value.runtime === 'cli' && (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">

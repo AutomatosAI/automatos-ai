@@ -75,6 +75,23 @@ def check_oauth_requirements(db: Session, app_names: List[str]) -> Dict[str, boo
 # Clone helper (extracted from marketplace.py agent install)
 # ---------------------------------------------------------------------------
 
+def _configuration_with_runtime(configuration) -> dict:
+    """The marketplace agent's configuration, with its runtime named explicitly.
+
+    Night 1 (2026-09-18): marketplace agents installed with ``configuration: {}``
+    — no runtime at all — and the roster, the agent form and the dispatcher each
+    had to assume one. The assumption is ``api`` either way; writing it down is
+    what makes the card able to say so, and the owner able to change it.
+    """
+    from core.cli_runtime import CONFIG_RUNTIME_KEY, RUNTIME_API, RUNTIME_KINDS
+
+    config = dict(configuration or {})
+    raw = config.get(CONFIG_RUNTIME_KEY)
+    kind = raw.strip().lower() if isinstance(raw, str) else ""
+    config[CONFIG_RUNTIME_KEY] = kind if kind in RUNTIME_KINDS else RUNTIME_API
+    return config
+
+
 def clone_agent_to_workspace(
     db: Session,
     workspace_id: UUID,
@@ -103,7 +120,7 @@ def clone_agent_to_workspace(
         name=agent_name,
         description=marketplace_agent.description,
         agent_type=marketplace_agent.agent_type,
-        configuration=marketplace_agent.configuration,
+        configuration=_configuration_with_runtime(marketplace_agent.configuration),
         model_config=marketplace_agent.model_config,
         tags=marketplace_agent.tags,
         status=marketplace_agent.status,
