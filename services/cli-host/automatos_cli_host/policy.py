@@ -52,6 +52,25 @@ NEVER_ALLOWED_BASH = (
     re.compile(r"(^|[;&|(]\s*)curl\b.*\|\s*(ba|z)?sh\b"),
 )
 
+# Always a card, even under ``--unlisted-bash allow``, and even when the verb
+# itself is on the allowlist. Night 1 (2026-09-18, F042): an OPS ticket session
+# ran ``cd …/automatos-ai && set -a && . ./.env && set +a`` and then
+# ``PGPASSWORD=… psql -h 127.0.0.1 … -f …/change-applied-task-3.sql`` — an
+# UPDATE against the platform's own database — plus ``docker logs`` and a
+# ``redis-cli -a`` attempt, all inside the allow window. ``cat`` and ``.`` are
+# perfectly ordinary verbs; what makes these worth a card is WHAT they touch.
+# The operator can still say yes; they just get asked.
+ALWAYS_ASK_BASH = (
+    (re.compile(r"(^|[\s;&|(])(\.|source)\s+\S*\.env\b"), "reads a .env file (it holds this system's secrets)"),
+    (re.compile(r"\.env(\.|\s|$|['\"])"), "touches a .env file (it holds this system's secrets)"),
+    (re.compile(r"(^|[;&|(]\s*)psql\b"), "runs psql against a database"),
+    (re.compile(r"(^|[;&|(]\s*)(redis-cli|mysql|mongosh)\b"), "opens a database shell"),
+    (re.compile(r"(^|[;&|(]\s*)docker\b"), "drives Docker (the platform runs in it)"),
+    (re.compile(r"(^|[;&|(]\s*)PGPASSWORD="), "passes a database password on the command line"),
+    (re.compile(r"(^|[;&|(]\s*)(alembic|flask|django-admin)\b"), "runs a database migration tool"),
+)
+
+
 # Verbs whose ARGUMENTS are the command that actually runs. None is on the
 # allowlist (each runs a command the gate would not otherwise see), so the
 # wrapper itself is held for the operator — but a never-allowed command must
@@ -739,6 +758,10 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
     for pattern in NEVER_ALLOWED_BASH:
         if pattern.search(joined):
             return Decision("deny", f"never allowed in a session: {_first_words(joined)!r} (sessions do not push or escalate)")
+    for pattern, why in ALWAYS_ASK_BASH:
+        if pattern.search(joined):
+            # Not a refusal — the operator decides. It just never happens silently.
+            return _worst([on_targets, Decision("ask", f"this command {why}")])
     inner = _unwrapped(words)
     if inner != list(words):
         # ``xargs git push``, ``timeout 5 git push``, ``env X=1 git push``: the
