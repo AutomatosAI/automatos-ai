@@ -107,10 +107,16 @@ async def _ask_and_record(
 
 
 def assignment_options(candidates: Sequence[Tuple[str, str]]) -> Dict[str, Optional[str]]:
+    """Distinct roster names, first spelling wins, case-insensitive (two options
+    that differ only by case would be one question with two identical answers),
+    capped so ``none`` fits."""
     seen: Dict[str, Optional[str]] = {}
+    lowered: set = set()
     for name, description in candidates:
         key = (name or "").strip()
-        if key and key.lower() != NONE_OPTION and key not in seen:
+        low = key.lower()
+        if key and low != NONE_OPTION and low not in lowered:
+            lowered.add(low)
             seen[key] = (description or "").strip()[:DESCRIPTION_MAX_CHARS] or None
         if len(seen) >= CHOICE_MAX_OPTIONS - 1:
             break
