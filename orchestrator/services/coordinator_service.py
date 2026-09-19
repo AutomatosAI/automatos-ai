@@ -2635,6 +2635,26 @@ class CoordinatorService:
                 override_auto_approve=bool(mission_config.get("auto_approve", False)),
             )
 
+        # F034: a mission is the single largest way to start spending. The
+        # day's ceiling refuses a NEW auto-approved run; one already running is
+        # untouched, and a human approving explicitly still gets their mission.
+        from dataclasses import replace
+
+        from services.daily_spend_guard import refuse_new_work
+
+        _over_budget = refuse_new_work(db, workspace_id, f"mission {run.id}")
+        if decision.auto_approve and _over_budget:
+            logger.warning("Mission %s not auto-approved — %s", run.id, _over_budget)
+            emit_event(
+                db=db,
+                run_id=run.id,
+                event_type=EventType.RUN_CREATED,
+                actor_type=ActorType.COORDINATOR,
+                actor_id="coordinator",
+                payload={"held": "daily_spend_ceiling", "detail": _over_budget},
+            )
+            decision = replace(decision, auto_approve=False, reason=_over_budget)
+
         if decision.auto_approve:
             transition_run(
                 db=db,

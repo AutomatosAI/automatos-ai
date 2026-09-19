@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config import config
@@ -529,7 +530,68 @@ async def get_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     enriched = _enrich_with_agents([task], db, ctx.workspace_id)
-    return enriched[0]
+    detail = dict(enriched[0])
+    detail["cost"] = ticket_cost(db, task.id)
+    return detail
+
+
+def ticket_cost(db: Session, task_id: int) -> Dict[str, Any]:
+    """What this ticket actually cost, from the ledger (F034).
+
+    Every model call already writes ``llm_usage`` with
+    ``execution_id = 'board_task:<id>'`` — the number existed and was simply
+    never shown on the thing that spent it. A subscription (CLI session) run
+    costs no API money and is labelled as such rather than shown as a bare
+    $0.00 with no explanation.
+    """
+    try:
+        row = db.execute(text("""
+            SELECT COALESCE(SUM(total_cost), 0) AS usd,
+                   COALESCE(SUM(total_tokens), 0) AS tokens,
+                   COUNT(*) AS calls,
+                   -- 'tier' is where a subscription run is actually marked;
+                   -- request_type stays 'board_task' for both lanes.
+                   COALESCE(SUM(total_tokens) FILTER (WHERE tier = 'subscription'), 0) AS sub_tokens,
+                   COUNT(*) FILTER (WHERE tier = 'subscription') AS sub_calls
+            FROM llm_usage
+            WHERE execution_id = :execution_id
+        """), {"execution_id": f"board_task:{task_id}"}).fetchone()
+    except Exception:  # noqa: BLE001 — a cost read-out must not break the ticket
+        logger.warning("[board] cost unavailable for ticket %s", task_id, exc_info=True)
+        return {"available": False}
+
+    usd = float(row.usd or 0.0) if row else 0.0
+    tokens = int(row.tokens or 0) if row else 0
+    calls = int(row.calls or 0) if row else 0
+    sub_tokens = int(row.sub_tokens or 0) if row else 0
+    sub_calls = int(row.sub_calls or 0) if row else 0
+    api_tokens = tokens - sub_tokens
+    api_calls = calls - sub_calls
+
+    if sub_calls and not api_calls:
+        billing, label = "subscription", (
+            f"{sub_tokens:,} tokens on your CLI subscription — no API charge "
+            f"({sub_calls} call{'s' if sub_calls != 1 else ''})"
+        )
+    elif sub_calls:
+        billing, label = "mixed", (
+            f"${usd:.2f} across {api_calls} API call{'s' if api_calls != 1 else ''} "
+            f"({api_tokens:,} tokens), plus {sub_tokens:,} tokens on your subscription"
+        )
+    else:
+        billing, label = "api", f"${usd:.2f} · {tokens:,} tokens · {calls} calls"
+
+    return {
+        "available": True,
+        "usd": round(usd, 4),
+        "tokens": tokens,
+        "calls": calls,
+        "subscription_tokens": sub_tokens,
+        "billing": billing,
+        # "$0.00" on a session run is true and misleading: it cost a seat, not
+        # a dollar, and the card should say which.
+        "label": label,
+    }
 
 
 @router.patch("/{task_id}", dependencies=[Depends(require_workspace_permission("missions:update"))])
@@ -1516,6 +1578,31 @@ async def finalize_board_task_run(
     return task.status
 
 
+def _park_over_budget(db: Session, task_id: int, reason: str) -> None:
+    """Hold a ticket that would have started over the day's ceiling.
+
+    ``blocked`` with the reason on it, so the board says why and the ticket
+    comes back on its own once the ceiling is raised or the day rolls over —
+    it is not failed, and nothing it might have produced is lost.
+    """
+    try:
+        task = db.query(BoardTask).get(task_id)
+        if not task or task.status not in ("assigned", "in_progress"):
+            return
+        task.status = "blocked"
+        task.blocked_at = datetime.now(timezone.utc)
+        task.blocked_reason = reason
+        task.lease_until = None
+        db.commit()
+        notify_board_event(
+            db, workspace_id=str(task.workspace_id), task_id=task.id,
+            status="blocked", event="task_updated",
+        )
+    except Exception:  # noqa: BLE001 — the guard must not become its own failure
+        logger.error("[spend-guard] could not park ticket %s", task_id, exc_info=True)
+        db.rollback()
+
+
 def _launch_task_execution(
     task_id: int,
     agent_id: int,
@@ -1538,6 +1625,18 @@ def _launch_task_execution(
             # dollar ceiling), a durable, revocable, expiring approval-grant is
             # created and the task is BLOCKED until a human grants it — not run,
             # not auto-allowed. On grant, the grant API re-queues the task.
+            # F034: the day's ceiling stops NEW autonomous work. Checked here,
+            # where the next dollar would be spent, and never on a path a human
+            # is waiting on. Work already running is untouched.
+            from services.daily_spend_guard import refuse_new_work
+
+            _over_budget = refuse_new_work(db, workspace_id, f"board task {task_id}")
+            if _over_budget:
+                _park_over_budget(db, task_id, _over_budget)
+                heartbeat.cancel()
+                db.close()
+                return
+
             if _board_task_blocked_pending_approval(db, task_id, agent_id, workspace_id):
                 heartbeat.cancel()
                 db.close()
