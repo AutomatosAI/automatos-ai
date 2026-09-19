@@ -51,6 +51,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
@@ -123,6 +124,13 @@ def _render_catalog(actions: Iterable[Any]) -> str:
 @dataclass
 class PromptBuilder:
     actions: Sequence[Any]
+    # PRD-248 S4 (`jev_rerank` mode): ``decider(state, questions)`` returns a
+    # DecisionResult or None — injectable for tests; the default asks the
+    # decision seam's TypeSafe client (route from DECISION_PROVIDER).
+    decider: Any = None
+    rerank_candidates: int = 30
+    rerank_min_probability: float = 0.5
+    rerank_min_keep: int = 5
 
     def build(self, query: str, mode: str, top_k: int = 15) -> Tuple[str, List[str]]:
         """
@@ -141,6 +149,8 @@ class PromptBuilder:
             # filtered and filtered_schema use the same prompt — they differ
             # only in whether the schema's action.enum is also narrowed.
             return self._filtered(query, top_k=top_k)
+        if mode == "jev_rerank":
+            return self._jev_rerank(query, top_k=top_k)
         if mode == "graph":
             prompt, surfaced, _is_fallback = self.build_graph(query, top_k=top_k)
             return prompt, surfaced
@@ -180,7 +190,7 @@ class PromptBuilder:
         Falls back to the unchanged tools list on any ranker error — same
         defensive pattern as production's `to_dispatcher_schema(allowed_names=[])`.
         """
-        if mode not in ("filtered_schema", "graph"):
+        if mode not in ("filtered_schema", "graph", "jev_rerank"):
             return top_level_tools
 
         if ranked_names is None:
@@ -265,6 +275,60 @@ class PromptBuilder:
             )
         )
         return [name for name, _score in ranked]
+
+    def _jev_rerank(self, query: str, top_k: int) -> Tuple[str, List[str]]:
+        """PRD-248 S4: the embedding index proposes a wide top-N, the decision
+        engine judges each candidate (one yes/no per action, one call), and
+        the surface is the cut above the probability floor — the same rule
+        production applies in ``tool_rerank_mode=live``. A miss (no answer,
+        too few answers, an error) falls back to the plain filtered top-K so
+        the mode never scores below the baseline for a bad reason."""
+        from core.llm.decisions import rerank as rr
+        from modules.tools.discovery.action_registry import get_action_registry
+
+        wide = self._rank_action_names(query, top_k=max(int(self.rerank_candidates), int(top_k)))
+        names = list(wide[:top_k])
+        by_name = {a.name: a for a in self.actions}
+        candidates = [(n, (getattr(by_name.get(n), "description", "") or "")) for n in wide]
+        try:
+            result = (
+                self._decide(rr.build_state(query), rr.build_questions(candidates))
+                if candidates else None
+            )
+            cut = (
+                rr.apply_rerank(
+                    result, wide, top_k=top_k,
+                    min_probability=self.rerank_min_probability, min_keep=self.rerank_min_keep,
+                )
+                if result is not None else None
+            )
+            if cut is not None and cut.kept:
+                names = list(cut.kept)
+            else:
+                logger.warning("jev_rerank: no usable decision for %r — filtered top-K used", query[:60])
+        except Exception:  # noqa: BLE001
+            logger.warning("jev_rerank: judge raised for %r — filtered top-K used", query[:60], exc_info=True)
+
+        registry = get_action_registry()
+        catalog = registry.build_filtered_prompt_summary(
+            names, exclude_admin=False, exclude_promoted=False,
+        )
+        return _PREAMBLE + catalog, names
+
+    def _decide(self, state: Dict[str, Any], questions: Dict[str, Any]) -> Any:
+        """One decision call: the injected ``decider`` or the seam's client on
+        the route named by DECISION_PROVIDER (OPENROUTER_API_KEY / TYPESAFE_API_KEY)."""
+        if self.decider is not None:
+            return self.decider(state, questions)
+        from core.llm.decisions.typesafe_client import TypeSafeDecisionClient
+
+        client = TypeSafeDecisionClient(
+            provider=os.getenv("DECISION_PROVIDER", "openrouter"),
+            timeout_s=float(os.getenv("DECISION_TIMEOUT_S", "5")),
+        )
+        return asyncio.run(
+            client.decide(state=state, questions=questions, workspace_id=None, purpose="eval_tool_rerank")
+        )
 
     def _graph(self, query: str, top_k: int) -> Tuple[str, List[str], bool]:
         """Delegate ranking to the production GraphRouter (PRD-139 US-004).

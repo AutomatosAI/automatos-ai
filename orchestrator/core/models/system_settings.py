@@ -55,6 +55,9 @@ class SettingCategory(str, Enum):
     # PRD-223: which models may hold the orchestrator (Auto) seat + turn cost governor.
     MODEL_POLICY = "model_policy"
 
+    # PRD-248: the decision engine — route, per-hook modes, confidence floor.
+    DECISION_ENGINE = "decision_engine"
+
 
 class SystemSetting(Base):
     """System-wide configuration settings"""
