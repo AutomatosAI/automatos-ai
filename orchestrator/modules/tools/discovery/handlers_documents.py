@@ -10,6 +10,12 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+# platform_search_documents bounds — a passage is read in a prompt, not a viewer.
+SEARCH_DOCUMENTS_DEFAULT_LIMIT = 8
+SEARCH_DOCUMENTS_MAX_LIMIT = 25
+SEARCH_DOCUMENTS_MAX_PASSAGE_CHARS = 1200
+
+
 async def list_templates(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-167 S6: list the workspace's document templates for an agent."""
     from modules.documents.template_service import DocumentTemplateService
@@ -490,6 +496,79 @@ async def read_document(db: Session, workspace_id: UUID, params: Dict[str, Any])
             if getattr(doc, "last_accessed", None)
             else None,
         },
+    }
+
+
+async def search_documents(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Semantic search over knowledge-base documents.
+
+    Night 1 (2026-09-18): agents had ``platform_search_memory`` (memories),
+    ``platform_grep_documents`` (literal regex) and ``platform_read_document``
+    (needs an id) — but no way to ask a *question* of the uploaded documents.
+    Auto could answer from documents because it lists and reads; every agent
+    that searched came back empty, in eleven tickets.
+
+    Runs the same retrieval funnel the chat path uses, so it picks up the
+    edition's vector backend (S3 Vectors on SaaS, pgvector locally), hybrid
+    search and reranking, rather than a second retrieval implementation.
+    """
+    from core.team_access import effective_team
+    from modules.rag.service import RAGService
+
+    query = (params.get("query") or "").strip()
+    if not query:
+        return {"success": False, "error": "query is required"}
+
+    limit = params.get("limit")
+    try:
+        limit = max(1, min(int(limit), SEARCH_DOCUMENTS_MAX_LIMIT))
+    except (TypeError, ValueError):
+        limit = SEARCH_DOCUMENTS_DEFAULT_LIMIT
+
+    # Same security boundary as grep_documents: the agent's own team wins,
+    # an explicit team can only narrow within it.
+    team = effective_team(_resolve_agent_team(db, params.get("_agent_id")), params.get("team"))
+
+    try:
+        rag = RAGService()
+        result = await rag.retrieve(
+            query=query,
+            max_chunks=limit,
+            context_type="agent",
+            workspace_id=str(workspace_id),
+            team=team,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("[documents] semantic search failed: %s", e, exc_info=True)
+        return {"success": False, "error": f"document search failed: {e}"}
+
+    passages = []
+    for chunk in (result.chunks or [])[:limit]:
+        metadata = chunk.get("metadata") or {}
+        passages.append({
+            "document_id": metadata.get("document_id") or chunk.get("document_id"),
+            "file_name": chunk.get("file_name") or metadata.get("file_name") or "",
+            "chunk_index": chunk.get("chunk_index") or metadata.get("chunk_index"),
+            "score": round(float(chunk.get("score") or chunk.get("similarity") or 0.0), 4),
+            "content": (chunk.get("content") or "")[:SEARCH_DOCUMENTS_MAX_PASSAGE_CHARS],
+        })
+
+    if not passages:
+        return {
+            "success": True,
+            "results": [],
+            "count": 0,
+            "message": (
+                "No document passages matched. The documents may not be embedded yet — "
+                "platform_list_documents shows what is uploaded and its chunk count."
+            ),
+        }
+
+    return {
+        "success": True,
+        "results": passages,
+        "count": len(passages),
+        "sources": result.sources or [],
     }
 
 

@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from config import config
@@ -793,11 +794,91 @@ def _answers_fold_in(task: BoardTask) -> str:
     return "\n".join(lines)
 
 
-def _ticket_prompt(task: BoardTask) -> str:
+# What a mission's shared memory is worth carrying into a session prompt. Past a
+# handful of points it stops being context and starts being a document.
+FIELD_MEMORY_MAX_POINTS = 6
+FIELD_MEMORY_MAX_VALUE_CHARS = 400
+# A claim waits this long for the field and no longer.
+FIELD_MEMORY_TIMEOUT_SECONDS = 5.0
+
+
+def _field_memory_block(db: Session, task: BoardTask) -> str:
+    """What the other agents on this mission already found, as a prompt section.
+
+    Night 1 (2026-09-18): an API agent on a mission gets the field memory
+    section rendered into its context; a session agent got nothing, so the two
+    runtimes on one mission were not working from the same knowledge.
+
+    The field is an async Qdrant read and the claim is sync (its callers, tests
+    included, are sync), so the read runs on its own loop in one worker thread,
+    bounded by a timeout. Returns "" for a standalone ticket and for EVERY
+    failure — a ticket must never fail to claim because memory is slow or down.
+    """
+    run_id = getattr(task, "orchestration_run_id", None)
+    if not run_id:
+        return ""
+    try:
+        row = db.execute(
+            sa_text("SELECT config FROM orchestration_runs WHERE id = :run_id"),
+            {"run_id": str(run_id)},
+        ).fetchone()
+        blob = (row.config if row else None) or {}
+        field_id = blob.get("field_id") if isinstance(blob, dict) else None
+        if not field_id:
+            return ""
+        points = _read_field_points(
+            str(field_id),
+            task.title or task.description or "",
+            int(task.assigned_agent_id or 0),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("[cli-host] field memory unavailable for ticket %s", task.id, exc_info=True)
+        return ""
+
+    if not points:
+        return ""
+
+    lines = ["## Field memory — what the other agents on this mission have found"]
+    for point in points[:FIELD_MEMORY_MAX_POINTS]:
+        key = str(point.get("key") or "note")
+        value = str(point.get("value") or "")[:FIELD_MEMORY_MAX_VALUE_CHARS]
+        lines.append(f"- **{key}**: {value}")
+    lines.append(
+        "\nAdd to it with `record_memory` when you find something the other agents "
+        "would otherwise re-derive."
+    )
+    return "\n".join(lines)
+
+
+def _read_field_points(field_id: str, query: str, agent_id: int) -> List[Dict[str, Any]]:
+    """One field query, on its own loop, in its own thread, with a deadline."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    async def _query() -> List[Dict[str, Any]]:
+        from modules.context.factory import get_shared_context
+
+        field = get_shared_context()
+        if not field:
+            return []
+        return await field.query(
+            context_id=field_id, query=query, agent_id=agent_id,
+            top_k=FIELD_MEMORY_MAX_POINTS,
+        ) or []
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(lambda: asyncio.run(_query())).result(
+            timeout=FIELD_MEMORY_TIMEOUT_SECONDS,
+        )
+
+
+def _ticket_prompt(task: BoardTask, field_memory: str = "") -> str:
     prompt = task.raw_prompt or task.description or task.title or ""
     answers = _answers_fold_in(task)
     if answers:
         prompt = f"{prompt}\n\n{answers}"
+    if field_memory:
+        prompt = f"{prompt}\n\n{field_memory}"
     if task.review_feedback:
         # Same redo fold-in as the dispatcher (Q44); consumed for this attempt only.
         prompt = (
@@ -887,7 +968,7 @@ def claim_for_host(db: Session, host: CliHost, limit: int = 1) -> Dict[str, Any]
         # Handed over ONCE, in this payload; only its hash stays on the ticket.
         session_token = mint_session_token(ref)
         task.runtime_ref = ref
-        prompt = _ticket_prompt(task)                       # reads the carried asks
+        prompt = _ticket_prompt(task, _field_memory_block(db, task))  # reads the carried asks
         # Mark the answers just folded in, so a LATER resume of the same ticket
         # does not render them again.
         if ref.get(SESSION_ASKS_KEY):
@@ -2025,10 +2106,26 @@ async def apply_result(
         exec_result=exec_result,
         review_mode=task.review_mode or "auto",
         # PRD-245 S0.3 (D6): review only when a held command went unanswered or
-        # was denied (an unclassifiable refusal counts as one — fail closed).
-        force_review=forces_review(denial_summaries),
+        # was denied (an unclassifiable refusal counts as one — fail closed) —
+        # or when the turn produced nothing at all (night 1, finding 14): no
+        # result text, no files, no report is not a finished piece of work, and
+        # closing it ``done`` is how sessions that could not file a report came
+        # to look successful.
+        force_review=forces_review(denial_summaries) or _produced_nothing(exec_result),
     )
     return {"applied": terminal is not None, "status": terminal or task.status}
+
+
+def _produced_nothing(exec_result: Dict[str, Any]) -> bool:
+    """True when a successful-looking turn left no trace a human could read.
+
+    A session that answered in text has ``result``; one that did work has files.
+    Neither means the session opened, decided there was nothing to do, and ended
+    — which belongs in ``review`` with the reason, not in ``done``.
+    """
+    if exec_result.get("status") != "success":
+        return False       # error / cancelled already have their own endings
+    return not (exec_result.get("result") or "").strip() and not exec_result.get("deliverables")
 
 
 def _merge_fresh_session_asks(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Dict[str, Any]:
@@ -2124,6 +2221,17 @@ def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optio
     if not asks:
         return None
     open_asks = [a for a in asks if not a.get("answered_at")]
+    # An ANSWERED ask is a reason to resume exactly ONCE — until its answer has
+    # been folded into a prompt (``_answers_fold_in`` marks ``folded_at`` at the
+    # claim that showed it). Without this check the ticket re-queued at the end
+    # of EVERY later turn, because its ask ledger still held an answered entry:
+    # night 1 re-dispatched three tickets 188 times between them, each launching
+    # a fresh session that found the work already done and ended ("110th
+    # dispatch, ticket unchanged… No action taken"). The dispatch cap does not
+    # cover this path — it guards lease-expiry requeues.
+    resumable = [a for a in asks if a.get("answered_at") and a.get("answer") and not a.get("folded_at")]
+    if not open_asks and not resumable:
+        return None
     ref = _mark_resumable(ref)
     if open_asks:
         task.status = "blocked"

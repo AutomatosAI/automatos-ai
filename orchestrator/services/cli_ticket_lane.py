@@ -415,6 +415,27 @@ def exec_result_for(task: Any) -> dict:
     return {"status": "error", "result": "", "error": error, **base}
 
 
+def _ticket_is_alive(task: Any) -> bool:
+    """True when this ticket is still being worked, so giving up on it would
+    leave a session running with nothing watching for its result.
+
+    Alive means: a session holds it on a live lease, or it is parked on a
+    question the operator has not answered yet, or it is waiting to be picked
+    up again. Only a lapsed lease means nobody is on it.
+    """
+    status = getattr(task, "status", None)
+    if status in ("assigned", "blocked"):
+        return True
+    if status != "in_progress":
+        return False
+    lease = getattr(task, "lease_until", None)
+    if lease is None:
+        return True            # in_progress with no lease recorded — assume a live session
+    if lease.tzinfo is None:
+        lease = lease.replace(tzinfo=timezone.utc)
+    return lease > datetime.now(timezone.utc)
+
+
 async def run_cli_ticket_and_wait(
     db: Session,
     *,
@@ -425,14 +446,23 @@ async def run_cli_ticket_and_wait(
     source_type: str,
     source_id: str,
     timeout_s: Optional[float] = None,
+    hard_timeout_s: Optional[float] = None,
     poll_s: Optional[float] = None,
     on_poll: Optional[Callable[[Any], None]] = None,
     **file_kwargs: Any,
 ) -> dict:
     """File the ticket a step or mission task owes a session agent and wait for
     it to end (PRD-239 S3). Returns ``exec_result_for`` the ended ticket, or an
-    error result that names the still-running ticket when ``timeout_s`` passes
-    — the session carries on; its result lands on the board.
+    error result that names the still-running ticket when the wait gives up —
+    the session carries on; its result lands on the board.
+
+    Two bounds, because a Claude Code session is not an API turn (night 1,
+    finding 21). ``timeout_s`` is the soft deadline; reaching it only ends the
+    wait if the ticket is NOT alive. A ticket that is genuinely being worked —
+    ``in_progress`` on a live lease, or parked on a question a human has yet to
+    answer — is waited on up to ``hard_timeout_s``. Declaring a 20-minute
+    research session failed at 4 minutes is what re-queued the task and spawned
+    a duplicate beside the session that was still running.
 
     ``on_poll(ticket)`` runs on every poll while waiting (S3b): the caller marks
     progress on its own record so a stall watchdog does not mistake a long
@@ -455,6 +485,7 @@ async def run_cli_ticket_and_wait(
             poll_s = float(DEFAULT_LANE_POLL_SECONDS)
     poll_s = max(0.5, float(poll_s))
     started = time.monotonic()
+    extended = False
     while True:
         db.expire_all()  # see the host's writes, not this session's cache
         current = db.query(BoardTask).filter(BoardTask.id == task_id).first()
@@ -470,14 +501,25 @@ async def run_cli_ticket_and_wait(
                 logger.debug("[CliTicketLane] on_poll failed for ticket #%s", task_id, exc_info=True)
         waited = time.monotonic() - started
         if timeout_s is not None and waited >= timeout_s:
-            return {
-                "status": "error",
-                "error": (
-                    f"ticket #{task_id} is still running after {int(waited)} s — the Claude Code "
-                    "session carries on and its result lands on the board"
-                ),
-                "runtime": RUNTIME_CLI,
-                "task_id": task_id,
-                "timed_out": True,
-            }
+            ceiling = hard_timeout_s if hard_timeout_s is not None else timeout_s
+            if _ticket_is_alive(current) and waited < float(ceiling):
+                if not extended:
+                    extended = True
+                    logger.info(
+                        "[CliTicketLane] ticket #%s is %s past its %ss deadline — the session is "
+                        "alive, waiting up to %ss rather than re-queuing it",
+                        task_id, current.status, int(timeout_s), int(ceiling),
+                    )
+            else:
+                return {
+                    "status": "error",
+                    "error": (
+                        f"ticket #{task_id} is still running after {int(waited)} s — the Claude Code "
+                        "session carries on and its result lands on the board"
+                    ),
+                    "runtime": RUNTIME_CLI,
+                    "task_id": task_id,
+                    "timed_out": True,
+                    "still_running": _ticket_is_alive(current),
+                }
         await asyncio.sleep(poll_s)

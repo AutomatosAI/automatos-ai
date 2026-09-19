@@ -53,6 +53,7 @@ from modules.tools.discovery.handlers_documents import (
     upload_document,
     read_document,
     grep_documents,
+    search_documents,
     list_templates,
     get_template_schema,
 )
@@ -457,6 +458,7 @@ class PlatformActionExecutor:
             "platform_list_documents": list_documents,
             "platform_read_document": read_document,
             "platform_grep_documents": grep_documents,
+            "platform_search_documents": search_documents,
             "platform_list_templates": list_templates,
             "platform_get_template_schema": get_template_schema,
             "platform_get_workspace_info": get_workspace_info,
@@ -1134,7 +1136,7 @@ class PlatformActionExecutor:
         if (
             action_name.startswith("platform_graph")
             or action_name == "platform_query_graph"
-            or action_name in ("platform_read_document", "platform_grep_documents")
+            or action_name in ("platform_read_document", "platform_grep_documents", "platform_search_documents")
         ):
             if "_agent_id" not in params:
                 # Resolve agent_id from the active mission or caller context

@@ -1457,6 +1457,11 @@ async def finalize_board_task_run(
     task.result = str(llm_text) if llm_text else None
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
+    # A ticket that ends well must not still carry the error of an earlier
+    # attempt: night 1 left four tickets simultaneously "done" and "failed"
+    # depending which field you read, because a retry that succeeded never
+    # cleared error_message.
+    task.error_message = None
     # PRD-128: dispatch task_complete only on terminal 'done'
     if task.status == "done":
         await _dispatch_task_complete(db, workspace_id, task)

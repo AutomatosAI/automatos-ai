@@ -15,7 +15,8 @@ import magic
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body, BackgroundTasks
+from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
@@ -105,7 +106,9 @@ ALLOWED_MIME_TYPES = {
 }
 
 # Shared by POST /upload and the platform_upload_document tool (PRD-143 S10).
-UPLOAD_DIR = Path("/tmp/automotas_uploads")
+# Overridable so a compose volume can outlive the container: night 1 lost every
+# uploaded source file on restart, which is what broke /reprocess.
+UPLOAD_DIR = Path(os.getenv("DOCUMENT_UPLOAD_DIR", "/tmp/automotas_uploads"))
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB
 
 @router.post("/upload", response_model=DocumentUploadResponse, dependencies=[Depends(require_workspace_permission("documents:create"))])
@@ -898,6 +901,43 @@ async def delete_document(
         logger.error(f"Error deleting document {document_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+async def _reembed_document_from_chunks(db: Session, document, workspace_id: str) -> int:
+    """Regenerate embeddings in place from the chunk text already in Postgres.
+
+    Returns the number of chunks embedded (0 when the document has none, which
+    leaves the caller to report the missing source file).
+    """
+    rows = db.execute(text("""
+        SELECT id, content
+        FROM document_chunks
+        WHERE document_id = :document_id AND workspace_id = CAST(:workspace_id AS uuid)
+        ORDER BY chunk_index
+    """), {"document_id": document.id, "workspace_id": workspace_id}).fetchall()
+
+    chunks = [(row.id, row.content) for row in rows if (row.content or "").strip()]
+    if not chunks:
+        return 0
+
+    from core.llm.embedding_manager import create_embedding_manager
+    embedding_manager = create_embedding_manager()
+
+    embedded = 0
+    for chunk_id, content in chunks:
+        vector = await embedding_manager.generate_embedding(content)
+        values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
+        literal = "[" + ",".join(f"{float(x):.8f}" for x in values) + "]"
+        db.execute(text("""
+            UPDATE document_chunks
+            SET embedding = CAST(:emb AS vector)
+            WHERE id = :chunk_id
+        """), {"emb": literal, "chunk_id": chunk_id})
+        embedded += 1
+
+    db.commit()
+    logger.info(f"Re-embedded {embedded} chunks for document {document.id} from stored chunk text")
+    return embedded
+
+
 @router.post("/{document_id}/reprocess", dependencies=[Depends(require_workspace_permission("documents:update"))])
 async def reprocess_document(
     document_id: int,
@@ -923,12 +963,32 @@ async def reprocess_document(
             )
         
         if not os.path.exists(document.file_path):
-            # File doesn't exist - check if this is test data
+            # The source file is gone (uploads live in a container-local temp dir
+            # that does not survive a restart — night 1, finding 17). The chunk
+            # text is still in Postgres, so re-embed from that rather than making
+            # the owner re-upload. Only valid in pgvector mode, where the vectors
+            # live beside the chunks; in S3 Vectors mode the source is still needed.
             logger.warning(f"Document {document_id} file not found at {document.file_path}")
+            if not config.S3_VECTORS_ENABLED:
+                reembedded = await _reembed_document_from_chunks(db, document, str(ctx.workspace_id))
+                if reembedded > 0:
+                    document.status = "processed"
+                    document.chunk_count = reembedded
+                    db.commit()
+                    return {
+                        "message": (
+                            "Document re-embedded from its stored chunks "
+                            "(the uploaded source file is no longer on disk)."
+                        ),
+                        "document_id": document_id,
+                        "chunk_count": reembedded,
+                        "status": "processed",
+                        "source": "chunks",
+                    }
             raise HTTPException(
                 status_code=400,
-                detail=f"Document file not found at: {document.file_path}. "
-                       f"This may be test data. To reprocess, please re-upload the document."
+                detail=f"Document file not found at: {document.file_path}, and it has no "
+                       f"stored chunks to rebuild from. Please re-upload the document."
             )
         
         # Update status
@@ -1045,28 +1105,66 @@ async def get_document_content_by_id(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+SEARCH_DEFAULT_LIMIT = 10           # Results returned when the caller names no limit
+SEARCH_MAX_LIMIT = 50               # Hard ceiling, mirrored by the query-param validator
+SEARCH_DEFAULT_MIN_SIMILARITY = 0.70
 PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
 PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
 PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
 
 
+class SemanticSearchRequest(BaseModel):
+    """JSON body for POST /api/documents/search.
+
+    Night 1 (2026-09-18): every agent that reached this route sent a JSON body —
+    the natural shape for a POST — and got a 422, because the parameters were
+    query-string only. Both shapes are accepted now; the body wins when both
+    carry a value.
+    """
+    query: Optional[str] = None
+    limit: Optional[int] = None
+    min_similarity: Optional[float] = None
+    document_ids: Optional[List[int]] = None
+    team: Optional[str] = None
+
+
 @router.post("/search", dependencies=[Depends(require_workspace_permission("documents:read"))])
 async def semantic_search(
-    query: str = Query(..., description="Search query"),
-    limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
-    min_similarity: float = Query(0.70, ge=0.0, le=1.0, description="Minimum similarity score"),
+    body: Optional[SemanticSearchRequest] = Body(None),
+    query: Optional[str] = Query(None, description="Search query (may also be sent in the JSON body)"),
+    limit: Optional[int] = Query(None, ge=1, le=50, description="Maximum number of results"),
+    min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
     team: Optional[str] = Query(None, description="Optional team scope (PRD-157 S1); normalized server-side"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
-    Semantic search across document chunks using vector similarity
-    
-    Uses OpenAI embeddings and pgvector for intelligent document search.
-    Returns chunks ranked by semantic similarity to the query.
+    Semantic search across document chunks using vector similarity.
+
+    Accepts its parameters in the JSON body or the query string. Embeddings are
+    read from whichever document-vector backend the edition selects — S3 Vectors
+    on SaaS, pgvector over ``document_chunks.embedding`` locally.
     """
     try:
+        # Body-or-query, body first. A missing query is a 422 either way, but
+        # now it says so instead of rejecting a well-formed JSON POST.
+        if body is not None:
+            query = body.query if body.query is not None else query
+            limit = body.limit if body.limit is not None else limit
+            min_similarity = body.min_similarity if body.min_similarity is not None else min_similarity
+            document_ids = body.document_ids if body.document_ids is not None else document_ids
+            team = body.team if body.team is not None else team
+
+        if not query or not str(query).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="'query' is required — send it in the JSON body or as a query parameter.",
+            )
+        query = str(query).strip()
+        limit = SEARCH_DEFAULT_LIMIT if limit is None else max(1, min(int(limit), SEARCH_MAX_LIMIT))
+        min_similarity = SEARCH_DEFAULT_MIN_SIMILARITY if min_similarity is None else float(min_similarity)
+
         import time
         start_time = time.time()
         
@@ -1082,21 +1180,26 @@ async def semantic_search(
         
         logger.info(f"Embedding generated (dim={len(query_embedding)}), performing vector search...")
 
-        # Search via S3 Vectors (embeddings stored there, not in PostgreSQL)
+        # Whichever document-vector backend this edition runs. Night 1: this
+        # route constructed S3VectorsBackend unconditionally, so every local
+        # search 500'd on "S3_VECTORS_BUCKET not configured" while the chunks
+        # sat embedded in document_chunks. Same selection as
+        # RAGService._get_doc_backend (PRD-197 S5).
         from config import config as app_config
-        from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
+        from modules.search.vector_store import get_vector_store
 
-        s3_backend = S3VectorsBackend(workspace_id=str(ctx.workspace_id))
-        await s3_backend.initialize()
+        backend_name = "s3_vectors" if app_config.S3_VECTORS_ENABLED else "pgvector"
+        vector_backend = get_vector_store(backend=backend_name, workspace_id=str(ctx.workspace_id))
+        await vector_backend.initialize()
 
         embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
-        s3_results = s3_backend.search(
+        s3_results = vector_backend.search(
             query_embedding=embedding_list,
             limit=limit * 3,  # Over-fetch to allow grouping by document
             min_score=min_similarity,
         )
 
-        logger.info(f"S3 Vectors returned {len(s3_results)} chunks")
+        logger.info(f"{backend_name} returned {len(s3_results)} chunks")
 
         # Map S3 results back to document metadata from PostgreSQL
         # S3 stores: key, score, content (chunk_text), file_name, chunk_index, metadata
@@ -1110,13 +1213,29 @@ async def semantic_search(
             chunk_text = s3_hit.get("content", "")
             chunk_index = s3_hit.get("chunk_index", 0)
 
-            # Look up document in PostgreSQL by filename + workspace
-            doc_row = db.execute(text("""
-                SELECT id, filename, file_type, file_size, upload_date
-                FROM documents
-                WHERE workspace_id = :workspace_id AND filename = :filename
-                LIMIT 1
-            """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
+            # Prefer the hit's own document_id (the pgvector backend carries it,
+            # and it survives two documents sharing a filename); fall back to the
+            # filename lookup the S3 payload allows.
+            hit_doc_id = (s3_hit.get("metadata") or {}).get("document_id") or s3_hit.get("external_file_id")
+            doc_row = None
+            if hit_doc_id is not None:
+                try:
+                    doc_row = db.execute(text("""
+                        SELECT id, filename, file_type, file_size, upload_date
+                        FROM documents
+                        WHERE workspace_id = :workspace_id AND id = :document_id
+                        LIMIT 1
+                    """), {"workspace_id": ctx.workspace_id, "document_id": int(hit_doc_id)}).fetchone()
+                except (TypeError, ValueError):
+                    doc_row = None
+
+            if not doc_row and file_name:
+                doc_row = db.execute(text("""
+                    SELECT id, filename, file_type, file_size, upload_date
+                    FROM documents
+                    WHERE workspace_id = :workspace_id AND filename = :filename
+                    LIMIT 1
+                """), {"workspace_id": ctx.workspace_id, "filename": file_name}).fetchone()
 
             if not doc_row:
                 continue

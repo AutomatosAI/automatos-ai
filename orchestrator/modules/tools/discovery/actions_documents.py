@@ -113,6 +113,43 @@ def register_documents_actions(registry: ActionRegistry) -> None:
     ))
 
     registry.register(ActionDefinition(
+        name="platform_search_documents",
+        description=(
+            "Ask a question of the knowledge-base documents and get back the passages "
+            "that answer it, with their document id and score. This is the one to reach "
+            "for when you want what the documents SAY about something — "
+            "platform_search_memory searches remembered facts, not documents, and "
+            "platform_grep_documents matches literal text."
+        ),
+        category="documents",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The question or topic to find in the documents.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum passages to return. Defaults to 8, max 25.",
+                },
+                "team": {
+                    "type": "string",
+                    "description": "Optional team to narrow the search within your accessible documents.",
+                },
+            },
+            "required": ["query"],
+        },
+        permission_level="read",
+        tags=["documents", "search", "semantic", "knowledge", "rag"],
+        examples=[
+            "what do the docs say about our refund policy?",
+            "search the knowledge base for the onboarding steps",
+            "which document covers the delivery SLA?",
+        ],
+    ))
+
+    registry.register(ActionDefinition(
         name="platform_grep_documents",
         description=(
             "Search the literal text of knowledge-base documents with a regular "

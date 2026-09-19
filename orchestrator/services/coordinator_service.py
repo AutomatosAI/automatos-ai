@@ -1659,6 +1659,7 @@ class CoordinatorService:
                     self._run_cli_ticket(
                         p["task"], p["prompt"], p["agent_id"], p.get("workspace_id"), p.get("run_id"),
                         (p.get("mode_caps") or {}).get("timeout_seconds") or Config.COORDINATOR_TASK_EXECUTION_TIMEOUT,
+                        Config.MISSION_CLI_TICKET_TIMEOUT_SECONDS,
                     )
                     if p.get("cli_agent")
                     else self._run_agent_io(p["factory"], p["agent_id"], p["prompt"],
@@ -2311,6 +2312,7 @@ class CoordinatorService:
     @staticmethod
     async def _run_cli_ticket(
         task: Any, prompt: str, agent_id: int, workspace_id: Any, run_id: Any, timeout_s: Any,
+        hard_timeout_s: Any = None,
     ) -> Dict[str, Any]:
         """PRD-239 S3: a mission task assigned to a session agent — file the
         ticket on the board (tied to this run) and wait for the Claude Code
@@ -2330,6 +2332,7 @@ class CoordinatorService:
                 source_type=MISSION_SOURCE_TYPE,
                 source_id=f"{MISSION_SOURCE_TYPE}:{run_id}:{task.id}",
                 timeout_s=float(timeout_s) if timeout_s else None,
+                hard_timeout_s=float(hard_timeout_s) if hard_timeout_s else None,
                 tags=["mission"],
                 orchestration_run_id=run_id,
                 orchestration_task_id=task.id,

@@ -28,6 +28,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from config import config
@@ -84,8 +85,34 @@ async def require_session(
         agent_id=int(task.assigned_agent_id) if task.assigned_agent_id else None,
         agent_name=getattr(agent, "name", None),
         workspace_id=task.workspace_id,
+        mission_field_id=mission_field_id(db, task),
     )
     return task, ctx
+
+
+def mission_field_id(db: Session, task: Any) -> Optional[str]:
+    """The shared field of the mission this ticket belongs to, or ``None``.
+
+    Read from the run, never from the call: PRD-178 S1 removed ambient field
+    binding precisely so one mission's agents cannot write into another's.
+    A standalone ticket has no run and therefore no field — that is a normal
+    answer, not an error.
+    """
+    run_id = getattr(task, "orchestration_run_id", None)
+    if not run_id:
+        return None
+    try:
+        row = db.execute(
+            sa_text("SELECT config FROM orchestration_runs WHERE id = :run_id"),
+            {"run_id": str(run_id)},
+        ).fetchone()
+    except Exception:  # noqa: BLE001
+        logger.warning("[session-tools] could not read the mission field for ticket %s",
+                       getattr(task, "id", "?"), exc_info=True)
+        return None
+    config_blob = (row.config if row else None) or {}
+    field_id = config_blob.get("field_id") if isinstance(config_blob, dict) else None
+    return str(field_id) if field_id else None
 
 
 def call_allowance(db: Session, task: Any) -> Optional[str]:

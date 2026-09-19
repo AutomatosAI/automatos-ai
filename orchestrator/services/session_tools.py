@@ -70,6 +70,16 @@ REFUSED_TICKET_STATUSES: Tuple[str, ...] = (
 )
 
 MAX_TOOL_RESULT_CHARS = 40000
+# A recorded fact is read later beside dozens of others; keep it a fact, not a report.
+MAX_MEMORY_CHARS = 1500
+MAX_MEMORY_KEY_CHARS = 120
+# The taxonomy platform_store_memory accepts (PRD-206); anything else is dropped
+# and the action's own default applies.
+MEMORY_TYPES: Tuple[str, ...] = (
+    "tool_outcome", "task_learning", "playbook_pattern", "user_fact",
+    "business_fact", "preference", "procedure", "decision", "open_loop",
+    "thread_summary",
+)
 # The operator reads a question on a CARD, not in a terminal: past a short
 # paragraph plus its options it is a report, not a question (PRD-225's own rule).
 MAX_QUESTION_CHARS = 700
@@ -111,6 +121,11 @@ class SessionContext:
     agent_id: Optional[int]
     agent_name: Optional[str]
     workspace_id: Any
+    # PRD-245 mission parity: the shared field of the mission this ticket belongs
+    # to, resolved server-side from OrchestrationRun.config (never from the call).
+    # ``None`` for a standalone ticket — then record_memory writes durable memory
+    # only, and says so.
+    mission_field_id: Optional[str] = None
 
 
 def _scope_update_ticket(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
@@ -272,6 +287,103 @@ def _scope_search(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]
     return {k: v for k, v in params.items() if k in ("query", "limit")}
 
 
+def _scope_record_memory(params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
+    """What a session may say about a fact it wants kept.
+
+    The destination is NOT a parameter: the mission field is written whenever
+    this ticket has one, resolved server-side. A session naming its own
+    ``field_id`` would be able to write into another mission's memory.
+    """
+    content = str(params.get("content") or params.get("value") or "").strip()
+    if not content:
+        raise SessionToolRefused(
+            "record_memory needs 'content' — the fact to keep, in one or two sentences."
+        )
+    scoped: Dict[str, Any] = {"content": content[:MAX_MEMORY_CHARS]}
+    key = params.get("key")
+    if key:
+        scoped["key"] = str(key)[:MAX_MEMORY_KEY_CHARS]
+    mem_type = params.get("type")
+    if mem_type in MEMORY_TYPES:
+        scoped["type"] = mem_type
+    importance = params.get("importance")
+    if importance is not None:
+        try:
+            scoped["importance"] = min(max(float(importance), 0.0), 1.0)
+        except (TypeError, ValueError):
+            pass
+    return scoped
+
+
+async def _run_record_memory(db: Any, params: Dict[str, Any], ctx: SessionContext) -> Dict[str, Any]:
+    """Write one fact to durable workspace memory, and to the mission field too.
+
+    Night 1 (2026-09-18): on a 9-task mission the API agent deposited 3 field
+    memory points and the session agent deposited 0 — not because it chose not
+    to, but because the bridge had a read path into memory and no write path at
+    all. Sessions and API turns now leave the same trace.
+    """
+    from modules.tools.execution.unified_executor import UnifiedToolExecutor
+
+    executor = UnifiedToolExecutor(db)
+    agent_id = int(ctx.agent_id or 0)
+    content = params.get("content", "")
+
+    durable = await executor.execute_tool(
+        tool_name=PLATFORM_DISPATCHER,
+        parameters={
+            "action": "platform_store_memory",
+            "params": {
+                "content": content,
+                "type": params.get("type", "business_fact"),
+                "importance": params.get("importance", 0.6),
+                "source_type": "claude_reports",
+            },
+        },
+        agent_id=agent_id,
+        workspace_id=ctx.workspace_id,
+        trace_id=f"session:{ctx.task_id}:record_memory:durable",
+        caller_context=None,
+    )
+    durable_ok = bool(isinstance(durable, dict) and durable.get("success", True))
+
+    field_ok = False
+    field_error: Optional[str] = None
+    if ctx.mission_field_id:
+        key = params.get("key") or f"ticket-{ctx.task_id}"
+        field = await executor.execute_tool(
+            tool_name=PLATFORM_DISPATCHER,
+            parameters={
+                "action": "platform_field_inject",
+                "params": {"key": str(key), "value": content},
+            },
+            agent_id=agent_id,
+            workspace_id=ctx.workspace_id,
+            trace_id=f"session:{ctx.task_id}:record_memory:field",
+            caller_context={"field_context": {"field_id": ctx.mission_field_id}},
+        )
+        field_ok = bool(isinstance(field, dict) and field.get("success", False))
+        if not field_ok and isinstance(field, dict):
+            field_error = str(field.get("error") or "")[:200]
+
+    if not durable_ok and not field_ok:
+        detail = field_error or (durable.get("error") if isinstance(durable, dict) else "")
+        return {"success": False, "error": f"nothing was recorded: {detail or 'memory is unavailable'}"}
+
+    if ctx.mission_field_id:
+        where = "workspace memory and this mission's shared field" if field_ok else (
+            "workspace memory (the mission field rejected it: %s)" % (field_error or "unavailable")
+        )
+    else:
+        where = "workspace memory (this ticket is not part of a mission, so there is no shared field)"
+    return {
+        "success": True,
+        "stored_durable": durable_ok,
+        "stored_field": field_ok,
+        "message": f"Recorded in {where}.",
+    }
+
+
 class SessionToolRefused(Exception):
     """The call is outside what a session may ask for; the reason is for the model."""
 
@@ -421,8 +533,9 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         name="search_knowledge",
         action="platform_search_memory",
         description=(
-            "Search this workspace's memory and knowledge for what the team already knows "
-            "about a topic — decisions, past findings, context. Search before re-deriving."
+            "Search this workspace's REMEMBERED FACTS — decisions, past findings, context "
+            "agents and Auto have recorded. Search before re-deriving. This does not search "
+            "uploaded documents: use search_documents for those."
         ),
         input_schema={
             "type": "object",
@@ -434,6 +547,60 @@ SESSION_TOOLS: Tuple[SessionTool, ...] = (
         },
         scope=_scope_search,
         tags=("knowledge",),
+    ),
+    SessionTool(
+        name="search_documents",
+        action="platform_search_documents",
+        description=(
+            "Ask a question of the documents uploaded to this workspace's knowledge base and "
+            "get back the passages that answer it. Use this whenever the answer might be in "
+            "the owner's own files — policies, specs, product data, briefs."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The question or topic to find."},
+                "limit": {"type": "integer", "description": "Max passages (default 8, max 25)."},
+            },
+            "required": ["query"],
+        },
+        scope=_scope_search,
+        tags=("knowledge", "documents"),
+    ),
+    SessionTool(
+        name="record_memory",
+        action="platform_store_memory",
+        description=(
+            "Record one fact worth keeping — a decision and its reason, a finding, a "
+            "correction. It goes into this workspace's long-term memory, and when your "
+            "ticket is part of a mission it is also shared with the other agents working "
+            "that mission, in their own turn. Record what the next agent would otherwise "
+            "have to re-derive; not raw tool output, and never a secret or credential."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "The fact, in one or two sentences."},
+                "key": {
+                    "type": "string",
+                    "description": "Short label for the mission field, e.g. 'pricing-decision'.",
+                },
+                "type": {
+                    "type": "string",
+                    "enum": list(MEMORY_TYPES),
+                    "description": "What kind of fact this is. Default business_fact.",
+                },
+                "importance": {
+                    "type": "number",
+                    "description": "0.0-1.0 how load-bearing this is. Default 0.6.",
+                },
+            },
+            "required": ["content"],
+        },
+        scope=_scope_record_memory,
+        runner=_run_record_memory,
+        reads_only=False,
+        tags=("knowledge", "memory"),
     ),
 )
 
@@ -520,8 +687,13 @@ async def call_tool(db: Any, tool: SessionTool, params: Dict[str, Any], ctx: Ses
         trace_id=f"session:{ctx.task_id}:{tool.name}",
         # A session speaks as its AGENT, never as a human operator: no user
         # context, so an admin-gated action refuses exactly as it would for any
-        # workspace agent.
-        caller_context=None,
+        # workspace agent. The ONE thing threaded is the mission field this
+        # ticket belongs to — resolved server-side from the run, so a session
+        # cannot name another mission's field (PRD-178 S1's rule, kept).
+        caller_context=(
+            {"field_context": {"field_id": ctx.mission_field_id}}
+            if ctx.mission_field_id else None
+        ),
     )
     if not isinstance(result, dict):
         return {"success": False, "error": "the executor returned no result"}

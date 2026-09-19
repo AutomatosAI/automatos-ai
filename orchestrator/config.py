@@ -1047,6 +1047,12 @@ class Config:
     # COORDINATOR_TASK_MAX_TOKENS is now a @property above (reads from system_settings)
     # Maximum seconds a single task execution can take before being timed out
     COORDINATOR_TASK_EXECUTION_TIMEOUT: int = int(os.getenv("COORDINATOR_TASK_EXECUTION_TIMEOUT", "240"))
+    # A mission task worked by a Claude Code session is not an API turn: research
+    # or a build routinely runs 10-30 minutes. The power-mode timeout still bounds
+    # API turns; this is the ceiling for a session ticket that is demonstrably
+    # alive (night 1, finding 21 — every mixed mission failed its session tasks at
+    # four minutes and spawned duplicates beside the sessions still running).
+    MISSION_CLI_TICKET_TIMEOUT_SECONDS: int = int(os.getenv("MISSION_CLI_TICKET_TIMEOUT_SECONDS", "3600"))
     # PRD-229: mid-run clarifications (ask_orchestrator). CLARIFICATION_BUDGET
     # caps how many questions Auto ANSWERS per run from retrievable context;
     # once spent, everything escalates (escalations are never budget-limited —

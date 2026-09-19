@@ -295,11 +295,15 @@ function KanbanCard({
             {(task.priority === 'urgent' || task.priority === 'high') && (
               <span className="high">· {task.priority.toUpperCase()}</span>
             )}
-            {(task.attempts ?? 0) > 0 && task.status !== 'done' && (
+            {/* A session ticket's FIRST claim sets attempts=1, so `> 0` badged
+                47 of 125 perfectly healthy tickets UNRESPONSIVE on night 1.
+                A requeue is only evidence of a missed ack from the second
+                attempt on. */}
+            {(task.attempts ?? 0) > 1 && task.status !== 'done' && (
               <span
                 className="high"
                 style={{ color: 'hsl(0 72% 60%)' }}
-                title={`Agent missed its ack deadline — task requeued ${task.attempts}×`}
+                title={`Agent missed its ack deadline — task requeued ${(task.attempts ?? 1) - 1}×`}
               >
                 · UNRESPONSIVE
               </span>
