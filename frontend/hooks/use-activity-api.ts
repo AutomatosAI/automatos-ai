@@ -244,12 +244,13 @@ export function useSchedulerHealth() {
  * Fetch latest reports from pinned agents.
  */
 export function useAgentReports(agentIds: number[]) {
+  // No pins is not "no reports": the endpoint then returns the agents that
+  // reported most recently. Night 1 ended with twelve reports and a blank panel.
   const idsParam = agentIds.join(',')
   return useQuery<AgentReportsResponse>({
     queryKey: activityQueryKeys.agentReports(agentIds),
     queryFn: () =>
       apiClient.request<AgentReportsResponse>(`/api/activity/agent-reports?agent_ids=${idsParam}`),
-    enabled: agentIds.length > 0,
     refetchInterval: 60000,
     staleTime: 30000,
   })

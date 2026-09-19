@@ -16,7 +16,7 @@ modules/tools/execution/exec_*.py for maintainability.
 
 import logging
 import time as _time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -53,6 +53,48 @@ def _get_composio_executor(db):
     return _composio_executor(db) if _composio_executor else None
 
 logger = logging.getLogger(__name__)
+
+
+# Names a model reaches for when it means one of our required params. Only
+# consulted for a param that is MISSING — never to override what was sent.
+_PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "title": ("name", "heading", "subject", "report_title", "task_title"),
+    "content": ("body", "markdown", "text", "details", "report_content", "message", "findings"),
+    "query": ("q", "search", "question", "prompt"),
+    "description": ("desc", "summary", "details"),
+}
+
+# A single dict argument named after the thing itself ({"report": {...}}) is a
+# wrapper the model added, not a parameter.
+_WRAPPER_KEYS: Tuple[str, ...] = ("report", "task", "document", "payload", "params", "input", "data")
+
+
+def _fill_required_from_aliases(params: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
+    """``params`` with any missing required key filled from an obvious synonym.
+
+    Returns a new dict — the caller's params are never mutated.
+    """
+    if not required or not isinstance(params, dict):
+        return params
+
+    filled = dict(params)
+
+    # Unwrap {"report": {...}} style wrappers first, without losing siblings.
+    for key in _WRAPPER_KEYS:
+        inner = filled.get(key)
+        if isinstance(inner, dict) and any(r in inner for r in required):
+            filled = {**inner, **{k: v for k, v in filled.items() if k != key}}
+            break
+
+    for name in required:
+        if name in filled and filled[name] not in (None, ""):
+            continue
+        for alias in _PARAM_ALIASES.get(name, ()):
+            value = filled.get(alias)
+            if value not in (None, "", [], {}):
+                filled[name] = value
+                break
+    return filled
 
 
 class UnifiedToolExecutor:
@@ -721,8 +763,16 @@ class UnifiedToolExecutor:
                     }
                     return result
 
-                # Validate required params
+                # Validate required params — after filling any that the caller
+                # supplied under an obvious other name. Night 1: 18 of 89 failed
+                # platform_execute calls were "Missing required params for
+                # 'platform_submit_report': ['title','content']" from agents that
+                # HAD written a report, under 'body' or nested in 'report'. The
+                # same schema/handler drift as the onboarding blueprint-rules wall:
+                # refuse a call that is genuinely incomplete, not one that used a
+                # synonym.
                 required = action_def.parameters.get("required", [])
+                action_params = _fill_required_from_aliases(action_params, required)
                 missing = [p for p in required if p not in action_params]
                 if missing:
                     # Include param descriptions so the LLM can self-correct

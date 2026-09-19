@@ -150,7 +150,11 @@ async def grant_approval(
     if grant.kind == KIND_QUESTION:
         raise HTTPException(
             status_code=422,
-            detail="This is a question — answer it via POST /{id}/answer, not /grant.",
+            detail=(
+                f"Grant {grant.id} is a question (kind='{grant.kind}'), not an approval — "
+                "answer it with POST /api/v1/approval-grants/{id}/answer, which takes "
+                "'answer_text' or 'option'. The /grant route is only for approval rows."
+            ),
         )
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(status_code=422, detail=f"Grant is not pending (status: {grant.status})")
@@ -311,7 +315,12 @@ async def answer_question(
     grant = _load_grant(db, ctx, grant_id)
     if grant.kind != KIND_QUESTION:
         raise HTTPException(
-            status_code=422, detail="This grant is an approval, not a question."
+            status_code=422,
+            detail=(
+                f"Grant {grant.id} is an approval (kind='{grant.kind}'), not a question — "
+                "approve it with POST /api/v1/approval-grants/{id}/grant, or refuse it with "
+                "/deny. The /answer route is only for kind='question' rows."
+            ),
         )
     if grant.status != GrantStatus.PENDING.value:
         raise HTTPException(

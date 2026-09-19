@@ -309,6 +309,10 @@ class ReportService:
                     agent_name=agent_name,
                     created_by=agent_name or "agent",
                     extra_tags=[f"report:{report_id}"],
+                    # What kind of report this is decides whether it also gets an
+                    # entity-extraction pass (Gerard, 2026-09-18 — the graph is for
+                    # how the business runs, not for standups and heartbeat logs).
+                    report_type=report_type,
                 )
             except Exception:
                 logger.error(

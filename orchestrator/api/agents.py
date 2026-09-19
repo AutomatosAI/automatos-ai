@@ -230,7 +230,34 @@ def _session_tool_gaps(agent: Agent) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
+def completed_task_counts(db: Session, agent_ids: List[int]) -> Dict[int, int]:
+    """How many board tickets each of these agents actually finished.
+
+    ``agents.performance_metrics`` is a JSON counter somebody has to remember to
+    write, and night 1 (2026-09-18) found it last written on 2026-09-08: the
+    roster showed 0 tasks completed for every agent while ``board_tasks`` held
+    OPS 20, NEWSROOM 13, WRITER 10 and so on for that same night. One query for
+    the whole roster, so the list endpoint stays a single round trip.
+    """
+    if not agent_ids:
+        return {}
+    try:
+        rows = db.execute(
+            text("""
+                SELECT assigned_agent_id AS agent_id, COUNT(*) AS completed
+                FROM board_tasks
+                WHERE assigned_agent_id = ANY(:agent_ids) AND status = 'done'
+                GROUP BY assigned_agent_id
+            """),
+            {"agent_ids": list(agent_ids)},
+        ).fetchall()
+    except Exception:  # noqa: BLE001 — a roster must render without its counts
+        logger.warning("[agents] completed-task counts unavailable", exc_info=True)
+        return {}
+    return {int(row.agent_id): int(row.completed) for row in rows}
+
+
+def _build_agent_response(agent: Agent, db: Session, tasks_completed: Optional[int] = None) -> AgentResponse:
     """Build agent response with skills, tools, and plugins"""
     # PRD-15: Debug logging for model_config
     model_cfg = getattr(agent, 'model_config', None)
@@ -328,7 +355,12 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
         tags=_normalize_tags(agent.tags) if getattr(agent, 'tags', None) else [],
         created_at=agent.created_at,
         updated_at=agent.updated_at or agent.created_at,
-        performance_metrics=agent.performance_metrics or {},
+        # The stale JSON counter, with the real number laid over it when the
+        # caller derived one from board_tasks (CLAUDE.md §5: one source of truth).
+        performance_metrics=(
+            {**(agent.performance_metrics or {}), "tasks_completed": tasks_completed}
+            if tasks_completed is not None else (agent.performance_metrics or {})
+        ),
         created_by=agent.created_by,
         agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
         model_usage_stats=getattr(agent, 'model_usage_stats', None),  # PRD-54: LLM usage stats
@@ -608,7 +640,11 @@ async def list_agents(
         query = query.distinct(Agent.id)
         agents = query.offset(skip).limit(limit).all()
 
-        return [_build_agent_response(agent, db) for agent in agents]
+        completed = completed_task_counts(db, [a.id for a in agents])
+        return [
+            _build_agent_response(agent, db, tasks_completed=completed.get(agent.id, 0))
+            for agent in agents
+        ]
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")

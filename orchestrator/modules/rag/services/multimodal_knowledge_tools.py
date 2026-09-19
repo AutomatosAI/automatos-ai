@@ -70,7 +70,7 @@ class MultimodalKnowledgeTools:
         the canonical PRD-124 clause). Team filter applies only when a team is
         supplied, mirroring ``modules/rag/service.py``.
         """
-        clause = "AND ki.workspace_id = :workspace_id::uuid"
+        clause = "AND ki.workspace_id = CAST(:workspace_id AS uuid)"
         params: Dict[str, Any] = {"workspace_id": str(workspace_id)}
         team_norm = normalize_team(team) if team else None
         if team_norm:
@@ -134,7 +134,7 @@ class MultimodalKnowledgeTools:
                     kt.column_count,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_tables kt ON kt.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
@@ -142,7 +142,7 @@ class MultimodalKnowledgeTools:
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 
@@ -237,7 +237,7 @@ class MultimodalKnowledgeTools:
                     kimg.format,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_images kimg ON kimg.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
@@ -245,7 +245,7 @@ class MultimodalKnowledgeTools:
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 
@@ -342,7 +342,7 @@ class MultimodalKnowledgeTools:
                     kf.complexity_level,
                     ki.quality_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_formulas kf ON kf.knowledge_item_id = ki.id
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
@@ -350,7 +350,7 @@ class MultimodalKnowledgeTools:
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 
@@ -475,14 +475,14 @@ class MultimodalKnowledgeTools:
                     ki.quality_score,
                     ki.importance_score,
                     ki.created_at,
-                    1 - (ki.embedding <=> :query_embedding::vector) as similarity
+                    1 - (ki.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM knowledge_items ki
                 JOIN kb_types kbt ON ki.kb_type_id = kbt.id
                 WHERE kbt.type_name = ANY(:kb_types)
                     AND ki.status = 'active'
                     AND ki.embedding IS NOT NULL
                     {scope_sql}
-                ORDER BY ki.embedding <=> :query_embedding::vector
+                ORDER BY ki.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
 

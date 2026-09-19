@@ -1209,19 +1209,68 @@ SESSION_HOLD_OPTIONS = (SESSION_HOLD_OPTION_ALLOW, SESSION_HOLD_OPTION_DENY)
 # The host's default ``--ask-timeout`` (services/cli-host … config.py); the row's
 # ``expires_at`` mirrors it. The row is CLOSED by the session's result in any case
 # (``apply_result``) — the host does not report its actual timeout on the event.
-SESSION_HOLD_TTL_SECONDS = 120
+SESSION_HOLD_TTL_SECONDS = 3600
 
 
 def session_hold_question(task_id: Any, entry: Dict[str, Any]) -> str:
-    """The question the operator sees, wherever it reaches them. The answer
+    """The question the operator sees, wherever it reaches them.
+
+    Night 1 (2026-09-18): the card was a raw, truncated shell command plus the
+    gate's own wording — the operator had to reverse-engineer what the agent was
+    trying to do before deciding. So: what it wants, in a plain sentence, first;
+    the exact command behind a disclosure; the gate's reason last. The answer
     words are spelled out because a Telegram reply sees no buttons and anything
-    but ``allow`` is read as deny (fail closed)."""
-    subject = entry.get("subject") or entry.get("tool") or "?"
-    lines = [f"**Allow this command in ticket #{task_id}?**", "", f"`{subject}`"]
+    but ``allow`` is read as deny (fail closed).
+    """
+    subject = str(entry.get("subject") or entry.get("tool") or "?")
+    intent = str(entry.get("intent") or entry.get("description") or "").strip()
+
+    lines = [f"**Allow this command in ticket #{task_id}?**", ""]
+    lines += [intent or _plain_intent(subject), ""]
+    # The full command, never truncated, but folded away — the summary line is
+    # what most decisions are made on.
+    lines += ["<details><summary>The exact command</summary>", "", "```sh", subject, "```", "", "</details>"]
     if entry.get("reason"):
-        lines += ["", str(entry["reason"])]
+        lines += ["", f"_Held because: {entry['reason']}_"]
     lines += ["", f"Answer `{SESSION_HOLD_OPTION_ALLOW}` or `{SESSION_HOLD_OPTION_DENY}`."]
     return "\n".join(lines)
+
+
+# What the common read-only verbs actually do, so a card can say it in English
+# rather than showing a shell fragment and hoping.
+_VERB_INTENTS: Dict[str, str] = {
+    "comm": "compare two sorted files line by line",
+    "diff": "compare two files",
+    "cat": "read a file",
+    "head": "read the start of a file",
+    "tail": "read the end of a file",
+    "grep": "search files for a pattern",
+    "rg": "search files for a pattern",
+    "find": "look for files",
+    "ls": "list a directory",
+    "wc": "count lines or words in a file",
+    "sort": "sort lines",
+    "uniq": "collapse repeated lines",
+    "sed": "transform text",
+    "awk": "extract fields from text",
+    "curl": "fetch a URL",
+    "git": "run a git command",
+    "npm": "run an npm command",
+    "python": "run a Python command",
+    "python3": "run a Python command",
+}
+
+
+def _plain_intent(command: str) -> str:
+    """One sentence describing what the held command would do."""
+    words = command.strip().split()
+    if not words:
+        return "The agent wants to run a command."
+    verb = words[0].rsplit("/", 1)[-1]
+    what = _VERB_INTENTS.get(verb)
+    if what:
+        return f"The agent wants to **{what}** (`{verb}`)."
+    return f"The agent wants to run **{verb}**."
 
 
 def is_allow_answer(answer: Any) -> bool:

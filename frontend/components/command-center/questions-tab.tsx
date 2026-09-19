@@ -45,6 +45,7 @@ function QuestionCard({ q }: { q: ApprovalGrant }) {
   const answerMut = useAnswerQuestion()
   const dismissMut = useDenyApproval()
   const [text, setText] = useState('')
+  const [showFreeText, setShowFreeText] = useState(!Array.isArray(q.options) || q.options.length === 0)
   const [resolved, setResolved] = useState<null | 'answered' | 'dismissed'>(null)
   const busy = answerMut.isLoading || dismissMut.isLoading
 
@@ -78,6 +79,7 @@ function QuestionCard({ q }: { q: ApprovalGrant }) {
   const shownTasks = cascade?.tasks ?? []
   const overflow = cascade ? cascade.total - shownTasks.length : 0
   const options = Array.isArray(q.options) ? q.options : []
+  const hasOptions = options.length > 0
 
   return (
     <div className="flex flex-col gap-2 rounded border border-border bg-background/50 p-3">
@@ -138,51 +140,73 @@ function QuestionCard({ q }: { q: ApprovalGrant }) {
         </p>
       ) : (
         <div className="flex flex-col gap-2">
-          {options.length > 0 && (
+          {/* When the ask carries options — an allow/deny hold — the chips ARE
+              the answer, so they are the primary control. Night 1: the biggest
+              button on the card was "Answer", disabled until you typed, on
+              questions where typing was never the answer. */}
+          {hasOptions && (
             <div className="flex flex-wrap gap-2" aria-label="Answer options">
-              {options.map((opt) => (
+              {options.map((opt, i) => (
                 <Button
                   key={opt}
                   size="sm"
-                  variant="outline"
+                  variant={i === 0 ? 'default' : 'outline'}
                   disabled={busy}
                   onClick={() => submit({ option: opt })}
+                  className="flex-1 min-w-[7rem]"
                 >
                   {opt}
                 </Button>
               ))}
             </div>
           )}
-          <textarea
-            aria-label="Answer"
-            value={text}
-            disabled={busy}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault()
-                submit({ answer_text: text })
-              }
-            }}
-            placeholder="Answer… (⌘/Ctrl-Enter to send)"
-            rows={2}
-            className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-          />
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              disabled={busy || !text.trim()}
-              onClick={() => submit({ answer_text: text })}
-              className="flex-1"
+
+          {hasOptions ? (
+            <button
+              type="button"
+              className="self-start text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() => setShowFreeText((v) => !v)}
             >
-              <Check className="mr-1 h-4 w-4" /> Answer
-            </Button>
+              {showFreeText ? 'Hide' : 'Answer in your own words instead'}
+            </button>
+          ) : null}
+
+          {showFreeText && (
+            <textarea
+              aria-label="Answer"
+              value={text}
+              disabled={busy}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  submit({ answer_text: text })
+                }
+              }}
+              placeholder="Answer… (⌘/Ctrl-Enter to send)"
+              rows={2}
+              className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+            />
+          )}
+
+          <div className="flex gap-2">
+            {showFreeText && (
+              <Button
+                size="sm"
+                disabled={busy || !text.trim()}
+                onClick={() => submit({ answer_text: text })}
+                className="flex-1"
+              >
+                <Check className="mr-1 h-4 w-4" /> Answer
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
               disabled={busy}
               onClick={dismiss}
               title={DISMISS_HINT}
+              className={showFreeText ? undefined : 'ml-auto'}
             >
               <X className="mr-1 h-4 w-4" /> Dismiss
             </Button>

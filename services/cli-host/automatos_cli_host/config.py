@@ -33,6 +33,8 @@ DEFAULT_POLL_SECONDS = 5.0
 DEFAULT_HEARTBEAT_SECONDS = 30.0
 DEFAULT_EVENT_FLUSH_SECONDS = 5.0
 DEFAULT_SESSION_TIMEOUT_SECONDS = 4 * 3600
+# How long a permission card waits for a human before the session gives up.
+DEFAULT_ASK_TIMEOUT_SECONDS = 3600.0
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 180.0
 DEFAULT_CLAIM_BATCH = 5
 
@@ -53,7 +55,12 @@ class HostConfig:
     heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS
     event_flush_seconds: float = DEFAULT_EVENT_FLUSH_SECONDS
     session_timeout_seconds: float = DEFAULT_SESSION_TIMEOUT_SECONDS
-    ask_timeout: float = 120.0
+    # A permission card is answered by a PERSON, who is not necessarily at the
+    # desk: night 1 (2026-09-18) expired every hold raised while Gerard was away,
+    # at two minutes, while a question grant gets 24 hours. An hour is long
+    # enough to come back from lunch and short enough that a session does not
+    # hold a slot overnight.
+    ask_timeout: float = DEFAULT_ASK_TIMEOUT_SECONDS
     unlisted_bash: str = "ask"  # ask | allow — what a session may run beyond its Bash allowlist
     startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS
     claim_batch: int = DEFAULT_CLAIM_BATCH
@@ -124,8 +131,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--unlisted-bash", choices=("ask", "allow"), default="ask",
                    help="a Bash verb outside the ticket's allowlist: 'ask' shows the operator a card (default); "
                         "'allow' runs it — never-allowed commands are still refused and unresolved paths still ask")
-    p.add_argument("--ask-timeout", type=float, default=120.0,
-                   help="seconds a session waits for the operator to answer a permission card before denying (default 120)")
+    p.add_argument("--ask-timeout", type=float, default=DEFAULT_ASK_TIMEOUT_SECONDS,
+                   help=("seconds a session waits for the operator to answer a permission card before "
+                         f"denying (default {int(DEFAULT_ASK_TIMEOUT_SECONDS)})"))
     p.add_argument("--startup-timeout", type=float, default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
                    help="seconds to wait for a session to report SessionStart (login screens and dialogs never do)")
     p.add_argument("--verbose", action="store_true")

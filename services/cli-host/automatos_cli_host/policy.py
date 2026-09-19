@@ -89,6 +89,12 @@ DEFAULT_BASH_ALLOW = (
     "ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "pwd", "which", "echo",
     "sort", "uniq", "cut", "tr", "sed", "awk", "date", "diff", "stat", "basename",
     "dirname", "printf", "jq", "file", "tree", "du", "true", "test", "[", "[[",
+    # Read-only coreutils that belong beside sort/uniq/diff. ``comm`` was the one
+    # word that held an otherwise-allowed CSS diff on night 1 (2026-09-18) — the
+    # session sat on a two-minute hold for a command that reads two sorted files.
+    "comm", "join", "paste", "nl", "tac", "rev", "fold", "expand", "unexpand",
+    "column", "md5sum", "sha1sum", "sha256sum", "cksum", "realpath", "readlink",
+    "seq",
     "python -m pytest", "python3 -m pytest", "pytest", "npm test", "npm run", "pnpm test",
     "pnpm run", "yarn test", "make test", "make lint", "cargo test", "go test",
     "ruff", "black --check", "mypy", "tsc", "eslint", "vitest",
