@@ -246,6 +246,8 @@ Rules:
 - RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS: {allowed_relations}. Never invent a new relation type. Keep the exact wording from the document in "relation_label" (e.g. relation "produces", relation_label "ships with every order").
 - Add hyperedges when 3+ nodes participate in a shared concept/flow/pattern. Maximum 3 per document.
 
+{output_budget}
+
 DOCUMENT PATH: {doc_path}
 
 ---
@@ -287,6 +289,8 @@ Rules:
 - Do not hallucinate entities not present in the report
 - RELATIONS: set each edge "relation" to the SINGLE closest of these ALLOWED RELATIONS: {allowed_relations}. Never invent a new relation type. Keep the exact wording from the report in "relation_label" (e.g. relation "causes", relation_label "timed out because of").
 - Add hyperedges when 3+ nodes participate in a shared concept/flow/pattern. Maximum 3 per report.
+
+{output_budget}
 
 REPORT PATH: {report_path}
 AGENT: {agent_name}
@@ -379,6 +383,46 @@ def _normalise_extraction(
 # LLM-based extractors
 # ---------------------------------------------------------------------------
 
+def _extraction_llm(llm: Optional[Any] = None) -> Any:
+    """The extraction LLM, with extraction's OWN output ceiling applied.
+
+    ``graph_extraction`` maps to the ``system_llm`` settings category, so it
+    inherited that tier's ``max_tokens`` (8000 locally). Night 1 cut 311 of 497
+    calls off mid-JSON at that ceiling: they parsed to nothing and were billed
+    in full. The ceiling here is extraction's alone — changing it does not move
+    any other service on the tier.
+    """
+    from config import config as app_config
+
+    if llm is None:
+        llm = create_llm_manager(
+            service_name="graph_extraction",
+            model=_get_graph_extraction_model(),
+        )
+    cap = int(getattr(app_config, "GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", 2000) or 2000)
+    try:
+        if getattr(llm.config, "max_tokens", 0) > cap:
+            llm.config.max_tokens = cap
+    except Exception:  # noqa: BLE001 — a manager without a mutable config still works
+        logger.debug("graph extraction: could not apply the output ceiling", exc_info=True)
+    return llm
+
+
+def _output_budget() -> str:
+    """The size contract the prompt states, from the same config as the ceiling."""
+    from config import config as app_config
+
+    return (
+        "BUDGET: return at most {nodes} nodes and {edges} edges — the most "
+        "load-bearing ones, not everything you can find. Output COMPACT JSON on "
+        "one line: no indentation, no trailing spaces, no commentary before or "
+        "after. A truncated answer is worth nothing, so stay inside the budget."
+    ).format(
+        nodes=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_NODES", 25) or 25),
+        edges=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_EDGES", 40) or 40),
+    )
+
+
 async def extract_from_document(
     doc_text: str,
     doc_path: str,
@@ -405,14 +449,11 @@ async def extract_from_document(
 
     prompt = _DOCUMENT_EXTRACTION_PROMPT.format(
         doc_path=doc_path, doc_text=doc_text, allowed_relations=_ALLOWED_RELATIONS_STR,
+        output_budget=_output_budget(),
     )
 
     try:
-        if llm is None:
-            llm = create_llm_manager(
-                service_name="graph_extraction",
-                model=_get_graph_extraction_model(),
-            )
+        llm = _extraction_llm(llm)
         response = await asyncio.wait_for(
             llm.generate_response([
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
@@ -430,6 +471,13 @@ async def extract_from_document(
 
     parsed = _parse_llm_json(raw_text)
     if parsed is None:
+        # Name it: a spend that produced nothing is the thing to notice, and a
+        # run of these means the budget in the prompt is not being respected.
+        logger.warning(
+            "graph extraction produced unparseable JSON for %s (%d chars) — "
+            "likely truncated at the output ceiling; nothing extracted, the call was billed",
+            doc_path, len(raw_text or ""),
+        )
         return _empty_graph()
 
     return _normalise_extraction(parsed, source_file=doc_path, team_access=team_access)
@@ -461,14 +509,11 @@ async def extract_from_report(
         report_text=report_text,
         agent_name=agent_name,
         allowed_relations=_ALLOWED_RELATIONS_STR,
+        output_budget=_output_budget(),
     )
 
     try:
-        if llm is None:
-            llm = create_llm_manager(
-                service_name="graph_extraction",
-                model=_get_graph_extraction_model(),
-            )
+        llm = _extraction_llm(llm)
         response = await asyncio.wait_for(
             llm.generate_response([
                 {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
@@ -486,6 +531,11 @@ async def extract_from_report(
 
     parsed = _parse_llm_json(raw_text)
     if parsed is None:
+        logger.warning(
+            "graph extraction produced unparseable JSON for report %s (%d chars) — "
+            "likely truncated at the output ceiling; nothing extracted, the call was billed",
+            report_path, len(raw_text or ""),
+        )
         return _empty_graph()
 
     return _normalise_extraction(parsed, source_file=report_path)

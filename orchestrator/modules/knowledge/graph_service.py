@@ -838,6 +838,7 @@ class GraphifyService:
 
         from core.database.database import get_db_session
         from core.models.core import Agent, Document
+        from services.knowledge_flywheel import title_is_telemetry
 
         _MAX_DOC_CHARS = 8000  # cap text sent to LLM extraction
 
@@ -882,10 +883,21 @@ class GraphifyService:
                         )
                         full_text = full_text[:_MAX_DOC_CHARS]
 
+                    doc_path = doc.original_filename or doc.filename or f"doc_{doc.id}"
+                    # F024: the platform's own copies of CLI tickets, heartbeat
+                    # logs and no-op passes are telemetry, not business
+                    # knowledge. They are still retrievable via RAG; they just
+                    # do not earn an LLM extraction pass on a full rebuild.
+                    if title_is_telemetry(doc_path):
+                        logger.debug(
+                            "_collect_sources: skipping telemetry doc %s (%s)", doc.id, doc_path,
+                        )
+                        continue
+
                     sources.append({
                         "type": "document",
                         "id": doc.id,
-                        "path": doc.original_filename or doc.filename or f"doc_{doc.id}",
+                        "path": doc_path,
                         "text": full_text,
                         "team_access": list(doc.team_access or []),
                     })

@@ -1393,6 +1393,28 @@ def ending_summary(task: Any) -> Optional[str]:
     return "; ".join(bits)[:500] or None
 
 
+# A later turn's result is only an improvement if it says more. Night 1
+# (2026-09-18) lost ticket #255's six delivered files when a re-claim wrote a
+# 488-character "I produced nothing" over the real write-up (F013).
+RESULT_KEEP_RATIO = 0.5
+
+
+def _kept_result(existing: Optional[str], incoming: Optional[str]) -> Optional[str]:
+    """Whichever of the two actually reports the work.
+
+    An incoming result replaces the old one unless it is substantially shorter —
+    then the longer account is kept and the newer one appended beneath it, so
+    nothing is lost either way and the ticket still shows what the last turn said.
+    """
+    if not incoming:
+        return existing
+    if not existing:
+        return incoming
+    if len(incoming) >= len(existing) * RESULT_KEEP_RATIO:
+        return incoming
+    return f"{existing}\n\n---\n\n_A later run reported:_ {incoming}"
+
+
 async def finalize_board_task_run(
     db: Session,
     *,
@@ -1476,7 +1498,7 @@ async def finalize_board_task_run(
         )
         return task.status
 
-    task.result = str(llm_text) if llm_text else None
+    task.result = _kept_result(task.result, str(llm_text) if llm_text else None)
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
     # A ticket that ends well must not still carry the error of an earlier

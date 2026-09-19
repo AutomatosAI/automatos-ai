@@ -83,6 +83,9 @@ Not a checklist — an evening. Do what a real owner would do, in a sensible ord
 
 - Tag everything you create `sim-night-{{DATE}}` (tasks: `tags`; agents: `tags` and the description; documents: `tags`). **Never delete, edit, block, cancel, reject or approve anything that does not carry that tag** — untagged work that appears on the board during the night is the real owner's (he shares this workspace and may run his own tests while you work): leave it exactly as it is, do not ask Auto to "stop" or "tidy" it either, and write one diary line noting you saw it. The existing agents are yours to *use*, not to change.
 - No external side effects: no send/post/publish/pay/delete on Gmail, Calendar, Shopify or any connected app. Drafts and reads only. If an agent asks to send something, say no in character.
+- **Everyone you deal with is fictional.** Your domain is `harbourline-coffee.example` — a reserved test domain, not registered. Your suppliers, importers, roasters and cafés are invented: make up their names, addresses and contacts. Never write to, or about, a real company as though it were your counterparty.
+- **Never address a draft to a real external address.** Every recipient ends in `@harbourline-coffee.example` or another `.example` domain. A draft is still a thing a person can accidentally send.
+- A question that was answered by `user:local` and you did not answer it was answered by the **real owner**, who shares this workspace. Note it in the diary and carry on — it is not a product fault and it does not belong in the Broken section.
 - Do not touch the repo, git, Docker, the database or logs. Do not fix the product. Do not install anything.
 - Keep an eye on spend with `cost`; if the night passes $40 in model calls, stop starting new work and say so in the report. (Gerard, 18 Sep: real testing is worth a few hundred euros over the programme — do not economise on the work itself.)
 - Write as you go. If this iteration is cut off, the diary and the report must already be useful.
@@ -91,7 +94,19 @@ Not a checklist — an evening. Do what a real owner would do, in a sensible ord
 
 **`{{NIGHT_DIR}}/DIARY.md`** — append an entry after every action: time · what you did (the exact command or message) · what you expected · what happened (ids, statuses, the first line of any error) · how it felt as a customer, 1–5 · one line if anything confused you or made you read code.
 
-**`{{NIGHT_DIR}}/MORNING-REPORT.md`** — rewrite it at the end of every iteration so it is always current:
+**`{{NIGHT_DIR}}/MORNING-REPORT.md`** — **append to it; never rewrite it.** Rewriting the
+whole file each iteration cost 1.44 M output tokens across 8 iterations on night 1, on a file
+that had reached 595 KB. So:
+
+- At the **top** of the file keep one short block headed `## State now` — a dozen lines at
+  most: counts (agents, tickets by status, deliverables), what you are in the middle of, what
+  is blocking you. **This block is the only thing you rewrite**, and you replace just it.
+- Everything else is **appended**, once, under the section it belongs to. A section you have
+  already written is finished — add to its end, do not regenerate it.
+- Never read the whole report back to rewrite it. If you need to know what you already wrote,
+  read the last 100 lines of the diary instead.
+
+The sections, in this order:
 1. **What I built** — agents (ids, runtime), tasks (id, title, assignee, status), documents, mission, playbook.
 2. **What I got** — every deliverable/report/result: where it is, grade 1–5, one-line verdict; the website: does `index.html` open and look like a roastery site?
 3. **Tools** — which connected tools agents actually used, with the evidence (ticket result, report, draft).

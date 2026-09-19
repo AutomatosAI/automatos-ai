@@ -95,7 +95,7 @@ def _absorb(acc: _Acc, prefix: str, payload: Any) -> None:
     elif prefix == TOOL_RESULT and isinstance(payload, dict):
         acc.tool_results.append(payload)
     elif prefix == FINISH_MESSAGE and isinstance(payload, dict):
-        acc.finish = payload
+        _absorb_finish_frame(acc, payload)
     elif prefix in (DATA, ANNOTATION):
         acc.data.append(payload)
         acc.chat_id = acc.chat_id or find_chat_id(payload)
@@ -105,6 +105,77 @@ def _absorb(acc: _Acc, prefix: str, payload: Any) -> None:
             for item in payload:
                 if isinstance(item, dict) and item.get("type") == "error":
                     acc.errors.append(json.dumps(item))
+
+
+# Automatos does not use the Vercel-SDK convention of separate 9:/a: frames for
+# tool calls and results. It puts EVERYTHING in the d: frame behind a "type"
+# discriminator — tool-start / tool-result / tool-end / usage / finish / chat-id
+# (verified against a live turn, 2026-09-19). Reading only the SDK shape is why
+# every turn recorded "tools: none" and chats.jsonl carried no tool or usage
+# data at all (F048), which is also the telemetry the tool-graph series needs.
+_D_TOOL_START = "tool-start"
+_D_TOOL_RESULT = "tool-result"
+_D_TOOL_END = "tool-end"
+_D_USAGE = "usage"
+_D_FINISH = "finish"
+_D_ERROR = "error"
+
+
+def _absorb_finish_frame(acc: _Acc, payload: dict[str, Any]) -> None:
+    """One ``d:`` frame, routed by its ``type``.
+
+    Anything unrecognised still lands in ``finish`` so nothing is silently lost
+    and a new frame type shows up in the record rather than vanishing.
+    """
+    kind = payload.get("type")
+    # An emitter bug nests the discriminator: {"type": {"type": "agent-info", …}}.
+    if isinstance(kind, dict):
+        payload = kind
+        kind = payload.get("type")
+    data = payload.get("data")
+    data = data if isinstance(data, dict) else {}
+
+    if kind == _D_TOOL_START:
+        acc.tool_calls.append({
+            "toolCallId": data.get("toolCallId"),
+            "toolName": data.get("toolName"),
+            "args": data.get("input"),
+        })
+    elif kind == _D_TOOL_RESULT:
+        acc.tool_results.append({
+            "toolCallId": data.get("toolCallId"),
+            "toolName": data.get("toolName"),
+            "result": data.get("result"),
+        })
+    elif kind == _D_TOOL_END:
+        # Close the loop on the matching call so a record shows duration and
+        # whether it actually worked, not just that it was attempted.
+        for call in acc.tool_calls:
+            if call.get("toolCallId") == data.get("toolCallId"):
+                call["success"] = data.get("success")
+                call["duration_ms"] = data.get("durationMs")
+                call["summary"] = data.get("summary")
+                break
+    elif kind == _D_USAGE:
+        acc.finish = {**(acc.finish or {}), "usage": _normalised_usage(data)}
+    elif kind == _D_FINISH:
+        acc.finish = {**(acc.finish or {}), "finishReason": payload.get("finishReason")}
+    elif kind == _D_ERROR:
+        acc.errors.append(json.dumps(payload))
+    else:
+        acc.chat_id = acc.chat_id or find_chat_id(payload)
+        acc.data.append(payload)
+
+
+def _normalised_usage(data: dict[str, Any]) -> dict[str, Any]:
+    """Usage under the names the rest of the harness reads."""
+    prompt = data.get("promptTokens", data.get("prompt_tokens"))
+    completion = data.get("completionTokens", data.get("completion_tokens"))
+    total = data.get("totalTokens", data.get("total_tokens"))
+    return {
+        "promptTokens": prompt, "completionTokens": completion, "totalTokens": total,
+        "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total,
+    }
 
 
 def parse_data_stream(body: str, header_chat_id: str | None = None) -> ChatTurn:

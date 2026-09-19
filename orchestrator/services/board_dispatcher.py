@@ -265,7 +265,8 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
     (Q41: 2) it becomes terminal ``failed`` with a reason, so dead work fails
     loudly instead of looping forever.
 
-    Returns ``{"requeued": [ids...], "failed": [ids...]}``.
+    Returns ``{"requeued": [...], "failed": [...], "delivered": [...]}`` —
+    ``delivered`` are the ones that produced files and went to ``review``.
     """
     now = datetime.now(timezone.utc)
 
@@ -281,6 +282,39 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
                AND lease_until < :now
                AND attempts < :max_attempts
          RETURNING id
+            """
+        ),
+        {"now": now, "max_attempts": max_attempts},
+    ).fetchall()
+
+    # A ticket whose worker never reported but which LEFT FILES did the work —
+    # night 1 wrote "no worker completed the task" over six delivered files
+    # (F013). Check the deliverables the run registered before naming it, and
+    # send those to ``review`` for a human verdict instead of ``failed``.
+    delivered = db.execute(
+        text(
+            """
+            UPDATE board_tasks bt
+               SET status        = 'review',
+                   lease_until   = NULL,
+                   completed_at  = :now,
+                   updated_at    = :now,
+                   error_message = NULL,
+                   review_feedback = COALESCE(
+                       bt.review_feedback,
+                       'Finished, worker never reported — its deliverables are on the ticket.'
+                   )
+             WHERE bt.status = 'in_progress'
+               AND bt.lease_until IS NOT NULL
+               AND bt.lease_until < :now
+               AND bt.attempts >= :max_attempts
+               AND EXISTS (
+                     SELECT 1 FROM deliverables d
+                      WHERE d.source_type = 'task'
+                        AND d.source_id = CAST(bt.id AS text)
+                        AND d.deleted_at IS NULL
+                   )
+         RETURNING bt.id
             """
         ),
         {"now": now, "max_attempts": max_attempts},
@@ -307,16 +341,23 @@ def requeue_expired_leases(db: Session, *, max_attempts: int) -> dict:
 
     db.commit()
 
-    result = {"requeued": [r[0] for r in requeued], "failed": [r[0] for r in failed]}
-    if result["requeued"] or result["failed"]:
+    result = {
+        "requeued": [r[0] for r in requeued],
+        "failed": [r[0] for r in failed],
+        "delivered": [r[0] for r in delivered],
+    }
+    if result["delivered"]:
+        _notify_swept(db, result["delivered"], "review", "task_updated")
+    if result["requeued"] or result["failed"] or result["delivered"]:
         # PRD-180 S1 (F090): a crashed task returning to the queue or dying is a
         # real state change the human should see immediately, not on a poll tick.
         _notify_swept(db, result["requeued"], "assigned", "task_requeued")
         _notify_swept(db, result["failed"], "failed", "task_failed")
         logger.info(
-            "[dispatch] sweeper requeued=%s failed=%s",
+            "[dispatch] sweeper requeued=%s failed=%s delivered=%s",
             result["requeued"],
             result["failed"],
+            result["delivered"],
         )
     return result
 

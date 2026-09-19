@@ -29,9 +29,11 @@ STATUS="$NIGHT_DIR/night.status"
 mkdir -p "$LOG_DIR"
 
 RALPH_MODEL="${RALPH_MODEL:-claude-opus-5}"
-MAX_ITERS="${RALPH_MAX_ITERS:-10}"
+# 10 ended night 1 on the cap, 2.5 h before STOP_AT.
+MAX_ITERS="${RALPH_MAX_ITERS:-14}"
 STOP_AT="${RALPH_STOP_AT:-06:30}"
-ITER_TIMEOUT="${RALPH_ITER_TIMEOUT:-50m}"
+# 4 of night 1's 10 iterations were killed at 50m mid-work.
+ITER_TIMEOUT="${RALPH_ITER_TIMEOUT:-70m}"
 PERSONA="$KIT/personas/${CUSTOMER_PERSONA:-harbourline}.md"
 export SIM_WORKSPACE_ID="${SIM_WORKSPACE_ID:-00000000-0000-0000-0000-0000000000c1}"
 export CUSTOMER_NIGHT_DIR="$NIGHT_DIR"

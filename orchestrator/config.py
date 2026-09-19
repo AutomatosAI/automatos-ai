@@ -672,6 +672,12 @@ class Config:
     BOARD_DISPATCH_CLAIM_BATCH: int = int(os.getenv("BOARD_DISPATCH_CLAIM_BATCH", "10"))
     # Q41: attempts before a task is terminal 'failed' (crash → requeue until here).
     BOARD_DISPATCH_MAX_ATTEMPTS: int = int(os.getenv("BOARD_DISPATCH_MAX_ATTEMPTS", "2"))
+    # The backstop across EVERY requeue path, not just lease expiry. Night 1
+    # re-dispatched three tickets 188 times between them and one 534 times,
+    # because the paths that send a ticket back to `assigned` (an answered ask,
+    # a resumed session) never consulted a ceiling at all. Single digits by
+    # design: past this a ticket needs a person, not another attempt.
+    BOARD_DISPATCH_HARD_ATTEMPT_CAP: int = int(os.getenv("BOARD_DISPATCH_HARD_ATTEMPT_CAP", "8"))
     # Per-agent concurrency slots: at most this many of an agent's tasks run at
     # once; the rest stay 'assigned' (the DB is the queue — double-texting is
     # queued, never dropped). The claim honours this via in_progress counts.
@@ -1053,6 +1059,14 @@ class Config:
     # alive (night 1, finding 21 — every mixed mission failed its session tasks at
     # four minutes and spawned duplicates beside the sessions still running).
     MISSION_CLI_TICKET_TIMEOUT_SECONDS: int = int(os.getenv("MISSION_CLI_TICKET_TIMEOUT_SECONDS", "3600"))
+    # Graph extraction shares the ``system_llm`` tier, whose max_tokens is 8000.
+    # Night 1 (2026-09-18): the model emitted ~2.4x its input and 311 of 497
+    # calls were cut off MID-JSON at that ceiling — they parsed to nothing and
+    # were billed in full ($9.06 of a $9.60 line). Extraction gets its own,
+    # lower ceiling, and a prompt that fits inside it.
+    GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", "2000"))
+    GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "25"))
+    GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "40"))
     # PRD-229: mid-run clarifications (ask_orchestrator). CLARIFICATION_BUDGET
     # caps how many questions Auto ANSWERS per run from retrievable context;
     # once spent, everything escalates (escalations are never budget-limited —

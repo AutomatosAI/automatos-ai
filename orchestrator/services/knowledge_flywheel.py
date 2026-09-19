@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -75,6 +75,35 @@ KG_REPORT_TYPES_SETTINGS_KEY = "knowledge_graph_report_types"
 # workspace.settings key: how many graph extractions a workspace may spend a day.
 KG_DAILY_CAP_SETTINGS_KEY = "knowledge_graph_daily_extraction_cap"
 KG_DAILY_EXTRACTION_CAP = 200
+
+
+# Titles that are the harness talking to itself, not the business. Night 1
+# (2026-09-18): the platform's own copy of every CLI ticket ("2026-09-18_180245_
+# 7a942e_task-…"), heartbeat and playbook logs, and "pass N / nothing changed"
+# no-op passes were all entity-extracted. F024: telemetry never.
+_TELEMETRY_TITLE_MARKERS: Tuple[str, ...] = (
+    "_task-",            # the platform's dated copy of a CLI ticket
+    "heartbeat",
+    "playbook run",
+    "nothing changed",
+    "no action taken",
+    "no changes",
+    "execution metrics",
+    "standup",
+)
+
+
+def title_is_telemetry(title: Optional[str]) -> bool:
+    """True when this output is the system describing its own operation.
+
+    Matched on the title because that is what every one of these shares and it
+    costs nothing to read — the alternative is paying an LLM to discover that a
+    heartbeat log contains no business entities.
+    """
+    haystack = (title or "").strip().lower()
+    if not haystack:
+        return False
+    return any(marker in haystack for marker in _TELEMETRY_TITLE_MARKERS)
 
 
 def report_type_in_graph_scope(db: Session, workspace_id: UUID | str, report_type: Optional[str]) -> bool:
@@ -213,6 +242,7 @@ def _schedule_kg_pending(workspace_id: UUID | str, pending: Dict[str, Any]) -> N
 
 def _kg_extraction_allowed(
     db: Session, workspace_id: UUID | str, source: str, report_type: Optional[str],
+    title: Optional[str] = None,
 ) -> bool:
     """Whether this output earns a graph-extraction pass (Gerard, 2026-09-18).
 
@@ -222,6 +252,9 @@ def _kg_extraction_allowed(
     """
     if not graph_store_available():
         logger.info("[Flywheel] graph store is down — no extraction for %s", source)
+        return False
+    if title_is_telemetry(title):
+        logger.debug("[Flywheel] '%s' is telemetry, not business knowledge — RAG only", title)
         return False
     if source == SOURCE_REPORT and not report_type_in_graph_scope(db, workspace_id, report_type):
         logger.debug(
@@ -311,7 +344,7 @@ async def ingest_agent_output(
 
         # The report is now retrievable either way. Whether it also gets an
         # entity-extraction pass is a separate, narrower question.
-        if _kg_extraction_allowed(db, workspace_id, source, report_type):
+        if _kg_extraction_allowed(db, workspace_id, source, report_type, title):
             _schedule_kg_pending(
                 workspace_id,
                 _build_kg_pending(

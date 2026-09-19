@@ -1451,6 +1451,10 @@ def answer_session_ask(db: Session, grant: Any) -> bool:
         logger.info("[cli-host] ask #%s answered, but ticket #%s is %s — nothing to resume",
                     grant.id, task.id, task.status)
         return False
+    if requeue_exhausted(task):
+        task.runtime_ref = ref
+        park_exhausted(db, task, "it has been resumed on answers too many times")
+        return False
     task.runtime_ref = _mark_resumable(ref)
     task.status = "assigned"
     task.blocked_at = None
@@ -2252,6 +2256,37 @@ def record_session_note(db: Session, *, task_id: Any, workspace_id: Any,
     return {"success": True, "result": {"recorded": True, "note": entry["note"]}}
 
 
+def requeue_exhausted(task: BoardTask) -> bool:
+    """True once this ticket has been attempted more times than anyone should.
+
+    The lease sweeper has always had ``BOARD_DISPATCH_MAX_ATTEMPTS``; the paths
+    that put a ticket back on the board for a NON-lease reason — an answered
+    ask, a resumed session — had no ceiling at all, which is how night 1
+    re-dispatched one ticket 534 times. This is the backstop they share.
+    """
+    return int(task.attempts or 0) >= int(config.BOARD_DISPATCH_HARD_ATTEMPT_CAP)
+
+
+def park_exhausted(db: Session, task: BoardTask, why: str) -> str:
+    """Send a ticket that has run out of attempts to a human, not round again."""
+    task.status = "review"
+    task.lease_until = None
+    task.blocked_at = None
+    task.blocked_reason = None
+    task.completed_at = _now()
+    task.review_feedback = (
+        f"Stopped after {task.attempts} attempts — {why}. "
+        "Nothing was re-queued; this needs a person."
+    )
+    db.commit()
+    _notify_status(db, task)
+    logger.warning(
+        "[cli-host] ticket #%s hit the hard attempt cap (%s) — parked in review, not re-queued",
+        task.id, config.BOARD_DISPATCH_HARD_ATTEMPT_CAP,
+    )
+    return task.status
+
+
 def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optional[str]:
     """PRD-245 W2 — the turn ended with a question open, or with one answered
     while it ran.
@@ -2281,6 +2316,8 @@ def _park_for_answer(db: Session, task: BoardTask, ref: Dict[str, Any]) -> Optio
     resumable = [a for a in asks if a.get("answered_at") and a.get("answer") and not a.get("folded_at")]
     if not open_asks and not resumable:
         return None
+    if resumable and not open_asks and requeue_exhausted(task):
+        return park_exhausted(db, task, "an answered question kept sending it back")
     ref = _mark_resumable(ref)
     if open_asks:
         task.status = "blocked"
