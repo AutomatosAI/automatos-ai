@@ -28,7 +28,7 @@ import sys
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .api import Api, ApiError, Trace
 from .config import DEFAULT_WORKSPACE_ID, LOGS_DIR, SIM_HOME, ConfigError, load_settings
@@ -155,7 +155,61 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     else:
         print("cli host: no host.log — is the host installed and running? (make cli-host-status)")
     print("deliverables folder: " + (args.deliverables_dir if Path(args.deliverables_dir).is_dir() else f"MISSING {args.deliverables_dir}"))
+
+    # F048: what the night MUTATES and must be restorable, plus the balance that
+    # decides whether the night can run at all. Night 1 changed workspace
+    # settings and blueprint defaults and nobody had a before-picture.
+    snapshot = _write_state_snapshot(api, args)
+    print("state snapshot: " + (str(snapshot) if snapshot else "not written (no night dir set)"))
+    balance = _openrouter_balance(api)
+    print(f"openrouter balance: {balance}")
     return 0 if ok else 2
+
+
+def _write_state_snapshot(api: Any, args: argparse.Namespace) -> Optional[Path]:
+    """Save the rows a night mutates, so the morning can diff or restore them.
+
+    ``workspaces.settings`` and the system settings are GLOBAL: the persona
+    changes them in passing and a later night inherits the change as if it were
+    the product's own behaviour.
+    """
+    night = _night_dir()
+    if not night:
+        return None
+    state: dict[str, Any] = {"captured_at": datetime.now(timezone.utc).isoformat()}
+    for label, path in (
+        ("workspace", "/api/workspaces/current"),
+        ("system_settings", "/api/system-settings/by-category"),
+        ("orchestrator", "/api/workspaces/current/orchestrator"),
+    ):
+        try:
+            resp = api.request("GET", path)
+            state[label] = json.loads(resp.body) if resp.status == 200 else {"_status": resp.status}
+        except Exception as exc:  # noqa: BLE001 — a snapshot must not block the night
+            state[label] = {"_error": str(exc)[:200]}
+    night.mkdir(parents=True, exist_ok=True)
+    target = night / "PREFLIGHT-STATE.json"
+    target.write_text(json.dumps(state, indent=1, default=str), encoding="utf-8")
+    return target
+
+
+def _openrouter_balance(api: Any) -> str:
+    """The credit the night will spend, or why it could not be read.
+
+    Night 1 ran with the balance unknown; a night that cannot pay is better
+    stopped at preflight than discovered at 3am.
+    """
+    try:
+        resp = api.request("GET", "/api/v1/providers/openrouter/balance")
+        if resp.status == 200:
+            data = json.loads(resp.body)
+            for key in ("balance", "credits", "remaining", "usage_remaining"):
+                if data.get(key) is not None:
+                    return f"{data[key]}"
+            return json.dumps(data)[:120]
+        return f"unavailable (HTTP {resp.status}) — check it in the OpenRouter dashboard before launching"
+    except Exception as exc:  # noqa: BLE001
+        return f"unavailable ({type(exc).__name__}) — check it in the OpenRouter dashboard before launching"
 
 
 def cmd_render_prompt(args: argparse.Namespace) -> int:

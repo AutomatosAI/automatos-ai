@@ -934,16 +934,19 @@ class UnifiedToolExecutor:
             if _is_find_tools:
                 try:
                     _nested = _params.get("params") if isinstance(_params.get("params"), dict) else {}
-                    _gap_query = (
-                        (caller_context or {}).get("user_query")
-                        or _params.get("query")
-                        or _nested.get("query")
-                    )
+                    # F033: the CAPABILITY the model went looking for is the
+                    # gap. This preferred caller_context.user_query — the whole
+                    # user prompt — so every row recorded that find_tools was
+                    # used, not what was missing: 43 rows of prompts, which is
+                    # a usage log wearing a gap's name. The searched term wins;
+                    # the prompt is only the fallback when there isn't one.
+                    _searched = _params.get("query") or _nested.get("query")
+                    _gap_query = _searched or (caller_context or {}).get("user_query")
                     fire_tool_gap(
                         query=_gap_query,
                         workspace_id=workspace_id,
                         agent_id=agent_id,
-                        gap_source="find_tools",
+                        gap_source="find_tools" if _searched else "find_tools_unspecified",
                         caller_context=caller_context,
                     )
                 except Exception:

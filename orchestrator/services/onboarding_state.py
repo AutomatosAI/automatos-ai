@@ -58,6 +58,11 @@ SKIPPED = "skipped"
 INITIAL_STAGE = "not_started"
 ALL_STAGES: frozenset[str] = frozenset(STAGE_ORDER) | {SKIPPED}
 TERMINAL_STAGES: frozenset[str] = frozenset({"completed", SKIPPED})
+# After this long with no advance, a non-terminal stage stops being treated as
+# live onboarding (F031). Long enough that a real onboarding spread over a
+# couple of weekends still counts; short enough that a stuck row does not pin
+# tools into every turn for a fortnight.
+ONBOARDING_STALE_DAYS = 14
 SEGMENT_KEYS: tuple[str, ...] = ("business", "goal", "comfort", "team_size")
 
 
@@ -97,8 +102,51 @@ def current_stage(workspace: Any) -> str:
 
 
 def is_onboarding_active(workspace: Any) -> bool:
-    """True while the spine should run — stage NOT IN (completed, skipped)."""
-    return current_stage(workspace) not in TERMINAL_STAGES
+    """True while the spine should run — stage NOT IN (completed, skipped),
+    and the stage has moved recently enough to still be onboarding.
+
+    A stage nobody ever finishes is not onboarding, it is a stuck row. Gerard's
+    operator workspace has sat on ``powerup`` since 2026-09-02, and the
+    onboarding prior pinned six spine tools into EVERY Auto turn for a
+    fortnight — four of which were never called (F031). Past
+    ``ONBOARDING_STALE_DAYS`` with no advance, the spine stops claiming the
+    turn; the stage itself is left alone, so resuming onboarding still works
+    and nothing about the row is rewritten behind the operator's back.
+    """
+    if current_stage(workspace) in TERMINAL_STAGES:
+        return False
+    return not _stage_is_stale(workspace)
+
+
+def _stage_is_stale(workspace: Any) -> bool:
+    """True when THIS stage has not advanced in ONBOARDING_STALE_DAYS.
+
+    Keyed on when the current stage was entered (``stages[<stage>]``), not on
+    ``updated_at``: anything writing to the onboarding doc for an unrelated
+    reason would otherwise reset the clock and keep a stuck stage alive forever.
+    """
+    doc = get_onboarding(workspace)
+    stage = current_stage(workspace)
+    stages = doc.get("stages")
+    stamp = (stages or {}).get(stage) if isinstance(stages, dict) else None
+    stamp = stamp or doc.get("started_at")
+    if not stamp:
+        return False        # never written — treat as freshly started
+    try:
+        moved = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if moved.tzinfo is None:
+        moved = moved.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - moved).days
+    if age_days >= ONBOARDING_STALE_DAYS:
+        logger.info(
+            "[onboarding] stage %r has not advanced in %d days — the spine stops "
+            "claiming turns (the stage is unchanged)",
+            current_stage(workspace), age_days,
+        )
+        return True
+    return False
 
 
 def public_snapshot(workspace: Any) -> dict[str, Any]:
