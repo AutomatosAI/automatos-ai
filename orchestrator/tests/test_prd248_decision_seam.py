@@ -367,6 +367,7 @@ def test_record_shadow_appends_json_lines(monkeypatch, tmp_path):
 DECISION_ENGINE_KEYS = {
     "classifier_mode", "tool_rerank_mode", "provider", "model", "timeout_seconds",
     "min_confidence", "rerank_candidates", "rerank_min_probability", "rerank_min_keep",
+    "ticket_assign_mode", "session_end_mode", "hold_risk_mode", "report_triage_mode",
 }
 
 
@@ -429,7 +430,7 @@ def test_seed_adds_only_the_decision_engine_rows_and_never_overwrites_a_value():
 
     mine = [s for s in db.added if s.category == "decision_engine"]
     assert {s.key for s in mine} == DECISION_ENGINE_KEYS - {"classifier_mode"}
-    assert len(mine) == 8 and created >= 8
+    assert len(mine) == 12 and created >= 12
     for row in mine:
         assert row.value == row.default_value and row.is_sensitive is False
         assert row.created_by == "system"
@@ -438,6 +439,7 @@ def test_seed_adds_only_the_decision_engine_rows_and_never_overwrites_a_value():
     assert defaults["tool_rerank_mode"] == "off" and defaults["provider"] == "openrouter"
     assert defaults["timeout_seconds"] == "2.5" and defaults["min_confidence"] == "0.7"
     assert defaults["rerank_candidates"] == "30" and defaults["rerank_min_keep"] == "5"
+    assert all(defaults[k] == "off" for k in ("ticket_assign_mode", "session_end_mode", "hold_risk_mode", "report_triage_mode"))
 
 
 def test_scorer_numbers_match_the_rows():

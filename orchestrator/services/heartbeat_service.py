@@ -21,6 +21,47 @@ from apscheduler.triggers.cron import CronTrigger
 logger = logging.getLogger(__name__)
 
 
+def _shadow_heartbeat_triage(
+    *,
+    workspace_id: Any,
+    link_id: Any,
+    agent_id: Any,
+    agent_name: Optional[str],
+    title: str,
+    message: str,
+    status: str,
+    source_type: str,
+    platform_action: str,
+) -> None:
+    """PRD-248 S5 (shadow only): the decision engine says whether the owner
+    should act on this heartbeat today and how severe it is, logged beside the
+    route the platform takes. Lazy, off by default, fail-open."""
+    try:
+        from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
+
+        engine = get_decision_engine()
+        if engine.dials().report_triage_mode == MODE_OFF:
+            return
+        engine.shadow(
+            judgements.shadow_report_triage(
+                engine,
+                workspace_id=workspace_id,
+                kind=f"heartbeat:{source_type}",
+                subject_id=link_id,
+                title=title,
+                summary=message,
+                status=status,
+                agent_name=agent_name,
+                agent_id=agent_id,
+                report_type=None,
+                platform_action=platform_action,
+            ),
+            purpose=judgements.PURPOSE_REPORT,
+        )
+    except Exception:  # noqa: BLE001 — never into a heartbeat
+        logger.debug("[decision] heartbeat triage shadow skipped", exc_info=True)
+
+
 def durable_probe_enabled(app_config: Any) -> bool:
     """PRD-238 S10: the durable-memory probe only makes sense with a Qdrant URL."""
     return bool(getattr(app_config, "QDRANT_URL", ""))
@@ -1358,6 +1399,15 @@ class HeartbeatService:
             #   - anything else (orchestrator/telegram/slack/empty) falls
             #                  through to the workspace-level NotificationDispatcher.
             report_to = (agent_hb_config.get("report_to") or "").strip().lower()
+
+            # PRD-248 S5 (shadow only): does this heartbeat need the owner today?
+            # Logged beside the route it takes; never changes the route.
+            _shadow_heartbeat_triage(
+                workspace_id=workspace_id, link_id=link_id, agent_id=agent_id,
+                agent_name=agent_name, title=title, message=message_body,
+                status=dispatch_status, source_type=source_type,
+                platform_action=f"report_to={report_to or 'workspace'}",
+            )
 
             if report_to == "auto" and source_type == "agent":
                 await self._route_heartbeat_to_auto(

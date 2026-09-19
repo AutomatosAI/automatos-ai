@@ -245,6 +245,81 @@ def rerank_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+CORE_PURPOSES = ("classifier", "tool_rerank")
+
+
+def purpose_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The S5 hooks as numbers: coverage, latency, agreement where the row
+    carries one, the engine's yes/no probabilities and picks per question,
+    and the platform's side (status / action / decision) as a distribution."""
+    scored = [r for r in rows if not r.get("error") and isinstance(r.get("answers"), dict)]
+    errors = Counter(str(r.get("error")) for r in rows if r.get("error"))
+    out: Dict[str, Any] = {"rows": len(rows), "scored": len(scored), "errors": dict(errors)}
+    if not scored:
+        return out
+    out["routes"] = dict(Counter(f"{r.get('provider')}/{r.get('model')}" for r in scored))
+    out["latency_ms"] = _latency([float(r["latency_ms"]) for r in scored if r.get("latency_ms") is not None])
+    if any("agree" in r for r in scored):
+        out["agreement"] = _rate_value(r.get("agree") for r in scored)
+    ranks = [r["jev_pick_platform_rank"] for r in scored if isinstance(r.get("jev_pick_platform_rank"), (int, float))]
+    if ranks:
+        out["jev_pick_platform_rank_mean"] = round(sum(ranks) / len(ranks), 2)
+    questions: Dict[str, Dict[str, Any]] = {}
+    for r in scored:
+        for qid, answer in r["answers"].items():
+            q = questions.setdefault(qid, {"type": answer.get("type"), "n": 0})
+            q["n"] += 1
+            if answer.get("type") == "noul" and answer.get("noul") is not None:
+                q.setdefault("_p", []).append(float(answer["noul"]))
+            elif answer.get("type") == "choice" and answer.get("choice"):
+                q.setdefault("_picks", Counter())[answer["choice"]] += 1
+            elif answer.get("type") == "score" and answer.get("score") is not None:
+                q.setdefault("_s", []).append(float(answer["score"]))
+    for q in questions.values():
+        if "_p" in q:
+            p = q.pop("_p")
+            q["mean_probability"] = round(sum(p) / len(p), 4)
+            q["share_yes"] = round(sum(1 for v in p if v >= 0.5) / len(p), 4)
+        if "_picks" in q:
+            q["picks"] = dict(q.pop("_picks").most_common(8))
+        if "_s" in q:
+            s = q.pop("_s")
+            q["mean_score"] = round(sum(s) / len(s), 3)
+    out["questions"] = questions
+    for key in ("platform_status", "platform_action", "platform_decision", "jev_verdict", "jev_intent", "jev_severity"):
+        values = Counter(str(r.get(key)) for r in scored if r.get(key) is not None)
+        if values:
+            out[key] = dict(values.most_common(8))
+    return out
+
+
+def summarize_purpose(name: str, rows: List[Dict[str, Any]]) -> str:
+    s = purpose_summary(rows)
+    out = [f"{name} rows={s['rows']} scored={s['scored']} errors={sum(s['errors'].values())}"]
+    if s.get("errors"):
+        out.append("  errors: " + ", ".join(f"{k}×{v}" for k, v in s["errors"].items()))
+    if not s.get("scored"):
+        return "\n".join(out)
+    lat = s.get("latency_ms") or {}
+    if lat:
+        out.append(f"  engine latency ms: p50={lat['p50']:.0f} p95={lat['p95']:.0f} max={lat['max']:.0f}")
+    if "agreement" in s:
+        a = s["agreement"]
+        rate_text = "n/a" if a["rate"] is None else f"{a['rate']:.0%}"
+        out.append(f"  agreement with the platform: {rate_text} ({a['n']})")
+    if "jev_pick_platform_rank_mean" in s:
+        out.append(f"  engine's pick sat at platform rank {s['jev_pick_platform_rank_mean']} on average")
+    for qid, q in s.get("questions", {}).items():
+        detail = ", ".join(
+            f"{k}={v}" for k, v in q.items() if k not in ("type", "n") and not k.startswith("_")
+        )
+        out.append(f"  {qid} ({q.get('type')}, n={q['n']}): {detail}")
+    for key in ("platform_status", "platform_action", "platform_decision", "jev_verdict", "jev_intent", "jev_severity"):
+        if key in s:
+            out.append(f"  {key}: " + ", ".join(f"{k}×{v}" for k, v in s[key].items()))
+    return "\n".join(out)
+
+
 def summary_dict(
     rows: List[Dict[str, Any]],
     *,
@@ -257,6 +332,7 @@ def summary_dict(
     if since is not None or until is not None:
         rows = filter_window(rows, since, until)
     simulated = sum(1 for r in rows if is_simulated(r))
+    extra = sorted({str(r.get("purpose")) for r in rows if r.get("purpose") not in (None, *CORE_PURPOSES)})
     return {
         "only": only,
         "window": {"since": since, "until": until},
@@ -265,6 +341,7 @@ def summary_dict(
         "real": len(rows) - simulated,
         "classifier": classifier_summary([r for r in rows if r.get("purpose", "classifier") == "classifier"]),
         "tool_rerank": rerank_summary([r for r in rows if r.get("purpose") == "tool_rerank"]),
+        "purposes": {p: purpose_summary([r for r in rows if r.get("purpose") == p]) for p in extra},
     }
 
 
@@ -361,6 +438,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.purpose in ("tool_rerank", "all"):
         print("== tool_rerank ==")
         print(summarize_rerank([r for r in rows if r.get("purpose") == "tool_rerank"]))
+    if args.purpose == "all":
+        for name in sorted({str(r.get("purpose")) for r in rows if r.get("purpose") not in (None, *CORE_PURPOSES)}):
+            print(f"== {name} ==")
+            print(summarize_purpose(name, [r for r in rows if r.get("purpose") == name]))
     return 0
 
 

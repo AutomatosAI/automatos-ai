@@ -67,10 +67,22 @@ class Dials:
     rerank_candidates: int = 30
     rerank_min_probability: float = 0.5
     rerank_min_keep: int = 5
+    # S5: four more decision points, shadow only — the engine judges beside the
+    # platform's own decision and logs it; nothing here ever changes behaviour.
+    ticket_assign_mode: str = MODE_OFF
+    session_end_mode: str = MODE_OFF
+    hold_risk_mode: str = MODE_OFF
+    report_triage_mode: str = MODE_OFF
 
     @property
     def any_on(self) -> bool:
-        return self.classifier_mode != MODE_OFF or self.tool_rerank_mode != MODE_OFF
+        return any(
+            mode != MODE_OFF
+            for mode in (
+                self.classifier_mode, self.tool_rerank_mode, self.ticket_assign_mode,
+                self.session_end_mode, self.hold_risk_mode, self.report_triage_mode,
+            )
+        )
 
 
 DEFAULT_DIALS = Dials()
@@ -105,6 +117,28 @@ def _as_float(raw: str, default: float, lo: float, hi: float) -> float:
         return max(lo, min(hi, float(raw)))
     except (TypeError, ValueError):
         return default
+
+
+def _as_shadow_only(raw: str, name: str) -> str:
+    """The S5 hooks have no live mode: ``live`` reads as ``shadow`` with a
+    warning, so a mistyped dial can never change behaviour."""
+    mode = _as_mode(raw, MODE_OFF)
+    if mode == MODE_LIVE:
+        logger.warning("[decision] %s has no live mode — running as shadow", name)
+        return MODE_SHADOW
+    return mode
+
+
+# Detached shadow tasks (fire-and-forget on the running loop). asyncio keeps
+# only a weak reference to a running task, so they are held here until done.
+_SHADOW_TASKS: set = set()
+
+
+def _run_detached(coro: Any, purpose: str) -> None:
+    try:
+        asyncio.run(coro)
+    except Exception:  # noqa: BLE001 — a shadow never surfaces
+        logger.debug("[decision] detached shadow failed for %s", purpose, exc_info=True)
 
 
 class DecisionEngine:
@@ -179,6 +213,10 @@ class DecisionEngine:
             rerank_min_keep=int(_as_float(
                 self._setting("rerank_min_keep", str(d.rerank_min_keep)), d.rerank_min_keep, 0, 40
             )),
+            ticket_assign_mode=_as_shadow_only(self._setting("ticket_assign_mode", d.ticket_assign_mode), "ticket_assign_mode"),
+            session_end_mode=_as_shadow_only(self._setting("session_end_mode", d.session_end_mode), "session_end_mode"),
+            hold_risk_mode=_as_shadow_only(self._setting("hold_risk_mode", d.hold_risk_mode), "hold_risk_mode"),
+            report_triage_mode=_as_shadow_only(self._setting("report_triage_mode", d.report_triage_mode), "report_triage_mode"),
         )
 
     # -- backend ------------------------------------------------------------
@@ -247,6 +285,36 @@ class DecisionEngine:
         except Exception as exc:  # noqa: BLE001 — never into a turn
             logger.warning("[decision] %s raised on %s: %s", d.provider, purpose, exc, exc_info=True)
             return None
+
+    # -- fire-and-forget ----------------------------------------------------
+
+    def shadow(self, coro: Any, purpose: str = "shadow") -> bool:
+        """Run ``coro`` beside the caller without ever blocking it: as a task on
+        the running loop when there is one, else on a daemon thread with its own
+        loop (the sync call sites — the matcher, grant creation). Returns True
+        when it was scheduled. Never raises."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        try:
+            if loop is not None:
+                task = loop.create_task(coro)
+                _SHADOW_TASKS.add(task)
+                task.add_done_callback(_SHADOW_TASKS.discard)
+                return True
+            threading.Thread(
+                target=_run_detached, args=(coro, purpose),
+                name=f"decision-shadow-{purpose}", daemon=True,
+            ).start()
+            return True
+        except Exception:  # noqa: BLE001
+            logger.debug("[decision] shadow not scheduled for %s", purpose, exc_info=True)
+            try:
+                coro.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return False
 
     # -- shadow log ---------------------------------------------------------
 

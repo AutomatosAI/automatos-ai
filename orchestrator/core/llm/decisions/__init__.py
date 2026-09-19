@@ -17,6 +17,7 @@ from .engine import (
     Dials,
     get_decision_engine,
 )
+from . import judgements
 from .llm_adapter import PROVIDER_LLM, LLMDecisionAdapter
 from .questions import (
     Choice,
@@ -57,6 +58,7 @@ __all__ = [
     "PROVIDER_TYPESAFE",
     "SETTINGS_CATEGORY",
     "get_decision_engine",
+    "judgements",
     "parse_answers",
     "to_wire",
 ]

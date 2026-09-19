@@ -820,6 +820,63 @@ def seed_system_settings(db: Session):
         },
         {
             "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "ticket_assign_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when the matcher ranks agents for a "
+                "mission task, the engine picks from the same roster beside it and "
+                "logs whether it agreed and where its pick sat in the platform's "
+                "ranking. Never changes the assignment."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "session_end_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when a Claude Code session posts its "
+                "result, the engine judges from the final message whether the work "
+                "is complete, whether nothing was done, and whether the owner is "
+                "needed; logged beside what the board did with the ticket."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "hold_risk_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when a question or approval is raised "
+                "(a held command, an ask), the engine scores its blast radius on "
+                "five levels, names the intent, and says whether a non-technical "
+                "owner could judge it; logged with the grant id so the human's "
+                "eventual answer can be joined. Never grants or denies."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
+            "key": "report_triage_mode",
+            "default_value": "off",
+            "value_type": "string",
+            "description": (
+                "PRD-248 S5, shadow only: when a report lands or a heartbeat "
+                "finishes, the engine says whether the owner should act on it "
+                "today and how severe it is; logged beside where the platform "
+                "sent it. Never changes a notification."
+            ),
+            "is_required": False,
+            "validation_rules": {"options": ["off", "shadow"]},
+        },
+        {
+            "category": SettingCategory.DECISION_ENGINE.value,
             "key": "provider",
             "default_value": "openrouter",
             "value_type": "string",

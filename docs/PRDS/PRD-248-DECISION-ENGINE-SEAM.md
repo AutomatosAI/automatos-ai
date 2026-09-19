@@ -59,6 +59,19 @@ This PRD builds the **seam**, not the vendor: one `decide()` contract with three
 4. `docker exec automatos_backend python -m scripts.eval.decision_shadow.score`; `llm_usage` rows with `request_type='decision'` carry latency and cost.
 5. Flip `provider` to `llm` for the same week to get the baseline in the same log.
 
+## S5 — four more decision points, shadow only (Gerard, 2026-09-19: "add the extra… let them run for a few days")
+
+Each is judged beside the platform's own decision and logged with what the platform did; none has a live mode (`live` on these dials reads as `shadow` with a warning). The pure half is `core/llm/decisions/judgements.py`; each call site checks its dial, gathers plain values and hands the coroutine to `engine.shadow()`, which runs it as a task on the running loop or on a daemon thread from a sync call site. Every one is tied to a night-1 finding.
+
+| dial | where | the questions | what the row compares |
+|---|---|---|---|
+| `ticket_assign_mode` | `AgentMatcher.rank` (mission tasks; also the watch re-match) | one Choice over the roster plus `none` | the engine's pick against the platform's top, and the platform rank of the engine's pick |
+| `session_end_mode` | `cli_host_service.apply_result` (a Claude Code session posts its result) | three Noul: work complete · nothing done · owner needed | the engine's verdict against the status the board applies (joined by task id and attempt); night 1's 188 re-dispatches would read `nothing_done` |
+| `hold_risk_mode` | `core/services/approval_grants.create_grant` (every question and approval, held commands included) | Score on five blast-radius levels · Choice of intent · Noul "a non-technical owner could judge this" | logged with the grant id; the human's allow/deny/answer is joined later from `approval_grants` |
+| `report_triage_mode` | `ReportService.create_report` and `heartbeat_service._dispatch_heartbeat_notification` | Noul "the owner should act on this today" · Choice of severity | against where the platform sent it (`report_submitted`, `requires_approval`, `report_to=…`) |
+
+The scorer summarises each purpose (`purposes` in `--json`): coverage, latency, agreement where the row carries one, the engine's probabilities and picks per question, and the platform side as a distribution. Question wording follows the vendor's failure-mode list: direct, no negations, no arithmetic, state trimmed to the fields the question needs. The verdict rule for the programme: a hook earns a live-mode design only when its shadow rows show it would have caught real misses at a useful rate; three of four earning it is a win, two tells us which decisions are not this shape.
+
 ## Benchmarking through PRD-247 (the simulation program)
 
 PRD-247's **P7 "Auto's brain pack"** is this PoC's benchmark lane. Its chat-mode driver produces the classified turns the shadow needs in one night instead of a week of the operator's own traffic; its four-row scorecard (usability, cost, quality, usefulness) answers the question the shadow's agreement rate cannot — whether a *different* decision is a *better* outcome; and its nightly offline gates are the two harnesses this PRD extended (`--mode jev_rerank`, `--ranker jev`). How the two connect:
