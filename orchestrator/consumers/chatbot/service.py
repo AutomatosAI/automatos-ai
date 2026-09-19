@@ -2594,6 +2594,17 @@ class StreamingChatService:
                 use_tools = None
                 _composio_result = None
 
+            # F025: this turn's ranked actions go in LAST, after every stable
+            # block. The dispatcher enum is byte-identical between turns so the
+            # cached prefix survives; the steer still reaches the model, it just
+            # costs only its own few hundred tokens instead of a ~34k re-read.
+            if use_tools:
+                from modules.tools.turn_narrowing import narrowed_actions_prompt_line
+
+                _narrow_line = narrowed_actions_prompt_line()
+                if _narrow_line:
+                    llm_messages.append({"role": "system", "content": _narrow_line})
+
             # Generate LLM response
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
             logger.info(f"Agent tools - count: {len(use_tools) if use_tools else 0}")

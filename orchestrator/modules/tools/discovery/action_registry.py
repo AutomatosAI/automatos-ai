@@ -265,12 +265,21 @@ class ActionRegistry:
                 )
                 narrowed_actions = valid_actions
 
+        # F025: what the model is STEERED to this turn, published for the
+        # caller to render as a late system line, and — when the cache-stable
+        # dial is on — kept OUT of the tool block so its bytes never move.
+        from modules.tools.turn_narrowing import publish_narrowed_actions, enum_is_cache_stable
+
+        if allowed_names and narrowed_actions != valid_actions:
+            publish_narrowed_actions(narrowed_actions)
+        enum_actions = valid_actions if enum_is_cache_stable() else narrowed_actions
+
         action_property: Dict[str, Any] = {
             "type": "string",
             "description": "The exact platform action name (e.g. 'platform_configure_agent_heartbeat')",
         }
-        if narrowed_actions:
-            action_property["enum"] = narrowed_actions
+        if enum_actions:
+            action_property["enum"] = enum_actions
 
         return {
             "type": "function",

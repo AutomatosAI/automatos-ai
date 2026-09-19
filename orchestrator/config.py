@@ -1067,6 +1067,16 @@ class Config:
     GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", "2000"))
     GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "25"))
     GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "40"))
+
+    # F025 — the prompt-cache prefix. Tools are serialised BEFORE the system
+    # prompt, so a tool block whose bytes move invalidates the whole cached
+    # prefix. Night 1: call 1 of all 77 Auto turns read back only 2,432-3,456
+    # tokens of a ~34k prefix while calls 2+ read ~33k, because the
+    # platform_execute action enum is re-narrowed per query. With this on the
+    # enum is the full eligible set (byte-stable between turns) and the
+    # per-turn ranking is delivered as a late system line instead — the model
+    # keeps the steer, the cache keeps the prefix.
+    TOOL_ENUM_CACHE_STABLE: bool = os.getenv("TOOL_ENUM_CACHE_STABLE", "true").lower() == "true"
     # PRD-229: mid-run clarifications (ask_orchestrator). CLARIFICATION_BUDGET
     # caps how many questions Auto ANSWERS per run from retrievable context;
     # once spent, everything escalates (escalations are never budget-limited —

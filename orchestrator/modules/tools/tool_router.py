@@ -413,6 +413,17 @@ def _first_class_names(
         it is reachable via ``platform_find_tools`` (a pinned discovery seam), the
         way the LLM pulls in any action the ranker did not surface."""
     pins = _promotion_pins() & promoted_names
+    from modules.tools.turn_narrowing import enum_is_cache_stable
+
+    if enum_is_cache_stable():
+        # F025: which actions attach FIRST-CLASS changed with the query (30, 31,
+        # then 33 tools across three turns), so the tool array's bytes moved even
+        # with a stable enum — and the tool array is the head of the cached
+        # prefix. In cache-stable mode only the pins attach, which is the same
+        # set every turn. A promoted action that ranked in is not stranded: the
+        # enum is the full eligible set in this mode, so it stays callable
+        # through the dispatcher, and the late system line names it.
+        return pins
     ranked_promoted = {n for n in (allowed_names or ()) if n in promoted_names}
     return pins | ranked_promoted
 
@@ -1158,6 +1169,10 @@ async def get_tools_for_agent_async(
         workspace_id = _resolve_workspace_id_from_agent(session_used, agent_id, workspace_id, trace_id)
         is_admin = _resolve_workspace_admin(session_used, workspace_id, is_admin, trace_id)
         ws_key = str(workspace_id) if workspace_id is not None else None
+        # A turn that does not narrow must not inherit the last one's line.
+        from modules.tools.turn_narrowing import clear_narrowed_actions
+
+        clear_narrowed_actions()
         narrowing = await _narrow_dispatcher_actions_async(
             query, is_admin, is_super_admin, workspace_id=ws_key
         )
