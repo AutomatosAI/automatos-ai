@@ -213,6 +213,89 @@ async def workspace_stats(db: Session, workspace_id: UUID, params: Dict[str, Any
     }
 
 
+# What one "how are things going?" answer needs, in one call (F028). Night 1
+# answered that question by calling platform_list_tasks six times in a second
+# plus a summary, an activity read and a schedule read — seven round trips and
+# seven tool results in the prompt for one status line.
+BOARD_SNAPSHOT_TASK_LIMIT = 200
+BOARD_SNAPSHOT_RECENT = 10
+
+
+async def board_snapshot(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Everything a status answer needs, in ONE call.
+
+    Counts by status and priority, the open tickets, what changed recently, and
+    what is scheduled — assembled here rather than by the model making six
+    calls and stitching them together.
+    """
+    from sqlalchemy import text as sa_text
+
+    snapshot: Dict[str, Any] = {"success": True}
+
+    summary = await board_summary(db, workspace_id, params)
+    snapshot["counts"] = {
+        k: summary.get(k) for k in ("by_status", "by_priority", "busiest_agents", "total")
+        if k in summary
+    }
+
+    limit = params.get("limit")
+    try:
+        limit = max(1, min(int(limit), BOARD_SNAPSHOT_TASK_LIMIT))
+    except (TypeError, ValueError):
+        limit = BOARD_SNAPSHOT_TASK_LIMIT
+
+    try:
+        rows = db.execute(sa_text("""
+            SELECT bt.id, bt.title, bt.status, bt.priority, bt.updated_at, a.name AS agent_name
+            FROM board_tasks bt
+            LEFT JOIN agents a ON a.id = bt.assigned_agent_id
+            WHERE bt.workspace_id = :ws
+              AND bt.status NOT IN ('done', 'cancelled', 'closed')
+            ORDER BY bt.updated_at DESC
+            LIMIT :limit
+        """), {"ws": str(workspace_id), "limit": limit}).fetchall()
+        snapshot["open_tasks"] = [{
+            "id": r.id, "title": (r.title or "")[:120], "status": r.status,
+            "priority": r.priority, "agent": r.agent_name,
+        } for r in rows]
+        snapshot["open_task_count"] = len(snapshot["open_tasks"])
+    except Exception as e:  # noqa: BLE001 — a partial snapshot beats no answer
+        logger.warning("[board_snapshot] open tasks unavailable: %s", e)
+        snapshot["open_tasks"] = []
+
+    try:
+        recent = db.execute(sa_text("""
+            SELECT id, title, status, completed_at
+            FROM board_tasks
+            WHERE workspace_id = :ws AND completed_at IS NOT NULL
+            ORDER BY completed_at DESC LIMIT :n
+        """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT}).fetchall()
+        snapshot["recently_finished"] = [{
+            "id": r.id, "title": (r.title or "")[:120], "status": r.status,
+            "at": r.completed_at.isoformat() if r.completed_at else None,
+        } for r in recent]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[board_snapshot] recent activity unavailable: %s", e)
+        snapshot["recently_finished"] = []
+
+    try:
+        sched = db.execute(sa_text("""
+            SELECT id, description, schedule, next_run_at
+            FROM agent_scheduled_tasks
+            WHERE workspace_id = :ws AND status = 'active'
+            ORDER BY next_run_at NULLS LAST LIMIT :n
+        """), {"ws": str(workspace_id), "n": BOARD_SNAPSHOT_RECENT}).fetchall()
+        snapshot["scheduled"] = [{
+            "id": r.id, "what": (r.description or "")[:100], "schedule": r.schedule,
+            "next_run_at": r.next_run_at.isoformat() if r.next_run_at else None,
+        } for r in sched]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[board_snapshot] schedule unavailable: %s", e)
+        snapshot["scheduled"] = []
+
+    return snapshot
+
+
 async def board_summary(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Get a summary of the task board: counts, busiest agents, failures."""
     from core.models.core import BoardTask

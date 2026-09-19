@@ -682,6 +682,90 @@ async def _update_many_board_task_statuses(
     }
 
 
+async def update_board_task(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Edit a board task's FIELDS — title, description, priority, tags, review_mode.
+
+    The one real gap in night 1's 43 ``__tool_gap__`` rows (F032): agents could
+    assign a ticket and move its status, and could not correct a title or raise
+    a priority. Status is deliberately NOT here — ``platform_update_task_status``
+    owns that, including the execution it triggers.
+    """
+    from core.models.core import BoardTask
+    from api.board_tasks import VALID_PRIORITIES, VALID_REVIEW_MODES, MAX_TASK_NOTE_CHARS
+
+    task_id = params.get("task_id")
+    if not task_id:
+        return {"success": False, "error": "task_id is required"}
+
+    task = db.query(BoardTask).filter(
+        BoardTask.id == int(task_id),
+        BoardTask.workspace_id == workspace_id,
+    ).first()
+    if not task:
+        return {"success": False, "error": f"Task {task_id} not found in this workspace"}
+
+    changed: Dict[str, Any] = {}
+
+    title = params.get("title")
+    if title is not None:
+        title = str(title).strip()
+        if not title:
+            return {"success": False, "error": "title cannot be empty"}
+        task.title = title[:500]
+        changed["title"] = task.title
+
+    if params.get("description") is not None:
+        task.description = str(params["description"])
+        changed["description"] = "updated"
+
+    priority = params.get("priority")
+    if priority is not None:
+        if priority not in VALID_PRIORITIES:
+            return {"success": False, "error": f"Invalid priority: {priority}. Must be one of {sorted(VALID_PRIORITIES)}"}
+        task.priority = priority
+        changed["priority"] = priority
+
+    review_mode = params.get("review_mode")
+    if review_mode is not None:
+        if review_mode not in VALID_REVIEW_MODES:
+            return {"success": False, "error": f"Invalid review_mode: {review_mode}. Must be one of {sorted(VALID_REVIEW_MODES)}"}
+        task.review_mode = review_mode
+        changed["review_mode"] = review_mode
+
+    tags = params.get("tags")
+    if tags is not None:
+        if not isinstance(tags, list):
+            return {"success": False, "error": "tags must be a list of strings"}
+        task.tags = [str(t) for t in tags if str(t).strip()]
+        changed["tags"] = task.tags
+
+    note = params.get("note")
+    if note:
+        # The same non-rejecting note the HTTP PATCH takes, so a remark from an
+        # agent and one from the owner land in the same place on the card.
+        from datetime import datetime, timezone
+
+        ref = dict(task.runtime_ref or {})
+        ref["session_notes"] = (ref.get("session_notes") or []) + [{
+            "note": str(note)[:MAX_TASK_NOTE_CHARS],
+            "at": datetime.now(timezone.utc).isoformat(),
+            "by": "an agent",
+        }]
+        task.runtime_ref = ref
+        changed["note"] = "added"
+
+    if not changed:
+        return {
+            "success": False,
+            "error": "Nothing to change. Pass at least one of: title, description, "
+                     "priority, tags, review_mode, note. For status use "
+                     "platform_update_task_status.",
+        }
+
+    db.commit()
+    return {"success": True, "task_id": task.id, "updated": changed}
+
+
 async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Update a board task's status. Moving to in_progress triggers execution.
     With ``task_ids`` (a list) every id is updated to the same status — see

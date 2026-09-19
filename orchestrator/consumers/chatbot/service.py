@@ -209,6 +209,26 @@ def atom_identity_clause(user_name: Optional[str]) -> str:
     return f" You're talking to {name}." if name else ""
 
 
+# How many times the same tool may fail the same way in one turn before the
+# loop stops handing it back as if the next attempt might differ (F030).
+MAX_IDENTICAL_TOOL_FAILURES = 2
+
+
+def _same_failure_key(tool_name: str, result: Dict[str, Any]) -> Optional[str]:
+    """A key identifying "this tool, failing this way", or None if it succeeded.
+
+    Keyed on the first line of the error so a retry with different arguments
+    that fails for the SAME reason still counts — a missing backend does not
+    care what you asked it for.
+    """
+    if result.get("success"):
+        return None
+    error = str(result.get("error") or (result.get("raw_result") or {}).get("error") or "").strip()
+    if not error:
+        return None
+    return f"{tool_name}:{error.splitlines()[0][:120]}"
+
+
 class ToolExecutionTracker:
     """
     Tracks tool executions within a conversation turn to prevent looping.
@@ -1587,6 +1607,8 @@ class StreamingChatService:
         _turn_id: str = uuid.uuid4().hex
         _prior_action: Optional[str] = None
         cumulative_attempts: Dict[str, int] = {}
+        # Per-turn tally of identical tool failures (F030).
+        repeated_failures: Dict[str, int] = {}
         followup_messages: List[Dict[str, Any]] = []
 
         _MULTI_STEP_TOOLS = {
@@ -1698,6 +1720,29 @@ class StreamingChatService:
             last_tool_name = name
 
             cumulative_attempts[name] = cumulative_attempts.get(name, 0) + 1
+
+            # F030: the same tool failing the same way is not worth another go.
+            # Night 1 called store_memory seven times in one turn against an
+            # identical "backend not configured" — a configuration fault cannot
+            # be retried into working, and each attempt cost a full round trip.
+            _repeat_key = _same_failure_key(name, result)
+            if _repeat_key:
+                repeated_failures[_repeat_key] = repeated_failures.get(_repeat_key, 0) + 1
+                if repeated_failures[_repeat_key] >= MAX_IDENTICAL_TOOL_FAILURES:
+                    logger.warning(
+                        "[chat] %s failed identically %dx this turn — not retrying it again",
+                        name, repeated_failures[_repeat_key],
+                    )
+                    result = {
+                        **result,
+                        "llm_context": (
+                            f"{result.get('llm_context') or ''}\n\n"
+                            f"[This is the same failure {repeated_failures[_repeat_key]} times in this turn. "
+                            "It is a configuration problem, not a transient one — do not call "
+                            f"`{name}` again. Tell the user what is not configured and carry on "
+                            "with what you can do without it.]"
+                        ).strip(),
+                    }
 
             llm_context = result.get("llm_context", str(result.get("raw_result", "")))
             # PRD-157 S3: token-budgeted truncation (model-aware), not a char cut.
@@ -2236,15 +2281,21 @@ class StreamingChatService:
         _attempts = tool_attempts.get(tool_name, 0)
 
         if _is_multi_step and _attempts >= 8:
+            # F031: this is a PER-TOOL cap, and it used to be worded as "this
+            # turn's tool budget is exhausted". The model read that once and
+            # then told the user it had run out of budget — 9 turns on night 1
+            # claimed exhaustion when only 2 had actually hit a limit, and three
+            # follow-up turns were spent undoing the claim. Say exactly what is
+            # capped, and say what is still available.
             llm_messages.append({
                 "role": "system",
                 "content": (
-                    f"STOP: `{tool_name}` has been called {_attempts} times — this turn's "
-                    "tool budget is exhausted. You MUST now synthesize a response from the "
-                    "results you have and call NO more tools. Be exact about completeness: "
-                    "say what was actually done and what remains undone. If the request "
-                    "needed more calls than you could make, say so plainly and offer to "
-                    "continue — never report the request as done."
+                    f"STOP calling `{tool_name}`: you have called it {_attempts} times in "
+                    "this reply, which is its per-tool limit. This is a limit on THAT ONE "
+                    "TOOL, not on the reply — every other tool is still available to you, "
+                    "and you have not run out of any overall budget. Do not tell the user "
+                    "you are out of budget or calls. Use what you have, or a different "
+                    "tool, and be exact about what was done and what remains undone."
                 ),
             })
             logger.warning(f"[tool-loop] Multi-step tool {tool_name} hit hard cap ({_attempts} calls) — forcing synthesis")

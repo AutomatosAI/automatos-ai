@@ -45,6 +45,7 @@ from modules.tools.discovery.handlers_analytics import (
     get_cost_breakdown,
     workspace_stats,
     board_summary,
+    board_snapshot,
 )
 from modules.tools.discovery.handlers_documents import (
     list_documents,
@@ -144,6 +145,7 @@ from modules.tools.discovery.handlers_board_tasks import (
     list_board_tasks,
     get_board_task,
     assign_board_task,
+    update_board_task,
     update_board_task_status,
 )
 from modules.tools.discovery.handlers_scheduling import (
@@ -335,6 +337,7 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
     "platform_delete_playbook_step":       (TARGET_PLAYBOOK, "playbook_id"),
     # Tasks — target is the assigned agent (resolved via the task row).
     "platform_assign_task":                (TARGET_TASK, "task_id"),
+    "platform_update_task":                (TARGET_TASK, "task_id"),
     "platform_update_task_status":         (TARGET_TASK, "task_id"),
 }
 
@@ -346,6 +349,7 @@ _HIERARCHY_TARGETS: Dict[str, tuple[str, Optional[str]]] = {
 OPERATOR_CONSENT_ACTIONS = (
     "platform_create_task",
     "platform_assign_task",
+    "platform_update_task",
     "platform_update_task_status",
     "platform_schedule_task",
 )
@@ -588,10 +592,12 @@ class PlatformActionExecutor:
             # PRD-72: Board Tasks
             "platform_create_task": create_board_task,
             "platform_list_tasks": list_board_tasks,
+            "platform_board_snapshot": board_snapshot,
             "platform_board_summary": board_summary,
             "platform_get_task": get_board_task,
             "platform_wait_for_task": wait_for_board_task,  # PRD-238 S4
             "platform_assign_task": assign_board_task,
+            "platform_update_task": update_board_task,
             "platform_update_task_status": update_board_task_status,
             # PRD-77: Agent Self-Scheduling
             "platform_schedule_task": schedule_task,
