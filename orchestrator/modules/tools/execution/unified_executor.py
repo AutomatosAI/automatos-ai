@@ -59,6 +59,10 @@ logger = logging.getLogger(__name__)
 # consulted for a param that is MISSING — never to override what was sent.
 _PARAM_ALIASES: Dict[str, Tuple[str, ...]] = {
     "title": ("name", "heading", "subject", "report_title", "task_title"),
+    # The reverse direction too: platform_create_agent requires `name` and was
+    # failing 6/6 with "Missing required parameter: name" from callers that sent
+    # `title` or `agent_name` (surfaced by the always-failing-actions check).
+    "name": ("title", "agent_name", "label", "display_name"),
     "content": ("body", "markdown", "text", "details", "report_content", "message", "findings"),
     "query": ("q", "search", "question", "prompt"),
     "description": ("desc", "summary", "details"),
