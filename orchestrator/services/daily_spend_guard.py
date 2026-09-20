@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
@@ -40,53 +42,96 @@ class SpendState:
     spent_usd: float
     ceiling_usd: float
     over: bool
+    since: datetime
 
     @property
     def message(self) -> str:
         return (
-            f"The day's model spend is ${self.spent_usd:.2f}, over the "
-            f"${self.ceiling_usd:.2f} ceiling (llm_cost_audit.daily_budget_alert_usd). "
-            "No new autonomous work will start until the ceiling is raised or the "
-            "day rolls over. Work already running is not affected."
+            f"Spend this window is ${self.spent_usd:.2f}, over the "
+            f"${self.ceiling_usd:.2f} ceiling (llm_cost_audit.spend_ceiling_usd), "
+            f"counted since {self.since:%Y-%m-%d %H:%M} UTC. No new autonomous work "
+            "will start until the ceiling is raised or the window rolls over. Work "
+            "already running is not affected, and you can still ask Auto anything — "
+            "the ceiling stops the platform spending on its own, not you."
         )
 
 
 def ceiling_usd(db: Session) -> float:
-    """The configured ceiling, or ``NO_CEILING`` when unset/unreadable."""
-    try:
-        from core.llm.manager import get_system_setting
+    """The configured ceiling, or ``NO_CEILING`` when unset/unreadable.
 
-        raw = get_system_setting(SPEND_CATEGORY, SPEND_CEILING_KEY, "0")
-        return max(0.0, float(raw or 0))
-    except Exception:  # noqa: BLE001 — an unreadable dial must not block work
-        logger.debug("[spend-guard] ceiling unreadable — treating as no ceiling", exc_info=True)
+    Its OWN dial first (``spend_ceiling_usd``, or the SPEND_CEILING_USD env),
+    then the legacy ``daily_budget_alert_usd`` so an operator who set the old
+    key still gets a ceiling. The old key's name says "alert", which is exactly
+    why borrowing it was wrong.
+    """
+    from config import config as app_config
+
+    for category, key in ((SPEND_CATEGORY, "spend_ceiling_usd"), (SPEND_CATEGORY, SPEND_CEILING_KEY)):
+        try:
+            from core.llm.manager import get_system_setting
+
+            raw = get_system_setting(category, key, "")
+            if raw not in (None, ""):
+                return max(0.0, float(raw))
+        except Exception:  # noqa: BLE001 — an unreadable dial must not block work
+            logger.debug("[spend-guard] setting %s.%s unreadable", category, key, exc_info=True)
+    try:
+        return max(0.0, float(getattr(app_config, "SPEND_CEILING_USD", 0) or 0))
+    except (TypeError, ValueError):
         return NO_CEILING
 
 
+def window_start() -> datetime:
+    """When the current spend window opened.
+
+    The window is a "spend day" beginning at ``SPEND_DAY_START_HOUR`` in
+    ``SPEND_TIMEZONE`` — midday by default. An overnight run from the evening
+    into the small hours therefore sits wholly inside ONE window, and the
+    previous night sits wholly inside the previous one. A UTC calendar day did
+    neither: it split every run down the middle at 01:00 local and charged last
+    night's spend to tonight.
+    """
+    from config import config as app_config
+
+    hour = int(getattr(app_config, "SPEND_DAY_START_HOUR", 12) or 0)
+    hour = min(max(hour, 0), 23)
+    try:
+        tz = ZoneInfo(str(getattr(app_config, "SPEND_TIMEZONE", "UTC") or "UTC"))
+    except Exception:  # noqa: BLE001 — an unknown zone must not stop the guard
+        logger.debug("[spend-guard] unknown SPEND_TIMEZONE — using UTC", exc_info=True)
+        tz = timezone.utc
+
+    local_now = datetime.now(tz)
+    start = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if local_now < start:
+        start -= timedelta(days=1)      # before today's boundary → still yesterday's window
+    return start.astimezone(timezone.utc)
+
+
 def spent_today_usd(db: Session, workspace_id: Any) -> float:
-    """Today's API spend for this workspace, from the ledger every call writes."""
+    """This window's API spend for this workspace, from the ledger."""
     try:
         total = db.execute(
             sa_text(
                 "SELECT COALESCE(SUM(total_cost), 0) FROM llm_usage "
-                "WHERE workspace_id = CAST(:ws AS uuid) "
-                "  AND created_at >= date_trunc('day', NOW())"
+                "WHERE workspace_id = CAST(:ws AS uuid) AND created_at >= :since"
             ),
-            {"ws": str(workspace_id)},
+            {"ws": str(workspace_id), "since": window_start()},
         ).scalar()
         return float(total or 0.0)
     except Exception:  # noqa: BLE001 — fail OPEN: a ledger fault must not halt the platform
-        logger.warning("[spend-guard] could not read today's spend — allowing", exc_info=True)
+        logger.warning("[spend-guard] could not read this window's spend — allowing", exc_info=True)
         return 0.0
 
 
 def spend_state(db: Session, workspace_id: Any) -> SpendState:
     """Today's spend against the ceiling. Fails open in every direction."""
     limit = ceiling_usd(db)
+    since = window_start()
     if limit <= NO_CEILING:
-        return SpendState(spent_usd=0.0, ceiling_usd=0.0, over=False)
+        return SpendState(spent_usd=0.0, ceiling_usd=0.0, over=False, since=since)
     spent = spent_today_usd(db, workspace_id)
-    return SpendState(spent_usd=spent, ceiling_usd=limit, over=spent >= limit)
+    return SpendState(spent_usd=spent, ceiling_usd=limit, over=spent >= limit, since=since)
 
 
 def refuse_new_work(db: Session, workspace_id: Any, what: str) -> Optional[str]:

@@ -1067,6 +1067,25 @@ class Config:
     GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS", "2000"))
     GRAPH_EXTRACTION_MAX_NODES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_NODES", "25"))
     GRAPH_EXTRACTION_MAX_EDGES: int = int(os.getenv("GRAPH_EXTRACTION_MAX_EDGES", "40"))
+    # F051: a call that yields no parseable line is retried ONCE with the
+    # ceiling lifted, rather than discarded after being paid for.
+    GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS: int = int(os.getenv("GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS", "6000"))
+
+    # The spend guard's own dials (fix-order §4). The first version borrowed
+    # ``llm_cost_audit.daily_budget_alert_usd`` — a key whose name says "alert" —
+    # and counted from date_trunc('day', NOW()), which is wrong three ways for
+    # this workload: an overnight run spans two UTC days, so last night's spend
+    # counted against tonight's ceiling ($10.89 of night 2's $20 before it had
+    # spent anything); the window reset at 00:00Z = 01:00 local, in the MIDDLE of
+    # every run it governs; and NOW() is the server's clock, not the owner's.
+    #
+    # A "spend day" therefore starts at SPEND_DAY_START_HOUR in SPEND_TIMEZONE —
+    # midday by default, so a run from the evening to the small hours sits
+    # wholly inside ONE window and last night sits wholly inside the previous
+    # one. 0 turns the ceiling off, which is the historical behaviour.
+    SPEND_CEILING_USD: float = float(os.getenv("SPEND_CEILING_USD", "0") or 0)
+    SPEND_DAY_START_HOUR: int = int(os.getenv("SPEND_DAY_START_HOUR", "12"))
+    SPEND_TIMEZONE: str = os.getenv("SPEND_TIMEZONE", "Europe/Lisbon")
 
     # F025 — the prompt-cache prefix. Tools are serialised BEFORE the system
     # prompt, so a tool block whose bytes move invalidates the whole cached

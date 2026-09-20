@@ -219,18 +219,17 @@ Given the document below, extract:
 5. RULES — constraints, policies, thresholds stated
 6. RELATIONSHIPS — how the above connect to each other
 
-Output JSON:
-{{
-  "nodes": [
-    {{"id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule", "source_file": "<doc_path>"}}
-  ],
-  "edges": [
-    {{"source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the document>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
-  ],
-  "hyperedges": [
-    {{"id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<doc_path>"}}
-  ]
-}}
+Output JSONL — ONE complete JSON object per line, nothing else. No wrapping
+object, no array, no code fence, no commentary. Each line must be independently
+valid JSON and must fit on one line, so that if your answer is cut short only
+the final line is lost:
+
+{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "concept|entity|process|metric|rule", "source_file": "<doc_path>"}}
+{{"kind": "edge", "source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the document>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
+{{"kind": "hyperedge", "id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<doc_path>"}}
+
+Write the most important entities FIRST, then their relationships — if you run
+out of room, what survives should be what matters most.
 
 Rules:
 - Use snake_case IDs derived from the label
@@ -267,18 +266,15 @@ Given the report below (authored by agent "{agent_name}"), extract:
 4. ISSUES — errors, warnings, blockers encountered
 5. RELATIONSHIPS — how the above connect to each other
 
-Output JSON:
-{{
-  "nodes": [
-    {{"id": "snake_case_id", "label": "Human Name", "file_type": "entity|action|outcome|issue", "source_file": "<report_path>"}}
-  ],
-  "edges": [
-    {{"source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the report>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
-  ],
-  "hyperedges": [
-    {{"id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<report_path>"}}
-  ]
-}}
+Output JSONL — ONE complete JSON object per line, nothing else. No wrapping
+object, no array, no code fence, no commentary. Each line must be independently
+valid JSON and fit on one line, so a cut answer loses only its final line:
+
+{{"kind": "node", "id": "snake_case_id", "label": "Human Name", "file_type": "entity|action|outcome|issue", "source_file": "<report_path>"}}
+{{"kind": "edge", "source": "node_id_a", "target": "node_id_b", "relation": "<one of the ALLOWED RELATIONS below>", "relation_label": "<the exact phrase from the report>", "confidence": "EXTRACTED|INFERRED|AMBIGUOUS", "confidence_score": 0.85}}
+{{"kind": "hyperedge", "id": "snake_case_id", "label": "Human Label", "nodes": ["id1", "id2", "id3"], "relation": "participate_in|implement|form", "confidence": "EXTRACTED|INFERRED", "confidence_score": 0.9, "source_file": "<report_path>"}}
+
+Write the most important entities FIRST, then their relationships.
 
 Rules:
 - Use snake_case IDs derived from the label
@@ -307,6 +303,123 @@ Respond ONLY with the JSON object, no commentary.
 # ---------------------------------------------------------------------------
 
 _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*", re.IGNORECASE)
+
+
+async def _extract_with_retry(
+    llm: Any, prompt: str, system: str, label: str,
+) -> tuple[dict[str, list] | None, int]:
+    """One extraction call, parsed as JSONL, retried ONCE at a larger cap.
+
+    F051: a call whose output was cut used to be discarded in silence — paid
+    for, logged as a warning, and worth nothing. Now the line-oriented parse
+    keeps whatever arrived, and a call that yields NO parseable line at all is
+    retried once with the ceiling lifted rather than written off.
+    """
+    from config import config as app_config
+
+    raw_text = await _call_extraction_llm(llm, prompt, system, label)
+    if raw_text is None:
+        return None, 0
+
+    graph, lost = _parse_jsonl_extraction(raw_text)
+    if graph is not None:
+        if lost:
+            logger.info(
+                "graph extraction %s: %d line(s) lost to truncation, %d kept",
+                label, lost, sum(len(v) for v in graph.values()),
+            )
+        return graph, lost
+
+    retry_cap = int(getattr(app_config, "GRAPH_EXTRACTION_RETRY_OUTPUT_TOKENS", 6000) or 6000)
+    logger.warning(
+        "graph extraction %s: nothing parseable in %d chars — retrying once at %d output tokens",
+        label, len(raw_text), retry_cap,
+    )
+    try:
+        llm.config.max_tokens = retry_cap
+    except Exception:  # noqa: BLE001
+        logger.debug("graph extraction: could not lift the ceiling for the retry", exc_info=True)
+
+    raw_retry = await _call_extraction_llm(llm, prompt, system, label)
+    if raw_retry is None:
+        return None, lost
+    graph, lost_retry = _parse_jsonl_extraction(raw_retry)
+    if graph is None:
+        logger.error(
+            "graph extraction %s: unparseable on the retry too (%d chars) — this document "
+            "contributed nothing to the graph and both calls were billed",
+            label, len(raw_retry),
+        )
+        return None, lost + lost_retry
+    logger.info(
+        "graph extraction %s: retry succeeded — %d items kept, %d line(s) lost",
+        label, sum(len(v) for v in graph.values()), lost_retry,
+    )
+    return graph, lost_retry
+
+
+async def _call_extraction_llm(llm: Any, prompt: str, system: str, label: str) -> str | None:
+    """The model call itself, with the extraction timeout. ``None`` on failure."""
+    try:
+        response = await asyncio.wait_for(
+            llm.generate_response([
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ]),
+            timeout=_extraction_timeout(),
+        )
+        return response.content if hasattr(response, "content") else str(response)
+    except asyncio.TimeoutError:
+        logger.error("LLM call timed out after %ds for %s", _extraction_timeout(), label)
+    except Exception:
+        logger.exception("LLM call failed during extraction for %s", label)
+    return None
+
+
+def _parse_jsonl_extraction(raw: str) -> tuple[dict[str, list] | None, int]:
+    """Parse JSONL extraction output. Returns ``(graph, lines_lost)``.
+
+    F051: the monolithic-object format made truncation FATAL — one long JSON
+    object cut anywhere yields nothing, so night 1 lost 63% of calls at an 8,000
+    cap and night 2 lost 100% (2 of 2) at 2,000. Lowering the number could never
+    fix that; only changing the shape can. One object per line means a cut tail
+    costs the last entity and everything above it survives.
+
+    ``lines_lost`` counts lines that did not parse — the truncated tail, and any
+    stray prose. Zero parsed objects returns ``None`` so the caller can retry.
+    """
+    graph = _empty_graph()
+    parsed_any = False
+    lost = 0
+    for line in _CODE_FENCE_RE.sub("", raw).splitlines():
+        line = line.strip().rstrip(",").strip()
+        if not line or line in ("{", "}", "[", "]"):
+            continue
+        try:
+            item = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            lost += 1          # the cut tail, or prose the model wrapped around it
+            continue
+        if not isinstance(item, dict):
+            lost += 1
+            continue
+        kind = str(item.pop("kind", "") or "").lower()
+        bucket = {"node": "nodes", "edge": "edges", "hyperedge": "hyperedges"}.get(kind)
+        if bucket is None:
+            # Tolerate a missing 'kind' by inferring from the object's shape,
+            # rather than discarding a paid extraction over one absent field.
+            if "source" in item and "target" in item:
+                bucket = "edges"
+            elif "nodes" in item:
+                bucket = "hyperedges"
+            elif "id" in item or "label" in item:
+                bucket = "nodes"
+            else:
+                lost += 1
+                continue
+        graph[bucket].append(item)
+        parsed_any = True
+    return (graph if parsed_any else None), lost
 
 
 def _parse_llm_json(raw: str) -> dict[str, list] | None:
@@ -414,9 +527,9 @@ def _output_budget() -> str:
 
     return (
         "BUDGET: return at most {nodes} nodes and {edges} edges — the most "
-        "load-bearing ones, not everything you can find. Output COMPACT JSON on "
-        "one line: no indentation, no trailing spaces, no commentary before or "
-        "after. A truncated answer is worth nothing, so stay inside the budget."
+        "load-bearing ones, not everything you can find. One object per line, "
+        "no indentation, no commentary. If you run out of room the last line is "
+        "the only thing lost, so never split an object across lines."
     ).format(
         nodes=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_NODES", 25) or 25),
         edges=int(getattr(app_config, "GRAPH_EXTRACTION_MAX_EDGES", 40) or 40),
@@ -452,32 +565,13 @@ async def extract_from_document(
         output_budget=_output_budget(),
     )
 
-    try:
-        llm = _extraction_llm(llm)
-        response = await asyncio.wait_for(
-            llm.generate_response([
-                {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
-                {"role": "user", "content": prompt},
-            ]),
-            timeout=_extraction_timeout(),
-        )
-        raw_text = response.content if hasattr(response, "content") else str(response)
-    except asyncio.TimeoutError:
-        logger.error("LLM call timed out after %ds for %s", _extraction_timeout(), doc_path)
-        return _empty_graph()
-    except Exception:
-        logger.exception("LLM call failed during document extraction for %s", doc_path)
-        return _empty_graph()
-
-    parsed = _parse_llm_json(raw_text)
+    llm = _extraction_llm(llm)
+    parsed, _lost = await _extract_with_retry(
+        llm, prompt,
+        "You are a knowledge-graph extraction engine. Output JSONL — one JSON object per line.",
+        doc_path,
+    )
     if parsed is None:
-        # Name it: a spend that produced nothing is the thing to notice, and a
-        # run of these means the budget in the prompt is not being respected.
-        logger.warning(
-            "graph extraction produced unparseable JSON for %s (%d chars) — "
-            "likely truncated at the output ceiling; nothing extracted, the call was billed",
-            doc_path, len(raw_text or ""),
-        )
         return _empty_graph()
 
     return _normalise_extraction(parsed, source_file=doc_path, team_access=team_access)
@@ -512,30 +606,13 @@ async def extract_from_report(
         output_budget=_output_budget(),
     )
 
-    try:
-        llm = _extraction_llm(llm)
-        response = await asyncio.wait_for(
-            llm.generate_response([
-                {"role": "system", "content": "You are a knowledge-graph extraction engine. Output valid JSON only."},
-                {"role": "user", "content": prompt},
-            ]),
-            timeout=_extraction_timeout(),
-        )
-        raw_text = response.content if hasattr(response, "content") else str(response)
-    except asyncio.TimeoutError:
-        logger.error("LLM call timed out after %ds for %s", _extraction_timeout(), report_path)
-        return _empty_graph()
-    except Exception:
-        logger.exception("LLM call failed during report extraction for %s", report_path)
-        return _empty_graph()
-
-    parsed = _parse_llm_json(raw_text)
+    llm = _extraction_llm(llm)
+    parsed, _lost = await _extract_with_retry(
+        llm, prompt,
+        "You are a knowledge-graph extraction engine. Output JSONL — one JSON object per line.",
+        report_path,
+    )
     if parsed is None:
-        logger.warning(
-            "graph extraction produced unparseable JSON for report %s (%d chars) — "
-            "likely truncated at the output ceiling; nothing extracted, the call was billed",
-            report_path, len(raw_text or ""),
-        )
         return _empty_graph()
 
     return _normalise_extraction(parsed, source_file=report_path)
