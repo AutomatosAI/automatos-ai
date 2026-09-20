@@ -49,6 +49,17 @@ router = APIRouter(prefix="/api/v1/tasks", tags=["board-tasks"])
 VALID_STATUSES = {"inbox", "assigned", "in_progress", "review", "blocked", "done", "failed", "cancelled", "closed"}
 # An operator note is read on a card, not in a document.
 MAX_TASK_NOTE_CHARS = 1000
+# A reviewer's verdict is folded into the next attempt's prompt, so it is read
+# by a model as well as a person — long enough to be specific, bounded so it
+# cannot crowd out the ticket itself.
+MAX_REVIEW_FEEDBACK_CHARS = 4000
+# Exactly what PATCH /api/v1/tasks/{id} stores. Anything else is a 422 rather
+# than a silent 200 (F060).
+PATCHABLE_TASK_FIELDS = frozenset({
+    "title", "description", "status", "blocked_reason", "priority", "review_mode",
+    "assigned_agent_id", "result", "error_message", "tags", "planning_data",
+    "note", "review_feedback",
+})
 VALID_PRIORITIES = {"urgent", "high", "medium", "low"}
 VALID_REVIEW_MODES = {"human", "llm", "auto"}
 
@@ -610,6 +621,28 @@ async def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     body = await request.json()
+
+    # F060: this route accepted any key, returned 200 and echoed the task back,
+    # while storing only the eleven fields below. `review_feedback` — the field
+    # a reviewer's verdict travels in — went in and vanished, so a rejection
+    # looked accepted and nothing was rejected. A PATCH that silently drops
+    # what it was given is worse than one that refuses: refuse.
+    unknown = sorted(set(body) - PATCHABLE_TASK_FIELDS)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown field(s) for a board task: {unknown}. "
+                f"This route stores exactly: {sorted(PATCHABLE_TASK_FIELDS)}. "
+                "Nothing was changed."
+            ),
+        )
+
+    if "review_feedback" in body:
+        # The reviewer's verdict. The dispatcher folds it into the prompt of the
+        # next attempt (see _ticket_prompt) and clears it once consumed.
+        feedback = body["review_feedback"]
+        task.review_feedback = str(feedback)[:MAX_REVIEW_FEEDBACK_CHARS] if feedback else None
 
     if "title" in body:
         title = (body["title"] or "").strip()

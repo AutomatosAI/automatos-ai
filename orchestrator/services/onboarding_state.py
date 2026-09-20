@@ -119,17 +119,31 @@ def is_onboarding_active(workspace: Any) -> bool:
 
 
 def _stage_is_stale(workspace: Any) -> bool:
-    """True when THIS stage has not advanced in ONBOARDING_STALE_DAYS.
+    """True when THIS ONBOARDING RUN has been going longer than
+    ``ONBOARDING_STALE_DAYS`` without reaching a terminal stage.
 
-    Keyed on when the current stage was entered (``stages[<stage>]``), not on
-    ``updated_at``: anything writing to the onboarding doc for an unrelated
-    reason would otherwise reset the clock and keep a stuck stage alive forever.
+    Keyed on when the run STARTED, not on when the current stage was entered.
+    The first version used ``stages[<current stage>]`` and was wrong in exactly
+    the case that matters: Gerard's workspace began onboarding on 2 Sep and
+    never completed, and when Auto advanced the stage on 18 Sep — seventeen
+    days in, mid-chat, in a workspace with 60+ tickets — the clock reset and
+    the age-out stopped firing. An advance inside a stuck run is not evidence
+    that onboarding is live; finishing it is.
+
+    A genuine restart DOES reset the clock: ``last_reset_at`` is stamped by
+    ``reset_onboarding`` and wins over the historical stamps.
     """
     doc = get_onboarding(workspace)
-    stage = current_stage(workspace)
-    stages = doc.get("stages")
-    stamp = (stages or {}).get(stage) if isinstance(stages, dict) else None
-    stamp = stamp or doc.get("started_at")
+    stamp = doc.get("last_reset_at")
+    if not stamp:
+        # The earliest thing we know about this run: when it first advanced, or
+        # the oldest stage stamp if started_at was never written.
+        candidates = [doc.get("started_at")]
+        stages = doc.get("stages")
+        if isinstance(stages, dict):
+            candidates.extend(stages.values())
+        stamps = sorted(str(c) for c in candidates if c)
+        stamp = stamps[0] if stamps else None
     if not stamp:
         return False        # never written — treat as freshly started
     try:
@@ -141,9 +155,9 @@ def _stage_is_stale(workspace: Any) -> bool:
     age_days = (datetime.now(timezone.utc) - moved).days
     if age_days >= ONBOARDING_STALE_DAYS:
         logger.info(
-            "[onboarding] stage %r has not advanced in %d days — the spine stops "
-            "claiming turns (the stage is unchanged)",
-            current_stage(workspace), age_days,
+            "[onboarding] this run has been going %d days without completing "
+            "(stage %r) — the spine stops claiming turns; the stage is unchanged",
+            age_days, current_stage(workspace),
         )
         return True
     return False

@@ -31,6 +31,10 @@ from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 
 logger = logging.getLogger(__name__)
 
+# F040: statuses that mean "the owner has switched this agent off". Anything
+# else runs — a new status word should not silently disable a fleet.
+INACTIVE_AGENT_STATUSES = frozenset({"inactive", "disabled", "paused", "archived", "suspended"})
+
 
 # ---------------------------------------------------------------------------
 # Lazy imports (avoid circular deps)
@@ -1039,6 +1043,49 @@ class AgentFactory:
             return RuntimeMismatchError(agent_id, RUNTIME_CLI)
         return None
 
+    def _inactive_refusal(self, agent: Union[int, "AgentRuntime"]) -> Optional[Dict[str, Any]]:
+        """F040: refuse to run an agent the owner has switched OFF.
+
+        Deactivating an agent changed ``agents.status`` and stopped nothing —
+        every execution lane went straight past it, so the one control an owner
+        has over an agent they no longer trust did nothing at all. "We built
+        governance — says who?" This is the same choke point the runtime guard
+        uses, so all eight lanes are covered by one check.
+
+        Returns an executor-shaped error, or ``None`` to proceed. Fail-OPEN on a
+        read problem: an unreadable row must not strand every agent.
+        """
+        agent_id = agent if isinstance(agent, int) else getattr(agent, "agent_id", None)
+        session = getattr(self, "db_session", None)
+        if agent_id is None or session is None or not hasattr(session, "query"):
+            return None
+        try:
+            row = session.query(Agent.status, Agent.name).filter(Agent.id == agent_id).first()
+        except Exception:  # noqa: BLE001
+            self.logger.warning(
+                "[AgentFactory] active guard could not read agent %s — proceeding",
+                agent_id, exc_info=True,
+            )
+            return None
+        if not row:
+            return None
+        status = str(row[0] or "").strip().lower()
+        if status in INACTIVE_AGENT_STATUSES:
+            name = row[1] or f"Agent {agent_id}"
+            self.logger.warning(
+                "[AgentFactory] refusing to execute '%s' (%s): the agent is %s",
+                name, agent_id, status,
+            )
+            return {
+                "status": "error",
+                "error": (
+                    f"'{name}' is {status} and cannot run work. Reactivate the agent "
+                    "in the roster, or assign this to an active agent."
+                ),
+                "refused": "agent_inactive",
+            }
+        return None
+
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],
@@ -1073,6 +1120,12 @@ class AgentFactory:
         if mismatch is not None:
             self.logger.warning("[AgentFactory] %s", mismatch)
             return mismatch.as_result()
+
+        # F040: an agent the owner switched off does not run. Checked here with
+        # the runtime guard, before any context is built or model client touched.
+        inactive = self._inactive_refusal(agent)
+        if inactive is not None:
+            return inactive
 
         # --- Resolve agent runtime ---
         if isinstance(agent, int):
