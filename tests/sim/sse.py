@@ -176,6 +176,11 @@ def _absorb_finish_frame(acc: _Acc, payload: dict[str, Any]) -> None:
         acc.finish = {**(acc.finish or {}), "finishReason": payload.get("finishReason")}
     elif kind == _D_ERROR:
         acc.errors.append(json.dumps(payload))
+    elif kind is None and "finishReason" in payload:
+        # The AI SDK's own untyped finish message, {finishReason, usage}.
+        usage = payload.get("usage")
+        acc.finish = {**(acc.finish or {}), "finishReason": payload.get("finishReason"),
+                      **({"usage": _normalised_usage(usage)} if isinstance(usage, dict) else {})}
     else:
         acc.chat_id = acc.chat_id or find_chat_id(payload)
         acc.data.append(payload)
