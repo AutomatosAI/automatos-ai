@@ -65,6 +65,15 @@ def _agent_facts(db: Session, workspace_id, since: datetime, agent_ids: List[Any
         a.id: a.name
         for a in db.query(Agent.id, Agent.name).filter(Agent.id.in_(agent_ids)).all()
     }
+    # F049: a deleted agent's name, stamped on its usage rows when it was deleted.
+    stamped = {
+        r.agent_id: r.agent_name
+        for r in _calls(db, workspace_id, since)
+        .filter(LLMUsage.agent_id.in_(agent_ids), LLMUsage.agent_name.isnot(None))
+        .with_entities(LLMUsage.agent_id, func.max(LLMUsage.agent_name).label("agent_name"))
+        .group_by(LLMUsage.agent_id)
+        .all()
+    }
     dominant = (
         _calls(db, workspace_id, since)
         .filter(LLMUsage.agent_id.in_(agent_ids))
@@ -85,7 +94,7 @@ def _agent_facts(db: Session, workspace_id, since: datetime, agent_ids: List[Any
         if key in out:
             continue
         facts = route_facts(row.model_id, row.provider)
-        facts["label"] = names.get(row.agent_id) or f"Agent #{row.agent_id}"
+        facts["label"] = names.get(row.agent_id) or stamped.get(row.agent_id) or f"Agent #{row.agent_id}"
         out[key] = facts
     for agent_id, name in names.items():
         out.setdefault(str(agent_id), {"label": name})

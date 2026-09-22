@@ -59,7 +59,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # create_all-first installs.
 # 2026-09-18: kb_multimodal_tables chains onto it — the three multimodal knowledge
 # tables PRD-209's schema retirement dropped from every fresh install.
-EXPECTED_HEAD = "kb_multimodal_tables"
+# 2026-09-22: llm_usage_agent_name chains onto it — a usage row keeps the name of
+# the agent that spent it once the agent is deleted (F049).
+EXPECTED_HEAD = "llm_usage_agent_name"
 
 
 def _literal(node: ast.AST):

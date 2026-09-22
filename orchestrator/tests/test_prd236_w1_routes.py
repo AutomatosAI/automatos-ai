@@ -187,7 +187,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # tables the fresh path lost); the guard follows it.
     kb = (versions / "kb_multimodal_tables.py").read_text()
     assert 'down_revision = "tool_execution_logs_workspace_user_idx"' in kb
-    assert 'EXPECTED_HEAD = "kb_multimodal_tables"' in guard
+    # 2026-09-22: llm_usage_agent_name chains onto that (F049 — a deleted agent's
+    # spend keeps its name); the guard follows it.
+    named = (versions / "llm_usage_agent_name.py").read_text()
+    assert 'down_revision = "kb_multimodal_tables"' in named
+    assert 'EXPECTED_HEAD = "llm_usage_agent_name"' in guard
 
 
 def test_orm_row_is_keyed_by_route():

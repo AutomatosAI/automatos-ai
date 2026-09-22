@@ -173,6 +173,9 @@ class LLMUsage(Base):
 
     # Request details
     agent_id = Column(Integer)
+    # F049: the agent's name, stamped when the agent is deleted (agent_id has no FK
+    # and would otherwise name nothing). Readers prefer the live agents.name.
+    agent_name = Column(String(255), nullable=True)
     execution_id = Column(String(255))
     request_type = Column(String(50))  # chat, agent, recipe, routing, embedding
 
