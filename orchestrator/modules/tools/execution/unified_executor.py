@@ -36,6 +36,7 @@ from modules.tools.execution import exec_workspace
 from modules.tools.execution.telemetry import fire_telemetry, fire_tool_gap
 from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
+from core.database.session_health import rollback_if_aborted
 
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
@@ -911,6 +912,12 @@ class UnifiedToolExecutor:
             }
             return result
         finally:
+            # F074: every tool in a turn runs on this one request session. A tool
+            # that caught its own failed statement and returned it as data left
+            # the transaction aborted, and every tool after it failed "current
+            # transaction is aborted" (night 1: query_database 7/7). Never hand
+            # the next tool a dead session.
+            rollback_if_aborted(getattr(self, "db", None), f"tool '{tool_name}'")
             # PRD-139: Universal telemetry — fire-and-forget, never fails the tool call
             _exec_ms = int((_time.monotonic() - _exec_start) * 1000)
             fire_telemetry(
