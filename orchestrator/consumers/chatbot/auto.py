@@ -889,11 +889,24 @@ class AutoBrain:
             logger.debug("[AutoBrain] decision dials unavailable — off", exc_info=True)
             return MODE_OFF
 
-    async def _decision_ask(self, message: str, conversation_length: int):
+    async def _decision_ask(
+        self,
+        message: str,
+        conversation_length: int,
+        entries: Optional[List[Dict[str, Any]]] = None,
+    ):
         """One engine call for the classifier questions over the message and
-        the active roster. Returns ``(result, roster)``; result None on a miss."""
-        roster = self._active_agents()
-        entries = auto_decisions.roster_entries(roster)
+        the active roster. Returns ``(result, roster)``; result None on a miss.
+
+        The shadow path passes ``entries`` (plain dicts) read on the request's
+        own session BEFORE its task exists, so the task never borrows the
+        caller's session (the PR #618 trap). The live path passes nothing and
+        reads the roster inline; its ORM rows come back for the ASSIGN-lane
+        name match."""
+        roster = None
+        if entries is None:
+            roster = self._active_agents()
+            entries = auto_decisions.roster_entries(roster)
         questions = auto_decisions.build_questions(e["name"] for e in entries)
         state = auto_decisions.build_state(message, conversation_length, entries)
         result = await get_decision_engine().decide(
@@ -911,9 +924,12 @@ class AutoBrain:
         held in a module-level set so the loop cannot drop it mid-flight."""
         if self._decision_mode() != MODE_SHADOW:
             return None
+        # Read the roster now, on the request's session, and hand the task plain
+        # dicts: a fire-and-forget task must never touch the caller's session.
+        entries = auto_decisions.roster_entries(self._active_agents())
         try:
             task = asyncio.get_running_loop().create_task(
-                self._decision_ask(message, conversation_length)
+                self._decision_ask(message, conversation_length, entries=entries)
             )
         except RuntimeError:
             return None
