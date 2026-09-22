@@ -1537,6 +1537,20 @@ class Config:
     # Cohere's published list price for rerank-v3.5 (2026): $2.00 / 1k searches.
     COHERE_RERANK_USD_PER_1K_SEARCHES: float = float(os.getenv("COHERE_RERANK_USD_PER_1K_SEARCHES", "2.0"))
 
+    # PRD-248 — the decision seam (TypeSafe Jev direct or through OpenRouter).
+    # Secrets and endpoints are env-only; the operating dials (route, model,
+    # timeout, per-hook modes, confidence floor) live in system_settings
+    # category ``decision_engine`` so a PoC flips from Settings → System with
+    # no restart. A missing key leaves the engine idle — no route errors for it.
+    TYPESAFE_API_KEY: str = os.getenv("TYPESAFE_API_KEY")
+    TYPESAFE_API_URL: str = os.getenv("TYPESAFE_API_URL", "https://api.typesafe.ai/v1/systemone")
+    # OpenRouter serves Jev on its alpha decisions path (2026-09); it may move.
+    OPENROUTER_DECISIONS_URL: str = os.getenv("OPENROUTER_DECISIONS_URL", "https://openrouter.ai/api/alpha/decisions")
+    # TypeSafe list price: $0.042 per million input tokens, output unmetered.
+    DECISION_ENGINE_USD_PER_MTOK_IN: float = float(os.getenv("DECISION_ENGINE_USD_PER_MTOK_IN", "0.042"))
+    # Shadow comparisons, one JSON line each — read by scripts/eval/decision_shadow.
+    DECISION_SHADOW_LOG_PATH: str = os.getenv("DECISION_SHADOW_LOG_PATH", "logs/decision_shadow.jsonl")
+
     @property
     def RAG_HYBRID_ENABLED(self) -> bool:
         """Real dense+sparse hybrid retrieval (default: ON — PRD-188 S3).

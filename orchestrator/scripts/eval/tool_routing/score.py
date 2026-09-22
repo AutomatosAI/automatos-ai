@@ -278,8 +278,9 @@ def _render_main_table(summary: List[Dict[str, Any]], tiers: Dict[str, str]) -> 
         "full": 0,
         "filtered": 1,
         "filtered_schema": 2,
-        "graph": 3,
-        "graph (no-edges)": 4,
+        "jev_rerank": 3,  # PRD-248 S4: embedding top-N judged by the decision engine
+        "graph": 4,
+        "graph (no-edges)": 5,
     }
     summary_sorted = sorted(
         summary,

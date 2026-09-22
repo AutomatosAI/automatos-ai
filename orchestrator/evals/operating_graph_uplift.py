@@ -37,6 +37,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import math
 import re
@@ -75,6 +76,9 @@ class TenantResult:
     bm25_acc: float
     embedding_acc: float
     learned_acc: float
+    # PRD-248 S4: an optional challenger ranker (the decision-engine rerank)
+    # scored beside the gate's three rankers — it never moves the gate itself.
+    challenger_acc: Optional[float] = None
 
     @property
     def best_baseline(self) -> float:
@@ -83,6 +87,12 @@ class TenantResult:
     @property
     def uplift_points(self) -> float:
         return (self.learned_acc - self.best_baseline) * 100.0
+
+    @property
+    def challenger_uplift_points(self) -> Optional[float]:
+        if self.challenger_acc is None:
+            return None
+        return (self.challenger_acc - self.best_baseline) * 100.0
 
 
 @dataclass
@@ -103,26 +113,45 @@ class UpliftReport:
     def passes(self) -> bool:
         return self.mean_uplift_points >= UPLIFT_THRESHOLD_POINTS
 
+    @property
+    def has_challenger(self) -> bool:
+        return any(t.challenger_acc is not None for t in self.tenants)
+
+    @property
+    def mean_challenger_uplift_points(self) -> Optional[float]:
+        points = [t.challenger_uplift_points for t in self.tenants if t.challenger_uplift_points is not None]
+        if not points:
+            return None
+        return sum(points) / len(points)
+
     def to_dict(self) -> Dict:
-        return {
+        tenants = []
+        for t in self.tenants:
+            row = {
+                "workspace_id": t.workspace_id,
+                "n_test": t.n_test,
+                "bm25_top1": round(t.bm25_acc, 4),
+                "embedding_top1": round(t.embedding_acc, 4),
+                "learned_top1": round(t.learned_acc, 4),
+                "uplift_points": round(t.uplift_points, 2),
+            }
+            if t.challenger_acc is not None:
+                row["challenger_top1"] = round(t.challenger_acc, 4)
+                row["challenger_uplift_points"] = round(t.challenger_uplift_points or 0.0, 2)
+            tenants.append(row)
+        out: Dict[str, Any] = {
             "source": self.meta.get("source", "fixture"),
-            "loader": {k: v for k, v in self.meta.items() if k != "source"},
+            "loader": {k: v for k, v in self.meta.items() if k not in ("source", "challenger")},
             "uplift_threshold_points": UPLIFT_THRESHOLD_POINTS,
             "mean_uplift_points": round(self.mean_uplift_points, 2),
             "passes": self.passes,
             "flip_flag_recommended": self.passes,
-            "tenants": [
-                {
-                    "workspace_id": t.workspace_id,
-                    "n_test": t.n_test,
-                    "bm25_top1": round(t.bm25_acc, 4),
-                    "embedding_top1": round(t.embedding_acc, 4),
-                    "learned_top1": round(t.learned_acc, 4),
-                    "uplift_points": round(t.uplift_points, 2),
-                }
-                for t in self.tenants
-            ],
+            "tenants": tenants,
         }
+        if self.has_challenger:
+            out["challenger"] = self.meta.get("challenger", "challenger")
+            out["mean_challenger_uplift_points"] = round(self.mean_challenger_uplift_points or 0.0, 2)
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -302,9 +331,79 @@ def _split_train_test(
     return train, test
 
 
+def _jev_challenger_factory(
+    actions: List[str],
+    category_by_action: Dict[str, str],
+    *,
+    candidates: int = 30,
+    decide: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]] = None,
+    describe: Optional[Callable[[str], str]] = None,
+) -> Ranker:
+    """PRD-248 S4: the decision-engine rerank as a top-1 ranker.
+
+    The bag-of-words proxy proposes the ``candidates`` nearest actions; one
+    Choice over them plus ``none`` picks the winner; ``none``, a miss, or an
+    unknown pick falls back to the proxy's own top-1, so the challenger can
+    never score below "no answer". ``decide(state, questions)`` is injectable
+    (tests); the default asks TypeSafe through the seam's client. ``describe``
+    supplies option descriptions (the registry's, in-container); the default
+    is the same name-and-category text the proxy ranks on.
+    """
+    from core.llm.decisions.questions import Choice
+
+    vecs = {a: _bow_vector(_tokenize(_action_text(a, category_by_action[a]))) for a in actions}
+    describe_fn = describe or (lambda a: _action_text(a, category_by_action[a]))
+    descriptions: Dict[str, str] = {}
+    for a in actions:
+        try:
+            descriptions[a] = (describe_fn(a) or "")[:160] or _action_text(a, category_by_action[a])
+        except Exception:  # noqa: BLE001 — a description is never worth a crash
+            descriptions[a] = _action_text(a, category_by_action[a])
+
+    def _default_decide(state: Dict[str, Any], questions: Dict[str, Any]) -> Any:
+        import asyncio
+        import os
+
+        from core.llm.decisions.typesafe_client import TypeSafeDecisionClient
+
+        client = TypeSafeDecisionClient(
+            provider=os.getenv("DECISION_PROVIDER", "openrouter"),
+            timeout_s=float(os.getenv("DECISION_TIMEOUT_S", "5")),
+        )
+        return asyncio.run(
+            client.decide(state=state, questions=questions, workspace_id=None, purpose="eval_uplift_rerank")
+        )
+
+    ask = decide or _default_decide
+
+    def rank(query: str) -> str:
+        qv = _bow_vector(_tokenize(query))
+        scored = sorted(((_cosine(qv, vecs[a]), a) for a in actions), key=lambda x: (-x[0], x[1]))
+        shortlist = [a for _s, a in scored[: max(2, candidates)]]
+        fallback = shortlist[0]
+        criteria: Dict[str, Optional[str]] = {a: descriptions.get(a) for a in shortlist}
+        criteria["none"] = "No listed action fits the request."
+        try:
+            result = ask(
+                {"request": query},
+                {"action": Choice("Which action best serves the request?", criteria)},
+            )
+            answer = result.get("action") if result is not None else None
+            if answer is not None and answer.choice in shortlist:
+                return answer.choice
+        except Exception:  # noqa: BLE001 — a miss is the proxy's answer, never a crash
+            pass
+        return fallback
+
+    return rank
+
+
 def run_uplift_eval(
     cases: List[EvalCase],
     embedding_ranker_factory: Optional[
+        Callable[[List[str], Dict[str, str]], Ranker]
+    ] = None,
+    challenger_factory: Optional[
         Callable[[List[str], Dict[str, str]], Ranker]
     ] = None,
 ) -> UpliftReport:
@@ -315,6 +414,9 @@ def run_uplift_eval(
         embedding_ranker_factory: optional injection of the REAL embedding
             ranker (production ActionSemanticIndex) for a provisioned run;
             defaults to the offline bag-of-words proxy.
+        challenger_factory: PRD-248 S4 — an optional extra ranker scored on
+            the same held-out split beside the three gate rankers. It is
+            reported, never part of the gate number.
     """
     emb_factory = embedding_ranker_factory or _embedding_proxy_ranker
 
@@ -344,6 +446,7 @@ def run_uplift_eval(
         bm25 = _bm25_ranker(actions, category_by_action)
         embedding = emb_factory(actions, category_by_action)
         learned = _learned_edge_ranker(train, actions, category_by_action, embedding)
+        challenger = challenger_factory(actions, category_by_action) if challenger_factory else None
 
         report.tenants.append(
             TenantResult(
@@ -352,6 +455,7 @@ def run_uplift_eval(
                 bm25_acc=_accuracy(test, bm25),
                 embedding_acc=_accuracy(test, embedding),
                 learned_acc=_accuracy(test, learned),
+                challenger_acc=_accuracy(test, challenger) if challenger else None,
             )
         )
     return report
@@ -583,21 +687,35 @@ def render_report(report: UpliftReport) -> str:
         "(learned-edge over best baseline, per tenant, mean across tenants).",
         _describe_source(report.meta),
         "",
-        "| tenant | n(test) | BM25 top-1 | embedding top-1 | learned top-1 | uplift (pts) |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| tenant | n(test) | BM25 top-1 | embedding top-1 | learned top-1 | uplift (pts) |"
+        + (" challenger top-1 | challenger vs best (pts) |" if report.has_challenger else ""),
+        "| --- | --- | --- | --- | --- | --- |" + (" --- | --- |" if report.has_challenger else ""),
     ]
     for t in report.tenants:
-        lines.append(
+        row = (
             f"| {t.workspace_id} | {t.n_test} | {t.bm25_acc*100:.1f}% | "
             f"{t.embedding_acc*100:.1f}% | {t.learned_acc*100:.1f}% | "
             f"{t.uplift_points:+.1f} |"
         )
+        if report.has_challenger:
+            if t.challenger_acc is None:
+                row += " — | — |"
+            else:
+                row += f" {t.challenger_acc*100:.1f}% | {(t.challenger_uplift_points or 0.0):+.1f} |"
+        lines.append(row)
     lines += [
         "",
         f"**Mean uplift: {report.mean_uplift_points:+.1f} points** — "
         f"{'PASSES' if report.passes else 'BELOW'} the {UPLIFT_THRESHOLD_POINTS:.1f}-point gate.",
         "",
     ]
+    if report.has_challenger:
+        lines += [
+            f"Challenger `{report.meta.get('challenger', 'challenger')}` (PRD-248 S4): "
+            f"**{(report.mean_challenger_uplift_points or 0.0):+.1f} points** over the best "
+            "baseline, mean across tenants — reported beside the gate, not part of it.",
+            "",
+        ]
     if report.passes:
         lines.append(
             "Recommendation: uplift clears the gate — flipping `TOOL_ROUTING_GRAPH` "
@@ -615,6 +733,23 @@ def render_report(report: UpliftReport) -> str:
             f"`TOOL_ROUTING_GRAPH` on. This is an honest sub-threshold outcome ({note})."
         )
     return "\n".join(lines)
+
+
+def _registry_describe() -> Optional[Callable[[str], str]]:
+    """The ActionRegistry's descriptions for the challenger, or None when the
+    registry cannot be imported (the stdlib-only lane)."""
+    try:
+        from modules.tools.discovery import get_action_registry
+
+        registry = get_action_registry()
+    except Exception:  # noqa: BLE001
+        return None
+
+    def describe(name: str) -> str:
+        action = registry.get(name)
+        return (getattr(action, "description", "") or "") if action is not None else ""
+
+    return describe
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -641,6 +776,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MIN_CASES_PER_TENANT,
         help="drop tenants with fewer distinct cases (with --from-telemetry)",
     )
+    parser.add_argument(
+        "--ranker",
+        choices=["none", "jev"],
+        default="none",
+        help="PRD-248 S4: score a challenger beside the gate — 'jev' asks the "
+        "decision engine to pick among the proxy's nearest candidates "
+        "(needs OPENROUTER_API_KEY or TYPESAFE_API_KEY; DECISION_PROVIDER "
+        "selects the route)",
+    )
+    parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=30,
+        help="how many nearest actions the challenger chooses among (with --ranker jev)",
+    )
     return parser
 
 
@@ -655,7 +805,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     else:
         cases = load_cases_from_eval_set(num_tenants=args.tenants)
         meta = {"source": "fixture", "tenants": args.tenants, "cases": len(cases)}
-    report = run_uplift_eval(cases)
+    challenger_factory = None
+    if args.ranker == "jev":
+        challenger_factory = functools.partial(
+            _jev_challenger_factory,
+            candidates=max(2, args.rerank_candidates),
+            # In-container (the telemetry gate) the registry's descriptions are
+            # available; the stdlib-only fixture lane keeps the proxy's text.
+            describe=_registry_describe() if args.from_telemetry else None,
+        )
+        meta["challenger"] = "jev"
+    report = run_uplift_eval(cases, challenger_factory=challenger_factory)
     report.meta = meta
 
     if args.json:

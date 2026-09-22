@@ -271,7 +271,7 @@ class AgentMatcher:
             min_datapoints=Config.COORDINATOR_HISTORY_MIN_DATAPOINTS,
         )
 
-        return AgentMatcher._rank_with_context(
+        ranked = AgentMatcher._rank_with_context(
             agents=agents,
             agent_role=agent_role,
             required_tools=required_tools,
@@ -282,6 +282,8 @@ class AgentMatcher:
             history_map=history_map,
             semantic=semantic,
         )
+        _shadow_assignment(task, agents, ranked, agent_role, required_tools)
+        return ranked
 
     @staticmethod
     def _rank_with_context(
@@ -370,6 +372,47 @@ class AgentMatcher:
 # ---------------------------------------------------------------------------
 # PRD-164 S2 — pure helpers (annotation, override, signals)
 # ---------------------------------------------------------------------------
+
+
+def _shadow_assignment(
+    task: Any,
+    agents: Sequence[Any],
+    ranked: Sequence[MatchResult],
+    agent_role: Optional[str],
+    required_tools: Sequence[str],
+) -> None:
+    """PRD-248 S5 (shadow only): the decision engine picks from the same roster
+    beside this ranking and logs whether it agreed. Lazy, off by default,
+    fail-open — the returned ranking is never touched."""
+    try:
+        from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
+
+        engine = get_decision_engine()
+        if not ranked or engine.dials().ticket_assign_mode == MODE_OFF:
+            return
+        candidates = [
+            (
+                getattr(a, "name", "") or "",
+                getattr(a, "description", "") or getattr(a, "job_title", "") or "",
+            )
+            for a in agents
+        ]
+        engine.shadow(
+            judgements.shadow_assignment(
+                engine,
+                workspace_id=getattr(agents[0], "workspace_id", None) if agents else None,
+                task_id=getattr(task, "id", None),
+                title=getattr(task, "title", "") or "",
+                description=getattr(task, "description", "") or "",
+                role=agent_role,
+                required_tools=list(required_tools or []),
+                candidates=candidates,
+                platform_ranked=[r.agent_name for r in ranked],
+            ),
+            purpose=judgements.PURPOSE_ASSIGN,
+        )
+    except Exception:  # noqa: BLE001 — never into a mission
+        logger.debug("[decision] assignment shadow skipped", exc_info=True)
 
 
 def build_match_annotation(ranked: Sequence[MatchResult]) -> Dict[str, Any]:

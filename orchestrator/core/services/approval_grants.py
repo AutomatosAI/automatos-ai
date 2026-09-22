@@ -95,7 +95,40 @@ def create_grant(
         db.flush()
     except Exception:  # pragma: no cover - flush is a no-op in some fakes
         logger.debug("[approval_grants] flush skipped", exc_info=True)
+    _shadow_hold(grant, workspace_id)
     return grant
+
+
+def _shadow_hold(grant: ApprovalGrant, workspace_id: Any) -> None:
+    """PRD-248 S5 (shadow only): the decision engine scores what is being asked
+    for — blast radius, intent, whether a non-technical owner could judge it —
+    and logs it with the grant id so the human's eventual answer can be joined.
+    Lazy, off by default, fail-open; it never grants, denies, or delays."""
+    try:
+        from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
+
+        engine = get_decision_engine()
+        if engine.dials().hold_risk_mode == MODE_OFF:
+            return
+        engine.shadow(
+            judgements.shadow_hold(
+                engine,
+                workspace_id=workspace_id,
+                grant_id=getattr(grant, "id", None),
+                kind=str(getattr(grant, "kind", "") or ""),
+                subject_type=str(getattr(grant, "subject_type", "") or ""),
+                subject_id=getattr(grant, "subject_id", None),
+                tool_name=getattr(grant, "tool_name", None),
+                risk_tier=getattr(grant, "risk_tier", None),
+                question_md=getattr(grant, "question_md", None) or getattr(grant, "reason", None),
+                options=getattr(grant, "options", None),
+                reason=getattr(grant, "reason", None),
+                agent_id=getattr(grant, "agent_id", None) or getattr(grant, "asked_by_agent_id", None),
+            ),
+            purpose=judgements.PURPOSE_HOLD,
+        )
+    except Exception:  # noqa: BLE001 — never into a grant
+        logger.debug("[decision] hold shadow skipped", exc_info=True)
 
 
 def find_active_grant(

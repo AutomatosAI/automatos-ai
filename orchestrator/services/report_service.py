@@ -22,6 +22,51 @@ from core.workspace_client import WorkspaceClient
 logger = logging.getLogger(__name__)
 
 
+def _shadow_report_triage(
+    *,
+    workspace_id: Any,
+    report_id: Any,
+    agent_id: Any,
+    agent_name: str,
+    title: str,
+    summary: str,
+    status: str,
+    report_type: str,
+    requires_approval: bool,
+    action_items: int,
+    recommendations: int,
+) -> None:
+    """PRD-248 S5 (shadow only): the decision engine says whether the owner
+    should act on this report today and how severe it is, logged beside what
+    the platform did with it. Lazy, off by default, fail-open."""
+    try:
+        from core.llm.decisions import MODE_OFF, get_decision_engine, judgements
+
+        engine = get_decision_engine()
+        if engine.dials().report_triage_mode == MODE_OFF:
+            return
+        engine.shadow(
+            judgements.shadow_report_triage(
+                engine,
+                workspace_id=workspace_id,
+                kind="report",
+                subject_id=report_id,
+                title=title,
+                summary=summary,
+                status=status,
+                agent_name=agent_name,
+                agent_id=agent_id,
+                report_type=report_type,
+                platform_action="requires_approval" if requires_approval else "report_submitted",
+                action_items=action_items,
+                recommendations=recommendations,
+            ),
+            purpose=judgements.PURPOSE_REPORT,
+        )
+    except Exception:  # noqa: BLE001 — never into a report
+        logger.debug("[decision] report triage shadow skipped", exc_info=True)
+
+
 def _slugify(value: str) -> str:
     """Convert string to kebab-case slug for file naming."""
     value = value.lower().strip()
@@ -252,6 +297,15 @@ class ReportService:
             )
             row = result.fetchone()
             report_id = str(row[0]) if row else None
+
+            # PRD-248 S5 (shadow only): does this report need the owner today?
+            # Logged beside the dispatch; never changes it.
+            _shadow_report_triage(
+                workspace_id=self.workspace_id, report_id=report_id, agent_id=agent_id,
+                agent_name=agent_name, title=title, summary=summary or "", status=status,
+                report_type=report_type, requires_approval=requires_approval,
+                action_items=len(action_items or []), recommendations=len(recommendations or []),
+            )
 
             # PRD-128: dispatch report_submitted before commit so the
             # notification row joins the same transaction as the report

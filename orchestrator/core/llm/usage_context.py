@@ -36,6 +36,8 @@ LANE_MISSION = "mission"
 LANE_SESSION = "session"
 LANE_EMBEDDING = "embedding"
 LANE_RERANK = "rerank"
+# PRD-248: one typed decision (TypeSafe Jev, direct or via OpenRouter).
+LANE_DECISION = "decision"
 
 # Context ``source`` values that name a lane directly (the callers of
 # ``execute_with_prompt`` already pass these); anything else is passed through

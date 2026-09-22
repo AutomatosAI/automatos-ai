@@ -79,6 +79,23 @@ The runner is **resumable**: rows already in `results/results.jsonl` are
 skipped. You can ctrl-C and re-run; only unfinished cells get filled in.
 Embedding cache is flushed every 25 cells.
 
+### 2b. The decision-engine rerank (PRD-248 S4, opt-in)
+
+`--mode jev_rerank` ranks the top-N by embedding (30 by default), asks the
+decision engine one yes/no question per candidate in a single call, and
+surfaces the candidates above the probability floor (at least 5, at most
+`top_k`) — the same rule production applies with `tool_rerank_mode=live`.
+It is not part of `all`. Route and budget come from the environment:
+`DECISION_PROVIDER` (`openrouter` on `OPENROUTER_API_KEY`, or `typesafe` on
+`TYPESAFE_API_KEY`) and `DECISION_TIMEOUT_S` (default 5). Compare it against
+`filtered_schema` in the report: the same in-set rate at fewer surfaced names
+is the win; a lower in-set rate means the judge dropped correct actions.
+
+```bash
+DECISION_PROVIDER=openrouter python -m scripts.eval.tool_routing.run_eval \
+    --mode jev_rerank --models openai/gpt-4.1-mini
+```
+
 ### 3. Score it
 
 ```bash

@@ -48,6 +48,9 @@ SERVICE_CATEGORY_MAP = {
     "verifier": "system_llm",
     "consistency_verifier": "system_llm",
     "graph_extraction": "system_llm",
+    # PRD-248: the decision seam's LLM-backed baseline answers typed questions
+    # on the cheap tier, never the orchestrator seat.
+    "decision_adapter": "system_llm",
 
     # Embeddings tier — vectorization only.
     "embeddings": "embeddings",
