@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+from . import secret_reach
 from .adapters.base import ToolClass, ToolIntent
 
 # Sessions never publish. The manager (Auto) integrates. Matched on the raw
@@ -61,13 +62,16 @@ NEVER_ALLOWED_BASH = (
 # perfectly ordinary verbs; what makes these worth a card is WHAT they touch.
 # The operator can still say yes; they just get asked.
 ALWAYS_ASK_BASH = (
-    (re.compile(r"(^|[\s;&|(])(\.|source)\s+\S*\.env\b"), "reads a .env file (it holds this system's secrets)"),
-    (re.compile(r"\.env(\.|\s|$|['\"])"), "touches a .env file (it holds this system's secrets)"),
+    (re.compile(r"(^|[\s;&|(])(\.|source)\s+\S*\.env\b", re.IGNORECASE), "reads a .env file (it holds this system's secrets)"),
+    (re.compile(r"\.env(\.|\s|$|['\"])", re.IGNORECASE), "touches a .env file (it holds this system's secrets)"),
     (re.compile(r"(^|[;&|(]\s*)psql\b"), "runs psql against a database"),
     (re.compile(r"(^|[;&|(]\s*)(redis-cli|mysql|mongosh)\b"), "opens a database shell"),
     (re.compile(r"(^|[;&|(]\s*)docker\b"), "drives Docker (the platform runs in it)"),
     (re.compile(r"(^|[;&|(]\s*)PGPASSWORD="), "passes a database password on the command line"),
     (re.compile(r"(^|[;&|(]\s*)(alembic|flask|django-admin)\b"), "runs a database migration tool"),
+    # F042 review: a link gives a file a second name — a hard link to a secret has
+    # no secret-shaped name at all. Asked even under ``--unlisted-bash allow``.
+    (re.compile(r"(^|[;&|(]\s*)ln\b"), "makes a link (a link can give a secrets file a harmless name)"),
 )
 
 
@@ -290,12 +294,17 @@ def _inside(path_str: str, roots: Iterable[Path]) -> bool:
 # front of that shape of Bash; the Read tool read the same file with no card at
 # all. A session may work in the folder that holds the platform; it may never
 # hold the platform's secrets.
-_SECRET_NAME_RE = re.compile(r"^(?:\.env(?:\..+)?|\.credential_key)$")
-_EXAMPLE_ENV_RE = re.compile(r"^\.env\.(?:example|sample|template|dist|defaults)$")
+# Case-folded throughout (security review 2026-09-22): APFS is case-insensitive,
+# so ``.ENV`` and ``~/.Automatos/…`` open the very files these names guard.
+_SECRET_NAME_RE = re.compile(r"^(?:\.env(?:\..+)?|\.credential_key)$", re.IGNORECASE)
+_EXAMPLE_ENV_RE = re.compile(r"^\.env\.(?:example|sample|template|dist|defaults)$", re.IGNORECASE)
 _SECRET_WORD_RE = re.compile(
-    r"""(?:^|[\s'"=:;|&(<>])([^\s'";|&()<>]*?(?:\.env(?:\.[\w.-]+)?|\.credential_key))(?=$|[\s'";|&()<>])""")
+    r"""(?:^|[\s'"=:;|&(<>])([^\s'";|&()<>]*?(?:\.env(?:\.[\w.-]+)?|\.credential_key))(?=$|[\s'";|&()<>])""",
+    re.IGNORECASE)
 _ABSOLUTE_WORD_RE = re.compile(r"""(?:^|[\s'"=:;|&(<>])((?:/|~/)[^\s'";|&()<>]*)""")
-_CD_TARGET_RE = re.compile(r"""(?:^|[;&|(]|\s)cd\s+(['"]?)([^\s'";|&()]+)\1""")
+_CD_TARGET_RE = re.compile(r"""(?:^|[;&|(]|\s)(?:cd|pushd)\s+(['"]?)([^\s'";|&()]+)\1""")
+# Shell options under which ``*`` reaches dot-files (or ignores case).
+_LOOSE_GLOB_RE = re.compile(r"dotglob|GLOBIGNORE|nocaseglob|nocasematch|extglob")
 
 
 def platform_secret_roots() -> Tuple[Path, ...]:
@@ -311,11 +320,20 @@ def _is_secret_name(name: str) -> bool:
 
 
 def _within(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
+    return secret_reach.within_folded(path, root)
+
+
+def _inventory(ctx: "PolicyContext") -> secret_reach.Inventory:
+    return secret_reach.inventory(ctx.secret_roots, ctx.off_limits, ctx.extra_dirs, _is_secret_name)
+
+
+def secret_protection_summary() -> str:
+    """What this host keeps out of every session's reach — logged at start, so a
+    host running from a checkout without ``orchestrator/`` says so out loud."""
+    roots = platform_secret_roots()
+    if not roots:
+        return "platform secrets: NOT protected — this host is not running from an Automatos checkout"
+    return "platform secrets out of every session's reach under " + ", ".join(str(r) for r in roots)
 
 
 def _guard_secret(path_str: str, ctx: "PolicyContext", base: Path) -> Optional["Decision"]:
@@ -331,6 +349,11 @@ def _guard_secret(path_str: str, ctx: "PolicyContext", base: Path) -> Optional["
     except (OSError, RuntimeError, ValueError):
         return None
     forms = (written, resolved)
+    if ctx.secret_roots:
+        linked = secret_reach.same_file_as_secret(resolved, _inventory(ctx))
+        if linked is not None:
+            return Decision("deny", f"{written.name} is a hard link to {linked.name}, the platform's own "
+                                    "secrets — no session may read or write it, and no approval changes that")
     granted = [Path(d).expanduser().resolve() for d in ctx.extra_dirs]
     for folder in ctx.off_limits:
         folder = Path(folder).expanduser().resolve()
@@ -349,18 +372,31 @@ def _guard_secret(path_str: str, ctx: "PolicyContext", base: Path) -> Optional["
     return Decision("ask", f"touches {written.name} (a secrets file) — the operator decides")
 
 
-def _guard_search(globs: Sequence[str], paths: Sequence[str], ctx: "PolicyContext") -> Optional["Decision"]:
-    """A search whose pattern names a secret (``glob: .env``): refused when it
-    would read through the platform's checkout — from inside it or from any
-    folder above it — asked otherwise."""
-    named = [g for g in globs if ".env" in g or ".credential_key" in g]
+def _guard_search(tool: str, globs: Sequence[str], paths: Sequence[str], ctx: "PolicyContext") -> Optional["Decision"]:
+    """A file-tool search whose pattern picks out a secrets file. Grep READS
+    what its glob selects (Claude Code's Grep runs ripgrep with ``--hidden``,
+    and a glob overrides .gitignore), so a glob that selects one of the
+    platform's secret files under the search folder is refused. A pattern aimed
+    at secret names (``.env``, ``**/.e*``, ``*.ENV`` — not ``*`` or ``**/*.py``)
+    is refused over the platform's checkout, from inside it or any folder
+    above it, and asked elsewhere."""
+    if not globs:
+        return None
+    inv = _inventory(ctx)
+    bases = [Path(p).expanduser() for p in paths] or [ctx.cwd]
+    bases = [(b if b.is_absolute() else ctx.cwd / b).resolve() for b in bases]
+    if tool == "Grep":
+        for base in bases:
+            for secret in (f for f in inv.reachable_under(base) if f in inv.files):
+                glob = next((g for g in globs if secret_reach.tool_glob_matches(g, secret, base)), None)
+                if glob is not None:
+                    return Decision("deny", f"a search with glob {glob!r} here would read {secret.name}, the "
+                                            "platform's own secrets — no approval changes that")
+    named = [g for g in globs if secret_reach.aimed_at_secrets(g, inv.names())]
     if not named:
         return None
-    bases = [Path(p).expanduser() for p in paths] or [ctx.cwd]
     for base in bases:
-        base = (base if base.is_absolute() else ctx.cwd / base).resolve()
-        for root in ctx.secret_roots:
-            root = Path(root).expanduser().resolve()
+        for root in inv.roots:
             if _within(base, root) or _within(root, base):
                 return Decision("deny", f"a search for {named[0]!r} here would read the platform's own secrets "
                                         f"({root.name}) — no approval changes that")
@@ -1043,6 +1079,185 @@ def _judge_command(command: str, bindings: Bindings, ctx: PolicyContext,
     return _worst(verdicts)
 
 
+Bases = Optional[Tuple[Path, ...]]      # the folders a command may run in; None = the gate cannot tell
+
+
+def _moved(words: Sequence[str], bindings: Bindings, bases: Bases) -> Bases:
+    """Where ``cd``/``pushd`` leaves the line: every value its target can take,
+    or unknown (a reference nothing defined, a glob, ``cd -``, bare ``cd``)."""
+    if bases is None or len(words) != 2 or words[1].startswith("-"):
+        return None
+    values = _expand(words[1], bindings)
+    if not _resolved(values) or any(secret_reach.has_glob(v) for v in values):
+        return None
+    moved = []
+    for base in bases:
+        for value in values:
+            target = Path(value).expanduser()
+            moved.append((target if target.is_absolute() else base / target).resolve())
+    return tuple(moved)
+
+
+def _read_operands(words: Sequence[str]) -> List[str]:
+    """The words a command reads as files: options, a grep/rg pattern and an
+    awk/sed program are not files."""
+    head = Path(words[0]).name
+    if head in secret_reach.GREP_VERBS or head == "rg":
+        return secret_reach.search_operands(words)
+    programs: List[str] = []
+    if head in SCRIPT_VERBS:
+        programs, _ = _script_texts(SCRIPT_VERBS[head], words[1:])
+    return [w for w in words[1:] if not w.startswith("-") and w not in programs]
+
+
+def _operand_reach(value: str, bases: Bases, inv: secret_reach.Inventory, ctx: PolicyContext,
+                   loose_globs: bool) -> Optional[Decision]:
+    """One file operand, as the shell will expand it, from every folder the
+    command may run in."""
+    unresolved = _UNRESOLVED_RE.search(value) or SUBSTITUTION_MARK in value
+    if unresolved:
+        if bases is None or any(inv.holds_secrets(b) for b in bases):
+            shown = "$(…)" if value in ("$", SUBSTITUTION_MARK) else repr(value)
+            return Decision("deny", f"{shown} names a file the gate cannot read (a substitution or a variable the "
+                                    "line does not define), in a folder that holds the platform's own secrets — "
+                                    "spell the path out")
+        return None
+    alternatives, _ = secret_reach.expand_braces(value)
+    for alternative in alternatives:
+        name = Path(alternative).name
+        if bases is None:
+            if _is_secret_name(name) or (secret_reach.has_glob(name) and secret_reach.pattern_may_name(
+                    name, inv.names(), leading_dot_literal=not loose_globs)):
+                return Decision("deny", f"{alternative!r} after a cd the gate cannot resolve could be the platform's "
+                                        "own secrets — no approval changes that")
+            continue
+        for base in bases:
+            if secret_reach.has_glob(alternative):
+                hit = secret_reach.glob_reaches(alternative, base, inv, leading_dot_literal=not loose_globs)
+                if hit is not None:
+                    return Decision("deny", f"{alternative!r} expands to {hit.name}, the platform's own secrets "
+                                            "(or the CLI host's state) — no approval changes that")
+                continue
+            guard = _guard_secret(alternative, ctx, base)
+            if guard is not None and guard.behavior == "deny":
+                return guard
+    return None
+
+
+def _command_reach(words: Sequence[str], targets: Sequence[str], bindings: Bindings, bases: Bases,
+                   inv: secret_reach.Inventory, ctx: PolicyContext, loose_globs: bool) -> Optional[Decision]:
+    """One simple command: the files it opens by name (after the shell expands
+    them), and the ones a recursive search or ``find -exec`` walks into."""
+    head = Path(words[0]).name if words else ""
+    operands = [*targets]
+    if words and head not in secret_reach.NO_CONTENT_VERBS and head not in FIND_EXEC_OPTIONS and head != "find":
+        operands += _read_operands(words)
+    for operand in operands:
+        for value in _expand(operand, bindings):
+            verdict = _operand_reach(value, bases, inv, ctx, loose_globs)
+            if verdict is not None:
+                return verdict
+    if words and secret_reach.reads_whole_tree(words):
+        for operand in _read_operands(words):
+            for value in _expand(operand, bindings):
+                for base in bases or ():
+                    tree = Path(value).expanduser()
+                    hits = inv.reachable_under(tree if tree.is_absolute() else base / tree)
+                    if hits:
+                        return Decision("deny", f"{head} {value!r} would read {hits[0].name}, the platform's own "
+                                                "secrets (or the CLI host's state) — no approval changes that")
+        if bases is None:
+            return Decision("deny", f"{head} from a folder the gate cannot resolve could read the platform's secrets")
+    search = secret_reach.search_spec(words) if words else None
+    if search is not None:
+        if bases is None:
+            return Decision("deny", f"{head} searches recursively from a folder the gate cannot resolve — it could "
+                                    "walk into the platform's own secrets")
+        for base in bases:
+            hit = secret_reach.search_reads(search, base, inv)
+            if hit is not None:
+                return Decision("deny", f"{head} over {hit[0]!r} would read {hit[1].name}, the platform's own secrets"
+                                        " (or the CLI host's state) — exclude them (grep --exclude='.env*' "
+                                        "--exclude='.cred*', rg -g '!.env*' -g '!.cred*') or search a narrower folder")
+    return None
+
+
+def _find_reach(find: secret_reach.FindSpec, inner: Sequence[str], bases: Bases,
+                inv: secret_reach.Inventory) -> Optional[Decision]:
+    """``find … -exec CMD {}``: CMD opens every hit, so the walk's own filters
+    decide whether a secret is among them."""
+    if not inner or Path(inner[0]).name in secret_reach.NO_CONTENT_VERBS:
+        return None
+    if bases is None:
+        return Decision("deny", "find -exec from a folder the gate cannot resolve could open the platform's secrets")
+    for base in bases:
+        hit = secret_reach.find_reads(find, base, inv)
+        if hit is not None:
+            return Decision("deny", f"find {hit[0]!r} -exec {Path(inner[0]).name} would open {hit[1].name}, the "
+                                    "platform's own secrets — filter it out (! -name '.env*' ! -name '.cred*') "
+                                    "or walk a narrower folder")
+    return None
+
+
+def _secret_reach_on_line(visible: str, ctx: PolicyContext) -> Optional[Decision]:
+    """The platform's secrets reached WITHOUT being named (secret_reach): each
+    simple command judged from the folder it runs in — a ``cd``/``pushd``
+    earlier on the line moves it, a subshell's move ends with the subshell, and
+    one the gate cannot resolve leaves it unknown. Quotes are already spliced
+    (``.e""nv`` is ``.env``), braces and globs are expanded against the files
+    that exist."""
+    if not (ctx.secret_roots or ctx.off_limits):
+        return None
+    try:
+        segments = _split_compound_depths(visible)
+    except ValueError:
+        return None                                   # the main judge asks on an unparseable line
+    inv = _inventory(ctx)
+    loose_globs = bool(_LOOSE_GLOB_RE.search(visible))
+    roots = [ctx.cwd, *ctx.extra_dirs]
+    stack: List[Bases] = [(Path(ctx.cwd).expanduser().resolve(),)]
+    bindings: Bindings = {}
+    last_find: Optional[Tuple[secret_reach.FindSpec, Bases]] = None
+    for depth, tokens in segments:
+        stack = stack[:depth + 1] if len(stack) > depth else [*stack, *[stack[-1]] * (depth + 1 - len(stack))]
+        words, targets = _peel_redirections(tokens)
+        words = _strip_keywords([_without_substitutions(w) for w in words])
+        targets = [_without_substitutions(t) for t in targets]
+        if words and words[0] == "for":
+            loop_words = list(words[3:]) if len(words) > 2 and words[2] == "in" else []
+            _, bindings = _bind_loop(words, bindings, roots)
+            verdict = _command_reach(["for", *loop_words], targets, {}, stack[depth], inv, ctx, loose_globs)
+            if verdict is not None:
+                return verdict
+            continue
+        words, bindings = _bind_assignments(words, bindings)
+        words = _unwrapped(words) if words and words[0] in COMMAND_WRAPPERS - set(FIND_EXEC_OPTIONS) else words
+        head = Path(words[0]).name if words else ""
+        if head in ("cd", "pushd"):
+            stack = [*stack[:depth], _moved(words, bindings, stack[depth])]
+            continue
+        if head == "popd":
+            stack = [*stack[:depth], None]
+            continue
+        if words and words[0] in FIND_EXEC_OPTIONS and last_find is not None:
+            # a second ``-exec`` split off by its ``;`` runs per hit of the find before it
+            inner = [w for w in words[1:] if w not in FIND_PLACEHOLDERS and w != ";"]
+            verdict = _find_reach(last_find[0], inner, last_find[1], inv)
+            if verdict is not None:
+                return verdict
+            continue
+        found = secret_reach.find_spec(words) if head == "find" else None
+        if found is not None:
+            last_find = (found[0], stack[depth])
+            verdict = _find_reach(found[0], found[1], stack[depth], inv)
+            if verdict is not None:
+                return verdict
+        verdict = _command_reach(words, targets, bindings, stack[depth], inv, ctx, loose_globs)
+        if verdict is not None:
+            return verdict
+    return None
+
+
 def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     # The raw nets read the COMMAND LINE. A here-document's body is data the
     # line writes, not a command in it: an unquoted body's substitutions are
@@ -1053,7 +1268,7 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     for pattern in NEVER_ALLOWED_BASH:
         if pattern.search(visible):
             return Decision("deny", f"never allowed in a session: {_first_words(visible)!r} (sessions do not push or escalate)")
-    secret = _secret_on_line(visible, ctx)
+    secret = _secret_on_line(visible, ctx) or _secret_reach_on_line(visible, ctx)
     if secret is not None:
         return secret
     if ".." in visible and re.search(r"(^|[\s'\"=:;|&(/])\.\.([/\\]|[\s'\");|&]|$)", visible):
@@ -1084,7 +1299,7 @@ def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:
         # F042 first: the platform's secrets are refused wherever they sit, and
         # any other secrets file asks — as the same file read through Bash does.
         guards = [_guard_secret(str(target), ctx, ctx.cwd) for target in intent.paths]
-        guards.append(_guard_search(getattr(intent, "globs", ()) or (), intent.paths, ctx))
+        guards.append(_guard_search(intent.tool, getattr(intent, "globs", ()) or (), intent.paths, ctx))
         guards = [g for g in guards if g is not None]
         if any(g.behavior == "deny" for g in guards):
             return _worst(guards)

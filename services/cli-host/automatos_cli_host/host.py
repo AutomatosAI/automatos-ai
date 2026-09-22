@@ -28,6 +28,7 @@ from .allowlist import NotAllowed, choose_default_root
 from .api import BackendClient, BackendError
 from .config import HostConfig, parse_args
 from .hook_server import HookServer
+from .policy import secret_protection_summary
 from .session import Session, host_capabilities
 from .terminal_server import MAX_TERMINALS, TerminalServer
 
@@ -242,6 +243,7 @@ class Host:
     def run_forever(self) -> int:
         host_id = self.identity["host_id"]
         log.info("CLI host %s (v%s) serving %s — directories: %s", host_id, __version__, self.cfg.url, ", ".join(self.allow_roots))
+        log.info("%s", secret_protection_summary())       # F042: a host with no checkout says so
         state.write_pid(self.cfg.pid_path)
         try:
             while not self.stop.is_set():
