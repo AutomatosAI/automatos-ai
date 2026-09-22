@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from . import __version__
+from . import usage_limit
 from .adapters import NotServed, UnknownCli, adapter_for, adapters
 from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
@@ -68,7 +69,7 @@ _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 @dataclass
 class SessionOutcome:
-    status: str                      # success | error | cancelled
+    status: str                      # success | error | cancelled | usage_limit
     result_text: str = ""
     error: Optional[str] = None
     exit_reason: str = ""
@@ -78,6 +79,7 @@ class SessionOutcome:
     session_id: Optional[str] = None
     transcript_path: Optional[str] = None
     effective_cwd: Optional[str] = None
+    resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (ISO, host clock)
 
     def as_result_payload(self, attempt: int) -> Dict[str, Any]:
         return {
@@ -94,6 +96,7 @@ class SessionOutcome:
             # PRD-239: where the session REALLY ran (a --worktree for a git repo) —
             # the directory `claude --resume` and the editor links must open.
             "effective_cwd": self.effective_cwd,
+            "resets_at": self.resets_at,
         }
 
 
@@ -685,10 +688,21 @@ class Session:
             tail = bytes(self.output_tail).decode("utf-8", "replace")[-1500:]
             code = self.proc.returncode if self.proc else None
             status, error = "error", f"{name} exited (code {code}) before finishing the turn. Last output:\n{tail}"
+        resets = None
+        if status == "error":
+            # F083: the CLI's plan window closed. That is a pause — the ticket goes
+            # back to the queue and the host stops claiming for this CLI — not a
+            # failed attempt, and never "check your key".
+            said = bytes(self.output_tail).decode("utf-8", "replace")[-4000:] + "\n" + (text or "")
+            if usage_limit.is_usage_limit(said):
+                until, known = usage_limit.pause(said, _local_now())
+                status, error, resets = "usage_limit", usage_limit.describe(self.cli, until, known), until.isoformat()
         files = [*self.files_touched, *self._land_deliverables(cwd)]
         self._shred_session_credentials()
-        return self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
-                             files_touched=files)
+        outcome = self._outcome(status, result_text=text, error=error, exit_reason=exit_reason, usage=usage, cwd=cwd,
+                                files_touched=files)
+        outcome.resets_at = resets
+        return outcome
 
     def _shred_session_credentials(self) -> None:
         """The turn is over: delete the files holding this ticket's token.
@@ -730,6 +744,12 @@ class Session:
             transcript_path=self.transcript_path,
             effective_cwd=str(self.effective_cwd or cwd) if (self.effective_cwd or cwd) else None,
         )
+
+
+def _local_now():
+    from datetime import datetime
+
+    return datetime.now().astimezone()
 
 
 def host_capabilities(cfg: HostConfig) -> Dict[str, Any]:

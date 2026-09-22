@@ -13,7 +13,8 @@ It does what the host relies on, and nothing else:
 * after ``Stop`` it idles like a TUI waiting for input until it is terminated.
 
 Scenario knobs (environment): ``FAKE_CLAUDE_SCENARIO`` = ``happy`` (default),
-``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop), ``no-start`` (never fires a hook);
+``exit-early`` (dies before Stop), ``slow`` (sleeps before Stop), ``no-start`` (never fires a hook),
+``usage-limit`` (prints a plan-limit notice mid-turn and exits 1 — ``FAKE_CLAUDE_LIMIT_TEXT`` overrides it);
 ``FAKE_CLAUDE_SESSION_NOTE=1`` also writes ``note.md`` into the ticket folder (the
 ``--add-dir``) and reports an edit of the host's own ``ticket.md`` there (PRD-245 S0.7).
 """
@@ -122,6 +123,13 @@ def main(argv) -> int:
 
     if scenario == "exit-early":
         return 3
+
+    if scenario == "usage-limit":
+        # F083: out of the plan's usage window — Claude Code says so on the
+        # terminal and exits mid-turn.
+        print(os.environ.get("FAKE_CLAUDE_LIMIT_TEXT", "You've hit your limit · resets 3pm (Europe/Dublin)"),
+              flush=True)
+        return 1
 
     # One allowed edit inside cwd, one Bash outside the allowlist (must be denied).
     edit = {"file_path": os.path.join(cwd, "hello.txt"), "content": "hi"}

@@ -2098,6 +2098,8 @@ async def apply_result(
         return {"applied": False, "reason": f"task is {task.status}", "status": task.status}
 
     status = str(payload.get("status") or "success").lower()
+    if status == "usage_limit":
+        return _release_for_usage_limit(db, task, ref, payload)
     denials = payload.get("permission_denials") or []
     denial_summaries = [_denial_summary(d) for d in denials]
     usage = payload.get("usage") or {}
@@ -2214,6 +2216,34 @@ async def apply_result(
         force_review=forces_review(denial_summaries) or _produced_nothing(exec_result),
     )
     return {"applied": terminal is not None, "status": terminal or task.status}
+
+
+def _release_for_usage_limit(db: Session, task: BoardTask, ref: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """F083: the CLI's plan window closed mid-turn. That is a pause, not a failed
+    attempt: the ticket goes back to the queue with the claim's attempt refunded
+    (a limit must never use up the two a ticket gets), its credential dies, and
+    it says why and when it resumes. The host stops claiming for that CLI until
+    then, so the ticket is not handed straight back to a closed window."""
+    clear_session_token(ref)
+    reason = str(payload.get("error") or "paused: usage limit")
+    now = _iso(_now())
+    ref.update({
+        "exit_reason": "usage_limit",
+        "finished_at": now,
+        "paused": {"reason": reason, "resets_at": payload.get("resets_at"), "at": now},
+    })
+    task.runtime_ref = ref
+    task.status = "assigned"
+    task.lease_until = None
+    task.attempts = max(0, int(task.attempts or 0) - 1)
+    db.commit()
+    # The turn's tokens before the limit are still real spend (booked as the
+    # error they used to be booked as).
+    book_session_usage(
+        task, ref, payload.get("usage") or {},
+        status="error", request_type=LANE_BOARD_TASK, execution_id=f"board_task:{task.id}", error=reason,
+    )
+    return {"applied": True, "status": "assigned", "released": True, "reason": reason}
 
 
 def _produced_nothing(exec_result: Dict[str, Any]) -> bool:

@@ -120,7 +120,8 @@ class SessionModeSettingsRequest(BaseModel):
 
 class ResultRequest(BaseModel):
     attempt: Optional[int] = None
-    status: str = Field("success", pattern="^(success|error|cancelled)$")
+    # F083: usage_limit — the CLI's plan window closed mid-turn; a pause, not a failure.
+    status: str = Field("success", pattern="^(success|error|cancelled|usage_limit)$")
     result_text: Optional[str] = None
     error: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None
@@ -129,6 +130,7 @@ class ResultRequest(BaseModel):
     session_id: Optional[str] = None
     exit_reason: Optional[str] = None
     transcript_path: Optional[str] = None
+    resets_at: Optional[str] = None   # F083: when a usage_limit pause ends (host clock, ISO)
 
 
 # ── operator surface ─────────────────────────────────────────────────────────
