@@ -69,7 +69,7 @@ _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 @dataclass
 class SessionOutcome:
-    status: str                      # success | error | cancelled | usage_limit
+    status: str                      # success | error | cancelled | usage_limit | host_stopped
     result_text: str = ""
     error: Optional[str] = None
     exit_reason: str = ""
@@ -298,6 +298,7 @@ class Session:
             self._adapter_error = str(exc)
         self.events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
         self.cancel_requested = threading.Event()
+        self.stopped_by_host: Optional[str] = None     # F015: why the HOST stopped this session
         self.stopped = threading.Event()
         self.session_started = threading.Event()
         self.ended = threading.Event()
@@ -656,7 +657,12 @@ class Session:
             except subprocess.TimeoutExpired:
                 log.error("task %s: process %s survived SIGKILL", self.task_id, self.proc.pid)
 
-    def request_cancel(self) -> None:
+    def request_cancel(self, host_reason: Optional[str] = None) -> None:
+        """Stop the session. ``host_reason`` when the host itself is stopping
+        (F015): the operator did not cancel the ticket, the machine stopped
+        serving it — it goes back to the queue, not to ``cancelled``."""
+        if host_reason and not self.cancel_requested.is_set():
+            self.stopped_by_host = host_reason
         self.cancel_requested.set()
 
     def _collect(self, exit_reason: str, cwd: Path, binary: str) -> SessionOutcome:
@@ -677,6 +683,8 @@ class Session:
         if exit_reason == "completed":
             status = "success"
             error = None
+        elif exit_reason == "cancelled" and self.stopped_by_host:
+            status, error = "host_stopped", self.stopped_by_host
         elif exit_reason == "cancelled":
             status, error = "cancelled", "cancelled by the operator"
         elif exit_reason == "timeout":

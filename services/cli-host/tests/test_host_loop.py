@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -127,6 +128,35 @@ def test_once_cycle_pairs_claims_runs_and_reports(short_tmp, fake_home, env_clea
     pair_call = next(c for c in backend.calls if c[1].endswith("/pair"))
     assert set(pair_call[2]) == {"code", "name", "capabilities"}
     assert (short_tmp / "state" / "sessions.json").read_text().strip() == "{}"  # table cleared
+
+
+def test_a_host_that_stops_mid_session_hands_the_ticket_back_saying_why(short_tmp, fake_home, env_clean, monkeypatch):
+    """F015 (night 1): the host stopping (a reinstall, a restart, SIGTERM) ended
+    its sessions as ``cancelled`` with no actor or reason. It now reports
+    ``host_stopped`` with the reason, and the backend puts the ticket back."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", "slow")
+    monkeypatch.setenv("FAKE_CLAUDE_SLOW_SECONDS", "60")
+    backend = FakeBackend(workdir)
+    try:
+        host = Host(_cfg(short_tmp, backend.url, once=False))
+        host.prepare()
+        runner = threading.Thread(target=host.run_forever, daemon=True)
+        runner.start()
+        deadline = time.time() + 30
+        while "SessionStart" not in [e["event"] for e in backend.events] and time.time() < deadline:
+            time.sleep(0.1)
+        assert "SessionStart" in [e["event"] for e in backend.events], "the session never started"
+        host.stopping = "the CLI host on test-mac stopped (SIGTERM)"
+        host.stop.set()
+        runner.join(timeout=45)
+        assert not runner.is_alive()
+    finally:
+        backend.close()
+    assert backend.result is not None, "no result was posted on the way out"
+    assert backend.result["status"] == "host_stopped"
+    assert backend.result["error"] == "the CLI host on test-mac stopped (SIGTERM)"
 
 
 def test_host_refuses_a_saas_backend_and_a_disabled_one(short_tmp, fake_home, env_clean):

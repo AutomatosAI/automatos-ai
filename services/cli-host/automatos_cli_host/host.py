@@ -16,6 +16,7 @@ import logging
 import queue
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -104,6 +105,7 @@ class Host:
         self._source_fingerprint = source_fingerprint()
         self._backend_contract: Optional[str] = None
         self.draining: Optional[str] = None  # the reason, once a restart is requested
+        self.stopping: Optional[str] = None  # F015: why the host is stopping, told to every session it ends
         self.exit_code = 0
         # PRD-239 S7: the Canvas terminal (the operator's own shell on the loopback)
         self.terminal: Optional[TerminalServer] = None
@@ -272,8 +274,12 @@ class Host:
                     return 0
                 time.sleep(self.cfg.poll_seconds if not self.sessions else min(1.0, self.cfg.poll_seconds))
         finally:
+            # F015: night 1 recorded these as `cancelled` by nobody for no reason.
+            # The host stopping is not the operator's cancel — each ticket goes back
+            # to the queue saying which host stopped and why.
+            why = self.stopping or f"the CLI host on {socket.gethostname()} stopped"
             for s in self.sessions.values():
-                s.request_cancel()
+                s.request_cancel(host_reason=why)
             for t in self.threads.values():
                 t.join(timeout=15)
             self._flush_events(host_id)
@@ -514,7 +520,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         log.error("backend error: %s", exc)
         return 3
 
-    def _sigterm(_signum, _frame):
+    def _sigterm(signum, _frame):
+        host.stopping = f"the CLI host on {socket.gethostname()} stopped ({signal.Signals(signum).name})"
         host.stop.set()
 
     def _sighup(_signum, _frame):

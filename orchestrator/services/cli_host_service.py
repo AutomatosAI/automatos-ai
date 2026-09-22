@@ -2102,6 +2102,8 @@ async def apply_result(
     status = str(payload.get("status") or "success").lower()
     if status == "usage_limit":
         return _release_for_usage_limit(db, task, ref, payload)
+    if status == "host_stopped":
+        return _release_for_host_stop(db, task, ref, payload, host)
     denials = payload.get("permission_denials") or []
     denial_summaries = [_denial_summary(d) for d in denials]
     usage = payload.get("usage") or {}
@@ -2226,20 +2228,41 @@ def _release_for_usage_limit(db: Session, task: BoardTask, ref: Dict[str, Any], 
     (a limit must never use up the two a ticket gets), its credential dies, and
     it says why and when it resumes. The host stops claiming for that CLI until
     then, so the ticket is not handed straight back to a closed window."""
-    clear_session_token(ref)
     reason = str(payload.get("error") or "paused: usage limit")
+    return _release_to_queue(db, task, ref, payload, exit_reason="usage_limit", reason=reason,
+                             record=("paused", {"reason": reason, "resets_at": payload.get("resets_at")}))
+
+
+def _release_for_host_stop(db: Session, task: BoardTask, ref: Dict[str, Any], payload: Dict[str, Any],
+                           host: CliHost) -> Dict[str, Any]:
+    """F015 (night 1): the CLI host stopped while this ticket ran — its service
+    restarted, the host was reinstalled, the machine went down. Night 1 wrote
+    those as ``cancelled`` with no one and no reason on them: tickets the owner
+    never stopped. It is neither the owner's stop nor a failed attempt: the
+    ticket goes back to the queue with the claim's attempt refunded, saying
+    which host stopped and why, and the next claim picks it up."""
+    reason = str(payload.get("error") or "the CLI host stopped")
+    by = f"cli-host:{host.id}"
+    logger.info("[cli-host] task %s back in the queue — %s (%s)", task.id, reason, by)
+    return _release_to_queue(db, task, ref, payload, exit_reason="host_stopped", reason=reason,
+                             record=("released", {"reason": reason, "by": by}))
+
+
+def _release_to_queue(db: Session, task: BoardTask, ref: Dict[str, Any], payload: Dict[str, Any], *,
+                      exit_reason: str, reason: str, record: Tuple[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """A claimed ticket back to ``assigned``: the claim's attempt refunded, the
+    session's credential dead, the turn's tokens still booked, and ``record``
+    (key, facts) on the ticket saying why."""
+    clear_session_token(ref)
     now = _iso(_now())
-    ref.update({
-        "exit_reason": "usage_limit",
-        "finished_at": now,
-        "paused": {"reason": reason, "resets_at": payload.get("resets_at"), "at": now},
-    })
+    key, facts = record
+    ref.update({"exit_reason": exit_reason, "finished_at": now, key: {**facts, "at": now}})
     task.runtime_ref = ref
     task.status = "assigned"
     task.lease_until = None
     task.attempts = max(0, int(task.attempts or 0) - 1)
     db.commit()
-    # The turn's tokens before the limit are still real spend (booked as the
+    # The turn's tokens before the release are still real spend (booked as the
     # error they used to be booked as).
     book_session_usage(
         task, ref, payload.get("usage") or {},

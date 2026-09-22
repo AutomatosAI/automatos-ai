@@ -121,7 +121,8 @@ class SessionModeSettingsRequest(BaseModel):
 class ResultRequest(BaseModel):
     attempt: Optional[int] = None
     # F083: usage_limit — the CLI's plan window closed mid-turn; a pause, not a failure.
-    status: str = Field("success", pattern="^(success|error|cancelled|usage_limit)$")
+    # F015: host_stopped — the host itself stopped while the session ran; not the operator's cancel.
+    status: str = Field("success", pattern="^(success|error|cancelled|usage_limit|host_stopped)$")
     result_text: Optional[str] = None
     error: Optional[str] = None
     usage: Optional[Dict[str, Any]] = None

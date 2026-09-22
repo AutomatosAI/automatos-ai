@@ -134,6 +134,36 @@ def test_cancel_terminates_a_running_session(short_tmp, fake_home, env_clean, mo
         hooks.stop()
 
 
+def test_a_session_the_host_stops_is_not_the_operators_cancel(short_tmp, fake_home, env_clean, monkeypatch):
+    """F015 (night 1): tickets ended by the host shutting down were recorded as
+    cancelled by the operator. The host's stop says so, and why."""
+    workdir = short_tmp / "ws" / "repo"
+    workdir.mkdir(parents=True)
+    monkeypatch.setenv("FAKE_CLAUDE_SCENARIO", "slow")
+    monkeypatch.setenv("FAKE_CLAUDE_SLOW_SECONDS", "60")
+    cfg = _cfg(short_tmp)
+    hooks = HookServer(cfg.socket_path)
+    hooks.start()
+    s = Session(_ticket(workdir), cfg, [str(short_tmp / "ws")], cfg.socket_path, default_root=str(short_tmp / "ws"))
+    hooks.register("42", s.handle_hook)
+    holder = {}
+    t = threading.Thread(target=lambda: holder.setdefault("out", s.run()))
+    t.start()
+    try:
+        deadline = time.time() + 30
+        while s.transcript_path is None and time.time() < deadline:
+            time.sleep(0.1)
+        assert s.transcript_path is not None, "SessionStart never arrived"
+        s.request_cancel(host_reason="the CLI host on mac stopped (SIGTERM)")
+        t.join(timeout=30)
+        out = holder["out"]
+        assert (out.status, out.error, out.exit_reason) == (
+            "host_stopped", "the CLI host on mac stopped (SIGTERM)", "cancelled")
+        assert out.as_result_payload(1)["status"] == "host_stopped"
+    finally:
+        hooks.stop()
+
+
 def test_not_onboarded_claude_is_refused_before_spawn(short_tmp, env_clean, monkeypatch):
     home = short_tmp / "home2"
     home.mkdir()
