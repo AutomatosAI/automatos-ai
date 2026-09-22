@@ -70,6 +70,13 @@ class ActionDefinition:
         }
 
 
+def action_is_available(action: Any) -> bool:
+    """F078: whether an action — or any object standing in for one — can run
+    here. Read like the role flags: an object without the check is available."""
+    check = getattr(action, "is_available", None)
+    return check() if callable(check) else True
+
+
 class ActionRegistry:
     """
     Registry of all platform actions available to Auto.
@@ -138,7 +145,7 @@ class ActionRegistry:
         self._ensure_initialized()
         actions = [
             a for a in self._actions.values()
-            if (include_super_admin or not a.super_admin_only) and a.is_available()
+            if (include_super_admin or not a.super_admin_only) and action_is_available(a)
         ]
         if permission_filter:
             actions = [a for a in actions if a.permission_level == permission_filter]
@@ -176,7 +183,7 @@ class ActionRegistry:
                 action the caller isn't entitled to.
         """
         self._ensure_initialized()
-        promoted = [a for a in self._actions.values() if a.promoted and a.is_available()]
+        promoted = [a for a in self._actions.values() if a.promoted and action_is_available(a)]
         if first_class_names is not None:
             promoted = [a for a in promoted if a.name in first_class_names]
         if not include_super_admin:
@@ -243,7 +250,7 @@ class ActionRegistry:
             and (not exclude_admin or not a.admin_only)
             and (include_super_admin or not a.super_admin_only)
             and a.name not in exclude_set
-            and a.is_available()
+            and action_is_available(a)
         )
 
         # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
@@ -267,7 +274,7 @@ class ActionRegistry:
                     if (not exclude_admin or not a.admin_only)
                     and (include_super_admin or not a.super_admin_only)
                     and a.name not in exclude_set
-                    and a.is_available()
+                    and action_is_available(a)
                 )
             narrowed_actions = [n for n in intersect_pool if n in allow_set]
             # Defensive: if the intersection is empty (e.g. ranker returned
