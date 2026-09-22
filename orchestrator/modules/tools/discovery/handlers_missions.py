@@ -74,6 +74,23 @@ def _plan_task_summary(plan_tasks: list) -> list:
     return summary
 
 
+def _owner_approves_every_mission(db: Session, workspace_id: UUID) -> bool:
+    """The workspace's mission policy is always-ask (the default). Unreadable
+    counts as always-ask: a gate that cannot be read stays shut."""
+    from core.services.approval_policy import ALWAYS_ASK, load_approval_policy
+
+    try:
+        return load_approval_policy(db, workspace_id)["policy"] == ALWAYS_ASK
+    except Exception:  # noqa: BLE001
+        logger.warning("[Missions] approval policy unreadable for %s — treated as always-ask", workspace_id)
+        return True
+
+
+AUTO_APPROVE_HELD_NOTE = (
+    " auto_approve was not applied: this workspace asks its owner to approve every mission."
+)
+
+
 def _create_reply_message(run: Any, task_count: int) -> str:
     """Honest status line — a mission defaults to awaiting_approval, not running."""
     from core.models.orchestration_enums import RunState
@@ -128,6 +145,13 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
     # attaches context_messages on its API call; the executor path did not. Narrow
     # to the SERVER-injected origin chat only — never a caller-supplied chat_id
     # (same cross-user concern as the narration target above).
+    # F036 (night 1): a mission's approval gate is the OWNER's policy. An agent's
+    # own tool call cannot skip it: auto_approve counts only where the policy
+    # already lets missions start without asking (auto_below_budget, full_auto).
+    auto_approve_held = bool(config.get("auto_approve")) and _owner_approves_every_mission(db, workspace_id)
+    if auto_approve_held:
+        config = {k: v for k, v in config.items() if k != "auto_approve"}
+
     if "context_messages" not in config:
         recent = _recent_chat_context(db, workspace_id, chat_id=str(_origin) if _origin else None)
         if recent:
@@ -186,7 +210,7 @@ async def create_mission(db: Session, workspace_id: UUID, params: Dict[str, Any]
             "goal": run.goal[:200] if run.goal else "",
             "task_count": len(tasks),
             "tasks": task_summary,
-            "message": _create_reply_message(run, len(tasks)),
+            "message": _create_reply_message(run, len(tasks)) + (AUTO_APPROVE_HELD_NOTE if auto_approve_held else ""),
         }
 
     except Exception as e:
@@ -337,6 +361,17 @@ async def approve_mission(db: Session, workspace_id: UUID, params: Dict[str, Any
     run, err = _resolve_run(db, workspace_id, params)
     if err:
         return err
+    # F036: under always-ask the approval is the owner's. A person driving the
+    # chat approves through Auto (the executor attributes it to them); an agent
+    # in a lane no person drives — a board ticket, a workflow — cannot give it.
+    if not params.get("_created_by") and _owner_approves_every_mission(db, workspace_id):
+        return {
+            "success": False,
+            "error": (
+                "This workspace asks its owner to approve every mission, and no person is behind this "
+                "request. The owner approves it from the mission card, or by saying so in chat."
+            ),
+        }
     from services.coordinator_service import CoordinatorService
 
     actor_id = _actor(params)
