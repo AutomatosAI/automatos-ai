@@ -873,7 +873,7 @@ class DocumentManager:
             logger.error(f"Error uploading document: {e}")
             raise
     
-    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None, filename: str = None):
+    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None, filename: str = None, update_graph: bool = True):
         """
         Process document: extract text, chunk, and generate embeddings.
 
@@ -883,6 +883,9 @@ class DocumentManager:
             file_type: Document type
             s3_key: S3 key where document is stored (for reference)
             filename: Real document filename (not the temp path basename)
+            update_graph: schedule the knowledge-graph update (a re-ingest of the
+                same source leaves the graph as it was — it is built from the
+                source, not the chunks)
         """
         self._ensure_database_initialized()
         # W3-S8: track S3 vector_ids the persist helper stored so the outer
@@ -1315,7 +1318,7 @@ class DocumentManager:
             # PRD-126: Trigger knowledge graph update on document ingest
             try:
                 from modules.knowledge.graph_service import get_graph_service
-                if self.workspace_id:
+                if self.workspace_id and update_graph:
                     get_graph_service().schedule_incremental_update(
                         str(self.workspace_id),
                         [{"type": "document", "path": file_path, "id": document_id}],
@@ -1694,6 +1697,32 @@ class DocumentManager:
             logger.error(f"Error getting document {document_id}: {e}")
             raise
     
+    def clear_chunks(self, document_id: int) -> int:
+        """F086 re-ingest: drop what ingestion stored for a document — its chunks,
+        its table and formula rows, its S3 vectors — and keep the document row,
+        so ``_process_document`` can run again under the same id. Returns the
+        number of chunks removed."""
+        self._ensure_database_initialized()
+        conn = psycopg2.connect(**self.db_config)
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (document_id,))
+            removed = cursor.rowcount
+            cursor.execute("SELECT to_regclass('public.kb_tables') IS NOT NULL, "
+                           "to_regclass('public.kb_formulas') IS NOT NULL")
+            has_tables, has_formulas = cursor.fetchone()
+            if has_tables:
+                cursor.execute("DELETE FROM kb_tables WHERE knowledge_item_id = %s", (document_id,))
+            if has_formulas:
+                cursor.execute("DELETE FROM kb_formulas WHERE knowledge_item_id = %s", (document_id,))
+            conn.commit()
+            cursor.close()
+        finally:
+            conn.close()
+        if self.use_s3_vectors and self._s3_backend:
+            self._s3_backend.delete_documents(str(document_id))
+        return removed
+
     def delete_document(self, document_id: int) -> bool:
         """Delete document, all its chunks, and any S3-stored vectors.
 

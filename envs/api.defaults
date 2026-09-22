@@ -52,6 +52,13 @@ AUTH_EDITION=local
 # to pin your own key instead.
 CREDENTIAL_KEY_FILE=/app/data/.credential_key
 
+# [ACTIVE] Uploaded document sources live on the same backend_data volume. In the
+# image's /tmp they vanished on every recreate (night 1, and again F102 on
+# 2026-09-23: 85 files held only in the container) — and a document can only be
+# re-processed from its source. Existing files move with
+# scripts/reingest_documents.py --move-uploads --apply.
+DOCUMENT_UPLOAD_DIR=/app/data/uploads
+
 # [ACTIVE] The single local workspace every anonymous request resolves to.
 # This exact id is what the CI seed (orchestrator/scripts/init_test_db.py) and
 # the entrypoint seed create; validate_auth_edition() (config.py) hard-requires
