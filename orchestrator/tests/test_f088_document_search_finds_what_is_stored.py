@@ -95,3 +95,19 @@ def test_the_route_no_longer_carries_its_own_vector_search():
     source = inspect.getsource(documents.semantic_search)
     assert "_retrieval_hits(" in source
     assert "get_vector_store" not in source and "create_embedding_manager" not in source
+
+
+# ── what the model is told the sources are ──────────────────────────────────
+
+def test_the_model_sees_each_passages_real_file_name():
+    """Night 3: the name was withheld ("[Source 1]"), and asked which file said
+    it, Auto invented one ("harbourline-wholesale-sheet.md")."""
+    from modules.tools.formatting.result_formatter import ToolResultFormatter
+
+    raw = {"success": True, "results": [
+        {"content": "Wholesale terms: 30 days.", "source": "wholesale-terms.md", "similarity": 0.61, "document_id": 717},
+        {"content": "Q2 revenue up 12%.", "source": "q2-2026-numbers.csv", "similarity": 0.44, "document_id": 724},
+    ]}
+    text = ToolResultFormatter.format_for_llm(raw, "search_knowledge")
+    assert "[Source 1: wholesale-terms.md]" in text and "[Source 2: q2-2026-numbers.csv]" in text
+    assert "only a file named here" in text
