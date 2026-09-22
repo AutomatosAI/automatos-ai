@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from core.llm.manager import create_llm_manager
 from core.models.composio import ComposioEntity, TriggerSubscription
 from core.models.composio_cache import AgentAppAssignment
+from core.cli_runtime import is_cli_agent
 from core.models.core import Agent
 from core.models.routing import (
     ChannelSource,
@@ -82,7 +83,64 @@ class UniversalRouter:
         Returns a ``RoutingDecision`` if a match is found at any tier,
         or ``None`` when no tier can resolve the request (the caller
         should fall back to LLM classification or default agent).
+
+        F071: every decision leaves through ``_chat_never_routes_to_a_session``,
+        so no tier — the cache included — can hand a chat turn to a session
+        agent, which can never be activated in chat.
         """
+        decision = await self._route_through_tiers(envelope)
+        return self._chat_never_routes_to_a_session(envelope, decision)
+
+    def _chat_never_routes_to_a_session(
+        self, envelope: RequestEnvelope, decision: Optional[RoutingDecision],
+    ) -> Optional[RoutingDecision]:
+        """A chat turn routed to a ``runtime: cli`` agent becomes ``orchestrate``.
+
+        Night 3 (F071): 15 of 34 Auto replies (44 %) failed this way. A session
+        agent is deliberately never activated in the LLM runtime (PRD-234 S1a —
+        its work is a board ticket its CLI host claims), so routing a chat turn
+        to one ended in "Failed to activate agent N" and advice to check a
+        provider key that was fine. ``orchestrate`` hands the turn to Auto,
+        which can answer it or file the ticket for that agent itself.
+
+        Scoped to CHAT on purpose: webhooks, triggers and channels share this
+        router, and their consumers may file a ticket for a session agent
+        legitimately. Any tier's decision — a cached one included — passes
+        through here, so an old cached route to a session agent (or an agent
+        switched to cli after it was cached) cannot replay into the failure.
+        """
+        if decision is None or decision.route_type != "agent" or decision.agent_id is None:
+            return decision
+        if envelope.source != ChannelSource.CHATBOT:
+            return decision
+        try:
+            row = (
+                self._db.query(Agent.configuration, Agent.name)
+                .filter(Agent.id == decision.agent_id)
+                .first()
+            )
+        except Exception:  # noqa: BLE001 — never let the guard break routing
+            logger.warning("[router] runtime check failed for agent %s", decision.agent_id, exc_info=True)
+            return decision
+        if row is None or not is_cli_agent(row[0]):
+            return decision
+        logger.info(
+            "[router] F071: chat turn routed to session agent %s (%s) — handing it to Auto instead",
+            decision.agent_id, row[1],
+        )
+        return RoutingDecision(
+            route_type="orchestrate",
+            agent_id=None,
+            confidence=decision.confidence,
+            reasoning=(
+                f"'{row[1]}' is a session agent — it works through board tickets, never "
+                f"in chat — so Auto takes the turn (was: {decision.reasoning})"
+            )[:500],
+            intent_category=decision.intent_category,
+        )
+
+    async def _route_through_tiers(self, envelope: RequestEnvelope) -> Optional[RoutingDecision]:
+        """The tier chain itself. Callers use ``route``, which vets the result."""
 
         env_hash = _envelope_hash(envelope)
         logger.info(
@@ -481,6 +539,18 @@ class UniversalRouter:
                 )
                 .all()
             )
+            if envelope.source == ChannelSource.CHATBOT:
+                # F071: a session agent cannot take a chat turn, so the LLM is
+                # never offered one — a pick it cannot use is a wasted call
+                # AND a cached route that would replay the failure.
+                offered = [a for a in agents if not is_cli_agent(a.configuration)]
+                if len(offered) != len(agents):
+                    logger.info(
+                        "[router] Tier 3: %d session agent(s) withheld from a chat turn",
+                        len(agents) - len(offered),
+                    )
+                agents = offered
+
             if semantic_candidates:
                 logger.info(
                     "[router] Tier 3: %d agents (semantic shortlisted %d)",
