@@ -322,6 +322,16 @@ def _enum(schema: Dict[str, Any]) -> List[str]:
     return schema["function"]["parameters"]["properties"]["action"].get("enum", [])
 
 
+@pytest.fixture
+def narrowed_enum(monkeypatch):
+    """F025 ships the enum cache-stable (the full eligible set) by default and
+    delivers the ranking as a late system line. These pins are about the
+    NARROWED enum, so they run with the dial off."""
+    import modules.tools.turn_narrowing as turn_narrowing
+
+    monkeypatch.setattr(turn_narrowing, "enum_is_cache_stable", lambda: False)
+
+
 def test_promoted_pin_dropped_without_flag() -> None:
     reg = _registry_with_promoted()
     schema = reg.to_dispatcher_schema(
@@ -331,7 +341,7 @@ def test_promoted_pin_dropped_without_flag() -> None:
     assert _enum(schema) == ["plain_action"]
 
 
-def test_promoted_pin_admitted_with_flag() -> None:
+def test_promoted_pin_admitted_with_flag(narrowed_enum) -> None:
     reg = _registry_with_promoted()
     schema = reg.to_dispatcher_schema(
         exclude_admin=True,

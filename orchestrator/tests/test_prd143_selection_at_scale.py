@@ -517,20 +517,30 @@ def test_topk_is_bounded(scale_registry, scale_index):
         )
 
 
+@pytest.mark.parametrize("cache_stable", [False, True])
 @pytest.mark.parametrize(
     "intent",
     ["create an agent", "invite a member to the workspace", "show me the logs"],
 )
-def test_dispatcher_enum_matches_ranked_set(scale_registry, scale_index, intent):
-    """The platform_execute enum the LLM sees is exactly the ranked top-K MINUS
-    the promoted actions that attach first-class this turn (PRD-232 US-014 §6.2:
+def test_dispatcher_enum_matches_ranked_set(scale_registry, scale_index, intent, cache_stable, monkeypatch):
+    """The set the LLM is steered to is exactly the ranked top-K MINUS the
+    promoted actions that attach first-class this turn (PRD-232 US-014 §6.2:
     config pins + whatever promoted ranked in) — no fallback to the full
-    catalogue, no su members. A promoted action is NEVER a bare enum member: it is
-    first-class when pinned/ranked, else reachable via platform_find_tools."""
+    catalogue, no su members.
+
+    F025: with the enum cache-stable (the default) that set is the late system
+    line and the enum is the full eligible set, so a promoted action that did
+    not rank stays reachable there; with the dial off the enum IS the ranked
+    set and a promoted action is never a bare enum member."""
+    import modules.tools.turn_narrowing as turn_narrowing
+
+    monkeypatch.setattr(turn_narrowing, "enum_is_cache_stable", lambda: cache_stable)
+    turn_narrowing.clear_narrowed_actions()
     with _tool_surface(scale_registry, scale_index):
         tools = tr.get_tools_for_agent(agent_id=None, workspace_id=None, query=intent)
 
     enum = _dispatcher_enum(tools)
+    steered = turn_narrowing.narrowed_actions() if cache_stable else enum
 
     # §6.2: the surface ranks the FULL set (exclude_promoted=False), attaches the
     # ranked/pinned promoted first-class, and the enum is the ranked remainder.
@@ -538,24 +548,34 @@ def test_dispatcher_enum_matches_ranked_set(scale_registry, scale_index, intent)
     full_ranked = [n for n, _ in _rank(scale_index, intent, exclude_promoted=False)]
     promoted_all = {spec[0] for spec in _PROMOTED}
     pins = tr._promotion_pins()
-    expected_first_class = {n for n in full_ranked if n in promoted_all} | (pins & promoted_all)
+    if cache_stable:
+        # F025: only the pins attach first-class, so the tool array is the same
+        # every turn; a promoted action that ranked stays in the steer + enum.
+        expected_first_class = pins & promoted_all
+    else:
+        expected_first_class = {n for n in full_ranked if n in promoted_all} | (pins & promoted_all)
     expected_enum = [n for n in full_ranked if n not in expected_first_class]
 
-    assert enum, f"dispatcher enum empty for {intent!r}"
-    assert set(enum) == set(expected_enum), (
-        f"dispatcher enum diverged from the §6.2 ranked-minus-first-class set for "
-        f"{intent!r}: enum-only={sorted(set(enum) - set(expected_enum))}, "
-        f"expected-only={sorted(set(expected_enum) - set(enum))}"
+    assert steered, f"nothing steered for {intent!r}"
+    assert set(steered) == set(expected_enum), (
+        f"steered set diverged from the §6.2 ranked-minus-first-class set for "
+        f"{intent!r}: steered-only={sorted(set(steered) - set(expected_enum))}, "
+        f"expected-only={sorted(set(expected_enum) - set(steered))}"
     )
-    assert len(enum) <= TOP_K
+    assert len(steered) <= TOP_K
+    assert set(expected_enum) <= set(enum)
     assert not (set(enum) & _su_names(scale_registry))
 
-    # Promotion-as-prior reachability: a promoted action is never a bare enum
-    # member; it is first-class iff pinned or ranked in this turn, otherwise
-    # reachable only via platform_find_tools (absent from both first-class + enum).
+    # Promotion-as-prior reachability: a promoted action attaches first-class iff
+    # pinned (dial off: or ranked this turn) and is never duplicated in the enum.
+    # Dial off, an unattached one is reachable only via platform_find_tools; with
+    # the cache-stable enum (F025) it stays in the full enum.
     surface = _names(tools)
     for promoted_name in promoted_all:
-        assert promoted_name not in enum
+        if promoted_name in expected_first_class:
+            assert promoted_name not in enum      # first-class is never duplicated in the enum
+        elif not cache_stable:
+            assert promoted_name not in enum      # dial off: reachable only via platform_find_tools
         if promoted_name in expected_first_class:
             assert promoted_name in surface
         else:
