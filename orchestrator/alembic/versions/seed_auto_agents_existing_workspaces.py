@@ -55,7 +55,7 @@ def upgrade() -> None:
                 true, NULL, :ws_id,
                 'workspace', :ws_id_str,
                 true, :persona,
-                :model_config::jsonb, :config::jsonb, :tags::jsonb,
+                CAST(:model_config AS jsonb), CAST(:config AS jsonb), CAST(:tags AS jsonb),
                 NOW(), NOW()
             )
             ON CONFLICT DO NOTHING
