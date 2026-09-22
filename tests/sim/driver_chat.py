@@ -73,6 +73,7 @@ def run_chat(ctx: RunContext, sc: Scenario) -> ScenarioResult:
                                      response.first_byte_ms))
             continue
         turn = parse_data_stream(response.body, chat_id)
+        chat_id = turn.chat_id or chat_id    # continue where the backend persisted the chat
         turns.append(turn_record(index, prompt, turn, response.status, response.ms, response.first_byte_ms))
         errors.extend(f"turn {index}: {e[:300]}" for e in turn.errors)
         if not turn.text and not turn.tool_calls:
