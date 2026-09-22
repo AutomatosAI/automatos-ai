@@ -64,7 +64,20 @@ SESSION_TOOLS_PATH = "/api/v1/session-tools/mcp"
 # card, a bell and a Telegram message addressed to the operator.
 MAX_ASKS_PER_TICKET = 6
 MAX_ASK_QUESTION_KEPT = 1000
-MAX_ASK_ANSWER_KEPT = 2000
+# F037 (night 1): the owner's answer was cut here at 2,000 characters, mid-word,
+# with nothing said to anyone — three of 28 answers lost ~1,050 characters of
+# instructions. An answer runs to pages before it is cut now, and when it is,
+# the text the session reads says so and where the rest is.
+MAX_ASK_ANSWER_KEPT = 16_000
+CUT_NOTE = "\n\n[{what} cut here at {kept:,} characters; {more:,} more are on question #{grant_id}.]"
+
+
+def _kept(text: Any, limit: int, *, what: str, grant_id: Any) -> str:
+    """``text`` as kept on the ticket: whole, or cut with a note saying so."""
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + CUT_NOTE.format(what=what, kept=limit, more=len(text) - limit, grant_id=grant_id)
 
 
 def _now() -> datetime:
@@ -1335,7 +1348,8 @@ def open_session_asks(ref: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def record_session_ask(ref: Dict[str, Any], *, grant_id: Any, question: str) -> Dict[str, Any]:
     """Remember an ask the session just made. Returns the rebuilt ref."""
-    entry = {"grant_id": int(grant_id), "question": str(question)[:MAX_ASK_QUESTION_KEPT],
+    entry = {"grant_id": int(grant_id),
+             "question": _kept(question, MAX_ASK_QUESTION_KEPT, what="The question is", grant_id=grant_id),
              "asked_at": _iso(_now())}
     return {**ref, SESSION_ASKS_KEY: [*session_asks(ref), entry]}
 
@@ -1360,7 +1374,11 @@ def record_session_answer(ref: Dict[str, Any], *, grant_id: Any, answer: str) ->
     touched = False
     for ask in session_asks(ref):
         if not touched and int(ask.get("grant_id") or 0) == int(grant_id) and not ask.get("answered_at"):
-            updated.append({**ask, "answer": str(answer)[:MAX_ASK_ANSWER_KEPT], "answered_at": _iso(_now())})
+            kept = _kept(answer, MAX_ASK_ANSWER_KEPT, what="The owner's answer is", grant_id=grant_id)
+            if len(str(answer)) > MAX_ASK_ANSWER_KEPT:
+                logger.warning("[cli-host] the answer to ask #%s is %s characters — %s kept on the ticket, "
+                               "the rest stays on the question", grant_id, len(str(answer)), MAX_ASK_ANSWER_KEPT)
+            updated.append({**ask, "answer": kept, "answered_at": _iso(_now())})
             touched = True
             continue
         updated.append(ask)
