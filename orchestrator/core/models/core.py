@@ -903,6 +903,10 @@ class DocumentResponse(BaseModel):
     rag_query_count: Optional[int] = 0
     # PRD-164 S3 (Q58): 'agent_output' rows are the flywheel scope
     source_type: Optional[str] = None
+    # F086: how much of the extracted text the stored chunks hold, and whether
+    # that is under the owner-facing threshold ("partial — 61% kept").
+    kept_pct: Optional[int] = None
+    partial: bool = False
 
 class SystemConfigCreate(BaseModel):
     config_key: str

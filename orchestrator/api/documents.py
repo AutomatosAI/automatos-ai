@@ -76,6 +76,36 @@ db_config = {
 }
 
 # Document manager factory - creates instance per request with workspace context
+# The type a document is listed under, by extension. F086: night 3's café sheet
+# was listed as "unknown" — CSV and spreadsheets were missing.
+UPLOAD_FILE_TYPES = {
+    ".pdf": "pdf", ".md": "markdown", ".markdown": "markdown", ".txt": "text",
+    ".doc": "document", ".docx": "document", ".json": "json",
+    ".csv": "csv", ".xlsx": "spreadsheet", ".xls": "spreadsheet",
+}
+
+
+def processing_type(file_type: str):
+    """How ingestion chunks a listed type. F086: DOCX, CSV and spreadsheets were
+    chunked as plain TEXT, so a CSV never reached row-aware chunking."""
+    return {
+        "pdf": DocumentType.PDF, "text": DocumentType.TEXT, "markdown": DocumentType.MARKDOWN,
+        "json": DocumentType.JSON, "document": DocumentType.DOCX, "csv": DocumentType.CSV,
+        "spreadsheet": DocumentType.XLSX,
+    }.get(file_type, DocumentType.TEXT)
+
+
+def _coverage_fields(doc) -> dict:
+    """F086: what the stored chunks hold of the document, for the list and the
+    page — a document under RAG_KEPT_WARN_PCT is shown as partial."""
+    from config import config as _config
+
+    kept = (getattr(doc, "doc_metadata", None) or {}).get("kept_pct")
+    if not isinstance(kept, int):
+        return {}
+    return {"kept_pct": kept, "partial": kept < _config.RAG_KEPT_WARN_PCT}
+
+
 def get_document_manager(workspace_id: str) -> DocumentManager:
     """Get DocumentManager configured for the workspace"""
     use_s3_vectors = config.S3_VECTORS_ENABLED
@@ -182,17 +212,7 @@ async def handle_request(
             f.write(content)
 
         # Determine file type category from extension
-        file_type = "unknown"
-        if file_extension in ['.pdf']:
-            file_type = "pdf"
-        elif file_extension in ['.md', '.markdown']:
-            file_type = "markdown"
-        elif file_extension in ['.txt']:
-            file_type = "text"
-        elif file_extension in ['.doc', '.docx']:
-            file_type = "document"
-        elif file_extension in ['.json']:
-            file_type = "json"
+        file_type = UPLOAD_FILE_TYPES.get(file_extension, "unknown")
         
         # Parse tags: comma-separated form field → stripped, de-duplicated
         # (order-preserving) list[str]. Persisted to documents.tags (PostgreSQL
@@ -250,12 +270,7 @@ async def handle_request(
             import asyncio
             
             # Determine file type enum
-            file_type_enum = {
-                'pdf': DocumentType.PDF,
-                'text': DocumentType.TEXT,
-                'markdown': DocumentType.MARKDOWN,
-                'json': DocumentType.JSON,
-            }.get(file_type, DocumentType.TEXT)
+            file_type_enum = processing_type(file_type)
             
             # Process document directly
             processing_error = None
@@ -654,6 +669,7 @@ async def list_documents(
                 last_accessed=doc.last_accessed,
                 rag_query_count=doc.rag_query_count or 0,
                 source_type=doc.source_type,
+                **_coverage_fields(doc),
             ) for doc in documents
         ]
         
@@ -789,6 +805,7 @@ async def get_document(
             processed_date=document.processed_date,
             created_by=document.created_by,
             source_type=document.source_type,
+            **_coverage_fields(document),
         )
         
     except HTTPException:

@@ -1575,6 +1575,10 @@ class Config:
         except Exception:
             return os.getenv("RAG_QUERY_ENHANCEMENT_ENABLED", "false").lower() == "true"
 
+    # F086: a document whose stored chunks hold less than this share of its
+    # extracted text is shown to the owner as partial ("partial — 61% kept").
+    RAG_KEPT_WARN_PCT: int = int(os.getenv("RAG_KEPT_WARN_PCT", "98"))
+
     @property
     def RAG_CONTEXTUAL_ANNOTATIONS_ENABLED(self) -> bool:
         """Contextual chunk annotations at ingestion (default: OFF — PRD-188 S2).
