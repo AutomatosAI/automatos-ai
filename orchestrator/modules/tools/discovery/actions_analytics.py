@@ -156,10 +156,12 @@ def register_analytics_actions(registry: ActionRegistry) -> None:
                     ),
                 },
                 "database_id": {
-                    "type": "integer",
+                    "type": "string",
                     "description": (
-                        "ID of the database source to query. If omitted, uses "
-                        "the workspace's default (first active) database."
+                        "The database source to query: its name (e.g. 'sales_db') "
+                        "or its numeric id. Omit it when the workspace has one "
+                        "database — that one is used. With several, name one; "
+                        "the error lists them."
                     ),
                 },
             },

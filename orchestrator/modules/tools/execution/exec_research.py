@@ -38,7 +38,7 @@ def _error(message: str, *, disabled: bool = False) -> Dict[str, Any]:
     return resp
 
 
-async def _run_nl2sql(
+async def run_nl2sql(
     *,
     method: str,
     parameters: Dict[str, Any],
@@ -47,10 +47,13 @@ async def _run_nl2sql(
     caller_context: Optional[Dict[str, Any]],
     db_session: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """Shared in-process NL2SQL invocation for both database tools.
+    """Shared in-process NL2SQL invocation for every database tool —
+    ``query_database``, ``smart_query_database`` and ``platform_query_data``
+    (F077): one service, one resolver, one audit row.
 
     ``method`` is ``"smart_query"`` (intelligent router) or ``"query_database"``
-    (direct). Resolution and execution are workspace-scoped end to end.
+    (direct). Resolution and execution are workspace-scoped end to end;
+    ``database_name`` may be a source's name or its id.
     """
     # Fail-closed: NL2SQL must never run without a workspace scope.
     if not workspace_id:
@@ -80,14 +83,15 @@ async def _run_nl2sql(
     # executor's request session when present (one fewer pooled connection).
     source_id = await service.resolve_source_id(ws_id, database_name, db_session=db_session)
     if not source_id:
-        if database_name:
+        available = await _available_sources(service, ws_id, db_session)
+        if database_name not in (None, ""):
             return _error(
-                f"No active database source named '{database_name}' is available "
-                "in this workspace."
+                f"No active database source named '{str(database_name)[:100]}' is available "
+                f"in this workspace.{available}"
             )
         return _error(
             "No database source is configured for this workspace, or several are "
-            "and none was named — pass 'database_name' to choose one."
+            f"and none was named — pass 'database_name' to choose one.{available}"
         )
 
     agent = str(agent_id) if agent_id is not None else None
@@ -132,6 +136,19 @@ async def _run_nl2sql(
     return result
 
 
+async def _available_sources(service: Any, ws_id: str, db_session: Optional[Any]) -> str:
+    """The ``Available: a (#36), b (#37).`` suffix, so the model can name a
+    source instead of asking the owner which database. Best-effort: empty on
+    any failure."""
+    try:
+        sources = await service.active_sources(ws_id, db_session=db_session)
+    except Exception:  # noqa: BLE001 — the message is a courtesy, never the failure
+        return ""
+    if not sources:
+        return ""
+    return " Available: " + ", ".join(f"{name} (#{sid})" for sid, name in sources[:10]) + "."
+
+
 async def execute_database_tool(
     executor,
     tool_name: str,
@@ -141,7 +158,7 @@ async def execute_database_tool(
     caller_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """``query_database`` — direct NL→SQL, workspace-scoped, in-process (PRD-160 S1)."""
-    return await _run_nl2sql(
+    return await run_nl2sql(
         method="query_database",
         parameters=parameters,
         agent_id=agent_id,
@@ -161,7 +178,7 @@ async def execute_smart_database_tool(
 ) -> Dict[str, Any]:
     """``smart_query_database`` — intelligent NL→SQL/analysis router, workspace-scoped,
     in-process (PRD-160 S1)."""
-    return await _run_nl2sql(
+    return await run_nl2sql(
         method="smart_query",
         parameters=parameters,
         agent_id=agent_id,
