@@ -371,12 +371,76 @@ def _split_parens(token: str) -> List[str]:
     return [*out, run] if run else out
 
 
+# Where a '#' begins a comment: at the start of a word, which in bash means the
+# start of the text or right after whitespace or a separator. Mid-word it is an
+# ordinary character — ``a#b``, ``$#``, ``${#arr}``, ``http://x#frag``.
+_COMMENT_WORD_START = frozenset(" \t\r\n;&|()")
+
+
+def _strip_comments(command: str) -> str:
+    """The command without its shell comments, the way bash reads it.
+
+    F056 (night 2, grant 355): a perfectly safe ``grep`` was held as
+    "could not be parsed (unbalanced quotes)" because a COMMENT line above it
+    said "# Exclude files I've already read" — and the apostrophe in "I've" was
+    taken for an opening quote. Bash never reads a comment, so the gate must
+    not either. Quote-aware, including ``$'…'`` (where a backslash escapes the
+    next character), so a '#' inside any string is left alone. The newline that
+    ends a comment is kept: it separates commands.
+    """
+    out: List[str] = []
+    i, n = 0, len(command)
+    single = double = ansi = False
+    while i < n:
+        c = command[i]
+        if ansi:                                   # inside $'…'
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(command[i + 1])
+                i += 2
+                continue
+            if c == "'":
+                ansi = False
+            i += 1
+            continue
+        if single:
+            out.append(c)
+            if c == "'":
+                single = False
+            i += 1
+            continue
+        if c == "\\" and i + 1 < n:                # an escape outside single quotes
+            out.append(c)
+            out.append(command[i + 1])
+            i += 2
+            continue
+        if c == "$" and i + 1 < n and command[i + 1] == "'" and not double:
+            out.append("$'")
+            ansi = True
+            i += 2
+            continue
+        if c == "'" and not double:
+            single = True
+        elif c == '"':
+            double = not double
+        elif c == "#" and not double and (i == 0 or command[i - 1] in _COMMENT_WORD_START):
+            end = command.find("\n", i)
+            if end == -1:
+                break                              # the comment runs to the end
+            i = end                                # keep the newline itself
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _tokens(command: str) -> List[str]:
     """Quote-aware tokens, the way a POSIX shell reads them; a run of
     punctuation (``&&``, ``2>``'s ``>``, a newline) is its own token, and a
-    parenthesis is always its own. Raises ``ValueError`` on an unbalanced
-    quote."""
-    lex = shlex.shlex(_LINE_CONTINUATION_RE.sub(" ", _heredocs(command)[0]), posix=True, punctuation_chars=_PUNCTUATION)
+    parenthesis is always its own. Comments are dropped first, as bash drops
+    them (F056). Raises ``ValueError`` on an unbalanced quote."""
+    text = _strip_comments(_LINE_CONTINUATION_RE.sub(" ", _heredocs(command)[0]))
+    lex = shlex.shlex(text, posix=True, punctuation_chars=_PUNCTUATION)
     lex.whitespace = " \t\r"       # a newline separates commands, like ';'
     lex.whitespace_split = True    # words end on whitespace and punctuation only
     lex.commenters = ""            # '#' is a character (``a#b`` is one word)
@@ -785,8 +849,17 @@ def _judge_simple(words: Sequence[str], targets: Sequence[str], bindings: Bindin
         if ctx.unlisted_bash == "allow":
             # ``--unlisted-bash allow`` (2026-09-18): the operator chose to run what the
             # list does not name. NEVER_ALLOWED_BASH was refused above, the explicit
-            # ask-list still asks, and a path the gate cannot place still asks.
-            return on_targets
+            # ask-list still asks — and the ARGUMENTS are still judged as paths.
+            #
+            # They were not. This returned ``on_targets`` (redirections) alone, so an
+            # unlisted verb could read any file on the machine: ``xxd /etc/passwd``,
+            # ``od -c ~/.ssh/id_rsa``, ``strings``, ``base64`` — all allowed, while
+            # ``cat`` of the same path was refused. The comment here and
+            # test_unlisted_bash_allow_runs_unknown_verbs_but_keeps_the_hard_lines both
+            # said otherwise; found 2026-09-22 when that test's stand-in verb changed.
+            # "Allow what the list does not name" means the VERB, never the path.
+            return _worst([on_targets, on_globals,
+                           _judge_args(words[0], list(words[1:]), bindings, roots)])
         return _worst([on_targets, Decision("ask", f"{_first_words(joined)!r} is outside this ticket's Bash allowlist")])
     head = Path(words[0]).name
     outer, inner, exec_option = _exec_split(words) if head == "find" else (list(words), [], None)

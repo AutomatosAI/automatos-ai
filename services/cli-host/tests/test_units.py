@@ -1052,13 +1052,19 @@ def test_a_substitution_inside_a_loop_keeps_the_loops_bindings(tmp_path):
 
 
 def test_unlisted_bash_allow_runs_unknown_verbs_but_keeps_the_hard_lines(tmp_path):
-    """--unlisted-bash allow: ``comm`` (not on the list) runs; never-allowed still denied; paths still judged."""
+    """--unlisted-bash allow: ``xxd`` (not on the list) runs; never-allowed still denied; paths still judged.
+
+    The stand-in verb was ``comm`` until 2026-09-19, when comm joined the read-only
+    allowlist — it was the one word that held an otherwise-allowed CSS diff all of
+    night 1. Any benign, file-reading verb the list does not name serves the test.
+    """
     permissive = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow")
     strict = policy.PolicyContext(cwd=tmp_path)
-    assert policy.decide_bash("comm -23 a.txt b.txt", strict).behavior == "ask"
-    assert policy.decide_bash("comm -23 a.txt b.txt", permissive).behavior == "allow"
+    assert "xxd" not in policy.DEFAULT_BASH_ALLOW, "the stand-in must stay unlisted"
+    assert policy.decide_bash("xxd a.txt", strict).behavior == "ask"
+    assert policy.decide_bash("xxd a.txt", permissive).behavior == "allow"
     assert policy.decide_bash("git push --force origin main", permissive).behavior == "deny"
-    assert policy.decide_bash("comm -23 /etc/passwd b.txt", permissive).behavior != "allow"
+    assert policy.decide_bash("xxd /etc/passwd", permissive).behavior != "allow"
     asks = policy.PolicyContext(cwd=tmp_path, unlisted_bash="allow", ask_bash=("docker compose",))
     assert policy.decide_bash("docker compose up", asks).behavior == "ask"
 
@@ -1086,3 +1092,43 @@ def test_ansi_c_check_ignores_a_dollar_that_closes_a_quoted_regex(tmp_path):
     assert policy.decide_bash("ls | grep -v '^$' | wc -l", ctx).behavior == "allow"
     assert policy.decide_bash("echo $'a\\tb'", ctx).behavior == "ask"
     assert policy.decide_bash("cat $'/etc/passwd'", ctx).behavior != "allow"
+
+
+# ── F056: bash reads no comments, and neither does the gate ─────────────────
+
+def test_a_comment_with_an_apostrophe_no_longer_holds_a_safe_command(tmp_path):
+    """Night 2, grant 355: a safe grep was held as "unbalanced quotes" because
+    the comment above it said "I've". Bash never reads a comment."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    held_on_night_2 = (
+        "WORK=<ROOT>/sessions/359\n"
+        "\n"
+        "# Exclude files I've already read in depth\n"
+        "grep -v -e 'sessions/315/' <ROOT>/a.md"
+    )
+    assert verdict(held_on_night_2) == "allow"
+    assert verdict("ls <ROOT> # it's fine") == "allow"
+
+
+def test_a_hash_inside_a_word_or_a_string_is_data_not_a_comment(tmp_path):
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict("grep '#include' <ROOT>/a.c") == "allow"
+    assert verdict('grep "a # b" <ROOT>/a.c') == "allow"
+    assert policy._strip_comments("a#b $# ${#x} http://x#y") == "a#b $# ${#x} http://x#y"
+
+
+def test_a_comment_can_never_hide_a_command_that_bash_would_run(tmp_path):
+    """The stripping must be exactly bash's: a newline ENDS a comment, and a
+    quoted '#' starts nothing. Either mistake would let a push through."""
+    ctx, fill = _layout(tmp_path)
+    verdict = lambda cmd: _decide("Bash", {"command": fill(cmd)}, ctx).behavior
+    assert verdict("ls <ROOT> # harmless\ngit push") == "deny"      # the newline ends the comment
+    assert verdict('echo "a # b"; git push') == "deny"               # a quoted # is not a comment
+    assert verdict("echo 'x # y' && git push") == "deny"
+    # Bash would not run a push that sits in a comment — but the hard lines scan
+    # the RAW text before any parsing, comments included, and that paranoia is
+    # deliberate. F056 is about parse errors holding SAFE commands, not about
+    # letting hard-line words through.
+    assert verdict("ls <ROOT> # ; git push") == "deny"

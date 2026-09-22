@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import hmac
 import logging
 import secrets
@@ -1261,16 +1262,50 @@ _VERB_INTENTS: Dict[str, str] = {
 }
 
 
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SEPARATOR_RE = re.compile(r"&&|\|\||[;|]")
+
+
+def _command_verbs(command: str) -> List[str]:
+    """The programs a command line actually runs, in order, without repeats.
+
+    Skips blank lines, comment lines and leading ``VAR=value`` assignments —
+    none of which is a program. F056 (night 2, grant 355): this took the first
+    WORD of ``WORK=/…/sessions/359`` and printed "The agent wants to run 359";
+    the program three lines down was ``grep``.
+    """
+    verbs: List[str] = []
+    for line in command.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        for segment in _SEPARATOR_RE.split(line):
+            words = segment.split()
+            while words and _ASSIGNMENT_RE.match(words[0]):
+                words = words[1:]
+            if not words or words[0].startswith("#"):
+                continue
+            verb = words[0].rsplit("/", 1)[-1]      # /usr/bin/grep -> grep
+            if verb and verb not in verbs:
+                verbs.append(verb)
+    return verbs
+
+
 def _plain_intent(command: str) -> str:
     """One sentence describing what the held command would do."""
-    words = command.strip().split()
-    if not words:
+    verbs = _command_verbs(command)
+    if not verbs:
+        if _ASSIGNMENT_RE.match(command.strip()):
+            return "The agent wants to set a shell variable (it runs no program)."
         return "The agent wants to run a command."
-    verb = words[0].rsplit("/", 1)[-1]
-    what = _VERB_INTENTS.get(verb)
-    if what:
-        return f"The agent wants to **{what}** (`{verb}`)."
-    return f"The agent wants to run **{verb}**."
+    first = verbs[0]
+    what = _VERB_INTENTS.get(first)
+    lead = f"**{what}** (`{first}`)" if what else f"run **{first}**"
+    rest = verbs[1:]
+    if not rest:
+        return f"The agent wants to {lead}."
+    tail = ", ".join(f"`{v}`" for v in rest[:4]) + (f" and {len(rest) - 4} more" if len(rest) > 4 else "")
+    return f"The agent wants to {lead}, then {tail}."
 
 
 def is_allow_answer(answer: Any) -> bool:
