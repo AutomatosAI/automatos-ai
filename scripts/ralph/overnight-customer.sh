@@ -32,6 +32,7 @@ RALPH_MODEL="${RALPH_MODEL:-claude-opus-5}"
 # 10 ended night 1 on the cap, 2.5 h before STOP_AT.
 MAX_ITERS="${RALPH_MAX_ITERS:-14}"
 STOP_AT="${RALPH_STOP_AT:-06:30}"
+THEME="${RALPH_THEME:-general}"   # nights/<theme>.md fills {{AGENDA}} in the brief
 # 4 of night 1's 10 iterations were killed at 50m mid-work.
 ITER_TIMEOUT="${RALPH_ITER_TIMEOUT:-70m}"
 PERSONA="$KIT/personas/${CUSTOMER_PERSONA:-harbourline}.md"
@@ -43,6 +44,7 @@ RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC
 say() { echo -e "$(date '+%H:%M:%S') $*"; echo "$(date '+%F %T') $*" | sed 's/\x1b\[[0-9;]*m//g' >> "$LOG_DIR/runner.log"; }
 set_status() { echo "$1=$2" >> "$STATUS"; }
 
+[[ -f "$KIT/nights/$THEME.md" ]] || { echo -e "${RED}no theme at $KIT/nights/$THEME.md${NC}"; exit 2; }
 [[ -f "$PERSONA" ]] || { echo -e "${RED}no persona at $PERSONA${NC}"; exit 2; }
 [[ -n "$TIMEOUT_BIN" ]] || { echo -e "${RED}need timeout/gtimeout (brew install coreutils)${NC}"; exit 2; }
 
@@ -117,9 +119,16 @@ consecutive_failures=0
 for ((iter = 1; iter <= MAX_ITERS; iter++)); do
   if past_stop; then say "${YELLOW}stop time $STOP_AT reached before iteration $iter${NC}"; break; fi
   prompt="$NIGHT_DIR/prompt-iter$iter.md"; logfile="$LOG_DIR/iter$iter.log"
+  # The night's theme (nights/<theme>.md) fills {{AGENDA}}. It is rendered FIRST with the same values,
+  # because render_prompt substitutes in one pass: a {{STOP_AT}} inside the theme would otherwise reach
+  # the persona as literal braces. A theme using a placeholder with no value fails here, loudly.
+  agenda="$NIGHT_DIR/agenda-iter$iter.md"
+  python3 -m tests.sim.customer render-prompt --template "$KIT/nights/$THEME.md" --persona "$PERSONA" --out "$agenda" \
+    --night-dir "$NIGHT_DIR" --iter "$iter" --max-iters "$MAX_ITERS" --stop-at "$STOP_AT" --date "$DATE" \
+    --set "NIGHT_START=$NIGHT_START" >/dev/null || { say "${RED}could not render the theme $THEME${NC}"; sleep 120; continue; }
   python3 -m tests.sim.customer render-prompt --template "$KIT/PROMPT_customer.md" --persona "$PERSONA" --out "$prompt" \
     --night-dir "$NIGHT_DIR" --iter "$iter" --max-iters "$MAX_ITERS" --stop-at "$STOP_AT" --date "$DATE" \
-    --set "NIGHT_START=$NIGHT_START" >/dev/null || { say "${RED}could not render the prompt (is the backend up?)${NC}"; sleep 120; continue; }
+    --set "NIGHT_START=$NIGHT_START" --set "AGENDA=$(cat "$agenda")" >/dev/null || { say "${RED}could not render the prompt (is the backend up?)${NC}"; sleep 120; continue; }
   say "${GREEN}▶ iteration $iter${NC}"
   set_status "ITER$iter" STARTED
   run_claude "$prompt" "$logfile"
