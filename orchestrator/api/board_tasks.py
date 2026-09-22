@@ -1614,10 +1614,14 @@ async def finalize_board_task_run(
     # have is not finished work, however well it reads.
     from services.result_files import missing_files_note
 
-    missing_note = await missing_files_note(
-        task, str(llm_text or ""), workspace_id,
-        projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
-    )
+    try:
+        missing_note = await missing_files_note(
+            task, str(llm_text or ""), workspace_id,
+            projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+        )
+    except Exception:  # noqa: BLE001 — a check that breaks is not a verdict; the ticket still closes
+        logger.warning("[board] ticket %s: the named-file check failed", task_id, exc_info=True)
+        missing_note = None
     if missing_note:
         task.result = f"{task.result or ''}\n\n{missing_note}".strip()
         force_review = True
