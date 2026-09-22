@@ -179,7 +179,10 @@ async def test_a_hold_becomes_one_question_row_and_the_ticket_keeps_running(quie
     assert q.subject_type == "board_task" and q.subject_id == str(TICKET)
     assert q.options == ["allow", "deny"] and q.asked_by_agent_id == 57 and q.agent_id == 57
     assert q.details == {"cli_permission": {"request_id": "r1", "task_id": TICKET}}
-    assert q.question_md.startswith(f"**Allow this command in ticket #{TICKET}?**\n\n`pip --version`\n\n")
+    # night 1 (64fc8dc4f): what the agent wants in a sentence first, the exact
+    # command folded away under it, the gate's reason last
+    assert q.question_md.startswith(f"**Allow this command in ticket #{TICKET}?**\n\nThe agent wants to run **pip**.\n\n")
+    assert "<summary>The exact command</summary>\n\n```sh\npip --version\n```" in q.question_md
     assert "outside this ticket's Bash allowlist" in q.question_md and "Answer `allow` or `deny`." in q.question_md
     # never parked — the host is waiting on the answer, the session is alive
     assert task.status == "in_progress" and task.blocked_reason is None
@@ -191,7 +194,7 @@ async def test_a_hold_becomes_one_question_row_and_the_ticket_keeps_running(quie
     assert bell["event_type"] == "question_pending" and bell["link_type"] == "question" and bell["link_id"] == str(q.id)
     assert bell["title"] == "Question from RESEARCHER" and bell["severity"] is None
     assert q.channel_refs["telegram"] == {"chat_id": "chat-9", "message_id": "701"}
-    assert "/answer" in quiet["telegram"][0]["text"] and "`pip --version`" in quiet["telegram"][0]["text"]
+    assert "/answer" in quiet["telegram"][0]["text"] and "```sh\npip --version\n```" in quiet["telegram"][0]["text"]
 
 
 @pytest.mark.asyncio
@@ -215,7 +218,7 @@ async def test_two_holds_are_two_rows(quiet):
     await svc.record_events(db, HOST, TICKET, [_hold("r1"), _hold("r2", "python3 -m pip --version")])
     rows = _question_rows(db)
     assert [r.details["cli_permission"]["request_id"] for r in rows] == ["r1", "r2"]
-    assert "`python3 -m pip --version`" in rows[1].question_md
+    assert "```sh\npython3 -m pip --version\n```" in rows[1].question_md
 
 
 @pytest.mark.asyncio
@@ -481,7 +484,9 @@ def test_the_marker_is_read_strictly():
     assert svc.session_hold_marker(SimpleNamespace(details={"cli_permission": "r:1"})) is None
     assert svc.session_hold_marker(SimpleNamespace(details={"human_qa": []})) is None
     assert svc.session_hold_marker(SimpleNamespace(details=None)) is None
-    assert svc.SESSION_HOLD_OPTIONS == ("allow", "deny") and svc.SESSION_HOLD_TTL_SECONDS == 120
+    # the row's expiry mirrors the host's --ask-timeout default
+    # (services/cli-host config.DEFAULT_ASK_TIMEOUT_SECONDS), an hour since night 1 (64fc8dc4f)
+    assert svc.SESSION_HOLD_OPTIONS == ("allow", "deny") and svc.SESSION_HOLD_TTL_SECONDS == 3600
 
 
 @pytest.mark.asyncio
