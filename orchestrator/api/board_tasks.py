@@ -1610,6 +1610,17 @@ async def finalize_board_task_run(
         return task.status
 
     task.result = _kept_result(task.result, str(llm_text) if llm_text else None)
+    # F014 (night 1, #153): a result that names a file the workspace does not
+    # have is not finished work, however well it reads.
+    from services.result_files import missing_files_note
+
+    missing_note = await missing_files_note(
+        task, str(llm_text or ""), workspace_id,
+        projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
+    )
+    if missing_note:
+        task.result = f"{task.result or ''}\n\n{missing_note}".strip()
+        force_review = True
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
     # A ticket that ends well must not still carry the error of an earlier
