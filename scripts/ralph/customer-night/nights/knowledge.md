@@ -19,7 +19,7 @@ Do it in this order, reacting to what comes back.
 
 3. **Keep a question ledger** — this is the most important thing you write tonight. Add a section `## Question ledger` to the morning report and append one row per question:
    `| # | asked | asked whom | the document that holds the answer | the right answer | what came back | right / wrong / partial / "don't know" | did it name the document? |`
-   Ask **at least 25 questions**, spread across: Auto; one API agent; one Claude session agent. Ask the same five questions to all three so the runtimes can be compared on identical asks.
+   Ask **at least 25 questions**, spread across Auto and at least two of your agents (every agent runs as a Claude Code session tonight). Ask the same five questions to Auto and to two agents, so the answers can be compared on identical asks.
 
 4. **Ask questions only your documents can answer.** Plain ones first ("what do I pay a kilo for the Guji?"), then ones that need two documents joined ("which importer supplies the coffee that goes first on a Thursday?"), then one whose honest answer is "that isn't in your documents". A good answer to that last one is *"I don't know"*, not an invention — record which you got.
 
