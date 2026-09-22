@@ -60,6 +60,23 @@ logger = logging.getLogger(__name__)
 _KB_ENTITIES_EXISTS: Optional[bool] = None
 
 
+def _rollback_step(conn, step: str, document_id) -> None:
+    """Undo a failed multimodal step's own statements (F082).
+
+    A failed statement leaves the connection's transaction aborted: every later
+    statement fails, and psycopg2's commit() on it silently rolls back
+    everything since the last commit. Without this, a document with two tables
+    (kb_tables allows one per catalog item) lost its formulas too, and a
+    failure that escaped the block left the chunk writes and the COMPLETED
+    status update running on a dead connection — the document marked failed
+    and its vectors deleted.
+    """
+    try:
+        conn.rollback()
+    except Exception:  # noqa: BLE001 — never mask the step's own failure
+        logger.warning("Rollback after the %s step failed for document %s", step, document_id, exc_info=True)
+
+
 def _kb_entities_table_exists(cursor) -> bool:
     """True only when ``kb_entities`` is a real table.
 
@@ -952,6 +969,7 @@ class DocumentManager:
                     
                 except Exception as e:
                     logger.warning(f"Table extraction failed for document {document_id}: {e}")
+                    _rollback_step(conn, "table", document_id)
                 
                 # Process formulas (for ALL file types)
                 try:
@@ -988,6 +1006,7 @@ class DocumentManager:
                 
                 except Exception as e:
                     logger.warning(f"Formula extraction failed for document {document_id}: {e}")
+                    _rollback_step(conn, "formula", document_id)
                 
                 # F063: this pass wrote to `kb_entities`, a table no migration has ever
                 # created and nothing reads — so every document upload paid for two LLM
@@ -1055,6 +1074,7 @@ class DocumentManager:
                         logger.warning(f"Entity extraction failed for document {document_id}: {e}")
                         import traceback
                         traceback.print_exc()
+                        _rollback_step(conn, "entity", document_id)
                 else:
                     logger.debug("Skipping legacy entity extraction for document %s — kb_entities does not exist", document_id)
                 
@@ -1062,7 +1082,9 @@ class DocumentManager:
                 
             except Exception as e:
                 logger.warning(f"Multimodal processing encountered errors for document {document_id}: {e}")
-                # Continue processing even if multimodal extraction fails
+                # Continue processing even if multimodal extraction fails — on a
+                # clean connection, or the chunks and the status update fail too
+                _rollback_step(conn, "multimodal", document_id)
             
             # Optional multimodal processing for PDFs: extract tables/images as additional chunks
             additional_chunks = []
