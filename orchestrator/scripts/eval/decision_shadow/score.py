@@ -226,6 +226,9 @@ def rerank_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     scored = [r for r in rows if not r.get("error") and isinstance(r.get("compare"), dict)]
     errors = Counter(str(r.get("error")) for r in rows if r.get("error"))
     out: Dict[str, Any] = {"rows": len(rows), "scored": len(scored), "errors": dict(errors)}
+    sources = Counter(str(r.get("candidate_source")) for r in rows if r.get("candidate_source"))
+    if sources:
+        out["candidate_source"] = dict(sources)
     if not scored:
         return out
     out["routes"] = dict(Counter(f"{r.get('provider')}/{r.get('model')}" for r in scored))

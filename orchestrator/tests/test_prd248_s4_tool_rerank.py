@@ -186,11 +186,66 @@ async def test_shadow_keeps_the_embedding_cut_and_records_the_comparison():
     assert row["purpose"] == "tool_rerank" and row["workspace_id"] == "ws" and row["query_sha"]
     assert row["embedding_top"] == ["a0", "a1", "a2"] and row["wide"] == [n for n, _ in WIDE]
     assert row["kept"] == ["a0", "a2", "a3"] and row["nothing_fits"] is False
+    assert row["candidate_source"] == "embedding"
     assert row["compare"]["dropped"] == ["a1"] and row["compare"]["added"] == ["a3"]
     assert row["provider"] == "fake" and row["latency_ms"] == 280 and "shadow_ms" in row
     # the judge saw the wide list with descriptions, not the narrow one
     assert set(decide.calls[0]["questions"]) == {n for n, _ in WIDE}
     assert "a7 does things" in decide.calls[0]["questions"]["a7"].instructions
+
+
+@pytest.mark.asyncio
+async def test_shadow_labels_no_candidates_and_judges_a_lexical_shortlist():
+    """An empty candidate list never reaches the engine and is labelled
+    'no_candidates', not 'no_result' (2026-09-22: an embedding timeout read as an
+    engine miss); lexical candidates (None scores) are judged and marked."""
+    rec = _Recorder()
+    decide = _decider(PROBS)
+
+    async def empty(n):
+        return []
+
+    await runner.narrow_with_decisions(**_kwargs("shadow", decide, rec, rank_wide=empty))
+    await _drain()
+    assert rec.rows[-1]["error"] == "no_candidates" and rec.rows[-1]["candidate_source"] == "none"
+    assert decide.calls == []
+
+    async def lexical(n):
+        return [(name, None) for name, _score in WIDE[:n]]
+
+    await runner.narrow_with_decisions(**_kwargs("shadow", decide, rec, rank_wide=lexical))
+    await _drain()
+    assert rec.rows[-1]["candidate_source"] == "lexical" and rec.rows[-1]["kept"] == ["a0", "a2", "a3"]
+
+
+@pytest.mark.asyncio
+async def test_router_rank_wide_falls_back_to_the_lexical_shortlist(monkeypatch):
+    import core.llm.decisions as decisions_pkg
+    from modules.tools import tool_router
+    from modules.tools.discovery import decision_rerank as dr
+
+    class _Index:
+        async def rank_actions(self, query, **kw):
+            return []
+
+        def lexical_rank(self, query, **kw):
+            return ["platform_list_agents", "platform_list_tasks"]
+
+    fake_index_mod = types.ModuleType("modules.tools.discovery.action_semantic_index")
+    fake_index_mod.get_action_semantic_index = lambda: _Index()
+    monkeypatch.setitem(sys.modules, "modules.tools.discovery.action_semantic_index", fake_index_mod)
+    shadow = DecisionEngine(settings_reader=lambda c, k, d: "shadow" if k == "tool_rerank_mode" else None,
+                            backend_factory=lambda d: None)
+    monkeypatch.setattr(decisions_pkg, "get_decision_engine", lambda: shadow)
+    captured: Dict[str, Any] = {}
+
+    async def capture(**kw):
+        captured.update(kw)
+        return kw["allowed"]
+
+    monkeypatch.setattr(dr, "narrow_with_decisions", capture)
+    assert await tool_router._apply_decision_rerank("list my agents", ["a"], True, False, "ws") == ["a"]
+    assert await captured["rank_wide"](30) == [("platform_list_agents", None), ("platform_list_tasks", None)]
 
 
 @pytest.mark.asyncio

@@ -42,7 +42,7 @@ MODE_OFF = "off"
 MODE_SHADOW = "shadow"
 MODE_LIVE = "live"
 
-RankWide = Callable[[int], Awaitable[Sequence[Tuple[str, float]]]]
+RankWide = Callable[[int], Awaitable[Sequence[Tuple[str, Optional[float]]]]]
 Describe = Callable[[str], str]
 
 # Shadow rerank tasks in flight: asyncio holds only a weak reference to a
@@ -61,9 +61,16 @@ async def _rerank_turn(
     min_probability: float,
     min_keep: int,
     workspace_id: Any,
-) -> Tuple[Optional[RerankCut], Optional[DecisionResult], List[str]]:
-    wide = await rank_wide(max(int(candidates_n), int(top_k)))
+) -> Tuple[Optional[RerankCut], Optional[DecisionResult], List[str], str]:
+    """The wide candidates, the engine's cut, and where the candidates came
+    from: ``embedding``, ``lexical`` (scores are None — the embedding timed out
+    and the router's lexical shortlist stood in), or ``none`` (nothing to judge,
+    so the engine is never called)."""
+    wide = list(await rank_wide(max(int(candidates_n), int(top_k))))
     names = [name for name, _score in wide if name]
+    if not names:
+        return None, None, names, "none"
+    source = "lexical" if all(score is None for _name, score in wide) else "embedding"
     candidates = [(name, describe(name) or "") for name in names]
     cut, result = await rerank_candidates(
         query=query,
@@ -74,7 +81,7 @@ async def _rerank_turn(
         min_keep=min_keep,
         workspace_id=workspace_id,
     )
-    return cut, result, names
+    return cut, result, names, source
 
 
 async def _shadow_turn(
@@ -94,9 +101,14 @@ async def _shadow_turn(
         "embedding_top": list(allowed),
     }
     try:
-        cut, result, wide = await _rerank_turn(query=query, workspace_id=workspace_id, **rerank_kwargs)
+        cut, result, wide, source = await _rerank_turn(query=query, workspace_id=workspace_id, **rerank_kwargs)
         row["wide"] = wide
-        if result is None:
+        row["candidate_source"] = source
+        if not wide:
+            # Nothing ranked (the embedding and the lexical fallback both came
+            # back empty): the engine was never asked, so this is not its miss.
+            row["error"] = "no_candidates"
+        elif result is None:
             row["error"] = "no_result"
         else:
             row.update(
@@ -175,7 +187,7 @@ async def narrow_with_decisions(
         return allowed
     if mode == MODE_LIVE:
         try:
-            cut, _result, _wide = await _rerank_turn(query=query, workspace_id=workspace_id, **rerank_kwargs)
+            cut, _result, _wide, _source = await _rerank_turn(query=query, workspace_id=workspace_id, **rerank_kwargs)
         except Exception as exc:  # noqa: BLE001 — fail-open to the embedding cut
             logger.warning("[tool-rerank] live rerank failed — embedding cut kept: %s", exc)
             return allowed
