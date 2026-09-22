@@ -874,14 +874,14 @@ class AutoBrain:
             )
             if ws is None:
                 return False
-            # Strict: only a KNOWN non-terminal stage string pins the turn — a
-            # corrupt doc (or a non-Workspace object) classifies normally.
-            stage = onboarding_state.current_stage(ws)
-            return (
-                isinstance(stage, str)
-                and stage in onboarding_state.ALL_STAGES
-                and stage not in onboarding_state.TERMINAL_STAGES
-            )
+            # F064: ONE definition, shared with the tool router's onboarding
+            # prior. This used to be its own copy of the stage check, so the
+            # age-out never reached AutoBrain — the operator workspace sat at a
+            # non-terminal stage from 2 Sep and every Auto turn was forced onto
+            # the full-context Tier 0 path, the classifier effectively off. The
+            # strictness that lived here (a corrupt stage classifies normally)
+            # now lives in the shared check too.
+            return onboarding_state.is_onboarding_active(ws)
         except Exception:
             logger.debug(
                 "[AutoBrain] onboarding check failed — classifying normally",

@@ -25,6 +25,7 @@ hands the content to ``DocumentManager.upload_document`` and cleans up.
 from __future__ import annotations
 
 import logging
+import re
 import os
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple
@@ -93,6 +94,13 @@ _TELEMETRY_TITLE_MARKERS: Tuple[str, ...] = (
 )
 
 
+# "pass 3", "Pass #12", "second pass 4" — a numbered re-run of the same work.
+# F065 (night 3 pre-launch): these slipped the markers above and full graph
+# rebuilds re-extracted them. Number-aware on purpose: a bare "pass" would also
+# match "passport", "password", "compass" and "passion fruit".
+_NUMBERED_PASS_RE = re.compile(r"\bpass\s*#?\s*\d+\b")
+
+
 def title_is_telemetry(title: Optional[str]) -> bool:
     """True when this output is the system describing its own operation.
 
@@ -103,6 +111,8 @@ def title_is_telemetry(title: Optional[str]) -> bool:
     haystack = (title or "").strip().lower()
     if not haystack:
         return False
+    if _NUMBERED_PASS_RE.search(haystack):
+        return True
     return any(marker in haystack for marker in _TELEMETRY_TITLE_MARKERS)
 
 
