@@ -54,6 +54,31 @@ import numpy as np
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# F063: whether the legacy entity table exists, read once per process. The
+# answer only changes with a migration, so there is no reason to ask on every
+# upload.
+_KB_ENTITIES_EXISTS: Optional[bool] = None
+
+
+def _kb_entities_table_exists(cursor) -> bool:
+    """True only when ``kb_entities`` is a real table.
+
+    Fails SAFE to False: when in doubt, skip the paid extraction rather than
+    pay for a result with nowhere to go.
+    """
+    global _KB_ENTITIES_EXISTS
+    if _KB_ENTITIES_EXISTS is not None:
+        return _KB_ENTITIES_EXISTS
+    try:
+        cursor.execute("SELECT to_regclass('public.kb_entities') IS NOT NULL")
+        row = cursor.fetchone()
+        _KB_ENTITIES_EXISTS = bool(row and row[0])
+    except Exception:  # noqa: BLE001
+        logger.debug("kb_entities existence check failed — skipping entity extraction", exc_info=True)
+        return False
+    return _KB_ENTITIES_EXISTS
+
+
 class DocumentStatus(Enum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -964,65 +989,74 @@ class DocumentManager:
                 except Exception as e:
                     logger.warning(f"Formula extraction failed for document {document_id}: {e}")
                 
-                # NEW: Entity extraction for knowledge graph
-                try:
-                    logger.info(f"Starting entity extraction for document {document_id}")
-                    entity_extractor = EntityExtractor()
+                # F063: this pass wrote to `kb_entities`, a table no migration has ever
+                # created and nothing reads — so every document upload paid for two LLM
+                # calls (entities, then relationships) whose results failed to INSERT and
+                # were swallowed by the except below. Night 1 counted 184 of these calls.
+                # The knowledge graph (PRD-165: graph_extraction -> workspace_graphs) is
+                # where entities live; this legacy pass runs only if its table exists.
+                if _kb_entities_table_exists(cursor):
+                    # NEW: Entity extraction for knowledge graph
+                    try:
+                        logger.info(f"Starting entity extraction for document {document_id}")
+                        entity_extractor = EntityExtractor()
                     
-                    # Extract entities from text
-                    entities = await entity_extractor.extract_entities(text, use_llm=True, max_entities=30)
-                    logger.info(f"Extracted {len(entities)} entities from document {document_id}")
+                        # Extract entities from text
+                        entities = await entity_extractor.extract_entities(text, use_llm=True, max_entities=30)
+                        logger.info(f"Extracted {len(entities)} entities from document {document_id}")
                     
-                    # Store entities and create mentions
-                    entity_ids = []
-                    for entity in entities:
-                        entity_id = await create_or_get_entity(
-                            cursor,
-                            entity.entity_name,
-                            entity.entity_type,
-                            entity.canonical_name,
-                            entity.description,
-                            workspace_id=workspace_id
-                        )
-                        entity_ids.append(entity_id)
-                        
-                        await create_entity_mention(
-                            cursor,
-                            document_id,
-                            entity_id,
-                            entity.mention_context,
-                            entity.confidence,
-                            entity.position,
-                            "llm"
-                        )
-                    
-                    conn.commit()
-                    logger.info(f"Stored {len(entities)} entities for document {document_id}")
-                    
-                    # Extract relationships between entities
-                    if len(entities) >= 2:
-                        relationships = await entity_extractor.extract_relationships(text, entities, max_relationships=20)
-                        logger.info(f"Extracted {len(relationships)} relationships from document {document_id}")
-                        
-                        for rel in relationships:
-                            await create_entity_relationship(
+                        # Store entities and create mentions
+                        entity_ids = []
+                        for entity in entities:
+                            entity_id = await create_or_get_entity(
                                 cursor,
-                                rel.from_entity,
-                                rel.to_entity,
-                                rel.relationship_type,
-                                rel.strength,
-                                document_id,
-                                rel.evidence,
+                                entity.entity_name,
+                                entity.entity_type,
+                                entity.canonical_name,
+                                entity.description,
                                 workspace_id=workspace_id
                             )
+                            entity_ids.append(entity_id)
                         
-                        conn.commit()
-                        logger.info(f"Stored {len(relationships)} relationships for document {document_id}")
+                            await create_entity_mention(
+                                cursor,
+                                document_id,
+                                entity_id,
+                                entity.mention_context,
+                                entity.confidence,
+                                entity.position,
+                                "llm"
+                            )
                     
-                except Exception as e:
-                    logger.warning(f"Entity extraction failed for document {document_id}: {e}")
-                    import traceback
-                    traceback.print_exc()
+                        conn.commit()
+                        logger.info(f"Stored {len(entities)} entities for document {document_id}")
+                    
+                        # Extract relationships between entities
+                        if len(entities) >= 2:
+                            relationships = await entity_extractor.extract_relationships(text, entities, max_relationships=20)
+                            logger.info(f"Extracted {len(relationships)} relationships from document {document_id}")
+                        
+                            for rel in relationships:
+                                await create_entity_relationship(
+                                    cursor,
+                                    rel.from_entity,
+                                    rel.to_entity,
+                                    rel.relationship_type,
+                                    rel.strength,
+                                    document_id,
+                                    rel.evidence,
+                                    workspace_id=workspace_id
+                                )
+                        
+                            conn.commit()
+                            logger.info(f"Stored {len(relationships)} relationships for document {document_id}")
+                    
+                    except Exception as e:
+                        logger.warning(f"Entity extraction failed for document {document_id}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    logger.debug("Skipping legacy entity extraction for document %s — kb_entities does not exist", document_id)
                 
                 conn.commit()
                 
