@@ -191,8 +191,13 @@ export function computeMissionStats(mission: MissionDetailResponse): MissionStat
     tasksActive: progress?.active ?? tasks.filter(t => (ACTIVE_TASK_STATES as readonly string[]).includes(t.state)).length,
     tasksFailed: progress?.failed ?? tasks.filter(t => t.state === 'failed').length,
     tokensUsed: mission.tokens_used || tasks.reduce((sum, t) => sum + t.tokens_used, 0),
+    // F062: a finished mission's clock stops when it finished. Counting to
+    // `now` showed 26 h 20 m for a mission that ran 1 h 24 m (13:14 → 14:38 on
+    // 09-19) — a completed thing presented as still running, the same class as
+    // night 1's status lies.
     elapsedMs: mission.started_at
-      ? Date.now() - new Date(mission.started_at).getTime()
+      ? (mission.completed_at ? new Date(mission.completed_at).getTime() : Date.now())
+        - new Date(mission.started_at).getTime()
       : 0,
   }
 }

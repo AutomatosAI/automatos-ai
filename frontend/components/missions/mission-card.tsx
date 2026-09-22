@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils'
 import type { MissionResponse, RunState } from '@/types/missions'
 import { DONE_TASK_STATES, TERMINAL_RUN_STATES } from '@/types/missions'
 import { usePauseMission, useResumeMission, useCancelMission, useDeleteMission } from '@/hooks/use-missions-api'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistance, formatDistanceToNow } from 'date-fns'
 
 interface MissionCardProps {
   mission: MissionResponse
@@ -36,8 +36,11 @@ export function MissionCard({ mission, index }: MissionCardProps) {
   // Parse plan for task stats (plan is JSONB with tasks array)
   const planTasks = (mission.plan as { tasks?: Array<Record<string, unknown>> })?.tasks ?? []
   const taskCount = planTasks.length
+  // F062: a finished mission's duration ends when it finished, not now.
   const elapsed = mission.started_at
-    ? formatDistanceToNow(new Date(mission.started_at), { addSuffix: false })
+    ? mission.completed_at
+      ? formatDistance(new Date(mission.completed_at), new Date(mission.started_at))
+      : formatDistanceToNow(new Date(mission.started_at), { addSuffix: false })
     : null
 
   const isTerminal = (TERMINAL_RUN_STATES as readonly string[]).includes(mission.state)
