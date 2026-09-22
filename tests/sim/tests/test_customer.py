@@ -54,7 +54,7 @@ def _api():
                                     {"id": 3, "title": "review me", "status": "review", "assigned_agent_id": 300, "tags": [tag]}]},
         "/api/deliverables": {"deliverables": [{"id": 9, "title": "index.html", "tags": [tag]}]},
         "/api/reports": {"reports": [{"id": 4, "title": "daily", "report_type": "standup"}]},
-        "/api/v1/approval-grants": {"grants": [{"id": 11, "kind": "question", "question": "Which supplier?", "options": ["A", "B"]}]},
+        "/api/v1/approval-grants": {"grants": [{"id": 11, "kind": "question", "question_md": "Which supplier?", "options": ["A", "B"]}]},
     })
 
 
