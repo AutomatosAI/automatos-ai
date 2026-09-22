@@ -127,10 +127,11 @@ class Inventory:
         return tuple(hits)
 
     def holds_secrets(self, folder: Path) -> bool:
-        """A folder a session works in reaches a secret: one sits under it, or the
-        folder is inside a protected checkout (``..`` spelled by a program's own
-        output is beyond the gate)."""
-        return bool(self.reachable_under(folder)) or any(within_folded(folder, r) for r in self.roots)
+        """A secret sits under the folder a command runs in. A folder elsewhere in
+        a protected checkout does not count: a ``$(…)`` whose OUTPUT climbs out
+        with ``..`` is a program deciding at run time, the same blind spot as a
+        script that opens the file itself (security review 2026-09-22)."""
+        return bool(self.reachable_under(folder))
 
 
 def inventory(secret_roots: Iterable[Path], off_limits: Iterable[Path], granted: Iterable[Path],

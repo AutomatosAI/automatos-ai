@@ -97,6 +97,14 @@ def test_ordinary_words_are_untouched(layout, line):
 def test_dotglob_on_the_line_makes_a_star_reach_dot_files(layout):
     assert _bash(layout, "platform", "cat *").behavior == "allow"
     assert _bash(layout, "platform", "shopt -s dotglob; cat *").behavior == "deny"
+    assert _bash(layout, "platform", "GLOBIGNORE=x; cat *").behavior == "deny"
+
+
+def test_only_setting_the_option_counts_not_the_word(layout):
+    """Review 2026-09-22: the word on the line flipped dot-matching for all of it."""
+    assert _bash(layout, "platform", "echo dotglob; cat *env").behavior == "allow"
+    assert _bash(layout, "platform", "cat *; shopt -s dotglob").behavior != "deny"    # set after, not before (shopt itself asks)
+    assert _bash(layout, "platform", "GLOBIGNORE=x cat *").behavior == "allow"        # a prefix: not this expansion
 
 
 # ── recursive search ────────────────────────────────────────────────────────
@@ -150,6 +158,11 @@ def test_a_file_named_by_a_substitution_is_refused_where_secrets_live(layout, li
 
 def test_a_substitution_where_no_secret_lives_is_left_to_the_other_rules(layout):
     assert _bash(layout, "shop", "cat $(ls -t | head -1)").behavior != "deny"
+    # Review 2026-09-22: inside the platform's checkout but with no secret beneath
+    # the folder, an ordinary $(…) path is not refused.
+    modules = layout["platform"] / "orchestrator" / "modules"
+    line = 'cat "$(git rev-parse --show-toplevel)/README.md"'
+    assert _bash(layout, modules, line).behavior != "deny"
 
 
 @pytest.mark.parametrize("line", ["pushd automatos-ai && cat .env", "D=automatos-ai; cd $D && cat .env",

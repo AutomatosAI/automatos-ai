@@ -303,8 +303,10 @@ _SECRET_WORD_RE = re.compile(
     re.IGNORECASE)
 _ABSOLUTE_WORD_RE = re.compile(r"""(?:^|[\s'"=:;|&(<>])((?:/|~/)[^\s'";|&()<>]*)""")
 _CD_TARGET_RE = re.compile(r"""(?:^|[;&|(]|\s)(?:cd|pushd)\s+(['"]?)([^\s'";|&()]+)\1""")
-# Shell options under which ``*`` reaches dot-files (or ignores case).
-_LOOSE_GLOB_RE = re.compile(r"dotglob|GLOBIGNORE|nocaseglob|nocasematch|extglob")
+# Shell options under which ``*`` reaches dot-files (or ignores case): set by
+# ``shopt -s …`` or a bare ``GLOBIGNORE=…``, from that command on — never by the
+# word merely appearing on the line (``echo dotglob`` sets nothing).
+_LOOSE_GLOB_OPTIONS = frozenset({"dotglob", "nocaseglob", "nocasematch", "extglob"})
 
 
 def platform_secret_roots() -> Tuple[Path, ...]:
@@ -1213,7 +1215,7 @@ def _secret_reach_on_line(visible: str, ctx: PolicyContext) -> Optional[Decision
     except ValueError:
         return None                                   # the main judge asks on an unparseable line
     inv = _inventory(ctx)
-    loose_globs = bool(_LOOSE_GLOB_RE.search(visible))
+    loose_globs = False
     roots = [ctx.cwd, *ctx.extra_dirs]
     stack: List[Bases] = [(Path(ctx.cwd).expanduser().resolve(),)]
     bindings: Bindings = {}
@@ -1230,9 +1232,15 @@ def _secret_reach_on_line(visible: str, ctx: PolicyContext) -> Optional[Decision
             if verdict is not None:
                 return verdict
             continue
+        assigned = [w.split("=", 1)[0] for w in words if _ASSIGNMENT_RE.match(w)]
         words, bindings = _bind_assignments(words, bindings)
+        if not words and "GLOBIGNORE" in assigned:
+            loose_globs = True                      # a bare GLOBIGNORE= turns dotglob on
         words = _unwrapped(words) if words and words[0] in COMMAND_WRAPPERS - set(FIND_EXEC_OPTIONS) else words
         head = Path(words[0]).name if words else ""
+        if head == "shopt" and "-s" in words and _LOOSE_GLOB_OPTIONS & set(words):
+            loose_globs = True
+            continue
         if head in ("cd", "pushd"):
             stack = [*stack[:depth], _moved(words, bindings, stack[depth])]
             continue
