@@ -76,8 +76,30 @@ def test_where_each_name_is_looked_up(monkeypatch):
 
 # ── the note ────────────────────────────────────────────────────────────────
 
+def _check(text, worker, runtime_ref=None, db=None):
+    return asyncio.run(result_files.check_named_files(NS(id=153, runtime_ref=runtime_ref), text, WS,
+                                                      db=db, client=worker))
+
+
 def _note(text, worker, runtime_ref=None):
-    return asyncio.run(result_files.missing_files_note(NS(id=153, runtime_ref=runtime_ref), text, WS, client=worker))
+    check = _check(text, worker, runtime_ref)
+    return None if check is None else check.note
+
+
+class _KnowledgeBase:
+    """documents(filename, original_filename) for the knowledge-base lookup."""
+
+    def __init__(self, *names):
+        self.names = names
+
+    def query(self, *_a):
+        return self
+
+    def filter(self, *_a):
+        return self
+
+    def all(self):
+        return [(name, None) for name in self.names]
 
 
 def test_a_named_file_that_is_there_passes_and_one_that_is_not_is_named():
@@ -94,6 +116,17 @@ def test_a_worker_that_cannot_answer_is_not_a_verdict():
 def test_a_result_that_names_no_file_asks_the_worker_nothing():
     worker = _Worker()
     assert _note("All done — the answer is 42.", worker) is None and worker.listed == []
+
+
+def test_a_name_saved_to_the_knowledge_base_is_found_there_not_sent_to_review():
+    """Night 1's #153 did save its pack — as a knowledge-base document named
+    ``deliverables/cafe_onboarding_pack.md`` (doc #473), not as a workspace file."""
+    check = _check(RESULT_153, _Worker(), db=_KnowledgeBase("deliverables/cafe_onboarding_pack.md"))
+    assert check.review is False
+    assert check.note.startswith("Saved to the knowledge base, not as a file in the workspace: "
+                                 "`deliverables/cafe_onboarding_pack.md`")
+    by_basename = _check(RESULT_153, _Worker(), db=_KnowledgeBase("cafe_onboarding_pack.md"))
+    assert by_basename.review is False
 
 
 def test_one_listing_per_folder_and_the_note_counts_the_rest():
@@ -154,3 +187,29 @@ def test_the_same_result_with_its_file_written_closes_done(writer):
     task = _Task()
     assert writer(task, RESULT_153, _Worker({"deliverables/cafe_onboarding_pack.md"})) == "done"
     assert task.result == RESULT_153
+
+
+def test_a_result_saved_as_a_knowledge_base_document_closes_done_saying_where(monkeypatch):
+    async def _noop(*_a, **_k):
+        return None
+
+    for name in ("_dispatch_task_complete", "_dispatch_task_failed", "_auto_create_task_report"):
+        monkeypatch.setattr(bt, name, _noop)
+    monkeypatch.setattr("core.workspace_client.WorkspaceClient", lambda ws: _Worker())
+
+    class Session(_KnowledgeBase):
+        def __init__(self, task):
+            super().__init__("deliverables/cafe_onboarding_pack.md")
+            self.task = task
+
+        def get(self, _id):
+            return self.task
+
+        def commit(self):
+            pass
+
+    task = _Task()
+    status = asyncio.run(bt.finalize_board_task_run(
+        Session(task), task_id=task.id, workspace_id=WS, agent_id=7,
+        exec_result={"status": "success", "result": RESULT_153}))
+    assert status == "done" and "Saved to the knowledge base" in task.result

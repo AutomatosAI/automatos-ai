@@ -1612,19 +1612,19 @@ async def finalize_board_task_run(
     task.result = _kept_result(task.result, str(llm_text) if llm_text else None)
     # F014 (night 1, #153): a result that names a file the workspace does not
     # have is not finished work, however well it reads.
-    from services.result_files import missing_files_note
+    from services.result_files import check_named_files
 
     try:
-        missing_note = await missing_files_note(
-            task, str(llm_text or ""), workspace_id,
+        file_check = await check_named_files(
+            task, str(llm_text or ""), workspace_id, db=db,
             projects_dir=getattr(config, "LOCAL_PROJECTS_DIR", "") or None,
         )
     except Exception:  # noqa: BLE001 — a check that breaks is not a verdict; the ticket still closes
         logger.warning("[board] ticket %s: the named-file check failed", task_id, exc_info=True)
-        missing_note = None
-    if missing_note:
-        task.result = f"{task.result or ''}\n\n{missing_note}".strip()
-        force_review = True
+        file_check = None
+    if file_check is not None:
+        task.result = f"{task.result or ''}\n\n{file_check.note}".strip()
+        force_review = force_review or file_check.review
     task.status = "done" if (review_mode == "auto" and not force_review) else "review"
     task.completed_at = datetime.now(timezone.utc)
     # A ticket that ends well must not still carry the error of an earlier
