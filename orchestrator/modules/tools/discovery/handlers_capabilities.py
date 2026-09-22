@@ -74,6 +74,7 @@ async def find_tools(db: Session, workspace_id: UUID, params: Dict[str, Any]) ->
         a for a in registry.get_all()
         if not getattr(a, "admin_only", False)
         and not getattr(a, "super_admin_only", False)
+        and a.is_available()
     ]
     by_name = {a.name: a for a in eligible}
 

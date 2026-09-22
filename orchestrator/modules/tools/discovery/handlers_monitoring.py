@@ -11,6 +11,31 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+# F078 — what each monitoring action needs to run on THIS server. The action
+# definitions offer an action only when its check passes (an action that can
+# only error is never offered); the handlers refuse the same way when called.
+
+def prometheus_available() -> bool:
+    """An explicit PROMETHEUS_URL. The default (localhost) answers nowhere in
+    the compose stack: night 3's Auto chose the tool four times and got
+    "only accessible within the Railway internal network" four times."""
+    from config import config
+    return bool(getattr(config, "PROMETHEUS_CONFIGURED", False))
+
+
+def loki_available() -> bool:
+    """The Grafana proxy (URL + service-account token) or an explicit LOKI_URL."""
+    from config import config
+    grafana = bool(getattr(config, "GRAFANA_URL", "") and getattr(config, "GRAFANA_SERVICE_ACCOUNT_TOKEN", ""))
+    return grafana or bool(getattr(config, "LOKI_CONFIGURED", False))
+
+
+def railway_api_available() -> bool:
+    """The Railway API token and project the log and service tools call with."""
+    from core.railway_client import RailwayClient
+    return RailwayClient().is_configured
+
+
 async def get_logs(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:
     """Fetch deployment logs from a Railway service."""
     from core.railway_client import RailwayClient
@@ -89,6 +114,14 @@ async def query_loki_logs(db: Session, workspace_id: UUID, params: Dict[str, Any
     import httpx
     from config import config
 
+    if not loki_available():
+        return {
+            "success": False,
+            "error": (
+                "Loki is not configured on this server — set GRAFANA_URL and "
+                "GRAFANA_SERVICE_ACCOUNT_TOKEN, or LOKI_URL, to query logs."
+            ),
+        }
     minutes = min(params.get("minutes", 60), 10080)
     limit = min(params.get("limit", 100), 500)
     service = params.get("service")
@@ -204,6 +237,11 @@ async def query_prometheus(db: Session, workspace_id: UUID, params: Dict[str, An
     import httpx
     from config import config
 
+    if not prometheus_available():
+        return {
+            "success": False,
+            "error": "Prometheus is not configured on this server — set PROMETHEUS_URL to query metrics.",
+        }
     prom_url = getattr(config, "PROMETHEUS_URL", None) or "http://prometheus.railway.internal:9090"
     query_input = params.get("query", "health")
     range_minutes = min(params.get("range_minutes", 15), 1440)

@@ -15,7 +15,7 @@ Usage:
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,20 @@ class ActionDefinition:
     promoted: bool = False
     tags: List[str] = field(default_factory=list)
     examples: List[str] = field(default_factory=list)
+    # F078: whether the action can run on THIS server — a monitoring backend
+    # that is configured, an API with its credentials. None = always. An action
+    # that can only error is never offered (the rule _offerable_candidates
+    # applies to a Composio tool without Composio); calling it still refuses.
+    available: Optional[Callable[[], bool]] = None
+
+    def is_available(self) -> bool:
+        if self.available is None:
+            return True
+        try:
+            return bool(self.available())
+        except Exception as e:  # a broken check hides the action, never the surface
+            logger.warning(f"[ActionRegistry] availability check for {self.name} failed: {e}")
+            return False
 
     def to_openai_schema(self) -> Dict[str, Any]:
         """Convert to OpenAI function calling format."""
@@ -124,7 +138,7 @@ class ActionRegistry:
         self._ensure_initialized()
         actions = [
             a for a in self._actions.values()
-            if include_super_admin or not a.super_admin_only
+            if (include_super_admin or not a.super_admin_only) and a.is_available()
         ]
         if permission_filter:
             actions = [a for a in actions if a.permission_level == permission_filter]
@@ -162,7 +176,7 @@ class ActionRegistry:
                 action the caller isn't entitled to.
         """
         self._ensure_initialized()
-        promoted = [a for a in self._actions.values() if a.promoted]
+        promoted = [a for a in self._actions.values() if a.promoted and a.is_available()]
         if first_class_names is not None:
             promoted = [a for a in promoted if a.name in first_class_names]
         if not include_super_admin:
@@ -229,6 +243,7 @@ class ActionRegistry:
             and (not exclude_admin or not a.admin_only)
             and (include_super_admin or not a.super_admin_only)
             and a.name not in exclude_set
+            and a.is_available()
         )
 
         # PRD-138 US-008: optional allow-list narrows the enum so the LLM only
@@ -252,6 +267,7 @@ class ActionRegistry:
                     if (not exclude_admin or not a.admin_only)
                     and (include_super_admin or not a.super_admin_only)
                     and a.name not in exclude_set
+                    and a.is_available()
                 )
             narrowed_actions = [n for n in intersect_pool if n in allow_set]
             # Defensive: if the intersection is empty (e.g. ranker returned
