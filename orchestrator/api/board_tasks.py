@@ -664,12 +664,23 @@ async def update_task(
             task.started_at = datetime.now(timezone.utc)
         if new_status in ("done", "review", "closed"):
             task.completed_at = datetime.now(timezone.utc)
-        if new_status == "blocked" and task.blocked_at is None:
-            task.blocked_at = datetime.now(timezone.utc)
-            task.blocked_reason = body.get("blocked_reason")
+        if new_status == "blocked":
+            # A person blocking a ticket that a machine had ALREADY parked used to
+            # record nothing — the `blocked_at is None` guard kept the park's
+            # reason, so the person's intent was invisible to everything after.
+            if task.blocked_at is None:
+                task.blocked_at = datetime.now(timezone.utc)
+            if body.get("blocked_reason") or old_status != "blocked":
+                task.blocked_reason = body.get("blocked_reason")
         if new_status != "blocked" and old_status == "blocked":
             task.blocked_at = None
             task.blocked_reason = None
+        # F036: an explicit status change through this route is a person's
+        # decision. A stop is recorded so no answer or grant can quietly undo
+        # it; any other status lifts it.
+        from services.operator_stop import apply_explicit_status
+
+        apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
 
     if "priority" in body:
         if body["priority"] not in VALID_PRIORITIES:
@@ -1075,6 +1086,11 @@ async def update_task_status(
     if new_status != "blocked" and old_status == "blocked":
         task.blocked_at = None
         task.blocked_reason = None
+    # F036: the dedicated status route is a person's decision too (the board's
+    # drag-and-drop lands here) — same stop rule as PATCH /{task_id}.
+    from services.operator_stop import apply_explicit_status
+
+    apply_explicit_status(task, old_status, new_status, body.get("blocked_reason"), by="operator")
 
     # PRD-128: dispatch task_complete on drag-to-done transitions
     if new_status == "done":

@@ -1451,6 +1451,18 @@ def answer_session_ask(db: Session, grant: Any) -> bool:
         logger.info("[cli-host] ask #%s answered, but ticket #%s is %s — nothing to resume",
                     grant.id, task.id, task.status)
         return False
+    # F036: the answer is recorded on the ticket either way, but it only
+    # resumes a ticket that is parked FOR it. Night 1's ticket 136 was stopped
+    # by a person at 18:18:06 and re-claimed at 18:19:17 — one second after its
+    # dead session's question was answered.
+    from services.operator_stop import operator_stop
+
+    if operator_stop(task):
+        task.runtime_ref = ref
+        db.commit()
+        logger.info("[cli-host] ask #%s answered, but ticket #%s was stopped by a person — not resumed",
+                    grant.id, task.id)
+        return False
     if requeue_exhausted(task):
         task.runtime_ref = ref
         park_exhausted(db, task, "it has been resumed on answers too many times")
@@ -2264,7 +2276,10 @@ def requeue_exhausted(task: BoardTask) -> bool:
     ask, a resumed session — had no ceiling at all, which is how night 1
     re-dispatched one ticket 534 times. This is the backstop they share.
     """
-    return int(task.attempts or 0) >= int(config.BOARD_DISPATCH_HARD_ATTEMPT_CAP)
+    # getattr: a ticket that has never been claimed has recorded no attempts —
+    # and the existing PRD-245 suites build tickets without the column. Reading
+    # it directly (4109206c8) broke six of their tests.
+    return int(getattr(task, "attempts", 0) or 0) >= int(config.BOARD_DISPATCH_HARD_ATTEMPT_CAP)
 
 
 def park_exhausted(db: Session, task: BoardTask, why: str) -> str:
@@ -2275,7 +2290,7 @@ def park_exhausted(db: Session, task: BoardTask, why: str) -> str:
     task.blocked_reason = None
     task.completed_at = _now()
     task.review_feedback = (
-        f"Stopped after {task.attempts} attempts — {why}. "
+        f"Stopped after {getattr(task, 'attempts', 0) or 0} attempts — {why}. "
         "Nothing was re-queued; this needs a person."
     )
     db.commit()

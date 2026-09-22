@@ -881,12 +881,20 @@ async def update_board_task_status(db: Session, workspace_id: UUID, params: Dict
     if new_status in ("done", "review") and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
     # Mirror the HTTP path's blocked transitions (api/board_tasks.py:548-553, 898-902).
-    if new_status == "blocked" and task.blocked_at is None:
-        task.blocked_at = datetime.now(timezone.utc)
+    if new_status == "blocked":
+        if task.blocked_at is None:
+            task.blocked_at = datetime.now(timezone.utc)
         task.blocked_reason = blocked_reason
     if new_status != "blocked" and old_status == "blocked":
         task.blocked_at = None
         task.blocked_reason = None
+    # F036: a status set through this tool is an instruction someone gave — on
+    # night 1 the persona stopped tickets by asking Auto, and the stops were
+    # undone by answers and grants meant for other parks. Same rule as the
+    # board API: a stop is recorded, any other status lifts it.
+    from services.operator_stop import apply_explicit_status
+
+    apply_explicit_status(task, old_status, new_status, blocked_reason, by="platform_tool")
 
     db.commit()
 
