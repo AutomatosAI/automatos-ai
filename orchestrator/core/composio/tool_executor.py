@@ -432,21 +432,25 @@ class ComposioToolExecutor:
                     .first()
                 )
                 if not assigned:
-                    # Inheritance fallback: agents with zero active assignments
-                    # inherit workspace-connected apps. Mirrors the contract used
-                    # by ComposioToolService, ComposioHintService and ToolRegistry
-                    # at discovery time so an agent that can SEE an app can also
-                    # EXECUTE it. The workspace connectivity check below still
-                    # gates on whether the app is actually wired up.
-                    has_any_assignment = (
-                        self.db.query(AgentAppAssignment.id)
-                        .filter(
-                            AgentAppAssignment.agent_id == agent_id,
-                            AgentAppAssignment.is_active == True,  # noqa: E712
-                        )
-                        .first()
-                    )
-                    if has_any_assignment:
+                    # Inheritance fallback: an agent with NO assignment rows at all
+                    # inherits workspace-connected apps — the one rule discovery
+                    # uses too (core.composio.agent_apps), so an agent that can SEE
+                    # an app can EXECUTE it and one that cannot, cannot. F040: an
+                    # agent whose apps are all switched off inherits nothing.
+                    from core.composio.agent_apps import inherits_workspace_apps, switched_off
+
+                    if switched_off(self.db, agent_id, app_name):
+                        return {
+                            "success": False,
+                            "error": (
+                                f"'{app_name}' is switched off for agent {agent_id}. Switch it back on "
+                                "in the agent's apps before using it."
+                            ),
+                            "error_type": "composio_app_switched_off",
+                            "data": None,
+                            "execution_time_ms": int((time.time() - start_time) * 1000),
+                        }
+                    if not inherits_workspace_apps(self.db, agent_id):
                         return {
                             "success": False,
                             "error": f"'{app_name}' is not assigned to agent {agent_id}. Assign it to this agent before using it.",

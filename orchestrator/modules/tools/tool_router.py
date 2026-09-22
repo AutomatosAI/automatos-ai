@@ -865,9 +865,11 @@ def _get_tools_for_agent_core(
 
                     app_names = [a.app_name for a in assignments if a.app_name]
 
-                    # Workspace inheritance: if no per-agent assignments,
-                    # fall back to workspace-connected apps
-                    if not app_names and workspace_id:
+                    # Workspace inheritance: only an agent with no assignments at
+                    # all (F040 — one switched all off inherits nothing)
+                    from core.composio.agent_apps import inherits_workspace_apps
+
+                    if not app_names and workspace_id and inherits_workspace_apps(session_used, agent_id):
                         try:
                             from core.composio.entity_manager import EntityManager
                             manager = EntityManager(session_used)

@@ -1449,6 +1449,10 @@ class ToolRegistry:
                 # Auto-inherit: when agent has no explicit assignments, use all
                 # workspace-connected apps. 850+ tools — agents shouldn't need
                 # manual per-app assignment to use what's already connected.
+                from core.composio.agent_apps import inherits_workspace_apps
+
+                if not assigned_apps and not inherits_workspace_apps(db, agent_id):
+                    return False, "Every app assigned to this agent is switched off"
                 if not assigned_apps:
                     if connected_apps:
                         logger.info(

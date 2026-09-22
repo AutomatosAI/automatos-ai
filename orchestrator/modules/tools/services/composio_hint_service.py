@@ -259,10 +259,13 @@ class ComposioHintService:
                 logger.warning(f"[ComposioHintService] Connection check failed: {conn_err}")
                 connected_apps = []
 
-        # Auto-inherit: when agent has no explicit assignments, use all
-        # workspace-connected apps instead of returning empty.
+        # Auto-inherit: when the agent has no assignments at all, use all
+        # workspace-connected apps (F040 — one whose apps are all switched off
+        # inherits nothing).
+        from core.composio.agent_apps import inherits_workspace_apps
+
         if not assigned_apps:
-            if connected_apps:
+            if connected_apps and inherits_workspace_apps(self.db, agent_id):
                 logger.info(
                     f"[ComposioHintService] Agent {agent_id} has no app assignments — "
                     f"inheriting {len(connected_apps)} workspace apps"

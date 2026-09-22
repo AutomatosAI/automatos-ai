@@ -740,7 +740,10 @@ class UniversalRouter:
             # Workspace inheritance: if agent has no per-agent assignments,
             # inherit workspace-connected apps (same pattern as
             # ComposioToolService and ComposioHintService)
-            if not app_names and workspace_apps:
+            # F040: only an agent with no assignments at all inherits
+            from core.composio.agent_apps import inherits_workspace_apps
+
+            if not app_names and workspace_apps and inherits_workspace_apps(self._db, agent.id):
                 app_names = workspace_apps
 
             descriptions.append(
