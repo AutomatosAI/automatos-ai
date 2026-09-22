@@ -37,6 +37,33 @@ def make_json_serializable(obj):
         return obj
 
 
+# F067: foreign keys read from pg_catalog, visible to any role that can see the
+# table (information_schema.constraint_column_usage is owner-only). One row per
+# column pair; a composite key yields its pairs in key order.
+FOREIGN_KEYS_FROM_PG_CATALOG = """
+    SELECT src_ns.nspname  AS table_schema,
+           src.relname     AS table_name,
+           src_att.attname AS column_name,
+           tgt_ns.nspname  AS foreign_table_schema,
+           tgt.relname     AS foreign_table_name,
+           tgt_att.attname AS foreign_column_name
+    FROM pg_catalog.pg_constraint AS con
+    JOIN pg_catalog.pg_class      AS src    ON src.oid = con.conrelid
+    JOIN pg_catalog.pg_namespace  AS src_ns ON src_ns.oid = src.relnamespace
+    JOIN pg_catalog.pg_class      AS tgt    ON tgt.oid = con.confrelid
+    JOIN pg_catalog.pg_namespace  AS tgt_ns ON tgt_ns.oid = tgt.relnamespace
+    CROSS JOIN LATERAL unnest(con.conkey, con.confkey)
+         WITH ORDINALITY AS k(src_attnum, tgt_attnum, ord)
+    JOIN pg_catalog.pg_attribute  AS src_att
+      ON src_att.attrelid = con.conrelid  AND src_att.attnum = k.src_attnum
+    JOIN pg_catalog.pg_attribute  AS tgt_att
+      ON tgt_att.attrelid = con.confrelid AND tgt_att.attnum = k.tgt_attnum
+    WHERE con.contype = 'f'
+      AND src_ns.nspname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY src_ns.nspname, src.relname, con.conname, k.ord
+"""
+
+
 class DatabaseIntrospectionService:
     """
     PRD-21: Schema Introspection (MVP)
@@ -147,21 +174,21 @@ class DatabaseIntrospectionService:
                         "columns": columns
                     })
 
-                # Foreign keys
-                fks = conn.execute(text(
-                    """
-                    SELECT tc.table_schema, tc.table_name, kcu.column_name,
-                           ccu.table_schema AS foreign_table_schema,
-                           ccu.table_name AS foreign_table_name,
-                           ccu.column_name AS foreign_column_name
-                    FROM information_schema.table_constraints AS tc
-                    JOIN information_schema.key_column_usage AS kcu
-                      ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-                    JOIN information_schema.constraint_column_usage AS ccu
-                      ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-                    WHERE tc.constraint_type = 'FOREIGN KEY'
-                    """
-                )).fetchall()
+                # Foreign keys — from pg_catalog, not information_schema.
+                #
+                # F067: information_schema.constraint_column_usage shows a
+                # constraint only to the OWNER of the table, so a least-
+                # privilege, read-only role — the secure way to connect — found
+                # 0 relationships (probe 2026-09-22: 4 as owner, 0 as reader, 4
+                # via pg_constraint) and every join path was stripped from the
+                # schema the model reasons over. pg_constraint is readable by
+                # any role that can see the table.
+                #
+                # It also pairs a COMPOSITE key's columns by position
+                # (conkey[i] <-> confkey[i]); joining key_column_usage to
+                # constraint_column_usage on the constraint name alone gave the
+                # cartesian product of the two column lists.
+                fks = conn.execute(text(FOREIGN_KEYS_FROM_PG_CATALOG)).fetchall()
 
                 for row in fks:
                     (schema, table, column, f_schema, f_table, f_column) = row
