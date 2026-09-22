@@ -22,6 +22,13 @@ from core.team_access import normalize_team, metadata_team_filter_clause
 
 logger = logging.getLogger(__name__)
 
+# What search_multimodal searches when no type is named: the EXTRACTED knowledge.
+# A document's own knowledge_items row is a catalog entry nothing embeds, so
+# "document" never returned a result here; documents are searched through
+# search_knowledge, over their embedded chunks (F081, Gerard's option A).
+# An explicit "document" is still honoured.
+DEFAULT_KB_TYPES = ("table", "image", "formula", "codegraph")
+
 
 class MultimodalKnowledgeTools:
     """
@@ -402,11 +409,12 @@ class MultimodalKnowledgeTools:
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Unified search across all knowledge types.
+        Unified search across the extracted knowledge types.
 
         Args:
             query: Search query
-            kb_types: List of knowledge types to search (default: all)
+            kb_types: Knowledge types to search (default: DEFAULT_KB_TYPES — the
+                extracted types; documents go through search_knowledge)
             limit: Maximum total results
             workspace_id: Tenant scope (mandatory; fails closed if absent)
             team: Optional team scope (PRD-124)
@@ -428,7 +436,7 @@ class MultimodalKnowledgeTools:
                 return {"success": False, "error": "workspace_id is required for multimodal search", "results": [], "count": 0, "breakdown": {}}
 
             if kb_types is None:
-                kb_types = ["document", "table", "image", "formula", "codegraph"]
+                kb_types = list(DEFAULT_KB_TYPES)
             else:
                 # Normalize common aliases from older UI/tool prompts
                 alias_map = {
@@ -450,7 +458,7 @@ class MultimodalKnowledgeTools:
                     if not tt:
                         continue
                     normalized.append(alias_map.get(tt, tt))
-                kb_types = normalized or ["document", "table", "image", "formula", "codegraph"]
+                kb_types = normalized or list(DEFAULT_KB_TYPES)
             
             if not self.db:
                 from core.database.database import SessionLocal

@@ -614,8 +614,8 @@ class ToolRegistry:
             name="search_multimodal",
             category=ToolCategory.RESEARCH,
             description=(
-                "Unified search across ALL INTERNAL knowledge types: documents, code, tables, images, formulas. "
-                "Use this for comprehensive research across the workspace when you need multiple content types at once. "
+                "One search across the workspace's EXTRACTED knowledge: tables, images, formulas and code. "
+                "Use this when you need several of those content types at once. "
                 "Searches uploaded/ingested content only — for external research, use web search tools."
             ),
             executor_class="MultimodalKnowledgeTools",
@@ -630,9 +630,9 @@ class ToolRegistry:
                 ToolParameter(
                     name="kb_types",
                     type="array",
-                    description="Knowledge types to search (default: all types)",
+                    description="Knowledge types to search (default: table, image, formula, codegraph)",
                     required=False,
-                    default=["document", "table", "image", "formula", "codegraph"]
+                    default=["table", "image", "formula", "codegraph"]
                 ),
                 ToolParameter(
                     name="limit",
@@ -645,9 +645,9 @@ class ToolRegistry:
             security_level=SecurityLevel.SAFE,
             permissions_required={"read": True},
             examples=[
-                {"action": "search_multimodal", "params": {"query": "authentication system", "kb_types": ["document", "codegraph", "image"], "limit": 10}}
+                {"action": "search_multimodal", "params": {"query": "authentication system", "kb_types": ["codegraph", "image"], "limit": 10}}
             ],
-            metadata={"kb_types": ["document", "table", "image", "formula", "codegraph"], "added_in": "PRD-19"}
+            metadata={"kb_types": ["table", "image", "formula", "codegraph"], "added_in": "PRD-19"}
         ))
         
         # ==========================================
