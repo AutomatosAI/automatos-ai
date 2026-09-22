@@ -575,7 +575,7 @@ def list_hosts(db: Session, workspace_id: Any) -> List[Dict[str, Any]]:
 # ── Settings → Session mode (PRD-239 S6c) ───────────────────────────────────
 SESSION_MODE_SETTINGS_KEY = "session_mode"
 DEFAULT_FOLDER_PROJECTS = "projects"   # tickets for agents without a folder run in LOCAL_PROJECTS_DIR
-DEFAULT_FOLDER_SESSIONS = "sessions"   # … in a fresh ./workspaces/<ws>/sessions/<ticket>
+DEFAULT_FOLDER_SESSIONS = "sessions"   # … in a fresh ./workspaces/<ws>/sessions/<ticket> — the default (F042)
 DEFAULT_FOLDER_CHOICES = (DEFAULT_FOLDER_PROJECTS, DEFAULT_FOLDER_SESSIONS)
 
 
@@ -589,15 +589,17 @@ def session_mode_settings(db: Session, workspace_id: Any) -> Dict[str, Any]:
     """What the operator sees and sets on Settings → Session mode: where tickets
     run when their agent names no folder, plus the projects folder as the stack
     was started with (a Docker mount — set in .env, read here) and how it is
-    mounted. The default is the projects folder when one is configured — most
-    tickets are "fix a bug in a repo" or "start a new repo" — else a fresh
-    sessions folder per ticket."""
+    mounted. The default is a fresh sessions folder per ticket; the projects
+    folder only when the operator chooses it. F042 (night 1): a folder-less OPS
+    ticket started at the top of ~/Development — the folder that holds the
+    Automatos checkout — walked in and sourced the platform's .env. A session
+    started in a folder of its own reaches no repository it was not given."""
     ws = _workspace_row(db, workspace_id)
     stored = ((getattr(ws, "settings", None) or {}).get(SESSION_MODE_SETTINGS_KEY) or {}) if ws is not None else {}
     projects_dir = getattr(config, "LOCAL_PROJECTS_DIR", "") or None
     choice = stored.get("default_folder")
     if choice not in DEFAULT_FOLDER_CHOICES:
-        choice = DEFAULT_FOLDER_PROJECTS if projects_dir else DEFAULT_FOLDER_SESSIONS
+        choice = DEFAULT_FOLDER_SESSIONS
     return {
         "default_folder": choice,
         "default_folder_explicit": stored.get("default_folder") in DEFAULT_FOLDER_CHOICES,
@@ -633,7 +635,7 @@ def save_session_mode_settings(db: Session, workspace_id: Any, *, default_folder
 
 def default_session_folder(db: Session, workspace_id: Any) -> Optional[str]:
     """The folder a ticket runs in when its agent names none: the projects
-    folder when the workspace says so and one is configured, else ``None`` —
+    folder when the operator chose it and one is configured, else ``None`` —
     the host then uses its per-ticket ``sessions/<ticket>`` folder."""
     try:
         settings = session_mode_settings(db, workspace_id)
