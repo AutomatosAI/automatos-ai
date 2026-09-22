@@ -1135,7 +1135,6 @@ async def get_document_content_by_id(
 
 SEARCH_DEFAULT_LIMIT = 10           # Results returned when the caller names no limit
 SEARCH_MAX_LIMIT = 50               # Hard ceiling, mirrored by the query-param validator
-SEARCH_DEFAULT_MIN_SIMILARITY = 0.70
 PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
 PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
 PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
@@ -1154,6 +1153,40 @@ class SemanticSearchRequest(BaseModel):
     min_similarity: Optional[float] = None
     document_ids: Optional[List[int]] = None
     team: Optional[str] = None
+
+
+async def _retrieval_hits(query: str, max_chunks: int, workspace_id: str, team: Optional[str],
+                          *, floor: Optional[float] = None) -> List[Dict[str, Any]]:
+    """The retrieval funnel's chunks as search hits: score, file name, text,
+    chunk index and document id. A chunk's own ``similarity`` is the
+    post-optimisation value; its document's retrieval score lives in
+    ``sources_map`` (the same reading as platform_search_documents)."""
+    from modules.rag.service import RAGService
+
+    result = await RAGService().retrieve(
+        query=query, max_chunks=max_chunks, context_type="agent", workspace_id=workspace_id, team=team,
+    )
+    scores = {
+        str(entry.get("document_id")): entry.get("score")
+        for entry in (result.sources_map or [])
+        if entry.get("document_id") is not None
+    }
+    hits: List[Dict[str, Any]] = []
+    for chunk in result.chunks or []:
+        metadata = chunk.get("metadata") or {}
+        document_id = chunk.get("document_id") or metadata.get("document_id")
+        score = scores.get(str(document_id))
+        score = float(score if score is not None else (chunk.get("similarity") or 0.0))
+        if floor is not None and score < floor:
+            continue
+        hits.append({
+            "score": score,
+            "file_name": chunk.get("source_file") or metadata.get("file_name") or "",
+            "content": chunk.get("content") or "",
+            "chunk_index": chunk.get("chunk_index") or metadata.get("chunk_index") or 0,
+            "metadata": {"document_id": document_id},
+        })
+    return hits
 
 
 @router.post("/search", dependencies=[Depends(require_workspace_permission("documents:read"))])
@@ -1191,43 +1224,19 @@ async def semantic_search(
             )
         query = str(query).strip()
         limit = SEARCH_DEFAULT_LIMIT if limit is None else max(1, min(int(limit), SEARCH_MAX_LIMIT))
-        min_similarity = SEARCH_DEFAULT_MIN_SIMILARITY if min_similarity is None else float(min_similarity)
+        min_similarity = None if min_similarity is None else float(min_similarity)
 
         import time
         start_time = time.time()
         
-        # Generate query embedding using centralized embedding manager
-        # NOTE: import directly from module for compatibility across deployments
-        from core.llm.embedding_manager import create_embedding_manager
-
-        embedding_manager = create_embedding_manager()
-        logger.info(f"Generating embedding for query: {query[:50]}...")
-        
-        # Generate embedding asynchronously
-        query_embedding = await embedding_manager.generate_embedding(query)
-        
-        logger.info(f"Embedding generated (dim={len(query_embedding)}), performing vector search...")
-
-        # Whichever document-vector backend this edition runs. Night 1: this
-        # route constructed S3VectorsBackend unconditionally, so every local
-        # search 500'd on "S3_VECTORS_BUCKET not configured" while the chunks
-        # sat embedded in document_chunks. Same selection as
-        # RAGService._get_doc_backend (PRD-197 S5).
-        from config import config as app_config
-        from modules.search.vector_store import get_vector_store
-
-        backend_name = "s3_vectors" if app_config.S3_VECTORS_ENABLED else "pgvector"
-        vector_backend = get_vector_store(backend=backend_name, workspace_id=str(ctx.workspace_id))
-        await vector_backend.initialize()
-
-        embedding_list = query_embedding.tolist() if hasattr(query_embedding, 'tolist') else list(query_embedding)
-        s3_results = vector_backend.search(
-            query_embedding=embedding_list,
-            limit=limit * 3,  # Over-fetch to allow grouping by document
-            min_score=min_similarity,
-        )
-
-        logger.info(f"{backend_name} returned {len(s3_results)} chunks")
+        # F088 (night 3): this route ran its own vector-only search with a 0.70
+        # cosine floor, so exact words stored in three documents each ("The Salt
+        # Loft", "moreish", "Declan Frost") came back as 0 results. It now runs the
+        # ONE retrieval funnel the chat and the agents use — hybrid (vector +
+        # keyword) with reranking, on the edition's backend — and a similarity
+        # floor applies only when the caller asks for one.
+        hits = await _retrieval_hits(query, limit * 3, str(ctx.workspace_id), team, floor=min_similarity)
+        logger.info(f"document search returned {len(hits)} chunks")
 
         # Map S3 results back to document metadata from PostgreSQL
         # S3 stores: key, score, content (chunk_text), file_name, chunk_index, metadata
@@ -1235,16 +1244,16 @@ async def semantic_search(
         grouped_results: Dict[int, Dict[str, Any]] = {}
         doc_order: List[int] = []
 
-        for s3_hit in s3_results:
-            similarity = s3_hit.get("score", 0.0)
-            file_name = s3_hit.get("file_name", "")
-            chunk_text = s3_hit.get("content", "")
-            chunk_index = s3_hit.get("chunk_index", 0)
+        for hit in hits:
+            similarity = hit.get("score", 0.0)
+            file_name = hit.get("file_name", "")
+            chunk_text = hit.get("content", "")
+            chunk_index = hit.get("chunk_index", 0)
 
             # Prefer the hit's own document_id (the pgvector backend carries it,
             # and it survives two documents sharing a filename); fall back to the
             # filename lookup the S3 payload allows.
-            hit_doc_id = (s3_hit.get("metadata") or {}).get("document_id") or s3_hit.get("external_file_id")
+            hit_doc_id = (hit.get("metadata") or {}).get("document_id")
             doc_row = None
             if hit_doc_id is not None:
                 try:

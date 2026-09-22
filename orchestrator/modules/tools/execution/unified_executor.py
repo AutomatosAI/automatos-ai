@@ -38,6 +38,15 @@ from modules.memory.tool_outcome_capture import capture_tool_outcome
 from core.observability.tracer import fire_tool_trace
 from core.database.session_health import rollback_if_aborted
 
+# F088 (night 3): names a model reaches for that are not tools. Auto called
+# `search_documents` four times and got "Unknown tool" each time — the registry
+# check ran before the old alias entry could — and told the owner the product's
+# document search was broken. Resolved before anything gates or routes the call.
+TOOL_ALIASES: Dict[str, str] = {
+    "search_documents": "platform_search_documents",   # searches the uploads and names the file
+    "search_code": "search_codebase",
+}
+
 # PRD-36: Composio Integration (lazy import to avoid startup overhead)
 _composio_executor = None
 
@@ -145,8 +154,6 @@ class UnifiedToolExecutor:
             'search_knowledge': self._execute_platform_tool,
             'semantic_search': self._execute_platform_tool,
             'search_codebase': self._execute_platform_tool,
-            'search_documents': self._execute_platform_tool,  # Alias
-            'search_code': self._execute_platform_tool,  # Alias
 
             # Database tools (natural language SQL)
             'query_database': self._execute_database_tool,
@@ -682,6 +689,12 @@ class UnifiedToolExecutor:
             )
             logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
 
+            # F088: a name a model reaches for that is not a tool runs the tool
+            # that does that job — before any gate or route sees it.
+            if tool_name in TOOL_ALIASES:
+                logger.info(f"[tool-trace {trace}] '{tool_name}' is not a tool — running {TOOL_ALIASES[tool_name]}")
+                tool_name = TOOL_ALIASES[tool_name]
+
             # PRD-174 W4 — the single policy chokepoint. When the plane is ON,
             # EVERY tool call (platform, workspace, Composio, registry) is
             # evaluated by one typed gate HERE, so Composio/workspace/registry
@@ -849,7 +862,7 @@ class UnifiedToolExecutor:
             if not tool_spec:
                 result = {
                     "success": False,
-                    "error": f"Unknown tool: {tool_name}",
+                    "error": self._unknown_tool_error(tool_name),
                     "tool": tool_name,
                 }
                 return result
@@ -898,7 +911,7 @@ class UnifiedToolExecutor:
             else:
                 result = {
                     "success": False,
-                    "error": f"Unknown tool: {tool_name}",
+                    "error": self._unknown_tool_error(tool_name),
                     "tool": tool_name,
                 }
                 return result
@@ -989,6 +1002,26 @@ class UnifiedToolExecutor:
     # ------------------------------------------------------------------
     # Delegate methods -- thin wrappers calling extracted modules
     # ------------------------------------------------------------------
+
+    def _unknown_tool_error(self, tool_name: str) -> str:
+        """F088: "Unknown tool" alone came back to the owner as "the document
+        search is broken" — say which real tools are nearest, so the model
+        retries with one instead."""
+        import difflib
+
+        names = set(self.tool_routes)
+        try:
+            names |= {t.name for t in self.tool_registry.get_all_tools()}
+            from modules.tools.discovery.action_registry import get_action_registry
+
+            names |= {a.name for a in get_action_registry().get_all()}
+        except Exception:  # noqa: BLE001 — the suggestions are a courtesy, never a failure
+            logger.debug("unknown-tool suggestions unavailable", exc_info=True)
+        near = difflib.get_close_matches(tool_name, sorted(names), n=3, cutoff=0.6)
+        if not near:
+            return f"Unknown tool: {tool_name} — there is no tool by that name; use one from your tool list."
+        return (f"Unknown tool: {tool_name}. Nearest real tools: {', '.join(near)} "
+                "(a platform_* action runs directly or through platform_execute).")
 
     async def _execute_platform_tool(self, tool_name, parameters, agent_id, **kw):
         return await exec_platform.execute_platform_tool(self, tool_name, parameters, agent_id)
