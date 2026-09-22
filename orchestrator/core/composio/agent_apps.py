@@ -23,12 +23,13 @@ from sqlalchemy.orm import Session
 
 
 def assignment_state(db: Session, agent_id: Any) -> Tuple[Set[str], Set[str]]:
-    """``(on, off)`` — the agent's app names, upper-cased, of every app type."""
+    """``(on, off)`` — the agent's EXTERNAL app names, upper-cased: the same rows
+    every site lists as the agent's apps."""
     from core.models.composio_cache import AgentAppAssignment
 
     rows = (
         db.query(AgentAppAssignment.app_name, AgentAppAssignment.is_active)
-        .filter(AgentAppAssignment.agent_id == agent_id)
+        .filter(AgentAppAssignment.agent_id == agent_id, AgentAppAssignment.app_type == "EXTERNAL")
         .all()
     )
     on: Set[str] = set()
