@@ -520,9 +520,13 @@ def test_get_tools_for_agent_no_query_returns_full_enum(caplog):
     )
 
 
-def test_get_tools_for_agent_with_query_narrows_enum(caplog):
-    """AC: query + flag on → dispatcher enum is the ranked subset."""
+def test_get_tools_for_agent_with_query_narrows_enum(caplog, monkeypatch):
+    """AC: query + flag on → dispatcher enum is the ranked subset. This pins the
+    narrowed-ENUM mode, so it runs with TOOL_ENUM_CACHE_STABLE off; by default
+    (night-1 F025) the enum stays whole and the narrowing is published through
+    turn_narrowing instead."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+    monkeypatch.setattr(_FAKE_CONFIG_CLS, "TOOL_ENUM_CACHE_STABLE", False, raising=False)
 
     async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
@@ -630,10 +634,12 @@ def test_get_tools_for_agent_excludes_admin_when_not_admin():
 # ===========================================================================
 
 
-def test_get_tools_for_agent_async_narrows_enum_without_bridge(caplog):
+def test_get_tools_for_agent_async_narrows_enum_without_bridge(caplog, monkeypatch):
     """The async entry awaits ranking on the caller's loop — narrowed enum,
-    and the thread-bridge helper is never engaged."""
+    and the thread-bridge helper is never engaged. Narrowed-ENUM mode, so
+    TOOL_ENUM_CACHE_STABLE is off here (see the sync test above)."""
     _FAKE_CONFIG_CLS.SEMANTIC_TOOL_ROUTING = True
+    monkeypatch.setattr(_FAKE_CONFIG_CLS, "TOOL_ENUM_CACHE_STABLE", False, raising=False)
 
     async def _rank(query, top_k, exclude_admin, exclude_promoted, include_super_admin=False, workspace_id=None, **kwargs):
         return [
