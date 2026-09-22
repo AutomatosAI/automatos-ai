@@ -9,6 +9,10 @@ The prefixes that matter to a tester:
     3  error (string)        d  finish message {finishReason, usage}
     8  message annotation    e  finish step      g  reasoning delta
 
+Automatos bends two of them: ``d:`` carries its typed events (``chat-id``
+first, then tool-start/tool-end/usage/finish), and a failed turn ends with
+``e:{"message", "code"}`` — the platform's turn error, not an SDK finish step.
+
 ``tests/api/helpers.parse_sse_response`` reads ``0:``/``2:``/``d:``/``e:`` only;
 this parser keeps every frame so a scenario can assert on effects (which tools
 ran, with which arguments) and on how the turn ended.
@@ -96,6 +100,8 @@ def _absorb(acc: _Acc, prefix: str, payload: Any) -> None:
         acc.tool_results.append(payload)
     elif prefix == FINISH_MESSAGE and isinstance(payload, dict):
         _absorb_finish_frame(acc, payload)
+    elif prefix == FINISH_STEP and isinstance(payload, dict) and _is_turn_error(payload):
+        acc.errors.append(_turn_error_text(payload))
     elif prefix in (DATA, ANNOTATION):
         acc.data.append(payload)
         acc.chat_id = acc.chat_id or find_chat_id(payload)
@@ -113,6 +119,7 @@ def _absorb(acc: _Acc, prefix: str, payload: Any) -> None:
 # (verified against a live turn, 2026-09-19). Reading only the SDK shape is why
 # every turn recorded "tools: none" and chats.jsonl carried no tool or usage
 # data at all (F048), which is also the telemetry the tool-graph series needs.
+_D_CHAT_ID = "chat-id"
 _D_TOOL_START = "tool-start"
 _D_TOOL_RESULT = "tool-result"
 _D_TOOL_END = "tool-end"
@@ -135,7 +142,14 @@ def _absorb_finish_frame(acc: _Acc, payload: dict[str, Any]) -> None:
     data = payload.get("data")
     data = data if isinstance(data, dict) else {}
 
-    if kind == _D_TOOL_START:
+    if kind == _D_CHAT_ID:
+        # The backend's id IS the conversation: an id it does not know — the
+        # one the client minted — gets a NEW chat, persisted under this id.
+        # Keeping the sent id made every continuation a fresh chat (F079: 98
+        # single-turn chats in one night).
+        acc.chat_id = find_chat_id(payload) or acc.chat_id
+        acc.data.append(payload)
+    elif kind == _D_TOOL_START:
         acc.tool_calls.append({
             "toolCallId": data.get("toolCallId"),
             "toolName": data.get("toolName"),
@@ -165,6 +179,18 @@ def _absorb_finish_frame(acc: _Acc, payload: dict[str, Any]) -> None:
     else:
         acc.chat_id = acc.chat_id or find_chat_id(payload)
         acc.data.append(payload)
+
+
+def _is_turn_error(payload: dict[str, Any]) -> bool:
+    """``e:{"message", "code"}`` is the platform's turn error (PRD-239 S4); the
+    AI SDK's own finish step carries ``finishReason`` and is not one."""
+    return ("message" in payload or "code" in payload) and "finishReason" not in payload
+
+
+def _turn_error_text(payload: dict[str, Any]) -> str:
+    message = str(payload.get("message") or "")
+    code = payload.get("code")
+    return f"{code}: {message}" if code else message
 
 
 def _normalised_usage(data: dict[str, Any]) -> dict[str, Any]:

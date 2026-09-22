@@ -178,7 +178,8 @@ class Api:
     # -- chat ---------------------------------------------------------------------
     def stream_chat(self, text: str, *, chat_id: str | None = None, agent_id: int | None = None,
                     timeout_s: float = 240.0, label: str | None = None) -> tuple[Response, str]:
-        """POST /api/chat; returns the stream and the chat id the conversation continues under."""
+        """POST /api/chat; returns the stream and the chat id it SENT. Continue under the parsed
+        turn's ``chat_id`` — the id the backend persisted the conversation under."""
         body, used = chat_body(text, chat_id=chat_id, agent_id=agent_id)
         response = self.request("POST", "/api/chat", json_body=body, timeout_s=timeout_s,
                                 accept="text/event-stream", label=label or "chat")
@@ -186,8 +187,9 @@ class Api:
 
 
 def chat_body(text: str, *, chat_id: str | None = None, agent_id: int | None = None) -> tuple[dict[str, Any], str]:
-    """The UI's request shape. The chat id is CLIENT-supplied (``api/chat.py`` reads ``request.id``
-    and never returns one), so a new conversation mints its own; pass it back to continue."""
+    """The UI's request shape. The id sent is only a proposal: ``api/chat.py`` creates a NEW chat
+    for an id it does not know and names the one it persisted under in the stream's first frame,
+    ``d:{"type":"chat-id","chatId":…}`` (``ChatTurn.chat_id``). Continue with that id, not this one."""
     used = chat_id or str(uuid.uuid4())
     body: dict[str, Any] = {"id": used, "chatId": used,
                             "message": {"role": "user", "parts": [{"type": "text", "text": text}]}}
