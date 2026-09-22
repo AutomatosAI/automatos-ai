@@ -44,6 +44,7 @@ class ToolIntent:
     cls: ToolClass
     paths: Tuple[str, ...] = ()       # everything the call would touch
     command: Optional[str] = None     # the shell command, if any
+    globs: Tuple[str, ...] = ()       # file-name patterns a search reads through (Grep's glob, Glob's pattern)
 
     @property
     def subject(self) -> Optional[str]:

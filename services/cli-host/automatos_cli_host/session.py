@@ -53,7 +53,7 @@ from .adapters.base import LaunchContext, Reply, ToolClass
 from .allowlist import NotAllowed, default_session_cwd, resolve_allowed, session_deliverables_dir
 from .config import HostConfig
 from .env import build_session_env
-from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide
+from .policy import Decision, PolicyContext, bash_allowlist_from_config, decide, platform_secret_roots
 from .presets import REGISTRY, TURN_END_PROCESS_EXIT, TURN_END_STOP_HOOK
 from .terminal_log import FILENAME as TERMINAL_LOG_FILENAME, BoundedLog
 from .transcript import empty_usage, usage_delta
@@ -535,6 +535,10 @@ class Session:
             allowed_bash=bash_allowlist_from_config(self.ticket.get("allowed_tools")),
             extra_dirs=extra_dirs,
             session_tools=tuple(session_tools.get("names") or ()) if session_tools else (),
+            # F042: the platform's own .env / credential key and this host's state
+            # (its token) are out of reach, whatever folder the ticket runs in.
+            secret_roots=platform_secret_roots(),
+            off_limits=(Path(self.cfg.state_dir).expanduser(),),
         )
 
         # PRD-239: a per-agent choice — a single repo gets a worktree per ticket

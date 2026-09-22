@@ -240,6 +240,13 @@ class PolicyContext:
     # offer). Empty = the bridge is not in this ticket, so no platform tool is.
     session_tools: Sequence[str] = ()
     unlisted_bash: str = "ask"           # "allow": verbs the allowlist does not name run without a card
+    # F042: the platform's own secrets are out of every session's reach — a hard
+    # deny no approval lifts. ``secret_roots``: checkouts whose .env family and
+    # credential key no session may read or write (the Automatos checkout this
+    # host runs from); ``off_limits``: folders no session may touch at all (the
+    # host's own state — its token). Empty = no such guard (tests, other hosts).
+    secret_roots: Sequence[Path] = ()
+    off_limits: Sequence[Path] = ()
 
 
 @dataclass
@@ -274,6 +281,111 @@ def _inside(path_str: str, roots: Iterable[Path]) -> bool:
     except (OSError, RuntimeError):
         return False
     return False
+
+
+# ── F042: the platform's secrets ────────────────────────────────────────────
+# Night 1 (2026-09-18): an OPS session started in ~/Development, went into the
+# Automatos checkout and sourced its .env — the platform's database password and
+# API keys — then ran psql against the platform. ALWAYS_ASK_BASH put a card in
+# front of that shape of Bash; the Read tool read the same file with no card at
+# all. A session may work in the folder that holds the platform; it may never
+# hold the platform's secrets.
+_SECRET_NAME_RE = re.compile(r"^(?:\.env(?:\..+)?|\.credential_key)$")
+_EXAMPLE_ENV_RE = re.compile(r"^\.env\.(?:example|sample|template|dist|defaults)$")
+_SECRET_WORD_RE = re.compile(
+    r"""(?:^|[\s'"=:;|&(<>])([^\s'";|&()<>]*?(?:\.env(?:\.[\w.-]+)?|\.credential_key))(?=$|[\s'";|&()<>])""")
+_ABSOLUTE_WORD_RE = re.compile(r"""(?:^|[\s'"=:;|&(<>])((?:/|~/)[^\s'";|&()<>]*)""")
+_CD_TARGET_RE = re.compile(r"""(?:^|[;&|(]|\s)cd\s+(['"]?)([^\s'";|&()]+)\1""")
+
+
+def platform_secret_roots() -> Tuple[Path, ...]:
+    """The Automatos checkout this host runs from — its .env family and credential
+    key are the platform's own secrets. Empty when the host is not running from
+    a checkout (no ``orchestrator/`` beside ``services/``)."""
+    root = Path(__file__).resolve().parents[3]
+    return (root,) if (root / "orchestrator").is_dir() else ()
+
+
+def _is_secret_name(name: str) -> bool:
+    return bool(_SECRET_NAME_RE.match(name)) and not _EXAMPLE_ENV_RE.match(name)
+
+
+def _within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _guard_secret(path_str: str, ctx: "PolicyContext", base: Path) -> Optional["Decision"]:
+    """``deny`` for the platform's own secrets and the host's state, ``ask`` for any
+    other secret-named file, ``None`` for everything else. Judged on the path as
+    written AND as resolved, so a symlink to the platform's .env is caught."""
+    if not (ctx.secret_roots or ctx.off_limits) and not _is_secret_name(Path(path_str).name):
+        return None
+    try:
+        written = Path(path_str).expanduser()
+        written = written if written.is_absolute() else base / written
+        resolved = written.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    forms = (written, resolved)
+    granted = [Path(d).expanduser().resolve() for d in ctx.extra_dirs]
+    for folder in ctx.off_limits:
+        folder = Path(folder).expanduser().resolve()
+        # The session's OWN folder (its ticket file) sits inside the host's state
+        # and is granted to it; the token, the process table and every other
+        # session's folder are not.
+        if any(_within(f, folder) for f in forms) and not any(_within(f, g) for f in forms for g in granted):
+            return Decision("deny", "the CLI host's own state — no session may read or write it")
+    if not any(_is_secret_name(f.name) for f in forms):
+        return None
+    for root in ctx.secret_roots:
+        root = Path(root).expanduser().resolve()
+        if any(_within(f, root) for f in forms):
+            return Decision("deny", f"{written.name} holds the platform's own secrets ({root.name}) — "
+                                    "no session may read or write it, and no approval changes that")
+    return Decision("ask", f"touches {written.name} (a secrets file) — the operator decides")
+
+
+def _guard_search(globs: Sequence[str], paths: Sequence[str], ctx: "PolicyContext") -> Optional["Decision"]:
+    """A search whose pattern names a secret (``glob: .env``): refused when it
+    would read through the platform's checkout — from inside it or from any
+    folder above it — asked otherwise."""
+    named = [g for g in globs if ".env" in g or ".credential_key" in g]
+    if not named:
+        return None
+    bases = [Path(p).expanduser() for p in paths] or [ctx.cwd]
+    for base in bases:
+        base = (base if base.is_absolute() else ctx.cwd / base).resolve()
+        for root in ctx.secret_roots:
+            root = Path(root).expanduser().resolve()
+            if _within(base, root) or _within(root, base):
+                return Decision("deny", f"a search for {named[0]!r} here would read the platform's own secrets "
+                                        f"({root.name}) — no approval changes that")
+    return Decision("ask", f"searches for {named[0]!r} (secrets files) — the operator decides")
+
+
+def _secret_on_line(visible: str, ctx: "PolicyContext") -> Optional["Decision"]:
+    """The platform's secrets named anywhere on a Bash line — as written, relative
+    to the session's folder, or relative to a ``cd`` earlier on the line (night
+    1's ``cd …/automatos-ai && . ./.env``). Only a refusal is returned here; a
+    card for any other .env is ALWAYS_ASK_BASH's job."""
+    if not (ctx.secret_roots or ctx.off_limits):
+        return None
+    bases = [ctx.cwd]
+    for match in _CD_TARGET_RE.finditer(visible):
+        target = Path(match.group(2)).expanduser()
+        bases.append(target if target.is_absolute() else ctx.cwd / target)
+    words = [m.group(1) for m in _SECRET_WORD_RE.finditer(visible)]
+    words += [m.group(1) for m in _ABSOLUTE_WORD_RE.finditer(visible)] if ctx.off_limits else []
+    for word in words:
+        for base in bases:
+            guard = _guard_secret(word, ctx, base)
+            if guard is not None and guard.behavior == "deny":
+                return guard
+    return None
 
 
 def _first_words(command: str) -> str:
@@ -941,6 +1053,9 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
     for pattern in NEVER_ALLOWED_BASH:
         if pattern.search(visible):
             return Decision("deny", f"never allowed in a session: {_first_words(visible)!r} (sessions do not push or escalate)")
+    secret = _secret_on_line(visible, ctx)
+    if secret is not None:
+        return secret
     if ".." in visible and re.search(r"(^|[\s'\"=:;|&(/])\.\.([/\\]|[\s'\");|&]|$)", visible):
         return Decision("deny", "path traversal ('..') in a shell command")
     if _ANSI_C_RE.search(visible):  # a ``$`` that OPENS a word — ``'^$'`` closing a regex is not quoting
@@ -966,12 +1081,19 @@ def decide_bash(command: str, ctx: PolicyContext) -> Decision:
 def decide(intent: ToolIntent, ctx: PolicyContext) -> Decision:
     roots = [ctx.cwd, *ctx.extra_dirs]
     if intent.cls in (ToolClass.FILE_READ, ToolClass.FILE_WRITE):
+        # F042 first: the platform's secrets are refused wherever they sit, and
+        # any other secrets file asks — as the same file read through Bash does.
+        guards = [_guard_secret(str(target), ctx, ctx.cwd) for target in intent.paths]
+        guards.append(_guard_search(getattr(intent, "globs", ()) or (), intent.paths, ctx))
+        guards = [g for g in guards if g is not None]
+        if any(g.behavior == "deny" for g in guards):
+            return _worst(guards)
         if not intent.paths:
-            return Decision("allow")  # a search without a path works in cwd
+            return _worst(guards)  # a search without a path works in cwd
         for target in intent.paths:
             if not _inside(str(target), roots):
                 return Decision("deny", f"{intent.tool} outside the session directory: {target}")
-        return Decision("allow")
+        return _worst(guards)
     if intent.cls is ToolClass.SHELL:
         return decide_bash(str(intent.command or ""), ctx)
     if intent.cls is ToolClass.PLATFORM:

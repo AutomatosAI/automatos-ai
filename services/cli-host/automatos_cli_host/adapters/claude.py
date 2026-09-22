@@ -247,7 +247,11 @@ class ClaudeAdapter(PresetAdapter):
         if tool_name in FILE_WRITE_TOOLS or tool_name in FILE_READ_TOOLS:
             paths = tuple(str(ti[k]) for k in _PATH_KEYS if ti.get(k))
             cls = ToolClass.FILE_WRITE if tool_name in FILE_WRITE_TOOLS else ToolClass.FILE_READ
-            return ToolIntent(tool=tool_name, cls=cls, paths=paths)
+            # F042: what a search reads THROUGH — Grep's glob, Glob's pattern — so
+            # a "glob: .env" over a folder holding the platform is judged too.
+            globs = tuple(str(ti[k]) for k in (("glob",) if tool_name == "Grep" else ("pattern",) if tool_name == "Glob" else ())
+                          if ti.get(k))
+            return ToolIntent(tool=tool_name, cls=cls, paths=paths, globs=globs)
         if tool_name in SHELL_TOOLS:
             return ToolIntent(tool=tool_name, cls=ToolClass.SHELL, command=str(ti.get("command") or ""))
         if tool_name in WEB_TOOLS:
