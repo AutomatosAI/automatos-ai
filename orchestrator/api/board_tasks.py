@@ -1230,29 +1230,12 @@ async def cancel_task(
     if task.status in ("done", "failed", "cancelled", "closed"):
         return {"id": task.id, "status": task.status, "applied": False}
 
-    previous = task.status
-    now = datetime.now(timezone.utc)
-    task.status = "cancelled"
-    task.completed_at = now
-    task.lease_until = None
-    if previous == "blocked":
-        task.blocked_at = None
-        task.blocked_reason = None
-    ref = dict(task.runtime_ref or {})
-    ref["cancel_requested_at"] = now.isoformat()
-    # PRD-245: the run is over, so its session credential is destroyed here too.
-    # Nulling the lease above already stops it resolving; removing the hash means
-    # there is nothing left on the row to resolve, however the ticket moves next.
-    from services.cli_host_service import clear_session_token
+    # F116: one cancel for the board and for a cancelled playbook run's step
+    # tickets — it now also records who cancelled and why.
+    from services.board_cancel import cancel_board_ticket
 
-    clear_session_token(ref)
-    task.runtime_ref = ref  # rebuild, never mutate in place (JSONB)
-    db.commit()
-    notify_board_event(
-        db, workspace_id=ctx.workspace_id, task_id=task.id, status="cancelled",
-        event="task_cancelled",
-    )
-    logger.info("[BoardTasks] task %d cancelled (was %s)", task.id, previous)
+    previous = task.status
+    cancel_board_ticket(db, task, by=_operator_ref(ctx), reason="cancelled on the board")
     return {"id": task.id, "status": "cancelled", "applied": True, "previous_status": previous}
 
 
