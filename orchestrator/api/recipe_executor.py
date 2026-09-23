@@ -38,6 +38,24 @@ from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 
 logger = logging.getLogger(__name__)
 
+# F113 (run 4): a run's failure is what the owner reads on the ticket. A
+# programming error ("'str' object has no attribute 'items'") is logged with
+# its traceback and reported in words; an operational error (a provider's 402,
+# a timeout) keeps its own message — the owner can act on that.
+_INTERNAL_ERRORS = (AttributeError, TypeError, KeyError, IndexError, NameError,
+                    AssertionError, ZeroDivisionError, RecursionError)
+INTERNAL_ERROR_TEXT = (
+    "The run stopped on an internal error, so nothing after it ran. "
+    "The details are in the server log."
+)
+
+
+def owner_error_text(exc: BaseException) -> str:
+    """What the owner reads for an exception that stopped a run."""
+    if isinstance(exc, _INTERNAL_ERRORS):
+        return INTERNAL_ERROR_TEXT
+    return str(exc) or type(exc).__name__
+
 
 # ---------------------------------------------------------------------------
 # PRD-128: Unified notification dispatch helper
@@ -1051,7 +1069,7 @@ def launch_recipe_task(
             try:
                 db = SessionLocal()
                 try:
-                    await _fail_execution(db, recipe_execution_id, f"Task crashed: {e}")
+                    await _fail_execution(db, recipe_execution_id, f"Task crashed: {owner_error_text(e)}")
                 finally:
                     db.close()
             except Exception as inner:
@@ -1199,6 +1217,15 @@ async def _execute_recipe_inner(
     scratchpad = None
     try:
         logger.info(f"[recipe_direct] Starting execution {recipe_execution_id} for recipe {recipe_id}")
+
+        # F113: whatever the trigger stored (a string from a tool call, a retried
+        # row), the steps read key-value pairs.
+        from core.services.playbook_inputs import playbook_inputs
+
+        input_data, _input_problem = playbook_inputs(input_data)
+        if _input_problem:
+            await _fail_execution(db, recipe_execution_id, f"This run's input could not be read: {_input_problem}")
+            return
 
         # Load recipe and execution
         recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == recipe_id).first()
@@ -1535,7 +1562,7 @@ async def _execute_recipe_inner(
 
                 except Exception as e:
                     step_result["status"] = "failed"
-                    step_result["error"] = str(e)
+                    step_result["error"] = owner_error_text(e)
                     step_result["duration_ms"] = int((time.time() - step_start) * 1000)
                     step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
                     logger.error(f"[recipe_direct] generate_document step failed: {e}", exc_info=True)
@@ -1543,7 +1570,7 @@ async def _execute_recipe_inner(
                     if error_handling == "stop":
                         step_results.append(_build_compact_step_result(step_result))
                         _persist_step_results(db, execution, step_results)
-                        await _fail_execution(db, recipe_execution_id, f"Document generation step failed: {e}", step_results=step_results)
+                        await _fail_execution(db, recipe_execution_id, f"Document generation step failed: {owner_error_text(e)}", step_results=step_results)
                         return
                     elif error_handling == "skip":
                         step_results.append(_build_compact_step_result(step_result))
@@ -1670,12 +1697,12 @@ async def _execute_recipe_inner(
                     logger.error(f"[recipe_direct] Step {step_order} pre_exec error: {pre_exc}", exc_info=True)
                     if error_handling == 'stop':
                         step_result["status"] = "failed"
-                        step_result["error"] = f"pre_exec error: {pre_exc}"
+                        step_result["error"] = f"pre_exec error: {owner_error_text(pre_exc)}"
                         step_result["duration_ms"] = int((time.time() - step_start) * 1000)
                         step_result["completed_at"] = datetime.now(timezone.utc).isoformat()
                         step_results.append(_build_compact_step_result(step_result))
                         _persist_step_results(db, execution, step_results)
-                        await _fail_execution(db, recipe_execution_id, f"Step {step_order} pre_exec error: {pre_exc}", step_results=step_results)
+                        await _fail_execution(db, recipe_execution_id, f"Step {step_order} pre_exec error: {owner_error_text(pre_exc)}", step_results=step_results)
                         return
 
             # F055: a placeholder the run did not supply must never reach an
@@ -1785,7 +1812,7 @@ async def _execute_recipe_inner(
                     last_error = f"Step timed out after {step_deadline:.0f}s"
                     logger.warning(f"[recipe_direct] Step {step_order} timed out ({step_deadline:.0f}s)")
                 except Exception as e:
-                    last_error = str(e)
+                    last_error = owner_error_text(e)
                     logger.error(f"[recipe_direct] Step {step_order} exception: {e}", exc_info=True)
 
                 attempt += 1
@@ -1992,7 +2019,7 @@ async def _execute_recipe_inner(
     except Exception as e:
         logger.error(f"[recipe_direct] Fatal error in execution {recipe_execution_id}: {e}", exc_info=True)
         try:
-            await _fail_execution(db, recipe_execution_id, str(e))
+            await _fail_execution(db, recipe_execution_id, owner_error_text(e))
         except Exception as err:
             logger.exception(
                 f"[recipe_direct] _fail_execution itself failed for {recipe_execution_id}: {err}"

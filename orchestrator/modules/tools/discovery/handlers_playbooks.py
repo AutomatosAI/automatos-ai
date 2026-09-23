@@ -441,7 +441,16 @@ async def execute_playbook(db: Session, workspace_id: UUID, params: Dict[str, An
 
     playbook_id = params.get("playbook_id")
     playbook_name = params.get("playbook_name")
-    input_data = params.get("input_data") or {}
+    # F113: a string (or an `inputs` / `input` alias) is read as key-value pairs;
+    # a value that cannot be one is refused here, not crashed on in the run.
+    from core.services.playbook_inputs import playbook_inputs
+
+    raw_input = params.get("input_data")
+    if raw_input is None:
+        raw_input = params.get("inputs", params.get("input"))
+    input_data, input_problem = playbook_inputs(raw_input)
+    if input_problem:
+        return {"success": False, "error": input_problem}
 
     # Resolve playbook
     query = db.query(WorkflowTemplate).filter(
