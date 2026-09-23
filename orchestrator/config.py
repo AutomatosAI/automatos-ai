@@ -1310,7 +1310,12 @@ class Config:
 
     # S3 Documents (general storage bucket)
     S3_DOCUMENTS_BUCKET: str = os.getenv("S3_DOCUMENTS_BUCKET", "automatos-ai")
-    
+    # PRD-251 S0.4c: GET /api/generated-images/{id} streams the S3 body in chunks
+    # of this many bytes (never the whole object in memory).
+    GENERATED_IMAGE_STREAM_CHUNK_BYTES: int = int(
+        os.getenv("GENERATED_IMAGE_STREAM_CHUNK_BYTES", str(64 * 1024))
+    )
+
     # =============================================================================
     # PRD-58: FutureAGI Integration (Prompt Scoring & Optimization)
     # =============================================================================
