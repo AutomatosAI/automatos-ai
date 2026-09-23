@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
-from typing import Any, Mapping, Sequence
+from datetime import datetime, timezone, tzinfo
+from typing import Any, Mapping, Optional, Sequence
 
 from .api import Api, ApiError, items_of
 from .config import Settings
@@ -74,6 +75,37 @@ def inventory(api: Api, tag: str | None = None) -> dict[str, Any]:
     }
 
 
+def _span(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    if minutes < 1:
+        return f"{int(seconds)}s"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 1:
+        return f"{minutes}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h" if days else f"{hours}h {minutes}m"
+
+
+def local_time(value: Any, *, now: Optional[datetime] = None, tz: Optional[tzinfo] = None) -> str:
+    """An API timestamp in this machine's local time, with how far off it is.
+
+    F091 (night 3): card times came through as UTC ISO strings and the persona
+    took four live cards for expired. ``tz`` defaults to the machine's zone; a
+    value without an offset is the API's naive UTC.
+    """
+    if not value:
+        return "—"
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    delta = (stamp - (now or datetime.now(timezone.utc))).total_seconds()
+    when = f"in {_span(delta)}" if delta >= 0 else f"{_span(-delta)} ago"
+    return f"{stamp.astimezone(tz):%Y-%m-%d %H:%M %Z} ({when})"
+
+
 def question_line(q: Mapping[str, Any]) -> str:
     """The text of an ask (``question_md``) or of a permission hold (``reason``/``tool_name``)."""
     return str(q.get("question_md") or q.get("question") or q.get("reason") or q.get("tool_name") or "").strip()
@@ -94,7 +126,10 @@ def render_inventory(inv: Mapping[str, Any]) -> str:
     lines.append(f"**Deliverables ({len(inv.get('deliverables') or [])})**: " + ", ".join(f"#{d.get('id')} {d.get('title')}" for d in (inv.get("deliverables") or [])[:12]))
     lines.append(f"**Reports today ({len(inv.get('reports') or [])})**: " + ", ".join(f"#{r.get('id')} {r.get('title')}" for r in (inv.get("reports") or [])[:12]))
     qs = inv.get("questions") or []
-    lines.append(f"**Pending questions/approvals ({len(qs)})**: " + ("; ".join(f"#{q.get('id')} {q.get('kind')}: {question_line(q)[:100]}" for q in qs[:8]) or "none"))
+    lines.append(f"**Pending questions/approvals ({len(qs)})**: " + ("; ".join(
+        f"#{q.get('id')} {q.get('kind')}: {question_line(q)[:100]}"
+        + (f" (expires {local_time(q.get('expires_at'))})" if q.get("expires_at") else "")
+        for q in qs[:8]) or "none"))
     for err in inv.get("errors") or []:
         lines.append(f"  ! {err}")
     return "\n".join(lines)

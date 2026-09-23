@@ -32,7 +32,8 @@ from typing import Any, Optional
 
 from .api import Api, ApiError, Trace
 from .config import DEFAULT_WORKSPACE_ID, LOGS_DIR, SIM_HOME, ConfigError, load_settings
-from .customer_ops import cost_table, inventory, purge_tagged, question_line, render_inventory, render_prompt
+from .customer_ops import (cost_table, inventory, local_time, purge_tagged, question_line, render_inventory,
+                           render_prompt)
 from .judge import judge_output
 from .sse import parse_data_stream
 
@@ -85,7 +86,7 @@ def cmd_questions(args: argparse.Namespace) -> int:
     for q in inv["questions"]:
         how = "answer <id> \"...\"" if q.get("kind") == "question" else "grant <id>"
         print(f"#{q['id']} [{q.get('kind')}] {question_line(q)}" + (f"  options: {q['options']}" if q.get("options") else "")
-              + (f"  expires: {q['expires_at']}" if q.get("expires_at") else "") + f"  → {how}")
+              + (f"  expires: {local_time(q['expires_at'])}" if q.get("expires_at") else "") + f"  → {how}")
     if not inv["questions"]:
         print("no pending questions or approvals")
     return 0
