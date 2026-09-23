@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 # import pandas as pd
 
 # Automatos imports (from existing system)
+from core.best_effort import awaitable_off_loop
 from core.credentials.resolver import CredentialResolver
 from core.llm import LLMProvider
 from modules.rag import RAGService
@@ -969,7 +970,8 @@ class DatabaseKnowledgeService:
                 "columns": columns, "row_count": len(rows),
                 "visualization_type": viz}
 
-    async def write_nl_audit(
+    @awaitable_off_loop
+    def write_nl_audit(
         self,
         *,
         source_id,
@@ -985,7 +987,8 @@ class DatabaseKnowledgeService:
         audit row (workspace via the source FK, agent, SQL, outcome). Workspace
         is carried by the workspace-scoped source per the PRD-156 S3 source-join
         audit convention, so no separate column is needed. Best-effort: a failed
-        audit write never breaks the query.
+        audit write never breaks the query, and it runs on the best-effort
+        threads (F105) — a dry connection pool never freezes the event loop.
         """
         from core.database.database import SessionLocal
         from core.models.database_knowledge import DatabaseQueryAudit

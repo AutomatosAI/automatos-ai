@@ -1470,6 +1470,11 @@ class Config:
     EMBEDDING_QUERY_TIMEOUT_S: float = float(os.getenv("EMBEDDING_QUERY_TIMEOUT_S", "15"))
     EMBEDDING_BATCH_TIMEOUT_S: float = float(os.getenv("EMBEDDING_BATCH_TIMEOUT_S", "60"))
     EMBEDDING_MAX_RETRIES: int = int(os.getenv("EMBEDDING_MAX_RETRIES", "1"))
+    # F105: best-effort writes (usage rows, telemetry, heartbeat findings, the
+    # NL2SQL audit) run on this many threads of their own, never on the loop.
+    BEST_EFFORT_WRITE_THREADS: int = int(os.getenv("BEST_EFFORT_WRITE_THREADS", "4"))
+    # ...and wait at most this long for a free pool connection, then drop the row.
+    BEST_EFFORT_POOL_WAIT_S: float = float(os.getenv("BEST_EFFORT_POOL_WAIT_S", "2"))
 
     # =============================================================================
     # PANDASAI (Data Analysis)

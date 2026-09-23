@@ -14,6 +14,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from core.best_effort import awaitable_off_loop
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,7 +88,8 @@ def _coerce_user_id(db: Session, raw: Any) -> Optional[int]:
     return uid
 
 
-async def write_telemetry(
+@awaitable_off_loop
+def write_telemetry(
     *,
     tool_name: str,
     parameters: Dict[str, Any],
@@ -100,7 +103,9 @@ async def write_telemetry(
     """Write a single telemetry row to tool_execution_logs.
 
     This function is designed to be fired-and-forgotten via asyncio.create_task.
-    It catches all exceptions internally so it never propagates failures.
+    It catches all exceptions internally so it never propagates failures. Its
+    body runs on the best-effort threads (F105): awaiting it never holds the
+    event loop, even while the connection pool is dry.
 
     It OWNS its session. It used to take the caller's ``db`` and commit or
     roll it back from a detached task at an arbitrary later moment — a
@@ -283,7 +288,8 @@ TOOL_GAP_ACTION = "__tool_gap__"
 SYNTHETIC_SIGNAL_SOURCE = "synthetic_signal"
 
 
-async def write_tool_gap(
+@awaitable_off_loop
+def write_tool_gap(
     *,
     query: Optional[str],
     workspace_id: Optional[UUID],
