@@ -386,6 +386,7 @@ class ToolLoopExecutor:
         per-tool attempts) that the caller's ``on_round_end`` hook can consult.
         """
         tool_results: List[Message] = []
+        self.tracker.begin_round()   # F120: this response's calls are one batch
         state = RoundState(iteration=iteration)
         attempts: Dict[str, int] = {}
 

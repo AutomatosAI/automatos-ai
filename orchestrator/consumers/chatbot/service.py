@@ -1712,6 +1712,11 @@ class StreamingChatService:
         _turn_id: str = uuid.uuid4().hex
         _prior_action: Optional[str] = None
         cumulative_attempts: Dict[str, int] = {}
+        # F120: the model responses (rounds) each tool was called in — eight
+        # searches in ONE response are a batch, not eight retries.
+        _round_index = 0
+        tool_rounds: Dict[str, set] = {}
+        _nudged_rounds: set = set()
         # Per-turn tally of identical tool failures (F030).
         repeated_failures: Dict[str, int] = {}
         followup_messages: List[Dict[str, Any]] = []
@@ -1825,6 +1830,7 @@ class StreamingChatService:
             last_tool_name = name
 
             cumulative_attempts[name] = cumulative_attempts.get(name, 0) + 1
+            tool_rounds.setdefault(name, set()).add(_round_index)
 
             # F030: the same tool failing the same way is not worth another go.
             # Night 1 called store_memory seven times in one turn against an
@@ -1882,10 +1888,13 @@ class StreamingChatService:
             ))
 
             # Loop-prevention proceed instructions (mutates llm_messages).
-            self._inject_loop_prevention(
+            if self._inject_loop_prevention(
                 llm_messages, name, cumulative_attempts,
                 empty_streak, result, agent_runtime, _MULTI_STEP_TOOLS,
-            )
+                rounds=len(tool_rounds.get(name) or ()),
+                nudged_this_round=(name, _round_index) in _nudged_rounds,
+            ):
+                _nudged_rounds.add((name, _round_index))
 
             # Hand back to executor with the truncated llm_context already prepared
             # so it does not re-truncate.
@@ -1932,7 +1941,8 @@ class StreamingChatService:
         async def _on_round_end(state: RoundState) -> Optional[ToolPostResult]:
             # Flush any Composio follow-up system messages into llm_messages
             # BEFORE the next LLM call (legacy ordering).
-            nonlocal followup_messages
+            nonlocal followup_messages, _round_index
+            _round_index += 1   # F120: the next calls belong to the next model response
             if followup_messages:
                 llm_messages.extend(followup_messages)
                 followup_messages = []
@@ -2369,8 +2379,16 @@ class StreamingChatService:
         result: Dict[str, Any],
         agent_runtime,
         multi_step_tools: set,
-    ) -> None:
-        """Inject system messages to prevent tool loops."""
+        *,
+        rounds: Optional[int] = None,
+        nudged_this_round: bool = False,
+    ) -> bool:
+        """Inject system messages to prevent tool loops. True when the
+        once-per-response "do not call it again" nudge was added.
+
+        F120: that nudge counts the model RESPONSES a tool was called in
+        (``rounds``), not its calls — eight distinct searches in one response
+        are one batch — and it is added once per response, not once per call."""
         # Search spiral: 4+ consecutive empty results from same tool
         if empty_same_tool_streak >= 4 and (
             tool_name.startswith("search_") or tool_name in {"semantic_search"}
@@ -2413,7 +2431,11 @@ class StreamingChatService:
                 ),
             })
             logger.warning(f"[tool-loop] Multi-step tool {tool_name} hit hard cap ({_attempts} calls) — forcing synthesis")
-        elif not _is_multi_step and _attempts >= 2:
+        elif (
+            not _is_multi_step
+            and (rounds if rounds is not None else _attempts) >= 2
+            and not nudged_this_round
+        ):
             llm_messages.append({
                 "role": "system",
                 "content": (
@@ -2424,6 +2446,8 @@ class StreamingChatService:
                 ),
             })
             logger.info(f"[tool-loop] Tool {tool_name} hit retry limit — injecting proceed instruction")
+            return True
+        return False
 
     # ─────────────────────────────────────────────────────────────────────
     # Main streaming methods
