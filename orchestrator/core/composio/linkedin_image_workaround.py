@@ -15,6 +15,15 @@ Credentials and tokens are cached per workspace; a workspace with no active
 credential of its own gets a clear error and no LinkedIn call is made — it never
 falls back to another workspace's credential.
 
+The caches never outlive the credential (P251-RVW-4). Every load re-reads the
+workspace's active credential: its id, ``updated_at`` and a digest of its
+encrypted data. A different credential, an edited one, or none at all drops
+the workspace's cached credential and token (``clear_workspace_cache``). This
+holds for a change made by another worker as well, because it is read from the
+database and not pushed by an in-process hook. A deactivated or deleted
+credential stops the next post before any LinkedIn call, and a replaced or
+edited one is used from the next post on.
+
 Text-only posts still go through Composio. This module only activates when
 the agent passes image file references (media_urls, images, etc.).
 
@@ -32,6 +41,7 @@ REMOVAL CHECKLIST (when Composio ships a working image post action):
 
 import asyncio
 import base64
+import hashlib
 import logging
 import time
 from ipaddress import ip_address
@@ -69,6 +79,8 @@ REFRESH_SAFETY_MARGIN_SECONDS = 60
 _creds_by_workspace: Dict[str, Dict[str, Any]] = {}
 _token_by_workspace: Dict[str, Tuple[str, float]] = {}
 _lock_by_workspace: Dict[str, asyncio.Lock] = {}
+# The credential the cached credential and token came from (_credential_version).
+_version_by_workspace: Dict[str, Tuple[int, Optional[str], str]] = {}
 
 
 class LinkedInCredentialError(ValueError):
@@ -85,10 +97,21 @@ def _workspace_key(workspace_id: Any) -> str:
 
 
 def clear_workspace_cache(workspace_id: Any) -> None:
-    """Forget a workspace's cached credential and token (e.g. after an edit)."""
+    """Forget a workspace's cached credential and token. The loader calls this
+    when the active credential is not the one they came from."""
     key = _workspace_key(workspace_id)
     _creds_by_workspace.pop(key, None)
     _token_by_workspace.pop(key, None)
+    _version_by_workspace.pop(key, None)
+
+
+def _credential_version(cred: Any) -> Tuple[int, Optional[str], str]:
+    """Identifies the credential as it is now: its id, when it was last updated,
+    and a digest of its encrypted data (which catches an edit that skipped
+    updated_at)."""
+    updated_at = cred.updated_at.isoformat() if cred.updated_at else None
+    digest = hashlib.sha256((cred.encrypted_data or "").encode("utf-8")).hexdigest()
+    return cred.id, updated_at, digest
 
 
 # ---------------------------------------------------------------------------
@@ -102,11 +125,13 @@ def _load_linkedin_credentials(workspace_id: Any) -> Dict[str, Any]:
     refresh_token (optional), organization_urn. Raises
     :class:`LinkedInCredentialError` when the workspace has no active
     credential of its own — never another workspace's.
+
+    The active credential is re-read on every call. The cached copy is returned
+    only while it is still that credential, unchanged. Otherwise the
+    workspace's cached credential and token are dropped first, so a token is
+    never paired with a credential it did not come from.
     """
     key = _workspace_key(workspace_id)
-    cached = _creds_by_workspace.get(key)
-    if cached:
-        return cached
 
     from core.database.database import SessionLocal
     from core.credentials.service import CredentialStore
@@ -134,10 +159,18 @@ def _load_linkedin_credentials(workspace_id: Any) -> Dict[str, Any]:
             .first()
         )
         if not cred:
+            clear_workspace_cache(key)
             raise LinkedInCredentialError(
                 "This workspace has no active LinkedIn Community Management credential. "
                 "Add one in Settings > Credentials."
             )
+
+        version = _credential_version(cred)
+        if _version_by_workspace.get(key, version) != version:
+            clear_workspace_cache(key)  # replaced or edited since it was cached
+        cached = _creds_by_workspace.get(key)
+        if cached and _version_by_workspace.get(key) == version:
+            return cached
 
         store = CredentialStore(db)
         data = store.get_decrypted_credential(
@@ -150,6 +183,7 @@ def _load_linkedin_credentials(workspace_id: Any) -> Dict[str, Any]:
             raise LinkedInCredentialError("LinkedIn credential missing organization_urn field")
 
         _creds_by_workspace[key] = data
+        _version_by_workspace[key] = version
         return data
     finally:
         db.close()
@@ -165,11 +199,11 @@ async def _get_access_token(http: httpx.AsyncClient, workspace_id: Any) -> str:
     lock = _lock_by_workspace.setdefault(key, asyncio.Lock())
 
     async with lock:
+        # First: a replaced, edited or removed credential drops the cached token.
+        creds = _load_linkedin_credentials(key)
         cached = _token_by_workspace.get(key)
         if cached and time.time() < cached[1]:
             return cached[0]
-
-        creds = _load_linkedin_credentials(key)
 
         if not cached:
             token = creds["access_token"]
@@ -451,7 +485,10 @@ async def execute_linkedin_image_post(
     failed: List[str] = []
 
     async with httpx.AsyncClient(timeout=60) as http:
-        token = await _get_access_token(http, workspace_id)
+        try:
+            token = await _get_access_token(http, workspace_id)
+        except LinkedInCredentialError as exc:
+            return {"success": False, "data": None, "error": str(exc)}
 
         for i, img_path in enumerate(image_paths):
             label = f"image[{i}]"

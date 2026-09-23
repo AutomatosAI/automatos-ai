@@ -15,7 +15,14 @@ LinkedIn (``httpx.MockTransport`` records every request):
   reaches LinkedIn (or anywhere);
 * workspace A's cached token is never used for workspace B;
 * no process-wide single credential or token cache remains, and all three
-  callers pass the workspace.
+  callers pass the workspace;
+* P251-RVW-4: in one process with warm caches, a credential that another worker
+  deactivates or deletes stops the next post before any LinkedIn request. A
+  replaced one posts with the new token and organisation, and an access token
+  edited in place is used from the next post on. An old credential's refreshed
+  token is never paired with its replacement. The change is made through a
+  separate connection, with no in-process hook: the loader re-reads the
+  credential and calls clear_workspace_cache.
 """
 from __future__ import annotations
 
@@ -139,6 +146,9 @@ class _LinkedIn:
         return [r for r in self.requests if r.url.host != "cdn.example.com"]
 
 
+_CACHES = (lw._creds_by_workspace, lw._token_by_workspace, lw._lock_by_workspace, lw._version_by_workspace)
+
+
 @pytest.fixture
 def env(monkeypatch):
     engine = sa.create_engine(
@@ -172,7 +182,7 @@ def env(monkeypatch):
 
     monkeypatch.setattr(database_mod, "SessionLocal", sessionmaker(bind=engine))
     monkeypatch.setattr(credential_service, "CredentialStore", _FakeStore)
-    for cache in (lw._creds_by_workspace, lw._token_by_workspace, lw._lock_by_workspace):
+    for cache in _CACHES:
         cache.clear()
 
     linkedin = _LinkedIn()
@@ -186,7 +196,7 @@ def env(monkeypatch):
     try:
         yield SimpleNamespace(engine=engine, linkedin=linkedin)
     finally:
-        for cache in (lw._creds_by_workspace, lw._token_by_workspace, lw._lock_by_workspace):
+        for cache in _CACHES:
             cache.clear()
         engine.dispose()
 
@@ -349,3 +359,119 @@ def test_the_smoke_route_is_admin_gated_and_uses_the_callers_workspace(env):
     result = asyncio.run(composio_api.test_linkedin_upload_init(ctx=ctx))
     assert result["ok"] is False and "LinkedIn" in result["error"]
     assert env.linkedin.requests == []
+
+
+# ---------------------------------------------------------------------------
+# P251-RVW-4: a changed credential never keeps posting from a warm process
+# ---------------------------------------------------------------------------
+
+ORG_A_NEW = "urn:li:organization:3003"
+REPLACEMENT = {"access_token": "token-A-new", "organization_urn": ORG_A_NEW, "client_id": "a2", "client_secret": "a2"}
+
+
+def _another_worker(env, *statements):
+    """Change the credential rows the way another worker would: on its own
+    connection and transaction, with no in-process hook."""
+    with env.engine.begin() as conn:
+        for statement in statements:
+            conn.execute(sa.text(statement))
+
+
+def _warm(env, workspace_id=WS_A):
+    """One successful post, so the workspace's credential and token are cached."""
+    assert _post_as(workspace_id)["success"] is True
+    assert str(workspace_id) in lw._creds_by_workspace and str(workspace_id) in lw._token_by_workspace
+    env.linkedin.requests.clear()
+
+
+def _replace_workspace_a_credential(env, monkeypatch):
+    monkeypatch.setitem(SECRETS, 6, dict(REPLACEMENT))
+    _another_worker(
+        env,
+        "UPDATE credentials SET is_active = 0 WHERE id = 3",
+        "INSERT INTO credentials (id, name, workspace_id, credential_type_id, encrypted_data, is_active) "
+        f"VALUES (6, 'cred-6', '{WS_A.hex}', 1, 'ciphertext-6', 1)",
+    )
+
+
+@pytest.mark.parametrize("change", [
+    "UPDATE credentials SET is_active = 0 WHERE id = 3",
+    "DELETE FROM credentials WHERE id = 3",
+])
+def test_a_deactivated_or_deleted_credential_stops_the_next_post_with_no_linkedin_request(env, change):
+    _warm(env)
+    _another_worker(env, change)
+
+    result = _post_as(WS_A)
+
+    assert result["success"] is False
+    assert "no active LinkedIn Community Management credential" in result["error"]
+    assert env.linkedin.requests == []
+    assert str(WS_A) not in lw._creds_by_workspace and str(WS_A) not in lw._token_by_workspace
+
+
+def test_a_replaced_credential_posts_with_its_own_token_and_organisation(env, monkeypatch):
+    _warm(env)
+    _replace_workspace_a_credential(env, monkeypatch)
+
+    result = _post_as(WS_A)
+
+    assert result["success"] is True, result
+    sent = env.linkedin.linkedin()
+    assert {r.headers["authorization"] for r in sent} == {"Bearer token-A-new"}
+    assert [b["initializeUploadRequest"]["owner"] for b in _bodies(sent, "initializeUpload")] == [ORG_A_NEW]
+    assert [b["author"] for b in _bodies(sent, "/rest/posts")] == [ORG_A_NEW]
+
+
+def test_an_access_token_edited_in_place_is_used_by_the_next_post(env, monkeypatch):
+    _warm(env)
+    monkeypatch.setitem(SECRETS, 3, {**SECRETS[3], "access_token": "token-A-rotated"})
+    # What CredentialStore.update_credential writes: re-encrypted data and a new updated_at.
+    _another_worker(
+        env, "UPDATE credentials SET encrypted_data = 'ciphertext-rotated', updated_at = CURRENT_TIMESTAMP WHERE id = 3",
+    )
+
+    result = _post_as(WS_A)
+
+    assert result["success"] is True, result
+    sent = env.linkedin.linkedin()
+    assert {r.headers["authorization"] for r in sent} == {"Bearer token-A-rotated"}
+    assert [b["author"] for b in _bodies(sent, "/rest/posts")] == [ORG_A]
+
+
+def test_an_old_credentials_refreshed_token_is_never_paired_with_its_replacement(env, monkeypatch):
+    _warm(env)
+    # What a token refresh leaves behind: the refreshed token cached and the credential copy dropped.
+    lw._token_by_workspace[str(WS_A)] = ("token-A-refreshed", time.time() + 3600)
+    lw._creds_by_workspace.pop(str(WS_A))
+    _replace_workspace_a_credential(env, monkeypatch)
+
+    result = _post_as(WS_A)
+
+    assert result["success"] is True, result
+    sent = env.linkedin.linkedin()
+    assert {r.headers["authorization"] for r in sent} == {"Bearer token-A-new"}
+    assert [b["author"] for b in _bodies(sent, "/rest/posts")] == [ORG_A_NEW]
+
+
+def test_an_unchanged_credential_keeps_its_cached_token(env):
+    """Only a changed credential drops the cache, not every post."""
+    _warm(env)
+    lw._token_by_workspace[str(WS_A)] = ("token-A-cached", time.time() + 3600)
+
+    assert _post_as(WS_A)["success"] is True
+
+    assert {r.headers["authorization"] for r in env.linkedin.linkedin()} == {"Bearer token-A-cached"}
+
+
+def test_the_loader_calls_clear_workspace_cache():
+    tree = ast.parse(Path(lw.__file__).read_text(encoding="utf-8"))
+    loader = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_load_linkedin_credentials"
+    )
+    called = {
+        node.func.id for node in ast.walk(loader)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "clear_workspace_cache" in called
