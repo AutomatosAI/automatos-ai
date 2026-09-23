@@ -464,6 +464,32 @@ def seed_system_settings(db: Session):
                 "options": ["rerank-v3.5", "rerank-english-v3.0", "rerank-multilingual-v3.0"]
             },
         },
+        {
+            "category": SettingCategory.EMBEDDINGS.value,
+            "key": "rag_upload_prior",
+            "default_value": "0.05",
+            "value_type": "number",
+            "description": (
+                "Retrieval: the lift the owner's own documents get over agents' "
+                "reports (0.05 = 5%), so an upload wins a near tie (F088). Only "
+                "near-equal scores change order. 0 disables."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 0.5},
+        },
+        {
+            "category": SettingCategory.EMBEDDINGS.value,
+            "key": "rag_recency_prior",
+            "default_value": "0.02",
+            "value_type": "number",
+            "description": (
+                "Retrieval: the lift the newest document among the hits gets "
+                "over the oldest (0.02 = 2%, scaled in between), so the newer "
+                "copy wins a near tie (F088). 0 disables."
+            ),
+            "is_required": False,
+            "validation_rules": {"min": 0, "max": 0.5},
+        },
     ])
 
     # =========================================================================

@@ -155,7 +155,13 @@ class RAGConfig:
     hybrid_keyword_weight: float = 0.3
     parent_child_expansion: bool = True
     expansion_window: int = 1
-    
+
+    # F088 A+B (night 3): on a near tie the owner's document beats an agent's
+    # report, and the newer document beats the older one. Multiplicative priors
+    # on the retrieval score — only near-equal scores change order; 0 disables.
+    upload_prior: float = None
+    recency_prior: float = None
+
     def __post_init__(self):
         """Load from system_settings if not provided"""
         if self.chunk_size is None:
@@ -170,6 +176,10 @@ class RAGConfig:
             self.diversity = _get_rag_setting_float("diversity_factor", 0.3)
         if self.min_similarity is None:
             self.min_similarity = _get_rag_setting_float("min_similarity", 0.5)
+        if self.upload_prior is None:
+            self.upload_prior = _get_rag_setting_float("rag_upload_prior", 0.05)
+        if self.recency_prior is None:
+            self.recency_prior = _get_rag_setting_float("rag_recency_prior", 0.02)
         
         # PRD-188 S1+S3: rerank and hybrid default ON via the canonical config
         # accessors (system_settings 'rag' group, then env). An explicit caller
@@ -437,6 +447,7 @@ class RAGService:
         # document a user marked unhelpful de-ranks (and can fall out of top-K).
         if workspace_id:
             candidates = self._apply_feedback_penalty(candidates, workspace_id)
+            candidates = self._apply_source_priors(candidates)
 
         # Parent-child context expansion (PRD-172 F005: scoped to workspace).
         candidates = await self._expand_to_parent_context(
@@ -612,6 +623,80 @@ class RAGService:
                 "[RAG] Feedback penalty de-ranked %d/%d candidates (ws=%s)",
                 demoted, len(candidates), workspace_id,
             )
+        return adjusted
+
+    # The key each stage ordered the candidates by: the reranker's, then the
+    # hybrid fusion's, then the dense leg's.
+    _ORDER_KEYS = ("rerank_score", "rrf_score", "score", "similarity")
+    _REPORT_SOURCE_TYPES = ("agent_output",)
+
+    @classmethod
+    def _order_score(cls, c: Dict) -> float:
+        for key in cls._ORDER_KEYS:
+            if isinstance(c.get(key), (int, float)):
+                return float(c[key])
+        return 0.0
+
+    @classmethod
+    def _document_ranking_facts(cls, doc_ids: List[Optional[str]]) -> Dict[str, Tuple[bool, Any]]:
+        """``{doc id: (is an agent's report, upload_date)}`` in one read. Fail-soft."""
+        ids = sorted({int(d) for d in doc_ids if d is not None and str(d).isdigit()})
+        if not ids:
+            return {}
+        from core.database.database import SessionLocal
+        from sqlalchemy import text
+
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text("SELECT id, source_type, upload_date FROM documents WHERE id = ANY(CAST(:ids AS int[]))"),
+                {"ids": ids},
+            ).fetchall()
+            return {str(r.id): (r.source_type in cls._REPORT_SOURCE_TYPES, r.upload_date) for r in rows}
+        except Exception as e:
+            logger.debug(f"source-prior read failed: {e}")
+            return {}
+        finally:
+            db.close()
+
+    def _apply_source_priors(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """F088 A+B (night 3): the owner's documents win near ties over agents'
+        reports, and newer documents over older ones.
+
+        Night 3: 408 agent reports shared the index with 166 of the owner's
+        documents, and six copies of one sheet sat side by side; near-equal
+        scores let a report or an old copy rank first, and Auto answered from
+        it. Every score key of a candidate is raised by ``upload_prior`` when
+        its document is not an agent's report, plus up to ``recency_prior`` by
+        how recently its document was uploaded among the candidates' documents
+        (newest gets it all, oldest none; a same-name replacement counts from
+        its replacement, F087) — then the candidates are re-sorted on the key the
+        last stage ordered them by. A gap wider than the priors keeps its
+        order. Immutable: returns new candidate dicts. Fail-soft.
+        """
+        upload_prior, recency_prior = self.config.upload_prior or 0.0, self.config.recency_prior or 0.0
+        if not candidates or (upload_prior <= 0 and recency_prior <= 0):
+            return candidates
+        facts = self._document_ranking_facts([self._candidate_doc_id(c) for c in candidates])
+        if not facts:
+            return candidates
+        dates = sorted({uploaded for _, uploaded in facts.values() if uploaded is not None})
+        newness = {d: (i / (len(dates) - 1) if len(dates) > 1 else 1.0) for i, d in enumerate(dates)}
+
+        adjusted: List[Dict[str, Any]] = []
+        for c in candidates:
+            fact = facts.get(self._candidate_doc_id(c) or "")
+            if fact is None:
+                adjusted.append(c)
+                continue
+            is_report, uploaded = fact
+            lift = 1.0 + (0.0 if is_report else upload_prior) + recency_prior * newness.get(uploaded, 0.0)
+            new_c = dict(c)
+            for key in self._ORDER_KEYS:
+                if isinstance(new_c.get(key), (int, float)):
+                    new_c[key] = new_c[key] * lift
+            adjusted.append(new_c)
+        adjusted.sort(key=self._order_score, reverse=True)
         return adjusted
 
     @staticmethod

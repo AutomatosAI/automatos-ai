@@ -50,13 +50,14 @@ def record_replacement(document: Any, *, file_path: str, file_size: int, content
                        replaced_by: Optional[str] = None, now: Optional[datetime] = None) -> int:
     """Point the document at its new source and keep the old one on record.
     Rebuilds ``doc_metadata`` (never mutates it). Returns the new version number."""
+    when = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     meta: Dict[str, Any] = dict(document.doc_metadata or {})
     versions: List[Dict[str, Any]] = list(meta.get("versions") or [])
     versions.append({
         "file_path": document.file_path,
         "content_hash": document.content_hash,
         "file_size": document.file_size,
-        "replaced_at": (now or datetime.now(timezone.utc)).isoformat(),
+        "replaced_at": when.isoformat(),
         "replaced_by": replaced_by,
     })
     meta.pop("kept_pct", None)              # measured again when the new text is ingested
@@ -65,6 +66,9 @@ def record_replacement(document: Any, *, file_path: str, file_size: int, content
     document.file_size = file_size
     document.content_hash = content_hash
     document.file_type = file_type
+    # A re-upload is an upload: retrieval counts "newer" from here (F088).
+    # The column is naive UTC, like the func.now() it defaults to.
+    document.upload_date = when.replace(tzinfo=None)
     document.status = "processing"
     return len(versions) + 1
 

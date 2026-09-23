@@ -32,6 +32,7 @@ def test_a_replacement_keeps_the_old_source_and_counts_the_version():
         {"file_path": "/uploads/a.csv", "content_hash": "h1", "file_size": 10, "replaced_at": when.isoformat(),
          "replaced_by": "user_2"}]}
     assert original == {"kept_pct": 37, "note": "kept"}              # rebuilt, never mutated
+    assert doc.upload_date == datetime(2026, 9, 23, 1, 0)             # a re-upload is an upload (F088)
     assert dv.record_replacement(doc, file_path="/uploads/c.csv", file_size=13, content_hash="h3",
                                  file_type="csv", now=when) == 3
 
