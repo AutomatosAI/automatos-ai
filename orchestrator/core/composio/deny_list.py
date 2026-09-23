@@ -12,7 +12,7 @@ changing plans and deploying stay with a person, in the tool's own interface.
 The list is DATA, never a code constant: the ``composio.denied_actions`` system
 setting, a JSON list of action slugs, seeded by the ``prd251_socials`` migration
 and edited by the super-admin in Settings → System Settings. It is read on every
-call (``get_system_setting``), so removing a slug unblocks it with no restart or
+call (``read_system_setting``), so removing a slug unblocks it with no restart or
 deploy. Slugs match case-insensitively.
 
 ``composio_action_denial(slug)`` is the ONE check. Every Composio execution entry
@@ -22,6 +22,10 @@ finds them by grep and holds each one to it.
 * No row, or an empty value → nothing is denied (a stack without the seed).
 * A value that is not a JSON list of strings → EVERY action is refused, with
   the reason, until it is fixed: a guard on real money fails closed.
+* A read that cannot complete (an exhausted pool, a timeout, a dropped
+  connection) → EVERY action is refused and the failure is logged at ERROR.
+  The read is strict: never ``get_system_setting``, whose catch-all returns the
+  default on any failure and would turn "could not read" into "nothing denied".
 """
 
 from __future__ import annotations
@@ -44,6 +48,10 @@ UNREADABLE_REASON = (
     "list of action slugs, so every Composio action is refused until a super-admin "
     "fixes it in Settings → System Settings."
 )
+READ_FAILED_REASON = (
+    "the Composio deny list (system setting composio.denied_actions) could not be "
+    "read, so no Composio action runs until it can be."
+)
 ERROR_TYPE_DENIED = "action_denied"
 
 
@@ -62,15 +70,28 @@ def parse_denied_actions(raw: Optional[str]) -> FrozenSet[str]:
     return frozenset(slug.strip().upper() for slug in value if slug.strip())
 
 
-def composio_action_denial(slug: Any) -> Optional[str]:
-    """``"This action is blocked in Automatos: <reason>"`` when ``slug`` may not
-    run, else ``None``. Reads the setting fresh on every call."""
+def _read_denied_actions() -> Optional[str]:
+    """The setting's stored value, ``None`` when there is no row. Raises when
+    the read cannot complete."""
     # Lazy: core.llm.manager imports every LLM provider client, and this module
     # is imported by the Composio client itself.
-    from core.llm.manager import get_system_setting
+    from core.llm.manager import read_system_setting
     from core.models.system_settings import SettingCategory
 
-    raw = get_system_setting(SettingCategory.COMPOSIO.value, KEY_DENIED_ACTIONS, None)
+    return read_system_setting(SettingCategory.COMPOSIO.value, KEY_DENIED_ACTIONS)
+
+
+def composio_action_denial(slug: Any) -> Optional[str]:
+    """``"This action is blocked in Automatos: <reason>"`` when ``slug`` may not
+    run, else ``None``. Reads the setting fresh on every call and never raises:
+    a read that cannot complete refuses the action."""
+    try:
+        raw = _read_denied_actions()
+    except Exception:  # noqa: BLE001 — any read that did not complete fails closed
+        logger.error(
+            "[ComposioDenyList] composio.denied_actions could not be read; refusing %s", slug, exc_info=True,
+        )
+        return BLOCKED_PREFIX + READ_FAILED_REASON
     try:
         denied = parse_denied_actions(raw)
     except ValueError:

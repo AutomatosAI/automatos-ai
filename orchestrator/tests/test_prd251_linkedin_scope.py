@@ -53,6 +53,7 @@ import core.credentials.service as credential_service  # noqa: E402
 import core.database.database as database_mod  # noqa: E402
 from core.auth.dependencies import RequestContext, UserContext  # noqa: E402
 from core.models.credentials import Credential, CredentialType  # noqa: E402
+from core.models.system_settings import SystemSetting  # noqa: E402
 
 WS_A = uuid.uuid4()
 WS_B = uuid.uuid4()
@@ -147,6 +148,10 @@ def env(monkeypatch):
     _sqlite_copy(CredentialType.__table__, copies)
     _sqlite_copy(Credential.__table__, copies)
     copies.create_all(engine)
+    # Every real database has system_settings. The smoke route reads the Composio
+    # deny list first (no row here → nothing denied); without the table that read
+    # cannot complete, and the deny list fails closed (P251-RVW-1).
+    SystemSetting.__table__.create(bind=engine)
     with engine.begin() as conn:
         for type_id, name in ((1, lw.CREDENTIAL_TYPE_NAME), (2, "openAiApi")):
             conn.execute(

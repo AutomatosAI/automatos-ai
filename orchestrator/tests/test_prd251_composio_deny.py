@@ -8,9 +8,12 @@ the policy plane ships ``off``. Pinned here, with the policy plane OFF:
 * the list is DATA — the ``composio.denied_actions`` system setting, seeded by
   the one PRD-251 migration with the eight D16 slugs and visible to the
   super-admin in Settings → System Settings; no slug is a code constant;
-* the real read path (``get_system_setting`` → ``system_settings`` on SQLite):
+* the real read path (``read_system_setting`` → ``system_settings`` on SQLite):
   removing a slug unblocks it on the next call, no restart; matching is
   case-insensitive; no row denies nothing; a malformed value fails CLOSED;
+* a read that cannot complete — a pool that cannot hand out a session, a query
+  that raises, a missing table — fails CLOSED for every action, logged at
+  ERROR: "could not read" is never taken for "nothing denied" (P251-RVW-1);
 * every Composio execution entry point refuses a denied slug with "This action
   is blocked in Automatos: <reason>" and the (mocked) Composio SDK / HTTP call is
   never made — the Composio client, the agent executor and the three agent tool
@@ -55,6 +58,7 @@ import importlib.util  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import exc as sa_exc  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
@@ -111,7 +115,7 @@ def policy_plane_off(monkeypatch):
 
 @pytest.fixture
 def settings_db(monkeypatch):
-    """get_system_setting → SessionLocal → an in-memory system_settings table,
+    """read_system_setting → SessionLocal → an in-memory system_settings table,
     seeded exactly as the migration seeds it."""
     engine = _settings_engine()
     monkeypatch.setattr(database_mod, "SessionLocal", sessionmaker(bind=engine))
@@ -320,6 +324,113 @@ def test_the_refusal_names_the_slug_and_the_reason(settings_db):
     denial = deny_list.composio_action_denial(BILLING)
     assert denial == BLOCKED + deny_list.DENIED_REASON.format(slug=BILLING)
     assert "stay with a person" in denial
+
+
+# ---------------------------------------------------------------------------
+# A read that cannot complete refuses every action (P251-RVW-1)
+# ---------------------------------------------------------------------------
+
+READ_FAILED = BLOCKED + deny_list.READ_FAILED_REASON
+
+
+def _pool_exhausted():
+    raise sa_exc.TimeoutError("QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00")
+
+
+class _DroppedConnection:
+    """A SessionLocal whose sessions fail every query as a dropped connection does."""
+
+    def __init__(self):
+        self.sessions = []
+
+    def __call__(self):
+        session = MagicMock(name="session")
+        session.query.side_effect = sa_exc.OperationalError(
+            "SELECT system_settings.value", {}, Exception("server closed the connection unexpectedly"),
+        )
+        self.sessions.append(session)
+        return session
+
+
+@pytest.fixture(params=["SessionLocal raises", "the query raises", "the table is missing"])
+def unreadable_settings(request, monkeypatch):
+    """The deny list cannot be read: SessionLocal itself raises (an exhausted
+    pool), the session's query raises (a dropped connection), or the real query
+    runs against a database without system_settings."""
+    engine = None
+    dropped = None
+    if request.param == "SessionLocal raises":
+        monkeypatch.setattr(database_mod, "SessionLocal", _pool_exhausted)
+    elif request.param == "the query raises":
+        dropped = _DroppedConnection()
+        monkeypatch.setattr(database_mod, "SessionLocal", dropped)
+    else:
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        monkeypatch.setattr(database_mod, "SessionLocal", sessionmaker(bind=engine))
+    yield request.param
+    if dropped is not None:
+        assert dropped.sessions and all(session.close.called for session in dropped.sessions)  # nothing leaks
+    if engine is not None:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("slug", [BILLING, "SLACK_SEND_MESSAGE"])
+def test_a_read_that_cannot_complete_refuses_every_action_and_logs_at_error(unreadable_settings, monkeypatch, slug):
+    logger = MagicMock(name="logger")
+    monkeypatch.setattr(deny_list, "logger", logger)
+
+    assert deny_list.composio_action_denial(slug) == READ_FAILED
+
+    logger.error.assert_called_once()
+    assert "could not be read" in logger.error.call_args.args[0]
+    assert logger.error.call_args.kwargs["exc_info"] is True
+
+
+def test_the_composio_client_refuses_when_the_list_cannot_be_read(unreadable_settings):
+    sdk = _sdk()
+
+    result = _client(sdk).execute_action(BILLING, {"amount": 100}, "entity-1")
+
+    assert result == {"success": False, "data": None, "error": READ_FAILED, "error_type": "action_denied"}
+    sdk.tools.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_agent_executor_refuses_when_the_list_cannot_be_read(unreadable_settings):
+    sdk = _sdk()
+    db = MagicMock(name="db")
+    executor = ComposioToolExecutor(db=db, client=_client(sdk))
+
+    result = await executor.execute(
+        action=BILLING, params={"amount": 100}, agent_id=1, workspace_id=uuid.uuid4(),
+    )
+
+    assert result["success"] is False and result["error_type"] == "action_denied"
+    assert result["error"] == READ_FAILED and result["action"] == BILLING
+    db.query.assert_not_called()  # no access validation ran
+    sdk.tools.execute.assert_not_called()
+
+
+def test_the_strict_read_tells_no_row_from_a_failed_read_and_other_callers_keep_their_default(monkeypatch):
+    from core.llm.manager import get_system_setting, read_system_setting
+
+    engine = _settings_engine()
+    monkeypatch.setattr(database_mod, "SessionLocal", sessionmaker(bind=engine))
+    try:
+        assert read_system_setting("composio", "denied_actions") is None  # no row: not a failure
+        assert get_system_setting("composio", "denied_actions", "fallback") == "fallback"
+        _mod = _load_migration()
+        with engine.begin() as conn:
+            _mod._seed_settings(conn, _mod._composio_settings_seed())
+        assert json.loads(read_system_setting("composio", "denied_actions")) == D16
+    finally:
+        engine.dispose()
+
+    monkeypatch.setattr(database_mod, "SessionLocal", _pool_exhausted)
+    with pytest.raises(sa_exc.TimeoutError):
+        read_system_setting("composio", "denied_actions")
+    # The lenient wrapper every other setting reader uses is unchanged: a failed read is its default.
+    assert get_system_setting("composio", "denied_actions", "fallback") == "fallback"
 
 
 # ---------------------------------------------------------------------------
