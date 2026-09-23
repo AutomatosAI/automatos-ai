@@ -50,7 +50,8 @@ Each theme is a brief file under `scripts/ralph/customer-night/nights/<theme>.md
 | # | theme | the customer's evening | measured | needs |
 |---|---|---|---|---|
 | 1 | **General** (done 18 Sep) | hire, delegate, review, weird asks | baseline for everything | — |
-| 2 | **Regression of night 1** | the same evening after the first fixes | the delta: same findings gone? new ones? | fixes for: agents can't read the knowledge base; raw-command holds; stats tiles; reports panel; Answer button |
+| 2 | **Regression of night 1** | the same evening after the first fixes | the delta: same findings gone? new ones? |
+| 2b | **Noise floor** (nobody has this number) | the same evening, the same brief, **the same build as the night before it — nothing changed at all** | run-to-run variance of every ledger column: tickets done, cost, tokens per turn, tool calls, grades. Until this exists, no night-over-night delta can be called a change rather than scatter. Cheapest useful night in the programme; run it once early, then after any big platform shift | a night where the operator changes nothing — hardest part is the discipline, not the code | fixes for: agents can't read the knowledge base; raw-command holds; stats tiles; reports panel; Answer button |
 | 3 | **Knowledge** | upload 10–20 real-shaped documents (CSV, MD, PDF), ask Auto and agents questions only the documents answer, contradict a document and ask again, update one and ask again | retrieval hit rate, wrong answers, ingestion cost per document (night 1: $3.81 of graph extraction nobody asked for), does the knowledge graph build and does it help | `GET /api/knowledge/graph` reads; Harbourline corpus in `~/.automatos-sim/` |
 | 4 | **Playbooks** | install playbooks from the marketplace, ask Auto to make one, run them, schedule one, break one on purpose | run success, step timing, what a failed step tells the owner | there are 0 playbooks in the workspace today |
 | 5 | **Missions + shared field memory** | three missions of increasing size; explicit staffing instructions ("the words to the writer"); the second mission needs facts the first one learned | plan quality, assignment obeys the owner, approval flow, synthesis, deliverables per mission; **shared field memory (PRD-166, Qdrant `field_memory`, on since 18 Sep 21:06): facts written per mission, promoted to durable, recalled by a *different* agent in the next mission, recall hit rate, wrong recalls** — the follow-up numbers for Gerard's field-memory paper | night 1 found assignment ignored the instruction; memory was off until 21:06; **the PRD-245 bridge must first give sessions the mission tools and field-memory read+write (night 1: sessions wrote 0 field-memory points on a 9-task mission while API agents wrote 3) — Gerard: "missions are my most powerful tool"** |
@@ -77,6 +78,19 @@ Gerard has a stand. Between now and then the programme has to *prove* the differ
 - Cadence: ~50 nights available; one theme a night, a regression night after each round of fixes, the collective night at least three times (early, mid, final) so the slide shows a trend, not a point.
 
 ## Rules that hold every night
+
+- **The running stack hot-reloads the checkout. A commit during a night is a deploy.** The backend runs
+  `uvicorn --reload` over a bind mount of `automatos-ai/orchestrator`, so a commit (or any edit) in
+  Gerard's checkout goes live inside seconds, under whatever sessions are mid-turn. Two consequences,
+  learned 2026-09-18/19: a fix lands without a restart (night 2 ran on the fixed build with no
+  redeploy), and **editing that checkout while a night runs corrupts the night** — the same class of
+  damage as restarting the host mid-run (night 1's "180 ms cancellation sweep"). During a night:
+  work in a worktree, never commit to the checkout, never restart backend/host/frontend until
+  `night.status` shows `FINISHED`.
+- **One night, one variable, wherever the night is meant to measure something.** A night that changes
+  the model *and* the runtime *and* twenty fixes answers "did the findings recur?" well and "what did
+  each fix buy?" not at all. Themed nights may carry a fix wave; comparison nights (8/9, 11, 2b) may
+  not.
 
 - Runtime **subscription session agents** for the team until the hybrid night (Gerard, 18 Sep). API agents only where the theme needs them.
 - The persona's guardrails: everything tagged `sim-night-<date>`; nothing untagged touched; drafts only on connected apps; no code, git, Docker, database; a spend stop per night.
