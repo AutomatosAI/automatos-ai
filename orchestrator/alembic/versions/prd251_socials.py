@@ -151,7 +151,24 @@ def _seed_settings(conn, rows) -> None:
         )
 
 
+def _has_table(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
+def _create_missing_indexes(table: str, indexes) -> None:
+    existing = {ix["name"] for ix in sa.inspect(op.get_bind()).get_indexes(table)}
+    for name, columns in indexes:
+        if name not in existing:
+            op.create_index(name, table, columns)
+
+
 def _create_social_posts() -> None:
+    # A create_all-first boot (a backend that loaded these models before this
+    # migration ran) has already built the table and its indexes from the model.
+    # Keep it and add only what is missing, like the other idempotent revisions.
+    if _has_table("social_posts"):
+        _create_missing_indexes("social_posts", POST_INDEXES)
+        return
     op.create_table(
         "social_posts",
         sa.Column("id", _uuid(), primary_key=True),
@@ -190,6 +207,9 @@ def _create_social_posts() -> None:
 
 
 def _create_social_post_targets() -> None:
+    if _has_table("social_post_targets"):
+        _create_missing_indexes("social_post_targets", TARGET_INDEXES)
+        return
     op.create_table(
         "social_post_targets",
         sa.Column("id", _uuid(), primary_key=True),
