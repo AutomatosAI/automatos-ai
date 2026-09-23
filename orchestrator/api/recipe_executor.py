@@ -1336,30 +1336,21 @@ async def _execute_recipe_inner(
         except Exception as exc:
             logger.info("[recipe_direct] Mem0 memory retrieval skipped: %s", exc)
 
-        # Read timeout config from execution_config
-        # Values may be stored in ms (>=10000) or seconds (<10000) depending on
-        # when the recipe was created. Normalise to seconds.
-        # Threshold: 10000+ is clearly ms (e.g. 120000ms=120s).
-        # Values like 1200 are valid seconds (20min), NOT milliseconds.
+        # F125: execution_config holds seconds. No unit is guessed from the size;
+        # only the floors apply (core/services/playbook_timeouts.py).
         exec_config = recipe.execution_config or {}
 
         from config import config as app_config
+        from core.services.playbook_timeouts import step_timeout_seconds, total_timeout_seconds
 
-        raw_step = (
-            exec_config.get('timeout_per_step')
-            or exec_config.get('per_step_timeout')
-            or app_config.PLAYBOOK_DEFAULT_STEP_TIMEOUT_SECONDS
-        )
-        raw_total = exec_config.get('total_timeout') or app_config.PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS
+        raw_step = step_timeout_seconds(exec_config, app_config.PLAYBOOK_DEFAULT_STEP_TIMEOUT_SECONDS)
+        raw_total = total_timeout_seconds(exec_config, app_config.PLAYBOOK_DEFAULT_TOTAL_TIMEOUT_SECONDS)
 
-        step_timeout_sec = raw_step / 1000 if raw_step >= 10000 else raw_step   # ms → s
-        total_timeout_sec = raw_total / 1000 if raw_total >= 10000 else raw_total
-
-        step_timeout_sec = max(step_timeout_sec, app_config.PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS)
-        total_timeout_sec = max(total_timeout_sec, app_config.PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS)
+        step_timeout_sec = max(raw_step, app_config.PLAYBOOK_MIN_STEP_TIMEOUT_SECONDS)
+        total_timeout_sec = max(raw_total, app_config.PLAYBOOK_MIN_TOTAL_TIMEOUT_SECONDS)
         logger.info(
             f"[recipe_direct] Timeouts: step={step_timeout_sec:.0f}s, "
-            f"total={total_timeout_sec:.0f}s (raw: step={raw_step}, total={raw_total})"
+            f"total={total_timeout_sec:.0f}s (configured: step={raw_step:.0f}s, total={raw_total:.0f}s)"
         )
 
         # Execute each step sequentially

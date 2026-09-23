@@ -61,7 +61,9 @@ _COMPOSE = _REPO / "docker-compose.yml"
 # tables PRD-209's schema retirement dropped from every fresh install.
 # 2026-09-22: llm_usage_agent_name chains onto it — a usage row keeps the name of
 # the agent that spent it once the agent is deleted (F049).
-EXPECTED_HEAD = "llm_usage_agent_name"
+# 2026-09-23: f125_playbook_timeouts_seconds chains onto that — legacy millisecond
+# playbook timeouts become seconds once (F125).
+EXPECTED_HEAD = "f125_playbook_timeouts_seconds"
 
 
 def _literal(node: ast.AST):

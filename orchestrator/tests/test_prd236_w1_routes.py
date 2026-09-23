@@ -191,7 +191,11 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # spend keeps its name); the guard follows it.
     named = (versions / "llm_usage_agent_name.py").read_text()
     assert 'down_revision = "kb_multimodal_tables"' in named
-    assert 'EXPECTED_HEAD = "llm_usage_agent_name"' in guard
+    # 2026-09-23: f125_playbook_timeouts_seconds chains onto that (F125 — legacy
+    # millisecond playbook timeouts become seconds once); the guard follows it.
+    seconds = (versions / "f125_playbook_timeouts_seconds.py").read_text()
+    assert 'down_revision = "llm_usage_agent_name"' in seconds
+    assert 'EXPECTED_HEAD = "f125_playbook_timeouts_seconds"' in guard
 
 
 def test_orm_row_is_keyed_by_route():
