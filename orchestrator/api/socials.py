@@ -11,8 +11,14 @@ post is a 404. Review actions (approve, request changes, reject) need
 ``socials:approve`` (D6); other writes mirror ``api/blog.py``.
 
 The lifecycle lives in ``modules/socials/service.py``; this module maps its
-errors: IllegalTransition → 409, UnsourcedClaims → 422 (naming the claims),
-NotPublishable → 409, PublishingUnavailable → 501, InvalidPost → 422.
+errors: IllegalTransition → 409, StaleContent → 409 (giving the current
+``content_hash``), UnsourcedClaims → 422 (naming the claims), NotPublishable →
+409, PublishingUnavailable → 501, InvalidPost → 422.
+
+An approval binds to the content the approver saw (D6): the approve request
+carries that version's ``content_hash``, and the write is a compare-and-set on
+the post's status and hash (``service.claim_unchanged``). A post that changed
+before the click, or while the request runs, answers 409 and is not written.
 """
 
 from __future__ import annotations
@@ -89,6 +95,8 @@ class UpdateSocialPostRequest(_Strict):
 
 
 class ApproveRequest(_Strict):
+    # The hash of the version the approver was shown (the post's content_hash).
+    content_hash: str = Field(..., pattern=service.CONTENT_HASH_PATTERN)
     override_unsourced: bool = False
     comment: Optional[str] = None
 
@@ -122,6 +130,8 @@ def _actor(ctx: RequestContext) -> str:
 def _raise_for(exc: service.SocialsError) -> NoReturn:
     if isinstance(exc, service.UnsourcedClaims):
         raise HTTPException(status_code=422, detail={"message": str(exc), "claims": exc.names})
+    if isinstance(exc, service.StaleContent):
+        raise HTTPException(status_code=409, detail={"message": str(exc), "content_hash": exc.current_hash})
     if isinstance(exc, PublishingUnavailable):
         raise HTTPException(status_code=501, detail=str(exc))
     if isinstance(exc, (service.IllegalTransition, service.NotPublishable)):
@@ -260,18 +270,28 @@ async def submit_social_post(
 @router.post("/posts/{post_id}/approve", dependencies=[CAN_REVIEW])
 async def approve_social_post(
     post_id: UUID,
-    body: Optional[ApproveRequest] = None,
+    body: ApproveRequest,
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid),
 ):
-    body = body or ApproveRequest()
+    """Approve the version the reviewer saw (D6). ``content_hash`` differs from
+    the post's → 409 with the current hash. An edit another worker commits
+    after the load is caught by the compare-and-set → the same 409, nothing
+    written."""
     post = _load(db, ctx, post_id)
     try:
         service.approve(
-            post, _actor(ctx), override_unsourced=body.override_unsourced, comment=body.comment
+            post,
+            _actor(ctx),
+            content_hash=body.content_hash,
+            override_unsourced=body.override_unsourced,
+            comment=body.comment,
         )
     except service.SocialsError as exc:
         _raise_for(exc)
+    if not service.claim_unchanged(db, post, status=service.NEEDS_APPROVAL, content_hash=body.content_hash):
+        db.rollback()
+        _raise_for(service.StaleContent(service.compute_content_hash(_load(db, ctx, post_id))))
     return _save(db, post)
 
 

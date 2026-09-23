@@ -637,7 +637,8 @@ class ApiClient {
             'Make sure you are signed in and the API client is configured with Clerk.'
           )
         }
-        throw new Error(detail || `HTTP ${response.status}`)
+        // The status rides the error, so a caller can tell a conflict (409) from a failure.
+        throw Object.assign(new Error(detail || `HTTP ${response.status}`), { status: response.status })
       }
 
       // Handle empty bodies (204 No Content, or any successful response with no body)
@@ -2537,10 +2538,12 @@ class ApiClient {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/submit`, { method: 'POST' })
   }
 
-  async approveSocialPost(postId: string, comment?: string): Promise<SocialPost> {
+  /** Approve the version the reviewer saw (D6): `contentHash` is that version's
+   * `content_hash`. A post that changed since answers 409. */
+  async approveSocialPost(postId: string, contentHash: string, comment?: string): Promise<SocialPost> {
     return this.request<SocialPost>(`/api/socials/posts/${postId}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ comment: comment || null }),
+      body: JSON.stringify({ content_hash: contentHash, comment: comment || null }),
     })
   }
 

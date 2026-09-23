@@ -11,6 +11,9 @@ stubbed. Pins:
 * D6 — PATCH of an approved post's copy returns it in needs_approval with a new
   content_hash; publish-now on a stale approval is 409 and the Composio executor
   is never called; a valid approval reaches the Wave 0 seam and answers 501;
+* D6 — approve carries the content_hash the reviewer saw: a post edited since
+  is 409 with the current hash and stays unapproved, and so is an edit another
+  worker commits while the approve request runs (the compare-and-set);
 * D7 — approve with an unsourced claim is 422 naming it; the override is 200
   and recorded;
 * ``socials:approve`` — a viewer gets 403, an editor 200;
@@ -51,6 +54,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 import api.socials as socials_api  # noqa: E402
+import modules.socials.service as socials_service  # noqa: E402
 import core.auth.workspace_permission as permission_mod  # noqa: E402
 import modules.socials.publisher as publisher  # noqa: E402
 import modules.socials.settings as socials_settings  # noqa: E402
@@ -161,8 +165,9 @@ def _post(api, post_id, action, body=None):
 
 def _approved(api, **body):
     post = _create(api, **body)
-    assert _post(api, post["id"], "submit").status_code == 200
-    resp = _post(api, post["id"], "approve", {})
+    submitted = _post(api, post["id"], "submit")
+    assert submitted.status_code == 200
+    resp = _post(api, post["id"], "approve", {"content_hash": submitted.json()["content_hash"]})
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -184,7 +189,7 @@ def _url(path, post_id):
 _VALID_BODY = {
     ("POST", "/api/socials/posts"): {"title": "T"},
     ("PATCH", "/api/socials/posts/{post_id}"): {"title": "Renamed"},
-    ("POST", "/api/socials/posts/{post_id}/approve"): {},
+    ("POST", "/api/socials/posts/{post_id}/approve"): {"content_hash": "0" * 64},
     ("POST", "/api/socials/posts/{post_id}/request-changes"): {"comment": "Change it"},
     ("POST", "/api/socials/posts/{post_id}/reject"): {"reason": "No"},
     ("POST", "/api/socials/posts/{post_id}/schedule"): {"scheduled_for": FUTURE_SLOT},
@@ -401,8 +406,106 @@ def test_publish_now_on_a_valid_approval_answers_501_in_wave_0(api, monkeypatch)
 
 def test_an_illegal_transition_is_409(api):
     post = _create(api)
-    resp = _post(api, post["id"], "approve", {})
+    resp = _post(api, post["id"], "approve", {"content_hash": post["content_hash"]})
     assert resp.status_code == 409 and "draft" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# D6 — the approval binds to the version the reviewer saw (P251-RVW-2)
+# ---------------------------------------------------------------------------
+
+
+def _get(api, post_id):
+    resp = api.client.get(f"/api/socials/posts/{post_id}")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _row(api, post_id):
+    """The post as committed, read through a session of its own."""
+    session = sessionmaker(bind=api.session.get_bind())()
+    try:
+        return session.get(SocialPost, uuid.UUID(post_id)).to_dict()
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("body", [{}, {"content_hash": ""}, {"content_hash": "not-a-hash"}, {"content_hash": "A" * 64}])
+def test_approve_requires_the_content_hash_the_reviewer_saw(api, body):
+    post = _create(api)
+    _post(api, post["id"], "submit")
+    assert _post(api, post["id"], "approve", body).status_code == 422
+    assert _get(api, post["id"])["status"] == "needs_approval"
+
+
+def test_approve_with_a_hash_the_post_no_longer_has_is_409_and_changes_nothing(api):
+    post = _create(api)
+    assert _post(api, post["id"], "submit").status_code == 200
+    seen = _get(api, post["id"])  # what the reviewer has on screen
+    h1 = seen["content_hash"]
+
+    edited = api.client.patch(f"/api/socials/posts/{post['id']}", json={"copy": {"base": "Edited after the reviewer opened it."}})
+    assert edited.status_code == 200
+    h2 = edited.json()["content_hash"]
+    assert edited.json()["status"] == "needs_approval" and h2 != h1
+    before = _get(api, post["id"])
+
+    stale = _post(api, post["id"], "approve", {"content_hash": h1})
+
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["content_hash"] == h2
+    assert "changed since you opened it" in stale.json()["detail"]["message"]
+    after = _get(api, post["id"])
+    for field in ("status", "approved_hash", "approved_by", "approved_at", "review_log", "content_hash"):
+        assert after[field] == before[field], field
+    assert after["status"] == "needs_approval" and after["approved_hash"] is None
+
+    current = _post(api, post["id"], "approve", {"content_hash": h2})
+    assert current.status_code == 200, current.text
+    assert current.json()["status"] == "approved"
+    assert current.json()["approved_hash"] == h2 == current.json()["content_hash"]
+
+
+def test_an_edit_committed_while_the_approve_runs_is_409_and_the_post_is_not_approved(api, monkeypatch):
+    """A second session (another worker) commits a PATCH after the approve route
+    has loaded the post and before it commits: the compare-and-set refuses it."""
+    post = _create(api)
+    assert _post(api, post["id"], "submit").status_code == 200
+    h1 = _get(api, post["id"])["content_hash"]
+
+    other_worker = sessionmaker(bind=api.session.get_bind())()
+    real_get_post = socials_service.get_post
+    edits = []
+
+    def load_then_another_worker_edits(db, workspace_id, post_id):
+        loaded = real_get_post(db, workspace_id, post_id)
+        if not edits:  # once: right after the approve route's load
+            row = other_worker.get(SocialPost, post_id)
+            socials_service.update_post(row, "editor-2", {"copy": {"base": "Edited by another worker."}})
+            edits.append(row.content_hash)
+            other_worker.commit()
+        return loaded
+
+    monkeypatch.setattr(socials_service, "get_post", load_then_another_worker_edits)
+    try:
+        resp = _post(api, post["id"], "approve", {"content_hash": h1, "comment": "Looks right"})
+    finally:
+        other_worker.close()
+
+    assert edits, "the concurrent edit never ran"
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["content_hash"] == edits[0] != h1
+    row = _row(api, post["id"])
+    assert row["status"] == "needs_approval"
+    assert (row["approved_hash"], row["approved_by"], row["approved_at"]) == (None, None, None)
+    assert row["content_hash"] == edits[0]
+    assert row["copy"] == {"base": "Edited by another worker."}
+    assert [entry["action"] for entry in row["review_log"]] == ["submit"]
+
+    # The reviewer, now shown the edit, can approve it.
+    resp = _post(api, post["id"], "approve", {"content_hash": edits[0]})
+    assert resp.status_code == 200, resp.text
+    assert _row(api, post["id"])["approved_hash"] == edits[0]
 
 
 def test_schedule_and_unschedule(api):
@@ -431,12 +534,12 @@ def test_approve_with_an_unsourced_claim_is_422_naming_it_then_the_override_is_r
     post = _create(api, variables={"users": {"value": 1200, "claim": True}})
     assert _post(api, post["id"], "submit").status_code == 200
 
-    resp = _post(api, post["id"], "approve", {})
+    resp = _post(api, post["id"], "approve", {"content_hash": post["content_hash"]})
     assert resp.status_code == 422
     assert resp.json()["detail"]["claims"] == ["users"]
     assert "users" in resp.json()["detail"]["message"]
 
-    resp = _post(api, post["id"], "approve", {"override_unsourced": True})
+    resp = _post(api, post["id"], "approve", {"content_hash": post["content_hash"], "override_unsourced": True})
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "approved" and body["override_unsourced"] is True
@@ -462,7 +565,7 @@ def test_an_editor_can_approve(api):
     _post(api, post["id"], "submit")
     api.role = "editor"
     api.ctx = _ctx(WS_A, "editor-1")
-    resp = _post(api, post["id"], "approve", {})
+    resp = _post(api, post["id"], "approve", {"content_hash": post["content_hash"]})
     assert resp.status_code == 200
     assert resp.json()["approved_by"] == "editor-1"
 

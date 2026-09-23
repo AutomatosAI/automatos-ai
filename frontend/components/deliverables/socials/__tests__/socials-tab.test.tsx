@@ -2,12 +2,13 @@
  * PRD-251 S0.5 — the Socials tab body against a mocked apiClient that applies
  * the S0.3 rules: the status machine (TRANSITIONS), the content hash, and D6 —
  * a content edit to an approved post voids the approval and sends it back to
- * needs_approval. The workspace comes through the REAL WorkspaceProvider (its
+ * needs_approval, and approve takes the content_hash of the version on screen
+ * (a post changed since answers 409). The workspace comes through the REAL WorkspaceProvider (its
  * GET /api/workspaces/current is the only stubbed fetch), so turning Socials on
  * is proven to refetch the workspace and swap the card for the list in place.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const server = vi.hoisted(() => ({
@@ -94,17 +95,24 @@ vi.mock('@/lib/api-client', () => {
       })
     }),
     submitSocialPost: vi.fn(async (id: string) => move(id, 'submit')),
-    approveSocialPost: vi.fn(async (id: string) =>
-      move(id, 'approve', null, (p) => ({ approved_hash: p.content_hash, approved_by: 'user-1', approved_at: tick() }))),
+    approveSocialPost: vi.fn(async (id: string, contentHash: string) => {
+      // D6: only the version the reviewer saw is approved; a post changed since is a 409.
+      if (find(id).content_hash !== contentHash) {
+        throw Object.assign(new Error('the post changed since you opened it'), { status: 409 })
+      }
+      return move(id, 'approve', null, (p) => ({ approved_hash: p.content_hash, approved_by: 'user-1', approved_at: tick() }))
+    }),
     requestSocialPostChanges: vi.fn(async (id: string, comment: string) => move(id, 'request_changes', comment)),
     rejectSocialPost: vi.fn(async (id: string) => move(id, 'reject')),
   }
   return { apiClient, default: apiClient }
 })
 
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 import { WorkspaceProvider, useWorkspace } from '@/components/workspace-provider'
 import { SocialsTab } from '@/components/deliverables/socials/socials-tab'
+import { SOCIAL_POST_CHANGED_MESSAGE } from '@/hooks/use-socials-api'
 
 const api = apiClient as unknown as Record<string, ReturnType<typeof vi.fn>>
 
@@ -117,6 +125,9 @@ const currentWorkspace = vi.fn(async () => ({
   }),
 }))
 
+const contentHashOf = (p: any) =>
+  JSON.stringify([p.copy ?? {}, p.variables ?? {}, p.sources ?? {}, p.format ?? null, p.template_id ?? null, p.media ?? {}])
+
 function seedPost(overrides: Record<string, unknown>) {
   const at = new Date(Date.UTC(2026, 8, 22, 9, 0, server.posts.length)).toISOString()
   const post: any = {
@@ -126,7 +137,7 @@ function seedPost(overrides: Record<string, unknown>) {
     override_unsourced: false, review_log: [], scheduled_for: null, timezone: null,
     created_at: at, updated_at: at, ...overrides,
   }
-  post.content_hash = JSON.stringify([post.copy, post.variables, post.sources, post.format, post.template_id, post.media])
+  post.content_hash = contentHashOf(post)
   server.posts = [...server.posts, post]
   return post
 }
@@ -158,6 +169,8 @@ beforeEach(() => {
   server.posts = []
   server.clock = 0
   Object.values(api).forEach((fn) => fn.mockClear())
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.error).mockClear()
   currentWorkspace.mockClear()
   vi.stubGlobal('fetch', currentWorkspace)
 })
@@ -250,6 +263,7 @@ describe('Socials on', () => {
     fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Approve' }))
     await screen.findByRole('heading', { name: 'Approved 1' })
     expect(statusOf('Launch week teaser')).toHaveTextContent('Approved')
+    expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, post.content_hash)
     expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
 
     fireEvent.change(within(detail('Launch week teaser')).getByLabelText('Copy'), { target: { value: 'v2, sharper' } })
@@ -261,6 +275,34 @@ describe('Socials on', () => {
     expect(api.updateSocialPost).toHaveBeenCalledWith(post.id, { copy: { base: 'v2, sharper' } })
     expect(server.posts[0].approved_hash).not.toBe(server.posts[0].content_hash)
     expect(within(detail('Launch week teaser')).getByText('Approval voided by an edit')).toBeInTheDocument()
+  })
+
+  it('Approve sends the hash of the version on screen; a 409 (changed since) toasts and refetches the posts', async () => {
+    const post = seedPost({ title: 'Launch week teaser', status: 'needs_approval', copy: { base: 'v1' } })
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: /Launch week teaser/ }))
+    expect(within(detail('Launch week teaser')).getByLabelText('Copy')).toHaveValue('v1')
+
+    // Another editor changes the copy on the server; this screen still shows v1 (the list is cached).
+    const edited = { ...server.posts[0], copy: { base: 'v2 from another editor' } }
+    server.posts = [{ ...edited, content_hash: contentHashOf(edited) }]
+    const fetches = api.listSocialPosts.mock.calls.length
+
+    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Approve' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(SOCIAL_POST_CHANGED_MESSAGE))
+    expect(api.approveSocialPost).toHaveBeenCalledWith(post.id, post.content_hash)
+    await waitFor(() => expect(api.listSocialPosts.mock.calls.length).toBeGreaterThan(fetches))
+    expect(await within(detail('Launch week teaser')).findByDisplayValue('v2 from another editor')).toBeInTheDocument()
+    expect(statusOf('Launch week teaser')).toHaveTextContent('Needs approval')
+    expect(server.posts[0].approved_hash).toBeNull()
+    expect(toast.success).not.toHaveBeenCalled()
+
+    // Now shown the edit, the reviewer approves exactly it.
+    fireEvent.click(within(detail('Launch week teaser')).getByRole('button', { name: 'Approve' }))
+    await screen.findByRole('heading', { name: 'Approved 1' })
+    expect(api.approveSocialPost).toHaveBeenLastCalledWith(post.id, server.posts[0].content_hash)
+    expect(server.posts[0].approved_hash).toBe(server.posts[0].content_hash)
   })
 
   it('request changes takes a comment and moves the post to Changes requested', async () => {

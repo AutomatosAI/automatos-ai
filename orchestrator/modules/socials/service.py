@@ -7,9 +7,16 @@
   Rendering, publishing, missed and failed arrive with their waves.
 * **The content hash (D6).** ``compute_content_hash`` is sha256 over canonical
   JSON of what is published: copy, variables, sources, format, template_id and
-  media. An approval binds to it. Any content edit changes it, so an approved
-  or scheduled post goes back to needs_approval and its approval is void,
-  because ``approved_hash`` no longer matches.
+  media. An approval binds to it: the approver sends the hash of the version
+  they were shown, and a post whose content has changed since refuses the
+  approval (:class:`StaleContent`, carrying the current hash). Any content edit
+  changes the hash, so an approved or scheduled post goes back to
+  needs_approval and its approval is void, because ``approved_hash`` no longer
+  matches.
+* **The write guard.** ``claim_unchanged`` is a compare-and-set on the row:
+  the approval is written only if the post still has the status and hash the
+  request checked, so an edit another worker commits mid-request is never
+  approved.
 * **Facts carry sources (D7).** A variable marked ``claim: true`` needs an entry
   in ``sources``. ``approve`` refuses unsourced claims unless the approver
   overrides, and the override is stored and named in ``review_log``.
@@ -29,7 +36,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 
 from core.models.socials import SOCIAL_POST_FORMATS, SocialPost
 
@@ -86,6 +93,9 @@ SOURCE_KINDS = ("deliverable", "report", "document", "url", "metric")
 TITLE_MAX_CHARS = 500
 COMMENT_MAX_CHARS = 2000
 
+# compute_content_hash's output: sha256, lowercase hex.
+CONTENT_HASH_PATTERN = r"^[0-9a-f]{64}$"
+
 
 # ── errors ──────────────────────────────────────────────────────────────────
 class SocialsError(Exception):
@@ -117,6 +127,16 @@ class NotPublishable(SocialsError):
     def __init__(self, reason: str):
         self.reason = reason
         super().__init__(reason)
+
+
+class StaleContent(SocialsError):
+    """The post's content is not the version the approver was shown (D6)."""
+
+    def __init__(self, current_hash: str):
+        self.current_hash = current_hash
+        super().__init__(
+            "the post changed since you opened it: review the current version, then approve it"
+        )
 
 
 # ── time ────────────────────────────────────────────────────────────────────
@@ -395,23 +415,28 @@ def approve(
     post: SocialPost,
     actor: str,
     *,
+    content_hash: str,
     override_unsourced: bool = False,
     comment: Optional[str] = None,
 ) -> SocialPost:
-    """needs_approval → approved, bound to the current content hash (D6).
+    """needs_approval → approved, bound to the content the approver saw (D6).
 
-    Refuses unsourced claims (D7) unless ``override_unsourced``; an override is
-    stored on the post and names the claims in ``review_log``.
+    ``content_hash`` is the hash of the version the approver was shown. When the
+    post's content is not that version any more, :class:`StaleContent` (with the
+    current hash) and the post is unchanged. Refuses unsourced claims (D7)
+    unless ``override_unsourced``; an override is stored on the post and names
+    the claims in ``review_log``.
     """
     target = _target(post, ACTION_APPROVE)
     comment = _validate_comment(comment, required=False, what="comment")
+    current = compute_content_hash(post)
+    if content_hash != current or content_hash != post.content_hash:
+        raise StaleContent(current)
     unsourced = unsourced_claims(post)
     if unsourced and not override_unsourced:
         raise UnsourcedClaims(unsourced)
 
-    content_hash = compute_content_hash(post)
-    post.content_hash = content_hash
-    post.approved_hash = content_hash
+    post.approved_hash = current
     post.approved_by = actor
     post.approved_at = _utcnow()
     post.override_unsourced = bool(unsourced)
@@ -482,6 +507,34 @@ def assert_publishable(post: Any) -> None:
         raise NotPublishable("the post has no approval")
     if approved_hash != getattr(post, "content_hash", None) or approved_hash != compute_content_hash(post):
         raise NotPublishable("the content changed after it was approved")
+
+
+# ── the write guard ─────────────────────────────────────────────────────────
+def claim_unchanged(db: Any, post: SocialPost, *, status: str, content_hash: str) -> bool:
+    """Compare-and-set before a write: lock the post's row until this
+    transaction ends, but only if it still has ``status`` and ``content_hash``,
+    the version the request checked.
+
+    ``False`` means another writer committed since the post was loaded. The
+    caller must roll back and write nothing. The no-op UPDATE takes the row lock
+    on Postgres (the write lock on SQLite), and its WHERE reads the latest
+    committed row. A racing write therefore either lands first, and this returns
+    ``False``, or waits for this transaction to commit. Autoflush is off, so the
+    caller's pending changes to ``post`` cannot land before the check.
+    """
+    table = SocialPost.__table__
+    with db.no_autoflush:
+        result = db.execute(
+            update(table)
+            .where(
+                table.c.id == post.id,
+                table.c.workspace_id == post.workspace_id,
+                table.c.status == status,
+                table.c.content_hash == content_hash,
+            )
+            .values(status=table.c.status)
+        )
+    return result.rowcount == 1
 
 
 # ── workspace-scoped reads ──────────────────────────────────────────────────

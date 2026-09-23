@@ -5,7 +5,9 @@
  * React Query over the apiClient socials methods — the workspace switch and the
  * post lifecycle (create, edit, submit, approve, request changes, reject). The
  * server enforces every rule (the gate, the role, the status machine, D6's
- * approval hash); these hooks only call it and refresh the list.
+ * approval hash); these hooks only call it and refresh the list. Approve sends
+ * the content_hash of the post on screen; a 409 means the post changed since it
+ * was fetched, so the list is refetched and the reviewer looks again.
  *
  * Query keys are scoped by workspace id so switching workspaces clears cache.
  */
@@ -31,6 +33,18 @@ export const socialsQueryKeys = {
 
 function useWorkspaceId(): string | null {
   return useWorkspace().workspace?.id ?? null
+}
+
+const HTTP_CONFLICT = 409
+
+/** Shown when an action answers 409: the post changed since this screen loaded it. */
+export const SOCIAL_POST_CHANGED_MESSAGE =
+  'This post changed since you opened it. Review the latest version, then try again.'
+
+/** The HTTP status apiClient.request() puts on the Error it throws, if any. */
+function httpStatusOf(error: unknown): number | undefined {
+  const status = (error as { status?: unknown } | null | undefined)?.status
+  return typeof status === 'number' ? status : undefined
 }
 
 function useInvalidateSocials() {
@@ -101,10 +115,11 @@ export function useUpdateSocialPost() {
   })
 }
 
-/** The review and submit actions, each one server call. */
+/** The review and submit actions, each one server call. Approve carries the
+ * content_hash of the version on screen (D6). */
 export type SocialPostAction =
   | { kind: 'submit' }
-  | { kind: 'approve' }
+  | { kind: 'approve'; contentHash: string }
   | { kind: 'request_changes'; comment: string }
   | { kind: 'reject'; reason?: string }
 
@@ -120,7 +135,7 @@ function runAction(postId: string, action: SocialPostAction): Promise<SocialPost
     case 'submit':
       return apiClient.submitSocialPost(postId)
     case 'approve':
-      return apiClient.approveSocialPost(postId)
+      return apiClient.approveSocialPost(postId, action.contentHash)
     case 'request_changes':
       return apiClient.requestSocialPostChanges(postId, action.comment)
     case 'reject':
@@ -136,7 +151,12 @@ export function useSocialPostAction() {
       await invalidate()
       toast.success(ACTION_DONE[action.kind])
     },
-    onError: (error) => {
+    onError: async (error) => {
+      if (httpStatusOf(error) === HTTP_CONFLICT) {
+        toast.error(SOCIAL_POST_CHANGED_MESSAGE)
+        await invalidate()
+        return
+      }
       toast.error(error.message || 'The action failed')
     },
   })

@@ -4,7 +4,8 @@
  * PRD-251 S0.5 — one post: its status, its copy, and the actions the caller's
  * role allows in that status (S0.3): submit, approve, request changes (with a
  * comment) and reject. Saving a copy change on an approved or scheduled post
- * voids the approval (D6) — the server moves it back to Needs approval.
+ * voids the approval (D6) — the server moves it back to Needs approval. Approve
+ * sends the content_hash of the version shown here, so it approves only that.
  */
 import { useEffect, useState, type FormEvent } from 'react'
 import { formatDistanceToNow } from 'date-fns'
@@ -128,7 +129,11 @@ export function SocialsPostDetail({ post, role }: SocialsPostDetailProps) {
         )}
         {actions.review && (
           <>
-            <Button size="sm" onClick={() => run({ kind: 'approve' })} disabled={busy || dirty}>
+            <Button
+              size="sm"
+              onClick={() => run({ kind: 'approve', contentHash: post.content_hash })}
+              disabled={busy || dirty}
+            >
               Approve
             </Button>
             <Button size="sm" variant="outline" onClick={() => setAskingChanges(true)} disabled={busy}>

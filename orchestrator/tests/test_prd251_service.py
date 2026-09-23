@@ -11,6 +11,9 @@ Pure tests of ``modules/socials/service.py`` and ``modules/socials/publisher.py`
   needs_approval and the publish guard then refuses it;
 * D7 — an unsourced claim blocks approval unless overridden, and the override
   is stored and named in ``review_log``;
+* D6 — ``approve`` binds to the version the approver saw: a post whose content
+  changed since refuses it (``StaleContent``, with the current hash) and is left
+  unchanged; ``claim_unchanged`` is a compare-and-set on status and hash;
 * ``publish_post`` runs ``assert_publishable`` before anything else.
 """
 from __future__ import annotations
@@ -54,6 +57,7 @@ from modules.socials.service import (  # noqa: E402
     IllegalTransition,
     InvalidPost,
     NotPublishable,
+    StaleContent,
     UnsourcedClaims,
 )
 
@@ -106,7 +110,7 @@ def _post_in(status: str) -> SocialPost:
         return service.request_changes(post, REVIEWER, "Tighten the headline.")
     if status == ARCHIVED:
         return service.reject(post, REVIEWER, "Off brand.")
-    service.approve(post, REVIEWER)
+    service.approve(post, REVIEWER, content_hash=post.content_hash)
     if status == APPROVED:
         return post
     if status == SCHEDULED:
@@ -126,7 +130,7 @@ def _edit_copy(post):
 ALLOWED = {
     (DRAFT, NEEDS_APPROVAL): lambda p: service.submit(p, AUTHOR),
     (CHANGES_REQUESTED, NEEDS_APPROVAL): lambda p: service.submit(p, AUTHOR),
-    (NEEDS_APPROVAL, APPROVED): lambda p: service.approve(p, REVIEWER),
+    (NEEDS_APPROVAL, APPROVED): lambda p: service.approve(p, REVIEWER, content_hash=p.content_hash),
     (NEEDS_APPROVAL, CHANGES_REQUESTED): lambda p: service.request_changes(p, REVIEWER, "Shorter."),
     (NEEDS_APPROVAL, ARCHIVED): lambda p: service.reject(p, REVIEWER, "No."),
     (APPROVED, SCHEDULED): lambda p: service.schedule(p, REVIEWER, SLOT, "UTC"),
@@ -160,7 +164,7 @@ def test_every_allowed_transition(move):
 
 ACTIONS = {
     "submit": lambda p: service.submit(p, AUTHOR),
-    "approve": lambda p: service.approve(p, REVIEWER),
+    "approve": lambda p: service.approve(p, REVIEWER, content_hash=p.content_hash),
     "request_changes": lambda p: service.request_changes(p, REVIEWER, "Change it."),
     "reject": lambda p: service.reject(p, REVIEWER),
     "schedule": lambda p: service.schedule(p, REVIEWER, SLOT, "UTC"),
@@ -359,9 +363,54 @@ def test_a_draft_edit_recomputes_the_hash_and_keeps_the_status():
 def test_reapproval_after_an_edit_binds_to_the_new_content():
     post = _post_in(APPROVED)
     _edit_copy(post)
-    service.approve(post, REVIEWER)
+    service.approve(post, REVIEWER, content_hash=post.content_hash)
     assert post.status == APPROVED and post.approved_hash == post.content_hash
     service.assert_publishable(post)
+
+
+def _approval_state(post):
+    return (
+        post.status, post.content_hash, post.approved_hash, post.approved_by, post.approved_at,
+        post.override_unsourced, list(post.review_log),
+    )
+
+
+def test_approve_binds_to_the_version_the_approver_saw():
+    post = _post_in(NEEDS_APPROVAL)
+    seen = post.content_hash
+    service.update_post(post, AUTHOR, {"copy": {"base": "Edited after the reviewer opened it."}})
+    before = _approval_state(post)
+
+    with pytest.raises(StaleContent) as exc:
+        service.approve(post, REVIEWER, content_hash=seen)
+
+    assert exc.value.current_hash == post.content_hash != seen
+    assert "changed since you opened it" in str(exc.value)
+    assert _approval_state(post) == before
+    assert post.status == NEEDS_APPROVAL and post.approved_hash is None
+
+    service.approve(post, REVIEWER, content_hash=post.content_hash)
+    assert post.status == APPROVED and post.approved_hash == post.content_hash
+    service.assert_publishable(post)
+
+
+def test_approve_refuses_content_changed_behind_the_services_back():
+    post = _post_in(NEEDS_APPROVAL)
+    stamped = post.content_hash
+    post.copy = {"base": "Changed without the service"}  # the hash is not recomputed
+    with pytest.raises(StaleContent) as exc:
+        service.approve(post, REVIEWER, content_hash=stamped)
+    assert exc.value.current_hash == service.compute_content_hash(post) != stamped
+    assert post.status == NEEDS_APPROVAL and post.approved_hash is None
+
+
+def test_a_stale_version_is_reported_before_its_unsourced_claims():
+    post = _with_claims()
+    seen = post.content_hash
+    service.update_post(post, AUTHOR, {"copy": {"base": "New words"}})
+    with pytest.raises(StaleContent):
+        service.approve(post, REVIEWER, content_hash=seen, override_unsourced=True)
+    assert post.override_unsourced is False and post.approved_hash is None
 
 
 def test_a_direct_write_that_skips_the_service_still_cannot_publish():
@@ -408,7 +457,7 @@ def test_unsourced_claims_names_only_claims_without_a_source():
 def test_approve_refuses_an_unsourced_claim_and_names_it():
     post = _with_claims()
     with pytest.raises(UnsourcedClaims) as exc:
-        service.approve(post, REVIEWER)
+        service.approve(post, REVIEWER, content_hash=post.content_hash)
     assert exc.value.names == ["users"]
     assert "users" in str(exc.value)
     assert post.status == NEEDS_APPROVAL and post.approved_hash is None
@@ -416,7 +465,7 @@ def test_approve_refuses_an_unsourced_claim_and_names_it():
 
 def test_approve_with_the_override_stores_it_and_names_the_claim():
     post = _with_claims()
-    service.approve(post, REVIEWER, override_unsourced=True)
+    service.approve(post, REVIEWER, content_hash=post.content_hash, override_unsourced=True)
 
     assert post.status == APPROVED and post.override_unsourced is True
     assert post.approved_by == REVIEWER and post.approved_hash == post.content_hash
@@ -432,13 +481,13 @@ def test_a_sourced_post_needs_no_override():
         post, AUTHOR,
         {"sources": {**post.sources, "users": {"kind": "metric", "ref": "active_users"}}},
     )
-    service.approve(post, REVIEWER)
+    service.approve(post, REVIEWER, content_hash=post.content_hash)
     assert post.status == APPROVED and post.override_unsourced is False
 
 
 def test_voiding_an_approval_clears_the_override():
     post = _with_claims()
-    service.approve(post, REVIEWER, override_unsourced=True)
+    service.approve(post, REVIEWER, content_hash=post.content_hash, override_unsourced=True)
     _edit_copy(post)
     assert post.override_unsourced is False
 
@@ -453,7 +502,7 @@ def test_every_review_action_appends_to_review_log():
     service.submit(post, AUTHOR)
     service.request_changes(post, REVIEWER, "Use the brand colour.")
     service.submit(post, AUTHOR)
-    service.approve(post, REVIEWER, comment="Good to go")
+    service.approve(post, REVIEWER, content_hash=post.content_hash, comment="Good to go")
     service.schedule(post, REVIEWER, SLOT, "Europe/Lisbon")
     service.unschedule(post, REVIEWER)
 
@@ -650,6 +699,25 @@ def test_get_post_never_returns_another_workspaces_post(session):
     assert service.get_post(session, WS_A, mine.id).title == "Mine"
     assert service.get_post(session, WS_A, theirs.id) is None
     assert service.get_post(session, WS_B, mine.id) is None
+
+
+def test_claim_unchanged_is_a_compare_and_set_on_status_and_hash(session):
+    post = _stored(session, WS_A, "Mine", NOW)
+    service.submit(post, AUTHOR)
+    session.commit()
+    committed = post.content_hash
+
+    assert service.claim_unchanged(session, post, status=NEEDS_APPROVAL, content_hash=committed) is True
+    assert service.claim_unchanged(session, post, status=DRAFT, content_hash=committed) is False
+    assert service.claim_unchanged(session, post, status=NEEDS_APPROVAL, content_hash="0" * 64) is False
+
+    # The caller's pending changes never land before the check (no autoflush).
+    service.approve(post, REVIEWER, content_hash=committed)
+    assert post.status == APPROVED  # in memory only
+    assert service.claim_unchanged(session, post, status=NEEDS_APPROVAL, content_hash=committed) is True
+    session.commit()
+    session.expire_all()
+    assert service.get_post(session, WS_A, post.id).status == APPROVED
 
 
 def test_list_posts_is_scoped_newest_first_and_filtered(session):

@@ -284,7 +284,7 @@ Socials is a fourth tab, `socials`, in both shells. Two switches control it:
 It keeps the same GET/PUT API and dialog. The dialog also opens from the Socials tab.
 
 ### D6 · Approval is state on the post, bound to a hash
-- **Approving** records `approved_hash = content_hash`, plus approver and time.
+- **Approving** records `approved_hash = content_hash`, plus approver and time. The approve request carries the `content_hash` of the version the approver was shown. A post whose content changed since answers 409 with the current hash. The write is a compare-and-set on status and hash, so an edit that lands while the request runs is never approved (P251-RVW-2).
 - **Any edit resets approval.** Any change to copy, variables, sources or re-rendered media changes `content_hash` and moves the post back to `needs_approval`.
 - **The publisher refuses** any target whose post has `approved_hash ≠ content_hash`, whatever the policy plane mode.
 - **Who can approve:** workspace owner, admin or editor (a new `socials:approve` permission in `modules/policy/roles.py`).
