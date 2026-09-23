@@ -88,6 +88,21 @@ class _Query:
         return len(self._rows)
 
 
+class _ColumnQuery(_Query):
+    """``db.query(Model.a, Model.b)`` — rows of the model as tuples (F091's
+    grant_owners names each card's agent and ticket this way)."""
+
+    def __init__(self, rows, keys):
+        super().__init__(rows)
+        self._keys = keys
+
+    def filter(self, *conds):
+        return _ColumnQuery(super().filter(*conds)._rows, self._keys)
+
+    def all(self):
+        return [tuple(getattr(r, k, None) for k in self._keys) for r in self._rows]
+
+
 class _FakeSession:
     def __init__(self):
         self.rows = []
@@ -110,8 +125,11 @@ class _FakeSession:
     def refresh(self, obj):
         pass
 
-    def query(self, model):
-        return _Query([r for r in self.rows if isinstance(r, model)])
+    def query(self, *entities):
+        if len(entities) == 1 and isinstance(entities[0], type):
+            return _Query([r for r in self.rows if isinstance(r, entities[0])])
+        model = entities[0].class_
+        return _ColumnQuery([r for r in self.rows if isinstance(r, model)], [e.key for e in entities])
 
 
 def _ticket(db):
