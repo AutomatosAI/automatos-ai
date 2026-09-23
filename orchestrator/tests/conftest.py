@@ -71,6 +71,22 @@ if _orchestrator_root not in sys.path:
 
 
 @pytest.fixture(autouse=True)
+def _reset_composio_deny_list_cache():
+    """PRD-251 S0.6: the Composio deny list is cached per process
+    (core/composio/deny_list.py), so no test may inherit another test's list.
+    Resets only a module that is already imported: importing it here would
+    disturb the tests that stub packages in sys.modules."""
+    def _reset():
+        reset = getattr(sys.modules.get("core.composio.deny_list"), "reset_cache", None)
+        if callable(reset):
+            reset()
+
+    _reset()
+    yield
+    _reset()
+
+
+@pytest.fixture(autouse=True)
 def _repair_stubbed_package_bindings():
     """Repair parent->child module attribute bindings that sibling tests broke.
 

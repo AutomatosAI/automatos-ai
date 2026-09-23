@@ -1861,6 +1861,10 @@ class Config:
     # (Instagram, TikTok publish-from-URL, the YouTube thumbnail). Empty = those
     # channels show "needs public storage".
     SOCIALS_PUBLIC_MEDIA_BUCKET: str = os.getenv("SOCIALS_PUBLIC_MEDIA_BUCKET", "").strip()
+    # S0.6 (D16): how long the Composio deny list is cached per process
+    # (core/composio/deny_list.py). A warm cache answers every Composio call from
+    # memory, so no call waits on system_settings; an edit applies within this.
+    COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS: int = int(os.getenv("COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS", "30"))
 
     def validate_security(self) -> None:
         """PRD-172: fail-closed validation of tenant-isolation secrets.

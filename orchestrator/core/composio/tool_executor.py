@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from core.composio.client import ComposioClient, get_composio_client
-from core.composio.deny_list import composio_action_denial, denied_result
+from core.composio.deny_list import composio_action_denial_async, denied_result
 
 logger = logging.getLogger(__name__)
 
@@ -391,7 +391,7 @@ class ComposioToolExecutor:
         # PRD-251 S0.6 (D16): the platform deny list, first — before access
         # validation, file uploads, the LinkedIn workaround or any network call,
         # and whatever the policy plane mode or the capability classifier says.
-        denial = composio_action_denial(action_upper)
+        denial = await composio_action_denial_async(action_upper)
         if denial:
             return self._refused(denial, action_upper, start_time)
         requested_action = action_upper
@@ -697,7 +697,7 @@ class ComposioToolExecutor:
         # again before the entity lookup, file uploads, the LinkedIn workaround
         # (which never passes through the checked client) and the SDK.
         if action_upper != requested_action:
-            denial = composio_action_denial(action_upper)
+            denial = await composio_action_denial_async(action_upper)
             if denial:
                 return self._refused(denial, action_upper, start_time)
 

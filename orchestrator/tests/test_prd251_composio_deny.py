@@ -131,6 +131,20 @@ def settings_db(monkeypatch):
     engine.dispose()
 
 
+@pytest.fixture
+def clock(monkeypatch):
+    """The deny-list cache's monotonic clock, moved by hand."""
+    now = [1_000.0]
+    monkeypatch.setattr(deny_list, "_now", lambda: now[0])
+    return now
+
+
+@pytest.fixture
+def inline_refresh(monkeypatch):
+    """A stale cache refreshes in the calling thread instead of a daemon thread."""
+    monkeypatch.setattr(deny_list, "_start_background_refresh", deny_list._refresh)
+
+
 def _set_denied(engine, value):
     raw = value if isinstance(value, str) else json.dumps(value)
     table = SystemSetting.__table__
@@ -262,7 +276,7 @@ def test_the_seeded_list_is_visible_to_the_super_admin_in_system_settings(settin
 # ---------------------------------------------------------------------------
 
 
-def test_removing_the_slug_from_the_setting_unblocks_it_with_no_restart(settings_db):
+def test_removing_the_slug_from_the_setting_unblocks_it_within_one_ttl_with_no_restart(settings_db, clock, inline_refresh):
     sdk = _sdk()
     client = _client(sdk)
 
@@ -273,6 +287,11 @@ def test_removing_the_slug_from_the_setting_unblocks_it_with_no_restart(settings
 
     _set_denied(settings_db, [slug for slug in D16 if slug != BILLING])
 
+    still_cached = client.execute_action(BILLING, {}, "entity-1")  # within the TTL the cached list answers
+    assert still_cached["error_type"] == "action_denied"
+    sdk.tools.execute.assert_not_called()
+
+    clock[0] += config_module.config.COMPOSIO_DENY_LIST_CACHE_TTL_SECONDS + 1
     allowed = client.execute_action(BILLING, {}, "entity-1")  # same process, same client
     assert allowed["success"] is True
     sdk.tools.execute.assert_called_once()
@@ -759,6 +778,9 @@ async def test_the_v2_api_service_refuses_before_the_http_call(settings_db):
 # ---------------------------------------------------------------------------
 
 HELPER = "composio_action_denial"
+# The async form gives the same decision to code on the event loop (it reads a cold
+# cache in a worker thread); tests/test_prd251_deny_list_cache.py holds the two equal.
+HELPERS = {HELPER, "composio_action_denial_async"}
 _REST_EXECUTE = re.compile(r"/tools/execute/|/actions/\{[^}]*\}/execute")
 # Every detection below needs one of these tokens in the file's text, so a file
 # without any of them cannot hold a site — only candidates are parsed (a full
@@ -875,9 +897,9 @@ def test_each_direct_site_calls_the_one_helper_before_it_executes(site):
     executions = _execution_sites()[site]
     checks = [
         node.lineno for node in ast.walk(_function(*site))
-        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == HELPER
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) in HELPERS
     ]
-    assert checks, f"{site} never calls {HELPER}"
+    assert checks, f"{site} never calls {HELPER} (or its async form)"
     first_execution = min(line for _kind, line in executions)
     assert min(checks) < first_execution, (site, checks, executions)
 

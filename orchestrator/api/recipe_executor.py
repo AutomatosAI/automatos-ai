@@ -476,7 +476,7 @@ async def _execute_step(
     from modules.tools.services.composio_tool_service import ComposioToolService
     from core.composio.tool_executor import resolve_file_uploads
     from core.composio.client import get_composio_client
-    from core.composio.deny_list import composio_action_denial
+    from core.composio.deny_list import composio_action_denial_async
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.context import ContextService, ContextMode
     from modules.tools.builtin.scratchpad_tool import (
@@ -773,7 +773,7 @@ async def _execute_step(
                 _dedup_key = f"{tool_name}|{json.dumps(tool_args, sort_keys=True, default=str)}"
                 # PRD-251 S0.6 (D16): a denied action never runs — not from the
                 # dedup cache, the LinkedIn workaround, file uploads or the spine.
-                _denial = composio_action_denial(tool_name)
+                _denial = await composio_action_denial_async(tool_name)
                 if _denial:
                     result_text = f"Error executing {tool_name}: {_denial}"
                     exec_ms = 0
