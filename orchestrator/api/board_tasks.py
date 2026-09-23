@@ -916,6 +916,34 @@ async def approve_task(
     }
 
 
+# F092 (night 3): a finished ticket can be sent back, and a re-run says what it
+# replaces. Night 3's #484 re-run overwrote the only evidence of F093.
+SENDABLE_BACK = ("review", "done")
+FINISHED = ("done", "failed", "cancelled", "review")
+PREVIOUS_RUNS_KEPT = 5
+PREVIOUS_RESULT_CHARS = 4000
+
+
+def keep_previous_run(task: Any, *, why: str, by: str, now: Optional[datetime] = None) -> None:
+    """Put a finished ticket's status, result and finish time on record in
+    ``planning_data.previous_runs`` (rebuilt, never mutated in place) before
+    it runs again. Keeps the newest ``PREVIOUS_RUNS_KEPT``."""
+    if task.status not in FINISHED and not task.result:
+        return
+    data = dict(task.planning_data or {})
+    runs = list(data.get("previous_runs") or [])
+    runs.append({
+        "status": task.status,
+        "result": (task.result or "")[:PREVIOUS_RESULT_CHARS],
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "why": why,
+        "by": by,
+        "at": (now or datetime.now(timezone.utc)).isoformat(),
+    })
+    data["previous_runs"] = runs[-PREVIOUS_RUNS_KEPT:]
+    task.planning_data = data
+
+
 @router.post("/{task_id}/reject", dependencies=[Depends(require_workspace_permission("missions:update"))])
 async def reject_task(
     task_id: int,
@@ -929,7 +957,8 @@ async def reject_task(
     Returns the task to the SAME agent as 'assigned' — not dumped back to inbox —
     with the feedback carried into the next execution's context (review_feedback),
     so the agent redoes the work with the correction. The dispatch loop picks the
-    re-assigned task up immediately.
+    re-assigned task up immediately. F092: a DONE ticket can be sent back the
+    same way; what it had finished with is kept in its history first.
     """
     task = db.query(BoardTask).filter(
         BoardTask.id == task_id,
@@ -938,13 +967,18 @@ async def reject_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if task.status != "review":
-        raise HTTPException(status_code=422, detail=f"Task must be in review status (currently: {task.status})")
+    if task.status not in SENDABLE_BACK:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Only a ticket in review or done can be sent back (currently: {task.status})",
+        )
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Cannot reject a task with no assigned agent")
 
     body = await request.json()
     feedback = (body.get("feedback") or "").strip()
+    if task.status == "done":
+        keep_previous_run(task, why="sent back", by=_operator_ref(ctx))
 
     # Q44: back to the same agent for another attempt, feedback in context.
     task.status = "assigned"
@@ -1016,7 +1050,10 @@ async def run_task_now(
     if not task.assigned_agent_id:
         raise HTTPException(status_code=422, detail="Assign an agent before running the task")
     if task.status == "in_progress":
-        raise HTTPException(status_code=409, detail="Task is already running")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ticket #{task.id} is already running — nothing to start; it reports when it finishes.",
+        )
 
     # PRD-234: pressing Run Now is the operator's approval — record it so the
     # gate lets the ticket through instead of parking it behind a grant.
@@ -1024,11 +1061,24 @@ async def run_task_now(
         db, workspace_id=ctx.workspace_id, task_id=task.id, agent_id=task.assigned_agent_id,
         actor=_operator_ref(ctx), why=WHY_RUN_NOW,
     )
+    was = task.status
+    rerun = was in FINISHED
+    if rerun:
+        keep_previous_run(task, why="run now", by=_operator_ref(ctx))
     _redispatch_task(db, task)
 
-    logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s",
-                task.id, task.assigned_agent_id)
-    return {"success": True, "task_id": task.id, "status": task.status}
+    logger.info("[BoardTasks] Run Now → task %d re-dispatched to agent %s%s",
+                task.id, task.assigned_agent_id, f" (was {was})" if rerun else "")
+    return {
+        "success": True,
+        "task_id": task.id,
+        "status": task.status,
+        "rerun_of": was if rerun else None,
+        "message": (
+            f"Re-running ticket #{task.id} — it was {was}; its previous result is kept in the "
+            "ticket's history." if rerun else f"Ticket #{task.id} started."
+        ),
+    }
 
 
 def end_session_claim(task: Any, old_status: Any, new_status: Any) -> None:
