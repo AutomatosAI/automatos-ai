@@ -7,22 +7,33 @@ via ``core.storage``, PRD-233 S4) and serves them back by id.
 
 S3 key pattern: generated-images/{workspace_id}/{uuid}.{ext}
 Pointer:        generated-image-pointers/{uuid}  → that key (PRD-251 S0.4c)
+Legacy index:   generated-image-pointers/legacy-index.json  (P251-RVW-3)
 
 The public route knows only the id. Every save also writes a small pointer
 object, so resolving an id is ONE GET — never a listing. (A pointer object, not
 a lookup row: no table, no migration, and the public route needs no database
-session.) Ids saved before pointers existed fall back to a PAGINATED listing —
-every page, never just the first 1000 keys — and the pointer is then written,
-so the next lookup is one GET too. Bodies stream, optionally one byte range
-(``get_object(Range=...)``); nothing reads a whole object into memory.
+session.) A save whose pointer cannot be written fails, so every image saved
+since pointers exist has one.
+
+Ids saved before pointers existed are a closed set. They are found through the
+legacy index: {id: key} for every image in the bucket when it was built. It is
+built once, by the first process that needs it, which walks EVERY page of the
+prefix, and it is kept as one object that every later process loads with one
+GET. The build is single-flight: concurrent misses wait for the one walk. So
+the prefix is walked once, not once per unknown id. After that, an unknown id
+costs one pointer GET and no listing, and a legacy id's first lookup writes its
+pointer. Bodies stream, optionally one byte range (``get_object(Range=...)``);
+no image is read whole into memory.
 """
 
 import asyncio
 import base64
+import json
 import logging
 import re
+import threading
 from dataclasses import dataclass
-from typing import Any, Iterator, Optional
+from typing import Any, Dict, Iterator, Optional
 from uuid import UUID, uuid4
 
 from config import config
@@ -44,6 +55,9 @@ POINTER_KEY_PREFIX = "generated-image-pointers"
 DEFAULT_WORKSPACE_SEGMENT = "default"
 DEFAULT_CONTENT_TYPE = "image/png"
 POINTER_CONTENT_TYPE = "text/plain; charset=utf-8"
+# Never a pointer key: pointers are named by canonical uuids only.
+LEGACY_INDEX_KEY = f"{POINTER_KEY_PREFIX}/legacy-index.json"
+LEGACY_INDEX_CONTENT_TYPE = "application/json"
 LIST_PAGE_SIZE = 1000  # S3's per-page maximum; the listing walks every page.
 WORKSPACE_LIST_PAGE_SIZE = 5
 
@@ -125,6 +139,9 @@ class S3ImageStore:
 
     def __init__(self):
         self.bucket = config.S3_DOCUMENTS_BUCKET
+        # The legacy index ({id: key}), loaded or built once per process.
+        self._legacy_index: Optional[Dict[str, str]] = None
+        self._legacy_index_lock = threading.Lock()
         logger.info("Image store: S3 (bucket=%s)", self.bucket)
 
     @property
@@ -154,10 +171,10 @@ class S3ImageStore:
                 ContentType=mime_type,
             ),
         )
-        # After the image, so a pointer never names a missing object. A failed
-        # pointer write leaves the image findable by the legacy listing, which
-        # writes the pointer on first lookup.
-        await loop.run_in_executor(None, lambda: self._write_pointer(image_id, key))
+        # After the image, so a pointer never names a missing object. The pointer
+        # is the only way to reach an image saved since pointers exist (the legacy
+        # index is built once), so a failed pointer write fails the save.
+        await loop.run_in_executor(None, lambda: self._put_pointer(image_id, key))
         logger.info("Saved image to S3: %s (%d bytes)", key, len(image_bytes))
         return image_id
 
@@ -230,29 +247,87 @@ class S3ImageStore:
             return None
         return key
 
+    def _put_pointer(self, image_id: str, key: str) -> None:
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=_pointer_key(image_id),
+            Body=key.encode("utf-8"),
+            ContentType=POINTER_CONTENT_TYPE,
+        )
+
     def _write_pointer(self, image_id: str, key: str) -> None:
+        """A legacy id's pointer, best effort: the index still resolves it."""
         try:
-            self.client.put_object(
-                Bucket=self.bucket,
-                Key=_pointer_key(image_id),
-                Body=key.encode("utf-8"),
-                ContentType=POINTER_CONTENT_TYPE,
-            )
+            self._put_pointer(image_id, key)
         except Exception as exc:
             logger.warning("Could not write the pointer for image %s (%s): %s", image_id, key, exc)
 
     def _find_legacy_key(self, image_id: str, workspace_id: Optional[str]) -> Optional[str]:
-        """An id saved before pointers existed: the caller's workspace first (one
-        small listing), then every page of the whole prefix."""
-        searches = []
-        if workspace_id:
-            searches.append((f"{IMAGE_KEY_PREFIX}/{workspace_id}/{image_id}.", WORKSPACE_LIST_PAGE_SIZE))
-        searches.append((f"{IMAGE_KEY_PREFIX}/", LIST_PAGE_SIZE))
-        for prefix, page_size in searches:
-            for key in self._iter_keys(prefix, page_size):
+        """An id with no pointer: saved before pointers existed, or unknown. Until
+        this process holds the legacy index, the caller's workspace is tried first
+        (one small listing). Then the index answers, with no listing once it is
+        held."""
+        if self._legacy_index is None and workspace_id:
+            prefix = f"{IMAGE_KEY_PREFIX}/{workspace_id}/{image_id}."
+            for key in self._iter_keys(prefix, WORKSPACE_LIST_PAGE_SIZE):
                 if _key_image_id(key) == image_id:
                     return key
-        return None
+        return self._legacy_keys().get(image_id)
+
+    def _legacy_keys(self) -> Dict[str, str]:
+        """The legacy index. It is loaded (one GET) or, when no process has built
+        it yet, built by walking the whole prefix and then stored. Single-flight:
+        concurrent callers wait for the one load or walk. A failure leaves nothing
+        held, so the next miss tries again."""
+        index = self._legacy_index
+        if index is not None:
+            return index
+        with self._legacy_index_lock:
+            if self._legacy_index is None:
+                loaded = self._load_legacy_index()
+                self._legacy_index = loaded if loaded is not None else self._build_legacy_index()
+            return self._legacy_index
+
+    def _load_legacy_index(self) -> Optional[Dict[str, str]]:
+        try:
+            obj = self.client.get_object(Bucket=self.bucket, Key=LEGACY_INDEX_KEY)
+        except Exception as exc:
+            if _error_code(exc) in _MISSING_KEY_CODES:
+                return None
+            raise
+        body = obj["Body"]
+        try:
+            raw = body.read()
+        finally:
+            body.close()
+        try:
+            entries = json.loads(raw)
+        except ValueError:
+            entries = None
+        if not isinstance(entries, dict):
+            logger.warning("The legacy image index %s is unreadable; rebuilding it", LEGACY_INDEX_KEY)
+            return None
+        return {
+            image_id: key for image_id, key in entries.items()
+            if isinstance(key, str) and _key_image_id(key) == image_id
+        }
+
+    def _build_legacy_index(self) -> Dict[str, str]:
+        index = {_key_image_id(key): key for key in self._iter_keys(f"{IMAGE_KEY_PREFIX}/", LIST_PAGE_SIZE)}
+        try:
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=LEGACY_INDEX_KEY,
+                Body=json.dumps(index).encode("utf-8"),
+                ContentType=LEGACY_INDEX_CONTENT_TYPE,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not store the legacy image index %s (%s); this process keeps its copy",
+                LEGACY_INDEX_KEY, exc,
+            )
+        logger.info("Indexed %d generated images for legacy lookups", len(index))
+        return index
 
     def _iter_keys(self, prefix: str, page_size: int) -> Iterator[str]:
         token: Optional[str] = None

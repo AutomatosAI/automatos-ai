@@ -15,16 +15,26 @@ page, ``IsTruncated`` + ``NextContinuationToken``) and records every call:
 * ``Range: bytes=0-99`` → 206, exactly 100 bytes, ``Content-Range: bytes
   0-99/<size>``; no Range → 200 with the whole body, streamed in chunks (the
   image body is never ``read()`` whole);
-* only canonical uuid ids reach the bucket, and they match a key exactly.
+* only canonical uuid ids reach the bucket, and they match a key exactly;
+* P251-RVW-3 — the prefix is walked ONCE, not once per unknown id. The walk
+  builds the legacy index, which is stored for every later process. It is
+  single-flight: ten concurrent misses start one walk. After it, twenty
+  unknown ids cost no listing (404), a new process loads the index with one GET
+  and never lists, legacy ids still resolve, and a save whose pointer cannot be
+  written fails.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
+import json
 import os
 import re
 import sys
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -263,6 +273,129 @@ async def test_a_pointer_naming_another_id_is_ignored(store, s3):
     target_id = keys[2].rsplit("/", 1)[-1].split(".", 1)[0]
     s3.objects[POINTER_PREFIX + target_id] = (keys[0].encode(), "text/plain")
     assert await store.resolve_key(target_id) == keys[2]
+
+
+# ── P251-RVW-3: the prefix is walked once, never once per unknown id ─────────
+
+def _image_id(key: str) -> str:
+    return key.rsplit("/", 1)[-1].split(".", 1)[0]
+
+
+def test_once_indexed_an_unknown_id_costs_no_listing(client, s3):
+    _legacy_objects(s3, 5000)
+    s3.calls.clear()
+
+    statuses = [client.get(f"/api/generated-images/{uuid.uuid4()}").status_code for _ in range(20)]
+
+    assert statuses == [404] * 20
+    pages = s3.ops("list_objects_v2")
+    assert len(pages) <= 5  # one walk of 5,000 keys, 1,000 a page, and then none at all
+    assert [p["ContinuationToken"] for p in pages] == [None, "1000", "2000", "3000", "4000"]
+    assert image_store.LEGACY_INDEX_KEY in s3.objects  # stored for every later process
+
+
+def test_the_legacy_walk_is_single_flight(store, s3, monkeypatch):
+    """Ten lookups of distinct unknown ids at once, all past their pointer GET
+    while the first walk is still listing: one walk runs, and all ten wait for it."""
+    _legacy_objects(s3, 3000)
+    lookups = 10
+    all_missed = threading.Event()
+    missed = []
+    real_get, real_list = s3.get_object, s3.list_objects_v2
+
+    def get_object(**kwargs):
+        try:
+            return real_get(**kwargs)
+        finally:
+            if kwargs["Key"].startswith(POINTER_PREFIX) and kwargs["Key"] != image_store.LEGACY_INDEX_KEY:
+                missed.append(kwargs["Key"])
+                if len(missed) >= lookups:
+                    all_missed.set()
+
+    def list_objects_v2(**kwargs):
+        if kwargs.get("ContinuationToken") is None:
+            all_missed.wait(timeout=20)  # hold the walk until every lookup has missed its pointer
+        return real_list(**kwargs)
+
+    monkeypatch.setattr(s3, "get_object", get_object)
+    monkeypatch.setattr(s3, "list_objects_v2", list_objects_v2)
+
+    async def at_once():
+        asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=lookups))
+        return await asyncio.gather(*(store.resolve_key(str(uuid.uuid4())) for _ in range(lookups)))
+
+    results = asyncio.run(at_once())
+
+    assert results == [None] * lookups
+    assert all_missed.is_set()  # all ten were in flight while the walk ran
+    walks = [page for page in s3.ops("list_objects_v2") if page["ContinuationToken"] is None]
+    assert len(walks) == 1
+    assert len(s3.ops("list_objects_v2")) == 3  # 3,000 keys, 1,000 a page
+    assert [c["Key"] for c in s3.ops("get_object")].count(image_store.LEGACY_INDEX_KEY) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_process_loads_the_stored_index_and_never_lists(store, s3):
+    keys = _legacy_objects(s3, 2500)
+    assert await store.resolve_key(str(uuid.uuid4())) is None  # this process walks once and stores the index
+    s3.calls.clear()
+
+    restarted = image_store.S3ImageStore()  # another worker, or the next deploy
+    for _ in range(20):
+        assert await restarted.resolve_key(str(uuid.uuid4())) is None
+    target = keys[2222]
+    assert await restarted.resolve_key(_image_id(target)) == target  # a legacy id still resolves
+
+    assert s3.ops("list_objects_v2") == []
+    assert [c["Key"] for c in s3.ops("get_object")].count(image_store.LEGACY_INDEX_KEY) == 1
+    assert s3.objects[POINTER_PREFIX + _image_id(target)][0] == target.encode()
+
+
+@pytest.mark.asyncio
+async def test_after_indexing_a_legacy_id_and_a_new_save_resolve_with_no_listing(store, s3):
+    keys = _legacy_objects(s3, 1500)
+    assert await store.resolve_key(str(uuid.uuid4())) is None  # builds the index
+    image_id = await _save(store)
+    s3.calls.clear()
+
+    assert await store.resolve_key(image_id) == f"generated-images/{WORKSPACES[0]}/{image_id}.png"
+    assert s3.calls == [("get_object", {"Key": POINTER_PREFIX + image_id, "Range": None})]
+    legacy = keys[1499]
+    assert await store.resolve_key(_image_id(legacy), workspace_id=WORKSPACES[2]) == legacy
+    assert s3.ops("list_objects_v2") == []
+
+
+@pytest.mark.asyncio
+async def test_a_save_whose_pointer_cannot_be_written_fails(store, s3, monkeypatch):
+    """Once the index is built the prefix is never walked again, so an image
+    without a pointer could never be served: the save must not hand out its id."""
+    real_put = s3.put_object
+
+    def put_object(**kwargs):
+        if kwargs["Key"].startswith(POINTER_PREFIX):
+            raise _client_error("SlowDown", "PutObject")
+        return real_put(**kwargs)
+
+    monkeypatch.setattr(s3, "put_object", put_object)
+    with pytest.raises(ClientError):
+        await _save(store)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_stored_index_is_rebuilt(store, s3):
+    keys = _legacy_objects(s3, 30)
+    s3.objects[image_store.LEGACY_INDEX_KEY] = (b"not json", "application/json")
+    target = keys[7]
+
+    assert await store.resolve_key(_image_id(target)) == target
+    assert len(s3.ops("list_objects_v2")) == 1
+    assert json.loads(s3.objects[image_store.LEGACY_INDEX_KEY][0])[_image_id(target)] == target
+
+
+def test_the_index_key_is_a_named_constant_no_pointer_can_take():
+    assert image_store.LEGACY_INDEX_KEY.startswith(POINTER_PREFIX)
+    assert not image_store._is_image_id(image_store.LEGACY_INDEX_KEY.rsplit("/", 1)[-1])
+    assert not image_store.LEGACY_INDEX_KEY.startswith(image_store.IMAGE_KEY_PREFIX + "/")  # never walked as an image
 
 
 # ── the route: streaming and Range ───────────────────────────────────────────
