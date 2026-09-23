@@ -265,7 +265,8 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         )
 
         if result.get("error"):
-            return {"success": False, "error": result["error"]}
+            # F103: the model must not tell the owner "noted" over a lost write.
+            return {"success": False, "error": f"Memory NOT saved — {result['error']}. Tell the owner it was not stored."}
 
         ns = service.namespace(ws_id)
         user_id = ns.resolve(agent_id_int)
@@ -277,7 +278,7 @@ async def store_memory(db: Session, workspace_id: UUID, params: Dict[str, Any]) 
         }
     except Exception as e:
         logger.warning(f"[PlatformExecutor] Memory store failed: {e}", exc_info=True)
-        return {"success": False, "error": f"Memory service error: {e}"}
+        return {"success": False, "error": f"Memory NOT saved — memory service error: {e}. Tell the owner it was not stored."}
 
 
 async def resume_context(db: Session, workspace_id: UUID, params: Dict[str, Any]) -> Dict[str, Any]:

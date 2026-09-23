@@ -21,6 +21,7 @@ payload so tenancy is fail-closed and GDPR erasure is one filter delete.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -28,7 +29,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import httpx
 from qdrant_client import AsyncQdrantClient
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -45,6 +48,17 @@ from config import config
 from core.llm.embedding_manager import EmbeddingManager
 
 logger = logging.getLogger(__name__)
+
+
+def is_timeout(exc: BaseException) -> bool:
+    """F103: the store did not answer in time — a 408 from Qdrant, or the
+    client's own timeout (night 3: 154 writes lost in 30 minutes, all inside the
+    F105 event-loop freezes)."""
+    if isinstance(exc, UnexpectedResponse):
+        return exc.status_code == 408
+    if isinstance(exc, ResponseHandlingException):  # the client wraps its transport errors
+        exc = exc.source
+    return isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError))
 
 
 def filter_by_relevance_floor(results: List[Dict], floor: float) -> List[Dict]:
@@ -247,24 +261,43 @@ class DurableMemoryStore:
 
         embedding = await self._embedder.generate_embedding(text)
         point_id = str(uuid.uuid4())
-        await self._client.upsert(
-            collection_name=self._collection,
-            points=[PointStruct(
-                id=point_id,
-                vector=embedding,
-                payload={
-                    "namespace": user_id,
-                    "workspace_id": ws,
-                    "subject_id": subject_id,  # PRD-196 S6 (GDPR data-subject tag)
-                    "content": text,
-                    "metadata": metadata or {},
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "content_hash": content_hash,
-                },
-            )],
+        point = PointStruct(
+            id=point_id,
+            vector=embedding,
+            payload={
+                "namespace": user_id,
+                "workspace_id": ws,
+                "subject_id": subject_id,  # PRD-196 S6 (GDPR data-subject tag)
+                "content": text,
+                "metadata": metadata or {},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "content_hash": content_hash,
+            },
         )
+        try:
+            await self._upsert_with_one_retry(point)
+        except Exception as exc:
+            if not is_timeout(exc):
+                raise
+            # F103: never silently — the log says what was lost, the caller is told it was not saved.
+            logger.warning("memory write lost: %s, %d chars (%r, after one retry)", user_id, len(text), exc)
+            return {"success": False, "error": "the memory store did not answer in time, twice"}
         logger.info("[Durable] Stored memory namespace=%s len=%d", user_id, len(text))
         return {"success": True, "id": point_id}
+
+    async def _upsert_with_one_retry(self, point: PointStruct) -> None:
+        """F103: a write that times out (a Qdrant 408 or the client's own
+        timeout) is tried once more after a short pause; anything else, or a
+        second timeout, is raised."""
+        for attempt in (1, 2):
+            try:
+                await self._client.upsert(collection_name=self._collection, points=[point])
+                return
+            except Exception as exc:
+                if attempt == 2 or not is_timeout(exc):
+                    raise
+                logger.info("[Durable] memory write timed out (%r) — retrying once", exc)
+                await asyncio.sleep(config.DURABLE_MEMORY_WRITE_RETRY_PAUSE_S)
 
     # ── Read ────────────────────────────────────────────────────
 

@@ -369,6 +369,16 @@ async def _run_record_memory(db: Any, params: Dict[str, Any], ctx: SessionContex
     if not durable_ok and not field_ok:
         detail = field_error or (durable.get("error") if isinstance(durable, dict) else "")
         return {"success": False, "error": f"nothing was recorded: {detail or 'memory is unavailable'}"}
+    if not durable_ok:
+        # F103: the mission field kept it, workspace memory did not — a lost
+        # write is never reported as recorded.
+        detail = (durable.get("error") if isinstance(durable, dict) else "") or "memory is unavailable"
+        return {
+            "success": False,
+            "stored_durable": False,
+            "stored_field": True,
+            "error": f"workspace memory did NOT keep it ({detail}); only this mission's shared field has it",
+        }
 
     if ctx.mission_field_id:
         where = "workspace memory and this mission's shared field" if field_ok else (
