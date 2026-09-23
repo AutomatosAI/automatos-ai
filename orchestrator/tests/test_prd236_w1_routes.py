@@ -191,12 +191,17 @@ def test_migration_chains_onto_prd234_head_and_guard_follows():
     # spend keeps its name).
     named = (versions / "llm_usage_agent_name.py").read_text()
     assert 'down_revision = "kb_multimodal_tables"' in named
-    # 2026-09-23: prd251_socials chains onto that too (PRD-251's one Socials
-    # migration), and f049_prd251_merge_heads joins the two; the guard follows it.
+    # 2026-09-23: f125_playbook_timeouts_seconds chains onto that (F125 — legacy
+    # millisecond playbook timeouts become seconds once).
+    seconds = (versions / "f125_playbook_timeouts_seconds.py").read_text()
+    assert 'down_revision = "llm_usage_agent_name"' in seconds
+    # 2026-09-23: prd251_socials chains onto kb_multimodal_tables too (PRD-251's one
+    # Socials migration), and f049_prd251_merge_heads joins it with F125; the guard
+    # follows it.
     socials = (versions / "prd251_socials.py").read_text()
     assert 'down_revision = "kb_multimodal_tables"' in socials
     joined = (versions / "f049_prd251_merge_heads.py").read_text()
-    assert '"llm_usage_agent_name"' in joined and '"prd251_socials"' in joined
+    assert '"f125_playbook_timeouts_seconds"' in joined and '"prd251_socials"' in joined
     assert 'EXPECTED_HEAD = "f049_prd251_merge_heads"' in guard
 
 
