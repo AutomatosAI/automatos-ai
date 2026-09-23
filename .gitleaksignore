@@ -22,3 +22,8 @@ ea1df1ad2defdcbfc11a4cd9b139d218727a3a0a:orchestrator/tests/test_system_settings
 # squash matched generic-api-key on the word 'key' + a colon. Reworded in the
 # next commit; the blob is history.
 9a29aae808e20efb77ff1999f4286326e970bb54:orchestrator/scripts/init_test_db.py:generic-api-key:298
+
+# PRD-245 W3: test_the_key_is_never_in_the_request_or_the_response uses a fabricated
+# ak_live_ value (a sequential tail, matches no real key) to prove the session RPC never
+# carries or returns a credential. Flagged by the #783 history scan.
+7fae5c5c2e4b508758a1bfafe6fad33a7ed1bf18:orchestrator/tests/test_prd245_session_composio.py:generic-api-key:197
