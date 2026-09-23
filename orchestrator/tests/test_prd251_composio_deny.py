@@ -631,6 +631,10 @@ async def test_the_v2_api_service_refuses_before_the_http_call(settings_db):
 
 HELPER = "composio_action_denial"
 _REST_EXECUTE = re.compile(r"/tools/execute/|/actions/\{[^}]*\}/execute")
+# Every detection below needs one of these tokens in the file's text, so a file
+# without any of them cannot hold a site — only candidates are parsed (a full
+# parse of all ~900 files overran CI's 60 s per-test timeout).
+_CANDIDATE = re.compile(r"tools\s*\.\s*execute|execute_action|execute_linkedin_image_post|_initialize_image_upload|/execute")
 _LINKEDIN_DIRECT = {"execute_linkedin_image_post", "_initialize_image_upload"}
 _LINKEDIN_MODULE = "core/composio/linkedin_image_workaround.py"
 
@@ -670,6 +674,15 @@ def _source_files():
     return tuple(files)
 
 
+def _fstring_text(node: ast.JoinedStr) -> str:
+    """An f-string's literal parts with each placeholder as ``{}`` — no
+    ast.get_source_segment, which re-splits the whole file on every call."""
+    return "".join(
+        part.value if isinstance(part, ast.Constant) and isinstance(part.value, str) else "{}"
+        for part in node.values
+    )
+
+
 @functools.lru_cache(maxsize=1)
 def _execution_sites():
     """{(file, qualified function): [(kind, line)]} for every Composio execution."""
@@ -679,6 +692,8 @@ def _execution_sites():
         if rel.startswith("alembic/"):
             continue
         source = path.read_text(encoding="utf-8")
+        if not _CANDIDATE.search(source):
+            continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SyntaxWarning)
             tree = ast.parse(source)
@@ -700,7 +715,7 @@ def _execution_sites():
                     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
                     if name in _LINKEDIN_DIRECT:
                         kind = "linkedin"
-                elif isinstance(child, ast.JoinedStr) and _REST_EXECUTE.search(ast.get_source_segment(source, child) or ""):
+                elif isinstance(child, ast.JoinedStr) and _REST_EXECUTE.search(_fstring_text(child)):
                     kind = "rest"
                 if kind:
                     sites.setdefault((rel, ".".join(scope) or "<module>"), []).append((kind, child.lineno))
