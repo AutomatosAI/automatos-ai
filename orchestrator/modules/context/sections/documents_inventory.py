@@ -14,8 +14,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from sqlalchemy import text
-
 from modules.context.sections.base import BaseSection, SectionContext
 
 logger = logging.getLogger(__name__)
@@ -26,6 +24,11 @@ _READY = "status IN ('completed', 'processed')"
 
 def documents_summary(db: Any, workspace_id: Any) -> Optional[str]:
     """The section's text, or None when the workspace holds no documents."""
+    # Imported where it queries, like the other sections: the package imports
+    # every section eagerly, so a module-level import binds whatever
+    # `sqlalchemy` is in sys.modules at that moment.
+    from sqlalchemy import text
+
     counts = db.execute(
         text(f"SELECT (source_type IS NOT DISTINCT FROM 'agent_output') AS report, count(*) FROM documents "
              f"WHERE workspace_id = CAST(:ws AS uuid) AND {_READY} GROUP BY 1"),
