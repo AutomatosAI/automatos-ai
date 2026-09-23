@@ -462,6 +462,8 @@ class ToolLoopExecutor:
                         content = post.llm_context_override
 
             tool_results.append(_tool_msg(call_id, name, content))
+            if success:
+                self.tracker.record_outcome(name, args, result)   # F108: what a reply may claim
 
             # Per-tool result inspection: fatal-error short-circuit signal.
             if isinstance(result, dict) and result.get("fatal_error"):
@@ -637,6 +639,60 @@ def looks_like_narrated_action(text: str) -> bool:
     cues = len(_NARRATION_CUES.findall(text))
     claims = len(_NARRATION_CLAIMS.findall(text))
     return cues >= 2 or (cues >= 1 and claims >= 1)
+
+
+_I_HAVE = r"\bi(?:'ve|’ve| have)(?: just| now| already)? "
+# F108: a reply that says an action is done. Each family names what it claims
+# and the actions that would have done it (substrings of the action names that
+# succeeded this turn — the inner action for platform_execute).
+_ACTION_CLAIMS = (
+    ("approved", re.compile(_I_HAVE + r"approved\b|\b(?:is|it's|it is) now approved\b", re.I),
+     ("approve",)),
+    ("started", re.compile(r"\b(?:is|it's|it is) now running\b|" + _I_HAVE
+                              + r"(?:started|launched|kicked off|resumed)\b", re.I),
+     ("approve_mission", "resume_", "execute_", "start_", "run_", "trigger", "update_task_status", "schedule_")),
+    ("noted", re.compile(_I_HAVE + r"(?:noted|made a note|saved|stored|recorded|remembered)\b", re.I),
+     ("store_memory", "update_", "field_inject", "submit_report")),
+    ("put on the board", re.compile(_I_HAVE + r"(?:put|added|placed)\b[^.!?\n]{0,80}\b(?:on|onto|to) the board\b|"
+                                       + _I_HAVE + r"(?:created|opened|added|raised) (?:a |an |the |your )?"
+                                       r"(?:new )?(?:task|ticket|card)\b", re.I),
+     ("create_task", "assign_task", "schedule_task")),
+    ("created", re.compile(_I_HAVE + r"(?:created|set up|added|built|installed) (?:a |an |the |your )?(?:new )?"
+                              r"(?:agent|mission|playbook|watch|schedule|skill|blueprint|api key|blog post|"
+                              r"routing rule)", re.I),
+     ("create_", "install_", "schedule_", "add_playbook_step")),
+    ("sent", re.compile(_I_HAVE + r"(?:sent|emailed|messaged|notified|texted|posted)\b", re.I),
+     ("send", "notify", "notification", "publish", "post", "mail", "message")),
+    ("deleted", re.compile(_I_HAVE + r"(?:deleted|removed|cancelled|canceled|uninstalled|revoked)\b", re.I),
+     ("delete_", "remove_", "cancel_", "uninstall_", "revoke_", "unassign_")),
+    ("changed", re.compile(_I_HAVE + r"(?:updated|renamed|changed|assigned|reassigned|moved|switched)\b", re.I),
+     ("update_", "assign_", "set_", "configure_", "rename", "move")),
+)
+# A sentence that places the action in the past is a reference, not a claim.
+_BACK_REFERENCE = re.compile(r"\b(?:earlier|previously|yesterday|last (?:time|turn|week|night)|before)\b", re.I)
+_SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
+
+CLAIMED_ACTION_NOTICE = (
+    "This reply says something was {claim}, but no action that does that ran in this reply — "
+    "it has not happened. Tell me to do it and I will make the call."
+)
+
+
+def claimed_action_not_done(text: str, done: Optional[set] = None) -> Optional[str]:
+    """What the reply says was done ("approved", "noted", …) when no
+    action that does it succeeded this turn, else None. Night 3: "I've
+    approved the mission. It's now running" (it wasn't), "I've noted that the
+    Taster plan is now £14" (no tool ran), "I've put your newsletter on the
+    board" (the owner's own ticket). A claim placed in the past ("as I noted
+    earlier") or denied ("I haven't approved it") is not one."""
+    succeeded = [a.lower() for a in (done or ())]
+    for sentence in _SENTENCE.findall(text or ""):
+        if _BACK_REFERENCE.search(sentence):
+            continue
+        for label, claim, backing in _ACTION_CLAIMS:
+            if claim.search(sentence) and not any(b in a for a in succeeded for b in backing):
+                return label
+    return None
 
 
 def _has_tool_calls(response: Any) -> bool:

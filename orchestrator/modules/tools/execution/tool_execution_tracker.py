@@ -80,6 +80,9 @@ class ToolExecutionTracker:
         self.exact_executions: Set[Tuple[str, str]] = set()
         self.search_queries: Dict[str, List[str]] = {}
         self.tool_counts: Dict[str, int] = {}
+        # F108: the actions that did what they were asked this turn (a result
+        # that reports a failure does not count) — what a reply may claim.
+        self.succeeded: Set[str] = set()
 
     def _hash_args(self, tool_args: Dict[str, Any]) -> str:
         return hashlib.md5(json.dumps(tool_args, sort_keys=True).encode()).hexdigest()
@@ -145,6 +148,14 @@ class ToolExecutionTracker:
             query = _extract_query_from_args(tool_name, tool_args)
             if query:
                 self.search_queries.setdefault(tool_name, []).append(query)
+
+    def record_outcome(self, tool_name: str, tool_args: Dict[str, Any], result: Any) -> None:
+        """F108: record an action that succeeded — the inner action for the
+        platform_execute dispatcher. A result that says it failed
+        (``success: False``, Composio's ``successful: False``) is not recorded."""
+        if isinstance(result, dict) and (result.get("success") is False or result.get("successful") is False):
+            return
+        self.succeeded.add(self._counting_key(tool_name, tool_args).split(":", 1)[-1])
 
     def get_execution_count(self, tool_name: str) -> int:
         return self.tool_counts.get(tool_name, 0)
