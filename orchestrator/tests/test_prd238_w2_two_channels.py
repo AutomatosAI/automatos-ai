@@ -165,6 +165,7 @@ def test_stream_llm_call_yields_frames_then_response():
 
     svc = object.__new__(StreamingChatService)
     svc.streaming_handler = get_streaming_handler()
+    svc.db = None  # F105: _stream_llm_call hands a read-only session back to the pool; none here
 
     class _Manager:
         async def generate_response(self, messages, tools=None, on_delta=None):
@@ -193,6 +194,7 @@ def test_stream_llm_call_surfaces_provider_errors():
 
     svc = object.__new__(StreamingChatService)
     svc.streaming_handler = get_streaming_handler()
+    svc.db = None  # F105: _stream_llm_call hands a read-only session back to the pool; none here
 
     class _Boom:
         async def generate_response(self, messages, tools=None, on_delta=None):

@@ -29,9 +29,10 @@ from core.models.core import BoardTask
 
 
 class _Query:
-    def __init__(self, rows, stats=None):
+    def __init__(self, rows, stats=None, columns=None):
         self._rows = list(rows)
         self._stats = stats if stats is not None else {}
+        self._columns = columns  # a column query (F091's grant_owners) returns tuples
 
     def filter(self, *conds):
         rows = self._rows
@@ -47,19 +48,22 @@ class _Query:
                 rows = [r for r in rows if str(getattr(r, key, None)) in allowed]
             else:
                 rows = [r for r in rows if str(getattr(r, key, None)) == str(value)]
-        return _Query(rows, self._stats)
+        return _Query(rows, self._stats, self._columns)
 
     def order_by(self, *a):
-        return _Query(list(reversed(self._rows)), self._stats)
+        return _Query(list(reversed(self._rows)), self._stats, self._columns)
 
     def limit(self, *a):
         return self
 
+    def _shaped(self, row):
+        return tuple(getattr(row, c) for c in self._columns) if self._columns else row
+
     def first(self):
-        return self._rows[0] if self._rows else None
+        return self._shaped(self._rows[0]) if self._rows else None
 
     def all(self):
-        return list(self._rows)
+        return [self._shaped(r) for r in self._rows]
 
 
 class _FakeSession:
@@ -72,8 +76,11 @@ class _FakeSession:
             obj.id = len(self.rows) + 1
         self.rows.append(obj)
 
-    def query(self, model):
-        return _Query([r for r in self.rows if isinstance(r, model)], self.stats)
+    def query(self, *entities):
+        # A model, or its columns: F091's grant_owners reads (id, name) and (id, title).
+        model = getattr(entities[0], "class_", entities[0])
+        columns = [e.key for e in entities] if entities[0] is not model else None
+        return _Query([r for r in self.rows if isinstance(r, model)], self.stats, columns)
 
 
 def _task(ws, tid, *, parent=None, status="assigned", title=None):
