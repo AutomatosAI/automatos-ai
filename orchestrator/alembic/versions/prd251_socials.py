@@ -7,11 +7,18 @@
   ``SOCIALS_ENABLED_DEFAULT`` at migration time (default off), so a stack
   that ships with Socials on starts on, and the page shows the real state.
   After that the row is the switch: the super-admin's choice wins over the env.
+* Creates the two D2 tables (``core/models/socials.py`` declares the same shape;
+  ``tests/test_prd251_models.py`` holds the two together):
+  - ``social_posts``: one row per post, its approval bound to ``content_hash`` (D6);
+  - ``social_post_targets``: one row per channel per post, with a UNIQUE
+    ``idempotency_key``.
+  JSON columns are JSONB on Postgres (the ``JSON().with_variant`` of the model).
+  ``social_campaigns`` is NOT created (D2: Wave 2, only if series approval ships).
 
-Insert-if-absent: ``system_settings`` has no (category, key) unique constraint,
-so the upgrade checks first (the voice precedent), and a re-run never
-overwrites a super-admin's choice. The downgrade deletes only the rows this
-revision created.
+Insert-if-absent seed: ``system_settings`` has no (category, key) unique
+constraint, so the upgrade checks first (the voice precedent), and a re-run
+never overwrites a super-admin's choice. The downgrade drops exactly what the
+upgrade creates: the two tables with their indexes, and the seeded row.
 
 Chains single-parent on kb_multimodal_tables (the current single head).
 
@@ -23,6 +30,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision = "prd251_socials"
 down_revision = "kb_multimodal_tables"
@@ -30,6 +38,31 @@ branch_labels = None
 depends_on = None
 
 SEED_CREATED_BY = "prd251"
+
+POST_STATUS_CHECK = (
+    "status IN ('draft', 'rendering', 'needs_approval', 'changes_requested', 'approved', "
+    "'scheduled', 'publishing', 'published', 'partially_published', 'failed', 'missed', "
+    "'archived')"
+)
+POST_FORMAT_CHECK = "format IN ('video', 'image', 'carousel', 'fact_card', 'infographic')"
+TARGET_POST_KIND_CHECK = (
+    "post_kind IN ('text', 'image', 'carousel', 'video', 'reel', 'short', 'story')"
+)
+TARGET_STATUS_CHECK = "status IN ('pending', 'uploading', 'published', 'failed')"
+
+POST_INDEXES = (
+    ("ix_social_posts_workspace_status", ["workspace_id", "status"]),
+    ("ix_social_posts_workspace_scheduled_for", ["workspace_id", "scheduled_for"]),
+)
+TARGET_INDEXES = (("ix_social_post_targets_post_id", ["post_id"]),)
+
+
+def _json():
+    return sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
+
+
+def _uuid():
+    return postgresql.UUID(as_uuid=True)
 
 
 def _socials_settings_seed() -> tuple:
@@ -74,11 +107,85 @@ def _seed_settings(conn, rows) -> None:
         )
 
 
+def _create_social_posts() -> None:
+    op.create_table(
+        "social_posts",
+        sa.Column("id", _uuid(), primary_key=True),
+        sa.Column(
+            "workspace_id",
+            _uuid(),
+            sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("created_by", sa.String(255), nullable=False),
+        sa.Column("campaign_id", _uuid(), nullable=True),
+        sa.Column("title", sa.String(500), nullable=False),
+        sa.Column("brief", sa.Text(), nullable=True),
+        sa.Column("copy", _json(), nullable=False),
+        sa.Column("format", sa.String(20), nullable=True),
+        sa.Column("template_id", _uuid(), nullable=True),
+        sa.Column("variables", _json(), nullable=False),
+        sa.Column("sources", _json(), nullable=False),
+        sa.Column("media", _json(), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False, server_default="draft"),
+        sa.Column("content_hash", sa.String(64), nullable=False),
+        sa.Column("approved_hash", sa.String(64), nullable=True),
+        sa.Column("approved_by", sa.String(255), nullable=True),
+        sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("override_unsourced", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("review_log", _json(), nullable=False),
+        sa.Column("scheduled_for", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("timezone", sa.String(64), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.CheckConstraint(POST_STATUS_CHECK, name="ck_social_posts_status"),
+        sa.CheckConstraint(POST_FORMAT_CHECK, name="ck_social_posts_format"),
+    )
+    for name, columns in POST_INDEXES:
+        op.create_index(name, "social_posts", columns)
+
+
+def _create_social_post_targets() -> None:
+    op.create_table(
+        "social_post_targets",
+        sa.Column("id", _uuid(), primary_key=True),
+        sa.Column(
+            "post_id",
+            _uuid(),
+            sa.ForeignKey("social_posts.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("toolkit", sa.String(100), nullable=False),
+        sa.Column("post_kind", sa.String(20), nullable=False),
+        sa.Column("action_plan", _json(), nullable=False),
+        sa.Column("idempotency_key", sa.String(128), nullable=False),
+        sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
+        sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("remote_id", sa.String(255), nullable=True),
+        sa.Column("permalink", sa.String(1000), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
+        sa.UniqueConstraint("idempotency_key", name="uq_social_post_targets_idempotency_key"),
+        sa.CheckConstraint(TARGET_POST_KIND_CHECK, name="ck_social_post_targets_post_kind"),
+        sa.CheckConstraint(TARGET_STATUS_CHECK, name="ck_social_post_targets_status"),
+    )
+    for name, columns in TARGET_INDEXES:
+        op.create_index(name, "social_post_targets", columns)
+
+
 def upgrade() -> None:
     _seed_settings(op.get_bind(), _socials_settings_seed())
+    _create_social_posts()
+    _create_social_post_targets()
 
 
 def downgrade() -> None:
+    for name, _columns in TARGET_INDEXES:
+        op.drop_index(name, table_name="social_post_targets")
+    op.drop_table("social_post_targets")
+    for name, _columns in POST_INDEXES:
+        op.drop_index(name, table_name="social_posts")
+    op.drop_table("social_posts")
     op.get_bind().execute(
         sa.text(
             "DELETE FROM system_settings WHERE category = 'socials' AND created_by = :created_by"

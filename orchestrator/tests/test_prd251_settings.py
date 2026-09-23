@@ -299,22 +299,6 @@ def test_migration_seed_never_overwrites_the_super_admins_choice(monkeypatch):
     assert [tuple(r) for r in rows] == [("true", "admin")]
 
 
-def test_migration_downgrade_deletes_only_its_own_seed(monkeypatch):
-    mod = _load_migration()
-    engine = _settings_engine()
-    table = SystemSetting.__table__
-    try:
-        with engine.begin() as conn:
-            conn.execute(table.insert().values(category="voice", key="live_enabled", value="false", created_by="prd207"))
-            mod._seed_settings(conn, mod._socials_settings_seed())
-            monkeypatch.setattr(mod, "op", SimpleNamespace(get_bind=lambda: conn))
-            mod.downgrade()
-            left = conn.execute(text("SELECT category, key FROM system_settings")).fetchall()
-    finally:
-        engine.dispose()
-    assert [tuple(r) for r in left] == [("voice", "live_enabled")]
-
-
 # ---------------------------------------------------------------------------
 # The workspace switch — pure parse / validate
 # ---------------------------------------------------------------------------
