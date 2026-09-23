@@ -582,6 +582,20 @@ def seed_system_settings(db: Session):
         },
         {
             "category": SettingCategory.CHATBOT.value,
+            "key": "release_db_between_model_calls",
+            "default_value": "true",
+            "value_type": "boolean",
+            "description": (
+                "Before each model call, a chat turn whose database transaction "
+                "has only read ends it, so the turn holds no pool connection while "
+                "the model thinks (F105, night 3: turns held connections through "
+                "their whole tool loop and the pool ran dry). A transaction that "
+                "wrote is never touched. Set false to hold connections as before."
+            ),
+            "is_required": False,
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
             "key": "action_retry_budget",
             "default_value": "1",
             "value_type": "number",

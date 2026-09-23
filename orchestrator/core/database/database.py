@@ -93,6 +93,10 @@ engine = create_engine(
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# F105-B: the listeners that tell a read-only transaction from one that wrote,
+# registered before any session begins (release_if_read_only relies on them).
+from core.database import read_release  # noqa: E402,F401
+
 def create_tables():
     """Create all database tables"""
     try:

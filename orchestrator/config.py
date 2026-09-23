@@ -420,6 +420,15 @@ class Config:
         return self._required_float_setting("model_policy", "turn_cost_ceiling_usd")
 
     @property
+    def CHATBOT_RELEASE_DB_BETWEEN_MODEL_CALLS(self) -> bool:
+        """F105-B: before each model call a chat turn ends its read-only
+        transaction, so it holds no pool connection while the model thinks.
+        Dial chatbot.release_db_between_model_calls; on unless set false."""
+        from core.llm.manager import get_system_setting
+        val = get_system_setting("chatbot", "release_db_between_model_calls", "true")
+        return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    @property
     def CHATBOT_ACTION_RETRY_BUDGET(self) -> int:
         """Retries when a tool returns 'action not mapped'."""
         return self._required_int_setting("chatbot", "action_retry_budget")

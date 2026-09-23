@@ -38,6 +38,7 @@ from modules.tools.execution.telemetry import resolve_action_name
 from core.models import Chat, Message, Vote, Workspace
 from core.services.image_store import get_image_store
 from config import config
+from core.database.read_release import release_if_read_only
 
 # Import from consumer's own modules
 from consumers.chatbot.prompt_analyzer import get_prompt_analyzer
@@ -697,6 +698,15 @@ class StreamingChatService:
         from modules.agents.factory.agent_factory import AgentFactory
         self.agent_factory = AgentFactory(db_session=db)
         logger.info("StreamingChatService initialized with AgentFactory integration")
+
+    def _before_model_call(self) -> None:
+        """F105-B: the turn holds no pool connection while the model thinks —
+        a transaction that has only read ends here; one that wrote is kept.
+        Dial: chatbot.release_db_between_model_calls (read once per turn)."""
+        if getattr(self, "_release_db_dial", None) is None:
+            self._release_db_dial = config.CHATBOT_RELEASE_DB_BETWEEN_MODEL_CALLS
+        if self._release_db_dial:
+            release_if_read_only(self.db)
 
     def _reset_turn_retrieval(self) -> None:
         """Clear per-turn retrieval provenance at the start of a turn."""
@@ -1525,6 +1535,7 @@ class StreamingChatService:
 
         async def _run():
             try:
+                self._before_model_call()
                 return await llm_manager.generate_response(messages=messages, tools=tools, on_delta=_on_delta)
             finally:
                 await frames.put(END)
@@ -1909,6 +1920,7 @@ class StreamingChatService:
 
         async def _llm_callback(messages, tools):
             try:
+                self._before_model_call()
                 return await _note_round(_governor_track(await agent_runtime.llm_manager.generate_response(
                     messages=messages, tools=tools, on_delta=_on_delta,
                 )))
@@ -1925,6 +1937,7 @@ class StreamingChatService:
                     )
                     if compacted:
                         logger.info("Recovery compaction succeeded, retrying LLM call")
+                        self._before_model_call()
                         return await _note_round(_governor_track(await agent_runtime.llm_manager.generate_response(
                             messages=messages_new, tools=tools_new, on_delta=_on_delta,
                         )))
@@ -2038,6 +2051,7 @@ class StreamingChatService:
                     "setting (or the workspace power-mode caps)."
                 ),
             )
+            self._before_model_call()
             final = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages, tools=None,
             )
@@ -2706,6 +2720,7 @@ class StreamingChatService:
                 # Live-test 2026-09-02: zero tokens, finish_reason=stop, streamed as
                 # a successful blank turn mid-onboarding. Retry once, then say so.
                 logger.warning("[chat] empty completion (no text, no tool calls) — retrying once")
+                self._before_model_call()
                 response = await agent_runtime.llm_manager.generate_response(
                     messages=llm_messages, tools=use_tools,
                 )
@@ -2760,6 +2775,7 @@ class StreamingChatService:
                         'role': 'system',
                         'content': 'Based on the tool results above, provide a comprehensive response to the user.',
                     })
+                    self._before_model_call()
                     forced = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
                     final_text = forced.content or "I apologize, but I encountered an issue generating a response. Please try again."
                     final_streamed = False
@@ -2915,6 +2931,7 @@ class StreamingChatService:
                 is_simple = self.prompt_analyzer.is_simple_message(latest_text)
                 use_tools = None if is_simple else tools
 
+                self._before_model_call()
                 response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
 
                 if response.tool_calls:
@@ -2952,6 +2969,7 @@ class StreamingChatService:
                     })
                     llm_messages.extend(tool_results)
 
+                    self._before_model_call()
                     final_response = await llm_manager.generate_response(messages=llm_messages, tools=None)
                     response_text = final_response.content or ""
                 else:
