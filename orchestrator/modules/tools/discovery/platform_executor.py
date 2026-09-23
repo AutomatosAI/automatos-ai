@@ -960,6 +960,16 @@ class PlatformActionExecutor:
                         action_name, approved_via_grant_id, self.workspace_id,
                     )
                 else:
+                    # F091 (night 3): never ask about something that is not
+                    # there, and name what is on the card.
+                    from modules.tools.execution.subject_targets import (
+                        missing_targets_error, named_subject, resolve_targets,
+                    )
+
+                    found, missing = resolve_targets(self.db, self.workspace_id, params, action_name)
+                    if missing:
+                        return missing_targets_error(action_name, missing)
+                    subject = named_subject(found) or _subject_line(params)
                     ask = {
                         "success": False,
                         "requires_confirmation": True,
@@ -967,7 +977,7 @@ class PlatformActionExecutor:
                         "permission_level": action_def.permission_level,
                         "message": (
                             f"This action ({action_def.permission_level}) requires confirmation. "
-                            f"Action: {action_name}{_subject_line(params)} — "
+                            f"Action: {action_name}{subject} — "
                             f"{action_def.description[:100]}"
                         ),
                         "params": params,
@@ -981,6 +991,7 @@ class PlatformActionExecutor:
                         permission_level=action_def.permission_level,
                         description=action_def.description,
                         caller_context=caller_context,
+                        subject=subject,
                     )
         except Exception as e:
             # Fail-closed: if we can't verify permissions, require confirmation
