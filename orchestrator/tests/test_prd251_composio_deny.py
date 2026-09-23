@@ -16,7 +16,8 @@ the policy plane ships ``off``. Pinned here, with the policy plane OFF:
   never made — the Composio client, the agent executor and the three agent tool
   paths, the tool router and tool service, a Playbook step, the LinkedIn smoke
   route, both Shopify bulk syncs, the Shopify credential probe, the cloud-file
-  REST download and the v2 API service;
+  REST download and the v2 API service; the agent executor also checks the
+  action its validation resolved the name to, not only the name asked for;
 * an AST inventory of every execution site in the orchestrator (SDK
   ``tools.execute``, the ``execute_action`` wrapper, Composio REST URLs, the
   LinkedIn direct API) proves each one calls the ONE helper before executing,
@@ -367,6 +368,50 @@ async def test_the_agent_executor_refuses_a_denied_linkedin_post_before_the_work
     )
 
     _assert_blocked(result["error"], LINKEDIN_POST)
+    direct.assert_not_called()
+    sdk.tools.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asked, cached_name", [
+    ("create_linked_in_post", LINKEDIN_POST),           # unprefixed
+    ("linkedin-create-linked-in-post", LINKEDIN_POST),  # slug form
+    ("post to linkedin", "CREATE LINKED IN POST"),      # display name, rebuilt with the app prefix
+])
+async def test_the_agent_executor_checks_the_action_validation_resolved(settings_db, monkeypatch, asked, cached_name):
+    """Validation can resolve the name asked for onto another action. The list
+    holds the action that runs, so a denied LinkedIn post never reaches the
+    direct API (which bypasses the checked client) under another name."""
+    import core.composio.entity_manager as entity_manager_mod
+    import core.composio.linkedin_image_workaround as lw
+
+    _set_denied(settings_db, [LINKEDIN_POST])
+    assert deny_list.composio_action_denial(asked) is None  # the name asked for is not listed
+
+    direct = AsyncMock(name="execute_linkedin_image_post")
+    monkeypatch.setattr(lw, "execute_linkedin_image_post", direct)
+    monkeypatch.setattr(entity_manager_mod.EntityManager, "get_connected_apps", lambda self, ws: ["LINKEDIN"])
+    db = MagicMock(name="db")
+    # Every .first(): the agent's LINKEDIN assignment, then the cache row the name resolves to.
+    db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(action_name=cached_name)
+    sdk = _sdk()
+    executor = ComposioToolExecutor(db=db, client=_client(sdk))
+    entity = MagicMock(return_value={"composio_entity_id": "entity-1"})
+    uploads = AsyncMock(side_effect=lambda action, params, workspace_id: (params, []))
+    monkeypatch.setattr(executor, "validate_feature_access", lambda *args, **kwargs: True)
+    monkeypatch.setattr(executor, "get_entity_for_workspace", entity)
+    monkeypatch.setattr(executor, "_resolve_file_uploads", uploads)
+
+    result = await executor.execute(
+        action=asked, params={"text": "hi", "images": ["/workspace/a.png"]},
+        agent_id=1, workspace_id=uuid.uuid4(), app_name="LINKEDIN",
+    )
+
+    assert result["success"] is False and result["error_type"] == "action_denied"
+    assert result["action"] == LINKEDIN_POST
+    _assert_blocked(result["error"], LINKEDIN_POST)
+    entity.assert_not_called()
+    uploads.assert_not_called()
     direct.assert_not_called()
     sdk.tools.execute.assert_not_called()
 
