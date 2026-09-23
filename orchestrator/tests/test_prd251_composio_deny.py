@@ -69,6 +69,11 @@ import core.database.database as database_mod  # noqa: E402
 from core.composio.client import ComposioClient  # noqa: E402
 from core.composio.tool_executor import ComposioToolExecutor  # noqa: E402
 from core.models.system_settings import SettingCategory, SystemSetting  # noqa: E402
+from tests.helpers_unreadable_settings import (  # noqa: E402
+    UNREADABLE_MODES,
+    pool_exhausted,
+    settings_unreadable,
+)
 
 BILLING = "HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE"
 LINKEDIN_POST = "LINKEDIN_CREATE_LINKED_IN_POST"
@@ -333,45 +338,13 @@ def test_the_refusal_names_the_slug_and_the_reason(settings_db):
 READ_FAILED = BLOCKED + deny_list.READ_FAILED_REASON
 
 
-def _pool_exhausted():
-    raise sa_exc.TimeoutError("QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00")
-
-
-class _DroppedConnection:
-    """A SessionLocal whose sessions fail every query as a dropped connection does."""
-
-    def __init__(self):
-        self.sessions = []
-
-    def __call__(self):
-        session = MagicMock(name="session")
-        session.query.side_effect = sa_exc.OperationalError(
-            "SELECT system_settings.value", {}, Exception("server closed the connection unexpectedly"),
-        )
-        self.sessions.append(session)
-        return session
-
-
-@pytest.fixture(params=["SessionLocal raises", "the query raises", "the table is missing"])
+@pytest.fixture(params=UNREADABLE_MODES)
 def unreadable_settings(request, monkeypatch):
     """The deny list cannot be read: SessionLocal itself raises (an exhausted
     pool), the session's query raises (a dropped connection), or the real query
     runs against a database without system_settings."""
-    engine = None
-    dropped = None
-    if request.param == "SessionLocal raises":
-        monkeypatch.setattr(database_mod, "SessionLocal", _pool_exhausted)
-    elif request.param == "the query raises":
-        dropped = _DroppedConnection()
-        monkeypatch.setattr(database_mod, "SessionLocal", dropped)
-    else:
-        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-        monkeypatch.setattr(database_mod, "SessionLocal", sessionmaker(bind=engine))
-    yield request.param
-    if dropped is not None:
-        assert dropped.sessions and all(session.close.called for session in dropped.sessions)  # nothing leaks
-    if engine is not None:
-        engine.dispose()
+    with settings_unreadable(request.param, monkeypatch) as mode:
+        yield mode
 
 
 @pytest.mark.parametrize("slug", [BILLING, "SLACK_SEND_MESSAGE"])
@@ -426,7 +399,7 @@ def test_the_strict_read_tells_no_row_from_a_failed_read_and_other_callers_keep_
     finally:
         engine.dispose()
 
-    monkeypatch.setattr(database_mod, "SessionLocal", _pool_exhausted)
+    monkeypatch.setattr(database_mod, "SessionLocal", pool_exhausted)
     with pytest.raises(sa_exc.TimeoutError):
         read_system_setting("composio", "denied_actions")
     # The lenient wrapper every other setting reader uses is unchanged: a failed read is its default.

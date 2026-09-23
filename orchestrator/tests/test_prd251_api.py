@@ -136,11 +136,11 @@ def api(monkeypatch):
 
     state = SimpleNamespace(session=session, ctx=_ctx(WS_A), role="owner", master="true")
 
-    def fake_get_system_setting(category, key, default_value=None):
+    def fake_read_system_setting(category, key):
         assert (category, key) == ("socials", "enabled")
-        return default_value if state.master is None else state.master
+        return state.master
 
-    monkeypatch.setattr(socials_settings, "get_system_setting", fake_get_system_setting)
+    monkeypatch.setattr(socials_settings, "read_system_setting", fake_read_system_setting)
     monkeypatch.setattr(permission_mod, "resolve_workspace_role", lambda db, ctx: state.role)
 
     app = FastAPI()

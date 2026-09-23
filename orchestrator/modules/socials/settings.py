@@ -18,13 +18,18 @@ Every plan gets Socials (owner, 2026-09-23), so there is no plan exposure key.
 route depends on it, and it answers 404 unless BOTH switches are on. A
 workspace that can't use Socials never learns the routes exist.
 
-Reads go through ``core.llm.manager.get_system_setting``: a per-request DB
-read that fails soft to the default, so flipping the switch takes effect on
-the next request.
+The master switch is read on every request, so flipping it takes effect on
+the next one. The read is strict (``core.llm.manager.read_system_setting``): a
+read that cannot complete (an exhausted pool, a timeout, a dropped connection)
+switches Socials OFF, whatever ``SOCIALS_ENABLED_DEFAULT`` says, and is logged
+at ERROR. A gate that can't decide must deny. Never ``get_system_setting``: its
+catch-all returns the default on any failure, so with the default on, "could
+not read" would read as ON (P251-RVW-8).
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -35,12 +40,18 @@ from config import config
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from core.llm.manager import get_system_setting
+from core.llm.manager import read_system_setting
 from core.models.system_settings import SettingCategory
 from core.models.workspaces import Workspace
 
+logger = logging.getLogger(__name__)
+
 SOCIALS_SETTINGS_CATEGORY = SettingCategory.SOCIALS.value
 KEY_ENABLED = "enabled"
+
+MASTER_READ_FAILED_LOG = (
+    "[Socials] system setting %s.%s could not be read; the Socials master switch is OFF until it can be"
+)
 
 # The workspace settings key, and the only keys its object may carry.
 WORKSPACE_SOCIALS_SETTINGS_KEY = "socials"
@@ -53,9 +64,18 @@ def socials_master_default() -> str:
 
 
 def socials_master_enabled() -> bool:
-    """The platform master switch: the ``socials.enabled`` system setting."""
-    value = get_system_setting(SOCIALS_SETTINGS_CATEGORY, KEY_ENABLED, socials_master_default())
-    return str(value).strip().lower() == "true"
+    """The platform master switch: the ``socials.enabled`` system setting.
+
+    A readable row decides: ``"true"`` is on, any other value is off. No row, or
+    an empty value, takes ``config.SOCIALS_ENABLED_DEFAULT``. A read that cannot
+    complete is off, whatever the default, and is logged at ERROR. Never raises.
+    """
+    try:
+        value = read_system_setting(SOCIALS_SETTINGS_CATEGORY, KEY_ENABLED)
+    except Exception:  # noqa: BLE001 — any read that did not complete fails closed
+        logger.error(MASTER_READ_FAILED_LOG, SOCIALS_SETTINGS_CATEGORY, KEY_ENABLED, exc_info=True)
+        return False
+    return str(value or socials_master_default()).strip().lower() == "true"
 
 
 @dataclass(frozen=True)
