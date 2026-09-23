@@ -110,6 +110,39 @@ actions:
     source: authored
   - text: give me the board health at a glance
     source: authored
+  platform_board_snapshot:
+  - text: how are things going?
+    source: example
+  - text: what is the status of the board?
+    source: example
+  - text: what is everyone working on?
+    source: example
+  - text: give me the full picture of the board
+    source: authored
+  - text: "what's open, who has it, and what's scheduled?"
+    source: authored
+  - text: catch me up on everything happening on the board
+    source: authored
+  - text: "what's in flight right now and who's on it?"
+    source: authored
+  - text: "what finished recently and what's coming up next?"
+    source: authored
+  - text: show me the open tickets with their agents
+    source: authored
+  - text: where do things stand across the team?
+    source: authored
+  - text: quick status check on all the work
+    source: authored
+  - text: "what's happening today?"
+    source: authored
+  - text: snapshot of the board please
+    source: authored
+  - text: what did the agents finish lately?
+    source: authored
+  - text: "what's scheduled to run next?"
+    source: authored
+  - text: bring me up to speed
+    source: authored
   platform_create_task:
   - text: create a task to fix the login bug
     source: example
@@ -263,6 +296,39 @@ actions:
   - text: which tickets are still open?
     source: authored
   - text: list the cards waiting on the researcher
+    source: authored
+  platform_update_task:
+  - text: "rename task 12 to 'Compare three compostable bag suppliers'"
+    source: example
+  - text: bump task 5 to high priority
+    source: example
+  - text: add a note to task 9 that the supplier replied
+    source: example
+  - text: change the title of task 4 to Supplier shortlist
+    source: authored
+  - text: make task 7 urgent
+    source: authored
+  - text: lower the priority of task 3 to low
+    source: authored
+  - text: update the description of task 15 with the new deadline
+    source: authored
+  - text: "edit ticket 21's description to mention the Dublin store"
+    source: authored
+  - text: add a comment to task 6 saying the quote arrived
+    source: authored
+  - text: reword the title on card 11
+    source: authored
+  - text: set task 18 to medium priority
+    source: authored
+  - text: "fix the typo in task 2's title"
+    source: authored
+  - text: "note on task 14 that we're waiting for the invoice"
+    source: authored
+  - text: correct the description of item 9
+    source: authored
+  - text: have a human sign off task 30 instead of the LLM
+    source: authored
+  - text: "tweak the wording of task 8's brief"
     source: authored
   platform_update_task_status:
   - text: move task 8 to in progress
