@@ -99,9 +99,11 @@ ci_green_on_head() {
   [ -z "$bad" ] || { echo "   PRD-251 jobs not green:"; echo "$bad" | sed 's/^/     /'; return 1; }
   echo "   test.yml run $id is green on $sha for the five PRD-251 jobs"
 }
+# The added-line grep is scoped to CODE: unscoped, it matched this script's own
+# pattern line and the PRD spec's prose (both added in the seed commit), never code.
 no_wave1_code() {
   ! git diff --name-only "$BASE"..HEAD | grep -qE '^services/media-render/|media_render_client' \
-    && ! git diff "$BASE"..HEAD | grep -qE '^\+.*social-publish-'
+    && ! git diff "$BASE"..HEAD -- orchestrator/ frontend/ services/ | grep -qE '^\+.*social-publish-'
 }
 
 # ── S0.1 switches, config, permission ────────────────────────────────────────

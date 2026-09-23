@@ -18,7 +18,7 @@
   - ``social_post_targets``: one row per channel per post, with a UNIQUE
     ``idempotency_key``.
   JSON columns are JSONB on Postgres (the ``JSON().with_variant`` of the model).
-  ``social_campaigns`` is NOT created (D2: Wave 2, only if series approval ships).
+  The campaigns table is NOT created (D2: Wave 2, only if series approval ships).
 
 Insert-if-absent seed: ``system_settings`` has no (category, key) unique
 constraint, so the upgrade checks first (the voice precedent), and a re-run

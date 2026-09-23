@@ -10,8 +10,8 @@ JSON columns are ``JSON().with_variant(JSONB(), "postgresql")`` and id columns
 the portable ``Uuid`` (native UUID on Postgres, CHAR(32) elsewhere), so the
 tables also build under SQLite in the unit tests. The ``prd251_socials`` migration
 creates the same shape, and ``tests/test_prd251_models.py`` holds the two
-together. There is no ``social_campaigns`` table: D2 creates it in Wave 2,
-and only if series approval ships.
+together. There is no campaigns table: D2 creates it in Wave 2, and only if
+series approval ships.
 """
 
 from __future__ import annotations
@@ -90,7 +90,7 @@ class SocialPost(Base):
     )
     # The user or agent that made the post.
     created_by = Column(String(255), nullable=False)
-    # social_campaigns arrives in Wave 2, only if series approval ships: no FK yet.
+    # The campaigns table arrives in Wave 2, only if series approval ships: no FK yet.
     campaign_id = Column(Uuid(as_uuid=True), nullable=True)
 
     title = Column(String(500), nullable=False)
