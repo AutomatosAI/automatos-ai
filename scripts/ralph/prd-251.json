@@ -1,0 +1,143 @@
+{
+ "project": "Automatos AI — PRD-251 Socials, Wave 0 (the gate, the tables, the API, the prerequisite fixes, and the bare Socials tab)",
+ "branchName": "feat/prd-251-socials",
+ "baseBranch": "main",
+ "description": "Wave 0 of PRD-251 (docs/PRDS/PRD-251-SOCIALS.md, decisions D1-D15 binding; owner answers of 2026-09-23 recorded in its status block). Branch feat/prd-251-socials <- main af214bc7b in its own worktree (<workspace>/.worktrees/automatos-ai/feat+prd-251-socials). Nine stories: S0.1 config and switches, S0.2 tables and migration, S0.3 service and API, S0.4 three prerequisite fixes (LinkedIn cross-tenant, video in Deliverables, image-store lookup), S0.5 the bare Socials tab, and S0.6 the platform-wide Composio deny list (PRD-251 is Composio-first since 2026-09-23: customers connect media tools in Composio and agents use them). Every plan gets Socials (no plan key). Nothing here renders media, schedules jobs or publishes to a channel — those are Waves 1-3 and start only after the owner has tested this wave on the socials stack.",
+ "userStories": [
+  {
+   "id": "US-001",
+   "title": "S0.1 — Config, the two Socials switches and the approve permission",
+   "description": "Gate everything Socials behind two switches (D1, owner 2026-09-23: every plan gets Socials, so there is NO plan exposure key). (a) orchestrator/config.py gains, in one commented 'PRD-251 Socials' group: SOCIALS_ENABLED_DEFAULT (bool, env, default False), SOCIALS_MEDIA_URL_TTL_SECONDS=86400, SOCIALS_MISFIRE_GRACE_SECONDS=1800, SOCIALS_MAX_TARGET_ATTEMPTS=3, SOCIALS_RENDER_URL='', SOCIALS_PUBLIC_MEDIA_BUCKET=''. Env reads happen only in config.py. (b) New package modules/socials/ with settings.py mirroring modules/voice/live_settings.py: socials_master_enabled() reads the 'socials'/'enabled' system setting through core.llm.manager.get_system_setting with the default taken from config.SOCIALS_ENABLED_DEFAULT; parse_workspace_socials(settings) -> WorkspaceSocials(enabled: bool); validate_socials_update(value) fail-closed (only the key 'enabled', a bool); and a FastAPI dependency require_socials_enabled that raises 404 unless BOTH the master switch and the caller's workspace switch are on. (c) Make the master switch settable in Settings -> System Settings exactly the way voice.live_enabled is (grep live_enabled across seeds, migrations and boot code and mirror it; do not invent a second mechanism). (d) api/workspaces.py: PUT /api/workspaces/current/socials (require_workspace_permission('workspace:manage')) mirroring save_voice_live_settings at :451, and GET /api/workspaces/current adds \"socials\": {\"available\": <master>, \"enabled\": <workspace>}. (e) modules/policy/roles.py ROLE_PERMISSIONS (:118) gains 'socials:approve' for owner, admin and editor, not viewer.",
+   "acceptanceCriteria": [
+    "config.py carries the six SOCIALS_* attributes with the stated defaults, and no os.getenv/os.environ read for them exists outside config.py (tests/test_config_env_centralization.py stays green).",
+    "socials_master_enabled() is False by default, True when the system setting is 'true', and True when SOCIALS_ENABLED_DEFAULT is true and no row exists (tests/test_prd251_settings.py).",
+    "require_socials_enabled raises 404 when the master switch is off, and 404 when the master is on but the workspace switch is off (unit test).",
+    "PUT /api/workspaces/current/socials returns 403 for a viewer, rejects unknown keys and a non-boolean 'enabled' the same way the voice-live route does, and persists workspace.settings['socials'] with flag_modified (test).",
+    "GET /api/workspaces/current returns socials.available and socials.enabled reflecting both switches (test).",
+    "owner, admin and editor hold 'socials:approve'; viewer does not (test).",
+    "services/plan_tiers.py is unchanged (no plan exposure key; D1)."
+   ],
+   "priority": 1,
+   "passes": false,
+   "notes": "Anchors (main af214bc7b, 2026-09-23): modules/voice/live_settings.py:26 (get_system_setting import), :28-29 (category/key constants), :50-57 (voice_live_enabled), :105-111 (parse), :133-166 (validate); api/workspaces.py:25 (require_workspace_permission import), :57 (GET /current), :119-138 (exposure + settings in the payload), :451-484 (PUT /current/voice-live); modules/policy/roles.py:101 (EDITOR), :118 (ROLE_PERMISSIONS); api/system_settings.py (generic admin API, workspace:manage)."
+  },
+  {
+   "id": "US-002",
+   "title": "S0.2 — social_posts and social_post_targets, one migration",
+   "description": "Add the two tables of D2 as SQLAlchemy models in a new core/models/socials.py, imported from core/models/__init__.py so scripts/init_test_db.py's Base.metadata.create_all builds them. social_posts: id, workspace_id, created_by (user or agent id, string), campaign_id (nullable, no FK yet), title, brief, copy (JSON: base text + per-channel overrides), format (video|image|carousel|fact_card|infographic), template_id (nullable), variables (JSON: name -> {value, claim: bool}), sources (JSON: claim name -> {kind, ref, as_of}), media (JSON: deliverable ids per aspect), status (the twelve D2 values), content_hash, approved_hash, approved_by, approved_at, override_unsourced (bool), review_log (JSON list of {at, by, action, comment} — the history the approval UI shows), scheduled_for (UTC), timezone, created_at, updated_at. social_post_targets: id, post_id (FK social_posts ON DELETE CASCADE), toolkit, post_kind (text|image|carousel|video|reel|short|story), action_plan (JSON), idempotency_key (UNIQUE), status (pending|uploading|published|failed), attempts, remote_id, permalink, error, published_at. Every JSON column is JSON().with_variant(JSONB(), 'postgresql') (precedent core/models/core.py:1056). Status columns follow BlogPost's convention (core/models/core.py ~:1681-1744). Indexes: (workspace_id, status) and (workspace_id, scheduled_for). One alembic revision alembic/versions/prd251_socials.py: revision 'prd251_socials', down_revision 'kb_multimodal_tables'; downgrade drops exactly what upgrade creates. Move both head pins: tests/test_prd209_alembic_single_head.py:62 EXPECTED_HEAD and the assertion in tests/test_prd236_w1_routes.py:186-190. social_campaigns is NOT created (D2: Wave 2, only if series approval ships).",
+   "acceptanceCriteria": [
+    "alembic has exactly one head, 'prd251_socials', chained onto 'kb_multimodal_tables'; tests/test_prd209_alembic_single_head.py and tests/test_prd236_w1_routes.py pass with the moved pins.",
+    "tests/test_prd251_models.py holds the model and the migration together (same tables, columns, unique constraint and indexes), in the style of tests/test_kb_multimodal_tables.py.",
+    "Both tables build under SQLite via create_all, and a duplicate idempotency_key is rejected (test).",
+    "The migration's upgrade/downgrade round-trip passes in CI (test.yml's migration lane or an alembic test) — record the CI run id in the AC evidence.",
+    "No social_campaigns table or model exists."
+   ],
+   "priority": 2,
+   "passes": false,
+   "notes": "Anchors: orchestrator/alembic/versions/kb_multimodal_tables.py (current single head); tests/test_prd209_alembic_single_head.py:60-62,133-135; tests/test_prd236_w1_routes.py:186-190; scripts/init_test_db.py:53 (create_all); core/models/__init__.py (import list). Trap: a new alembic head updates TWO pins. Trap: SQLite tests need the JSON variant, not bare JSONB."
+  },
+  {
+   "id": "US-003",
+   "title": "S0.3a — The socials service: status machine, content hash, approval and the publish guard",
+   "description": "modules/socials/service.py owns the post lifecycle as pure, tested logic. (a) The status machine: an explicit allowed-transitions table over the D2 statuses; an illegal transition raises IllegalTransition. Wave 0 transitions: draft -> needs_approval (submit); changes_requested -> needs_approval (submit); needs_approval -> approved | changes_requested | archived (reject); approved -> scheduled (schedule) -> approved (unschedule); approved|scheduled -> needs_approval (any content edit). Rendering, publishing, missed and failed transitions arrive with their waves. (b) compute_content_hash(post): sha256 over canonical JSON (sort_keys=True, separators=(',', ':'), ensure_ascii=False) of copy, variables, sources, format, template_id and media. Docstring: Wave 1 extends 'media' with the rendered files' digests. (c) create_draft, update_post (recomputes the hash; if an approved or scheduled post's hash changes, status -> needs_approval and the approval is void because approved_hash != content_hash), submit, approve(user, override_unsourced=False), request_changes(user, comment), reject(user, reason), schedule(scheduled_for, timezone), unschedule. Every review action appends to review_log. (d) D7: unsourced_claims(post) returns the names of variables with claim=true that have no entry in sources. approve raises UnsourcedClaims(names) unless override_unsourced=True, in which case override_unsourced is stored and the review_log entry names the claims. (e) assert_publishable(post) raises NotPublishable unless status is approved or scheduled AND approved_hash == content_hash. (f) modules/socials/publisher.py: publish_post(db, post) calls assert_publishable FIRST, then — Wave 0 has no channel publishers — raises PublishingUnavailable. This is the seam S3.3 fills; nothing in it calls Composio yet.",
+   "acceptanceCriteria": [
+    "tests/test_prd251_service.py covers every allowed transition and asserts IllegalTransition for at least five illegal ones.",
+    "The hash is stable across key order and identical content, and changes when any one of copy, variables, sources, format, template_id or media changes (parametrised test).",
+    "Editing any content field of an approved post moves it to needs_approval, and assert_publishable then raises (test).",
+    "approve with an unsourced claim raises UnsourcedClaims naming it; with override_unsourced=True it succeeds, stores the override and names the claim in review_log (test).",
+    "publish_post on a post whose approved_hash != content_hash raises NotPublishable before anything else runs (test with a mock proving no downstream call)."
+   ],
+   "priority": 3,
+   "passes": false,
+   "notes": "Keep the service free of FastAPI imports (the API maps its exceptions). Reuse: blog_service's draft/publish shape (core/services/blog_service.py:250-258) is the precedent, not the model. D6/D7 in the PRD are binding."
+  },
+  {
+   "id": "US-004",
+   "title": "S0.3b — The /api/socials routes behind the gate",
+   "description": "api/socials.py: GET /api/socials/posts?status=&from=&to=; POST /api/socials/posts; GET and PATCH /api/socials/posts/{id}; POST /api/socials/posts/{id}/submit|approve|request-changes|reject|schedule|unschedule|publish-now. Mount it the way other routers are mounted (grep main.py's include_router list). Every route depends on require_socials_enabled (US-001) and on the caller's workspace; every query filters by that workspace_id, so another workspace's post is a 404. approve additionally requires 'socials:approve' (403 otherwise). Write permissions otherwise mirror api/blog.py. Exceptions map: IllegalTransition -> 409, UnsourcedClaims -> 422 (body names the claims), NotPublishable -> 409, PublishingUnavailable -> 501 with 'Channel publishing arrives in Wave 3'. Add a guard test that walks the app's routes under /api/socials and asserts each carries require_socials_enabled, so a later route cannot skip the gate. Update orchestrator/reports/route-manifest.json for every new route, plus PUT /api/workspaces/current/socials (CI's frontend route-contract reads the COMMITTED manifest): regenerate with `cd orchestrator && python3 -m scripts.dump_routes`, or hand-edit sorted by (path, method) and bump route_count.",
+   "acceptanceCriteria": [
+    "With the master switch off, every /api/socials route returns 404 (parametrised over the router's routes) — tests/test_prd251_api.py.",
+    "With the master on and the workspace switch off, the routes still return 404 (test).",
+    "PATCH of an approved post's copy returns the post in needs_approval with a new content_hash (test).",
+    "publish-now on a post whose approved_hash != content_hash returns 409 and the Composio executor (mocked) is never called (test).",
+    "approve with an unsourced claim and no override returns 422 naming the claim; with override_unsourced=true it returns 200 and records the override (test).",
+    "A viewer gets 403 on approve and an editor gets 200; a post from another workspace returns 404 (test).",
+    "route-manifest.json lists every new route; the route-gate guard test passes."
+   ],
+   "priority": 4,
+   "passes": false,
+   "notes": "Trap (route-manifest-frontend-contract): orchestrator tests regenerate their own manifest and never compare it with the committed one — only the frontend route-contract job reads the committed file, so forgetting it passes backend CI and fails frontend CI. FastAPI route-order trap: declare /posts/{id}/<action> routes explicitly; never let /{id} swallow them."
+  },
+  {
+   "id": "US-005",
+   "title": "S0.4a — Workspace-scope the LinkedIn image workaround",
+   "description": "core/composio/linkedin_image_workaround.py loads the FIRST active 'linkedInCommunityManagementOAuth2Api' credential with no workspace filter (:61-107) and caches it — and the access token (_cached_token, _cached_token_expires, :118) — in process globals (:53). Any workspace posting a LinkedIn image publishes to that one organisation: cross-tenant. Owner decision (2026-09-23): scope it, do not delete it (the module header says Composio cannot upload LinkedIn images). _load_linkedin_credentials(workspace_id) filters by the workspace (check core/models/credentials.py for how credentials carry their workspace); caches are dicts keyed by workspace_id; a workspace with no credential of its own gets a clear error and no LinkedIn HTTP call — never another workspace's credential. Thread workspace_id through all three callers: core/composio/tool_executor.py:705, api/recipe_executor.py:763 and api/composio.py:281. Add api/composio.py to the module's REMOVAL CHECKLIST (it lists only two hooks today).",
+   "acceptanceCriteria": [
+    "tests/test_prd251_linkedin_scope.py: two workspaces with two credentials each post with their own credential and organisation URN (httpx mocked).",
+    "A workspace with no credential gets a clear error, and no request reaches LinkedIn (test).",
+    "Workspace A's cached token is never used for workspace B (test).",
+    "No module-level single-credential or single-token cache remains (grep evidence in the commit body), and all three callers pass workspace_id."
+   ],
+   "priority": 5,
+   "passes": false,
+   "notes": "Anchors: linkedin_image_workaround.py:43 (CREDENTIAL_TYPE_NAME), :53 (_cached_creds), :61-107 (loader), :118-155 (token cache), :374-400 (execute path already receives workspace_id); callers tool_executor.py:705, recipe_executor.py:763, api/composio.py:281."
+  },
+  {
+   "id": "US-006",
+   "title": "S0.4b — Video in Deliverables",
+   "description": "Agents can already produce MP4s and deliverable_service maps .mp4/.mov/.avi/.mkv/.webm to type 'video' (services/deliverable_service.py:107-108), but 'video' is missing from AGENT_REGISTERABLE_ARTIFACT_TYPES (:132) and from the frontend DELIVERABLE_TYPES (components/icons/deliverable-icon.tsx:34). Add it to both, give it an icon from the icon set that file already uses, and make the Deliverables preview play it: a <video controls preload=\"metadata\"> fed by the same file URL the preview already uses for other binary Deliverables (find the preview component; do not add a second media route).",
+   "acceptanceCriteria": [
+    "Registering an MP4 as an agent artifact of type 'video' succeeds (backend test).",
+    "The Deliverables list shows the video icon and the preview renders a <video> element with controls for a video Deliverable (vitest).",
+    "CI green on the story's commit for the five PRD-251 jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built — the last runs next build); record the run id."
+   ],
+   "priority": 6,
+   "passes": false,
+   "notes": "Canonical term: Deliverable (never 'artifact' or 'output' in user-facing copy)."
+  },
+  {
+   "id": "US-007",
+   "title": "S0.4c — The image-store public lookup and Range streaming",
+   "description": "GET /api/generated-images/{id} (api/generated_images.py:23-28) calls image_store.get_image(image_id, workspace_id=None), which lists the prefix and falls back to one list_objects_v2 call with MaxKeys=1000 (core/services/image_store.py:69-94) — past 1000 objects lookups start returning 404 — and then reads the whole object into memory (:100). Fix both: (a) on save, also write a small pointer object (or a lookup row — pick the smaller change and say why) mapping image_id -> key, and resolve by that pointer with one GET; legacy ids without a pointer fall back to a PAGINATED listing (ContinuationToken or a paginator), never a single 1000-key page; (b) the route streams the body and honours Range: bytes=a-b with 206, Content-Range, Accept-Ranges and Content-Length, using S3 get_object(Range=...). Socials media never uses this route (D9); this fixes the platform defect the PRD found.",
+   "acceptanceCriteria": [
+    "With 1,500 stored objects (stubbed S3), the 1,400th image resolves (tests/test_prd251_image_store.py).",
+    "A new save writes the pointer, and resolving a new id makes one GET and no list call (stub assertion).",
+    "Range: bytes=0-99 returns 206 with exactly 100 bytes and Content-Range 'bytes 0-99/<size>'; no Range returns 200 with the full body, streamed (test).",
+    "Existing get_image callers and their tests stay green."
+   ],
+   "priority": 7,
+   "passes": false,
+   "notes": "Anchors: image_store.py:44 (save_image), :69 (get_image), :77-78 (MaxKeys=5 prefix path), :87-88 (MaxKeys=1000 fallback), :100 (get_object); api/generated_images.py:23-28."
+  },
+  {
+   "id": "US-008",
+   "title": "S0.5 — The Socials tab, bare, in both shells",
+   "description": "Pulled forward from S2.1 so the owner can see and click Wave 0 (owner rule: activate before stacking dormant features). (a) frontend/lib/deliverables/tabs.ts:2 DELIVERABLE_TABS gains 'socials'; Studio TAB_LABELS (components/deliverables/studio/deliverables-studio.tsx:21-31) and the Classic FilterTabs (app/deliverables/page.tsx:106-155) render it only when the workspace payload's socials.available is true; ?tab=socials falls back to outputs otherwise. (b) New components under frontend/components/deliverables/socials/: the tab body switches on the gate — available && !enabled shows ONE card: owner/admin get 'Turn on Socials for this workspace' (PUT /api/workspaces/current/socials, then refetch the workspace so the list appears without a reload), anyone else gets 'Ask an admin to turn on Socials'; available && enabled shows the list. (c) The list groups posts by status with counts, newest first, with an empty state. 'New draft' takes a title, a brief and the base copy and creates a draft. (d) Post detail shows the status and the actions the caller's role allows: submit, approve, request changes (with a comment), reject. Use the member role the frontend already has (grep hooks/use-workspace.ts and the /current payload); the server enforces anyway. (e) Every call goes through new apiClient methods in frontend/lib/api-client.ts (raw fetch is eslint-banned). Canonical terms: Deliverable, Auto, Command Center.",
+   "acceptanceCriteria": [
+    "With socials.available false the tab is absent in BOTH shells and ?tab=socials renders Outputs (vitest).",
+    "With available true and enabled false, an owner sees the Turn-on card and a viewer sees the ask-an-admin card; turning it on shows the empty list without a reload (vitest, apiClient mocked).",
+    "Creating a draft lists it under Draft with count 1 (vitest).",
+    "Approving moves it to Approved; editing its copy afterwards moves it to Needs approval (vitest against a mocked API that applies the S0.3 rules).",
+    "CI green on the story's commit for the five PRD-251 jobs (orchestrator-tests, Alembic from-zero, Schema-drift check, Frontend CI, Prod images built — the last runs next build); record the run id. Every new apiClient path exists in orchestrator/reports/route-manifest.json (the Frontend CI route-contract step)."
+   ],
+   "priority": 8,
+   "passes": false,
+   "notes": "Anchors: lib/deliverables/tabs.ts:2; deliverables-studio.tsx:18 (import), :21-31 (labels + tab param parsing), :80-112 (tab strip and bodies); app/deliverables/page.tsx:15, :106-156; hooks/use-workspace.ts; lib/api-client.ts:412 (class ApiClient). Trap (PRD-246): vitest mocks main-layout in most suites, so a JSX syntax error can pass vitest and still break next build — CI's 'Prod images built' job runs next build; never mark DONE before it is green. Trap: Tailwind 3.3.3 has no dvh utilities."
+  },
+  {
+   "id": "US-009",
+   "title": "S0.6 — The Composio deny list, platform-wide",
+   "description": "PRD-251 is Composio-first (D12/D15/D16): customers connect paid media tools in Composio and agents use them. Composio's Higgsfield toolkit (higgsfield_mcp) carries HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE, which Composio documents as 'charges real money', and Automatos has no guard: no per-action allow/deny list, no billing keyword in modules/tools/capabilities/classifier.py, and the policy plane that enforces REQUIRES_CONFIRMATION ships 'off' (config.py:898). Add a deny list of Composio action slugs stored as a system setting ('composio' / 'denied_actions', a JSON list), made settable in Settings -> System Settings the same way US-001 made socials.enabled settable, and seeded with the eight D16 slugs: HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE, HIGGSFIELD_MCP_CANCEL_TRIAL_AUTO_RENEWAL, HIGGSFIELD_MCP_CONFIRM_TRIAL_CANCEL, HIGGSFIELD_MCP_CREATE_WEBSITE, HIGGSFIELD_MCP_DEPLOY_WEBSITE, HIGGSFIELD_MCP_PUBLISH_WEBSITE, HIGGSFIELD_MCP_PARTICIPATE_IN_CONTEST, HIGGSFIELD_MCP_APPS_INVOKE. EVERY path that executes a Composio action consults it before any network call — ComposioToolExecutor.execute (core/composio/tool_executor.py:344), api/recipe_executor.py and api/composio.py are known; grep for the rest (execute_action, tools.execute, client execute calls) — and refuses with 'This action is blocked in Automatos: <reason>'. It never depends on the policy plane mode or on the capability classifier. Slug matching is case-insensitive. Put the check in ONE helper that every entry point calls; do not copy it.",
+   "acceptanceCriteria": [
+    "With AUTOMATOS_POLICY_PLANE=off, executing HIGGSFIELD_MCP_CONFIRM_BILLING_PURCHASE through each entry point returns the blocked error and the Composio client (mocked) is never called — tests/test_prd251_composio_deny.py.",
+    "Removing the slug from the system setting unblocks it with no restart or deploy (test).",
+    "A test lists every Composio execution entry point found by grep and proves each one calls the single deny-list helper.",
+    "The seeded setting holds the eight D16 slugs and is visible to the super-admin in Settings -> System Settings.",
+    "CI green on the story's commit for the five PRD-251 jobs; record the run id."
+   ],
+   "priority": 9,
+   "passes": false,
+   "notes": "Anchors: core/composio/tool_executor.py:344 (execute), :705 (LinkedIn hook inside execute), api/recipe_executor.py:763, api/composio.py:281; modules/tools/capabilities/taxonomy.py:268-280 (REQUIRES_CONFIRMATION); config.py:898 (AUTOMATOS_POLICY_PLANE default off). Composio docs verified 2026-09-23: docs.composio.dev/toolkits/higgsfield_mcp. The list is DATA (system setting), never a code constant."
+  }
+ ]
+}
