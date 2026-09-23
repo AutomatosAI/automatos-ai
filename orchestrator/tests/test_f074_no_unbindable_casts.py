@@ -22,6 +22,10 @@ import pytest
 
 ORCH = Path(__file__).resolve().parents[1]
 UNBINDABLE = re.compile(r"(?<![:\w]):[A-Za-z_]\w*::[A-Za-z_]")
+# A literal holding ``:name::type`` holds ``::`` and a letter in the file's text too:
+# only such files are parsed (the full parse of ~1,100 files took 36 s — past the
+# suite's 60 s timeout on a loaded machine).
+ANY_CAST = re.compile(r"::[A-Za-z_]")
 SKIP_DIRS = {"tests", "__pycache__", "node_modules", ".venv", "venv"}
 
 
@@ -37,7 +41,10 @@ def _offenders():
         if SKIP_DIRS & set(path.relative_to(ORCH).parts):
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            if not ANY_CAST.search(source):
+                continue
+            tree = ast.parse(source)
         except (SyntaxError, UnicodeDecodeError):
             continue
         for lineno, value in _string_literals(tree):
