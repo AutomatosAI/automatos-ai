@@ -1157,15 +1157,7 @@
     padding: 1px 5px; border: 1px solid hsl(var(--border)); border-radius: 3px;
     background: hsl(var(--secondary)); color: hsl(var(--muted-foreground));
   }
-  /* A phone has no ⌘K and no room for a 240px box beside the utilities cluster
-     — the headbar is nowrap with non-shrinking children, so it would push the
-     profile off the edge. Below 768px the search is the icon alone. */
-  @media (max-width: 767px) {
-    .studio .sh-cmdk {
-      min-width: 0; width: 30px; padding: 0; justify-content: center;
-    }
-    .studio .sh-cmdk > span { display: none; }
-  }
+  /* Below 768px the search is the icon alone: see the compact region (PRD-246). */
 
   /* ── Studio shell layout container ─────────────────────────────── */
   .studio .sh-shell {
@@ -3043,6 +3035,14 @@
   }
 
   @media (max-width: 767px) {
+    /* The headbar search (night-1, ba57b09fc): a phone has no ⌘K and no room for
+       a 240px box beside the utilities cluster; the headbar is nowrap with
+       non-shrinking children, so it would push the profile off the edge. */
+    .studio .sh-cmdk {
+      min-width: 0; width: 30px; padding: 0; justify-content: center;
+    }
+    .studio .sh-cmdk > span { display: none; }
+
     /* Phone: every Studio control that is tapped is a 44px target (M4).
        Each of these centres its content with flex, so the min-height is the
        whole change — no padding or type is disturbed. */

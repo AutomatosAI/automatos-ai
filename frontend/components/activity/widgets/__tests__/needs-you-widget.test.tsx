@@ -6,13 +6,19 @@ const data = vi.hoisted(() => ({
   decisions: { data: undefined as any, isLoading: false },
   gates: { data: undefined as any, isLoading: false },
   questions: { data: undefined as any, isLoading: false },
+  reviews: { data: undefined as any, isLoading: false },
 }))
 vi.mock('@/hooks/use-kpi-api', () => ({ useDecisionsNeeded: () => data.decisions, useApprovalGates: () => data.gates }))
 vi.mock('@/hooks/use-approval-grants', () => ({ useQuestions: () => data.questions }))
+// The review family (night-1, 95f261a1f) reads the board's review column.
+vi.mock('@/hooks/use-board-tasks-api', () => ({ useBoardTasksList: () => data.reviews }))
 
 import { NeedsYouWidget } from '@/components/activity/widgets/needs-you-widget'
 
-beforeEach(() => { data.decisions.data = undefined; data.gates.data = undefined; data.questions.data = undefined })
+beforeEach(() => {
+  data.decisions.data = undefined; data.gates.data = undefined
+  data.questions.data = undefined; data.reviews.data = undefined
+})
 afterEach(cleanup)
 
 describe('NeedsYouWidget', () => {
@@ -35,6 +41,14 @@ describe('NeedsYouWidget', () => {
     expect(screen.getByText('Ship the invoice run').closest('a')).toHaveAttribute('href', '/command-center?tab=governance')
     expect(screen.getByText('Q3 review').closest('a')).toHaveAttribute('href', '/command-center?tab=governance')
     expect(screen.getByText('L3 URGENT')).toBeInTheDocument()
+  })
+
+  it('counts a ticket waiting in review as its own family, linked to the board', () => {
+    data.reviews.data = { total: 1, tasks: [{ id: 760, title: 'Monday dispatch', agent_name: 'CLUB SECRETARY', completed_at: null }] }
+    render(<NeedsYouWidget period="1d" />)
+    expect(screen.getByText('1 waiting')).toBeInTheDocument()
+    expect(screen.getByText('In review · 1')).toBeInTheDocument()
+    expect(screen.getByText('Monday dispatch').closest('a')).toHaveAttribute('href', '/command-center?tab=board')
   })
 
   it('hides a family that has nothing', () => {

@@ -35,7 +35,9 @@
     "/api/skills/single",
     "/api/system/activities",
     "/api/teams",
-    "/api/usage/analytics"
+    "/api/usage/analytics",
+    "/api/workflows/*/execute",
+    "/api/workflows/execute"
   ],
   "examples": {
     "/api/agents/*/patterns": "/api/agents/${agentId}/patterns",
@@ -72,6 +74,8 @@
     "/api/skills/single": "/api/skills/single",
     "/api/system/activities": "/api/system/activities?limit=${limit}",
     "/api/teams": "/api/teams",
-    "/api/usage/analytics": "/api/usage/analytics?timeRange=${timeRange}"
+    "/api/usage/analytics": "/api/usage/analytics?timeRange=${timeRange}",
+    "/api/workflows/*/execute": "/api/workflows/${workflowId}/execute",
+    "/api/workflows/execute": "/api/workflows/execute"
   }
 }
